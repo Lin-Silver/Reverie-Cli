@@ -1,0 +1,40 @@
+"""
+Reverie Tools Package
+
+Tools available to the AI Agent:
+- codebase-retrieval: Query symbols, search code, analyze dependencies
+- git-commit-retrieval: Access git history, blame, commits
+- str_replace_editor: Edit files using string replacement
+- file_ops: File system operations
+- command_exec: Execute shell commands
+- web_search: Search the web
+- task_manager: Organize complex work
+"""
+
+from .base import BaseTool, ToolResult, ToolResultStatus
+from .codebase_retrieval import CodebaseRetrievalTool
+from .git_commit_retrieval import GitCommitRetrievalTool
+from .str_replace_editor import StrReplaceEditorTool
+from .file_ops import FileOpsTool
+from .command_exec import CommandExecTool
+from .web_search import WebSearchTool
+from .task_manager import TaskManagerTool
+from .context_management import ContextManagementTool
+from .create_file import CreateFileTool
+from .user_input import UserInputTool
+
+__all__ = [
+    'BaseTool',
+    'ToolResult',
+    'ToolResultStatus',
+    'CodebaseRetrievalTool',
+    'GitCommitRetrievalTool',
+    'StrReplaceEditorTool',
+    'FileOpsTool',
+    'CommandExecTool',
+    'WebSearchTool',
+    'TaskManagerTool',
+    "ContextManagementTool",
+    "CreateFileTool",
+    "UserInputTool"
+]

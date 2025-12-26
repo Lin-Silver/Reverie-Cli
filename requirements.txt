@@ -1,0 +1,39 @@
+# Reverie Cli - Dependencies
+
+# CLI UI and Terminal Display
+rich>=13.0.0
+click>=8.0.0
+tqdm>=4.65.0
+
+# LLM and API Integration
+openai>=1.20.0
+requests>=2.31.0
+jsonschema>=4.21.0
+
+# Web Search and Scraping
+beautifulsoup4>=4.12.0
+duckduckgo-search
+ddgs
+
+# Version Control Integration
+GitPython>=3.1.0
+
+# Context Engine - Tree-Sitter Support
+# Note: These are optional but highly recommended for better code analysis
+tree-sitter>=0.20.0
+tree-sitter-python>=0.20.0
+tree-sitter-javascript>=0.20.0
+tree-sitter-typescript>=0.20.0
+tree-sitter-c>=0.20.0
+tree-sitter-cpp>=0.20.0
+tree-sitter-rust>=0.20.0
+tree-sitter-go>=0.20.0
+tree-sitter-java>=0.20.0
+tree-sitter-c-sharp>=0.20.0
+tree-sitter-html>=0.20.0
+tree-sitter-css>=0.20.0
+
+# Build and Deployment
+pyinstaller>=6.0.0
+pillow
+numpy

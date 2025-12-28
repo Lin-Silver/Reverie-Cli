@@ -124,6 +124,7 @@ class Config:
     max_context_tokens: int = 128000
     stream_responses: bool = True
     auto_index: bool = True
+    show_status_line: bool = True
     
     @property
     def active_model(self) -> Optional[ModelConfig]:
@@ -139,7 +140,8 @@ class Config:
             'theme': self.theme,
             'max_context_tokens': self.max_context_tokens,
             'stream_responses': self.stream_responses,
-            'auto_index': self.auto_index
+            'auto_index': self.auto_index,
+            'show_status_line': self.show_status_line
         }
     
     @classmethod
@@ -155,7 +157,8 @@ class Config:
             theme=data.get('theme', 'default'),
             max_context_tokens=data.get('max_context_tokens', 128000),
             stream_responses=data.get('stream_responses', True),
-            auto_index=data.get('auto_index', True)
+            auto_index=data.get('auto_index', True),
+            show_status_line=data.get('show_status_line', True)
         )
 
 

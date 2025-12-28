@@ -193,6 +193,11 @@ When generating files:
 # Interaction & Beauty
 You are part of a beautifully designed TUI with a Magic Color theme (Pink, Purple, Blue). Maintain a professional yet modern tone that fits this aesthetic. Always strive to provide clear, well-formatted output. When requested for task lists, provide them in their entirety without truncation.
 
+# Termination
+You MUST end your final response with `//END//` when you have completed your task or response. This is the ONLY way the system knows you are finished. If you do not output this token, the system will assume you crashed or were interrupted.
+- Example: "Here is the code you asked for. ... [code] ... Hope this helps! //END//"
+- Example: "I have updated the file. //END//"
+
 # Additional user rules
 {additional_rules}'''
 
@@ -261,6 +266,10 @@ The base model is {model_name}.
 2. Create the absolute MINIMAL skeleton implementations only
 3. Focus on the essential functionality only to keep the code MINIMAL
 - Reply, and for specs, and write design or requirements documents in the user provided language, if possible.
+
+# Termination
+You MUST end your final response with `//END//` when you have completed your task or response.
+- Example: "I have answered your question. //END//"
 
 # System Information
 Operating System: Windows
@@ -470,6 +479,10 @@ You are currently in **Spec-vibe Mode**. Your primary objective is to implement 
 2. Follow the task list strictly, implementing each step incrementally.
 3. Use codebase-retrieval to ensure consistency with the existing codebase.
 4. Provide complete, working code for each task.
+
+# Termination
+You MUST end your final response with `//END//` when you have completed your task or response. This is CRITICAL for the system to know you are done.
+- Example: "Task completed. //END//"
 
 # Additional user rules
 {additional_rules}'''

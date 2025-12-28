@@ -1,7 +1,7 @@
 """
-Command Handler - Process CLI commands
+Command Handler - Process CLI commands with Dreamscape Theme
 
-Handles all commands starting with / 
+Handles all commands starting with / with dreamy pink-purple-blue aesthetics
 """
 
 from typing import Optional, Callable, Dict, Any
@@ -11,12 +11,19 @@ import time
 from rich.console import Console
 from rich.table import Table
 from rich.prompt import Prompt, Confirm
+from rich.panel import Panel
+from rich.text import Text
+from rich.align import Align
+from rich.columns import Columns
+from rich.padding import Padding
 from rich import box
 from rich.markup import escape
 
+from .theme import THEME, DECO, DREAM
+
 
 class CommandHandler:
-    """Handles CLI commands (starting with /)"""
+    """Handles CLI commands (starting with /) with Dreamscape styling"""
     
     def __init__(
         self,
@@ -25,6 +32,8 @@ class CommandHandler:
     ):
         self.console = console
         self.app = app_context
+        self.theme = THEME
+        self.deco = DECO
         
         # Command registry
         self.commands = {
@@ -60,39 +69,36 @@ class CommandHandler:
         if cmd in self.commands:
             return self.commands[cmd](args)
         else:
-            self.console.print(f"[red]Unknown command: /{cmd}[/red]")
-            self.console.print("Type /help for available commands.")
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Unknown command: /{cmd}[/{self.theme.CORAL_SOFT}]")
+            self.console.print(f"[{self.theme.TEXT_DIM}]Type /help for available commands.[/{self.theme.TEXT_DIM}]")
             return True
     
     def cmd_help(self, args: str) -> bool:
-        """Show detailed help with beautiful formatting"""
-        from rich.panel import Panel
-        from rich.text import Text
-        from rich.columns import Columns
-        from rich.padding import Padding
+        """Show detailed help with beautiful dreamy formatting"""
         
-        # Main title
+        # Main title with sparkles
         self.console.print()
-        self.console.print(Panel(
-            "[bold #ffb8d1]Reverie CLI - Command Help[/bold #ffb8d1]\n" 
-            "[dim #ce93d8]World-class context engine coding assistant[/dim #ce93d8]",
-            border_style="#ce93d8",
+        title_panel = Panel(
+            f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Reverie CLI - Command Help {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]\n"
+            f"[{self.theme.PURPLE_MEDIUM}]World-class context engine coding assistant[/{self.theme.PURPLE_MEDIUM}]",
+            border_style=self.theme.BORDER_PRIMARY,
             padding=(0, 2),
             box=box.ROUNDED
-        ))
+        )
+        self.console.print(title_panel)
         self.console.print()
         
         # Basic commands
         basic_commands = Table(
-            title="[bold #ffb8d1]Basic Commands[/bold #ffb8d1]",
+            title=f"[bold {self.theme.PINK_SOFT}]{self.deco.DIAMOND} Basic Commands[/bold {self.theme.PINK_SOFT}]",
             box=box.ROUNDED,
-            border_style="#ce93d8",
+            border_style=self.theme.BORDER_PRIMARY,
             show_lines=True,
             title_justify="left"
         )
-        basic_commands.add_column("Command", style="bold #81d4fa", width=15)
-        basic_commands.add_column("Description", style="white")
-        basic_commands.add_column("Example", style="dim #a5d6a7")
+        basic_commands.add_column("Command", style=f"bold {self.theme.BLUE_SOFT}", width=15)
+        basic_commands.add_column("Description", style=self.theme.TEXT_SECONDARY)
+        basic_commands.add_column("Example", style=f"dim {self.theme.MINT_SOFT}")
         
         basic_commands.add_row(
             "/help",
@@ -120,29 +126,29 @@ class CommandHandler:
         
         # Models and config
         config_commands = Table(
-            title="[bold #ffb8d1]Models & Settings[/bold #ffb8d1]",
+            title=f"[bold {self.theme.PINK_SOFT}]{self.deco.DIAMOND} Models & Settings[/bold {self.theme.PINK_SOFT}]",
             box=box.ROUNDED,
-            border_style="#ce93d8",
+            border_style=self.theme.BORDER_PRIMARY,
             show_lines=True,
             title_justify="left"
         )
-        config_commands.add_column("Command", style="bold #81d4fa", width=15)
-        config_commands.add_column("Description", style="white")
-        config_commands.add_column("Example", style="dim #a5d6a7")
+        config_commands.add_column("Command", style=f"bold {self.theme.BLUE_SOFT}", width=15)
+        config_commands.add_column("Description", style=self.theme.TEXT_SECONDARY)
+        config_commands.add_column("Example", style=f"dim {self.theme.MINT_SOFT}")
         
         config_commands.add_row(
             "/model",
-            "Model manager:\n• List configured models\n• Switch active model\n• Add model: /model add\n• Delete: /model delete <#>",
+            f"Model manager:\n{self.deco.DOT_MEDIUM} List configured models\n{self.deco.DOT_MEDIUM} Switch active model\n{self.deco.DOT_MEDIUM} Add model: /model add\n{self.deco.DOT_MEDIUM} Delete: /model delete <#>",
             "/model\n/model add\n/model delete 2"
         )
         config_commands.add_row(
             "/setting",
-            "Interactive settings menu:\n• Mode (reverie/spec-driven/spec-vibe)\n• Theme\n• Custom rules\n• Auto-index toggle",
+            f"Interactive settings menu:\n{self.deco.DOT_MEDIUM} Mode (reverie/spec-driven/spec-vibe)\n{self.deco.DOT_MEDIUM} Theme\n{self.deco.DOT_MEDIUM} Custom rules\n{self.deco.DOT_MEDIUM} Auto-index toggle",
             "/setting"
         )
         config_commands.add_row(
             "/rules",
-            "Manage custom rules:\n• List rules\n• Add rule: /rules add <text>\n• Remove: /rules remove <#>",
+            f"Manage custom rules:\n{self.deco.DOT_MEDIUM} List rules\n{self.deco.DOT_MEDIUM} Add rule: /rules add <text>\n{self.deco.DOT_MEDIUM} Remove: /rules remove <#>",
             "/rules\n/rules add Always use async\n/rules remove 1"
         )
         
@@ -151,15 +157,15 @@ class CommandHandler:
         
         # Tools and features
         tool_commands = Table(
-            title="[bold #ffb8d1]Tools & Features[/bold #ffb8d1]",
+            title=f"[bold {self.theme.PINK_SOFT}]{self.deco.DIAMOND} Tools & Features[/bold {self.theme.PINK_SOFT}]",
             box=box.ROUNDED,
-            border_style="#ce93d8",
+            border_style=self.theme.BORDER_PRIMARY,
             show_lines=True,
             title_justify="left"
         )
-        tool_commands.add_column("Command", style="bold #81d4fa", width=15)
-        tool_commands.add_column("Description", style="white")
-        tool_commands.add_column("Example", style="dim #a5d6a7")
+        tool_commands.add_column("Command", style=f"bold {self.theme.BLUE_SOFT}", width=15)
+        tool_commands.add_column("Description", style=self.theme.TEXT_SECONDARY)
+        tool_commands.add_column("Example", style=f"dim {self.theme.MINT_SOFT}")
         
         tool_commands.add_row(
             "/search <q>",
@@ -168,7 +174,7 @@ class CommandHandler:
         )
         tool_commands.add_row(
             "/tools",
-            "List available tools the AI can use:\n• Read/write files\n• Run commands\n• Search code\n• Git actions, etc.",
+            f"List available tools the AI can use:\n{self.deco.DOT_MEDIUM} Read/write files\n{self.deco.DOT_MEDIUM} Run commands\n{self.deco.DOT_MEDIUM} Search code\n{self.deco.DOT_MEDIUM} Git actions, etc.",
             "/tools"
         )
         tool_commands.add_row(
@@ -182,19 +188,19 @@ class CommandHandler:
         
         # Session management
         session_commands = Table(
-            title="[bold #ffb8d1]Session Management[/bold #ffb8d1]",
+            title=f"[bold {self.theme.PINK_SOFT}]{self.deco.DIAMOND} Session Management[/bold {self.theme.PINK_SOFT}]",
             box=box.ROUNDED,
-            border_style="#ce93d8",
+            border_style=self.theme.BORDER_PRIMARY,
             show_lines=True,
             title_justify="left"
         )
-        session_commands.add_column("Command", style="bold #81d4fa", width=15)
-        session_commands.add_column("Description", style="white")
-        session_commands.add_column("Example", style="dim #a5d6a7")
+        session_commands.add_column("Command", style=f"bold {self.theme.BLUE_SOFT}", width=15)
+        session_commands.add_column("Description", style=self.theme.TEXT_SECONDARY)
+        session_commands.add_column("Example", style=f"dim {self.theme.MINT_SOFT}")
         
         session_commands.add_row(
             "/sessions",
-            "Manage conversation sessions:\n• List history\n• Load previous\n• Create new\n• Delete old",
+            f"Manage conversation sessions:\n{self.deco.DOT_MEDIUM} List history\n{self.deco.DOT_MEDIUM} Load previous\n{self.deco.DOT_MEDIUM} Create new\n{self.deco.DOT_MEDIUM} Delete old",
             "/sessions"
         )
         session_commands.add_row(
@@ -206,15 +212,15 @@ class CommandHandler:
         self.console.print(session_commands)
         self.console.print()
         
-        # Quick tips
+        # Quick tips with dreamy panel
         tips = Panel(
-            "[bold #ce93d8]Tips[/bold #ce93d8]\n\n"
-            "[#ffb8d1]• Input[/#ffb8d1]  Type questions or requests directly; the AI will respond.\n"
-            "[#ffb8d1]• Multi-line[/#ffb8d1]  Use a trailing \ or triple quotes to enter multi-line text.\n"
-            "[#ffb8d1]• Interrupt[/#ffb8d1]  Ctrl+C once cancels input; twice exits the program.\n"
-            "[#ffb8d1]• History[/#ffb8d1]  Use ↑/↓ to browse input history.\n"
-            "[#ffb8d1]• Completion[/#ffb8d1]  Type /command to see available completions.",
-            border_style="#ce93d8",
+            f"[bold {self.theme.PURPLE_MEDIUM}]{self.deco.SPARKLE} Tips[/bold {self.theme.PURPLE_MEDIUM}]\n\n"
+            f"[{self.theme.PINK_SOFT}]{self.deco.CHEVRON_RIGHT} Input[/{self.theme.PINK_SOFT}]  Type questions or requests directly; the AI will respond.\n"
+            f"[{self.theme.PINK_SOFT}]{self.deco.CHEVRON_RIGHT} Multi-line[/{self.theme.PINK_SOFT}]  Use a trailing \\ or triple quotes to enter multi-line text.\n"
+            f"[{self.theme.PINK_SOFT}]{self.deco.CHEVRON_RIGHT} Interrupt[/{self.theme.PINK_SOFT}]  Ctrl+C once cancels input; twice exits the program.\n"
+            f"[{self.theme.PINK_SOFT}]{self.deco.CHEVRON_RIGHT} History[/{self.theme.PINK_SOFT}]  Use ↑/↓ to browse input history.\n"
+            f"[{self.theme.PINK_SOFT}]{self.deco.CHEVRON_RIGHT} Completion[/{self.theme.PINK_SOFT}]  Type /command to see available completions.",
+            border_style=self.theme.BORDER_PRIMARY,
             padding=(0, 2),
             box=box.ROUNDED
         )
@@ -224,28 +230,32 @@ class CommandHandler:
         return True
     
     def cmd_tools(self, args: str) -> bool:
-        """List available tools"""
+        """List available tools with dreamy styling"""
         agent = self.app.get('agent')
         if not agent:
-            self.console.print("[red]Agent not initialized[/red]")
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Agent not initialized[/{self.theme.CORAL_SOFT}]")
             return True
             
         tools = agent.tool_executor._tools
         
-        table = Table(title="Available Tools", box=box.ROUNDED, border_style="#ce93d8")
-        table.add_column("Name", style="bold #81d4fa")
-        table.add_column("Description", style="white")
+        table = Table(
+            title=f"[bold {self.theme.PINK_SOFT}]{self.deco.CRYSTAL} Available Tools[/bold {self.theme.PINK_SOFT}]",
+            box=box.ROUNDED,
+            border_style=self.theme.BORDER_PRIMARY
+        )
+        table.add_column("Name", style=f"bold {self.theme.BLUE_SOFT}")
+        table.add_column("Description", style=self.theme.TEXT_SECONDARY)
         
         for name, tool in sorted(tools.items()):
             # Get first line of description
             desc = tool.description.strip().split('\n')[0]
-            table.add_row(name, desc)
+            table.add_row(f"{self.deco.DOT_MEDIUM} {name}", desc)
             
         self.console.print(table)
         return True
 
     def cmd_status(self, args: str) -> bool:
-        """Show current status"""
+        """Show current status with dreamy styling"""
         config_manager = self.app.get('config_manager')
         indexer = self.app.get('indexer')
         session_manager = self.app.get('session_manager')
@@ -253,23 +263,36 @@ class CommandHandler:
         agent = self.app.get('agent')
         
         self.console.print()
-        table = Table(title="[bold #ffb8d1]Reverie System Status[/bold #ffb8d1]", box=box.ROUNDED, border_style="#ce93d8")
-        table.add_column("Component", style="bold #81d4fa")
-        table.add_column("Value", style="white")
+        table = Table(
+            title=f"[bold {self.theme.PINK_SOFT}]{self.deco.CRYSTAL} Reverie System Status[/bold {self.theme.PINK_SOFT}]",
+            box=box.ROUNDED,
+            border_style=self.theme.BORDER_PRIMARY
+        )
+        table.add_column("Component", style=f"bold {self.theme.BLUE_SOFT}")
+        table.add_column("Value", style=self.theme.TEXT_SECONDARY)
         
         # Model info
         if config_manager:
             model = config_manager.get_active_model()
             if model:
-                table.add_row("Model", f"[bold #ffb8d1]{model.model_display_name}[/bold #ffb8d1]")
-                table.add_row("Endpoint", f"[dim]{model.base_url}[/dim]")
+                table.add_row(
+                    f"{self.deco.SPARKLE} Model",
+                    f"[bold {self.theme.PINK_SOFT}]{model.model_display_name}[/bold {self.theme.PINK_SOFT}]"
+                )
+                table.add_row(
+                    f"{self.deco.DOT_MEDIUM} Endpoint",
+                    f"[{self.theme.TEXT_DIM}]{model.base_url}[/{self.theme.TEXT_DIM}]"
+                )
         
         # Session info
         if session_manager:
             session = session_manager.get_current_session()
             if session:
-                table.add_row("Session", f"[bold #ce93d8]{session.name}[/bold #ce93d8]")
-                table.add_row("Messages", str(len(session.messages)))
+                table.add_row(
+                    f"{self.deco.SPARKLE} Session",
+                    f"[bold {self.theme.PURPLE_SOFT}]{session.name}[/bold {self.theme.PURPLE_SOFT}]"
+                )
+                table.add_row(f"{self.deco.DOT_MEDIUM} Messages", str(len(session.messages)))
         
         # Token info
         if agent:
@@ -286,21 +309,42 @@ class CommandHandler:
                      max_tokens = getattr(config, 'max_context_tokens', 128000)
 
             percentage = (tokens / max_tokens) * 100
-            table.add_row("Context Usage", f"{tokens:,} / {max_tokens:,} ([bold #ffb86c]{percentage:.1f}%[/bold #ffb86c])")
+            
+            # Color based on percentage
+            if percentage < 40:
+                pct_color = self.theme.MINT_SOFT
+            elif percentage < 70:
+                pct_color = self.theme.AMBER_GLOW
+            else:
+                pct_color = self.theme.CORAL_SOFT
+                
+            table.add_row(
+                f"{self.deco.SPARKLE} Context Usage",
+                f"{tokens:,} / {max_tokens:,} ([bold {pct_color}]{percentage:.1f}%[/bold {pct_color}])"
+            )
         
         # Context Engine stats
         if indexer:
             stats = indexer.get_statistics()
-            table.add_row("Files Indexed", f"[bold #a5d6a7]{stats.get('files_indexed', 0)}[/bold #a5d6a7]")
+            table.add_row(
+                f"{self.deco.DOT_MEDIUM} Files Indexed",
+                f"[{self.theme.MINT_SOFT}]{stats.get('files_indexed', 0)}[/{self.theme.MINT_SOFT}]"
+            )
             symbols = stats.get('symbols', {})
-            table.add_row("Total Symbols", f"[bold #a5d6a7]{symbols.get('total_symbols', 0)}[/bold #a5d6a7]")
+            table.add_row(
+                f"{self.deco.DOT_MEDIUM} Total Symbols",
+                f"[{self.theme.MINT_SOFT}]{symbols.get('total_symbols', 0)}[/{self.theme.MINT_SOFT}]"
+            )
         
         # Timer
         if start_time:
             elapsed = time.time() - start_time
             hours, remainder = divmod(int(elapsed), 3600)
             minutes, seconds = divmod(remainder, 60)
-            table.add_row("Total Time", f"[bold #f1fa8c]{hours}h {minutes}m {seconds}s[/bold #f1fa8c]")
+            table.add_row(
+                f"{self.deco.SPARKLE} Total Time",
+                f"[bold {self.theme.PURPLE_SOFT}]{hours}h {minutes}m {seconds}s[/bold {self.theme.PURPLE_SOFT}]"
+            )
             
             active_elapsed = self.app.get('total_active_time', 0.0)
             cur_start = self.app.get('current_task_start')
@@ -309,7 +353,10 @@ class CommandHandler:
             
             a_hours, a_remainder = divmod(int(active_elapsed), 3600)
             a_minutes, a_seconds = divmod(a_remainder, 60)
-            table.add_row("Active Time", f"[bold #a5d6a7]{a_hours}h {a_minutes}m {a_seconds}s[/bold #a5d6a7]")
+            table.add_row(
+                f"{self.deco.DOT_MEDIUM} Active Time",
+                f"[{self.theme.MINT_SOFT}]{a_hours}h {a_minutes}m {a_seconds}s[/{self.theme.MINT_SOFT}]"
+            )
         
         self.console.print(table)
         self.console.print()
@@ -323,7 +370,7 @@ class CommandHandler:
         
         config_manager = self.app.get('config_manager')
         if not config_manager:
-            self.console.print("[red]Config manager not available[/red]")
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]")
             return True
         
         # Handle delete
@@ -334,36 +381,39 @@ class CommandHandler:
                     index_to_delete = int(parts[1]) - 1
                     if Confirm.ask(f"Delete model #{index_to_delete + 1}?"):
                          if config_manager.remove_model(index_to_delete):
-                             self.console.print("[green]Model deleted.[/green]")
+                             self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Model deleted.[/{self.theme.MINT_VIBRANT}]")
                              # Reinit agent if needed
                              if self.app.get('reinit_agent'):
                                  self.app['reinit_agent']()
                          else:
-                             self.console.print("[red]Invalid model index.[/red]")
+                             self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid model index.[/{self.theme.CORAL_SOFT}]")
                 except ValueError:
-                    self.console.print("[red]Invalid index format. Use: /model delete <number>[/red]")
+                    self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid index format. Use: /model delete <number>[/{self.theme.CORAL_SOFT}]")
             else:
-                 self.console.print("[yellow]Usage: /model delete <number>[/yellow]")
+                 self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /model delete <number>[/{self.theme.AMBER_GLOW}]")
             return True
 
         config = config_manager.load()
         
         if not config.models:
-            self.console.print("[yellow]No models configured.[/yellow]")
+            self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} No models configured.[/{self.theme.AMBER_GLOW}]")
             if Confirm.ask("Would you like to add one now?"):
                 return self.cmd_add_model("")
             return True
         
         # Show model list
-        table = Table(title="Available Models", box=box.ROUNDED, border_style="#ce93d8")
-        table.add_column("#", style="dim")
-        table.add_column("Model", style="bold #81d4fa")
-        table.add_column("Endpoint")
-        table.add_column("Status")
+        table = Table(
+            title=f"[bold {self.theme.PINK_SOFT}]{self.deco.CRYSTAL} Available Models[/bold {self.theme.PINK_SOFT}]",
+            box=box.ROUNDED,
+            border_style=self.theme.BORDER_PRIMARY
+        )
+        table.add_column("#", style=self.theme.TEXT_DIM)
+        table.add_column("Model", style=f"bold {self.theme.BLUE_SOFT}")
+        table.add_column("Endpoint", style=self.theme.TEXT_DIM)
+        table.add_column("Status", style=self.theme.MINT_SOFT)
         
         for i, model in enumerate(config.models):
-            active = "*" if i == config.active_model_index else " "
-            status = "[bold #a5d6a7]Active[/bold #a5d6a7]" if i == config.active_model_index else ""
+            status = f"[bold {self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Active[/bold {self.theme.MINT_VIBRANT}]" if i == config.active_model_index else ""
             table.add_row(
                 str(i + 1),
                 model.model_display_name,
@@ -372,12 +422,12 @@ class CommandHandler:
             )
         
         self.console.print(table)
-        self.console.print("[dim #ce93d8]Tip: Use '/model add' to add, or '/model delete <#>' to remove[/dim #ce93d8]")
+        self.console.print(f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} Tip: Use '/model add' to add, or '/model delete <#>' to remove[/{self.theme.TEXT_DIM}]")
         
         # Ask to select
         try:
             choice = Prompt.ask(
-                "Select model # to activate (or Enter to keep current)",
+                f"[{self.theme.PURPLE_SOFT}]Select model # to activate (or Enter to keep current)[/{self.theme.PURPLE_SOFT}]",
                 default=""
             )
             
@@ -387,52 +437,58 @@ class CommandHandler:
                     if 0 <= index < len(config.models):
                         config_manager.set_active_model(index)
                         self.console.print(
-                            f"[bold #a5d6a7]Switched to: {config.models[index].model_display_name}[/bold #a5d6a7]"
+                            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Switched to: {config.models[index].model_display_name}[/{self.theme.MINT_VIBRANT}]"
                         )
                         
                         # Reinitialize agent
                         if self.app.get('reinit_agent'):
                             self.app['reinit_agent']()
                     else:
-                        self.console.print("[red]Invalid selection[/red]")
+                        self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid selection[/{self.theme.CORAL_SOFT}]")
                 except ValueError:
-                    self.console.print("[red]Invalid input[/red]")
+                    self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid input[/{self.theme.CORAL_SOFT}]")
         except KeyboardInterrupt:
             self.console.print()
         
         return True
     
     def cmd_add_model(self, args: str) -> bool:
-        """Add a new model configuration"""
+        """Add a new model configuration with dreamy wizard"""
         from ..config import ModelConfig  # Import locally to avoid circular imports if any
         
-        self.console.print("\n[bold #ffb8d1]Add New Model Configuration[/bold #ffb8d1]")
-        self.console.print("─" * 30)
+        self.console.print()
+        self.console.print(Panel(
+            f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Add New Model Configuration {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]",
+            border_style=self.theme.BORDER_PRIMARY,
+            box=box.ROUNDED,
+            padding=(0, 2)
+        ))
+        self.console.print()
         
         try:
             # interactive wizard
             base_url = Prompt.ask(
-                "API Base URL",
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] API Base URL",
                 default="https://api.openai.com/v1"
             )
             
             api_key = Prompt.ask(
-                "API Key (hidden)",
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] API Key (hidden)",
                 password=True
             )
             
             model_name = Prompt.ask(
-                "Model Identifier (e.g. gpt-4, claude-3-opus)",
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Model Identifier (e.g. gpt-4, claude-3-opus)",
                 default="gpt-4"
             )
             
             display_name = Prompt.ask(
-                "Display Name",
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Display Name",
                 default=model_name
             )
 
             max_tokens_str = Prompt.ask(
-                "Max Context Tokens (Optional, default 128000)",
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Max Context Tokens (Optional, default 128000)",
                 default="128000"
             )
             try:
@@ -451,7 +507,7 @@ class CommandHandler:
             
             # Optional: Verify connection
             if Confirm.ask("Verify connection before saving?", default=True):
-                 with self.console.status("[bold #ce93d8]Verifying connection...[/bold #ce93d8]"):
+                 with self.console.status(f"[{self.theme.PURPLE_SOFT}]{self.deco.SPARKLE} Verifying connection...[/{self.theme.PURPLE_SOFT}]"):
                      try:
                          from openai import OpenAI
                          client = OpenAI(
@@ -462,26 +518,26 @@ class CommandHandler:
                          models = client.models.list()
                          model_ids = [m.id for m in models.data]
                          
-                         self.console.print(f"[bold #a5d6a7]✓ Connection successful![/bold #a5d6a7]")
+                         self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Connection successful![/{self.theme.MINT_VIBRANT}]")
                          
                          # If the user entered a model name that exists, confirm it
                          if model_name in model_ids:
-                             self.console.print(f"[bold #a5d6a7]✓ Model '{model_name}' found in provider list.[/bold #a5d6a7]")
+                             self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Model '{model_name}' found in provider list.[/{self.theme.MINT_VIBRANT}]")
                          else:
-                             self.console.print(f"[yellow]! Model '{model_name}' not found in provider's list. Available: {', '.join(model_ids)}[/yellow]")
+                             self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Model '{model_name}' not found in provider's list. Available: {', '.join(model_ids[:5])}...[/{self.theme.AMBER_GLOW}]")
                              if Confirm.ask("Would you like to select a model from the list?", default=True):
                                  # Simple selection
                                  # (In a real app, use a fuzzy selector or list)
                                  pass 
                      except Exception as e:
-                         self.console.print(f"[red]Verification failed: {str(e)}[/red]")
+                         self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Verification failed: {str(e)}[/{self.theme.CORAL_SOFT}]")
                          if not Confirm.ask("Save anyway?", default=False):
                              return True
  
             config_manager = self.app.get('config_manager')
             if config_manager:
                 config_manager.add_model(new_model)
-                self.console.print(f"\n[bold #a5d6a7]✓ Model '{display_name}' added successfully![/bold #a5d6a7]")
+                self.console.print(f"\n[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Model '{display_name}' added successfully![/{self.theme.MINT_VIBRANT}]")
                 
                 # Ask to switch
                 if Confirm.ask("Switch to this model now?", default=True):
@@ -489,61 +545,65 @@ class CommandHandler:
                     # The new model is last
                     new_index = len(config.models) - 1
                     config_manager.set_active_model(new_index)
-                    self.console.print("[bold #a5d6a7]Active model updated.[/bold #a5d6a7]")
+                    self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Active model updated.[/{self.theme.MINT_VIBRANT}]")
                     
                     if self.app.get('reinit_agent'):
                         self.app['reinit_agent']()
             else:
-                self.console.print("[red]Error: Config manager not found.[/red]")
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Error: Config manager not found.[/{self.theme.CORAL_SOFT}]")
                 
         except KeyboardInterrupt:
-            self.console.print("\n[yellow]Cancelled.[/yellow]")
+            self.console.print(f"\n[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Cancelled.[/{self.theme.AMBER_GLOW}]")
             
         return True
     
     def cmd_search(self, args: str) -> bool:
-        """Web search"""
+        """Web search with styled output"""
         if not args:
-            self.console.print("[yellow]Usage: /search <query>[/yellow]")
+            self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /search <query>[/{self.theme.AMBER_GLOW}]")
             return True
         
         from ..tools import WebSearchTool
         
         tool = WebSearchTool()
-        with self.console.status(f"[bold #ce93d8]Searching: {args}...[/bold #ce93d8]"):
+        with self.console.status(f"[{self.theme.PURPLE_SOFT}]{self.deco.SPARKLE} Searching: {args}...[/{self.theme.PURPLE_SOFT}]"):
             result = tool.execute(query=args, max_results=5)
         
         if result.success:
             from rich.markdown import Markdown
             self.console.print(Markdown(result.output))
         else:
-            self.console.print(f"[red]Search failed: {result.error}[/red]")
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Search failed: {result.error}[/{self.theme.CORAL_SOFT}]")
         
         return True
     
     def cmd_sessions(self, args: str) -> bool:
-        """Session management"""
+        """Session management with dreamy styling"""
         session_manager = self.app.get('session_manager')
         if not session_manager:
-            self.console.print("[red]Session manager not available[/red]")
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Session manager not available[/{self.theme.CORAL_SOFT}]")
             return True
         
         sessions = session_manager.list_sessions()
         current = session_manager.get_current_session()
         
         if not sessions:
-            self.console.print("[dim #ce93d8]No sessions yet.[/dim #ce93d8]")
+            self.console.print(f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} No sessions yet.[/{self.theme.TEXT_DIM}]")
             return True
         
-        table = Table(title="Sessions", box=box.ROUNDED, border_style="#ce93d8")
-        table.add_column("#", style="dim")
-        table.add_column("Name", style="bold #81d4fa")
-        table.add_column("Messages")
-        table.add_column("Updated")
-        table.add_column("")
+        table = Table(
+            title=f"[bold {self.theme.PINK_SOFT}]{self.deco.CRYSTAL} Sessions[/bold {self.theme.PINK_SOFT}]",
+            box=box.ROUNDED,
+            border_style=self.theme.BORDER_PRIMARY
+        )
+        table.add_column("#", style=self.theme.TEXT_DIM)
+        table.add_column("Name", style=f"bold {self.theme.BLUE_SOFT}")
+        table.add_column("Messages", style=self.theme.TEXT_SECONDARY)
+        table.add_column("Updated", style=self.theme.TEXT_DIM)
+        table.add_column("", style=self.theme.MINT_SOFT)
         
         for i, session in enumerate(sessions, 1):
-            is_current = "*" if current and session.id == current.id else ""
+            is_current = f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY}[/{self.theme.MINT_VIBRANT}]" if current and session.id == current.id else ""
             table.add_row(
                 str(i),
                 session.name,
@@ -554,24 +614,24 @@ class CommandHandler:
         
         self.console.print(table)
         
-        self.console.print("\n[dim #ce93d8]Actions: (n)ew, (number) to load, (d) to delete[/dim #ce93d8]")
+        self.console.print(f"\n[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} Actions: (n)ew, (number) to load, (d) to delete[/{self.theme.TEXT_DIM}]")
         
         try:
-            choice = Prompt.ask("Action", default="")
+            choice = Prompt.ask(f"[{self.theme.PURPLE_SOFT}]Action[/{self.theme.PURPLE_SOFT}]", default="")
             
             if choice.lower() == 'n':
-                name = Prompt.ask("Session name", default="")
+                name = Prompt.ask(f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Session name", default="")
                 session = session_manager.create_session(name or None)
-                self.console.print(f"[bold #a5d6a7]Created session: {session.name}[/bold #a5d6a7]")
+                self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Created session: {session.name}[/{self.theme.MINT_VIBRANT}]")
                 
             elif choice.lower() == 'd':
-                idx = Prompt.ask("Delete session #")
+                idx = Prompt.ask(f"[{self.theme.PURPLE_SOFT}]Delete session #[/{self.theme.PURPLE_SOFT}]")
                 try:
                     idx = int(idx) - 1
                     if 0 <= idx < len(sessions):
                         if Confirm.ask(f"Delete '{sessions[idx].name}'?"):
                             session_manager.delete_session(sessions[idx].id)
-                            self.console.print("[bold #a5d6a7]Deleted[/bold #a5d6a7]")
+                            self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Deleted[/{self.theme.MINT_VIBRANT}]")
                 except ValueError:
                     pass
                     
@@ -580,7 +640,7 @@ class CommandHandler:
                 if 0 <= idx < len(sessions):
                     session = session_manager.load_session(sessions[idx].id)
                     if session:
-                        self.console.print(f"[bold #a5d6a7]Loaded: {session.name}[/bold #a5d6a7]")
+                        self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Loaded: {session.name}[/{self.theme.MINT_VIBRANT}]")
                         # Update agent history
                         if self.app.get('agent'):
                             self.app['agent'].set_history(session.messages)
@@ -590,10 +650,10 @@ class CommandHandler:
         return True
     
     def cmd_history(self, args: str) -> bool:
-        """View conversation history"""
+        """View conversation history with themed styling"""
         agent = self.app.get('agent')
         if not agent:
-            self.console.print("[red]Agent not available[/red]")
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Agent not available[/{self.theme.CORAL_SOFT}]")
             return True
         
         limit = 999999
@@ -606,8 +666,12 @@ class CommandHandler:
         history = agent.get_history()
         
         if not history:
-            self.console.print("[dim #ce93d8]No conversation history yet.[/dim #ce93d8]")
+            self.console.print(f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} No conversation history yet.[/{self.theme.TEXT_DIM}]")
             return True
+        
+        self.console.print()
+        self.console.print(f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Conversation History[/bold {self.theme.PINK_SOFT}]")
+        self.console.print(f"[{self.theme.PURPLE_MEDIUM}]{self.deco.LINE_HORIZONTAL * 40}[/{self.theme.PURPLE_MEDIUM}]")
         
         # Show all messages by default
         for msg in history[-limit:]:
@@ -615,11 +679,11 @@ class CommandHandler:
             content = msg.get('content', '')
             
             if role == 'user':
-                self.console.print(f"\n[bold #81d4fa]You:[/bold #81d4fa] {escape(content)}")
+                self.console.print(f"\n[bold {self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT} You:[/bold {self.theme.BLUE_SOFT}] {escape(content)}")
             elif role == 'assistant':
-                self.console.print(f"\n[bold #ffb8d1]Reverie:[/bold #ffb8d1] {escape(content)}")
+                self.console.print(f"\n[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Reverie:[/bold {self.theme.PINK_SOFT}] {escape(content)}")
             elif role == 'tool':
-                self.console.print(f"\n[dim #ce93d8]Tool Result: {escape(content)}[/dim #ce93d8]")
+                self.console.print(f"\n[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} Tool Result: {escape(content[:200])}...[/{self.theme.TEXT_DIM}]")
         
         return True
     
@@ -629,30 +693,30 @@ class CommandHandler:
         return True
     
     def cmd_index(self, args: str) -> bool:
-        """Re-index the codebase"""
+        """Re-index the codebase with styled output"""
         indexer = self.app.get('indexer')
         if not indexer:
-            self.console.print("[red]Indexer not available[/red]")
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Indexer not available[/{self.theme.CORAL_SOFT}]")
             return True
         
-        with self.console.status("[bold #ce93d8]Indexing codebase...[/bold #ce93d8]"):
+        with self.console.status(f"[{self.theme.PURPLE_SOFT}]{self.deco.SPARKLE} Indexing codebase...[/{self.theme.PURPLE_SOFT}]"):
             result = indexer.full_index()
         
-        self.console.print(f"[bold #a5d6a7]Indexing complete![/bold #a5d6a7]")
-        self.console.print(f"  Files scanned: {result.files_scanned}")
-        self.console.print(f"  Files parsed: {result.files_parsed}")
-        self.console.print(f"  Symbols: {result.symbols_extracted}")
-        self.console.print(f"  Time: {result.total_time_ms:.0f}ms")
+        self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Indexing complete![/{self.theme.MINT_VIBRANT}]")
+        self.console.print(f"  [{self.theme.TEXT_SECONDARY}]{self.deco.DOT_MEDIUM} Files scanned: [{self.theme.BLUE_SOFT}]{result.files_scanned}[/{self.theme.BLUE_SOFT}][/{self.theme.TEXT_SECONDARY}]")
+        self.console.print(f"  [{self.theme.TEXT_SECONDARY}]{self.deco.DOT_MEDIUM} Files parsed: [{self.theme.BLUE_SOFT}]{result.files_parsed}[/{self.theme.BLUE_SOFT}][/{self.theme.TEXT_SECONDARY}]")
+        self.console.print(f"  [{self.theme.TEXT_SECONDARY}]{self.deco.DOT_MEDIUM} Symbols: [{self.theme.BLUE_SOFT}]{result.symbols_extracted}[/{self.theme.BLUE_SOFT}][/{self.theme.TEXT_SECONDARY}]")
+        self.console.print(f"  [{self.theme.TEXT_SECONDARY}]{self.deco.DOT_MEDIUM} Time: [{self.theme.PURPLE_SOFT}]{result.total_time_ms:.0f}ms[/{self.theme.PURPLE_SOFT}][/{self.theme.TEXT_SECONDARY}]")
         
         if result.errors:
-            self.console.print(f"\n[yellow]Errors ({len(result.errors)}):[/yellow]")
+            self.console.print(f"\n[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Errors ({len(result.errors)}):[/{self.theme.AMBER_GLOW}]")
             for err in result.errors[:5]:
-                self.console.print(f"  - {err}")
+                self.console.print(f"  [{self.theme.TEXT_DIM}]- {err}[/{self.theme.TEXT_DIM}]")
         
         return True
     
     def cmd_setting(self, args: str) -> bool:
-        """Interactive settings menu with keyboard navigation"""
+        """Interactive settings menu with keyboard navigation and dreamy styling"""
         import os
         import sys
         
@@ -660,7 +724,7 @@ class CommandHandler:
         try:
             import msvcrt
         except ImportError:
-            self.console.print("[red]Keyboard navigation is only supported on Windows.[/red]")
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Keyboard navigation is only supported on Windows.[/{self.theme.CORAL_SOFT}]")
             return True
             
         config_manager = self.app.get('config_manager')
@@ -676,24 +740,23 @@ class CommandHandler:
             {"name": "Active Model", "key": "active_model_index", "options": list(range(len(config.models)))},
             {"name": "Theme", "key": "theme", "options": ["default", "dark", "light", "ocean"]},
             {"name": "Auto Index", "key": "auto_index", "options": [True, False]},
+            {"name": "Status Line", "key": "show_status_line", "options": [True, False]},
             {"name": "Rules", "key": "rules", "type": "text"}
         ]
         
         selected_cat_idx = 0
         
         from rich.live import Live
-        from rich.panel import Panel
         from rich.layout import Layout
-        from rich.align import Align
         
         def generate_settings_view(cat_idx, current_config):
             table = Table(box=box.SIMPLE, show_header=False)
-            table.add_column("Category", style="bold #81d4fa", width=20)
-            table.add_column("Value", style="bold #a5d6a7")
+            table.add_column("Category", style=f"bold {self.theme.BLUE_SOFT}", width=20)
+            table.add_column("Value", style=f"bold {self.theme.MINT_SOFT}")
             
             for i, cat in enumerate(categories):
-                marker = ">> " if i == cat_idx else "   "
-                style = "bold #ffb8d1" if i == cat_idx else "white"
+                marker = f"{self.deco.CHEVRON_RIGHT} " if i == cat_idx else "   "
+                style = f"bold {self.theme.PINK_SOFT}" if i == cat_idx else self.theme.TEXT_SECONDARY
                 
                 name = cat["name"]
                 key = cat["key"]
@@ -706,24 +769,29 @@ class CommandHandler:
                 if key == "active_model_index":
                     display_val = current_config.models[val].model_display_name if current_config.models else "None"
                 elif isinstance(val, bool):
-                    display_val = "ON" if val else "OFF"
+                    display_val = f"[{self.theme.MINT_SOFT}]ON[/{self.theme.MINT_SOFT}]" if val else f"[{self.theme.TEXT_DIM}]OFF[/{self.theme.TEXT_DIM}]"
                 elif key == "rules":
                     display_val = val.replace('\n', ' ')
-                    if not val: display_val = "(empty) - Press Enter to edit"
+                    if not val: display_val = f"[{self.theme.TEXT_DIM}](empty) - Press Enter to edit[/{self.theme.TEXT_DIM}]"
                 else:
                     display_val = str(val)
                 
                 if i == cat_idx:
-                    table.add_row(f"{marker}{name}", f"[reverse] {display_val} [/reverse]", style=style)
+                    table.add_row(f"[{self.theme.PINK_SOFT}]{marker}{name}[/{self.theme.PINK_SOFT}]", f"[reverse] {display_val} [/reverse]", style=style)
                 else:
                     table.add_row(f"{marker}{name}", display_val, style=style)
             
-            help_text = "\n[dim #ce93d8]↑/↓: Navigate | ←/→: Change | Enter: Edit/Confirm | Esc: Exit[/dim #ce93d8]"
+            help_text = (
+                f"\n[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} ↑/↓: Navigate "
+                f"{self.deco.DOT_MEDIUM} ←/→: Change "
+                f"{self.deco.DOT_MEDIUM} Enter: Edit/Confirm "
+                f"{self.deco.DOT_MEDIUM} Esc: Exit[/{self.theme.TEXT_DIM}]"
+            )
             return Panel(
                 Align.center(table),
-                title="[bold #ffb8d1]Reverie Settings[/bold #ffb8d1]",
+                title=f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Reverie Settings {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]",
                 subtitle=help_text,
-                border_style="#ce93d8",
+                border_style=self.theme.BORDER_PRIMARY,
                 padding=(1, 2),
                 box=box.ROUNDED
             )
@@ -739,20 +807,20 @@ class CommandHandler:
                         cat = categories[selected_cat_idx]
                         if cat["key"] == "rules":
                             live.stop()
-                            self.console.print("\n[bold #ffb8d1]Edit Rules (One per line, empty line to finish):[/bold #ffb8d1]")
+                            self.console.print(f"\n[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Edit Rules (One per line, empty line to finish):[/bold {self.theme.PINK_SOFT}]")
                             
                             # Clear existing rules if user wants to start over, 
                             # or just let them add. The prompt says "Edit Rules".
                             # Let's show current rules first.
                             current_rules = rules_manager.get_rules()
                             if current_rules:
-                                self.console.print("[dim]Current rules:[/dim]")
+                                self.console.print(f"[{self.theme.TEXT_DIM}]Current rules:[/{self.theme.TEXT_DIM}]")
                                 for r in current_rules:
-                                    self.console.print(f" - {r}")
+                                    self.console.print(f" [{self.theme.PURPLE_SOFT}]{self.deco.DOT_MEDIUM}[/{self.theme.PURPLE_SOFT}] {r}")
                             
                             new_rules = []
                             while True:
-                                line = input("> ").strip()
+                                line = input(f"{self.deco.CHEVRON_RIGHT} ").strip()
                                 if not line: break
                                 new_rules.append(line)
                             
@@ -760,7 +828,7 @@ class CommandHandler:
                                 # Replace all rules for simplicity in this menu
                                 rules_manager._rules = new_rules
                                 rules_manager.save()
-                                self.console.print("[bold #a5d6a7]Rules updated.[/bold #a5d6a7]")
+                                self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Rules updated.[/{self.theme.MINT_VIBRANT}]")
                             live.start()
                         elif cat["key"] == "mode":
                              # Toggle mode
@@ -803,14 +871,14 @@ class CommandHandler:
         if self.app.get('reinit_agent'):
             self.app['reinit_agent']()
             
-        self.console.print("[bold #a5d6a7]Settings saved and applied.[/bold #a5d6a7]")
+        self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Settings saved and applied.[/{self.theme.MINT_VIBRANT}]")
         return True
     
     def cmd_rules(self, args: str) -> bool:
-        """Manage custom rules"""
+        """Manage custom rules with dreamy styling"""
         rules_manager = self.app.get('rules_manager')
         if not rules_manager:
-            self.console.print("[red]Rules manager not available[/red]")
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Rules manager not available[/{self.theme.CORAL_SOFT}]")
             return True
             
         args = args.strip()
@@ -820,39 +888,43 @@ class CommandHandler:
         if action == "list":
             rules = rules_manager.get_rules()
             if not rules:
-                self.console.print("[dim #ce93d8]No custom rules defined.[/dim #ce93d8]")
+                self.console.print(f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} No custom rules defined.[/{self.theme.TEXT_DIM}]")
             else:
-                table = Table(title="Custom Rules", box=box.ROUNDED, border_style="#ce93d8")
-                table.add_column("#", style="dim", width=4)
-                table.add_column("Rule", style="white")
+                table = Table(
+                    title=f"[bold {self.theme.PINK_SOFT}]{self.deco.CRYSTAL} Custom Rules[/bold {self.theme.PINK_SOFT}]",
+                    box=box.ROUNDED,
+                    border_style=self.theme.BORDER_PRIMARY
+                )
+                table.add_column("#", style=self.theme.TEXT_DIM, width=4)
+                table.add_column("Rule", style=self.theme.TEXT_SECONDARY)
                 
                 for i, rule in enumerate(rules, 1):
                     table.add_row(str(i), rule)
                 
                 self.console.print(table)
-                self.console.print("[dim #ce93d8]Use '/rules add <text>' or '/rules remove <#>' to manage.[/dim #ce93d8]")
+                self.console.print(f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} Use '/rules add <text>' or '/rules remove <#>' to manage.[/{self.theme.TEXT_DIM}]")
                 
         elif action == "add":
             if len(parts) < 2:
                 # Interactive add
-                self.console.print("[bold #ffb8d1]Add New Rule[/bold #ffb8d1]")
-                self.console.print("[dim #ce93d8]Enter the rule text below (single line):[/dim #ce93d8]")
-                rule_text = Prompt.ask(">")
+                self.console.print(f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Add New Rule[/bold {self.theme.PINK_SOFT}]")
+                self.console.print(f"[{self.theme.TEXT_DIM}]Enter the rule text below (single line):[/{self.theme.TEXT_DIM}]")
+                rule_text = Prompt.ask(f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}]")
             else:
                 rule_text = parts[1]
                 
             if rule_text.strip():
                 rules_manager.add_rule(rule_text.strip())
-                self.console.print("[bold #a5d6a7]Rule added.[/bold #a5d6a7]")
+                self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Rule added.[/{self.theme.MINT_VIBRANT}]")
                 # Reinit agent to apply changes
                 if self.app.get('reinit_agent'):
                     self.app['reinit_agent']()
             else:
-                self.console.print("[yellow]Empty rule text.[/yellow]")
+                self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Empty rule text.[/{self.theme.AMBER_GLOW}]")
                 
         elif action == "remove" or action == "delete":
             if len(parts) < 2:
-                self.console.print("[yellow]Usage: /rules remove <number>[/yellow]")
+                self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /rules remove <number>[/{self.theme.AMBER_GLOW}]")
                 return True
                 
             try:
@@ -861,23 +933,23 @@ class CommandHandler:
                 if 0 <= idx < len(rules):
                     if Confirm.ask(f"Remove rule: '{rules[idx]}'?"):
                         rules_manager.remove_rule(idx)
-                        self.console.print("[bold #a5d6a7]Rule removed.[/bold #a5d6a7]")
+                        self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Rule removed.[/{self.theme.MINT_VIBRANT}]")
                         # Reinit agent to apply changes
                         if self.app.get('reinit_agent'):
                             self.app['reinit_agent']()
                 else:
-                    self.console.print("[red]Invalid rule number.[/red]")
+                    self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid rule number.[/{self.theme.CORAL_SOFT}]")
             except ValueError:
-                self.console.print("[red]Invalid index format.[/red]")
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid index format.[/{self.theme.CORAL_SOFT}]")
                 
         else:
-            self.console.print(f"[red]Unknown action: {action}[/red]")
-            self.console.print("Usage: /rules [list|add|remove]")
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Unknown action: {action}[/{self.theme.CORAL_SOFT}]")
+            self.console.print(f"[{self.theme.TEXT_DIM}]Usage: /rules [list|add|remove][/{self.theme.TEXT_DIM}]")
             
         return True
 
     def cmd_exit(self, args: str) -> bool:
-        """Exit the application"""
-        if Confirm.ask("Exit Reverie?", default=True):
+        """Exit the application with styled prompt"""
+        if Confirm.ask(f"[{self.theme.PURPLE_SOFT}]Exit Reverie?[/{self.theme.PURPLE_SOFT}]", default=True):
             return False
         return True

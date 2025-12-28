@@ -6,6 +6,7 @@ Features:
 - Command auto-completion
 - Command history
 - Syntax highlighting for commands
+- Dreamscape themed prompts
 """
 
 from typing import List, Optional, Tuple, Callable
@@ -14,6 +15,8 @@ import sys
 from rich.console import Console
 from rich.text import Text
 from rich.prompt import Prompt
+
+from .theme import THEME, DECO
 
 
 # Available commands with descriptions
@@ -27,6 +30,8 @@ COMMANDS = {
     '/clear': 'Clear the screen',
     '/index': 'Re-index the codebase',
     '/setting': 'Interactive settings menu',
+    '/rules': 'Manage custom rules',
+    '/tools': 'List available tools',
     '/exit': 'Exit Reverie',
     '/quit': 'Exit Reverie',
 }
@@ -35,12 +40,38 @@ COMMANDS = {
 class InputHandler:
     """
     Advanced input handler with multiline support and command completion.
+    Features Dreamscape themed prompts and visual feedback.
     """
     
     def __init__(self, console: Console):
         self.console = console
         self.history: List[str] = []
         self.history_index = 0
+        self.theme = THEME
+        self.deco = DECO
+    
+    def _render_prompt(self, prompt_text: str, is_continuation: bool = False) -> None:
+        """Render the dreamy themed prompt"""
+        if is_continuation:
+            # Continuation prompt for multiline input
+            self.console.print(
+                f"[{self.theme.PURPLE_MEDIUM}]   {self.deco.LINE_VERTICAL}[/{self.theme.PURPLE_MEDIUM}] ",
+                end=""
+            )
+        else:
+            # Main prompt with sparkle effect
+            prompt_parts = Text()
+            
+            # Decorative sparkle
+            prompt_parts.append(f"{self.deco.SPARKLE_FILLED} ", style=self.theme.PINK_SOFT)
+            
+            # Main prompt text
+            prompt_parts.append(prompt_text.rstrip("> "), style=f"bold {self.theme.PURPLE_SOFT}")
+            
+            # Chevron separator
+            prompt_parts.append(f" {self.deco.CHEVRON_RIGHT} ", style=self.theme.BLUE_SOFT)
+            
+            self.console.print(prompt_parts, end="")
     
     def get_input(self, prompt_text: str = "Reverie> ") -> Optional[str]:
         """
@@ -60,15 +91,11 @@ class InputHandler:
             try:
                 # Show appropriate prompt
                 if in_multiline:
-                    current_prompt = ""
-                    # Use styled continuation prompt
-                    self.console.print("[#c080e1]   |[/#c080e1] ", end="")
+                    self._render_prompt(prompt_text, is_continuation=True)
                 else:
-                    # Format the main prompt with purple theme
-                    self.console.print(f"[bold #e4b0ff]{prompt_text}[/bold #e4b0ff]", end="")
-                    current_prompt = ""
+                    self._render_prompt(prompt_text, is_continuation=False)
                 
-                line = input(current_prompt)
+                line = input("")
                 
                 # Check for triple quotes to start/end multiline
                 if '"""' in line or "'''" in line:
@@ -108,7 +135,9 @@ class InputHandler:
             except KeyboardInterrupt:
                 if in_multiline:
                     # Cancel multiline input
-                    self.console.print("\n[dim]Multiline input cancelled[/dim]")
+                    self.console.print(
+                        f"\n[{self.theme.TEXT_DIM}]{self.deco.CROSS} Multiline input cancelled[/{self.theme.TEXT_DIM}]"
+                    )
                     return ""
                 else:
                     self.console.print()
@@ -145,18 +174,27 @@ class InputHandler:
     
     def show_completions(self, completions: List[Tuple[str, str]]) -> Optional[str]:
         """
-        Display completions and let user select one.
+        Display completions with dreamy styling and let user select one.
         
         Returns selected command or None.
         """
         if not completions:
             return None
         
-        self.console.print("\n[dim]Available commands:[/dim]")
+        self.console.print(
+            f"\n[{self.theme.PURPLE_SOFT}]{self.deco.SPARKLE} Available commands:[/{self.theme.PURPLE_SOFT}]"
+        )
         
         for i, (cmd, desc) in enumerate(completions, 1):
-            # Highlight command in cyan
-            self.console.print(f"  [bold cyan]{cmd}[/bold cyan]  [dim]{desc}[/dim]")
+            # Gradient-like color based on position
+            colors = [self.theme.PINK_SOFT, self.theme.PURPLE_SOFT, self.theme.BLUE_SOFT]
+            color = colors[i % len(colors)]
+            
+            self.console.print(
+                f"  [{color}]{self.deco.CHEVRON_RIGHT}[/{color}] "
+                f"[bold {self.theme.BLUE_SOFT}]{cmd}[/bold {self.theme.BLUE_SOFT}]  "
+                f"[{self.theme.TEXT_DIM}]{desc}[/{self.theme.TEXT_DIM}]"
+            )
         
         self.console.print()
         return None  # User needs to type the full command

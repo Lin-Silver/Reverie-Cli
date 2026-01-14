@@ -23,7 +23,11 @@ from ..tools import (
     TaskManagerTool,
     ContextManagementTool,
     CreateFileTool,
-    UserInputTool
+    UserInputTool,
+    UserInputTool,
+    ClarificationTool,
+    TaskBoundaryTool,
+    NotifyUserTool
 )
 
 
@@ -67,7 +71,11 @@ class ToolExecutor:
             TaskManagerTool,
             ContextManagementTool,
             CreateFileTool,
-            UserInputTool
+            UserInputTool,
+            UserInputTool,
+            ClarificationTool,
+            TaskBoundaryTool,
+            NotifyUserTool
         ]
         
         for tool_class in tool_classes:
@@ -119,6 +127,21 @@ class ToolExecutor:
             # Filter task_manager in non-reverie modes
             if name == "task_manager" and mode != "reverie":
                 continue
+            
+            # Filter ask_clarification in non-writer modes
+            if name == "ask_clarification" and mode != "writer":
+                continue
+                
+            # Filter Reverie-ant tools
+            if name in ["task_boundary", "notify_user"] and mode not in ["reverie-ant", "Reverie-ant"]:
+                continue
+                
+            # Filter TaskManager in Reverie-ant (optional, but requested in prompt logic)
+            # The prompt for Ant says "task_manager... tool is only for Reverie".
+            # If we strictly follow, we hide it.
+            if name == "task_manager" and mode in ["reverie-ant", "Reverie-ant"]:
+                continue
+                
             schemas.append(tool.get_schema())
         return schemas
     

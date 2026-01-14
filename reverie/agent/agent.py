@@ -12,12 +12,18 @@ from typing import List, Dict, Any, Optional, Generator, AsyncGenerator
 from pathlib import Path
 import json
 import time
+import re
 
 from rich.markup import escape as rich_escape
 
 from .system_prompt import build_system_prompt
 from .tool_executor import ToolExecutor
 from ..tools.base import ToolResult
+
+# Special marker for thinking content (used in streaming)
+# This allows the interface to identify and style thinking content differently
+THINKING_START_MARKER = "[[THINKING_START]]"
+THINKING_END_MARKER = "[[THINKING_END]]"
 
 
 class ReverieAgent:
@@ -47,7 +53,9 @@ class ReverieAgent:
         self.model_display_name = model_display_name or model
         self.project_root = project_root or Path.cwd()
         self.additional_rules = additional_rules
+        self.additional_rules = additional_rules
         self.mode = mode
+        self.ant_phase = "PLANNING"
         
         # Initialize OpenAI client
         self._client = None
@@ -69,16 +77,46 @@ class ReverieAgent:
         self.system_prompt = build_system_prompt(
             model_name=self.model_display_name,
             additional_rules=additional_rules,
-            mode=self.mode
+            mode=self.mode,
+            ant_phase=self.ant_phase
         )
+
+    def set_ant_phase(self, phase: str) -> None:
+        """Update Antigravity phase (PLANNING/EXECUTION)"""
+        if phase in ["PLANNING", "EXECUTION", "VERIFICATION"]:
+            # Verification shares EXECUTION prompt but might have minor differences in future
+            # For now mapping VERIFICATION to EXECUTION prompt logic if needed,
+            # or just keeping the phase state for the tool.
+            # System prompt only distinguishes PLANNING vs EXECUTION.
+            self.ant_phase = phase
+            
+            # Map VERIFICATION to EXECUTION for prompt selection if strictly binary
+            prompt_phase = "EXECUTION" if phase in ["EXECUTION", "VERIFICATION"] else "PLANNING"
+            
+            self.system_prompt = build_system_prompt(
+                model_name=self.model_display_name,
+                additional_rules=self.additional_rules,
+                mode=self.mode,
+                ant_phase=prompt_phase
+            )
+
+    def _check_tool_side_effects(self, tool_name: str, args: Dict[str, Any]) -> None:
+        """Check for tools that modify agent state"""
+        if tool_name == "task_boundary":
+            mode = args.get("Mode")
+            if mode and mode in ["PLANNING", "EXECUTION", "VERIFICATION"]:
+                if mode != self.ant_phase:
+                    self.set_ant_phase(mode)
 
     def update_mode(self, mode: str) -> None:
         """Update the agent's mode and rebuild the system prompt"""
         self.mode = mode
+        self.ant_phase = "PLANNING" # Reset phase on mode switch
         self.system_prompt = build_system_prompt(
             model_name=self.model_display_name,
             additional_rules=self.additional_rules,
-            mode=self.mode
+            mode=self.mode,
+            ant_phase=self.ant_phase
         )
     
     def _init_client(self) -> None:
@@ -162,8 +200,12 @@ class ReverieAgent:
             
             # Collect streamed response
             collected_content = ""
+            collected_thinking = ""  # Collect thinking/reasoning content
             collected_tool_calls = []
             finish_reason = None
+            
+            # Flag to track if we're in thinking mode
+            thinking_started = False
             
             # Buffer for handling split tokens (to hide //END//)
             stream_buffer = ""
@@ -183,8 +225,31 @@ class ReverieAgent:
                 if delta is None:
                     continue
                 
+                # Handle reasoning/thinking content FIRST (for thinking models like o1, DeepSeek-R1, etc.)
+                # Check for reasoning_content in delta (OpenAI o1 / DeepSeek style)
+                reasoning_content = None
+                if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
+                    reasoning_content = delta.reasoning_content
+                elif hasattr(delta, 'thinking') and delta.thinking:
+                    # Alternative field name used by some providers
+                    reasoning_content = delta.thinking
+                
+                if reasoning_content:
+                    collected_thinking += reasoning_content
+                    # Emit thinking content with special markers for the interface
+                    if not thinking_started:
+                        yield THINKING_START_MARKER
+                        thinking_started = True
+                    yield reasoning_content
+                
                 # Content streaming - yield with buffering
+                # If we were in thinking mode and now receiving regular content, end thinking first
                 if delta.content:
+                    # Check if we need to transition from thinking mode to regular content
+                    if thinking_started:
+                        yield THINKING_END_MARKER
+                        thinking_started = False  # Reset so we don't emit again
+                    
                     content_piece = delta.content
                     collected_content += content_piece
                     stream_buffer += content_piece
@@ -243,6 +308,10 @@ class ReverieAgent:
                         if tool_call.id:
                             collected_tool_calls[tool_call.index]["id"] = tool_call.id
             
+            # If thinking was streamed, emit end marker
+            if thinking_started:
+                yield THINKING_END_MARKER
+            
             # Flush any remaining buffer that isn't the hidden token
             if stream_buffer and token_to_hide not in stream_buffer:
                 yield stream_buffer
@@ -267,6 +336,9 @@ class ReverieAgent:
                         args = json.loads(tool_call["function"]["arguments"])
                     except json.JSONDecodeError:
                         args = {}
+                    
+                    # Check side effects
+                    self._check_tool_side_effects(tool_name, args)
                     
                     # Tool call header - Dreamscape style with sparkle
                     exec_msg = tool.get_execution_message(**args) if tool else f"Executing {tool_name}..."
@@ -380,6 +452,9 @@ class ReverieAgent:
                         args = json.loads(tool_call.function.arguments)
                     except json.JSONDecodeError:
                         args = {}
+                    
+                    # Check side effects
+                    self._check_tool_side_effects(tool_name, args)
                     
                     exec_msg = tool.get_execution_message(**args) if tool else f"Executing {tool_name}..."
                     

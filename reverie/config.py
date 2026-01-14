@@ -19,7 +19,7 @@ import shutil
 
 
 # Version info
-__version__ = "1.2.5"
+__version__ = "1.4.0"
 
 
 def get_app_root() -> Path:
@@ -126,6 +126,17 @@ class Config:
     auto_index: bool = True
     show_status_line: bool = True
     
+    # Writer mode specific settings
+    writer_mode: Dict[str, Any] = field(default_factory=lambda: {
+        "memory_system_enabled": True,
+        "auto_consistency_check": True,
+        "auto_character_tracking": True,
+        "max_chapter_context_window": 5,
+        "narrative_analysis_enabled": True,
+        "emotion_tracking_enabled": True,
+        "plot_tracking_enabled": True,
+    })
+    
     @property
     def active_model(self) -> Optional[ModelConfig]:
         if 0 <= self.active_model_index < len(self.models):
@@ -141,7 +152,8 @@ class Config:
             'max_context_tokens': self.max_context_tokens,
             'stream_responses': self.stream_responses,
             'auto_index': self.auto_index,
-            'show_status_line': self.show_status_line
+            'show_status_line': self.show_status_line,
+            'writer_mode': self.writer_mode,
         }
     
     @classmethod
@@ -158,7 +170,16 @@ class Config:
             max_context_tokens=data.get('max_context_tokens', 128000),
             stream_responses=data.get('stream_responses', True),
             auto_index=data.get('auto_index', True),
-            show_status_line=data.get('show_status_line', True)
+            show_status_line=data.get('show_status_line', True),
+            writer_mode=data.get('writer_mode', {
+                "memory_system_enabled": True,
+                "auto_consistency_check": True,
+                "auto_character_tracking": True,
+                "max_chapter_context_window": 5,
+                "narrative_analysis_enabled": True,
+                "emotion_tracking_enabled": True,
+                "plot_tracking_enabled": True,
+            })
         )
 
 

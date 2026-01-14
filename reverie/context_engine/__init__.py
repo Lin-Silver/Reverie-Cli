@@ -19,6 +19,10 @@ from .indexer import CodebaseIndexer, IndexResult, FileInfo, IndexConfig
 from .retriever import ContextRetriever, ContextPackage, SymbolContext, EditContext
 from .cache import CacheManager
 from .git_integration import GitIntegration, CommitInfo, BlameInfo, CommitDetails
+from .novel_index import NovelIndex, IndexEntry
+from .emotion_tracker import EmotionTracker, EmotionalSnapshot
+from .plot_analyzer import PlotAnalyzer, CausalityChain, PlotType
+from .continuity_validator import ContinuityValidator, CharacterState, TemporalEvent
 
 
 __all__ = [
@@ -46,4 +50,15 @@ __all__ = [
     'CommitInfo',
     'BlameInfo',
     'CommitDetails',
+    # Novel-specific (Writer Mode)
+    'NovelIndex',
+    'IndexEntry',
+    'EmotionTracker',
+    'EmotionalSnapshot',
+    'PlotAnalyzer',
+    'CausalityChain',
+    'PlotType',
+    'ContinuityValidator',
+    'CharacterState',
+    'TemporalEvent',
 ]

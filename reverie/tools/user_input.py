@@ -38,8 +38,16 @@ class UserInputTool(BaseTool):
         In the CLI, we just return a status to the AI.
         The UI will display the question as part of the normal streaming output.
         """
-        return ToolResult.success(
+        return ToolResult.ok(
             f"Question asked: '{question}' for reason '{reason}'. "
             "The system is now waiting for the user to respond in the chat. "
             "Do not continue with further tool calls until you receive a user message."
         )
+
+    def get_execution_message(self, **kwargs) -> str:
+        """
+        Overridden to display the actual question in the execution log.
+        """
+        question = kwargs.get('question', '...')
+        reason = kwargs.get('reason', 'user input')
+        return f"Asking user ({reason}): \"{question}\""

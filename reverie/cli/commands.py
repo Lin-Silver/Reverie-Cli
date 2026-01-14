@@ -736,7 +736,7 @@ class CommandHandler:
         # Settings categories
         rules_manager = self.app.get('rules_manager')
         categories = [
-            {"name": "Mode", "key": "mode", "options": ["reverie", "Reverie-Spec-driven", "spec-vibe"]},
+            {"name": "Mode", "key": "mode", "options": ["reverie", "Reverie-ant", "Reverie-Spec-driven", "spec-vibe", "writer"]},
             {"name": "Active Model", "key": "active_model_index", "options": list(range(len(config.models)))},
             {"name": "Theme", "key": "theme", "options": ["default", "dark", "light", "ocean"]},
             {"name": "Auto Index", "key": "auto_index", "options": [True, False]},

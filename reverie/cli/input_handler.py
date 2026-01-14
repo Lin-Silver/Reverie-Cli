@@ -53,22 +53,17 @@ class InputHandler:
     def _render_prompt(self, prompt_text: str, is_continuation: bool = False) -> None:
         """Render the dreamy themed prompt"""
         if is_continuation:
-            # Continuation prompt for multiline input
             self.console.print(
                 f"[{self.theme.PURPLE_MEDIUM}]   {self.deco.LINE_VERTICAL}[/{self.theme.PURPLE_MEDIUM}] ",
                 end=""
             )
         else:
-            # Main prompt with sparkle effect
             prompt_parts = Text()
             
-            # Decorative sparkle
             prompt_parts.append(f"{self.deco.SPARKLE_FILLED} ", style=self.theme.PINK_SOFT)
             
-            # Main prompt text
             prompt_parts.append(prompt_text.rstrip("> "), style=f"bold {self.theme.PURPLE_SOFT}")
             
-            # Chevron separator
             prompt_parts.append(f" {self.deco.CHEVRON_RIGHT} ", style=self.theme.BLUE_SOFT)
             
             self.console.print(prompt_parts, end="")
@@ -78,18 +73,20 @@ class InputHandler:
         Get input from user with multiline support.
         
         Multiline modes:
+        - Paste detection: Rapidly entered lines are combined into one line
         - End line with \ to continue on next line
         - Use triple quotes for block input
         
         Returns None if user wants to exit (Ctrl+C twice)
         """
+        import msvcrt
+        
         lines = []
         in_multiline = False
         multiline_quote = None
         
         while True:
             try:
-                # Show appropriate prompt
                 if in_multiline:
                     self._render_prompt(prompt_text, is_continuation=True)
                 else:
@@ -97,22 +94,39 @@ class InputHandler:
                 
                 line = input("")
                 
-                # Check for triple quotes to start/end multiline
+                # Paste detection: Check if more input is immediately available in buffer
+                # This handles "convert to one line input" for pasted content
+                if not in_multiline and msvcrt.kbhit():
+                    pasted_lines = [line]
+                    while msvcrt.kbhit():
+                        try:
+                            # Read subsequent lines without prompting
+                            pasted_lines.append(input(""))
+                        except (EOFError, KeyboardInterrupt):
+                            break
+                    
+                    # Combine pasted lines into one single line input
+                    # Replace newlines with spaces as requested ("convert to one line")
+                    combined_input = " ".join(pasted_lines)
+                    
+                    # If we detected a paste, we usually return immediately unless it ended with continuation char
+                    if combined_input.strip():
+                        self.history.append(combined_input)
+                        self.history_index = len(self.history)
+                        return combined_input
+                    return combined_input
+                
                 if '"""' in line or "'''" in line:
                     quote = '"""' if '"""' in line else "'''"
                     if not in_multiline:
-                        # Starting multiline
                         in_multiline = True
                         multiline_quote = quote
-                        # Remove the opening quote
                         line = line.replace(quote, '', 1)
                         if quote in line:
-                            # Both open and close on same line
                             line = line.replace(quote, '', 1)
                             in_multiline = False
                             multiline_quote = None
                     else:
-                        # Ending multiline
                         line = line.replace(quote, '', 1)
                         in_multiline = False
                         multiline_quote = None
@@ -121,9 +135,8 @@ class InputHandler:
                         break
                     continue
                 
-                # Check for line continuation
                 if line.endswith('\\'):
-                    lines.append(line[:-1])  # Remove the backslash
+                    lines.append(line[:-1])
                     in_multiline = True
                     continue
                 
@@ -134,20 +147,20 @@ class InputHandler:
                     
             except KeyboardInterrupt:
                 if in_multiline:
-                    # Cancel multiline input
                     self.console.print(
                         f"\n[{self.theme.TEXT_DIM}]{self.deco.CROSS} Multiline input cancelled[/{self.theme.TEXT_DIM}]"
                     )
                     return ""
                 else:
                     self.console.print()
-                    return None  # Signal interrupt
+                    return None
             except EOFError:
                 return None
         
         result = '\n'.join(lines)
         
-        # Add to history if not empty
+        result = result.replace('\n', '')
+        
         if result.strip():
             self.history.append(result)
             self.history_index = len(self.history)
@@ -186,7 +199,6 @@ class InputHandler:
         )
         
         for i, (cmd, desc) in enumerate(completions, 1):
-            # Gradient-like color based on position
             colors = [self.theme.PINK_SOFT, self.theme.PURPLE_SOFT, self.theme.BLUE_SOFT]
             color = colors[i % len(colors)]
             
@@ -197,7 +209,7 @@ class InputHandler:
             )
         
         self.console.print()
-        return None  # User needs to type the full command
+        return None
     
     def interactive_input(self, prompt_text: str = "Reverie> ") -> Optional[str]:
         """
@@ -210,17 +222,13 @@ class InputHandler:
         if result is None:
             return None
         
-        # Check if partial command - offer completions
         stripped = result.strip()
         if stripped.startswith('/') and ' ' not in stripped:
             completions = self.get_command_completions(stripped)
             if len(completions) == 1:
-                # Exact match or single completion
                 return completions[0][0]
             elif len(completions) > 1 and stripped != '/' and len(stripped) > 1:
-                # Multiple matches - show them
                 self.show_completions(completions)
-                # Return original so user can refine
                 return result
         
         return result

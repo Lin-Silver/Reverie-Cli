@@ -60,6 +60,13 @@ class DreamscapeTheme:
     CORAL_SOFT = "#ff8a80"         # Soft coral
     CORAL_VIBRANT = "#ff5252"      # Bright coral
     
+    # Thinking/Reasoning accents (ethereal, mystical)
+    THINKING_SOFT = "#b39ddb"      # Soft twilight purple
+    THINKING_MEDIUM = "#9575cd"    # Mystical violet
+    THINKING_DIM = "#7e57c2"       # Deep thought purple
+    THINKING_BORDER = "#673ab7"    # Thinking panel border
+    THINKING_GLOW = "#d1c4e9"      # Soft lavender glow
+    
     # ═══════════════════════════════════════════════════════════════════════════
     # TEXT COLORS
     # ═══════════════════════════════════════════════════════════════════════════
@@ -193,6 +200,13 @@ class DreamDecorators:
     MOON_CRESCENT = "🌙"
     CLOUD = "☁"
     
+    # Thinking/Reasoning indicators
+    THOUGHT_BUBBLE = "💭"
+    CRYSTAL_BALL = "🔮"
+    BRAIN = "🧠"
+    THINKING = "⟐"                 # Diamond with dot (thinking symbol)
+    THOUGHT_WAVE = "∿"             # Wavy thinking line
+    
     # Brackets and frames
     BRACKET_OPEN = "「"
     BRACKET_CLOSE = "」"
@@ -274,6 +288,27 @@ class DreamText:
         return (
             f"[bold {cls.theme.PINK_SOFT}]{cls.deco.RHOMBUS}[/bold {cls.theme.PINK_SOFT}] "
             f"[bold {cls.theme.PURPLE_GLOW}]{tool_name}[/bold {cls.theme.PURPLE_GLOW}]"
+        )
+    
+    @classmethod
+    def thinking_header(cls) -> str:
+        """Create a thinking process header"""
+        return (
+            f"[italic {cls.theme.THINKING_SOFT}]{cls.deco.THOUGHT_BUBBLE}[/italic {cls.theme.THINKING_SOFT}] "
+            f"[italic bold {cls.theme.THINKING_MEDIUM}]Thinking...[/italic bold {cls.theme.THINKING_MEDIUM}]"
+        )
+    
+    @classmethod
+    def thinking_content(cls, text: str) -> str:
+        """Format thinking/reasoning content with special styling"""
+        return f"[italic {cls.theme.THINKING_SOFT}]{text}[/italic {cls.theme.THINKING_SOFT}]"
+    
+    @classmethod
+    def thinking_line(cls, text: str) -> str:
+        """Format a single line of thinking content"""
+        return (
+            f"[{cls.theme.THINKING_DIM}]{cls.deco.LINE_VERTICAL}[/{cls.theme.THINKING_DIM}] "
+            f"[italic {cls.theme.THINKING_SOFT}]{text}[/italic {cls.theme.THINKING_SOFT}]"
         )
     
     @classmethod

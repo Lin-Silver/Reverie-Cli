@@ -29,7 +29,7 @@ from .theme import THEME, DECO, DREAM
 from ..config import ConfigManager, ModelConfig, Config
 from ..rules_manager import RulesManager
 from ..session import SessionManager
-from ..agent import ReverieAgent
+from ..agent import ReverieAgent, THINKING_START_MARKER, THINKING_END_MARKER
 from ..context_engine import CodebaseIndexer, ContextRetriever, GitIntegration
 
 
@@ -205,6 +205,11 @@ class ReverieInterface:
             current_markdown_text = ""
             first_non_tool_chunk = True
             
+            # Thinking content state management
+            in_thinking_mode = False
+            thinking_content = ""
+            first_thinking_chunk = True
+            
             # Create live display for status line if enabled
             status_live = None
             if config.show_status_line:
@@ -213,7 +218,61 @@ class ReverieInterface:
                 status_live.start()
             
             try:
+                import msvcrt
                 for chunk in self.agent.process_message(message, stream=config.stream_responses):
+                    # Check for ESC key execution interruption
+                    if msvcrt.kbhit():
+                        key = msvcrt.getch()
+                        # Check for ESC (0x1b)
+                        if key == b'\x1b':
+                            self.console.print(f"\n[{self.theme.CORAL_SOFT}]{self.deco.DOT_MEDIUM} Output stopped by user (ESC)[/{self.theme.CORAL_SOFT}]")
+                            break
+
+                    # Handle thinking markers
+                    if chunk == THINKING_START_MARKER:
+                        # Flush any pending content before entering thinking mode
+                        if current_markdown_text:
+                            self.console.print(format_markdown(current_markdown_text), end="")
+                            current_markdown_text = ""
+                        in_thinking_mode = True
+                        first_thinking_chunk = True
+                        continue
+                    
+                    if chunk == THINKING_END_MARKER:
+                        # Flush any pending thinking content and exit thinking mode
+                        if thinking_content.strip():
+                            # Print remaining thinking content
+                            self._print_thinking_content(thinking_content)
+                            thinking_content = ""
+                        in_thinking_mode = False
+                        # Add a visual separator after thinking
+                        self.console.print()
+                        continue
+                    
+                    # Handle thinking content
+                    if in_thinking_mode:
+                        if first_thinking_chunk:
+                            # Print thinking header
+                            self.console.print(
+                                f"[italic {self.theme.THINKING_SOFT}]{DECO.THOUGHT_BUBBLE}[/italic {self.theme.THINKING_SOFT}] "
+                                f"[italic bold {self.theme.THINKING_MEDIUM}]Thinking...[/italic bold {self.theme.THINKING_MEDIUM}]"
+                            )
+                            first_thinking_chunk = False
+                        
+                        thinking_content += chunk
+                        # Stream thinking content line by line for better UX
+                        if '\n' in thinking_content:
+                            lines = thinking_content.split('\n')
+                            # Print complete lines, keep the last one in buffer
+                            for line in lines[:-1]:
+                                if line.strip():
+                                    self.console.print(
+                                        f"[{self.theme.THINKING_DIM}]{DECO.LINE_VERTICAL}[/{self.theme.THINKING_DIM}] "
+                                        f"[italic {self.theme.THINKING_SOFT}]{escape(line)}[/italic {self.theme.THINKING_SOFT}]"
+                                    )
+                            thinking_content = lines[-1]
+                        continue
+                    
                     # Check for tool/system markers
                     if chunk.startswith('\n[') or chunk.startswith('['):
                         # Flush pending markdown
@@ -238,6 +297,10 @@ class ReverieInterface:
                 # Final flush - print all accumulated content
                 if current_markdown_text.strip():
                     self.console.print(format_markdown(current_markdown_text))
+                
+                # Flush any remaining thinking content
+                if thinking_content.strip():
+                    self._print_thinking_content(thinking_content)
             
             finally:
                 # Stop live display
@@ -263,6 +326,15 @@ class ReverieInterface:
         if config.show_status_line:
             self.console.print(self.status_line)
         self.console.print() # Final spacer for prompt
+    
+    def _print_thinking_content(self, content: str) -> None:
+        """Helper method to print thinking content with proper formatting"""
+        for line in content.strip().split('\n'):
+            if line.strip():
+                self.console.print(
+                    f"[{self.theme.THINKING_DIM}]{DECO.LINE_VERTICAL}[/{self.theme.THINKING_DIM}] "
+                    f"[italic {self.theme.THINKING_SOFT}]{escape(line)}[/italic {self.theme.THINKING_SOFT}]"
+                )
 
     def _init_context_engine(self) -> None:
         cache_dir = self.config_manager.project_data_dir / 'context_cache'

@@ -22,6 +22,11 @@ from .task_manager import TaskManagerTool
 from .context_management import ContextManagementTool
 from .create_file import CreateFileTool
 from .user_input import UserInputTool
+from .clarification import ClarificationTool
+from .ant_tools import TaskBoundaryTool, NotifyUserTool
+from .novel_context_manager import NovelContextManagerTool
+from .consistency_checker_tool import ConsistencyCheckerTool
+from .plot_analyzer_tool import PlotAnalyzerTool
 
 __all__ = [
     'BaseTool',
@@ -36,5 +41,12 @@ __all__ = [
     'TaskManagerTool',
     "ContextManagementTool",
     "CreateFileTool",
-    "UserInputTool"
+    "UserInputTool",
+    "UserInputTool",
+    "ClarificationTool",
+    "TaskBoundaryTool",
+    "NotifyUserTool",
+    "NovelContextManagerTool",
+    "ConsistencyCheckerTool",
+    "PlotAnalyzerTool",
 ]

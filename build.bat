@@ -4,6 +4,8 @@ REM Reverie Cli - Build Script
 REM Creates a standalone Windows executable using PyInstaller
 REM ============================================================
 
+chcp 65001 >nul
+
 setlocal enabledelayedexpansion
 
 echo.

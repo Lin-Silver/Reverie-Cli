@@ -80,17 +80,19 @@ class SessionManager:
     
     def create_session(self, name: Optional[str] = None) -> Session:
         """Create a new session"""
-        session_id = str(uuid.uuid4())[:8]
-        now = datetime.now().isoformat()
+        # Use timestamp as session ID (YYYYMMDD_HHMMSS format)
+        now = datetime.now()
+        session_id = now.strftime('%Y%m%d_%H%M%S')
+        iso_time = now.isoformat()
         
         if name is None:
-            name = f"Session {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            name = f"Session {now.strftime('%Y-%m-%d %H:%M:%S')}"
         
         session = Session(
             id=session_id,
             name=name,
-            created_at=now,
-            updated_at=now
+            created_at=iso_time,
+            updated_at=iso_time
         )
         
         self._current_session = session

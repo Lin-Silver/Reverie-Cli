@@ -9,6 +9,7 @@ Tools available to the AI Agent:
 - command_exec: Execute shell commands
 - web_search: Search the web
 - task_manager: Organize complex work
+- nexus: Large-scale project development with 24+ hour support
 """
 
 from .base import BaseTool, ToolResult, ToolResultStatus
@@ -27,6 +28,7 @@ from .ant_tools import TaskBoundaryTool, NotifyUserTool
 from .novel_context_manager import NovelContextManagerTool
 from .consistency_checker_tool import ConsistencyCheckerTool
 from .plot_analyzer_tool import PlotAnalyzerTool
+from .nexus import NexusTool
 
 __all__ = [
     'BaseTool',
@@ -49,4 +51,5 @@ __all__ = [
     "NovelContextManagerTool",
     "ConsistencyCheckerTool",
     "PlotAnalyzerTool",
+    "NexusTool",
 ]

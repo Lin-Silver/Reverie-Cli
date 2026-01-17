@@ -2,6 +2,7 @@
 build/
 dist/
 search-mcp/
+gemini-cli-main/
 
 reverie_cli.egg-info/
 *.exe
@@ -9,7 +10,7 @@ reverie_cli.egg-info/
 
 # 忽略 Python 缓存
 __pycache__/
-**/__pycache__/
+*.pyo
 *.pyc
 
 # 忽略虚拟环境

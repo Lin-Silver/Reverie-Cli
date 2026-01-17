@@ -1,3 +1,56 @@
+## 🚀 Reverie CLI v1.4.1 — Advanced Context Engine & Nexus Integration
+
+**Release Date:** 2026-01-17
+
+### 🧠 Context Engine Major Enhancements
+* **Semantic Indexer**: Added deep code understanding through semantic analysis and pattern recognition
+* **Knowledge Graph**: Implemented advanced relationship tracking with impact analysis and architecture understanding
+* **Commit History Indexer**: Added learning from past changes with pattern extraction and team convention detection
+* **Context Engine Core**: Unified context management system integrating all advanced components
+
+### 🔧 Nexus Tool - Large-Scale Project Development
+* **24+ Hour Support**: Enabled continuous work sessions for large projects with external context management
+* **Phase-Based Workflow**: Structured development phases (Planning, Design, Implementation, Testing, Integration, Documentation, Verification, Completion)
+* **Persistent State**: Automatic checkpoint and recovery for long-running tasks
+* **Token Limit Bypass**: External context storage to handle projects beyond typical token limits
+* **Self-Healing**: Automatic error recovery and state management
+
+### 💾 Enhanced Checkpoint System
+* **File-Level Checkpoints**: Automatic snapshots before file modifications
+* **TUI Rollback Interface**: Interactive checkpoint selection and restoration
+* **Version History**: Track multiple versions of each file with timestamps
+* **Automatic Cleanup**: Remove old checkpoints after configurable time period
+
+### 📝 Session Management Improvements
+* **Timestamp-Based Naming**: Session files now use creation time (YYYYMMDD_HHMMSS format)
+* **Enhanced Metadata**: Improved session tracking with detailed timestamps
+
+### ✍️ Writer Mode Enhancements
+* **Mandatory Outline Phase**: Complete novel outline must be created and approved before writing
+* **Structured Outline Format**: Comprehensive outline with characters, setting, plot summary, chapter breakdown, themes, and key plot points
+* **User Review Workflow**: Outline must be reviewed and approved by user before proceeding to content creation
+
+### 🎨 TUI Interaction Improvements
+* **Keyboard Navigation**: Arrow key navigation (up/down) for all selectors
+* **Enter to Confirm**: Consistent Enter key behavior for selections
+* **Escape to Cancel**: Escape key cancels operations or exits dialogs
+* **Visual Highlighting**: Clear visual indication of selected items
+* **Search Support**: Filter lists with search functionality (/ key)
+* **Smooth Scrolling**: Page Up/Down support for long lists
+* **Modern Selectors**: Specialized selectors for models, settings, sessions, and checkpoints
+
+### 🤖 System Prompt Updates
+* **Advanced Context Engine Documentation**: Added comprehensive documentation for semantic indexing, knowledge graph, and commit history features
+* **Nexus Tool Integration**: Added instructions for using Nexus in large-scale project development
+* **Enhanced Context Usage Guidelines**: Updated rules for leveraging advanced context engine capabilities
+
+### 🐛 Bug Fixes
+* Fixed session naming to use precise timestamps
+* Improved checkpoint management reliability
+* Enhanced TUI selector responsiveness
+
+---
+
 ## 🚀 Reverie CLI v1.4.0 — Reverie-Ant Autonomous Agentic Enhancement
 
 **Release Date:** 2026-01-12

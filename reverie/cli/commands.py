@@ -401,54 +401,46 @@ class CommandHandler:
                 return self.cmd_add_model("")
             return True
         
-        # Show model list
-        table = Table(
-            title=f"[bold {self.theme.PINK_SOFT}]{self.deco.CRYSTAL} Available Models[/bold {self.theme.PINK_SOFT}]",
-            box=box.ROUNDED,
-            border_style=self.theme.BORDER_PRIMARY
-        )
-        table.add_column("#", style=self.theme.TEXT_DIM)
-        table.add_column("Model", style=f"bold {self.theme.BLUE_SOFT}")
-        table.add_column("Endpoint", style=self.theme.TEXT_DIM)
-        table.add_column("Status", style=self.theme.MINT_SOFT)
+        # Use TUI selector for model selection
+        from .tui_selector import ModelSelector, SelectorAction
         
+        # Prepare model data
+        models_data = []
+        current_model_id = None
         for i, model in enumerate(config.models):
-            status = f"[bold {self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Active[/bold {self.theme.MINT_VIBRANT}]" if i == config.active_model_index else ""
-            table.add_row(
-                str(i + 1),
-                model.model_display_name,
-                model.base_url,
-                status
-            )
+            models_data.append({
+                'id': str(i),
+                'name': model.model_display_name,
+                'description': f"{model.base_url} • {model.model}",
+                'model': model
+            })
+            if i == config.active_model_index:
+                current_model_id = str(i)
         
-        self.console.print(table)
-        self.console.print(f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} Tip: Use '/model add' to add, or '/model delete <#>' to remove[/{self.theme.TEXT_DIM}]")
+        # Create and run selector
+        selector = ModelSelector(
+            console=self.console,
+            models=models_data,
+            current_model=current_model_id
+        )
         
-        # Ask to select
-        try:
-            choice = Prompt.ask(
-                f"[{self.theme.PURPLE_SOFT}]Select model # to activate (or Enter to keep current)[/{self.theme.PURPLE_SOFT}]",
-                default=""
-            )
-            
-            if choice:
-                try:
-                    index = int(choice) - 1
-                    if 0 <= index < len(config.models):
-                        config_manager.set_active_model(index)
-                        self.console.print(
-                            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Switched to: {config.models[index].model_display_name}[/{self.theme.MINT_VIBRANT}]"
-                        )
-                        
-                        # Reinitialize agent
-                        if self.app.get('reinit_agent'):
-                            self.app['reinit_agent']()
-                    else:
-                        self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid selection[/{self.theme.CORAL_SOFT}]")
-                except ValueError:
-                    self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid input[/{self.theme.CORAL_SOFT}]")
-        except KeyboardInterrupt:
-            self.console.print()
+        result = selector.run()
+        
+        if result.action == SelectorAction.SELECT and result.selected_item:
+            try:
+                index = int(result.selected_item.id)
+                if 0 <= index < len(config.models):
+                    config_manager.set_active_model(index)
+                    self.console.print()
+                    self.console.print(
+                        f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Switched to: {config.models[index].model_display_name}[/{self.theme.MINT_VIBRANT}]"
+                    )
+                    
+                    # Reinitialize agent
+                    if self.app.get('reinit_agent'):
+                        self.app['reinit_agent']()
+            except (ValueError, IndexError):
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid selection[/{self.theme.CORAL_SOFT}]")
         
         return True
     

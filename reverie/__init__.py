@@ -6,7 +6,7 @@ Context Engine to understand large codebases and reduce
 AI model hallucinations.
 """
 
-__version__ = "1.4.0"
+__version__ = "1.4.1"
 __author__ = "Raiden"
 __description__ = "World-Class Context Engine Coding Assistant"
 

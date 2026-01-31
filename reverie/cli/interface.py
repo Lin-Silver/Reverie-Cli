@@ -60,6 +60,11 @@ class ReverieInterface:
         self.project_data_dir = self.config_manager.project_data_dir
         self.session_manager = SessionManager(self.project_data_dir)
         
+        # Initialize operation history and rollback manager
+        from ..session import OperationHistory, RollbackManager
+        self.operation_history = OperationHistory("current")
+        self.rollback_manager = RollbackManager(self.project_data_dir, self.operation_history)
+        
         self.indexer: Optional[CodebaseIndexer] = None
         self.retriever: Optional[ContextRetriever] = None
         self.git_integration: Optional[GitIntegration] = None
@@ -201,6 +206,9 @@ class ReverieInterface:
         self.current_task_start = time.time()
         config = self.config_manager.load()
         
+        # Get current session ID
+        session_id = self.session_manager.current_session.id if self.session_manager.current_session else "default"
+        
         try:
             current_markdown_text = ""
             first_non_tool_chunk = True
@@ -219,7 +227,7 @@ class ReverieInterface:
             
             try:
                 import msvcrt
-                for chunk in self.agent.process_message(message, stream=config.stream_responses):
+                for chunk in self.agent.process_message(message, stream=config.stream_responses, session_id=session_id):
                     # Check for ESC key execution interruption
                     if msvcrt.kbhit():
                         key = msvcrt.getch()
@@ -380,7 +388,9 @@ class ReverieInterface:
             additional_rules=self.rules_manager.get_rules_text(),
             mode=config.mode or "reverie",
             provider=getattr(model, 'provider', 'openai-sdk'),
-            thinking_mode=getattr(model, 'thinking_mode', None)
+            thinking_mode=getattr(model, 'thinking_mode', None),
+            operation_history=self.operation_history,
+            rollback_manager=self.rollback_manager
         )
         self.agent.config = config
         # Also inject config_manager into tool context for context threshold check
@@ -399,7 +409,9 @@ class ReverieInterface:
             'agent': self.agent, 'start_time': self.start_time, 
             'total_active_time': self.total_active_time,
             'current_task_start': self.current_task_start,
-            'reinit_agent': self._init_agent
+            'reinit_agent': self._init_agent,
+            'operation_history': self.operation_history,
+            'rollback_manager': self.rollback_manager
         }
 
     def run_setup_wizard(self) -> None:

@@ -47,7 +47,9 @@ class ReverieAgent:
         additional_rules: str = "",
         mode: str = "reverie",
         provider: str = "openai-sdk",
-        thinking_mode: Optional[str] = None
+        thinking_mode: Optional[str] = None,
+        operation_history=None,
+        rollback_manager=None
     ):
         self.base_url = base_url
         self.api_key = api_key
@@ -77,6 +79,11 @@ class ReverieAgent:
         
         # Conversation history
         self.messages: List[Dict] = []
+        
+        # Operation history and rollback support
+        self.operation_history = operation_history
+        self.rollback_manager = rollback_manager
+        self.current_checkpoint_id: Optional[str] = None
         
         self.system_prompt = build_system_prompt(
             model_name=self.model_display_name,
@@ -175,7 +182,8 @@ class ReverieAgent:
     def process_message(
         self,
         user_message: str,
-        stream: bool = True
+        stream: bool = True,
+        session_id: str = "default"
     ) -> Generator[str, None, None]:
         """
         Process a user message and yield responses.
@@ -183,15 +191,32 @@ class ReverieAgent:
         Args:
             user_message: The user's input
             stream: Whether to stream the response
+            session_id: Current session ID for checkpointing
         
         Yields:
             Response chunks (or full response if not streaming)
         """
+        # Create checkpoint before processing user question
+        if self.rollback_manager:
+            self.current_checkpoint_id = self.rollback_manager.create_pre_question_checkpoint(
+                session_id=session_id,
+                messages=self.messages,
+                question=user_message
+            )
+        
         # Add user message to history
         self.messages.append({
             "role": "user",
             "content": user_message
         })
+        
+        # Record user question in operation history
+        if self.operation_history:
+            self.operation_history.add_user_question(
+                question=user_message,
+                message_index=len(self.messages) - 1,
+                checkpoint_id=self.current_checkpoint_id
+            )
         
         # Check for context threshold (60%) and trigger compression if needed
         self._check_and_compress_context()
@@ -199,26 +224,26 @@ class ReverieAgent:
         # Call model with tools
         try:
             if stream:
-                yield from self._process_streaming()
+                yield from self._process_streaming(session_id=session_id)
             else:
-                response = self._process_non_streaming()
+                response = self._process_non_streaming(session_id=session_id)
                 yield response
         except Exception as e:
             error_msg = f"Error processing message: {str(e)}"
             yield error_msg
     
-    def _process_streaming(self) -> Generator[str, None, None]:
+    def _process_streaming(self, session_id: str = "default") -> Generator[str, None, None]:
         """Process with streaming response"""
         if self.provider == "openai-sdk":
-            yield from self._process_streaming_openai_sdk()
+            yield from self._process_streaming_openai_sdk(session_id=session_id)
         elif self.provider == "request":
-            yield from self._process_streaming_request()
+            yield from self._process_streaming_request(session_id=session_id)
         elif self.provider == "anthropic":
-            yield from self._process_streaming_anthropic()
+            yield from self._process_streaming_anthropic(session_id=session_id)
         else:
             raise ValueError(f"Unknown provider: {self.provider}")
     
-    def _process_streaming_openai_sdk(self) -> Generator[str, None, None]:
+    def _process_streaming_openai_sdk(self, session_id: str = "default") -> Generator[str, None, None]:
         """Process with streaming response using OpenAI SDK"""
         messages = self._build_messages()
         tools = self.tool_executor.get_tool_schemas(mode=self.mode)
@@ -376,12 +401,34 @@ class ReverieAgent:
                     # Check side effects
                     self._check_tool_side_effects(tool_name, args)
                     
+                    # Create checkpoint before tool execution
+                    tool_checkpoint_id = None
+                    if self.rollback_manager:
+                        tool_checkpoint_id = self.rollback_manager.create_pre_tool_checkpoint(
+                            session_id=session_id,
+                            messages=self.messages,
+                            tool_name=tool_name,
+                            arguments=args
+                        )
+                    
                     # Tool call header - Dreamscape style with sparkle
                     exec_msg = tool.get_execution_message(**args) if tool else f"Executing {tool_name}..."
                     yield f"\n[bold #ffb8d1]✧[/bold #ffb8d1] [bold #e4b0ff]{exec_msg}[/bold #e4b0ff]\n"
                     
                     # Execute tool
                     result = self.tool_executor.execute(tool_name, args)
+                    
+                    # Record tool call in operation history
+                    if self.operation_history:
+                        parent_id = self.operation_history.get_last_user_question().id if self.operation_history.get_last_user_question() else None
+                        self.operation_history.add_tool_call(
+                            tool_name=tool_name,
+                            arguments=args,
+                            result=result.output if result.success else None,
+                            success=result.success,
+                            error=result.error,
+                            parent_id=parent_id
+                        )
                     
                     if result.success:
                         output_preview = result.output.strip()
@@ -437,7 +484,7 @@ class ReverieAgent:
             # No content at all, just break
             break
     
-    def _process_streaming_request(self) -> Generator[str, None, None]:
+    def _process_streaming_request(self, session_id: str = "default") -> Generator[str, None, None]:
         """Process with streaming response using requests library"""
         import requests
         
@@ -669,7 +716,7 @@ class ReverieAgent:
             
             break
     
-    def _process_streaming_anthropic(self) -> Generator[str, None, None]:
+    def _process_streaming_anthropic(self, session_id: str = "default") -> Generator[str, None, None]:
         """Process with streaming response using Anthropic SDK"""
         messages = self._build_messages()
         tools = self.tool_executor.get_tool_schemas(mode=self.mode)
@@ -864,18 +911,18 @@ class ReverieAgent:
             
             break
     
-    def _process_non_streaming(self) -> str:
+    def _process_non_streaming(self, session_id: str = "default") -> str:
         """Process without streaming"""
         if self.provider == "openai-sdk":
-            return self._process_non_streaming_openai_sdk()
+            return self._process_non_streaming_openai_sdk(session_id=session_id)
         elif self.provider == "request":
-            return self._process_non_streaming_request()
+            return self._process_non_streaming_request(session_id=session_id)
         elif self.provider == "anthropic":
-            return self._process_non_streaming_anthropic()
+            return self._process_non_streaming_anthropic(session_id=session_id)
         else:
             raise ValueError(f"Unknown provider: {self.provider}")
     
-    def _process_non_streaming_openai_sdk(self) -> str:
+    def _process_non_streaming_openai_sdk(self, session_id: str = "default") -> str:
         """Process without streaming using OpenAI SDK"""
         messages = self._build_messages()
         tools = self.tool_executor.get_tool_schemas(mode=self.mode)
@@ -985,7 +1032,7 @@ class ReverieAgent:
         
         return '\n'.join(all_content)
     
-    def _process_non_streaming_request(self) -> str:
+    def _process_non_streaming_request(self, session_id: str = "default") -> str:
         """Process without streaming using requests library"""
         import requests
         
@@ -1105,7 +1152,7 @@ class ReverieAgent:
         
         return '\n'.join(all_content)
     
-    def _process_non_streaming_anthropic(self) -> str:
+    def _process_non_streaming_anthropic(self, session_id: str = "default") -> str:
         """Process without streaming using Anthropic SDK"""
         messages = self._build_messages()
         tools = self.tool_executor.get_tool_schemas(mode=self.mode)

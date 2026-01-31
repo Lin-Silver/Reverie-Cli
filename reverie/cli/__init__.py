@@ -7,6 +7,7 @@ Rich command-line interface components with Dreamscape Theme:
 - DisplayComponents: Rich UI elements
 - InputHandler: Multiline input and command completion
 - SessionUI: Session management UI
+- RollbackUI: Interactive rollback interface
 - Theme: Dreamscape color palette and decorators
 """
 
@@ -15,6 +16,7 @@ from .commands import CommandHandler
 from .display import DisplayComponents
 from .input_handler import InputHandler
 from .session_ui import SessionUI
+from .rollback_ui import RollbackUI
 from .theme import THEME, DECO, DREAM, DreamscapeTheme, DreamDecorators, DreamText
 
 __all__ = [
@@ -23,6 +25,7 @@ __all__ = [
     'DisplayComponents',
     'InputHandler',
     'SessionUI',
+    'RollbackUI',
     'THEME',
     'DECO',
     'DREAM',

@@ -65,11 +65,12 @@ class DisplayComponents:
             f"[{self.theme.PURPLE_SOFT}]{self.deco.CHEVRON_RIGHT} Type [bold]/help[/bold] for commands • Mode: [bold {self.theme.BLUE_SOFT}]{mode.upper()}[/bold {self.theme.BLUE_SOFT}][/{self.theme.PURPLE_SOFT}]"
         )
 
+        # Use width=None to auto-detect terminal width, remove expand=True to prevent display issues
         self.console.print(Panel(
             Align.center(Text.from_markup(styled_banner + info_text)),
             border_style=self.theme.BORDER_PRIMARY,
             padding=(1, 2),
-            expand=True,
+            width=None,
             box=box.ROUNDED
         ))
         self.console.print()

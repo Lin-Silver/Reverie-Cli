@@ -51,6 +51,11 @@ class CommandHandler:
             'rules': self.cmd_rules,
             'exit': self.cmd_exit,
             'quit': self.cmd_exit,
+            'rollback': self.cmd_rollback,
+            'undo': self.cmd_undo,
+            'redo': self.cmd_redo,
+            'checkpoints': self.cmd_checkpoints,
+            'operations': self.cmd_operations,
         }
     
     def handle(self, command_line: str) -> bool:
@@ -207,6 +212,31 @@ class CommandHandler:
             "/history [n]",
             "Show conversation history. Display the last n messages (default 10).",
             "/history\n/history 20"
+        )
+        session_commands.add_row(
+            "/rollback",
+            f"Rollback to previous state:\n{self.deco.DOT_MEDIUM} Rollback to previous question\n{self.deco.DOT_MEDIUM} Rollback to previous tool call\n{self.deco.DOT_MEDIUM} Rollback to specific checkpoint",
+            "/rollback question\n/rollback tool\n/rollback <id>"
+        )
+        session_commands.add_row(
+            "/undo",
+            "Undo the last rollback operation.",
+            "/undo"
+        )
+        session_commands.add_row(
+            "/redo",
+            "Redo the last undone rollback operation.",
+            "/redo"
+        )
+        session_commands.add_row(
+            "/checkpoints",
+            f"Interactive checkpoint manager:\n{self.deco.DOT_MEDIUM} Browse checkpoints with arrow keys\n{self.deco.DOT_MEDIUM} Select to restore\n{self.deco.DOT_MEDIUM} View checkpoint details",
+            "/checkpoints"
+        )
+        session_commands.add_row(
+            "/operations",
+            "Show operation history and statistics.",
+            "/operations"
         )
         
         self.console.print(session_commands)
@@ -980,6 +1010,306 @@ class CommandHandler:
             self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Unknown action: {action}[/{self.theme.CORAL_SOFT}]")
             self.console.print(f"[{self.theme.TEXT_DIM}]Usage: /rules [list|edit|add|remove][/{self.theme.TEXT_DIM}]")
             
+        return True
+    
+    def cmd_rollback(self, args: str) -> bool:
+        """Rollback to a previous state"""
+        rollback_manager = self.app.get('rollback_manager')
+        operation_history = self.app.get('operation_history')
+        
+        if not rollback_manager or not operation_history:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Rollback manager not available.[/{self.theme.CORAL_SOFT}]")
+            return True
+        
+        parts = args.strip().split()
+        
+        if not parts:
+            # Use interactive UI
+            from .rollback_ui import RollbackUI
+            rollback_ui = RollbackUI(self.console, rollback_manager, operation_history)
+            
+            action = rollback_ui.show_main_menu()
+            
+            if action is None:
+                return True
+            
+            session_id = self.app.get('session_manager').current_session.id if self.app.get('session_manager') and self.app['session_manager'].current_session else "default"
+            
+            if action == rollback_ui.RollbackAction.ROLLBACK_TO_QUESTION:
+                result = rollback_manager.rollback_to_previous_question(session_id)
+                rollback_ui.show_rollback_summary(result)
+                
+                # Update agent messages if available
+                if result.success and result.restored_messages and self.app.get('agent'):
+                    self.app['agent'].messages = result.restored_messages
+            
+            elif action == rollback_ui.RollbackAction.ROLLBACK_TO_TOOL:
+                result = rollback_manager.rollback_to_previous_tool_call(session_id)
+                rollback_ui.show_rollback_summary(result)
+            
+            elif action == rollback_ui.RollbackAction.ROLLBACK_TO_CHECKPOINT:
+                checkpoint_id = rollback_ui.show_checkpoint_selector()
+                if checkpoint_id:
+                    result = rollback_manager.rollback_to_checkpoint(checkpoint_id)
+                    rollback_ui.show_rollback_summary(result)
+                    
+                    # Update agent messages if available
+                    if result.success and result.restored_messages and self.app.get('agent'):
+                        self.app['agent'].messages = result.restored_messages
+            
+            elif action == rollback_ui.RollbackAction.UNDO:
+                result = rollback_manager.undo()
+                rollback_ui.show_rollback_summary(result)
+            
+            elif action == rollback_ui.RollbackAction.REDO:
+                result = rollback_manager.redo()
+                rollback_ui.show_rollback_summary(result)
+            
+        elif parts[0] == 'question':
+            # Rollback to previous question
+            session_id = self.app.get('session_manager').current_session.id if self.app.get('session_manager') and self.app['session_manager'].current_session else "default"
+            result = rollback_manager.rollback_to_previous_question(session_id)
+            
+            if result.success:
+                self.console.print()
+                self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} {result.message}[/{self.theme.MINT_VIBRANT}]")
+                
+                if result.restored_files:
+                    self.console.print(f"[{self.theme.TEXT_DIM}]Restored files:[/{self.theme.TEXT_DIM}]")
+                    for file_path in result.restored_files:
+                        self.console.print(f"  [{self.theme.MINT_SOFT}]✓[/{self.theme.MINT_SOFT}] {file_path}")
+                
+                if result.errors:
+                    self.console.print()
+                    self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Errors:[/{self.theme.AMBER_GLOW}]")
+                    for error in result.errors:
+                        self.console.print(f"  [{self.theme.CORAL_SOFT}]✗[/{self.theme.CORAL_SOFT}] {error}")
+                
+                # Update agent messages if available
+                if result.restored_messages and self.app.get('agent'):
+                    self.app['agent'].messages = result.restored_messages
+            else:
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} {result.message}[/{self.theme.CORAL_SOFT}]")
+        
+        elif parts[0] == 'tool':
+            # Rollback to previous tool call
+            session_id = self.app.get('session_manager').current_session.id if self.app.get('session_manager') and self.app['session_manager'].current_session else "default"
+            result = rollback_manager.rollback_to_previous_tool_call(session_id)
+            
+            if result.success:
+                self.console.print()
+                self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} {result.message}[/{self.theme.MINT_VIBRANT}]")
+                
+                if result.restored_files:
+                    self.console.print(f"[{self.theme.TEXT_DIM}]Restored files:[/{self.theme.TEXT_DIM}]")
+                    for file_path in result.restored_files:
+                        self.console.print(f"  [{self.theme.MINT_SOFT}]✓[/{self.theme.MINT_SOFT}] {file_path}")
+                
+                if result.errors:
+                    self.console.print()
+                    self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Errors:[/{self.theme.AMBER_GLOW}]")
+                    for error in result.errors:
+                        self.console.print(f"  [{self.theme.CORAL_SOFT}]✗[/{self.theme.CORAL_SOFT}] {error}")
+            else:
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} {result.message}[/{self.theme.CORAL_SOFT}]")
+        
+        else:
+            # Rollback to specific checkpoint
+            checkpoint_id = parts[0]
+            result = rollback_manager.rollback_to_checkpoint(checkpoint_id)
+            
+            if result.success:
+                self.console.print()
+                self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} {result.message}[/{self.theme.MINT_VIBRANT}]")
+                
+                if result.restored_files:
+                    self.console.print(f"[{self.theme.TEXT_DIM}]Restored files:[/{self.theme.TEXT_DIM}]")
+                    for file_path in result.restored_files:
+                        self.console.print(f"  [{self.theme.MINT_SOFT}]✓[/{self.theme.MINT_SOFT}] {file_path}")
+                
+                if result.errors:
+                    self.console.print()
+                    self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Errors:[/{self.theme.AMBER_GLOW}]")
+                    for error in result.errors:
+                        self.console.print(f"  [{self.theme.CORAL_SOFT}]✗[/{self.theme.CORAL_SOFT}] {error}")
+                
+                # Update agent messages if available
+                if result.restored_messages and self.app.get('agent'):
+                    self.app['agent'].messages = result.restored_messages
+            else:
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} {result.message}[/{self.theme.CORAL_SOFT}]")
+        
+        return True
+    
+    def cmd_undo(self, args: str) -> bool:
+        """Undo the last rollback operation"""
+        rollback_manager = self.app.get('rollback_manager')
+        if not rollback_manager:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Rollback manager not available.[/{self.theme.CORAL_SOFT}]")
+            return True
+        
+        if not rollback_manager.can_undo():
+            self.console.print(f"[{self.theme.TEXT_DIM}]Nothing to undo.[/{self.theme.TEXT_DIM}]")
+            return True
+        
+        result = rollback_manager.undo()
+        
+        if result.success:
+            self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} {result.message}[/{self.theme.MINT_VIBRANT}]")
+        else:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} {result.message}[/{self.theme.CORAL_SOFT}]")
+        
+        return True
+    
+    def cmd_redo(self, args: str) -> bool:
+        """Redo the last undone rollback operation"""
+        rollback_manager = self.app.get('rollback_manager')
+        if not rollback_manager:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Rollback manager not available.[/{self.theme.CORAL_SOFT}]")
+            return True
+        
+        if not rollback_manager.can_redo():
+            self.console.print(f"[{self.theme.TEXT_DIM}]Nothing to redo.[/{self.theme.TEXT_DIM}]")
+            return True
+        
+        result = rollback_manager.redo()
+        
+        if result.success:
+            self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} {result.message}[/{self.theme.MINT_VIBRANT}]")
+        else:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} {result.message}[/{self.theme.CORAL_SOFT}]")
+        
+        return True
+    
+    def cmd_checkpoints(self, args: str) -> bool:
+        """List and manage checkpoints with interactive selection"""
+        rollback_manager = self.app.get('rollback_manager')
+        if not rollback_manager:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Rollback manager not available.[/{self.theme.CORAL_SOFT}]")
+            return True
+        
+        # Get checkpoints
+        checkpoints = rollback_manager.checkpoint_manager.list_checkpoints()
+        
+        if not checkpoints:
+            self.console.print()
+            self.console.print(f"[{self.theme.TEXT_DIM}]No checkpoints available.[/{self.theme.TEXT_DIM}]")
+            return True
+        
+        # Prepare checkpoint data for selector
+        checkpoints_data = []
+        for cp in checkpoints:
+            created_at = cp.created_at[:19].replace('T', ' ')
+            description = f"{cp.description} • {cp.message_count} messages"
+            
+            checkpoints_data.append({
+                'id': cp.id,
+                'description': cp.description,
+                'created_at': created_at,
+                'message_count': cp.message_count,
+                'checkpoint': cp
+            })
+        
+        # Use TUI selector for checkpoint selection
+        from .tui_selector import CheckpointSelector, SelectorAction
+        
+        # Create and run selector
+        selector = CheckpointSelector(
+            console=self.console,
+            checkpoints=checkpoints_data
+        )
+        
+        result = selector.run()
+        
+        if result.action == SelectorAction.SELECT and result.selected_item:
+            checkpoint_id = result.selected_item.id
+            
+            # Rollback to selected checkpoint
+            session_id = self.app.get('session_manager').current_session.id if self.app.get('session_manager') and self.app['session_manager'].current_session else "default"
+            rollback_result = rollback_manager.rollback_to_checkpoint(checkpoint_id)
+            
+            if rollback_result.success:
+                self.console.print()
+                self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} {rollback_result.message}[/{self.theme.MINT_VIBRANT}]")
+                
+                if rollback_result.restored_files:
+                    self.console.print(f"[{self.theme.TEXT_DIM}]Restored files:[/{self.theme.TEXT_DIM}]")
+                    for file_path in rollback_result.restored_files:
+                        self.console.print(f"  [{self.theme.MINT_SOFT}]✓[/{self.theme.MINT_SOFT}] {file_path}")
+                
+                if rollback_result.errors:
+                    self.console.print()
+                    self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Errors:[/{self.theme.AMBER_GLOW}]")
+                    for error in rollback_result.errors:
+                        self.console.print(f"  [{self.theme.CORAL_SOFT}]✗[/{self.theme.CORAL_SOFT}] {error}")
+                
+                # Update agent messages if available
+                if rollback_result.restored_messages and self.app.get('agent'):
+                    self.app['agent'].messages = rollback_result.restored_messages
+            else:
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} {rollback_result.message}[/{self.theme.CORAL_SOFT}]")
+        
+        return True
+    
+    def cmd_operations(self, args: str) -> bool:
+        """Show operation history and statistics"""
+        operation_history = self.app.get('operation_history')
+        rollback_manager = self.app.get('rollback_manager')
+        
+        if not operation_history:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Operation history not available.[/{self.theme.CORAL_SOFT}]")
+            return True
+        
+        self.console.print()
+        title_panel = Panel(
+            f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Operation History {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]",
+            border_style=self.theme.BORDER_PRIMARY,
+            padding=(0, 2),
+            box=box.ROUNDED
+        )
+        self.console.print(title_panel)
+        self.console.print()
+        
+        # Show summary
+        if rollback_manager:
+            summary = rollback_manager.get_operation_summary()
+            
+            self.console.print(f"[bold {self.theme.PURPLE_SOFT}]Summary:[/bold {self.theme.PURPLE_SOFT}]")
+            self.console.print(f"  [{self.theme.TEXT_DIM}]Total Operations:[/{self.theme.TEXT_DIM}] {summary['total_operations']}")
+            self.console.print(f"  [{self.theme.TEXT_DIM}]Modified Files:[/{self.theme.TEXT_DIM}] {len(summary['modified_files'])}")
+            self.console.print(f"  [{self.theme.TEXT_DIM}]Can Undo:[/{self.theme.TEXT_DIM}] {summary['can_undo']}")
+            self.console.print(f"  [{self.theme.TEXT_DIM}]Can Redo:[/{self.theme.TEXT_DIM}] {summary['can_redo']}")
+            self.console.print()
+        
+        # Show recent operations
+        recent_ops = operation_history.get_operations(limit=20)
+        
+        if not recent_ops:
+            self.console.print(f"[{self.theme.TEXT_DIM}]No operations recorded yet.[/{self.theme.TEXT_DIM}]")
+            return True
+        
+        table = Table(
+            box=box.ROUNDED,
+            border_style=self.theme.BORDER_PRIMARY,
+            show_lines=True
+        )
+        table.add_column("#", style=f"bold {self.theme.BLUE_SOFT}", width=4)
+        table.add_column("Type", style=self.theme.TEXT_SECONDARY, width=12)
+        table.add_column("Description", style=self.theme.TEXT_PRIMARY)
+        table.add_column("Time", style=f"dim {self.theme.TEXT_DIM}", width=20)
+        
+        for i, op in enumerate(recent_ops, 1):
+            table.add_row(
+                str(i),
+                op.operation_type.value,
+                op.description[:60],
+                op.timestamp[:19].replace('T', ' ')
+            )
+        
+        self.console.print(table)
+        self.console.print()
+        self.console.print(f"[{self.theme.TEXT_DIM}]Showing last 20 operations.[/{self.theme.TEXT_DIM}]")
+        
         return True
 
     def cmd_exit(self, args: str) -> bool:

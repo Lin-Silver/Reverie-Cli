@@ -99,6 +99,8 @@ class ModelConfig:
     base_url: str
     api_key: str = ""
     max_context_tokens: Optional[int] = None
+    provider: str = "openai-sdk"  # Options: openai-sdk, request, anthropic
+    thinking_mode: Optional[str] = None  # For request provider: true, false, or None
     
     def to_dict(self) -> dict:
         return asdict(self)
@@ -110,7 +112,9 @@ class ModelConfig:
             model_display_name=data.get('model_display_name', data.get('model', '')),
             base_url=data.get('base_url', ''),
             api_key=data.get('api_key', ''),
-            max_context_tokens=data.get('max_context_tokens')
+            max_context_tokens=data.get('max_context_tokens'),
+            provider=data.get('provider', 'openai-sdk'),
+            thinking_mode=data.get('thinking_mode')
         )
 
 
@@ -125,6 +129,7 @@ class Config:
     stream_responses: bool = True
     auto_index: bool = True
     show_status_line: bool = True
+    config_version: str = "1.4.0"  # Config file version for migration
     
     # Writer mode specific settings
     writer_mode: Dict[str, Any] = field(default_factory=lambda: {
@@ -154,6 +159,7 @@ class Config:
             'auto_index': self.auto_index,
             'show_status_line': self.show_status_line,
             'writer_mode': self.writer_mode,
+            'config_version': self.config_version,
         }
     
     @classmethod
@@ -179,7 +185,8 @@ class Config:
                 "narrative_analysis_enabled": True,
                 "emotion_tracking_enabled": True,
                 "plot_tracking_enabled": True,
-            })
+            }),
+            config_version=data.get('config_version', '1.4.0')
         )
 
 
@@ -230,6 +237,12 @@ class ConfigManager:
                         data = json.load(f)
                     self._config = Config.from_dict(data)
                     self._last_mtime = current_mtime
+                    
+                    # Auto-update config file if it's missing new fields
+                    if self._needs_config_update(data):
+                        self.save(self._config)
+                        # Update mtime after saving to avoid infinite loop
+                        self._last_mtime = os.path.getmtime(self.config_path)
                 except Exception:
                     # If error reading (e.g., partial write), keep old config if available
                     if self._config is None:
@@ -238,6 +251,34 @@ class ConfigManager:
             self._config = Config()
         
         return self._config
+    
+    def _needs_config_update(self, data: dict) -> bool:
+        """Check if the loaded config needs to be updated with new fields"""
+        needs_update = False
+        
+        # Check if config_version is missing or outdated
+        current_version = data.get('config_version', '0.0.0')
+        if current_version != '1.4.0':
+            needs_update = True
+        
+        # Check if any model is missing provider field
+        models = data.get('models', [])
+        for model in models:
+            if 'provider' not in model:
+                needs_update = True
+                break
+        
+        # Check if any model is missing thinking_mode field (for request provider)
+        for model in models:
+            if 'thinking_mode' not in model:
+                needs_update = True
+                break
+        
+        # Check if Config is missing any new fields
+        if 'config_version' not in data:
+            needs_update = True
+        
+        return needs_update
     
     def save(self, config: Optional[Config] = None) -> None:
         """Save configuration to file"""

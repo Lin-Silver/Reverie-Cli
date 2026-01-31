@@ -2,6 +2,7 @@ from typing import List, Dict, Any, Optional
 import json
 from pathlib import Path
 from datetime import datetime
+import requests
 
 class ContextCompressor:
     """
@@ -38,11 +39,21 @@ class ContextCompressor:
         except Exception as e:
             return ""
 
-    def compress(self, messages: List[Dict], client: Any, model: str, session_id: str = "default") -> List[Dict]:
+    def compress(self, messages: List[Dict], client: Any, model: str, session_id: str = "default", 
+              provider: str = "openai-sdk", base_url: str = "", api_key: str = "") -> List[Dict]:
         """
         Compresses the conversation history using the LLM.
         Retains system prompt and last few messages.
         Summarizes the rest using recursive technical retainment.
+        
+        Args:
+            messages: List of messages to compress
+            client: Client object (for openai-sdk and anthropic providers)
+            model: Model name
+            session_id: Session ID for checkpointing
+            provider: Provider type (openai-sdk, request, anthropic)
+            base_url: Base URL for request provider
+            api_key: API key for request provider
         """
         if not messages:
             return []
@@ -88,13 +99,57 @@ class ContextCompressor:
         ]
         
         try:
-            # Use the provided client to summarize
-            response = client.chat.completions.create(
-                model=model,
-                messages=prompt,
-                stream=False
-            )
-            summary = response.choices[0].message.content
+            # Use the provided client to summarize based on provider
+            if provider == "openai-sdk":
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=prompt,
+                    stream=False
+                )
+                summary = response.choices[0].message.content
+            elif provider == "request":
+                # Use requests library for request provider
+                payload = {
+                    "model": model,
+                    "messages": prompt,
+                    "stream": False
+                }
+                headers = {
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                }
+                response = requests.post(base_url, headers=headers, json=payload)
+                response.raise_for_status()
+                response_data = response.json()
+                summary = response_data["choices"][0]["message"]["content"]
+            elif provider == "anthropic":
+                # Use Anthropic SDK
+                # Convert messages to Anthropic format
+                anthropic_messages = []
+                system_message = None
+                
+                for msg in prompt:
+                    if msg["role"] == "system":
+                        system_message = msg["content"]
+                    else:
+                        anthropic_messages.append({
+                            "role": msg["role"],
+                            "content": msg["content"]
+                        })
+                
+                kwargs = {
+                    "model": model,
+                    "messages": anthropic_messages,
+                    "max_tokens": 4096,
+                }
+                
+                if system_message:
+                    kwargs["system"] = system_message
+                
+                response = client.messages.create(**kwargs)
+                summary = response.content[0].text
+            else:
+                raise ValueError(f"Unknown provider: {provider}")
             
             # Construct new history
             summary_message = {

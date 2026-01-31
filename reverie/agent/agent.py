@@ -45,7 +45,9 @@ class ReverieAgent:
         indexer=None,
         git_integration=None,
         additional_rules: str = "",
-        mode: str = "reverie"
+        mode: str = "reverie",
+        provider: str = "openai-sdk",
+        thinking_mode: Optional[str] = None
     ):
         self.base_url = base_url
         self.api_key = api_key
@@ -56,8 +58,10 @@ class ReverieAgent:
         self.additional_rules = additional_rules
         self.mode = mode
         self.ant_phase = "PLANNING"
+        self.provider = provider
+        self.thinking_mode = thinking_mode
         
-        # Initialize OpenAI client
+        # Initialize client based on provider
         self._client = None
         self._init_client()
         
@@ -85,7 +89,7 @@ class ReverieAgent:
         """Update Antigravity phase (PLANNING/EXECUTION)"""
         if phase in ["PLANNING", "EXECUTION", "VERIFICATION"]:
             # Verification shares EXECUTION prompt but might have minor differences in future
-            # For now mapping VERIFICATION to EXECUTION prompt logic if needed,
+            # For now mapping VERIFICATION to EXECUTION for prompt logic if needed,
             # or just keeping the phase state for the tool.
             # System prompt only distinguishes PLANNING vs EXECUTION.
             self.ant_phase = phase
@@ -120,16 +124,37 @@ class ReverieAgent:
         )
     
     def _init_client(self) -> None:
-        """Initialize OpenAI client"""
-        try:
-            from openai import OpenAI
-            self._client = OpenAI(
-                base_url=self.base_url,
-                api_key=self.api_key
-            )
-        except ImportError:
-            raise ImportError(
-                "OpenAI SDK not installed. Run: pip install openai"
+        """Initialize client based on provider"""
+        if self.provider == "openai-sdk":
+            try:
+                from openai import OpenAI
+                self._client = OpenAI(
+                    base_url=self.base_url,
+                    api_key=self.api_key
+                )
+            except ImportError:
+                raise ImportError(
+                    "OpenAI SDK not installed. Run: pip install openai"
+                )
+        elif self.provider == "anthropic":
+            try:
+                import anthropic
+                self._client = anthropic.Anthropic(
+                    api_key=self.api_key,
+                    base_url=self.base_url if self.base_url else None
+                )
+            except ImportError:
+                raise ImportError(
+                    "Anthropic SDK not installed. Run: pip install anthropic"
+                )
+        elif self.provider == "request":
+            # For request provider, we don't need a client object
+            # We'll use requests library directly
+            self._client = None
+        else:
+            raise ValueError(
+                f"Unknown provider: {self.provider}. "
+                f"Supported providers: openai-sdk, request, anthropic"
             )
     
     def set_context_engine(self, retriever, indexer, git_integration) -> None:
@@ -184,6 +209,17 @@ class ReverieAgent:
     
     def _process_streaming(self) -> Generator[str, None, None]:
         """Process with streaming response"""
+        if self.provider == "openai-sdk":
+            yield from self._process_streaming_openai_sdk()
+        elif self.provider == "request":
+            yield from self._process_streaming_request()
+        elif self.provider == "anthropic":
+            yield from self._process_streaming_anthropic()
+        else:
+            raise ValueError(f"Unknown provider: {self.provider}")
+    
+    def _process_streaming_openai_sdk(self) -> Generator[str, None, None]:
+        """Process with streaming response using OpenAI SDK"""
         messages = self._build_messages()
         tools = self.tool_executor.get_tool_schemas(mode=self.mode)
         
@@ -401,8 +437,446 @@ class ReverieAgent:
             # No content at all, just break
             break
     
+    def _process_streaming_request(self) -> Generator[str, None, None]:
+        """Process with streaming response using requests library"""
+        import requests
+        
+        messages = self._build_messages()
+        tools = self.tool_executor.get_tool_schemas(mode=self.mode)
+        
+        max_continuations = 3  # Safety limit to prevent infinite loops
+        continuation_count = 0
+        
+        while True:
+            # Build payload
+            payload = {
+                "model": self.model,
+                "messages": messages,
+                "stream": True,
+            }
+            
+            # Add tools if available
+            if tools:
+                payload["tools"] = tools
+            
+            # Add thinking mode if configured
+            if self.thinking_mode and self.thinking_mode.lower() in ["true", "false"]:
+                payload["chat_template_kwargs"] = {"thinking": self.thinking_mode.lower() == "true"}
+            
+            # Build headers
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Accept": "text/event-stream",
+                "Content-Type": "application/json"
+            }
+            
+            # Make request
+            response = requests.post(self.base_url, headers=headers, json=payload, stream=True)
+            response.raise_for_status()
+            
+            # Collect streamed response
+            collected_content = ""
+            collected_thinking = ""
+            collected_tool_calls = []
+            finish_reason = None
+            
+            # Flag to track if we're in thinking mode
+            thinking_started = False
+            
+            # Buffer for handling split tokens (to hide //END//)
+            stream_buffer = ""
+            token_to_hide = "//END//"
+            
+            # Parse SSE stream
+            for line in response.iter_lines():
+                if not line:
+                    continue
+                
+                line_str = line.decode("utf-8")
+                
+                # SSE format: "data: {...}"
+                if not line_str.startswith("data: "):
+                    continue
+                
+                data_str = line_str[6:]  # Remove "data: " prefix
+                
+                # Check for [DONE] marker
+                if data_str.strip() == "[DONE]":
+                    break
+                
+                try:
+                    chunk_data = json.loads(data_str)
+                except json.JSONDecodeError:
+                    continue
+                
+                # Extract choice
+                choices = chunk_data.get("choices", [])
+                if not choices:
+                    continue
+                
+                choice = choices[0]
+                
+                # Track finish reason
+                if "finish_reason" in choice:
+                    finish_reason = choice["finish_reason"]
+                
+                delta = choice.get("delta", {})
+                if not delta:
+                    continue
+                
+                # Handle reasoning/thinking content
+                reasoning_content = delta.get("reasoning_content") or delta.get("thinking")
+                
+                if reasoning_content:
+                    collected_thinking += reasoning_content
+                    if not thinking_started:
+                        yield THINKING_START_MARKER
+                        thinking_started = True
+                    yield reasoning_content
+                
+                # Handle content streaming
+                content = delta.get("content")
+                if content:
+                    if thinking_started:
+                        yield THINKING_END_MARKER
+                        thinking_started = False
+                    
+                    collected_content += content
+                    stream_buffer += content
+                    
+                    if token_to_hide in stream_buffer:
+                        parts = stream_buffer.split(token_to_hide)
+                        if parts[0]:
+                            yield parts[0]
+                        remaining = "".join(parts[1:])
+                        stream_buffer = remaining
+                    
+                    # Check for partial match
+                    partial_match_len = 0
+                    for i in range(1, len(token_to_hide)):
+                        if len(stream_buffer) >= i:
+                            suffix = stream_buffer[-i:]
+                            if token_to_hide.startswith(suffix):
+                                partial_match_len = i
+                    
+                    if partial_match_len > 0:
+                        to_yield = stream_buffer[:-partial_match_len]
+                        stream_buffer = stream_buffer[-partial_match_len:]
+                        if to_yield:
+                            yield to_yield
+                    else:
+                        yield stream_buffer
+                        stream_buffer = ""
+                
+                # Handle tool calls
+                tool_calls_delta = delta.get("tool_calls", [])
+                if tool_calls_delta:
+                    for tool_call_delta in tool_calls_delta:
+                        index = tool_call_delta.get("index", 0)
+                        
+                        if index >= len(collected_tool_calls):
+                            collected_tool_calls.append({
+                                "id": tool_call_delta.get("id", ""),
+                                "type": "function",
+                                "function": {
+                                    "name": "",
+                                    "arguments": ""
+                                }
+                            })
+                        
+                        function_delta = tool_call_delta.get("function", {})
+                        if "name" in function_delta:
+                            collected_tool_calls[index]["function"]["name"] = function_delta["name"]
+                        if "arguments" in function_delta:
+                            collected_tool_calls[index]["function"]["arguments"] += function_delta["arguments"]
+                        if "id" in tool_call_delta:
+                            collected_tool_calls[index]["id"] = tool_call_delta["id"]
+            
+            # If thinking was streamed, emit end marker
+            if thinking_started:
+                yield THINKING_END_MARKER
+            
+            # Flush remaining buffer
+            if stream_buffer and token_to_hide not in stream_buffer:
+                yield stream_buffer
+            
+            # Check for tool calls
+            if collected_tool_calls:
+                assistant_message = {
+                    "role": "assistant",
+                    "content": collected_content or None,
+                    "tool_calls": collected_tool_calls
+                }
+                self.messages.append(assistant_message)
+                messages.append(assistant_message)
+                
+                # Execute tools
+                for tool_call in collected_tool_calls:
+                    tool_name = tool_call["function"]["name"]
+                    tool = self.tool_executor.get_tool(tool_name)
+                    
+                    try:
+                        args = json.loads(tool_call["function"]["arguments"])
+                    except json.JSONDecodeError:
+                        args = {}
+                    
+                    self._check_tool_side_effects(tool_name, args)
+                    
+                    exec_msg = tool.get_execution_message(**args) if tool else f"Executing {tool_name}..."
+                    yield f"\n[bold #ffb8d1]✧[/bold #ffb8d1] [bold #e4b0ff]{exec_msg}[/bold #e4b0ff]\n"
+                    
+                    result = self.tool_executor.execute(tool_name, args)
+                    
+                    if result.success:
+                        output_preview = result.output.strip()
+                        if output_preview:
+                            preview_lines = output_preview.split('\n')
+                            formatted_output = ""
+                            for line in preview_lines:
+                                formatted_output += f"[#ba68c8]   │[/#ba68c8] [#e0e0e0]{line}[/#e0e0e0]\n"
+                            yield formatted_output
+                    else:
+                        yield f"[bold #ff5252]   ✘ Failed:[/bold #ff5252] [#ff8a80]{rich_escape(result.error or '')}[/#ff8a80]\n"
+                    
+                    tool_result_message = {
+                        "role": "tool",
+                        "tool_call_id": tool_call["id"],
+                        "content": result.output if result.success else f"Error: {result.error}"
+                    }
+                    self.messages.append(tool_result_message)
+                    messages.append(tool_result_message)
+                
+                continuation_count = 0
+                continue
+            
+            # No tool calls - save content and check if we should continue
+            if collected_content:
+                clean_content = collected_content.replace("//END//", "").strip()
+                self.messages.append({
+                    "role": "assistant",
+                    "content": clean_content
+                })
+                
+                if finish_reason in ('stop', 'end_turn', 'end', None) or "//END//" in collected_content:
+                    break
+                
+                continuation_count += 1
+                if continuation_count >= max_continuations:
+                    break
+                
+                messages = self._build_messages()
+                continue
+            
+            break
+    
+    def _process_streaming_anthropic(self) -> Generator[str, None, None]:
+        """Process with streaming response using Anthropic SDK"""
+        messages = self._build_messages()
+        tools = self.tool_executor.get_tool_schemas(mode=self.mode)
+        
+        max_continuations = 3
+        continuation_count = 0
+        
+        # Convert messages to Anthropic format
+        anthropic_messages = []
+        system_message = None
+        
+        for msg in messages:
+            if msg["role"] == "system":
+                system_message = msg["content"]
+            else:
+                anthropic_messages.append({
+                    "role": msg["role"],
+                    "content": msg["content"]
+                })
+        
+        while True:
+            # Build kwargs for Anthropic API
+            kwargs = {
+                "model": self.model,
+                "messages": anthropic_messages,
+                "max_tokens": 4096,
+                "stream": True
+            }
+            
+            if system_message:
+                kwargs["system"] = system_message
+            
+            if tools:
+                kwargs["tools"] = tools
+            
+            # Make request
+            with self._client.messages.stream(**kwargs) as stream:
+                collected_content = ""
+                collected_thinking = ""
+                collected_tool_calls = []
+                thinking_started = False
+                stream_buffer = ""
+                token_to_hide = "//END//"
+                
+                for event in stream:
+                    if event.type == "content_block_start":
+                        if hasattr(event.content_block, 'type') and event.content_block.type == "thinking":
+                            thinking_started = True
+                            yield THINKING_START_MARKER
+                    
+                    elif event.type == "content_block_delta":
+                        if hasattr(event.delta, 'type'):
+                            if event.delta.type == "thinking_delta":
+                                if hasattr(event.delta, 'thinking'):
+                                    collected_thinking += event.delta.thinking
+                                    yield event.delta.thinking
+                            elif event.delta.type == "text_delta":
+                                if hasattr(event.delta, 'text'):
+                                    text = event.delta.text
+                                    if thinking_started:
+                                        yield THINKING_END_MARKER
+                                        thinking_started = False
+                                    
+                                    collected_content += text
+                                    stream_buffer += text
+                                    
+                                    if token_to_hide in stream_buffer:
+                                        parts = stream_buffer.split(token_to_hide)
+                                        if parts[0]:
+                                            yield parts[0]
+                                        remaining = "".join(parts[1:])
+                                        stream_buffer = remaining
+                                    
+                                    partial_match_len = 0
+                                    for i in range(1, len(token_to_hide)):
+                                        if len(stream_buffer) >= i:
+                                            suffix = stream_buffer[-i:]
+                                            if token_to_hide.startswith(suffix):
+                                                partial_match_len = i
+                                    
+                                    if partial_match_len > 0:
+                                        to_yield = stream_buffer[:-partial_match_len]
+                                        stream_buffer = stream_buffer[-partial_match_len:]
+                                        if to_yield:
+                                            yield to_yield
+                                    else:
+                                        yield stream_buffer
+                                        stream_buffer = ""
+                    
+                    elif event.type == "content_block_stop":
+                        if thinking_started:
+                            yield THINKING_END_MARKER
+                            thinking_started = False
+                    
+                    elif event.type == "message_stop":
+                        break
+                
+                # Flush remaining buffer
+                if stream_buffer and token_to_hide not in stream_buffer:
+                    yield stream_buffer
+                
+                # Get final message for tool calls
+                final_message = stream.get_final_message()
+                
+                # Check for tool use blocks
+                tool_use_blocks = [block for block in final_message.content if block.type == "tool_use"]
+                
+                if tool_use_blocks:
+                    collected_tool_calls = []
+                    for block in tool_use_blocks:
+                        collected_tool_calls.append({
+                            "id": block.id,
+                            "type": "function",
+                            "function": {
+                                "name": block.name,
+                                "arguments": json.dumps(block.input)
+                            }
+                        })
+                
+                # Check for tool calls
+                if collected_tool_calls:
+                    assistant_message = {
+                        "role": "assistant",
+                        "content": collected_content or None,
+                        "tool_calls": collected_tool_calls
+                    }
+                    self.messages.append(assistant_message)
+                    anthropic_messages.append({
+                        "role": "assistant",
+                        "content": collected_content or ""
+                    })
+                    
+                    # Execute tools
+                    for tool_call in collected_tool_calls:
+                        tool_name = tool_call["function"]["name"]
+                        tool = self.tool_executor.get_tool(tool_name)
+                        
+                        try:
+                            args = json.loads(tool_call["function"]["arguments"])
+                        except json.JSONDecodeError:
+                            args = {}
+                        
+                        self._check_tool_side_effects(tool_name, args)
+                        
+                        exec_msg = tool.get_execution_message(**args) if tool else f"Executing {tool_name}..."
+                        yield f"\n[bold #ffb8d1]✧[/bold #ffb8d1] [bold #e4b0ff]{exec_msg}[/bold #e4b0ff]\n"
+                        
+                        result = self.tool_executor.execute(tool_name, args)
+                        
+                        if result.success:
+                            output_preview = result.output.strip()
+                            if output_preview:
+                                preview_lines = output_preview.split('\n')
+                                formatted_output = ""
+                                for line in preview_lines:
+                                    formatted_output += f"[#ba68c8]   │[/#ba68c8] [#e0e0e0]{line}[/#e0e0e0]\n"
+                                yield formatted_output
+                        else:
+                            yield f"[bold #ff5252]   ✘ Failed:[/bold #ff5252] [#ff8a80]{rich_escape(result.error or '')}[/#ff8a80]\n"
+                        
+                        tool_result_message = {
+                            "role": "tool",
+                            "tool_call_id": tool_call["id"],
+                            "content": result.output if result.success else f"Error: {result.error}"
+                        }
+                        self.messages.append(tool_result_message)
+                        anthropic_messages.append({
+                            "role": "user",
+                            "content": f"Tool result: {result.output if result.success else f'Error: {result.error}'}"
+                        })
+                    
+                    continuation_count = 0
+                    continue
+                
+                # No tool calls - save content and check if we should continue
+                if collected_content:
+                    clean_content = collected_content.replace("//END//", "").strip()
+                    self.messages.append({
+                        "role": "assistant",
+                        "content": clean_content
+                    })
+                    
+                    if "//END//" in collected_content:
+                        break
+                    
+                    continuation_count += 1
+                    if continuation_count >= max_continuations:
+                        break
+                    
+                    anthropic_messages = self._build_messages()
+                    continue
+            
+            break
+    
     def _process_non_streaming(self) -> str:
         """Process without streaming"""
+        if self.provider == "openai-sdk":
+            return self._process_non_streaming_openai_sdk()
+        elif self.provider == "request":
+            return self._process_non_streaming_request()
+        elif self.provider == "anthropic":
+            return self._process_non_streaming_anthropic()
+        else:
+            raise ValueError(f"Unknown provider: {self.provider}")
+    
+    def _process_non_streaming_openai_sdk(self) -> str:
+        """Process without streaming using OpenAI SDK"""
         messages = self._build_messages()
         tools = self.tool_executor.get_tool_schemas(mode=self.mode)
         
@@ -511,6 +985,259 @@ class ReverieAgent:
         
         return '\n'.join(all_content)
     
+    def _process_non_streaming_request(self) -> str:
+        """Process without streaming using requests library"""
+        import requests
+        
+        messages = self._build_messages()
+        tools = self.tool_executor.get_tool_schemas(mode=self.mode)
+        
+        all_content = []
+        
+        while True:
+            # Build payload
+            payload = {
+                "model": self.model,
+                "messages": messages,
+                "stream": False,
+            }
+            
+            # Add tools if available
+            if tools:
+                payload["tools"] = tools
+            
+            # Add thinking mode if configured
+            if self.thinking_mode and self.thinking_mode.lower() in ["true", "false"]:
+                payload["chat_template_kwargs"] = {"thinking": self.thinking_mode.lower() == "true"}
+            
+            # Build headers
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            }
+            
+            # Make request
+            response = requests.post(self.base_url, headers=headers, json=payload)
+            response.raise_for_status()
+            
+            response_data = response.json()
+            
+            # Extract choice
+            choices = response_data.get("choices", [])
+            if not choices:
+                break
+            
+            choice = choices[0]
+            message = choice.get("message", {})
+            
+            # Check for tool calls
+            tool_calls = message.get("tool_calls", [])
+            if tool_calls:
+                # Add assistant message
+                assistant_message = {
+                    "role": "assistant",
+                    "content": message.get("content"),
+                    "tool_calls": tool_calls
+                }
+                self.messages.append(assistant_message)
+                messages.append(assistant_message)
+                
+                if message.get("content"):
+                    all_content.append(message["content"])
+                
+                # Execute each tool
+                for tool_call in tool_calls:
+                    tool_name = tool_call["function"]["name"]
+                    tool = self.tool_executor.get_tool(tool_name)
+                    
+                    try:
+                        args = json.loads(tool_call["function"]["arguments"])
+                    except json.JSONDecodeError:
+                        args = {}
+                    
+                    self._check_tool_side_effects(tool_name, args)
+                    
+                    exec_msg = tool.get_execution_message(**args) if tool else f"Executing {tool_name}..."
+                    all_content.append(f"[bold #ffb8d1]✧[/bold #ffb8d1] [bold #e4b0ff]{exec_msg}[/bold #e4b0ff]")
+                    
+                    result = self.tool_executor.execute(tool_name, args)
+                    
+                    if result.success:
+                        all_content.append(f"[bold #66bb6a]   ✔ Success[/bold #66bb6a]")
+                    else:
+                        all_content.append(f"[bold #ff5252]   ✘ Failed:[/bold #ff5252] [#ff8a80]{rich_escape(result.error or '')}[/#ff8a80]")
+                    
+                    tool_result_message = {
+                        "role": "tool",
+                        "tool_call_id": tool_call["id"],
+                        "content": result.output if result.success else f"Error: {result.error}"
+                    }
+                    self.messages.append(tool_result_message)
+                    messages.append(tool_result_message)
+                
+                continue
+            
+            # No tool calls, final response check
+            content = message.get("content")
+            if content:
+                if "//END//" in content:
+                    clean_content = content.replace("//END//", "").strip()
+                    self.messages.append({
+                        "role": "assistant",
+                        "content": clean_content
+                    })
+                    all_content.append(clean_content)
+                    break
+                
+                if self.messages and self.messages[-1].get("role") == "assistant" and "tool_calls" not in self.messages[-1]:
+                    self.messages[-1]["content"] += content
+                else:
+                    self.messages.append({
+                        "role": "assistant",
+                        "content": content
+                    })
+                
+                all_content.append(content)
+                messages = self._build_messages()
+                continue
+            
+            break
+        
+        return '\n'.join(all_content)
+    
+    def _process_non_streaming_anthropic(self) -> str:
+        """Process without streaming using Anthropic SDK"""
+        messages = self._build_messages()
+        tools = self.tool_executor.get_tool_schemas(mode=self.mode)
+        
+        all_content = []
+        
+        # Convert messages to Anthropic format
+        anthropic_messages = []
+        system_message = None
+        
+        for msg in messages:
+            if msg["role"] == "system":
+                system_message = msg["content"]
+            else:
+                anthropic_messages.append({
+                    "role": msg["role"],
+                    "content": msg["content"]
+                })
+        
+        while True:
+            # Build kwargs for Anthropic API
+            kwargs = {
+                "model": self.model,
+                "messages": anthropic_messages,
+                "max_tokens": 4096,
+            }
+            
+            if system_message:
+                kwargs["system"] = system_message
+            
+            if tools:
+                kwargs["tools"] = tools
+            
+            # Make request
+            response = self._client.messages.create(**kwargs)
+            
+            # Extract content
+            content_blocks = response.content
+            collected_content = ""
+            collected_tool_calls = []
+            
+            for block in content_blocks:
+                if block.type == "text":
+                    collected_content += block.text
+                elif block.type == "tool_use":
+                    collected_tool_calls.append({
+                        "id": block.id,
+                        "type": "function",
+                        "function": {
+                            "name": block.name,
+                            "arguments": json.dumps(block.input)
+                        }
+                    })
+            
+            # Check for tool calls
+            if collected_tool_calls:
+                assistant_message = {
+                    "role": "assistant",
+                    "content": collected_content or None,
+                    "tool_calls": collected_tool_calls
+                }
+                self.messages.append(assistant_message)
+                anthropic_messages.append({
+                    "role": "assistant",
+                    "content": collected_content or ""
+                })
+                
+                if collected_content:
+                    all_content.append(collected_content)
+                
+                # Execute each tool
+                for tool_call in collected_tool_calls:
+                    tool_name = tool_call["function"]["name"]
+                    tool = self.tool_executor.get_tool(tool_name)
+                    
+                    try:
+                        args = json.loads(tool_call["function"]["arguments"])
+                    except json.JSONDecodeError:
+                        args = {}
+                    
+                    self._check_tool_side_effects(tool_name, args)
+                    
+                    exec_msg = tool.get_execution_message(**args) if tool else f"Executing {tool_name}..."
+                    all_content.append(f"[bold #ffb8d1]✧[/bold #ffb8d1] [bold #e4b0ff]{exec_msg}[/bold #e4b0ff]")
+                    
+                    result = self.tool_executor.execute(tool_name, args)
+                    
+                    if result.success:
+                        all_content.append(f"[bold #66bb6a]   ✔ Success[/bold #66bb6a]")
+                    else:
+                        all_content.append(f"[bold #ff5252]   ✘ Failed:[/bold #ff5252] [#ff8a80]{rich_escape(result.error or '')}[/#ff8a80]")
+                    
+                    tool_result_message = {
+                        "role": "tool",
+                        "tool_call_id": tool_call["id"],
+                        "content": result.output if result.success else f"Error: {result.error}"
+                    }
+                    self.messages.append(tool_result_message)
+                    anthropic_messages.append({
+                        "role": "user",
+                        "content": f"Tool result: {result.output if result.success else f'Error: {result.error}'}"
+                    })
+                
+                continue
+            
+            # No tool calls, final response check
+            if collected_content:
+                if "//END//" in collected_content:
+                    clean_content = collected_content.replace("//END//", "").strip()
+                    self.messages.append({
+                        "role": "assistant",
+                        "content": clean_content
+                    })
+                    all_content.append(clean_content)
+                    break
+                
+                if self.messages and self.messages[-1].get("role") == "assistant" and "tool_calls" not in self.messages[-1]:
+                    self.messages[-1]["content"] += collected_content
+                else:
+                    self.messages.append({
+                        "role": "assistant",
+                        "content": collected_content
+                    })
+                
+                all_content.append(collected_content)
+                anthropic_messages = self._build_messages()
+                continue
+            
+            break
+        
+        return '\n'.join(all_content)
+    
     def clear_history(self) -> None:
         """Clear conversation history"""
         self.messages = []
@@ -569,7 +1296,10 @@ class ReverieAgent:
                     messages=full_messages,
                     client=self._client,
                     model=self.model,
-                    session_id=session_id
+                    session_id=session_id,
+                    provider=self.provider,
+                    base_url=self.base_url,
+                    api_key=self.api_key
                 )
                 
                 # Update messages (exclude system prompt which is handled separately)

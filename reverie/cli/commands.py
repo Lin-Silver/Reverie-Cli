@@ -148,8 +148,8 @@ class CommandHandler:
         )
         config_commands.add_row(
             "/rules",
-            f"Manage custom rules:\n{self.deco.DOT_MEDIUM} List rules\n{self.deco.DOT_MEDIUM} Add rule: /rules add <text>\n{self.deco.DOT_MEDIUM} Remove: /rules remove <#>",
-            "/rules\n/rules add Always use async\n/rules remove 1"
+            f"Manage custom rules:\n{self.deco.DOT_MEDIUM} List rules\n{self.deco.DOT_MEDIUM} Edit rules.txt: /rules edit\n{self.deco.DOT_MEDIUM} Add rule: /rules add <text>\n{self.deco.DOT_MEDIUM} Remove: /rules remove <#>",
+            "/rules\n/rules edit\n/rules add Always use async\n/rules remove 1"
         )
         
         self.console.print(config_commands)
@@ -894,7 +894,49 @@ class CommandHandler:
                     table.add_row(str(i), rule)
                 
                 self.console.print(table)
-                self.console.print(f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} Use '/rules add <text>' or '/rules remove <#>' to manage.[/{self.theme.TEXT_DIM}]")
+                self.console.print(f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} Use '/rules edit' to edit rules.txt directly.[/{self.theme.TEXT_DIM}]")
+                
+        elif action == "edit":
+            # Open rules.txt in default editor
+            import subprocess
+            import os
+            
+            rules_path = rules_manager.rules_txt_path
+            
+            # Ensure the file exists
+            if not rules_path.exists():
+                rules_path.parent.mkdir(parents=True, exist_ok=True)
+                rules_path.write_text("", encoding='utf-8')
+            
+            self.console.print(f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Opening rules.txt...[/bold {self.theme.PINK_SOFT}]")
+            self.console.print(f"[{self.theme.TEXT_DIM}]Path: {rules_path}[/{self.theme.TEXT_DIM}]")
+            self.console.print(f"[{self.theme.TEXT_DIM}]Edit the file and save your changes. Each line is a separate rule.[/{self.theme.TEXT_DIM}]")
+            self.console.print(f"[{self.theme.TEXT_DIM}]Press Enter when done editing to apply changes...[/{self.theme.TEXT_DIM}]")
+            
+            # Open with default text editor
+            try:
+                if os.name == 'nt':  # Windows
+                    os.startfile(str(rules_path))
+                elif os.name == 'posix':  # macOS/Linux
+                    if os.uname().sysname == 'Darwin':  # macOS
+                        subprocess.run(['open', str(rules_path)])
+                    else:  # Linux
+                        subprocess.run(['xdg-open', str(rules_path)])
+                
+                # Wait for user to finish editing
+                Prompt.ask(f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Press Enter when done")
+                
+                # Reload rules
+                rules_manager._load()
+                rules = rules_manager.get_rules()
+                self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Rules reloaded. {len(rules)} rule(s) loaded.[/{self.theme.MINT_VIBRANT}]")
+                
+                # Reinit agent to apply changes
+                if self.app.get('reinit_agent'):
+                    self.app['reinit_agent']()
+                    
+            except Exception as e:
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Failed to open editor: {str(e)}[/{self.theme.CORAL_SOFT}]")
                 
         elif action == "add":
             if len(parts) < 2:
@@ -936,7 +978,7 @@ class CommandHandler:
                 
         else:
             self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Unknown action: {action}[/{self.theme.CORAL_SOFT}]")
-            self.console.print(f"[{self.theme.TEXT_DIM}]Usage: /rules [list|add|remove][/{self.theme.TEXT_DIM}]")
+            self.console.print(f"[{self.theme.TEXT_DIM}]Usage: /rules [list|edit|add|remove][/{self.theme.TEXT_DIM}]")
             
         return True
 

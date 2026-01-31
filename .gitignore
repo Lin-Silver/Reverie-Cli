@@ -2,7 +2,6 @@
 build/
 dist/
 search-mcp/
-gemini-cli-main/
 
 reverie_cli.egg-info/
 *.exe

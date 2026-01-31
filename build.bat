@@ -34,18 +34,18 @@ call "%VENV_DIR%\Scripts\activate.bat"
 
 REM Install/upgrade PyInstaller
 echo.
-echo [2/5] Installing PyInstaller...
-pip install --upgrade pyinstaller >nul 2>&1
+echo [2/5] Installing PyInstaller and dependencies...
+py -m pip install --upgrade pyinstaller pillow >nul 2>&1
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] Failed to install PyInstaller
     exit /b 1
 )
-echo       PyInstaller installed successfully
+echo       PyInstaller and Pillow installed successfully
 
 REM Check dependencies
 echo.
 echo [3/5] Checking dependencies...
-pip install -e . >nul 2>&1
+py -m pip install -e . >nul 2>&1
 if %ERRORLEVEL% neq 0 (
     echo [WARNING] Some dependencies may be missing
 )
@@ -62,7 +62,7 @@ echo [5/5] Building executable with PyInstaller...
 echo       This may take a few minutes...
 echo.
 
-pyinstaller --noconfirm reverie.spec
+py -m PyInstaller --noconfirm reverie.spec
 
 if %ERRORLEVEL% neq 0 (
     echo.

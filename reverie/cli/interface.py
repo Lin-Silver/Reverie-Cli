@@ -378,7 +378,9 @@ class ReverieInterface:
             model_display_name=model.model_display_name, project_root=self.project_root,
             retriever=self.retriever, indexer=self.indexer, git_integration=self.git_integration,
             additional_rules=self.rules_manager.get_rules_text(),
-            mode=config.mode or "reverie"
+            mode=config.mode or "reverie",
+            provider=getattr(model, 'provider', 'openai-sdk'),
+            thinking_mode=getattr(model, 'thinking_mode', None)
         )
         self.agent.config = config
         # Also inject config_manager into tool context for context threshold check

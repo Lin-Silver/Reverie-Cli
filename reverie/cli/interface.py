@@ -176,9 +176,16 @@ class ReverieInterface:
                     break 
                 if not user_input.strip(): 
                     continue
+
+                normalized_input = user_input.strip()
+                if normalized_input.lower() == "tools":
+                    should_continue = self.command_handler.handle("/tools")
+                    if not should_continue:
+                        break
+                    continue
                 
-                if user_input.strip().startswith('/'):
-                    should_continue = self.command_handler.handle(user_input.strip())
+                if normalized_input.startswith('/'):
+                    should_continue = self.command_handler.handle(normalized_input)
                     if not should_continue: 
                         break
                     continue

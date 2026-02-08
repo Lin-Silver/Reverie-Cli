@@ -129,15 +129,61 @@ class BaseTool(ABC):
         return None
     
     def get_schema(self) -> Dict:
-        """Get tool schema for OpenAI format"""
-        return {
-            "type": "function",
-            "function": {
-                "name": self.name,
-                "description": self.description,
-                "parameters": self.parameters
+        """
+        Get tool schema for OpenAI format.
+        
+        This method ensures that the schema is properly formatted and
+        all strings are safe for JSON serialization.
+        """
+        # Validate that the schema can be serialized
+        try:
+            import json
+            schema = {
+                "type": "function",
+                "function": {
+                    "name": self.name,
+                    "description": self.description,
+                    "parameters": self.parameters
+                }
             }
-        }
+            # Test serialization
+            json.dumps(schema, ensure_ascii=False)
+            return schema
+        except (TypeError, ValueError) as e:
+            # If serialization fails, try to fix the description
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Tool schema serialization failed for {self.name}: {e}")
+            
+            # Create a safer schema with minimal description
+            safe_schema = {
+                "type": "function",
+                "function": {
+                    "name": self.name,
+                    "description": self.description.split('\n')[0] if self.description else self.name,  # Use first line only
+                    "parameters": self.parameters
+                }
+            }
+            
+            # Test again
+            try:
+                json.dumps(safe_schema, ensure_ascii=False)
+                return safe_schema
+            except (TypeError, ValueError) as e2:
+                logger.error(f"Failed to create safe schema for {self.name}: {e2}")
+                # Return minimal schema
+                return {
+                    "type": "function",
+                    "function": {
+                        "name": self.name,
+                        "description": self.name,
+                        "parameters": {
+                            "type": "object",
+                            "properties": {},
+                            "required": []
+                        }
+                    }
+                }
     
     def get_execution_message(self, **kwargs) -> str:
         """

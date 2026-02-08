@@ -92,7 +92,40 @@ On first run, Reverie will guide you through configuration:
 2. **API Key**: Your authentication key
 3. **Model**: The model to use (e.g., `gpt-4o`)
 
-Configuration is stored in `.reverie/config.json` in your project directory.
+### Configuration Modes
+
+Reverie supports two configuration modes:
+
+**Global Mode (Default)**:
+- Configuration stored in `<app_root>/.reverie/config.json`
+- Shared across all workspaces
+- Quick setup for single workspace use
+
+**Workspace Mode**:
+- Configuration stored in `<project_root>/.reverie/config.json`
+- Each workspace has independent configuration
+- Perfect for multi-workspace scenarios
+
+### Managing Workspace Configuration
+
+```bash
+# View current configuration status
+/workspace
+
+# Enable workspace-local configuration
+/workspace enable
+
+# Disable workspace-local configuration (use global)
+/workspace disable
+
+# Copy global config to workspace
+/workspace copy-to-workspace
+
+# Copy workspace config to global
+/workspace copy-to-global
+```
+
+See [WORKSPACE_CONFIG.md](WORKSPACE_CONFIG.md) for detailed documentation on multi-workspace configuration.
 
 ## CLI Commands
 

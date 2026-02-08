@@ -19,7 +19,7 @@ import shutil
 
 
 # Version info
-__version__ = "1.4.0"
+__version__ = "2.0.0"
 
 
 def get_app_root() -> Path:
@@ -129,7 +129,16 @@ class Config:
     stream_responses: bool = True
     auto_index: bool = True
     show_status_line: bool = True
-    config_version: str = "1.4.0"  # Config file version for migration
+    config_version: str = "2.0.0"  # Config file version for migration
+    
+    # Workspace isolation settings
+    use_workspace_config: bool = False  # If True, config is stored in workspace directory
+    
+    # API call settings for improved stability
+    api_max_retries: int = 3
+    api_initial_backoff: float = 1.0
+    api_timeout: int = 60
+    api_enable_debug_logging: bool = False
     
     # Writer mode specific settings
     writer_mode: Dict[str, Any] = field(default_factory=lambda: {
@@ -140,6 +149,27 @@ class Config:
         "narrative_analysis_enabled": True,
         "emotion_tracking_enabled": True,
         "plot_tracking_enabled": True,
+    })
+
+    # Gamer mode specific settings
+    gamer_mode: Dict[str, Any] = field(default_factory=lambda: {
+        "target_engine": "custom",
+        "supported_engines": ["custom", "web", "pygame", "love2d", "cocos2d"],
+        "supported_frameworks": [
+            "phaser", "pixijs", "threejs", "pygame", "love2d", "cocos2d"
+        ],
+        "asset_tracking_enabled": True,
+        "asset_packaging_enabled": True,
+        "game_balance_analysis": True,
+        "math_simulation_enabled": True,
+        "statistics_tools_enabled": True,
+        "gdd_required": True,
+        "story_design_enabled": True,
+        "rpg_focus_enabled": True,
+        "level_design_assistant": True,
+        "config_editing_enabled": True,
+        "max_asset_context_window": 10,
+        "context_compression_enabled": True,
     })
     
     @property
@@ -159,7 +189,13 @@ class Config:
             'auto_index': self.auto_index,
             'show_status_line': self.show_status_line,
             'writer_mode': self.writer_mode,
+            'gamer_mode': self.gamer_mode,
             'config_version': self.config_version,
+            'use_workspace_config': self.use_workspace_config,
+            'api_max_retries': self.api_max_retries,
+            'api_initial_backoff': self.api_initial_backoff,
+            'api_timeout': self.api_timeout,
+            'api_enable_debug_logging': self.api_enable_debug_logging,
         }
     
     @classmethod
@@ -186,39 +222,184 @@ class Config:
                 "emotion_tracking_enabled": True,
                 "plot_tracking_enabled": True,
             }),
-            config_version=data.get('config_version', '1.4.0')
+            gamer_mode=data.get('gamer_mode', {
+                "target_engine": "custom",
+                "supported_engines": ["custom", "web", "pygame", "love2d", "cocos2d"],
+                "supported_frameworks": [
+                    "phaser", "pixijs", "threejs", "pygame", "love2d", "cocos2d"
+                ],
+                "asset_tracking_enabled": True,
+                "asset_packaging_enabled": True,
+                "game_balance_analysis": True,
+                "math_simulation_enabled": True,
+                "statistics_tools_enabled": True,
+                "gdd_required": True,
+                "story_design_enabled": True,
+                "rpg_focus_enabled": True,
+                "level_design_assistant": True,
+                "config_editing_enabled": True,
+                "max_asset_context_window": 10,
+                "context_compression_enabled": True,
+            }),
+            config_version=data.get('config_version', '2.0.0'),
+            use_workspace_config=data.get('use_workspace_config', False),
+            api_max_retries=data.get('api_max_retries', 3),
+            api_initial_backoff=data.get('api_initial_backoff', 1.0),
+            api_timeout=data.get('api_timeout', 60),
+            api_enable_debug_logging=data.get('api_enable_debug_logging', False)
         )
 
 
 class ConfigManager:
     """
-    Manages configuration persistence.
+    Manages configuration persistence with workspace isolation support.
     
-    Configuration is stored in the app root's .reverie folder (next to exe file).
-    Project-specific data is stored in .reverie/project_caches/[project_path]/.
+    Configuration can be stored in two modes:
+    1. Global mode: config.json in app_root/.reverie/ (shared across workspaces)
+    2. Workspace mode: config.json in project_root/.reverie/ (isolated per workspace)
+    
+    Project-specific data is always stored in .reverie/project_caches/[project_path]/.
     """
     
-    def __init__(self, project_root: Path):
+    def __init__(self, project_root: Path, force_workspace_config: bool = False):
         self.project_root = project_root
         
-        # Use app root for config (next to exe file or script directory)
+        # Use app root for global config (next to exe file or script directory)
         self.app_root = get_app_root()
         self.reverie_dir = self.app_root / '.reverie'
-        self.config_path = self.reverie_dir / 'config.json'
+        self.global_config_path = self.reverie_dir / 'config.json'
         
-        # Project-specific data directory
+        # Workspace-specific config directory
+        self.workspace_reverie_dir = self.project_root / '.reverie'
+        self.workspace_config_path = self.workspace_reverie_dir / 'config.json'
+        
+        # Project-specific data directory (for context cache, etc.)
         self.project_data_dir = get_project_data_dir(project_root)
         
         self._config: Optional[Config] = None
         self._last_mtime: float = 0
+        
+        # Determine config path based on setting
+        self._use_workspace_config = force_workspace_config
+        self._update_config_path()
+    
+    def _update_config_path(self) -> None:
+        """Update config path based on current mode"""
+        if self._use_workspace_config:
+            self.config_path = self.workspace_config_path
+        else:
+            self.config_path = self.global_config_path
+    
+    def set_workspace_mode(self, enabled: bool) -> None:
+        """
+        Enable or disable workspace-local configuration mode.
+        
+        Args:
+            enabled: If True, config is stored in workspace directory.
+                    If False, config is stored in global app directory.
+        """
+        if self._use_workspace_config != enabled:
+            self._use_workspace_config = enabled
+            self._update_config_path()
+            # Clear cached config to force reload from new location
+            self._config = None
+            self._last_mtime = 0
+    
+    def is_workspace_mode(self) -> bool:
+        """Check if workspace-local configuration mode is enabled"""
+        return self._use_workspace_config
+    
+    def copy_config_to_workspace(self) -> bool:
+        """
+        Copy global configuration to workspace configuration.
+        
+        Returns:
+            True if copy was successful, False otherwise
+        """
+        if not self.global_config_path.exists():
+            return False
+        
+        try:
+            # Load global config
+            with open(self.global_config_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            # Update to workspace mode
+            data['use_workspace_config'] = True
+            
+            # Ensure workspace directory exists
+            self.workspace_reverie_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Save to workspace config
+            with open(self.workspace_config_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            
+            # Clear cache and switch to workspace mode
+            self._config = None
+            self._last_mtime = 0
+            self.set_workspace_mode(True)
+            
+            return True
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Failed to copy config to workspace: {e}")
+            return False
+    
+    def copy_config_to_global(self) -> bool:
+        """
+        Copy workspace configuration to global configuration.
+        
+        Returns:
+            True if copy was successful, False otherwise
+        """
+        if not self.workspace_config_path.exists():
+            return False
+        
+        try:
+            # Load workspace config
+            with open(self.workspace_config_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            # Update to global mode
+            data['use_workspace_config'] = False
+            
+            # Ensure global directory exists
+            self.reverie_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Save to global config
+            with open(self.global_config_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            
+            # Clear cache and switch to global mode
+            self._config = None
+            self._last_mtime = 0
+            self.set_workspace_mode(False)
+            
+            return True
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Failed to copy config to global: {e}")
+            return False
+    
+    def has_workspace_config(self) -> bool:
+        """Check if workspace configuration file exists"""
+        return self.workspace_config_path.exists()
+    
+    def has_global_config(self) -> bool:
+        """Check if global configuration file exists"""
+        return self.global_config_path.exists()
     
     def ensure_dirs(self) -> None:
         """Create necessary directories"""
-        # Main app directories
+        # Global app directories (always needed)
         self.reverie_dir.mkdir(exist_ok=True)
         (self.reverie_dir / 'project_caches').mkdir(exist_ok=True)
         
-        # Project-specific directories
+        # Workspace-specific directories (if using workspace mode)
+        if self._use_workspace_config:
+            self.workspace_reverie_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Project-specific data directories (for context cache, etc.)
         self.project_data_dir.mkdir(parents=True, exist_ok=True)
         (self.project_data_dir / 'context_cache').mkdir(exist_ok=True)
         (self.project_data_dir / 'specs').mkdir(exist_ok=True)
@@ -228,6 +409,7 @@ class ConfigManager:
     
     def load(self) -> Config:
         """Load configuration from file, reloading if file changed"""
+        # Check if we need to switch config mode based on loaded config
         if self.config_path.exists():
             current_mtime = os.path.getmtime(self.config_path)
             # Reload if file changed or not loaded yet
@@ -237,6 +419,10 @@ class ConfigManager:
                         data = json.load(f)
                     self._config = Config.from_dict(data)
                     self._last_mtime = current_mtime
+                    
+                    # Check if config mode changed
+                    if self._config.use_workspace_config != self._use_workspace_config:
+                        self.set_workspace_mode(self._config.use_workspace_config)
                     
                     # Auto-update config file if it's missing new fields
                     if self._needs_config_update(data):
@@ -258,7 +444,7 @@ class ConfigManager:
         
         # Check if config_version is missing or outdated
         current_version = data.get('config_version', '0.0.0')
-        if current_version != '1.4.0':
+        if current_version != '2.0.0':
             needs_update = True
         
         # Check if any model is missing provider field
@@ -278,6 +464,21 @@ class ConfigManager:
         if 'config_version' not in data:
             needs_update = True
         
+        # Check if use_workspace_config field is missing
+        if 'use_workspace_config' not in data:
+            needs_update = True
+        
+        # Check if API settings fields are missing
+        api_fields = ['api_max_retries', 'api_initial_backoff', 'api_timeout', 'api_enable_debug_logging']
+        for field in api_fields:
+            if field not in data:
+                needs_update = True
+                break
+
+        # Check if gamer_mode field is missing
+        if 'gamer_mode' not in data:
+            needs_update = True
+        
         return needs_update
     
     def save(self, config: Optional[Config] = None) -> None:
@@ -287,6 +488,10 @@ class ConfigManager:
         
         if self._config is None:
             return
+        
+        # Update config mode if it changed
+        if self._config.use_workspace_config != self._use_workspace_config:
+            self.set_workspace_mode(self._config.use_workspace_config)
         
         self.ensure_dirs()
         

@@ -10,7 +10,7 @@ import argparse
 from pathlib import Path
 
 # Version info
-__version__ = "1.4.1"
+__version__ = "2.0.0"
 
 
 def main():

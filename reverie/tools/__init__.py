@@ -29,6 +29,15 @@ from .novel_context_manager import NovelContextManagerTool
 from .consistency_checker_tool import ConsistencyCheckerTool
 from .plot_analyzer_tool import PlotAnalyzerTool
 from .nexus import NexusTool
+from .game_asset_manager import GameAssetManagerTool
+from .game_balance_analyzer import GameBalanceAnalyzerTool
+from .level_design_tool import LevelDesignTool
+from .game_config_editor import GameConfigEditorTool
+from .game_asset_packer import GameAssetPackerTool
+from .game_gdd_manager import GameGDDManagerTool
+from .story_design_tool import StoryDesignTool
+from .game_math_simulator import GameMathSimulatorTool
+from .game_stats_analyzer import GameStatsAnalyzerTool
 
 __all__ = [
     'BaseTool',
@@ -52,4 +61,13 @@ __all__ = [
     "ConsistencyCheckerTool",
     "PlotAnalyzerTool",
     "NexusTool",
+    "GameAssetManagerTool",
+    "GameBalanceAnalyzerTool",
+    "LevelDesignTool",
+    "GameConfigEditorTool",
+    "GameAssetPackerTool",
+    "GameGDDManagerTool",
+    "StoryDesignTool",
+    "GameMathSimulatorTool",
+    "GameStatsAnalyzerTool",
 ]

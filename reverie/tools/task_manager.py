@@ -36,6 +36,14 @@ class Task:
     name: str
     description: str = ""
     state: TaskState = TaskState.NOT_STARTED
+    priority: str = "medium"  # low, medium, high, critical
+    phase: str = "implementation"  # design, implementation, content, testing, release
+    tags: List[str] = field(default_factory=list)
+    estimate: Optional[str] = None  # e.g., "2h", "1d", "30m"
+    progress: float = 0.0  # 0.0 to 1.0
+    due_date: str = ""
+    dependencies: List[str] = field(default_factory=list)
+    blockers: List[str] = field(default_factory=list)
     parent_id: Optional[str] = None
     children: List[str] = field(default_factory=list)
     created_at: str = ""
@@ -47,6 +55,14 @@ class Task:
             'name': self.name,
             'description': self.description,
             'state': self.state.name,
+            'priority': self.priority,
+            'phase': self.phase,
+            'tags': self.tags,
+            'estimate': self.estimate,
+            'progress': self.progress,
+            'due_date': self.due_date,
+            'dependencies': self.dependencies,
+            'blockers': self.blockers,
             'parent_id': self.parent_id,
             'children': self.children,
             'created_at': self.created_at,
@@ -60,6 +76,14 @@ class Task:
             name=data['name'],
             description=data.get('description', ''),
             state=TaskState[data.get('state', 'NOT_STARTED')],
+            priority=data.get('priority', 'medium'),
+            phase=data.get('phase', 'implementation'),
+            tags=data.get('tags', []) or [],
+            estimate=data.get('estimate', data.get('estimate_minutes')),  # Support old format
+            progress=float(data.get('progress', 0.0) or 0.0),
+            due_date=data.get('due_date', ''),
+            dependencies=data.get('dependencies', []) or [],
+            blockers=data.get('blockers', []) or [],
             parent_id=data.get('parent_id'),
             children=data.get('children', []),
             created_at=data.get('created_at', ''),
@@ -122,21 +146,97 @@ class TaskStore:
             if task.name.lower().strip() == name_lower:
                 return task
         return None
+    
+    def validate_dependencies(self, task_id: str, dependencies: List[str]) -> tuple[bool, str]:
+        """
+        Validate task dependencies.
+        
+        Returns:
+            (is_valid, error_message) - True if valid, False with error message if invalid
+        """
+        # Check if all dependency tasks exist
+        for dep_id in dependencies:
+            if dep_id not in self.tasks:
+                return False, f"Dependency task not found: {dep_id}"
+        
+        # Check for circular dependencies
+        if self._has_circular_dependency(task_id, dependencies):
+            return False, "Circular dependency detected: task cannot depend on itself directly or indirectly"
+        
+        return True, ""
+    
+    def _has_circular_dependency(self, task_id: str, new_dependencies: List[str]) -> bool:
+        """
+        Check if adding these dependencies would create a circular dependency.
+        
+        Uses depth-first search to detect cycles.
+        """
+        # Build a temporary dependency graph including the new dependencies
+        visited = set()
+        rec_stack = set()
+        
+        def has_cycle(current_id: str) -> bool:
+            visited.add(current_id)
+            rec_stack.add(current_id)
+            
+            # Get dependencies for current task
+            if current_id == task_id:
+                # Use the new dependencies for the task being updated
+                deps = new_dependencies
+            elif current_id in self.tasks:
+                deps = self.tasks[current_id].dependencies
+            else:
+                deps = []
+            
+            for dep_id in deps:
+                if dep_id not in visited:
+                    if has_cycle(dep_id):
+                        return True
+                elif dep_id in rec_stack:
+                    # Found a back edge - cycle detected
+                    return True
+            
+            rec_stack.remove(current_id)
+            return False
+        
+        return has_cycle(task_id)
 
     def add_task(
         self,
         name: str,
         description: str = "",
-        parent_id: Optional[str] = None
+        parent_id: Optional[str] = None,
+        priority: str = "medium",
+        phase: str = "implementation",
+        tags: Optional[List[str]] = None,
+        estimate: Optional[str] = None,
+        progress: float = 0.0,
+        due_date: str = "",
+        dependencies: Optional[List[str]] = None,
+        blockers: Optional[List[str]] = None
     ) -> Task:
         task_id = str(uuid.uuid4())[:8]
         now = datetime.now().isoformat()
+        
+        # Validate dependencies if provided
+        if dependencies:
+            is_valid, error_msg = self.validate_dependencies(task_id, dependencies)
+            if not is_valid:
+                raise ValueError(f"Invalid dependencies: {error_msg}")
         
         task = Task(
             id=task_id,
             name=name,
             description=description,
             parent_id=parent_id,
+            priority=priority,
+            phase=phase,
+            tags=tags or [],
+            estimate=estimate,
+            progress=progress,
+            due_date=due_date,
+            dependencies=dependencies or [],
+            blockers=blockers or [],
             created_at=now,
             updated_at=now
         )
@@ -156,12 +256,26 @@ class TaskStore:
         task_id: str,
         name: Optional[str] = None,
         description: Optional[str] = None,
-        state: Optional[TaskState] = None
+        state: Optional[TaskState] = None,
+        priority: Optional[str] = None,
+        phase: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        estimate: Optional[str] = None,
+        progress: Optional[float] = None,
+        due_date: Optional[str] = None,
+        dependencies: Optional[List[str]] = None,
+        blockers: Optional[List[str]] = None
     ) -> Optional[Task]:
         
         task = self.tasks.get(task_id)
         if not task:
             return None
+        
+        # Validate dependencies if being updated
+        if dependencies is not None:
+            is_valid, error_msg = self.validate_dependencies(task_id, dependencies)
+            if not is_valid:
+                raise ValueError(f"Invalid dependencies: {error_msg}")
         
         if name is not None:
             task.name = name
@@ -169,6 +283,22 @@ class TaskStore:
             task.description = description
         if state is not None:
             task.state = state
+        if priority is not None:
+            task.priority = priority
+        if phase is not None:
+            task.phase = phase
+        if tags is not None:
+            task.tags = tags
+        if estimate is not None:
+            task.estimate = estimate
+        if progress is not None:
+            task.progress = max(0.0, min(1.0, float(progress)))
+        if due_date is not None:
+            task.due_date = due_date
+        if dependencies is not None:
+            task.dependencies = dependencies
+        if blockers is not None:
+            task.blockers = blockers
         
         task.updated_at = datetime.now().isoformat()
         self.save()
@@ -228,9 +358,28 @@ class TaskStore:
             state_str = f"[{style}]{state_icon}[/{style}]"
             name_str = f"[{style}]{escape(task.name)}[/{style}]"
             
-            lines.append(f"{prefix}{state_str} {name_str}")
+            meta = []
+            if task.priority:
+                meta.append(f"prio:{task.priority}")
+            if task.phase:
+                meta.append(f"phase:{task.phase}")
+            if task.progress:
+                meta.append(f"{int(task.progress * 100)}%")
+            if task.estimate:
+                meta.append(f"est:{task.estimate}")
+            if task.due_date:
+                meta.append(f"due:{task.due_date}")
+            meta_str = f" [dim]({' | '.join(meta)})[/dim]" if meta else ""
+
+            lines.append(f"{prefix}{state_str} {name_str}{meta_str}")
             if task.description:
                 lines.append(f"{prefix}  [dim]{escape(task.description)}[/dim]")
+            if task.tags:
+                lines.append(f"{prefix}  [dim]tags: {escape(', '.join(task.tags))}[/dim]")
+            if task.dependencies:
+                lines.append(f"{prefix}  [dim]deps: {escape(', '.join(task.dependencies))}[/dim]")
+            if task.blockers:
+                lines.append(f"{prefix}  [dim]blockers: {escape(', '.join(task.blockers))}[/dim]")
             
             for child_id in task.children:
                 render_task(child_id, indent + 1)
@@ -242,6 +391,60 @@ class TaskStore:
             lines.append("[dim italic]No tasks yet.[/dim italic]")
         
         return '\n'.join(lines)
+
+    def validate_dependencies(self, task_id: str, dependencies: List[str]) -> tuple[bool, str]:
+        """
+        Validate task dependencies.
+
+        Returns:
+            (is_valid, error_message) - True if valid, False with error message if invalid
+        """
+        # Check if all dependency tasks exist
+        for dep_id in dependencies:
+            if dep_id not in self.tasks:
+                return False, f"Dependency task not found: {dep_id}"
+
+        # Check for circular dependencies
+        if self._has_circular_dependency(task_id, dependencies):
+            return False, "Circular dependency detected: task cannot depend on itself directly or indirectly"
+
+        return True, ""
+
+    def _has_circular_dependency(self, task_id: str, new_dependencies: List[str]) -> bool:
+        """
+        Check if adding these dependencies would create a circular dependency.
+
+        Uses depth-first search to detect cycles.
+        """
+        # Build a temporary dependency graph including the new dependencies
+        visited = set()
+        rec_stack = set()
+
+        def has_cycle(current_id: str) -> bool:
+            visited.add(current_id)
+            rec_stack.add(current_id)
+
+            # Get dependencies for current task
+            if current_id == task_id:
+                # Use the new dependencies for the task being updated
+                deps = new_dependencies
+            elif current_id in self.tasks:
+                deps = self.tasks[current_id].dependencies
+            else:
+                deps = []
+
+            for dep_id in deps:
+                if dep_id not in visited:
+                    if has_cycle(dep_id):
+                        return True
+                elif dep_id in rec_stack:
+                    # Found a back edge - cycle detected
+                    return True
+
+            rec_stack.remove(current_id)
+            return False
+
+        return has_cycle(task_id)
 
 
 # Global task store (shared across tool instances)
@@ -259,8 +462,8 @@ class TaskManagerTool(BaseTool):
 
 Operations:
 - add_tasks: Add new tasks or subtasks
-- update_tasks: Update task name, description, or state
-- view_tasklist: View all tasks
+- update_tasks: Update task fields or state
+- view_tasklist: View all tasks (supports filtering)
 - reorganize_tasklist: Reorganize multiple tasks at once
 
 Task states:
@@ -269,10 +472,24 @@ Task states:
 - COMPLETED: [x] - Finished
 - CANCELLED: [-] - No longer needed
 
+Task phases:
+- design: Design and planning phase
+- implementation: Implementation phase
+- content: Content creation phase
+- testing: Testing phase
+- release: Release phase
+
+Task priorities:
+- low: Low priority
+- medium: Medium priority (default)
+- high: High priority
+- critical: Critical priority
+
 Examples:
-- Add task: {"operation": "add_tasks", "tasks": [{"name": "Implement feature X"}]}
-- Update: {"operation": "update_tasks", "task_id": "abc123", "state": "COMPLETED"} (You can also use 'name' instead of 'task_id' if unsure of ID)
-- View: {"operation": "view_tasklist"}"""
+- Add task: {"operation": "add_tasks", "tasks": [{"name": "Implement feature X", "phase": "implementation", "priority": "high", "estimate": "2h"}]}
+- Update: {"operation": "update_tasks", "task_id": "abc123", "state": "COMPLETED", "progress": 1.0} (You can also use 'name' instead of 'task_id' if unsure of ID)
+- View: {"operation": "view_tasklist"}
+- View with filter: {"operation": "view_tasklist", "filter": {"state": "IN_PROGRESS", "phase": "design"}}"""
     
     parameters = {
         "type": "object",
@@ -291,7 +508,15 @@ Examples:
                         "name": {"type": "string"},
                         "description": {"type": "string"},
                         "state": {"type": "string", "enum": ["NOT_STARTED", "IN_PROGRESS", "COMPLETED", "CANCELLED"]},
-                        "parent_id": {"type": "string"}
+                        "parent_id": {"type": "string"},
+                        "priority": {"type": "string", "enum": ["low", "medium", "high", "critical"]},
+                        "phase": {"type": "string", "enum": ["design", "implementation", "content", "testing", "release"]},
+                        "tags": {"type": "array", "items": {"type": "string"}},
+                        "estimate": {"type": "string", "description": "Time estimate (e.g., '2h', '1d', '30m')"},
+                        "progress": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "Progress from 0.0 to 1.0"},
+                        "due_date": {"type": "string"},
+                        "dependencies": {"type": "array", "items": {"type": "string"}, "description": "List of task IDs this task depends on"},
+                        "blockers": {"type": "array", "items": {"type": "string"}, "description": "List of blocking issues"}
                     }
                 },
                 "description": "Tasks to add or updates to apply"
@@ -305,6 +530,29 @@ Examples:
             "state": {
                 "type": "string",
                 "enum": ["NOT_STARTED", "IN_PROGRESS", "COMPLETED", "CANCELLED"]
+            },
+            "priority": {
+                "type": "string",
+                "enum": ["low", "medium", "high", "critical"]
+            },
+            "phase": {
+                "type": "string",
+                "enum": ["design", "implementation", "content", "testing", "release"]
+            },
+            "tags": {"type": "array", "items": {"type": "string"}},
+            "estimate": {"type": "string", "description": "Time estimate (e.g., '2h', '1d', '30m')"},
+            "progress": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "Progress from 0.0 to 1.0"},
+            "due_date": {"type": "string"},
+            "dependencies": {"type": "array", "items": {"type": "string"}, "description": "List of task IDs this task depends on"},
+            "blockers": {"type": "array", "items": {"type": "string"}, "description": "List of blocking issues"},
+            "filter": {
+                "type": "object",
+                "properties": {
+                    "state": {"type": "string"},
+                    "phase": {"type": "string"},
+                    "tag": {"type": "string"},
+                    "priority": {"type": "string"}
+                }
             }
         },
         "required": ["operation"]
@@ -351,7 +599,15 @@ Examples:
                     task_id,
                     kwargs.get('name'),
                     kwargs.get('description'),
-                    kwargs.get('state')
+                    kwargs.get('state'),
+                    kwargs.get('priority'),
+                    kwargs.get('phase'),
+                    kwargs.get('tags'),
+                    kwargs.get('estimate'),
+                    kwargs.get('progress'),
+                    kwargs.get('due_date'),
+                    kwargs.get('dependencies'),
+                    kwargs.get('blockers')
                 )
             elif tasks:
                 # Batch update
@@ -360,7 +616,7 @@ Examples:
                 return ToolResult.fail("Either task_id or tasks array/name is required")
         
         elif operation == "view_tasklist":
-            return self._view_tasklist()
+            return self._view_tasklist(kwargs.get('filter'))
         
         elif operation == "reorganize_tasklist":
             return self._reorganize(kwargs.get('tasks', []))
@@ -374,17 +630,37 @@ Examples:
             return ToolResult.fail("No tasks provided")
         
         added = []
+        errors = []
+        
         for task_data in tasks:
-            task = _task_store.add_task(
-                name=task_data.get('name', 'Unnamed task'),
-                description=task_data.get('description', ''),
-                parent_id=task_data.get('parent_id')
-            )
-            added.append(task)
+            try:
+                task = _task_store.add_task(
+                    name=task_data.get('name', 'Unnamed task'),
+                    description=task_data.get('description', ''),
+                    parent_id=task_data.get('parent_id'),
+                    priority=task_data.get('priority', 'medium'),
+                    phase=task_data.get('phase', 'implementation'),
+                    tags=task_data.get('tags', []),
+                    estimate=task_data.get('estimate'),
+                    progress=task_data.get('progress', 0.0),
+                    due_date=task_data.get('due_date', ''),
+                    dependencies=task_data.get('dependencies', []),
+                    blockers=task_data.get('blockers', [])
+                )
+                added.append(task)
+            except ValueError as e:
+                errors.append(f"Failed to add task '{task_data.get('name', 'Unnamed')}': {str(e)}")
+        
+        if not added and errors:
+            return ToolResult.fail('\n'.join(errors))
         
         output_parts = [f"Added {len(added)} task(s):", ""]
         for task in added:
             output_parts.append(f"- {escape(task.state.value)} {escape(task.name)}")
+        
+        if errors:
+            output_parts.append("\nErrors:")
+            output_parts.extend(errors)
         
         return ToolResult.ok('\n'.join(output_parts))
     
@@ -393,7 +669,15 @@ Examples:
         task_id: Optional[str],
         name: Optional[str],
         description: Optional[str],
-        state: Optional[str]
+        state: Optional[str],
+        priority: Optional[str],
+        phase: Optional[str],
+        tags: Optional[List[str]],
+        estimate: Optional[str],
+        progress: Optional[float],
+        due_date: Optional[str],
+        dependencies: Optional[List[str]],
+        blockers: Optional[List[str]]
     ) -> ToolResult:
         """Update a single task"""
         task_state = TaskState[state] if state else None
@@ -412,12 +696,23 @@ Examples:
         if not target_task:
              return ToolResult.fail(f"Task not found: {task_id}")
 
-        task = _task_store.update_task(
-            target_task.id,
-            name=name,
-            description=description,
-            state=task_state
-        )
+        try:
+            task = _task_store.update_task(
+                target_task.id,
+                name=name,
+                description=description,
+                state=task_state,
+                priority=priority,
+                phase=phase,
+                tags=tags,
+                estimate=estimate,
+                progress=progress,
+                due_date=due_date,
+                dependencies=dependencies,
+                blockers=blockers
+            )
+        except ValueError as e:
+            return ToolResult.fail(f"Update failed: {str(e)}")
         
         if not task:
             return ToolResult.fail(f"Task could not be updated: {task_id}")
@@ -469,17 +764,28 @@ Examples:
             
             new_name = name if task_id else None # Only update name if we looked up by ID
             
-            updated_task = _task_store.update_task(
-                target_task.id,
-                name=new_name, 
-                description=task_data.get('description'),
-                state=task_state
-            )
-            
-            if updated_task:
-                updated.append(updated_task)
-            else:
-                 errors.append(f"Update failed for {target_task.name}")
+            try:
+                updated_task = _task_store.update_task(
+                    target_task.id,
+                    name=new_name, 
+                    description=task_data.get('description'),
+                    state=task_state,
+                    priority=task_data.get('priority'),
+                    phase=task_data.get('phase'),
+                    tags=task_data.get('tags'),
+                    estimate=task_data.get('estimate'),
+                    progress=task_data.get('progress'),
+                    due_date=task_data.get('due_date'),
+                    dependencies=task_data.get('dependencies'),
+                    blockers=task_data.get('blockers')
+                )
+                
+                if updated_task:
+                    updated.append(updated_task)
+                else:
+                    errors.append(f"Update failed for {target_task.name}")
+            except ValueError as e:
+                errors.append(f"Update failed for {target_task.name}: {str(e)}")
         
         output_parts = [f"Updated {len(updated)} task(s)"]
         for task in updated:
@@ -490,9 +796,12 @@ Examples:
         
         return ToolResult.ok('\n'.join(output_parts))
     
-    def _view_tasklist(self) -> ToolResult:
-        """View all tasks"""
-        markdown = _task_store.to_markdown()
+    def _view_tasklist(self, filters: Optional[Dict] = None) -> ToolResult:
+        """View all tasks, optionally filtered"""
+        if not filters:
+            markdown = _task_store.to_markdown()
+        else:
+            markdown = self._filtered_markdown(filters)
         
         # Add summary
         total = len(_task_store.tasks)
@@ -507,3 +816,46 @@ Examples:
         """Reorganize tasks (bulk update for reordering)"""
         # For now, this is similar to batch update
         return self._update_batch(tasks)
+
+    def _filtered_markdown(self, filters: Dict) -> str:
+        """Render task list with filters"""
+        state_filter = filters.get("state")
+        phase_filter = filters.get("phase")
+        tag_filter = filters.get("tag")
+        priority_filter = filters.get("priority")
+
+        lines = ["[bold underline cyan]Task List (Filtered)[/bold underline cyan]", ""]
+
+        def include(task: Task) -> bool:
+            if state_filter and task.state.name != state_filter:
+                return False
+            if phase_filter and task.phase != phase_filter:
+                return False
+            if tag_filter and tag_filter not in task.tags:
+                return False
+            if priority_filter and task.priority != priority_filter:
+                return False
+            return True
+
+        def render_task(task_id: str, indent: int = 0):
+            if task_id not in _task_store.tasks:
+                return
+            task = _task_store.tasks[task_id]
+            if not include(task):
+                for child_id in task.children:
+                    render_task(child_id, indent + 1)
+                return
+            prefix = "  " * indent
+            state_icon = task.state.value
+            name_str = escape(task.name)
+            lines.append(f"{prefix}{state_icon} {name_str}")
+            for child_id in task.children:
+                render_task(child_id, indent + 1)
+
+        for task_id in _task_store.root_tasks:
+            render_task(task_id)
+
+        if len(lines) <= 2:
+            lines.append("[dim italic]No tasks match filters.[/dim italic]")
+
+        return "\n".join(lines)

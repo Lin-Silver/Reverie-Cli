@@ -13,6 +13,7 @@ from pathlib import Path
 import json
 import time
 import re
+import logging
 
 from rich.markup import escape as rich_escape
 
@@ -24,6 +25,174 @@ from ..tools.base import ToolResult
 # This allows the interface to identify and style thinking content differently
 THINKING_START_MARKER = "[[THINKING_START]]"
 THINKING_END_MARKER = "[[THINKING_END]]"
+
+# Configure logging for debugging
+logger = logging.getLogger(__name__)
+
+
+def validate_and_sanitize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Validate and sanitize the API request payload to prevent JSON serialization errors.
+    
+    This function:
+    - Ensures all strings are properly escaped
+    - Validates that all values are JSON-serializable
+    - Removes or fixes problematic characters
+    - Logs any issues found
+    
+    Args:
+        payload: The payload dictionary to validate
+        
+    Returns:
+        A sanitized payload dictionary
+        
+    Raises:
+        ValueError: If the payload cannot be sanitized
+    """
+    def sanitize_value(value: Any, path: str = "") -> Any:
+        """Recursively sanitize a value"""
+        if value is None:
+            return None
+        
+        elif isinstance(value, (str, int, float, bool)):
+            if isinstance(value, str):
+                # Check for unescaped quotes that might break JSON
+                # Count quotes to detect potential issues
+                quote_count = value.count('"')
+                if quote_count % 2 != 0:
+                    logger.warning(f"Unbalanced quotes in {path}: {value[:100]}...")
+                # Ensure the string doesn't contain control characters
+                try:
+                    # Test if it can be JSON-encoded
+                    json.dumps(value)
+                except (TypeError, ValueError) as e:
+                    logger.error(f"Failed to encode string at {path}: {e}")
+                    # Try to fix by removing problematic characters
+                    value = ''.join(char for char in value if ord(char) >= 32 or char in '\n\r\t')
+            return value
+        
+        elif isinstance(value, dict):
+            return {k: sanitize_value(v, f"{path}.{k}") for k, v in value.items()}
+        
+        elif isinstance(value, list):
+            return [sanitize_value(item, f"{path}[{i}]") for i, item in enumerate(value)]
+        
+        else:
+            raise ValueError(f"Unsupported type at {path}: {type(value)}")
+    
+    try:
+        # Validate the payload structure
+        if not isinstance(payload, dict):
+            raise ValueError(f"Payload must be a dict, got {type(payload)}")
+        
+        # Sanitize the payload
+        sanitized = sanitize_value(payload, "payload")
+        
+        # Test JSON serialization
+        try:
+            json_str = json.dumps(sanitized, ensure_ascii=False)
+            # Verify it can be parsed back
+            json.loads(json_str)
+        except (TypeError, ValueError) as e:
+            logger.error(f"JSON serialization failed: {e}")
+            logger.error(f"Payload preview: {str(payload)[:500]}")
+            raise ValueError(f"Payload cannot be serialized to JSON: {e}")
+        
+        return sanitized
+    
+    except Exception as e:
+        logger.error(f"Payload validation failed: {e}")
+        raise
+
+
+def make_api_request_with_retry(
+    url: str,
+    headers: Dict[str, str],
+    payload: Dict[str, Any],
+    max_retries: int = 3,
+    initial_backoff: float = 1.0,
+    stream: bool = False,
+    timeout: int = 60
+) -> Any:
+    """
+    Make an API request with retry logic and exponential backoff.
+    
+    Args:
+        url: The API endpoint URL
+        headers: Request headers
+        payload: Request payload (will be validated and sanitized)
+        max_retries: Maximum number of retry attempts
+        initial_backoff: Initial backoff time in seconds
+        stream: Whether to stream the response
+        timeout: Request timeout in seconds
+        
+    Returns:
+        The response object
+        
+    Raises:
+        requests.RequestException: If all retries fail
+    """
+    import requests
+    
+    # Validate and sanitize payload
+    try:
+        sanitized_payload = validate_and_sanitize_payload(payload)
+    except ValueError as e:
+        logger.error(f"Payload validation failed before request: {e}")
+        raise
+    
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            logger.debug(f"API request attempt {attempt + 1}/{max_retries}")
+            
+            response = requests.post(
+                url,
+                headers=headers,
+                json=sanitized_payload,
+                stream=stream,
+                timeout=timeout
+            )
+            
+            # Check for HTTP errors
+            response.raise_for_status()
+            
+            # Success - return response
+            logger.debug(f"API request succeeded on attempt {attempt + 1}")
+            return response
+            
+        except requests.exceptions.HTTPError as e:
+            last_error = e
+            status_code = e.response.status_code if e.response is not None else "unknown"
+            
+            # Don't retry on client errors (4xx) except 429 (rate limit)
+            if isinstance(status_code, int) and 400 <= status_code < 500 and status_code != 429:
+                logger.error(f"Client error {status_code}, not retrying: {e}")
+                # Try to get more details from the response
+                if e.response is not None:
+                    try:
+                        error_detail = e.response.json()
+                        logger.error(f"Error details: {error_detail}")
+                    except:
+                        logger.error(f"Error response: {e.response.text[:500]}")
+                raise
+            
+            # Retry on server errors (5xx) and rate limit (429)
+            logger.warning(f"HTTP error {status_code} on attempt {attempt + 1}: {e}")
+            
+        except requests.exceptions.RequestException as e:
+            last_error = e
+            logger.warning(f"Request exception on attempt {attempt + 1}: {e}")
+        
+        # Exponential backoff
+        if attempt < max_retries - 1:
+            backoff = initial_backoff * (2 ** attempt)
+            logger.debug(f"Waiting {backoff}s before retry...")
+            time.sleep(backoff)
+    
+    # All retries failed
+    logger.error(f"All {max_retries} retry attempts failed")
+    raise last_error or requests.RequestException("All retry attempts failed")
 
 
 class ReverieAgent:
@@ -49,7 +218,8 @@ class ReverieAgent:
         provider: str = "openai-sdk",
         thinking_mode: Optional[str] = None,
         operation_history=None,
-        rollback_manager=None
+        rollback_manager=None,
+        config=None
     ):
         self.base_url = base_url
         self.api_key = api_key
@@ -62,6 +232,24 @@ class ReverieAgent:
         self.ant_phase = "PLANNING"
         self.provider = provider
         self.thinking_mode = thinking_mode
+        
+        # API configuration for stability
+        self.api_max_retries = 3
+        self.api_initial_backoff = 1.0
+        self.api_timeout = 60
+        self.api_enable_debug_logging = False
+        
+        if config:
+            self.api_max_retries = getattr(config, 'api_max_retries', 3)
+            self.api_initial_backoff = getattr(config, 'api_initial_backoff', 1.0)
+            self.api_timeout = getattr(config, 'api_timeout', 60)
+            self.api_enable_debug_logging = getattr(config, 'api_enable_debug_logging', False)
+        
+        # Configure logging level based on config
+        if self.api_enable_debug_logging:
+            logging.getLogger(__name__).setLevel(logging.DEBUG)
+        else:
+            logging.getLogger(__name__).setLevel(logging.WARNING)
         
         # Initialize client based on provider
         self._client = None
@@ -517,9 +705,20 @@ class ReverieAgent:
                 "Content-Type": "application/json"
             }
             
-            # Make request
-            response = requests.post(self.base_url, headers=headers, json=payload, stream=True)
-            response.raise_for_status()
+            # Make request with retry logic
+            try:
+                response = make_api_request_with_retry(
+                    url=self.base_url,
+                    headers=headers,
+                    payload=payload,
+                    max_retries=self.api_max_retries,
+                    initial_backoff=self.api_initial_backoff,
+                    stream=True,
+                    timeout=self.api_timeout
+                )
+            except requests.RequestException as e:
+                logger.error(f"Streaming API request failed: {e}")
+                raise
             
             # Collect streamed response
             collected_content = ""
@@ -1063,9 +1262,20 @@ class ReverieAgent:
                 "Content-Type": "application/json"
             }
             
-            # Make request
-            response = requests.post(self.base_url, headers=headers, json=payload)
-            response.raise_for_status()
+            # Make request with retry logic
+            try:
+                response = make_api_request_with_retry(
+                    url=self.base_url,
+                    headers=headers,
+                    payload=payload,
+                    max_retries=self.api_max_retries,
+                    initial_backoff=self.api_initial_backoff,
+                    stream=False,
+                    timeout=self.api_timeout
+                )
+            except requests.RequestException as e:
+                logger.error(f"API request failed: {e}")
+                raise
             
             response_data = response.json()
             

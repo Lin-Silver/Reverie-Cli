@@ -23,6 +23,7 @@ from .theme import THEME, DECO
 COMMANDS = {
     '/help': 'Show available commands',
     '/model': 'List and select models',
+    '/mode': 'Switch modes quickly',
     '/status': 'Show current status',
     '/search': 'Search the web (usage: /search <query>)',
     '/sessions': 'Manage sessions',
@@ -30,6 +31,8 @@ COMMANDS = {
     '/clear': 'Clear the screen',
     '/index': 'Re-index the codebase',
     '/setting': 'Interactive settings menu',
+    '/gdd': 'Create or view the GDD',
+    '/assets': 'List game assets',
     '/rules': 'Manage custom rules',
     '/tools': 'List available tools',
     '/exit': 'Exit Reverie',

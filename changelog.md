@@ -1,3 +1,37 @@
+## 🚀 Reverie CLI v2.0.0 — Reverie-Gamer Mode & Game Dev Toolchain
+
+**Release Date:** 2026-02-04
+
+### 🎮 Reverie-Gamer Mode (New)
+* **GDD-First Workflow**: Game Design Document must be created/updated before implementation
+* **RPG Focus**: Dedicated narrative and quest design emphasis for RPG projects
+* **Engine Coverage**: Custom engine development, Web games (Phaser/PixiJS/Three.js), and 2D frameworks (Pygame/Love2D/Cocos2d)
+
+### 🧰 Game Development Toolchain (All Self-Made)
+* **GDD Manager**: Create/view/update GDD templates with RPG sections
+* **Story Design**: Story bible, questlines, NPC profiles, dialogue samples
+* **Asset Manager**: List assets, detect missing references, generate manifests, import assets
+* **Asset Packer**: Zip packaging with manifest generation
+* **Balance Analyzer**: Combat/economy/difficulty/stat distribution analysis
+* **Math Simulator**: Monte Carlo simulations for balance tuning
+* **Stats Analyzer**: Percentiles and distribution metrics for datasets
+* **Level Design Tool**: Layout generation, logic checks, difficulty analysis
+* **Config Editor**: JSON/YAML/XML read/edit/validate/template generation
+
+### 🧭 Task Management Upgrade
+* Added phases, priorities, tags, progress, estimates, dependencies, and blockers
+* Filtering support for focused task views (state/phase/tag/priority)
+
+### 🧠 Context Engine Integration
+* Lightweight script parsing for Love2D (Lua) and Godot (GDScript)
+* Game-specific context compression via summarize_game_context
+
+### 🖥️ CLI Enhancements
+* New `/mode` command for fast mode switching (including reverie-gamer)
+* New `/gdd` and `/assets` commands for gamer workflows
+
+---
+
 ## 🚀 Reverie CLI v1.4.1 — Advanced Context Engine & Nexus Integration
 
 **Release Date:** 2026-01-17

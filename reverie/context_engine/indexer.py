@@ -26,6 +26,10 @@ from .dependency_graph import DependencyGraph, Dependency
 from .parsers.base import BaseParser, ParseResult
 from .parsers.python_parser import PythonParser
 from .parsers.treesitter_parser import TreeSitterParser, SUPPORTED_LANGUAGES
+from .parsers.simple_script_parser import SimpleScriptParser
+from .parsers.lua_parser import LuaParser
+from .parsers.gdscript_parser import GDScriptParser
+from .parsers.config_parser import ConfigParser
 
 
 @dataclass
@@ -149,6 +153,32 @@ class CodebaseIndexer:
         '.zig',  # Zig
         '.html', '.htm',  # HTML
         '.css', '.scss', '.sass', '.less',  # CSS
+        '.lua', '.gd',  # Love2D (Lua) and Godot (GDScript)
+    }
+    
+    # Game asset file extensions
+    GAME_ASSET_EXTENSIONS = {
+        # Images
+        '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tga', '.webp', '.svg',
+        # Audio
+        '.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a',
+        # 3D Models
+        '.obj', '.fbx', '.gltf', '.glb', '.dae', '.blend',
+        # Animations
+        '.anim', '.animation', '.anm',
+        # Fonts
+        '.ttf', '.otf', '.woff', '.woff2',
+        # Shaders
+        '.shader', '.glsl', '.hlsl', '.vert', '.frag',
+        # Game-specific
+        '.tscn', '.tres',  # Godot scenes and resources
+        '.unity', '.prefab',  # Unity
+        '.tmx', '.tsx',  # Tiled map editor
+    }
+    
+    # Game configuration file extensions
+    GAME_CONFIG_EXTENSIONS = {
+        '.json', '.yaml', '.yml', '.xml', '.toml', '.ini', '.cfg', '.conf'
     }
     
     def __init__(
@@ -176,7 +206,11 @@ class CodebaseIndexer:
         # Initialize parsers
         self._parsers: List[BaseParser] = [
             PythonParser(self.project_root),
+            LuaParser(self.project_root),
+            GDScriptParser(self.project_root),
+            ConfigParser(self.project_root),
             TreeSitterParser(self.project_root),
+            SimpleScriptParser(self.project_root),
         ]
         
         # Large file tracking
@@ -235,6 +269,52 @@ class CodebaseIndexer:
     def _is_supported_file(self, path: Path) -> bool:
         """Check if file extension is supported"""
         return path.suffix.lower() in self.SUPPORTED_EXTENSIONS
+    
+    def _is_game_asset(self, path: Path) -> bool:
+        """Check if file is a game asset"""
+        return path.suffix.lower() in self.GAME_ASSET_EXTENSIONS
+    
+    def _is_game_config(self, path: Path) -> bool:
+        """Check if file is a game configuration file"""
+        return path.suffix.lower() in self.GAME_CONFIG_EXTENSIONS
+    
+    def _get_asset_type(self, path: Path) -> Optional[str]:
+        """Get the type of game asset"""
+        ext = path.suffix.lower()
+        
+        # Image assets
+        if ext in {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tga', '.webp', '.svg'}:
+            return 'image'
+        
+        # Audio assets
+        if ext in {'.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a'}:
+            return 'audio'
+        
+        # 3D model assets
+        if ext in {'.obj', '.fbx', '.gltf', '.glb', '.dae', '.blend'}:
+            return 'model'
+        
+        # Animation assets
+        if ext in {'.anim', '.animation', '.anm'}:
+            return 'animation'
+        
+        # Font assets
+        if ext in {'.ttf', '.otf', '.woff', '.woff2'}:
+            return 'font'
+        
+        # Shader assets
+        if ext in {'.shader', '.glsl', '.hlsl', '.vert', '.frag'}:
+            return 'shader'
+        
+        # Game-specific assets
+        if ext in {'.tscn', '.tres'}:
+            return 'godot_resource'
+        if ext in {'.unity', '.prefab'}:
+            return 'unity_resource'
+        if ext in {'.tmx', '.tsx'}:
+            return 'tilemap'
+        
+        return None
     
     def _is_large_file(self, path: Path) -> bool:
         """Check if file exceeds size limits"""
@@ -306,7 +386,10 @@ class CodebaseIndexer:
                 if self._should_ignore(file_path):
                     continue
                 
-                if not self._is_supported_file(file_path):
+                # Include code files, game assets, and game config files
+                if not (self._is_supported_file(file_path) or 
+                       self._is_game_asset(file_path) or 
+                       self._is_game_config(file_path)):
                     continue
                 
                 # Track large files separately (but still include them)
@@ -616,6 +699,64 @@ class CodebaseIndexer:
             'dependencies': self.dependency_graph.get_statistics(),
             'project_root': str(self.project_root)
         }
+    
+    def get_game_assets(self) -> Dict[str, List[Dict]]:
+        """Get all game assets organized by type"""
+        assets_by_type = {
+            'image': [],
+            'audio': [],
+            'model': [],
+            'animation': [],
+            'font': [],
+            'shader': [],
+            'godot_resource': [],
+            'unity_resource': [],
+            'tilemap': [],
+            'other': []
+        }
+        
+        for file_str, file_info in self._file_info.items():
+            file_path = Path(file_str)
+            
+            if self._is_game_asset(file_path):
+                asset_type = self._get_asset_type(file_path)
+                
+                asset_info = {
+                    'path': file_str,
+                    'name': file_path.name,
+                    'size': file_info.size,
+                    'size_kb': file_info.size / 1024,
+                    'modified': file_info.mtime
+                }
+                
+                if asset_type:
+                    assets_by_type[asset_type].append(asset_info)
+                else:
+                    assets_by_type['other'].append(asset_info)
+        
+        return assets_by_type
+    
+    def get_game_asset_statistics(self) -> Dict:
+        """Get statistics about game assets"""
+        assets = self.get_game_assets()
+        
+        stats = {
+            'total_assets': 0,
+            'total_size_mb': 0.0,
+            'by_type': {}
+        }
+        
+        for asset_type, asset_list in assets.items():
+            if asset_list:
+                type_size = sum(a['size'] for a in asset_list)
+                stats['by_type'][asset_type] = {
+                    'count': len(asset_list),
+                    'size_mb': type_size / (1024 * 1024)
+                }
+                stats['total_assets'] += len(asset_list)
+                stats['total_size_mb'] += type_size / (1024 * 1024)
+        
+        return stats
     
     def find_file(self, pattern: str) -> List[str]:
         """Find files matching a pattern"""

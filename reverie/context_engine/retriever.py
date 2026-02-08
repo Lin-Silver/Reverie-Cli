@@ -88,6 +88,33 @@ class ContextRetriever:
     # Default token budget (increased for larger context window)
     DEFAULT_TOKEN_BUDGET = 50000
     
+    # Game-related keywords for prioritization
+    GAME_LOGIC_KEYWORDS = {
+        # Core game loop
+        'update', 'draw', 'render', 'tick', 'step', 'loop',
+        # Entity/Component
+        'entity', 'component', 'system', 'actor', 'object', 'sprite',
+        # Game state
+        'state', 'scene', 'level', 'world', 'game', 'play',
+        # Input
+        'input', 'control', 'keyboard', 'mouse', 'touch', 'button',
+        # Physics
+        'physics', 'collision', 'velocity', 'position', 'transform',
+        # Animation
+        'animation', 'animate', 'tween', 'frame',
+        # Audio
+        'audio', 'sound', 'music', 'sfx',
+        # UI
+        'ui', 'menu', 'hud', 'dialog', 'button', 'panel',
+        # RPG specific
+        'quest', 'npc', 'dialog', 'inventory', 'item', 'skill', 'stat',
+        'character', 'player', 'enemy', 'battle', 'combat',
+        # Love2D specific
+        'love', 'conf', 'load', 'keypressed', 'mousepressed',
+        # Godot specific
+        '_ready', '_process', '_physics_process', '_input', 'node',
+    }
+    
     def __init__(
         self,
         symbol_table: SymbolTable,
@@ -259,7 +286,8 @@ class ContextRetriever:
         max_tokens: int = None,
         include_source: bool = True,
         include_dependencies: bool = True,
-        relevance_boost: Optional[Dict[str, float]] = None
+        relevance_boost: Optional[Dict[str, float]] = None,
+        prioritize_game_code: bool = True
     ) -> ContextPackage:
         """
         Build a "minimal but complete" context package.
@@ -273,6 +301,7 @@ class ContextRetriever:
             include_source: Include source code
             include_dependencies: Auto-expand dependencies
             relevance_boost: Optional relevance scores for prioritization
+            prioritize_game_code: Prioritize game logic symbols over utility code
         
         Returns:
             ContextPackage ready for model consumption
@@ -301,6 +330,10 @@ class ContextRetriever:
                         dep_sym = self.symbol_table.get_symbol(dep.to_symbol)
                         if dep_sym:
                             resolved_symbols.append(dep_sym)
+        
+        # Apply game code prioritization if enabled
+        if prioritize_game_code:
+            resolved_symbols = self.prioritize_game_symbols(resolved_symbols)
         
         # Score and rank symbols
         scored_symbols = self._score_symbols(resolved_symbols, relevance_boost)
@@ -363,7 +396,8 @@ class ContextRetriever:
                 'requested_symbols': symbols,
                 'symbols_included': len(included_symbols),
                 'token_budget': max_tokens,
-                'tokens_used': current_tokens
+                'tokens_used': current_tokens,
+                'game_prioritization': prioritize_game_code
             }
         )
     
@@ -465,6 +499,83 @@ class ContextRetriever:
             scored.append((score, sym))
         
         return scored
+    
+    def _is_game_logic_symbol(self, symbol: Symbol) -> bool:
+        """Check if a symbol is related to game logic"""
+        name_lower = symbol.name.lower()
+        qname_lower = symbol.qualified_name.lower()
+        
+        # Check if name contains game logic keywords
+        for keyword in self.GAME_LOGIC_KEYWORDS:
+            if keyword in name_lower or keyword in qname_lower:
+                return True
+        
+        # Check file path for game-related directories
+        if symbol.file_path:
+            path_lower = symbol.file_path.lower()
+            game_dirs = ['game', 'gameplay', 'entities', 'components', 'systems', 
+                        'scenes', 'levels', 'characters', 'enemies', 'items']
+            for game_dir in game_dirs:
+                if f'/{game_dir}/' in path_lower or f'\\{game_dir}\\' in path_lower:
+                    return True
+        
+        # Check for game-specific languages
+        if symbol.language in {'lua', 'gdscript'}:
+            return True
+        
+        return False
+    
+    def _calculate_game_priority_score(self, symbol: Symbol) -> float:
+        """Calculate priority score for game-related symbols (higher = more important)"""
+        score = 1.0
+        
+        # Base boost for game logic symbols
+        if self._is_game_logic_symbol(symbol):
+            score *= 2.0
+        
+        # Extra boost for core game loop functions
+        name_lower = symbol.name.lower()
+        if name_lower in {'update', 'draw', 'render', '_process', '_physics_process', 'tick'}:
+            score *= 3.0
+        
+        # Boost for entity/component systems
+        if any(keyword in name_lower for keyword in ['entity', 'component', 'system']):
+            score *= 2.5
+        
+        # Boost for player-related code
+        if 'player' in name_lower:
+            score *= 2.0
+        
+        # Boost for game state management
+        if any(keyword in name_lower for keyword in ['state', 'scene', 'level']):
+            score *= 1.8
+        
+        # Boost for RPG-specific code
+        if any(keyword in name_lower for keyword in ['quest', 'npc', 'dialog', 'inventory', 'battle']):
+            score *= 1.7
+        
+        # Boost for game-specific file types
+        if symbol.language in {'lua', 'gdscript'}:
+            score *= 1.5
+        
+        return score
+    
+    def prioritize_game_symbols(self, symbols: List[Symbol]) -> List[Symbol]:
+        """
+        Sort symbols by game logic priority.
+        
+        Game-related symbols are prioritized higher than utility/helper code.
+        """
+        scored_symbols = []
+        
+        for symbol in symbols:
+            priority_score = self._calculate_game_priority_score(symbol)
+            scored_symbols.append((priority_score, symbol))
+        
+        # Sort by score (descending)
+        scored_symbols.sort(key=lambda x: x[0], reverse=True)
+        
+        return [sym for _, sym in scored_symbols]
     
     def _build_symbol_context_string(
         self,

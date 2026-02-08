@@ -296,9 +296,10 @@ class TUISelector:
             else:
                 indicator = Text("  ")
             
-            # Title
+            # Title with enhanced visual feedback
             if is_selected:
-                title_style = f"bold {self.theme.BLUE_SOFT}"
+                # Selected item: bold with background highlight
+                title_style = f"bold {self.theme.BLUE_SOFT} on {self.theme.PURPLE_DEEP}"
             else:
                 title_style = self.theme.TEXT_PRIMARY
             
@@ -317,16 +318,24 @@ class TUISelector:
         # Add search bar if searching
         if self.is_searching:
             search_text = Text()
-            search_text.append(f"{self.deco.SEARCH} Search: ", style=self.theme.PURPLE_SOFT)
+            search_text.append(f"{self.deco.SEARCH} Search: ", style=f"bold {self.theme.PURPLE_SOFT}")
             search_text.append(self.search_query, style=f"bold {self.theme.TEXT_PRIMARY}")
-            search_text.append("_", style=self.theme.TEXT_DIM)  # Cursor
+            search_text.append("_", style=f"bold {self.theme.PINK_SOFT}")  # Blinking cursor effect
             
             search_panel = Panel(
                 search_text,
-                border_style=self.theme.BORDER_SECONDARY,
-                padding=(0, 1)
+                border_style=self.theme.PINK_SOFT,
+                padding=(0, 1),
+                box=box.ROUNDED
             )
             content_parts.append(search_panel)
+        
+        # Add scroll indicator if needed
+        if len(self.filtered_items) > self.max_visible:
+            scroll_info = Text()
+            scroll_info.append(f"Showing {self.scroll_offset + 1}-{min(self.scroll_offset + self.max_visible, len(self.filtered_items))} of {len(self.filtered_items)}", 
+                             style=self.theme.TEXT_DIM)
+            content_parts.append(scroll_info)
         
         return Align(Group(*content_parts), vertical="top")
     

@@ -3,6 +3,108 @@ import json
 from pathlib import Path
 from datetime import datetime
 import requests
+import logging
+
+logger = logging.getLogger(__name__)
+
+def validate_payload_for_compression(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Validate and sanitize payload for context compression API calls.
+    
+    Args:
+        payload: The payload dictionary to validate
+        
+    Returns:
+        A sanitized payload dictionary
+        
+    Raises:
+        ValueError: If the payload cannot be sanitized
+    """
+    try:
+        # Test JSON serialization
+        json_str = json.dumps(payload, ensure_ascii=False)
+        # Verify it can be parsed back
+        json.loads(json_str)
+        return payload
+    except (TypeError, ValueError) as e:
+        logger.error(f"Payload validation failed in compressor: {e}")
+        # Try to fix by truncating overly long messages
+        if "messages" in payload:
+            messages = payload["messages"]
+            sanitized_messages = []
+            for msg in messages:
+                if isinstance(msg, dict) and "content" in msg:
+                    content = msg["content"]
+                    if isinstance(content, str) and len(content) > 100000:
+                        # Truncate very long messages
+                        logger.warning(f"Truncating message from {len(content)} to 100000 chars")
+                        content = content[:100000] + "... [truncated]"
+                    sanitized_messages.append({
+                        "role": msg.get("role", "user"),
+                        "content": content
+                    })
+                else:
+                    sanitized_messages.append(msg)
+            payload["messages"] = sanitized_messages
+        
+        # Try again
+        try:
+            json_str = json.dumps(payload, ensure_ascii=False)
+            json.loads(json_str)
+            return payload
+        except (TypeError, ValueError) as e2:
+            logger.error(f"Failed to sanitize payload: {e2}")
+            raise ValueError(f"Cannot sanitize payload: {e2}")
+
+
+def make_compression_request_with_retry(
+    url: str,
+    headers: Dict[str, str],
+    payload: Dict[str, Any],
+    max_retries: int = 2
+) -> requests.Response:
+    """
+    Make a compression API request with retry logic.
+    
+    Args:
+        url: The API endpoint URL
+        headers: Request headers
+        payload: Request payload
+        max_retries: Maximum number of retry attempts
+        
+    Returns:
+        The response object
+        
+    Raises:
+        requests.RequestException: If all retries fail
+    """
+    # Validate payload
+    payload = validate_payload_for_compression(payload)
+    
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            logger.debug(f"Compression request attempt {attempt + 1}/{max_retries}")
+            
+            response = requests.post(
+                url,
+                headers=headers,
+                json=payload,
+                timeout=120  # Longer timeout for compression
+            )
+            
+            response.raise_for_status()
+            return response
+            
+        except requests.exceptions.RequestException as e:
+            last_error = e
+            logger.warning(f"Compression request failed on attempt {attempt + 1}: {e}")
+            
+            if attempt < max_retries - 1:
+                import time
+                time.sleep(2 ** attempt)  # Exponential backoff
+    
+    raise last_error or requests.RequestException("All compression retry attempts failed")
 
 class ContextCompressor:
     """
@@ -118,8 +220,7 @@ class ContextCompressor:
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json"
                 }
-                response = requests.post(base_url, headers=headers, json=payload)
-                response.raise_for_status()
+                response = make_compression_request_with_retry(base_url, headers, payload)
                 response_data = response.json()
                 summary = response_data["choices"][0]["message"]["content"]
             elif provider == "anthropic":
@@ -189,3 +290,271 @@ class ContextCompressor:
                 continue
         
         return sorted(checkpoints, key=lambda x: x['timestamp'], reverse=True)
+
+
+def summarize_game_context(
+    gdd_path: Optional[str] = None,
+    asset_manifest_path: Optional[str] = None,
+    task_list_path: Optional[str] = None,
+    keep_last_messages: int = 5
+) -> Dict[str, Any]:
+    """
+    Compress game development context for efficient memory usage.
+    
+    This function creates a compressed summary of game development artifacts:
+    - GDD (Game Design Document): Keeps core sections
+    - Asset Manifest: Summarizes by type and count
+    - Task List: Summarizes by phase and status
+    - Recent Messages: Keeps the last N messages
+    
+    Args:
+        gdd_path: Path to the GDD file (Markdown)
+        asset_manifest_path: Path to the asset manifest (JSON)
+        task_list_path: Path to the task list (JSON)
+        keep_last_messages: Number of recent messages to keep
+    
+    Returns:
+        Dictionary containing compressed context
+    """
+    compressed = {
+        'gdd_summary': None,
+        'asset_summary': None,
+        'task_summary': None,
+        'compression_timestamp': datetime.now().isoformat()
+    }
+    
+    # Compress GDD
+    if gdd_path and Path(gdd_path).exists():
+        try:
+            with open(gdd_path, 'r', encoding='utf-8') as f:
+                gdd_content = f.read()
+            
+            # Extract core sections (概述, 核心机制, 角色系统, 剧情系统, 任务系统)
+            core_sections = []
+            current_section = None
+            current_content = []
+            
+            for line in gdd_content.split('\n'):
+                # Check for section headers
+                if line.startswith('## '):
+                    # Save previous section if it's a core section
+                    if current_section and any(keyword in current_section for keyword in 
+                                              ['概述', '核心机制', '角色', '剧情', '任务', 'Overview', 'Core', 'Character', 'Story', 'Quest']):
+                        core_sections.append({
+                            'title': current_section,
+                            'content': '\n'.join(current_content[:20])  # Keep first 20 lines
+                        })
+                    
+                    current_section = line[3:].strip()
+                    current_content = []
+                elif current_section:
+                    current_content.append(line)
+            
+            # Save last section if core
+            if current_section and any(keyword in current_section for keyword in 
+                                      ['概述', '核心机制', '角色', '剧情', '任务', 'Overview', 'Core', 'Character', 'Story', 'Quest']):
+                core_sections.append({
+                    'title': current_section,
+                    'content': '\n'.join(current_content[:20])
+                })
+            
+            compressed['gdd_summary'] = {
+                'core_sections': core_sections,
+                'total_sections': gdd_content.count('## ')
+            }
+        
+        except Exception as e:
+            logger.error(f"Failed to compress GDD: {e}")
+            compressed['gdd_summary'] = {'error': str(e)}
+    
+    # Compress Asset Manifest
+    if asset_manifest_path and Path(asset_manifest_path).exists():
+        try:
+            with open(asset_manifest_path, 'r', encoding='utf-8') as f:
+                manifest = json.load(f)
+            
+            # Summarize by type
+            asset_summary = {}
+            
+            if 'assets' in manifest:
+                for asset_type, assets in manifest['assets'].items():
+                    if isinstance(assets, list):
+                        total_size = sum(a.get('size', 0) for a in assets if isinstance(a, dict))
+                        asset_summary[asset_type] = {
+                            'count': len(assets),
+                            'total_size_mb': total_size / (1024 * 1024) if total_size > 0 else 0,
+                            'examples': [a.get('path', '') for a in assets[:3] if isinstance(a, dict)]
+                        }
+            
+            # Include statistics if available
+            if 'statistics' in manifest:
+                asset_summary['statistics'] = manifest['statistics']
+            
+            compressed['asset_summary'] = asset_summary
+        
+        except Exception as e:
+            logger.error(f"Failed to compress asset manifest: {e}")
+            compressed['asset_summary'] = {'error': str(e)}
+    
+    # Compress Task List
+    if task_list_path and Path(task_list_path).exists():
+        try:
+            with open(task_list_path, 'r', encoding='utf-8') as f:
+                tasks = json.load(f)
+            
+            # Summarize by phase and status
+            task_summary = {
+                'by_phase': {},
+                'by_status': {},
+                'total_tasks': 0
+            }
+            
+            if isinstance(tasks, list):
+                task_summary['total_tasks'] = len(tasks)
+                
+                for task in tasks:
+                    if not isinstance(task, dict):
+                        continue
+                    
+                    # Count by phase
+                    phase = task.get('phase', 'unknown')
+                    if phase not in task_summary['by_phase']:
+                        task_summary['by_phase'][phase] = 0
+                    task_summary['by_phase'][phase] += 1
+                    
+                    # Count by status
+                    status = task.get('state', task.get('status', 'unknown'))
+                    if status not in task_summary['by_status']:
+                        task_summary['by_status'][status] = 0
+                    task_summary['by_status'][status] += 1
+                
+                # Include high-priority tasks
+                high_priority = [
+                    {
+                        'name': t.get('name', ''),
+                        'phase': t.get('phase', ''),
+                        'status': t.get('state', t.get('status', ''))
+                    }
+                    for t in tasks
+                    if isinstance(t, dict) and t.get('priority') in ['high', 'critical']
+                ]
+                
+                if high_priority:
+                    task_summary['high_priority_tasks'] = high_priority[:5]  # Keep top 5
+            
+            elif isinstance(tasks, dict) and 'tasks' in tasks:
+                # Handle nested structure
+                task_list = tasks['tasks']
+                task_summary['total_tasks'] = len(task_list)
+                
+                for task in task_list:
+                    if not isinstance(task, dict):
+                        continue
+                    
+                    phase = task.get('phase', 'unknown')
+                    if phase not in task_summary['by_phase']:
+                        task_summary['by_phase'][phase] = 0
+                    task_summary['by_phase'][phase] += 1
+                    
+                    status = task.get('state', task.get('status', 'unknown'))
+                    if status not in task_summary['by_status']:
+                        task_summary['by_status'][status] = 0
+                    task_summary['by_status'][status] += 1
+            
+            compressed['task_summary'] = task_summary
+        
+        except Exception as e:
+            logger.error(f"Failed to compress task list: {e}")
+            compressed['task_summary'] = {'error': str(e)}
+    
+    return compressed
+
+
+def format_game_context_summary(summary: Dict[str, Any]) -> str:
+    """
+    Format a game context summary into a readable string.
+    
+    Args:
+        summary: Dictionary from summarize_game_context
+    
+    Returns:
+        Formatted string representation
+    """
+    lines = ["=== Game Development Context Summary ===\n"]
+    
+    # GDD Summary
+    if summary.get('gdd_summary'):
+        lines.append("📄 Game Design Document:")
+        gdd = summary['gdd_summary']
+        
+        if 'error' in gdd:
+            lines.append(f"  Error: {gdd['error']}")
+        else:
+            lines.append(f"  Total Sections: {gdd.get('total_sections', 0)}")
+            lines.append("  Core Sections:")
+            for section in gdd.get('core_sections', []):
+                lines.append(f"    - {section['title']}")
+                # Add first few lines of content
+                content_preview = section['content'].split('\n')[:3]
+                for line in content_preview:
+                    if line.strip():
+                        lines.append(f"      {line.strip()[:80]}")
+        lines.append("")
+    
+    # Asset Summary
+    if summary.get('asset_summary'):
+        lines.append("🎨 Game Assets:")
+        assets = summary['asset_summary']
+        
+        if 'error' in assets:
+            lines.append(f"  Error: {assets['error']}")
+        else:
+            total_count = 0
+            total_size = 0.0
+            
+            for asset_type, info in assets.items():
+                if asset_type == 'statistics':
+                    continue
+                if isinstance(info, dict):
+                    count = info.get('count', 0)
+                    size = info.get('total_size_mb', 0)
+                    total_count += count
+                    total_size += size
+                    lines.append(f"  {asset_type}: {count} files ({size:.2f} MB)")
+                    
+                    examples = info.get('examples', [])
+                    if examples:
+                        lines.append(f"    Examples: {', '.join(examples[:2])}")
+            
+            lines.append(f"  Total: {total_count} assets ({total_size:.2f} MB)")
+        lines.append("")
+    
+    # Task Summary
+    if summary.get('task_summary'):
+        lines.append("📋 Tasks:")
+        tasks = summary['task_summary']
+        
+        if 'error' in tasks:
+            lines.append(f"  Error: {tasks['error']}")
+        else:
+            lines.append(f"  Total Tasks: {tasks.get('total_tasks', 0)}")
+            
+            if tasks.get('by_phase'):
+                lines.append("  By Phase:")
+                for phase, count in tasks['by_phase'].items():
+                    lines.append(f"    {phase}: {count}")
+            
+            if tasks.get('by_status'):
+                lines.append("  By Status:")
+                for status, count in tasks['by_status'].items():
+                    lines.append(f"    {status}: {count}")
+            
+            if tasks.get('high_priority_tasks'):
+                lines.append("  High Priority:")
+                for task in tasks['high_priority_tasks']:
+                    lines.append(f"    - {task['name']} ({task['phase']}, {task['status']})")
+        lines.append("")
+    
+    lines.append(f"Compressed at: {summary.get('compression_timestamp', 'unknown')}")
+    
+    return '\n'.join(lines)

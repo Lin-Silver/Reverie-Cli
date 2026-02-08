@@ -86,6 +86,31 @@ class DreamscapeTheme:
     INFO = "#81d4fa"
     
     # ═══════════════════════════════════════════════════════════════════════════
+    # GAME DEVELOPMENT SPECIFIC COLORS
+    # ═══════════════════════════════════════════════════════════════════════════
+    
+    # Tool categories
+    TOOL_GDD = "#ffb8d1"           # GDD Manager (pink)
+    TOOL_STORY = "#e4b0ff"         # Story Design (purple)
+    TOOL_ASSET = "#81d4fa"         # Asset Manager (blue)
+    TOOL_BALANCE = "#66bb6a"       # Balance Analyzer (green)
+    TOOL_LEVEL = "#ffcc80"         # Level Design (peach)
+    TOOL_CONFIG = "#ce93d8"        # Config Editor (purple)
+    
+    # Task phases
+    PHASE_DESIGN = "#ffb8d1"       # Design phase (pink)
+    PHASE_IMPLEMENTATION = "#81d4fa"  # Implementation (blue)
+    PHASE_CONTENT = "#e4b0ff"      # Content creation (purple)
+    PHASE_TESTING = "#66bb6a"      # Testing (green)
+    PHASE_RELEASE = "#ffcc80"      # Release (peach)
+    
+    # Priority levels
+    PRIORITY_LOW = "#9e9e9e"       # Low priority (gray)
+    PRIORITY_MEDIUM = "#81d4fa"    # Medium priority (blue)
+    PRIORITY_HIGH = "#ffcc80"      # High priority (peach)
+    PRIORITY_CRITICAL = "#ff5252"  # Critical priority (red)
+    
+    # ═══════════════════════════════════════════════════════════════════════════
     # UI ELEMENT COLORS
     # ═══════════════════════════════════════════════════════════════════════════
     
@@ -192,6 +217,7 @@ class DreamDecorators:
     CROSS = "✗"
     CROSS_FANCY = "✘"
     LOADING_DOTS = "⋯"
+    SEARCH = "🔍"  # Search icon for selector
     
     # Mood/emotion
     HEART = "♡"

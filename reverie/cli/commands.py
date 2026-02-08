@@ -40,6 +40,7 @@ class CommandHandler:
             'help': self.cmd_help,
             'model': self.cmd_model,
             'add_model': self.cmd_add_model,
+            'mode': self.cmd_mode,
             'status': self.cmd_status,
             'search': self.cmd_search,
             'sessions': self.cmd_sessions,
@@ -49,6 +50,7 @@ class CommandHandler:
             'tools': self.cmd_tools,
             'setting': self.cmd_setting,
             'rules': self.cmd_rules,
+            'workspace': self.cmd_workspace,
             'exit': self.cmd_exit,
             'quit': self.cmd_exit,
             'rollback': self.cmd_rollback,
@@ -56,6 +58,8 @@ class CommandHandler:
             'redo': self.cmd_redo,
             'checkpoints': self.cmd_checkpoints,
             'operations': self.cmd_operations,
+            'gdd': self.cmd_gdd,
+            'assets': self.cmd_assets,
         }
     
     def handle(self, command_line: str) -> bool:
@@ -148,13 +152,27 @@ class CommandHandler:
         )
         config_commands.add_row(
             "/setting",
-            f"Interactive settings menu:\n{self.deco.DOT_MEDIUM} Mode (reverie/spec-driven/spec-vibe)\n{self.deco.DOT_MEDIUM} Theme\n{self.deco.DOT_MEDIUM} Custom rules\n{self.deco.DOT_MEDIUM} Auto-index toggle",
+            f"Interactive settings menu:\n{self.deco.DOT_MEDIUM} Mode (reverie/reverie-gamer/spec-driven/spec-vibe/writer)\n{self.deco.DOT_MEDIUM} Theme\n{self.deco.DOT_MEDIUM} Custom rules\n{self.deco.DOT_MEDIUM} Auto-index toggle",
             "/setting"
+        )
+        config_commands.add_row(
+            "/mode [name]",
+            f"View or switch operational modes:\n"
+            f"{self.deco.DOT_MEDIUM} No args: Display current mode and list all available modes\n"
+            f"{self.deco.DOT_MEDIUM} With mode name: Switch to specified mode\n"
+            f"{self.deco.DOT_MEDIUM} Available: reverie, reverie-gamer, spec-driven, spec-vibe, writer, reverie-ant\n"
+            f"[{self.theme.TEXT_DIM}]Each mode provides specialized tools and workflows[/{self.theme.TEXT_DIM}]",
+            "/mode\n/mode reverie-gamer\n/mode spec-driven"
         )
         config_commands.add_row(
             "/rules",
             f"Manage custom rules:\n{self.deco.DOT_MEDIUM} List rules\n{self.deco.DOT_MEDIUM} Edit rules.txt: /rules edit\n{self.deco.DOT_MEDIUM} Add rule: /rules add <text>\n{self.deco.DOT_MEDIUM} Remove: /rules remove <#>",
             "/rules\n/rules edit\n/rules add Always use async\n/rules remove 1"
+        )
+        config_commands.add_row(
+            "/workspace",
+            f"Workspace configuration mode:\n{self.deco.DOT_MEDIUM} Enable/disable workspace-local config\n{self.deco.DOT_MEDIUM} Copy config between workspace and global\n{self.deco.DOT_MEDIUM} Multi-workspace support",
+            "/workspace status\n/workspace enable\n/workspace copy-to-workspace"
         )
         
         self.console.print(config_commands)
@@ -189,6 +207,40 @@ class CommandHandler:
         )
         
         self.console.print(tool_commands)
+        self.console.print()
+        
+        # Game Development Commands (Reverie-Gamer)
+        game_commands = Table(
+            title=f"[bold {self.theme.PINK_SOFT}]{self.deco.DIAMOND} Game Development Commands (Reverie-Gamer)[/bold {self.theme.PINK_SOFT}]",
+            box=box.ROUNDED,
+            border_style=self.theme.BORDER_PRIMARY,
+            show_lines=True,
+            title_justify="left"
+        )
+        game_commands.add_column("Command", style=f"bold {self.theme.BLUE_SOFT}", width=15)
+        game_commands.add_column("Description", style=self.theme.TEXT_SECONDARY)
+        game_commands.add_column("Example", style=f"dim {self.theme.MINT_SOFT}")
+        
+        game_commands.add_row(
+            "/gdd [action]",
+            f"Manage Game Design Document:\n"
+            f"{self.deco.DOT_MEDIUM} create: Create new GDD with project details\n"
+            f"{self.deco.DOT_MEDIUM} view: Display complete GDD in formatted view\n"
+            f"{self.deco.DOT_MEDIUM} summary: Show condensed GDD overview\n"
+            f"[{self.theme.TEXT_DIM}]Essential for GDD-First workflow in game development[/{self.theme.TEXT_DIM}]",
+            "/gdd create\n/gdd view\n/gdd summary"
+        )
+        game_commands.add_row(
+            "/assets [type]",
+            f"List and manage game assets:\n"
+            f"{self.deco.DOT_MEDIUM} No args: List all detected game assets\n"
+            f"{self.deco.DOT_MEDIUM} With type: Filter by asset type (sprite, audio, model, etc.)\n"
+            f"{self.deco.DOT_MEDIUM} Shows asset paths, sizes, and usage information\n"
+            f"[{self.theme.TEXT_DIM}]Helps track sprites, audio, models, and other game resources[/{self.theme.TEXT_DIM}]",
+            "/assets\n/assets sprite\n/assets audio"
+        )
+        
+        self.console.print(game_commands)
         self.console.print()
         
         # Session management
@@ -249,7 +301,8 @@ class CommandHandler:
             f"[{self.theme.PINK_SOFT}]{self.deco.CHEVRON_RIGHT} Multi-line[/{self.theme.PINK_SOFT}]  Use a trailing \\ or triple quotes to enter multi-line text.\n"
             f"[{self.theme.PINK_SOFT}]{self.deco.CHEVRON_RIGHT} Interrupt[/{self.theme.PINK_SOFT}]  Ctrl+C once cancels input; twice exits the program.\n"
             f"[{self.theme.PINK_SOFT}]{self.deco.CHEVRON_RIGHT} History[/{self.theme.PINK_SOFT}]  Use ↑/↓ to browse input history.\n"
-            f"[{self.theme.PINK_SOFT}]{self.deco.CHEVRON_RIGHT} Completion[/{self.theme.PINK_SOFT}]  Type /command to see available completions.",
+            f"[{self.theme.PINK_SOFT}]{self.deco.CHEVRON_RIGHT} Completion[/{self.theme.PINK_SOFT}]  Type /command to see available completions.\n"
+            f"[{self.theme.PINK_SOFT}]{self.deco.CHEVRON_RIGHT} Tools[/{self.theme.PINK_SOFT}]  Type tools (or /tools) to list all available tools.",
             border_style=self.theme.BORDER_PRIMARY,
             padding=(0, 2),
             box=box.ROUNDED
@@ -471,6 +524,358 @@ class CommandHandler:
                         self.app['reinit_agent']()
             except (ValueError, IndexError):
                 self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid selection[/{self.theme.CORAL_SOFT}]")
+        
+        return True
+
+    def cmd_mode(self, args: str) -> bool:
+        """Quickly switch modes or display current mode and available modes"""
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]")
+            return True
+
+        config = config_manager.load()
+        mode = args.strip()
+        
+        # Available modes
+        available_modes = [
+            "reverie",
+            "reverie-gamer",
+            "spec-driven",
+            "spec-vibe",
+            "writer",
+            "reverie-ant"
+        ]
+        
+        # If no mode specified, show current mode and available modes
+        if not mode:
+            current_mode = config.mode or "reverie"
+            
+            self.console.print()
+            self.console.print(Panel(
+                f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Mode Configuration {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]",
+                border_style=self.theme.BORDER_PRIMARY,
+                box=box.ROUNDED,
+                padding=(0, 2)
+            ))
+            self.console.print()
+            
+            # Current mode
+            self.console.print(f"[bold {self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT} Current Mode:[/bold {self.theme.BLUE_SOFT}] [{self.theme.MINT_VIBRANT}]{current_mode}[/{self.theme.MINT_VIBRANT}]")
+            self.console.print()
+            
+            # Available modes table
+            table = Table(
+                title=f"[bold {self.theme.PINK_SOFT}]{self.deco.DIAMOND} Available Modes[/bold {self.theme.PINK_SOFT}]",
+                box=box.ROUNDED,
+                border_style=self.theme.BORDER_PRIMARY,
+                show_lines=True
+            )
+            table.add_column("Mode", style=f"bold {self.theme.BLUE_SOFT}", width=20)
+            table.add_column("Description", style=self.theme.TEXT_SECONDARY)
+            table.add_column("", style=self.theme.MINT_SOFT, width=5)
+            
+            mode_descriptions = {
+                "reverie": "General-purpose coding assistant with context engine",
+                "reverie-gamer": "Game development mode with specialized tools for RPG and game design",
+                "spec-driven": "Specification-driven development with structured workflows",
+                "spec-vibe": "Lightweight spec mode with flexible approach",
+                "writer": "Creative writing and documentation mode",
+                "reverie-ant": "Advanced task management with planning and execution phases"
+            }
+            
+            for mode_name in available_modes:
+                is_current = f"{self.deco.CHECK_FANCY}" if mode_name == current_mode else ""
+                description = mode_descriptions.get(mode_name, "")
+                table.add_row(mode_name, description, is_current)
+            
+            self.console.print(table)
+            self.console.print()
+            self.console.print(f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} Usage: /mode <mode-name> to switch modes[/{self.theme.TEXT_DIM}]")
+            self.console.print()
+            
+            return True
+        
+        # Validate mode
+        if mode not in available_modes:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid mode: {mode}[/{self.theme.CORAL_SOFT}]")
+            self.console.print(f"[{self.theme.TEXT_DIM}]Available modes: {', '.join(available_modes)}[/{self.theme.TEXT_DIM}]")
+            return True
+
+        # Switch mode
+        config.mode = mode
+        config_manager.save(config)
+
+        # Reinit agent to apply new mode
+        if self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+
+        self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Mode switched to {mode}[/{self.theme.MINT_VIBRANT}]")
+        return True
+
+    def cmd_gdd(self, args: str) -> bool:
+        """Create, view, or summarize GDD (Reverie-Gamer)"""
+        from ..tools.game_gdd_manager import GameGDDManagerTool
+        
+        args = args.strip().lower()
+        action = args if args in ["create", "view", "summary"] else "view"
+        
+        config_manager = self.app.get('config_manager')
+        project_root = Path(config_manager.project_root) if config_manager else Path.cwd()
+        
+        # Initialize the tool
+        tool = GameGDDManagerTool({"project_root": str(project_root)})
+        
+        # Default GDD path
+        gdd_path = "docs/GDD.md"
+        
+        if action == "create":
+            # Prompt for project details
+            self.console.print()
+            self.console.print(Panel(
+                f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Create Game Design Document {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]",
+                border_style=self.theme.BORDER_PRIMARY,
+                box=box.ROUNDED,
+                padding=(0, 2)
+            ))
+            self.console.print()
+            
+            project_name = Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Project Name",
+                default=project_root.name
+            )
+            
+            genre = Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Genre",
+                default="RPG"
+            )
+            
+            target_engine = Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Target Engine",
+                default="custom",
+                choices=["custom", "phaser", "pygame", "love2d", "godot", "unity", "unreal"]
+            )
+            
+            target_platform = Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Target Platform",
+                default="PC"
+            )
+            
+            is_rpg = Confirm.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Is this an RPG game?",
+                default=True
+            )
+            
+            # Call the tool
+            result = tool.execute(
+                action="create",
+                gdd_path=gdd_path,
+                project_name=project_name,
+                genre=genre,
+                target_engine=target_engine,
+                target_platform=target_platform,
+                is_rpg=is_rpg
+            )
+            
+            if result.success:
+                self.console.print()
+                self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} {result.output}[/{self.theme.MINT_VIBRANT}]")
+            else:
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} {result.error}[/{self.theme.CORAL_SOFT}]")
+            
+            return True
+        
+        elif action == "view":
+            # Call the tool to view GDD
+            result = tool.execute(action="view", gdd_path=gdd_path)
+            
+            if result.success:
+                from rich.markdown import Markdown
+                self.console.print()
+                self.console.print(Panel(
+                    Markdown(result.output),
+                    title=f"[bold {self.theme.PINK_SOFT}]{self.deco.CRYSTAL} Game Design Document[/bold {self.theme.PINK_SOFT}]",
+                    border_style=self.theme.BORDER_PRIMARY,
+                    box=box.ROUNDED,
+                    padding=(1, 2)
+                ))
+            else:
+                self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} {result.error}[/{self.theme.AMBER_GLOW}]")
+                self.console.print(f"[{self.theme.TEXT_DIM}]Use /gdd create to generate a new GDD.[/{self.theme.TEXT_DIM}]")
+            
+            return True
+        
+        elif action == "summary":
+            # Call the tool to generate summary
+            result = tool.execute(action="summary", gdd_path=gdd_path)
+            
+            if result.success:
+                self.console.print()
+                self.console.print(Panel(
+                    result.output,
+                    title=f"[bold {self.theme.PINK_SOFT}]{self.deco.CRYSTAL} GDD Summary[/bold {self.theme.PINK_SOFT}]",
+                    border_style=self.theme.BORDER_PRIMARY,
+                    box=box.ROUNDED,
+                    padding=(1, 2)
+                ))
+            else:
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} {result.error}[/{self.theme.CORAL_SOFT}]")
+            
+            return True
+        
+        return True
+
+    def cmd_assets(self, args: str) -> bool:
+        """List assets using the game asset tool with formatted table display"""
+        from ..tools.game_asset_manager import GameAssetManagerTool
+        
+        config_manager = self.app.get('config_manager')
+        project_root = config_manager.project_root if config_manager else Path.cwd()
+        tool = GameAssetManagerTool({"project_root": project_root})
+        
+        # Parse arguments - support /assets or /assets <type>
+        asset_type = args.strip().lower() if args.strip() else "all"
+        
+        # Validate asset type
+        valid_types = ["all", "sprite", "audio", "model", "animation"]
+        if asset_type not in valid_types:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid asset type: {asset_type}[/{self.theme.CORAL_SOFT}]")
+            self.console.print(f"[{self.theme.TEXT_DIM}]Valid types: {', '.join(valid_types)}[/{self.theme.TEXT_DIM}]")
+            return True
+        
+        # Execute the tool
+        result = tool.execute(action="list", asset_type=asset_type)
+        
+        if not result.success:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} {result.error}[/{self.theme.CORAL_SOFT}]")
+            return True
+        
+        # Display results in formatted table
+        self.console.print()
+        
+        # Get asset data from result
+        data = result.data or {}
+        
+        if asset_type == "all":
+            # Display all assets grouped by type
+            assets_by_type = data.get("assets", {})
+            total_count = data.get("total_count", 0)
+            
+            # Title panel
+            title_panel = Panel(
+                f"[bold {self.theme.PINK_SOFT}]{self.deco.CRYSTAL} Game Assets Overview {self.deco.CRYSTAL}[/bold {self.theme.PINK_SOFT}]\n"
+                f"[{self.theme.TEXT_SECONDARY}]Total: {total_count} asset(s)[/{self.theme.TEXT_SECONDARY}]",
+                border_style=self.theme.BORDER_PRIMARY,
+                box=box.ROUNDED,
+                padding=(0, 2)
+            )
+            self.console.print(title_panel)
+            self.console.print()
+            
+            # Display each asset type in a table
+            for atype in ["sprite", "audio", "model", "animation"]:
+                assets = assets_by_type.get(atype, [])
+                if not assets:
+                    continue
+                
+                # Create table for this asset type
+                table = Table(
+                    title=f"[bold {self.theme.BLUE_SOFT}]{self.deco.DIAMOND} {atype.upper()}S ({len(assets)})[/bold {self.theme.BLUE_SOFT}]",
+                    box=box.ROUNDED,
+                    border_style=self.theme.BORDER_PRIMARY,
+                    show_lines=False,
+                    title_justify="left"
+                )
+                table.add_column("Name", style=f"bold {self.theme.MINT_SOFT}", width=30)
+                table.add_column("Size", style=self.theme.TEXT_SECONDARY, justify="right", width=12)
+                table.add_column("Path", style=f"dim {self.theme.TEXT_DIM}", no_wrap=False)
+                
+                # Add rows (limit to first 10 for readability)
+                for asset in assets[:10]:
+                    name = asset.get("name", "")
+                    size = asset.get("size", 0)
+                    path = asset.get("path", "")
+                    
+                    # Format size
+                    if size < 1024:
+                        size_str = f"{size} B"
+                    elif size < 1024 * 1024:
+                        size_str = f"{size / 1024:.1f} KB"
+                    else:
+                        size_str = f"{size / (1024 * 1024):.2f} MB"
+                    
+                    table.add_row(
+                        f"{self.deco.DOT_MEDIUM} {name}",
+                        size_str,
+                        path
+                    )
+                
+                # Show "and X more" if there are more assets
+                if len(assets) > 10:
+                    table.add_row(
+                        f"[dim {self.theme.TEXT_DIM}]... and {len(assets) - 10} more[/dim {self.theme.TEXT_DIM}]",
+                        "",
+                        ""
+                    )
+                
+                self.console.print(table)
+                self.console.print()
+        
+        else:
+            # Display specific asset type
+            assets = data.get("assets", [])
+            count = data.get("count", 0)
+            
+            # Title panel
+            title_panel = Panel(
+                f"[bold {self.theme.PINK_SOFT}]{self.deco.CRYSTAL} {asset_type.upper()} Assets {self.deco.CRYSTAL}[/bold {self.theme.PINK_SOFT}]\n"
+                f"[{self.theme.TEXT_SECONDARY}]Found: {count} asset(s)[/{self.theme.TEXT_SECONDARY}]",
+                border_style=self.theme.BORDER_PRIMARY,
+                box=box.ROUNDED,
+                padding=(0, 2)
+            )
+            self.console.print(title_panel)
+            self.console.print()
+            
+            if not assets:
+                self.console.print(f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} No {asset_type} assets found.[/{self.theme.TEXT_DIM}]")
+                self.console.print()
+                return True
+            
+            # Create table
+            table = Table(
+                box=box.ROUNDED,
+                border_style=self.theme.BORDER_PRIMARY,
+                show_lines=True
+            )
+            table.add_column("#", style=f"dim {self.theme.TEXT_DIM}", width=5, justify="right")
+            table.add_column("Name", style=f"bold {self.theme.MINT_SOFT}", width=35)
+            table.add_column("Size", style=self.theme.TEXT_SECONDARY, justify="right", width=12)
+            table.add_column("Path", style=self.theme.TEXT_DIM, no_wrap=False)
+            
+            # Add rows
+            for idx, asset in enumerate(assets, 1):
+                name = asset.get("name", "")
+                size = asset.get("size", 0)
+                path = asset.get("path", "")
+                
+                # Format size
+                if size < 1024:
+                    size_str = f"{size} B"
+                elif size < 1024 * 1024:
+                    size_str = f"{size / 1024:.1f} KB"
+                else:
+                    size_str = f"{size / (1024 * 1024):.2f} MB"
+                
+                table.add_row(
+                    str(idx),
+                    f"{self.deco.DOT_MEDIUM} {name}",
+                    size_str,
+                    path
+                )
+            
+            self.console.print(table)
+            self.console.print()
         
         return True
     
@@ -758,7 +1163,7 @@ class CommandHandler:
         # Settings categories
         rules_manager = self.app.get('rules_manager')
         categories = [
-            {"name": "Mode", "key": "mode", "options": ["reverie", "Reverie-ant", "Reverie-Spec-driven", "spec-vibe", "writer"]},
+            {"name": "Mode", "key": "mode", "options": ["reverie", "reverie-gamer", "Reverie-ant", "Reverie-Spec-driven", "spec-vibe", "writer"]},
             {"name": "Active Model", "key": "active_model_index", "options": list(range(len(config.models)))},
             {"name": "Theme", "key": "theme", "options": ["default", "dark", "light", "ocean"]},
             {"name": "Auto Index", "key": "auto_index", "options": [True, False]},
@@ -1311,6 +1716,136 @@ class CommandHandler:
         self.console.print(f"[{self.theme.TEXT_DIM}]Showing last 20 operations.[/{self.theme.TEXT_DIM}]")
         
         return True
+
+    def cmd_workspace(self, args: str) -> bool:
+        """Manage workspace configuration mode for multi-workspace support"""
+        from rich.table import Table
+        
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]")
+            return True
+        
+        args = args.strip().lower()
+        
+        # Show current status
+        if not args or args == 'status':
+            is_workspace = config_manager.is_workspace_mode()
+            has_workspace = config_manager.has_workspace_config()
+            has_global = config_manager.has_global_config()
+            
+            self.console.print()
+            self.console.print(Panel(
+                f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Workspace Configuration Status {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]",
+                border_style=self.theme.BORDER_PRIMARY,
+                box=box.ROUNDED,
+                padding=(0, 2)
+            ))
+            self.console.print()
+            
+            table = Table(box=box.SIMPLE, show_header=False)
+            table.add_column("Setting", style=f"bold {self.theme.BLUE_SOFT}", width=30)
+            table.add_column("Value", style=self.theme.MINT_SOFT)
+            
+            mode_text = f"[{self.theme.MINT_SOFT}]Workspace Mode[/{self.theme.MINT_SOFT}]" if is_workspace else f"[{self.theme.PURPLE_MEDIUM}]Global Mode[/{self.theme.PURPLE_MEDIUM}]"
+            table.add_row("Current Mode", mode_text)
+            table.add_row("Workspace Config", f"[{self.theme.MINT_SOFT}]Exists[/{self.theme.MINT_SOFT}]" if has_workspace else f"[{self.theme.TEXT_DIM}]Not Found[/{self.theme.TEXT_DIM}]")
+            table.add_row("Global Config", f"[{self.theme.MINT_SOFT}]Exists[/{self.theme.MINT_SOFT}]" if has_global else f"[{self.theme.TEXT_DIM}]Not Found[/{self.theme.TEXT_DIM}]")
+            
+            self.console.print(table)
+            self.console.print()
+            self.console.print(f"[{self.theme.TEXT_DIM}]Available commands:[/{self.theme.TEXT_DIM}]")
+            self.console.print(f"  [{self.theme.BLUE_SOFT}]/workspace enable[/{self.theme.BLUE_SOFT}]  - Enable workspace-local configuration")
+            self.console.print(f"  [{self.theme.BLUE_SOFT}]/workspace disable[/{self.theme.BLUE_SOFT}] - Disable workspace-local configuration (use global)")
+            self.console.print(f"  [{self.theme.BLUE_SOFT}]/workspace copy-to-workspace[/{self.theme.BLUE_SOFT}] - Copy global config to workspace")
+            self.console.print(f"  [{self.theme.BLUE_SOFT}]/workspace copy-to-global[/{self.theme.BLUE_SOFT}] - Copy workspace config to global")
+            self.console.print()
+            
+            return True
+        
+        # Enable workspace mode
+        elif args == 'enable':
+            if config_manager.is_workspace_mode():
+                self.console.print(f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} Workspace mode is already enabled.[/{self.theme.TEXT_DIM}]")
+                return True
+            
+            # Check if workspace config exists
+            if not config_manager.has_workspace_config():
+                if not config_manager.has_global_config():
+                    self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} No configuration found. Please configure a model first.[/{self.theme.CORAL_SOFT}]")
+                    return True
+                
+                self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Workspace config not found. Copying from global config...[/{self.theme.AMBER_GLOW}]")
+                if not config_manager.copy_config_to_workspace():
+                    self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Failed to copy config to workspace.[/{self.theme.CORAL_SOFT}]")
+                    return True
+            
+            config_manager.set_workspace_mode(True)
+            config = config_manager.load()
+            config.use_workspace_config = True
+            config_manager.save(config)
+            
+            self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Workspace mode enabled![/{self.theme.MINT_VIBRANT}]")
+            self.console.print(f"[{self.theme.TEXT_DIM}]Configuration is now stored in: {config_manager.workspace_config_path}[/{self.theme.TEXT_DIM}]")
+            
+            # Reinit agent if needed
+            if self.app.get('reinit_agent'):
+                self.app['reinit_agent']()
+            
+            return True
+        
+        # Disable workspace mode
+        elif args == 'disable':
+            if not config_manager.is_workspace_mode():
+                self.console.print(f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} Workspace mode is already disabled.[/{self.theme.TEXT_DIM}]")
+                return True
+            
+            config_manager.set_workspace_mode(False)
+            config = config_manager.load()
+            config.use_workspace_config = False
+            config_manager.save(config)
+            
+            self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Workspace mode disabled![/{self.theme.MINT_VIBRANT}]")
+            self.console.print(f"[{self.theme.TEXT_DIM}]Configuration is now stored in: {config_manager.global_config_path}[/{self.theme.TEXT_DIM}]")
+            
+            # Reinit agent if needed
+            if self.app.get('reinit_agent'):
+                self.app['reinit_agent']()
+            
+            return True
+        
+        # Copy global config to workspace
+        elif args == 'copy-to-workspace':
+            if not config_manager.has_global_config():
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} No global configuration found.[/{self.theme.CORAL_SOFT}]")
+                return True
+            
+            if config_manager.copy_config_to_workspace():
+                self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Configuration copied to workspace![/{self.theme.MINT_VIBRANT}]")
+                self.console.print(f"[{self.theme.TEXT_DIM}]Workspace config: {config_manager.workspace_config_path}[/{self.theme.TEXT_DIM}]")
+            else:
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Failed to copy configuration to workspace.[/{self.theme.CORAL_SOFT}]")
+            
+            return True
+        
+        # Copy workspace config to global
+        elif args == 'copy-to-global':
+            if not config_manager.has_workspace_config():
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} No workspace configuration found.[/{self.theme.CORAL_SOFT}]")
+                return True
+            
+            if config_manager.copy_config_to_global():
+                self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Configuration copied to global![/{self.theme.MINT_VIBRANT}]")
+                self.console.print(f"[{self.theme.TEXT_DIM}]Global config: {config_manager.global_config_path}[/{self.theme.TEXT_DIM}]")
+            else:
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Failed to copy configuration to global.[/{self.theme.CORAL_SOFT}]")
+            
+            return True
+        
+        else:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Unknown workspace command: {args}[/{self.theme.CORAL_SOFT}]")
+            self.console.print(f"[{self.theme.TEXT_DIM}]Type /workspace for available commands.[/{self.theme.TEXT_DIM}]")
+            return True
 
     def cmd_exit(self, args: str) -> bool:
         """Exit the application with styled prompt"""

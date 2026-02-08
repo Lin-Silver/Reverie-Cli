@@ -27,7 +27,16 @@ from ..tools import (
     UserInputTool,
     ClarificationTool,
     TaskBoundaryTool,
-    NotifyUserTool
+    NotifyUserTool,
+    GameAssetManagerTool,
+    GameBalanceAnalyzerTool,
+    LevelDesignTool,
+    GameConfigEditorTool,
+    GameAssetPackerTool,
+    GameGDDManagerTool,
+    StoryDesignTool,
+    GameMathSimulatorTool,
+    GameStatsAnalyzerTool
 )
 
 
@@ -75,7 +84,16 @@ class ToolExecutor:
             UserInputTool,
             ClarificationTool,
             TaskBoundaryTool,
-            NotifyUserTool
+            NotifyUserTool,
+            GameAssetManagerTool,
+            GameBalanceAnalyzerTool,
+            LevelDesignTool,
+            GameConfigEditorTool,
+            GameAssetPackerTool,
+            GameGDDManagerTool,
+            StoryDesignTool,
+            GameMathSimulatorTool,
+            GameStatsAnalyzerTool
         ]
         
         for tool_class in tool_classes:
@@ -121,11 +139,16 @@ class ToolExecutor:
             return ToolResult.fail(f"Tool execution error: {str(e)}")
     
     def get_tool_schemas(self, mode: str = "reverie") -> List[Dict]:
-        """Get OpenAI-format schemas for all tools, filtered by mode"""
+        """
+        Get OpenAI-format schemas for all tools, filtered by mode.
+        
+        This method ensures that all tool schemas are properly validated
+        and safe for JSON serialization before returning them.
+        """
         schemas = []
         for name, tool in self._tools.items():
             # Filter task_manager in non-reverie modes
-            if name == "task_manager" and mode != "reverie":
+            if name == "task_manager" and mode not in ["reverie", "reverie-gamer", "Reverie-Gamer"]:
                 continue
             
             # Filter ask_clarification in non-writer modes
@@ -141,8 +164,35 @@ class ToolExecutor:
             # If we strictly follow, we hide it.
             if name == "task_manager" and mode in ["reverie-ant", "Reverie-ant"]:
                 continue
+
+            gamer_tools = {
+                "game_asset_manager",
+                "game_balance_analyzer",
+                "level_design",
+                "game_config_editor",
+                "game_asset_packer",
+                "game_gdd_manager",
+                "story_design",
+                "game_math_simulator",
+                "game_stats_analyzer",
+            }
+            if name in gamer_tools and mode not in ["reverie-gamer", "Reverie-Gamer"]:
+                continue
                 
-            schemas.append(tool.get_schema())
+            # Get schema and validate it
+            try:
+                schema = tool.get_schema()
+                # Validate that the schema can be serialized
+                import json
+                json.dumps(schema, ensure_ascii=False)
+                schemas.append(schema)
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Failed to get schema for tool {name}: {e}")
+                # Skip this tool rather than breaking the entire request
+                continue
+        
         return schemas
     
     def update_context(self, key: str, value: Any) -> None:

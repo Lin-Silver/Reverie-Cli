@@ -81,12 +81,21 @@ class UserInputTool(BaseTool):
         **Validates: Requirements 8.1-8.10**
         """
         from rich.console import Console
-        from rich.prompt import Prompt, Confirm
         from rich.panel import Panel
         from rich import box
         from ..cli.theme import THEME, DECO
         
-        console = Console()
+        # Use force_terminal=True to ensure proper input handling on Windows
+        # Try to get console from context if available (for shared instance)
+        console = self.context.get('console') if self.context else None
+        if not console:
+            console = Console(width=None, force_terminal=True)
+        
+        # Stop status line live display if it's running (to prevent input being overwritten)
+        get_status_live = self.context.get('get_status_live') if self.context else None
+        status_live = get_status_live() if get_status_live else None
+        if status_live:
+            status_live.stop()
         
         # Display the question in a prominent panel (Requirement 8.2)
         question_panel = Panel(
@@ -122,32 +131,42 @@ class UserInputTool(BaseTool):
                 user_input = self._get_multiline_input(console)
             else:
                 # Single-line input mode with proper pause (Requirements 8.1, 8.3)
-                prompt_text = f"[{THEME.PURPLE_SOFT}]{DECO.CHEVRON_RIGHT} Your response[/{THEME.PURPLE_SOFT}]"
-                user_input = Prompt.ask(
-                    prompt_text,
-                    default=default_value if default_value else "",
-                    console=console
-                )
-            
-            # Input validation (Requirement 8.5)
-            if not user_input or user_input.strip() == "":
+                # Use console.input() directly for reliable input handling on all platforms
+                prompt_text = f"[{THEME.PURPLE_SOFT}]{DECO.CHEVRON_RIGHT}[/{THEME.PURPLE_SOFT}] "
                 if default_value:
+                    prompt_text += f"[{THEME.TEXT_DIM}](default: {default_value})[/{THEME.TEXT_DIM}] "
+                prompt_text += f"[bold {THEME.TEXT_PRIMARY}]›[bold {THEME.TEXT_PRIMARY}] "
+                
+                console.print(prompt_text, end="")
+                user_input = console.input("")
+                
+                # Handle default value for empty input
+                if not user_input.strip() and default_value:
                     user_input = default_value
                     console.print(
                         f"[{THEME.TEXT_DIM}]{DECO.DOT_MEDIUM} Using default value: {default_value}[/{THEME.TEXT_DIM}]"
                     )
-                else:
-                    # Empty input without default - ask again
-                    console.print(
-                        f"[{THEME.AMBER_GLOW}]! Empty input provided. Please provide a response.[/{THEME.AMBER_GLOW}]"
-                    )
-                    return self.execute(question, reason, multiline, default_value, allow_cancel)
+            
+            # Input validation (Requirement 8.5)
+            if not user_input or user_input.strip() == "":
+                # Empty input without default - ask again
+                console.print(
+                    f"[{THEME.AMBER_GLOW}]! Empty input provided. Please provide a response.[/{THEME.AMBER_GLOW}]"
+                )
+                # Restart status live before recursive call
+                if status_live:
+                    status_live.start()
+                return self.execute(question, reason, multiline, default_value, allow_cancel)
             
             # Success message (Requirement 8.4)
             console.print(
                 f"[{THEME.MINT_SOFT}]{DECO.CHECK_FANCY} Input received[/{THEME.MINT_SOFT}]"
             )
             console.print()  # Add spacing for clean rendering (Requirement 8.9)
+            
+            # Restart status live after successful input
+            if status_live:
+                status_live.start()
             
             return ToolResult.ok(
                 f"User response: {user_input}",
@@ -156,6 +175,10 @@ class UserInputTool(BaseTool):
         
         except KeyboardInterrupt:
             # Handle cancellation (Requirements 8.7, 8.8)
+            # Restart status live before handling cancellation
+            if status_live:
+                status_live.start()
+            
             if allow_cancel:
                 console.print(
                     f"\n[{THEME.CORAL_SOFT}]{DECO.CROSS_FANCY} Input cancelled by user[/{THEME.CORAL_SOFT}]"
@@ -169,10 +192,17 @@ class UserInputTool(BaseTool):
                 console.print(
                     f"\n[{THEME.AMBER_GLOW}]! Cancellation not allowed. Please provide input.[/{THEME.AMBER_GLOW}]"
                 )
+                # Restart status live before recursive call
+                if status_live:
+                    status_live.start()
                 return self.execute(question, reason, multiline, default_value, allow_cancel)
         
         except Exception as e:
             # Handle unexpected errors gracefully (Requirement 8.8)
+            # Restart status live before returning
+            if status_live:
+                status_live.start()
+            
             console.print(
                 f"[{THEME.CORAL_VIBRANT}]{DECO.CROSS_FANCY} Error getting input: {str(e)}[/{THEME.CORAL_VIBRANT}]"
             )
@@ -186,6 +216,7 @@ class UserInputTool(BaseTool):
         
         **Validates: Requirement 8.6**
         """
+        import sys
         from ..cli.theme import THEME, DECO
         
         console.print(
@@ -195,10 +226,19 @@ class UserInputTool(BaseTool):
         lines = []
         try:
             while True:
-                line = input()
-                lines.append(line)
-        except EOFError:
-            # Ctrl+D (Unix) or Ctrl+Z (Windows) pressed
+                # Use console.input() for proper terminal handling on Windows
+                # This ensures the input is properly captured in all terminal environments
+                try:
+                    if sys.platform == 'win32':
+                        # On Windows, use sys.stdout.flush() to ensure prompt is displayed
+                        sys.stdout.flush()
+                    line = console.input("")
+                    lines.append(line)
+                except EOFError:
+                    # Ctrl+D (Unix) or Ctrl+Z (Windows) pressed
+                    break
+        except KeyboardInterrupt:
+            # Allow Ctrl+C to cancel multi-line input
             pass
         
         return "\n".join(lines)

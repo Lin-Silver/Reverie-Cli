@@ -99,25 +99,32 @@ class InputHandler:
                 
                 # Paste detection: Check if more input is immediately available in buffer
                 # This handles "convert to one line input" for pasted content
+                # Only trigger if there's significant buffered content (more than just the enter key)
                 if not in_multiline and msvcrt.kbhit():
-                    pasted_lines = [line]
-                    while msvcrt.kbhit():
-                        try:
-                            # Read subsequent lines without prompting
-                            pasted_lines.append(input(""))
-                        except (EOFError, KeyboardInterrupt):
-                            break
+                    # Small delay to let the buffer fill if it's a real paste
+                    import time
+                    time.sleep(0.05)
                     
-                    # Combine pasted lines into one single line input
-                    # Replace newlines with spaces as requested ("convert to one line")
-                    combined_input = " ".join(pasted_lines)
-                    
-                    # If we detected a paste, we usually return immediately unless it ended with continuation char
-                    if combined_input.strip():
-                        self.history.append(combined_input)
-                        self.history_index = len(self.history)
+                    # Only treat as paste if there's still content after the delay
+                    if msvcrt.kbhit():
+                        pasted_lines = [line]
+                        while msvcrt.kbhit():
+                            try:
+                                # Read subsequent lines without prompting
+                                pasted_lines.append(input(""))
+                            except (EOFError, KeyboardInterrupt):
+                                break
+                        
+                        # Combine pasted lines into one single line input
+                        # Replace newlines with spaces as requested ("convert to one line")
+                        combined_input = " ".join(pasted_lines)
+                        
+                        # If we detected a paste, we usually return immediately unless it ended with continuation char
+                        if combined_input.strip():
+                            self.history.append(combined_input)
+                            self.history_index = len(self.history)
+                            return combined_input
                         return combined_input
-                    return combined_input
                 
                 if '"""' in line or "'''" in line:
                     quote = '"""' if '"""' in line else "'''"

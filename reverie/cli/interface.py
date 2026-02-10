@@ -231,6 +231,7 @@ class ReverieInterface:
                 from rich.live import Live
                 status_live = Live(self.status_line, console=self.console, refresh_per_second=1, transient=True)
                 status_live.start()
+                self._status_live = status_live  # Store reference for user input tool
             
             try:
                 import msvcrt
@@ -402,6 +403,11 @@ class ReverieInterface:
         self.agent.config = config
         # Also inject config_manager into tool context for context threshold check
         self.agent.tool_executor.update_context('config_manager', self.config_manager)
+        # Inject console into tool context for proper input handling (especially on Windows)
+        self.agent.tool_executor.update_context('console', self.console)
+        # Inject status_live control for user input (will be set during _process_message)
+        self._status_live = None
+        self.agent.tool_executor.update_context('get_status_live', lambda: self._status_live)
         self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY}[/{self.theme.MINT_VIBRANT}] [{self.theme.MINT_SOFT}]Agent ready ({model.model_display_name})[/{self.theme.MINT_SOFT}]")
 
     def _init_session(self) -> None:

@@ -15,7 +15,7 @@ if readme_path.exists():
 
 setup(
     name="reverie-cli",
-    version="2.0.0",
+    version="2.0.1",
     author="Raiden",
     author_email="raiden@reverie.dev",
     description="World-Class Context Engine Coding Assistant",

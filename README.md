@@ -127,6 +127,53 @@ Reverie supports two configuration modes:
 
 See [WORKSPACE_CONFIG.md](WORKSPACE_CONFIG.md) for detailed documentation on multi-workspace configuration.
 
+### Text-to-Image Configuration (v2.0.1)
+
+Reverie now supports a built-in `text_to_image` tool (available in all modes) that calls `Comfy/generate_image.py`.
+
+Add this section to your `config.json`:
+
+```json
+"tti-models": [
+  {
+    "path": "Comfy/models/t2i/bluePencilXL_v700.safetensors",
+    "display_name": "blue-pencil-xl",
+    "introduction": "General illustration model"
+  },
+  {
+    "path": "D:/AI/models/another_model.safetensors",
+    "display_name": "another-model",
+    "introduction": ""
+  }
+],
+"text_to_image": {
+  "enabled": true,
+  "python_executable": "",
+  "script_path": "Comfy/generate_image.py",
+  "output_dir": ".",
+  "models": [],
+  "default_model_display_name": "blue-pencil-xl"
+}
+```
+
+`tti-models` is the top-level editable model list. On load/save, Reverie automatically syncs `tti-models` and `text_to_image.models`.
+`models[].path` supports both relative paths (relative to project root/config directory) and absolute paths.
+`text_to_image.output_dir` defaults to project root (`"."`).
+When calling `text_to_image(action="generate")`, `output_path` should be a relative path under project root.
+If `python_executable` is empty, Reverie uses the current Python (dev mode) or discovers `python/py` from PATH (packaged exe mode).
+
+When building `reverie.exe` with `build.bat`, required runtime assets for text-to-image (`generate_image.py` and `embedded_comfy.b64`) are embedded into the executable bundle path automatically. You do not need to keep a separate `Comfy` folder next to `reverie.exe` for these two files.
+
+### Optional TTI Dependencies
+
+If you want to run `/tti` image generation in environments without a prepared Comfy Python environment, install optional dependencies manually:
+
+```bash
+pip install -r requirements-tti.txt
+```
+
+These dependencies are intentionally kept separate from the main project requirements.
+
 ## CLI Commands
 
 | Command | Description |
@@ -139,6 +186,9 @@ See [WORKSPACE_CONFIG.md](WORKSPACE_CONFIG.md) for detailed documentation on mul
 | `/history [limit]` | View conversation history |
 | `/clear` | Clear the screen |
 | `/index` | Re-index the codebase |
+| `/tti models` | Show configured TTI models and interactively select default model |
+| `/tti add` | Add a new TTI model entry (`path`, `display_name`, `introduction`) |
+| `/tti <prompt>` | Generate an image with default TTI model and default parameters |
 | `/exit` | Exit Reverie |
 
 ## Architecture

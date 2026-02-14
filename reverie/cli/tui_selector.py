@@ -396,12 +396,12 @@ class ModelSelector(TUISelector):
             )
             for model in models
         ]
-        
-        # Set current model as selected
+
+        current_index = 0
         if current_model:
             for i, item in enumerate(items):
                 if item.id == current_model:
-                    self.selected_index = i
+                    current_index = i
                     break
         
         super().__init__(
@@ -412,6 +412,8 @@ class ModelSelector(TUISelector):
             allow_cancel=True,
             show_descriptions=True
         )
+        self.selected_index = current_index
+        self.scroll_offset = max(0, self.selected_index - self.max_visible + 1)
 
 
 class SettingsSelector(TUISelector):

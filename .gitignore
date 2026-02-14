@@ -2,6 +2,7 @@
 build/
 dist/
 search-mcp/
+Comfy/
 
 reverie_cli.egg-info/
 *.exe

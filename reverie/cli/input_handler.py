@@ -31,6 +31,7 @@ COMMANDS = {
     '/clear': 'Clear the screen',
     '/index': 'Re-index the codebase',
     '/setting': 'Interactive settings menu',
+    '/tti': 'Text-to-image: /tti models, /tti add, or /tti <prompt>',
     '/gdd': 'Create or view the GDD',
     '/assets': 'List game assets',
     '/rules': 'Manage custom rules',
@@ -77,7 +78,7 @@ class InputHandler:
         
         Multiline modes:
         - Paste detection: Rapidly entered lines are combined into one line
-        - End line with \ to continue on next line
+        - End line with \\ to continue on next line
         - Use triple quotes for block input
         
         Returns None if user wants to exit (Ctrl+C twice)

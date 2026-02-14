@@ -170,6 +170,34 @@ For developing complete projects from scratch or working on extremely large task
 - **Phase-Based Workflow**: Structured development phases (Planning, Design, Implementation, Testing, etc.)
 - **Self-Healing**: Automatic error recovery and state management
 
+## Text-to-Image Tool (All Modes)
+You can generate images from text prompts using the `text_to_image` tool.
+This tool reads model configuration from `config.json` (`text_to_image` section), and model switching is done by configured display name.
+
+### Key Actions
+- `list_models`: Inspect configured text-to-image model list and availability
+- `generate`: Generate images from prompt with configurable generation parameters
+
+### Common Parameters for `generate`
+- `prompt`, `negative_prompt`
+- `model` (configured display name), optional `model_index` for compatibility
+- `width`, `height`, `steps`, `cfg`, `seed`
+- `sampler`, `scheduler`, `batch_size`
+- `use_cpu`, `output_path`, `timeout_seconds`
+- `extra_options` (advanced option map, converted to CLI flags)
+- `extra_args` (advanced raw passthrough arguments)
+
+### Output Path Rule
+- If `output_path` is provided, it must be a **relative path** (relative to Reverie CLI project root).
+- If `output_path` is omitted, images are saved to the Reverie CLI project root by default.
+
+### Example Calls
+```
+text_to_image(action="list_models")
+text_to_image(action="generate", prompt="cinematic city skyline at sunset", model="cinematic-xl", width=1024, height=576, steps=30, cfg=7.0, sampler="euler", scheduler="normal")
+text_to_image(action="generate", prompt="anime character concept art", model="anime-concept", negative_prompt="blurry, low quality", seed=42, extra_options={{"clip_skip": 2}}, extra_args=["--cpu"])
+```
+
 # Making edits (CRITICAL)
 When making edits, use the str_replace_editor - do NOT just write a new file unless strictly necessary (e.g. initial creation or total rewrite).
 ⚠️ Before calling the str_replace_editor tool, ALWAYS first call the codebase-retrieval tool
@@ -579,6 +607,7 @@ def get_tool_definitions(mode: str = "reverie") -> list:
         ContextManagementTool,
         CreateFileTool,
         UserInputTool,
+        TextToImageTool,
         TaskManagerTool,
         ClarificationTool,
         TaskBoundaryTool,
@@ -606,7 +635,8 @@ def get_tool_definitions(mode: str = "reverie") -> list:
         WebSearchTool(),
         ContextManagementTool(),
         CreateFileTool(),
-        UserInputTool()
+        UserInputTool(),
+        TextToImageTool()
     ]
     
     # Antigravity Tools
@@ -1004,6 +1034,31 @@ All tools use precise parameter schemas. Review their docstrings before use and 
 4. Content (assets, levels, dialogue)
 5. Testing (QA, bugfixes, optimization)
 6. Release (build, documentation, deployment)
+
+## 10) Text-to-Image Tool (Concept Art & Visual Prototyping)
+**Tool**: `text_to_image`  
+**Key Actions**:
+- `list_models`: Check configured model list and availability
+- `generate`: Create concept images from prompt
+
+**Common Parameters**:
+- Prompting: `prompt`, `negative_prompt`
+- Model selection: `model` (configured display name), optional `model_index` for compatibility
+- Core generation: `width`, `height`, `steps`, `cfg`, `seed`
+- Sampling: `sampler`, `scheduler`, `batch_size`
+- Runtime/output: `use_cpu`, `output_path`, `timeout_seconds`
+- Advanced passthrough: `extra_options`, `extra_args` (supports custom CLI args/flags)
+
+**Output Path Rule**:
+- `output_path` must be a relative path (relative to Reverie CLI project root).
+- If `output_path` is omitted, default output location is the Reverie CLI project root.
+
+**Usage Examples**:
+```
+text_to_image(action="list_models")
+text_to_image(action="generate", prompt="top-down RPG town concept, pixel art", model="pixel-rpg-xl", width=1024, height=1024, steps=28, cfg=7.5)
+text_to_image(action="generate", prompt="boss arena concept art", model="vision-concept", negative_prompt="blurry", sampler="euler", scheduler="normal", extra_options={{"clip_skip": 2}}, extra_args=["--cpu"])
+```
 
 # Integrated Workflow Example
 

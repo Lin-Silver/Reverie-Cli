@@ -51,6 +51,7 @@ class CommandHandler:
             'setting': self.cmd_setting,
             'rules': self.cmd_rules,
             'workspace': self.cmd_workspace,
+            'tti': self.cmd_tti,
             'exit': self.cmd_exit,
             'quit': self.cmd_exit,
             'rollback': self.cmd_rollback,
@@ -205,7 +206,16 @@ class CommandHandler:
             "Re-index the codebase: scan files, extract symbols and dependencies. Use after structure changes.",
             "/index"
         )
-        
+        tool_commands.add_row(
+            "/tti",
+            f"Text-to-image command:\n"
+            f"{self.deco.DOT_MEDIUM} /tti models: list TTI models and choose default\n"
+            f"{self.deco.DOT_MEDIUM} /tti add: add a new TTI model\n"
+            f"{self.deco.DOT_MEDIUM} /tti <prompt>: generate image using default model and default parameters\n"
+            f"{self.deco.DOT_MEDIUM} Supports both /tti and /TTI (case-insensitive)",
+            "/tti models\n/tti add\n/tti <cinematic city skyline at sunset>"
+        )
+
         self.console.print(tool_commands)
         self.console.print()
         
@@ -318,8 +328,30 @@ class CommandHandler:
         if not agent:
             self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Agent not initialized[/{self.theme.CORAL_SOFT}]")
             return True
-            
-        tools = agent.tool_executor._tools
+
+        # Resolve current mode for tool visibility filtering.
+        mode = getattr(agent, "mode", "reverie") or "reverie"
+        config_manager = self.app.get('config_manager')
+        if config_manager:
+            try:
+                config = config_manager.load()
+                if getattr(config, "mode", None):
+                    mode = config.mode
+            except Exception:
+                # Fall back to agent mode if config loading fails.
+                pass
+
+        tool_schemas = agent.tool_executor.get_tool_schemas(mode=mode)
+        visible_tool_names = {
+            schema.get("function", {}).get("name")
+            for schema in tool_schemas
+            if schema.get("function", {}).get("name")
+        }
+        tools = {
+            name: tool
+            for name, tool in agent.tool_executor._tools.items()
+            if name in visible_tool_names
+        }
         
         table = Table(
             title=f"[bold {self.theme.PINK_SOFT}]{self.deco.CRYSTAL} Available Tools[/bold {self.theme.PINK_SOFT}]",
@@ -333,8 +365,249 @@ class CommandHandler:
             # Get first line of description
             desc = tool.description.strip().split('\n')[0]
             table.add_row(f"{self.deco.DOT_MEDIUM} {name}", desc)
-            
+        
         self.console.print(table)
+        return True
+
+    def _load_tti_config(self):
+        """Load normalized TTI configuration from config manager."""
+        from ..config import (
+            default_text_to_image_config,
+            normalize_tti_models,
+            resolve_tti_default_display_name,
+        )
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            return None
+
+        config = config_manager.load()
+        raw_tti = config.text_to_image if isinstance(config.text_to_image, dict) else default_text_to_image_config()
+        tti_cfg = dict(raw_tti)
+        models = normalize_tti_models(
+            tti_cfg.get("models", []),
+            legacy_model_paths=tti_cfg.get("model_paths", []),
+        )
+        default_display_name = resolve_tti_default_display_name(tti_cfg)
+        return config_manager, config, tti_cfg, models, default_display_name
+
+    def cmd_tti(self, args: str) -> bool:
+        """
+        Text-to-image CLI command.
+
+        Supported:
+        - /tti models      -> list TTI models and pick default model
+        - /tti add         -> add a TTI model to config
+        - /tti <prompt>    -> generate one image with default model/default params
+        """
+        raw = args.strip()
+        if not raw:
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} "
+                f"Usage: /tti models OR /tti add OR /tti <your prompt>"
+                f"[/{self.theme.AMBER_GLOW}]"
+            )
+            return True
+
+        if raw.lower() == "models":
+            return self._cmd_tti_models()
+        if raw.lower() == "add":
+            return self._cmd_tti_add()
+
+        prompt = raw
+        if prompt.startswith("<") and prompt.endswith(">") and len(prompt) >= 2:
+            prompt = prompt[1:-1].strip()
+        if not prompt:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Empty prompt. Use: /tti <your prompt>[/{self.theme.CORAL_SOFT}]")
+            return True
+
+        from ..tools import TextToImageTool
+
+        context = {"project_root": Path.cwd()}
+        loaded = self._load_tti_config()
+        if loaded:
+            config_manager, _, _, _, _ = loaded
+            context["project_root"] = Path(config_manager.project_root)
+            context["config_manager"] = config_manager
+
+        tool = TextToImageTool(context)
+        with self.console.status(f"[{self.theme.PURPLE_SOFT}]{self.deco.SPARKLE} Generating image...[/{self.theme.PURPLE_SOFT}]"):
+            result = tool.execute(action="generate", prompt=prompt)
+
+        if result.success:
+            self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} TTI generation finished.[/{self.theme.MINT_VIBRANT}]")
+            if result.output:
+                self.console.print(result.output)
+            if result.error:
+                self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} {result.error}[/{self.theme.AMBER_GLOW}]")
+        else:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} TTI generation failed: {result.error}[/{self.theme.CORAL_SOFT}]")
+        return True
+
+    def _cmd_tti_add(self) -> bool:
+        """Interactively add a new TTI model configuration entry."""
+        loaded = self._load_tti_config()
+        if not loaded:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]")
+            return True
+
+        from ..config import normalize_tti_models, sanitize_tti_path
+
+        config_manager, config, tti_cfg, models, _ = loaded
+
+        self.console.print()
+        self.console.print(Panel(
+            f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Add TTI Model {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]",
+            border_style=self.theme.BORDER_PRIMARY,
+            box=box.ROUNDED,
+            padding=(0, 2)
+        ))
+        self.console.print()
+
+        try:
+            model_path = Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Model path (absolute or relative)"
+            ).strip()
+            model_path = sanitize_tti_path(model_path)
+            if not model_path:
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Model path cannot be empty.[/{self.theme.CORAL_SOFT}]")
+                return True
+
+            suggested_name = Path(model_path).stem.strip() or "tti-model"
+            display_name = Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Display name",
+                default=suggested_name
+            ).strip()
+            if not display_name:
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Display name cannot be empty.[/{self.theme.CORAL_SOFT}]")
+                return True
+
+            introduction = Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Introduction (optional)",
+                default=""
+            )
+
+            model_path_key = model_path.replace("\\", "/").strip().lower()
+            existing_by_path = any(
+                sanitize_tti_path(m.get("path", "")).replace("\\", "/").strip().lower() == model_path_key
+                for m in models
+            )
+            existing_by_name = any(m.get("display_name", "").strip().lower() == display_name.lower() for m in models)
+            if existing_by_path:
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} A model with the same path already exists.[/{self.theme.CORAL_SOFT}]")
+                return True
+            if existing_by_name:
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} A model with the same display name already exists.[/{self.theme.CORAL_SOFT}]")
+                return True
+
+            updated_models = models + [{
+                "path": model_path,
+                "display_name": display_name,
+                "introduction": introduction or "",
+            }]
+            normalized_models = normalize_tti_models(updated_models)
+
+            tti_cfg["models"] = normalized_models
+
+            # If there is no default yet, or user wants it, make the new model default.
+            current_default = str(tti_cfg.get("default_model_display_name", "")).strip()
+            set_default = not current_default
+            if current_default:
+                set_default = Confirm.ask(
+                    f"Set '{display_name}' as default TTI model?",
+                    default=False
+                )
+            if set_default:
+                default_name = display_name
+                for item in normalized_models:
+                    item_path_key = sanitize_tti_path(item.get("path", "")).replace("\\", "/").strip().lower()
+                    if item_path_key == model_path_key:
+                        default_name = item.get("display_name", display_name)
+                        break
+                tti_cfg["default_model_display_name"] = default_name
+
+            tti_cfg.pop("model_paths", None)
+            tti_cfg.pop("default_model_index", None)
+            config.text_to_image = tti_cfg
+            config_manager.save(config)
+
+            self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Added TTI model: {display_name}[/{self.theme.MINT_VIBRANT}]")
+            if set_default:
+                self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Default TTI model updated.[/{self.theme.MINT_VIBRANT}]")
+
+            # Rebuild prompt context to include the latest TTI model list.
+            if self.app.get('reinit_agent'):
+                self.app['reinit_agent']()
+
+        except KeyboardInterrupt:
+            self.console.print()
+            self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Cancelled.[/{self.theme.AMBER_GLOW}]")
+
+        return True
+
+    def _cmd_tti_models(self) -> bool:
+        """Show TTI model selector and set default model."""
+        loaded = self._load_tti_config()
+        if not loaded:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]")
+            return True
+
+        config_manager, config, tti_cfg, models, default_display_name = loaded
+
+        if not models:
+            self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} No TTI models configured in config.json.[/{self.theme.AMBER_GLOW}]")
+            return True
+
+        from .tui_selector import ModelSelector, SelectorAction
+
+        models_data = []
+        current_model_id = None
+        for i, model in enumerate(models):
+            intro = model.get("introduction", "")
+            intro_text = intro if intro else "(empty introduction)"
+            models_data.append({
+                "id": str(i),
+                "name": model["display_name"],
+                "description": f"{model['path']} • {intro_text}",
+                "model": model,
+            })
+            if model["display_name"].lower() == default_display_name.lower():
+                current_model_id = str(i)
+
+        selector = ModelSelector(
+            console=self.console,
+            models=models_data,
+            current_model=current_model_id,
+        )
+        result = selector.run()
+
+        if result.action != SelectorAction.SELECT or not result.selected_item:
+            return True
+
+        try:
+            selected_idx = int(result.selected_item.id)
+        except (TypeError, ValueError):
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid model selection.[/{self.theme.CORAL_SOFT}]")
+            return True
+
+        if selected_idx < 0 or selected_idx >= len(models):
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid model index.[/{self.theme.CORAL_SOFT}]")
+            return True
+
+        selected_name = models[selected_idx]["display_name"]
+        tti_cfg["models"] = models
+        tti_cfg["default_model_display_name"] = selected_name
+        tti_cfg.pop("model_paths", None)
+        tti_cfg.pop("default_model_index", None)
+        config.text_to_image = tti_cfg
+        config_manager.save(config)
+
+        self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Default TTI model set to: {selected_name}[/{self.theme.MINT_VIBRANT}]")
+
+        # Rebuild agent prompt so model context includes latest TTI default/meta.
+        if self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+
         return True
 
     def cmd_status(self, args: str) -> bool:
@@ -1163,7 +1436,7 @@ class CommandHandler:
         # Settings categories
         rules_manager = self.app.get('rules_manager')
         categories = [
-            {"name": "Mode", "key": "mode", "options": ["reverie", "reverie-gamer", "Reverie-ant", "Reverie-Spec-driven", "spec-vibe", "writer"]},
+            {"name": "Mode", "key": "mode", "options": ["reverie", "reverie-gamer", "reverie-ant", "spec-driven", "spec-vibe", "writer"]},
             {"name": "Active Model", "key": "active_model_index", "options": list(range(len(config.models)))},
             {"name": "Theme", "key": "theme", "options": ["default", "dark", "light", "ocean"]},
             {"name": "Auto Index", "key": "auto_index", "options": [True, False]},

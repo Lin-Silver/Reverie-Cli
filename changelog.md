@@ -1,3 +1,32 @@
+## 🚀 Reverie CLI v2.0.1 — Text-to-Image Integration & Stability Fixes
+
+**Release Date:** 2026-02-13
+
+### 🖼️ Text-to-Image Tool (All Modes)
+* Added new `text_to_image` tool, available across all modes
+* Integrated local generation flow through `Comfy/generate_image.py`
+* Added support to list configured text-to-image models from `config.json`
+* Added support to generate images using:
+  - Configured model index
+  - Explicit absolute model path
+  - Explicit relative model path
+
+### ⚙️ Config Upgrade
+* `config.json` now includes `text_to_image` section with:
+  - `model_paths` list for multiple model files
+  - Runtime options (script path, Python executable, output directory, defaults)
+* Config migration now auto-fills missing `text_to_image` fields
+* Config schema version bumped to `2.0.1`
+* Build pipeline now embeds required text-to-image resources (`generate_image.py`, `embedded_comfy.b64`) into the EXE bundle path
+
+### 🐛 Logic Fixes
+* Fixed duplicate `UserInputTool` registration in tool export/executor lists
+* Fixed potential `NameError` in `Comfy/generate_image.py` when resolving fallback model paths
+* Unified mode values in settings menu to canonical names (`reverie-ant`, `spec-driven`)
+* Added advanced parameter passthrough support (`extra_options`, `extra_args`) for text-to-image generation
+
+---
+
 ## 🚀 Reverie CLI v2.0.0 — Reverie-Gamer Mode & Game Dev Toolchain
 
 **Release Date:** 2026-02-04

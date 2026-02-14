@@ -38,3 +38,4 @@ tree-sitter-css>=0.20.0
 pyinstaller>=6.0.0
 pillow
 numpy
+pyyaml

@@ -19,7 +19,184 @@ import shutil
 
 
 # Version info
-__version__ = "2.0.0"
+__version__ = "2.0.1"
+
+
+def default_text_to_image_config() -> Dict[str, Any]:
+    """Default configuration for text-to-image generation."""
+    return {
+        "enabled": True,
+        "python_executable": "",
+        "script_path": "Comfy/generate_image.py",
+        "output_dir": ".",
+        "models": [],
+        "default_model_display_name": "",
+        "default_width": 512,
+        "default_height": 512,
+        "default_steps": 20,
+        "default_cfg": 8.0,
+        "default_sampler": "euler",
+        "default_scheduler": "normal",
+        "default_negative_prompt": "",
+        "force_cpu": False,
+    }
+
+
+def sanitize_tti_path(path_value: Any) -> str:
+    """Normalize user-provided TTI path text (quotes/whitespace/escaped quotes)."""
+    raw = str(path_value or "").strip()
+    if not raw:
+        return ""
+
+    # Common case from copied JSON/Python literals: \"C:\path\model.safetensors\"
+    raw = raw.replace('\\"', '"').replace("\\'", "'")
+    # Also handle over-escaped wrappers like \\\"C:\path\\\"
+    raw = re.sub(r'^(\\+)(["\'])', r"\2", raw)
+    raw = re.sub(r'(\\+)(["\'])$', r"\2", raw)
+
+    # Remove wrapping quotes, including accidentally doubled wrappers.
+    for _ in range(3):
+        stripped = raw.strip()
+        if len(stripped) >= 2 and (
+            (stripped[0] == '"' and stripped[-1] == '"')
+            or (stripped[0] == "'" and stripped[-1] == "'")
+        ):
+            raw = stripped[1:-1]
+            continue
+
+        if stripped.startswith('"') or stripped.startswith("'"):
+            stripped = stripped[1:]
+        if stripped.endswith('"') or stripped.endswith("'"):
+            stripped = stripped[:-1]
+        raw = stripped
+        break
+
+    return raw.strip()
+
+
+def _tti_display_name_from_path(path: str, fallback_index: int) -> str:
+    """Build a readable display name from a model path."""
+    raw = sanitize_tti_path(path)
+    if not raw:
+        return f"tti-model-{fallback_index + 1}"
+
+    parsed = Path(raw)
+    stem = parsed.stem.strip()
+    if stem:
+        return stem
+
+    name = parsed.name.strip()
+    if name:
+        return name
+
+    return f"tti-model-{fallback_index + 1}"
+
+
+def normalize_tti_models(raw_models: Any, legacy_model_paths: Any = None) -> List[Dict[str, str]]:
+    """
+    Normalize TTI model configuration into:
+    [{"path": "...", "display_name": "...", "introduction": "..."}]
+    """
+    merged_entries: List[Any] = []
+
+    if isinstance(raw_models, list):
+        merged_entries.extend(raw_models)
+
+    if isinstance(legacy_model_paths, list):
+        merged_entries.extend(legacy_model_paths)
+
+    models: List[Dict[str, str]] = []
+    used_display_names = set()
+    seen_path_keys = set()
+
+    for idx, entry in enumerate(merged_entries):
+        path_value = ""
+        display_name = ""
+        introduction = ""
+
+        if isinstance(entry, str):
+            path_value = sanitize_tti_path(entry)
+        elif isinstance(entry, dict):
+            raw_path = (
+                entry.get("path")
+                or entry.get("model_path")
+                or entry.get("model")
+            )
+            if raw_path is not None:
+                path_value = sanitize_tti_path(raw_path)
+
+            raw_display = (
+                entry.get("display_name")
+                or entry.get("DisplayName")
+                or entry.get("name")
+            )
+            if raw_display is not None:
+                display_name = str(raw_display).strip()
+
+            raw_intro = entry.get("introduction")
+            if raw_intro is None:
+                raw_intro = entry.get("intro", "")
+            if raw_intro is not None:
+                introduction = str(raw_intro)
+        else:
+            continue
+
+        if not path_value:
+            continue
+
+        normalized_path_key = path_value.strip().replace("\\", "/").lower()
+        if normalized_path_key in seen_path_keys:
+            continue
+        seen_path_keys.add(normalized_path_key)
+
+        if not display_name:
+            display_name = _tti_display_name_from_path(path_value, idx)
+
+        base_name = display_name
+        candidate = base_name
+        suffix = 2
+        while candidate.lower() in used_display_names:
+            candidate = f"{base_name}_{suffix}"
+            suffix += 1
+        display_name = candidate
+        used_display_names.add(display_name.lower())
+
+        models.append(
+            {
+                "path": path_value,
+                "display_name": display_name,
+                "introduction": introduction,
+            }
+        )
+
+    return models
+
+
+def resolve_tti_default_display_name(text_to_image: Dict[str, Any]) -> str:
+    """Resolve default model display name from current/legacy fields."""
+    models = normalize_tti_models(
+        text_to_image.get("models", []),
+        legacy_model_paths=text_to_image.get("model_paths", []),
+    )
+    if not models:
+        return ""
+
+    raw_default = text_to_image.get("default_model_display_name", "")
+    if raw_default is not None:
+        default_name = str(raw_default).strip()
+        if default_name:
+            for item in models:
+                if item["display_name"].lower() == default_name.lower():
+                    return item["display_name"]
+
+    legacy_index = text_to_image.get("default_model_index", 0)
+    try:
+        idx = int(legacy_index)
+    except (TypeError, ValueError):
+        idx = 0
+    if idx < 0 or idx >= len(models):
+        idx = 0
+    return models[idx]["display_name"]
 
 
 def get_app_root() -> Path:
@@ -129,7 +306,7 @@ class Config:
     stream_responses: bool = True
     auto_index: bool = True
     show_status_line: bool = True
-    config_version: str = "2.0.0"  # Config file version for migration
+    config_version: str = "2.0.1"  # Config file version for migration
     
     # Workspace isolation settings
     use_workspace_config: bool = False  # If True, config is stored in workspace directory
@@ -139,6 +316,9 @@ class Config:
     api_initial_backoff: float = 1.0
     api_timeout: int = 60
     api_enable_debug_logging: bool = False
+    
+    # Text-to-image settings
+    text_to_image: Dict[str, Any] = field(default_factory=default_text_to_image_config)
     
     # Writer mode specific settings
     writer_mode: Dict[str, Any] = field(default_factory=lambda: {
@@ -179,8 +359,19 @@ class Config:
         return None
     
     def to_dict(self) -> dict:
+        text_to_image = dict(self.text_to_image) if isinstance(self.text_to_image, dict) else default_text_to_image_config()
+        text_to_image['models'] = normalize_tti_models(
+            text_to_image.get('models', []),
+            legacy_model_paths=text_to_image.get('model_paths', [])
+        )
+        text_to_image['default_model_display_name'] = resolve_tti_default_display_name(text_to_image)
+        text_to_image.pop('model_paths', None)
+        text_to_image.pop('default_model_index', None)
+        tti_models = text_to_image['models']
+
         return {
             'models': [m.to_dict() for m in self.models],
+            'tti-models': tti_models,
             'active_model_index': self.active_model_index,
             'mode': self.mode,
             'theme': self.theme,
@@ -196,6 +387,7 @@ class Config:
             'api_initial_backoff': self.api_initial_backoff,
             'api_timeout': self.api_timeout,
             'api_enable_debug_logging': self.api_enable_debug_logging,
+            'text_to_image': text_to_image,
         }
     
     @classmethod
@@ -204,6 +396,21 @@ class Config:
             ModelConfig.from_dict(m) 
             for m in data.get('models', [])
         ]
+        text_to_image = default_text_to_image_config()
+        loaded_t2i = data.get('text_to_image', data.get('tti', {}))
+        if isinstance(loaded_t2i, dict):
+            text_to_image.update(loaded_t2i)
+        top_level_tti_models = data.get('tti-models', None)
+        if top_level_tti_models is not None:
+            text_to_image['models'] = top_level_tti_models
+        text_to_image['models'] = normalize_tti_models(
+            text_to_image.get('models', []),
+            legacy_model_paths=text_to_image.get('model_paths', [])
+        )
+        text_to_image['default_model_display_name'] = resolve_tti_default_display_name(text_to_image)
+        text_to_image.pop('model_paths', None)
+        text_to_image.pop('default_model_index', None)
+
         return cls(
             models=models,
             active_model_index=data.get('active_model_index', 0),
@@ -241,12 +448,13 @@ class Config:
                 "max_asset_context_window": 10,
                 "context_compression_enabled": True,
             }),
-            config_version=data.get('config_version', '2.0.0'),
+            config_version=data.get('config_version', '2.0.1'),
             use_workspace_config=data.get('use_workspace_config', False),
             api_max_retries=data.get('api_max_retries', 3),
             api_initial_backoff=data.get('api_initial_backoff', 1.0),
             api_timeout=data.get('api_timeout', 60),
-            api_enable_debug_logging=data.get('api_enable_debug_logging', False)
+            api_enable_debug_logging=data.get('api_enable_debug_logging', False),
+            text_to_image=text_to_image
         )
 
 
@@ -444,7 +652,7 @@ class ConfigManager:
         
         # Check if config_version is missing or outdated
         current_version = data.get('config_version', '0.0.0')
-        if current_version != '2.0.0':
+        if current_version != '2.0.1':
             needs_update = True
         
         # Check if any model is missing provider field
@@ -479,6 +687,59 @@ class ConfigManager:
         if 'gamer_mode' not in data:
             needs_update = True
         
+        # Check if text_to_image section is missing or incomplete
+        if 'text_to_image' not in data:
+            needs_update = True
+        else:
+            text_to_image = data.get('text_to_image')
+            if not isinstance(text_to_image, dict):
+                needs_update = True
+            else:
+                for field_name in default_text_to_image_config().keys():
+                    if field_name not in text_to_image:
+                        needs_update = True
+                        break
+                models = text_to_image.get('models', [])
+                if not isinstance(models, list):
+                    needs_update = True
+                else:
+                    for model_item in models:
+                        if not isinstance(model_item, dict):
+                            needs_update = True
+                            break
+                        if 'path' not in model_item or 'display_name' not in model_item or 'introduction' not in model_item:
+                            needs_update = True
+                            break
+                # Old config keys from pre-2.0.1 TTI format should be migrated.
+                if 'model_paths' in text_to_image or 'default_model_index' in text_to_image:
+                    needs_update = True
+
+        # Check if top-level tti-models exists and is valid
+        raw_tti_models = data.get('tti-models', None)
+        if raw_tti_models is None:
+            needs_update = True
+        elif not isinstance(raw_tti_models, list):
+            needs_update = True
+        else:
+            for model_item in raw_tti_models:
+                if not isinstance(model_item, dict):
+                    needs_update = True
+                    break
+                if 'path' not in model_item or 'display_name' not in model_item or 'introduction' not in model_item:
+                    needs_update = True
+                    break
+
+        # Check sync between text_to_image.models and top-level tti-models
+        if isinstance(data.get('text_to_image'), dict) and isinstance(raw_tti_models, list):
+            text_to_image = data.get('text_to_image', {})
+            nested_models = normalize_tti_models(
+                text_to_image.get('models', []),
+                legacy_model_paths=text_to_image.get('model_paths', [])
+            )
+            top_models = normalize_tti_models(raw_tti_models)
+            if nested_models != top_models:
+                needs_update = True
+
         return needs_update
     
     def save(self, config: Optional[Config] = None) -> None:

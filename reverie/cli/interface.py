@@ -26,7 +26,13 @@ from .commands import CommandHandler
 from .input_handler import InputHandler
 from .markdown_formatter import format_markdown
 from .theme import THEME, DECO, DREAM
-from ..config import ConfigManager, ModelConfig, Config
+from ..config import (
+    ConfigManager,
+    ModelConfig,
+    Config,
+    normalize_tti_models,
+    resolve_tti_default_display_name,
+)
 from ..rules_manager import RulesManager
 from ..session import SessionManager
 from ..agent import ReverieAgent, THINKING_START_MARKER, THINKING_END_MARKER
@@ -393,7 +399,7 @@ class ReverieInterface:
             base_url=model.base_url, api_key=model.api_key, model=model.model,
             model_display_name=model.model_display_name, project_root=self.project_root,
             retriever=self.retriever, indexer=self.indexer, git_integration=self.git_integration,
-            additional_rules=self.rules_manager.get_rules_text(),
+            additional_rules=self._build_additional_rules_with_tti(config),
             mode=config.mode or "reverie",
             provider=getattr(model, 'provider', 'openai-sdk'),
             thinking_mode=getattr(model, 'thinking_mode', None),
@@ -409,6 +415,40 @@ class ReverieInterface:
         self._status_live = None
         self.agent.tool_executor.update_context('get_status_live', lambda: self._status_live)
         self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY}[/{self.theme.MINT_VIBRANT}] [{self.theme.MINT_SOFT}]Agent ready ({model.model_display_name})[/{self.theme.MINT_SOFT}]")
+
+    def _build_additional_rules_with_tti(self, config: Config) -> str:
+        """Append TTI model metadata from config.json into model context."""
+        base_rules = (self.rules_manager.get_rules_text() or "").strip()
+
+        tti_cfg = config.text_to_image if isinstance(config.text_to_image, dict) else {}
+        tti_models = normalize_tti_models(
+            tti_cfg.get("models", []),
+            legacy_model_paths=tti_cfg.get("model_paths", []),
+        )
+        default_display_name = resolve_tti_default_display_name(tti_cfg)
+
+        lines = [
+            "## TTI Models (from config.json)",
+            f"- Tool: `text_to_image`",
+            f"- Selection rule: use `model` parameter with configured `display_name` (not raw path).",
+            f"- Default model: {default_display_name if default_display_name else '(none)'}",
+        ]
+
+        if not tti_models:
+            lines.append("- Configured models: (none)")
+        else:
+            lines.append("- Configured models:")
+            for idx, item in enumerate(tti_models):
+                intro = item.get("introduction", "")
+                intro_text = intro if intro else "(empty)"
+                lines.append(
+                    f"  [{idx}] display_name={item['display_name']}; path={item['path']}; introduction={intro_text}"
+                )
+
+        tti_block = "\n".join(lines)
+        if base_rules:
+            return f"{base_rules}\n\n{tti_block}"
+        return tti_block
 
     def _init_session(self) -> None:
         session = self.session_manager.create_session()

@@ -14,6 +14,9 @@ import json
 import time
 import re
 import logging
+import uuid
+import hmac
+import hashlib
 
 from rich.markup import escape as rich_escape
 
@@ -351,6 +354,147 @@ class ReverieAgent:
                 f"Unknown provider: {self.provider}. "
                 f"Supported providers: openai-sdk, request, anthropic"
             )
+
+    def _is_iflow_direct_request(self) -> bool:
+        """Whether current request-provider config targets iFlow direct API."""
+        if self.provider != "request":
+            return False
+        base_url = str(self.base_url or "").strip().lower()
+        return "apis.iflow.cn" in base_url and "/v1/chat/completions" in base_url
+
+    def _refresh_iflow_api_key_from_local_cache(self) -> None:
+        """Refresh iFlow API key from local CLI cache when needed."""
+        if self.api_key:
+            return
+        
+        # Direct implementation matching proxy.py's get_iflow_key function
+        import os
+        import json
+        
+        IFLOW_ACCOUNTS_FILE = os.path.expanduser("~/.iflow/iflow_accounts.json")
+        IFLOW_OAUTH_FILE = os.path.expanduser("~/.iflow/oauth_creds.json")
+        
+        # Priority 1: ~/.iflow/iflow_accounts.json
+        if os.path.exists(IFLOW_ACCOUNTS_FILE):
+            try:
+                with open(IFLOW_ACCOUNTS_FILE, 'r') as f:
+                    data = json.load(f)
+                    if data.get("iflowApiKey"):
+                        self.api_key = data.get("iflowApiKey")
+                        return
+            except Exception as e:
+                logger.error(f"Error reading iflow_accounts.json: {e}")
+
+        # Priority 2: ~/.iflow/oauth_creds.json
+        if os.path.exists(IFLOW_OAUTH_FILE):
+            try:
+                with open(IFLOW_OAUTH_FILE, 'r') as f:
+                    data = json.load(f)
+                    if data.get("apiKey"):
+                        self.api_key = data.get("apiKey")
+                        return
+            except Exception as e:
+                logger.error(f"Error reading oauth_creds.json: {e}")
+
+    def _generate_iflow_signature(self, api_key: str, user_agent: str, session_id: str, timestamp_ms: int) -> str:
+        # Exact copy of proxy.py's generate_signature function
+        payload = f"{user_agent}:{session_id}:{timestamp_ms}"
+        h = hmac.new(api_key.encode(), payload.encode(), hashlib.sha256)
+        return h.hexdigest()
+
+    def _build_request_headers(self, stream: bool) -> Dict[str, str]:
+        """Build HTTP headers for request provider (generic + iFlow direct mode)."""
+        if not self._is_iflow_direct_request():
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            }
+            if stream:
+                headers["Accept"] = "text/event-stream"
+            return headers
+
+        self._refresh_iflow_api_key_from_local_cache()
+        if not self.api_key:
+            raise ValueError(
+                "iFlow CLI credentials were not found. Please login with iFlow CLI and run /iflow."
+            )
+
+        # Use the exact same approach as proxy.py
+        user_agent = "iFlow-Cli"
+        session_id = f"session-{uuid.uuid4()}"
+        timestamp = int(time.time() * 1000)  # Use same variable name as proxy.py
+        signature = self._generate_iflow_signature(
+            api_key=self.api_key,
+            user_agent=user_agent,
+            session_id=session_id,
+            timestamp_ms=timestamp  # Pass timestamp directly
+        )
+
+        # Headers exactly matching proxy.py
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": user_agent,
+            "session-id": session_id,
+            "x-iflow-timestamp": str(timestamp),
+            "x-iflow-signature": signature,
+            "Accept": "text/event-stream" if stream else "application/json",
+        }
+
+    def _apply_iflow_model_suffix_logic(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Mirror iflow-proxy model suffix logic:
+        - model(depth) -> model + thinking toggles
+        - minimax family uses reasoning_split
+        """
+        model_name = str(payload.get("model", "")).strip()
+        if "(" not in model_name or ")" not in model_name:
+            return payload
+
+        base_model = model_name.split("(", 1)[0].strip()
+        suffix = model_name.split("(", 1)[1].split(")", 1)[0].strip().lower()
+        if not base_model:
+            return payload
+
+        thinking_suffixes = {"auto", "low", "medium", "high", "xhigh", "minimal"}
+        if suffix in thinking_suffixes or suffix.isdigit():
+            payload["model"] = base_model
+            is_glm = "glm" in base_model.lower()
+            is_minimax = "minimax" in base_model.lower()
+
+            if is_minimax:
+                payload["reasoning_split"] = True
+            else:
+                chat_kwargs = payload.get("chat_template_kwargs")
+                if not isinstance(chat_kwargs, dict):
+                    chat_kwargs = {}
+                    payload["chat_template_kwargs"] = chat_kwargs
+                chat_kwargs["enable_thinking"] = True
+                if is_glm:
+                    chat_kwargs["clear_thinking"] = False
+        elif suffix in {"none", "0"}:
+            payload["model"] = base_model
+            chat_kwargs = payload.get("chat_template_kwargs")
+            if isinstance(chat_kwargs, dict):
+                chat_kwargs["enable_thinking"] = False
+
+        return payload
+
+    def _prepare_request_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Prepare request-provider payload for generic API or iFlow direct API."""
+        prepared = dict(payload)
+
+        if self._is_iflow_direct_request():
+            return self._apply_iflow_model_suffix_logic(prepared)
+
+        if self.thinking_mode and self.thinking_mode.lower() in ["true", "false"]:
+            chat_kwargs = prepared.get("chat_template_kwargs")
+            if not isinstance(chat_kwargs, dict):
+                chat_kwargs = {}
+                prepared["chat_template_kwargs"] = chat_kwargs
+            chat_kwargs["thinking"] = self.thinking_mode.lower() == "true"
+
+        return prepared
     
     def set_context_engine(self, retriever, indexer, git_integration) -> None:
         """Update Context Engine references"""
@@ -693,17 +837,8 @@ class ReverieAgent:
             # Add tools if available
             if tools:
                 payload["tools"] = tools
-            
-            # Add thinking mode if configured
-            if self.thinking_mode and self.thinking_mode.lower() in ["true", "false"]:
-                payload["chat_template_kwargs"] = {"thinking": self.thinking_mode.lower() == "true"}
-            
-            # Build headers
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Accept": "text/event-stream",
-                "Content-Type": "application/json"
-            }
+            payload = self._prepare_request_payload(payload)
+            headers = self._build_request_headers(stream=True)
             
             # Make request with retry logic
             try:
@@ -733,110 +868,268 @@ class ReverieAgent:
             stream_buffer = ""
             token_to_hide = "//END//"
             
-            # Parse SSE stream
-            for line in response.iter_lines():
-                if not line:
-                    continue
+            # For iFlow direct API, properly handle SSE with chunk boundaries
+            if self._is_iflow_direct_request():
+                # Buffer to accumulate incomplete lines across chunk boundaries
+                line_buffer = ""
                 
-                line_str = line.decode("utf-8")
-                
-                # SSE format: "data: {...}"
-                if not line_str.startswith("data: "):
-                    continue
-                
-                data_str = line_str[6:]  # Remove "data: " prefix
-                
-                # Check for [DONE] marker
-                if data_str.strip() == "[DONE]":
-                    break
-                
-                try:
-                    chunk_data = json.loads(data_str)
-                except json.JSONDecodeError:
-                    continue
-                
-                # Extract choice
-                choices = chunk_data.get("choices", [])
-                if not choices:
-                    continue
-                
-                choice = choices[0]
-                
-                # Track finish reason
-                if "finish_reason" in choice:
-                    finish_reason = choice["finish_reason"]
-                
-                delta = choice.get("delta", {})
-                if not delta:
-                    continue
-                
-                # Handle reasoning/thinking content
-                reasoning_content = delta.get("reasoning_content") or delta.get("thinking")
-                
-                if reasoning_content:
-                    collected_thinking += reasoning_content
-                    if not thinking_started:
-                        yield THINKING_START_MARKER
-                        thinking_started = True
-                    yield reasoning_content
-                
-                # Handle content streaming
-                content = delta.get("content")
-                if content:
-                    if thinking_started:
-                        yield THINKING_END_MARKER
-                        thinking_started = False
+                for chunk in response.iter_content(chunk_size=1024):
+                    if not chunk:
+                        continue
                     
-                    collected_content += content
-                    stream_buffer += content
+                    # Add chunk to buffer
+                    line_buffer += chunk.decode("utf-8")
                     
-                    if token_to_hide in stream_buffer:
-                        parts = stream_buffer.split(token_to_hide)
-                        if parts[0]:
-                            yield parts[0]
-                        remaining = "".join(parts[1:])
-                        stream_buffer = remaining
+                    # Process complete lines
+                    lines = line_buffer.split('\n')
                     
-                    # Check for partial match
-                    partial_match_len = 0
-                    for i in range(1, len(token_to_hide)):
-                        if len(stream_buffer) >= i:
-                            suffix = stream_buffer[-i:]
-                            if token_to_hide.startswith(suffix):
-                                partial_match_len = i
+                    # Keep the last potentially incomplete line in the buffer
+                    line_buffer = lines[-1]
                     
-                    if partial_match_len > 0:
-                        to_yield = stream_buffer[:-partial_match_len]
-                        stream_buffer = stream_buffer[-partial_match_len:]
-                        if to_yield:
-                            yield to_yield
-                    else:
-                        yield stream_buffer
-                        stream_buffer = ""
-                
-                # Handle tool calls
-                tool_calls_delta = delta.get("tool_calls", [])
-                if tool_calls_delta:
-                    for tool_call_delta in tool_calls_delta:
-                        index = tool_call_delta.get("index", 0)
+                    # Process all complete lines
+                    for line in lines[:-1]:
+                        line = line.rstrip()
+                        if not line.strip():
+                            continue
                         
-                        if index >= len(collected_tool_calls):
-                            collected_tool_calls.append({
-                                "id": tool_call_delta.get("id", ""),
-                                "type": "function",
-                                "function": {
-                                    "name": "",
-                                    "arguments": ""
-                                }
-                            })
+                        # SSE format: "data: {...}" or "data:{...}"
+                        if not line.startswith("data:"):
+                            continue
                         
-                        function_delta = tool_call_delta.get("function", {})
-                        if "name" in function_delta:
-                            collected_tool_calls[index]["function"]["name"] = function_delta["name"]
-                        if "arguments" in function_delta:
-                            collected_tool_calls[index]["function"]["arguments"] += function_delta["arguments"]
-                        if "id" in tool_call_delta:
-                            collected_tool_calls[index]["id"] = tool_call_delta["id"]
+                        # Handle both "data: {...}" and "data:{...}" formats
+                        data_str = line[5:].lstrip()
+                        
+                        # Check for [DONE] marker
+                        if data_str.strip() == "[DONE]":
+                            break
+                        
+                        try:
+                            chunk_data = json.loads(data_str)
+                        except json.JSONDecodeError:
+                            continue
+                        
+                        # Extract choice
+                        choices = chunk_data.get("choices", [])
+                        if not choices:
+                            continue
+                        
+                        choice = choices[0]
+                        
+                        # Track finish reason
+                        if "finish_reason" in choice:
+                            finish_reason = choice["finish_reason"]
+                        
+                        delta = choice.get("delta", {})
+                        if not delta:
+                            continue
+                        
+                        # Handle reasoning/thinking content - iFlow uses "reasoning_content"
+                        reasoning_content = delta.get("reasoning_content") or delta.get("thinking")
+                        
+                        if reasoning_content:
+                            collected_thinking += reasoning_content
+                            if not thinking_started:
+                                yield THINKING_START_MARKER
+                                thinking_started = True
+                            yield reasoning_content
+                        
+                        # Handle content streaming
+                        content = delta.get("content")
+                        if content:
+                            if thinking_started:
+                                yield THINKING_END_MARKER
+                                thinking_started = False
+                            
+                            collected_content += content
+                            stream_buffer += content
+                            
+                            if token_to_hide in stream_buffer:
+                                parts = stream_buffer.split(token_to_hide)
+                                if parts[0]:
+                                    yield parts[0]
+                                remaining = "".join(parts[1:])
+                                stream_buffer = remaining
+                            
+                            # Check for partial match
+                            partial_match_len = 0
+                            for i in range(1, len(token_to_hide)):
+                                if len(stream_buffer) >= i:
+                                    suffix = stream_buffer[-i:]
+                                    if token_to_hide.startswith(suffix):
+                                        partial_match_len = i
+                            
+                            if partial_match_len > 0:
+                                to_yield = stream_buffer[:-partial_match_len]
+                                stream_buffer = stream_buffer[-partial_match_len:]
+                                if to_yield:
+                                    yield to_yield
+                            else:
+                                yield stream_buffer
+                                stream_buffer = ""
+                        
+                        # Handle tool calls
+                        tool_calls_delta = delta.get("tool_calls", [])
+                        if tool_calls_delta:
+                            for tool_call_delta in tool_calls_delta:
+                                index = tool_call_delta.get("index", 0)
+                                
+                                if index >= len(collected_tool_calls):
+                                    collected_tool_calls.append({
+                                        "id": tool_call_delta.get("id", ""),
+                                        "type": "function",
+                                        "function": {
+                                            "name": "",
+                                            "arguments": ""
+                                        }
+                                    })
+                                
+                                function_delta = tool_call_delta.get("function", {})
+                                if "name" in function_delta:
+                                    collected_tool_calls[index]["function"]["name"] = function_delta["name"]
+                                if "arguments" in function_delta:
+                                    collected_tool_calls[index]["function"]["arguments"] += function_delta["arguments"]
+                                if "id" in tool_call_delta:
+                                    collected_tool_calls[index]["id"] = tool_call_delta["id"]
+                
+                # Process any remaining buffered line
+                if line_buffer.strip():
+                    line = line_buffer.rstrip()
+                    if line.startswith("data:"):
+                        data_str = line[5:].lstrip()
+                        if data_str.strip() != "[DONE]":
+                            try:
+                                chunk_data = json.loads(data_str)
+                                choices = chunk_data.get("choices", [])
+                                if choices:
+                                    choice = choices[0]
+                                    if "finish_reason" in choice:
+                                        finish_reason = choice["finish_reason"]
+                                    
+                                    delta = choice.get("delta", {})
+                                    if delta:
+                                        reasoning_content = delta.get("reasoning_content") or delta.get("thinking")
+                                        if reasoning_content:
+                                            collected_thinking += reasoning_content
+                                            if not thinking_started:
+                                                yield THINKING_START_MARKER
+                                                thinking_started = True
+                                            yield reasoning_content
+                                        
+                                        content = delta.get("content")
+                                        if content:
+                                            if thinking_started:
+                                                yield THINKING_END_MARKER
+                                                thinking_started = False
+                                            collected_content += content
+                                            yield content
+                            except json.JSONDecodeError:
+                                pass
+            else:
+                # Original parsing logic for non-iFlow APIs
+                # Parse SSE stream
+                for line in response.iter_lines():
+                    if not line:
+                        continue
+                    
+                    line_str = line.decode("utf-8")
+                    
+                    # SSE format: "data: {...}"
+                    if not line_str.startswith("data: "):
+                        continue
+                    
+                    data_str = line_str[6:]  # Remove "data: " prefix
+                    
+                    # Check for [DONE] marker
+                    if data_str.strip() == "[DONE]":
+                        break
+                    
+                    try:
+                        chunk_data = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        continue
+                    
+                    # Extract choice
+                    choices = chunk_data.get("choices", [])
+                    if not choices:
+                        continue
+                    
+                    choice = choices[0]
+                    
+                    # Track finish reason
+                    if "finish_reason" in choice:
+                        finish_reason = choice["finish_reason"]
+                    
+                    delta = choice.get("delta", {})
+                    if not delta:
+                        continue
+                    
+                    # Handle reasoning/thinking content
+                    reasoning_content = delta.get("reasoning_content") or delta.get("thinking")
+                    
+                    if reasoning_content:
+                        collected_thinking += reasoning_content
+                        if not thinking_started:
+                            yield THINKING_START_MARKER
+                            thinking_started = True
+                        yield reasoning_content
+                    
+                    # Handle content streaming
+                    content = delta.get("content")
+                    if content:
+                        if thinking_started:
+                            yield THINKING_END_MARKER
+                            thinking_started = False
+                        
+                        collected_content += content
+                        stream_buffer += content
+                        
+                        if token_to_hide in stream_buffer:
+                            parts = stream_buffer.split(token_to_hide)
+                            if parts[0]:
+                                yield parts[0]
+                            remaining = "".join(parts[1:])
+                            stream_buffer = remaining
+                        
+                        # Check for partial match
+                        partial_match_len = 0
+                        for i in range(1, len(token_to_hide)):
+                            if len(stream_buffer) >= i:
+                                suffix = stream_buffer[-i:]
+                                if token_to_hide.startswith(suffix):
+                                    partial_match_len = i
+                        
+                        if partial_match_len > 0:
+                            to_yield = stream_buffer[:-partial_match_len]
+                            stream_buffer = stream_buffer[-partial_match_len:]
+                            if to_yield:
+                                yield to_yield
+                        else:
+                            yield stream_buffer
+                            stream_buffer = ""
+                    
+                    # Handle tool calls
+                    tool_calls_delta = delta.get("tool_calls", [])
+                    if tool_calls_delta:
+                        for tool_call_delta in tool_calls_delta:
+                            index = tool_call_delta.get("index", 0)
+                            
+                            if index >= len(collected_tool_calls):
+                                collected_tool_calls.append({
+                                    "id": tool_call_delta.get("id", ""),
+                                    "type": "function",
+                                    "function": {
+                                        "name": "",
+                                        "arguments": ""
+                                    }
+                                })
+                            
+                            function_delta = tool_call_delta.get("function", {})
+                            if "name" in function_delta:
+                                collected_tool_calls[index]["function"]["name"] = function_delta["name"]
+                            if "arguments" in function_delta:
+                                collected_tool_calls[index]["function"]["arguments"] += function_delta["arguments"]
+                            if "id" in tool_call_delta:
+                                collected_tool_calls[index]["id"] = tool_call_delta["id"]
             
             # If thinking was streamed, emit end marker
             if thinking_started:
@@ -1251,16 +1544,8 @@ class ReverieAgent:
             # Add tools if available
             if tools:
                 payload["tools"] = tools
-            
-            # Add thinking mode if configured
-            if self.thinking_mode and self.thinking_mode.lower() in ["true", "false"]:
-                payload["chat_template_kwargs"] = {"thinking": self.thinking_mode.lower() == "true"}
-            
-            # Build headers
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
+            payload = self._prepare_request_payload(payload)
+            headers = self._build_request_headers(stream=False)
             
             # Make request with retry logic
             try:

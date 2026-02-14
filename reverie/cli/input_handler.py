@@ -23,6 +23,7 @@ from .theme import THEME, DECO
 COMMANDS = {
     '/help': 'Show available commands',
     '/model': 'List and select models',
+    '/iflow': 'iFlow CLI status and iFlow model selection',
     '/mode': 'Switch modes quickly',
     '/status': 'Show current status',
     '/search': 'Search the web (usage: /search <query>)',

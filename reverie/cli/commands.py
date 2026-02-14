@@ -39,6 +39,7 @@ class CommandHandler:
         self.commands = {
             'help': self.cmd_help,
             'model': self.cmd_model,
+            'iflow': self.cmd_iflow,
             'add_model': self.cmd_add_model,
             'mode': self.cmd_mode,
             'status': self.cmd_status,
@@ -150,6 +151,11 @@ class CommandHandler:
             "/model",
             f"Model manager:\n{self.deco.DOT_MEDIUM} List configured models\n{self.deco.DOT_MEDIUM} Switch active model\n{self.deco.DOT_MEDIUM} Add model: /model add\n{self.deco.DOT_MEDIUM} Delete: /model delete <#>",
             "/model\n/model add\n/model delete 2"
+        )
+        config_commands.add_row(
+            "/iflow",
+            f"iFlow CLI integration:\n{self.deco.DOT_MEDIUM} /iflow: detect local iFlow login cache\n{self.deco.DOT_MEDIUM} /iflow model: select iFlow model catalog\n{self.deco.DOT_MEDIUM} iFlow model list is independent from /model",
+            "/iflow\n/iflow model"
         )
         config_commands.add_row(
             "/setting",
@@ -613,6 +619,7 @@ class CommandHandler:
     def cmd_status(self, args: str) -> bool:
         """Show current status with dreamy styling"""
         config_manager = self.app.get('config_manager')
+        config = config_manager.load() if config_manager else None
         indexer = self.app.get('indexer')
         session_manager = self.app.get('session_manager')
         start_time = self.app.get('start_time')
@@ -639,6 +646,12 @@ class CommandHandler:
                     f"{self.deco.DOT_MEDIUM} Endpoint",
                     f"[{self.theme.TEXT_DIM}]{model.base_url}[/{self.theme.TEXT_DIM}]"
                 )
+                source = str(getattr(config, "active_model_source", "standard")).lower() if config else "standard"
+                source_label = "iFlow" if source == "iflow" else "Standard"
+                table.add_row(
+                    f"{self.deco.DOT_MEDIUM} Source",
+                    f"[{self.theme.TEXT_DIM}]{source_label}[/{self.theme.TEXT_DIM}]"
+                )
         
         # Session info
         if session_manager:
@@ -661,8 +674,7 @@ class CommandHandler:
                      max_tokens = model_config.max_context_tokens
                  else:
                      # Fallback to global config if available
-                     config = config_manager.load()
-                     max_tokens = getattr(config, 'max_context_tokens', 128000)
+                     max_tokens = getattr(config, 'max_context_tokens', 128000) if config else 128000
 
             percentage = (tokens / max_tokens) * 100
             
@@ -716,6 +728,205 @@ class CommandHandler:
         
         self.console.print(table)
         self.console.print()
+        return True
+
+    def cmd_iflow(self, args: str) -> bool:
+        """iFlow integration command."""
+        raw = args.strip()
+        if not raw:
+            return self._cmd_iflow_status()
+
+        lowered = raw.lower()
+        if lowered in ("status", "check"):
+            return self._cmd_iflow_status()
+        if lowered == "model":
+            return self._cmd_iflow_model("")
+        if lowered.startswith("model "):
+            return self._cmd_iflow_model(raw[6:].strip())
+
+        self.console.print(
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /iflow OR /iflow model[/{self.theme.AMBER_GLOW}]"
+        )
+        return True
+
+    def _cmd_iflow_status(self) -> bool:
+        """Detect local iFlow CLI credentials and show current iFlow selection."""
+        from ..iflow import (
+            detect_iflow_cli_credentials,
+            normalize_iflow_config,
+            resolve_iflow_selected_model,
+        )
+
+        config_manager = self.app.get('config_manager')
+        config = config_manager.load() if config_manager else None
+
+        cred = detect_iflow_cli_credentials()
+        self.console.print()
+
+        if cred.get("found"):
+            self.console.print(
+                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} iFlow CLI credentials detected.[/{self.theme.MINT_VIBRANT}]"
+            )
+            self.console.print(
+                f"[{self.theme.MINT_SOFT}]iFlow CLI is installed and logged in. Use /iflow model to select a model.[/{self.theme.MINT_SOFT}]"
+            )
+            source_file = cred.get("source_file", "")
+            if source_file:
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Credential source: {source_file}[/{self.theme.TEXT_DIM}]"
+                )
+        else:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} iFlow CLI credentials were not found under ~/.iflow.[/{self.theme.CORAL_SOFT}]"
+            )
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]Please install and login to iFlow CLI first, then run /iflow again.[/{self.theme.AMBER_GLOW}]"
+            )
+
+        if config_manager and config:
+            iflow_cfg = normalize_iflow_config(getattr(config, "iflow", {}))
+            selected = resolve_iflow_selected_model(iflow_cfg)
+            if selected:
+                self.console.print(
+                    f"[{self.theme.BLUE_SOFT}]Current iFlow model:[/{self.theme.BLUE_SOFT}] {selected['display_name']} ({selected['id']})"
+                )
+            else:
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Current iFlow model: (none)[/{self.theme.TEXT_DIM}]"
+                )
+
+            model_source = str(getattr(config, "active_model_source", "standard")).lower()
+            self.console.print(
+                f"[{self.theme.BLUE_SOFT}]Active model source:[/{self.theme.BLUE_SOFT}] {model_source}"
+            )
+            api_url = str(iflow_cfg.get("api_url", "")).strip()
+            if api_url:
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]iFlow API endpoint: {api_url}[/{self.theme.TEXT_DIM}]"
+                )
+
+        self.console.print()
+        return True
+
+    def _cmd_iflow_model(self, model_query: str) -> bool:
+        """Select iFlow model from dedicated catalog."""
+        from ..iflow import (
+            detect_iflow_cli_credentials,
+            get_iflow_model_catalog,
+            normalize_iflow_config,
+        )
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        cred = detect_iflow_cli_credentials()
+        if not cred.get("found"):
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} iFlow CLI credentials were not found under ~/.iflow.[/{self.theme.CORAL_SOFT}]"
+            )
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]Run /iflow first after logging into iFlow CLI.[/{self.theme.AMBER_GLOW}]"
+            )
+            return True
+
+        config = config_manager.load()
+        iflow_cfg = normalize_iflow_config(getattr(config, "iflow", {}))
+
+        catalog = get_iflow_model_catalog()
+        if not catalog:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} iFlow model catalog is empty.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        selected_model = None
+        query = str(model_query or "").strip().lower()
+        if query:
+            for item in catalog:
+                model_id = str(item.get("id", "")).lower()
+                name = str(item.get("display_name", "")).lower()
+                if query == model_id or query == name:
+                    selected_model = item
+                    break
+            if not selected_model:
+                for item in catalog:
+                    model_id = str(item.get("id", "")).lower()
+                    name = str(item.get("display_name", "")).lower()
+                    if query in model_id or query in name:
+                        selected_model = item
+                        break
+
+            if not selected_model:
+                self.console.print(
+                    f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} iFlow model not found: {model_query}[/{self.theme.CORAL_SOFT}]"
+                )
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Use /iflow model to open the full selector.[/{self.theme.TEXT_DIM}]"
+                )
+                return True
+        else:
+            from .tui_selector import ModelSelector, SelectorAction
+
+            models_data = []
+            current_model_id = None
+            selected_id = str(iflow_cfg.get("selected_model_id", "")).strip().lower()
+            for i, item in enumerate(catalog):
+                model_id = str(item.get("id", ""))
+                description = f"{model_id} | {item.get('description', '')}"
+                models_data.append(
+                    {
+                        "id": str(i),
+                        "name": item.get("display_name", model_id),
+                        "description": description,
+                        "model": item,
+                    }
+                )
+                if model_id.lower() == selected_id:
+                    current_model_id = str(i)
+
+            selector = ModelSelector(
+                console=self.console,
+                models=models_data,
+                current_model=current_model_id
+            )
+            result = selector.run()
+            if result.action != SelectorAction.SELECT or not result.selected_item:
+                return True
+
+            try:
+                selected_index = int(result.selected_item.id)
+            except (TypeError, ValueError):
+                self.console.print(
+                    f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid iFlow model selection.[/{self.theme.CORAL_SOFT}]"
+                )
+                return True
+
+            if selected_index < 0 or selected_index >= len(catalog):
+                self.console.print(
+                    f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid iFlow model index.[/{self.theme.CORAL_SOFT}]"
+                )
+                return True
+
+            selected_model = catalog[selected_index]
+
+        iflow_cfg["selected_model_id"] = selected_model["id"]
+        iflow_cfg["selected_model_display_name"] = selected_model["display_name"]
+        config.iflow = iflow_cfg
+        config.active_model_source = "iflow"
+        config_manager.save(config)
+
+        self.console.print()
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Switched to iFlow model: {selected_model['display_name']} ({selected_model['id']})[/{self.theme.MINT_VIBRANT}]"
+        )
+
+        if self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+
         return True
 
     def cmd_model(self, args: str) -> bool:
@@ -1552,6 +1763,8 @@ class CommandHandler:
                                 cur_idx = opts.index(cur_val)
                                 new_idx = (cur_idx - 1) % len(opts)
                                 setattr(config, cat["key"], opts[new_idx])
+                                if cat["key"] == "active_model_index":
+                                    config.active_model_source = "standard"
                                 config_manager.save(config)
                         elif key == b'M': # Right
                             cat = categories[selected_cat_idx]
@@ -1561,6 +1774,8 @@ class CommandHandler:
                                 cur_idx = opts.index(cur_val)
                                 new_idx = (cur_idx + 1) % len(opts)
                                 setattr(config, cat["key"], opts[new_idx])
+                                if cat["key"] == "active_model_index":
+                                    config.active_model_source = "standard"
                                 config_manager.save(config)
                     
                     live.update(generate_settings_view(selected_cat_idx, config))

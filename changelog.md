@@ -1,3 +1,20 @@
+## 🚀 Reverie CLI v2.0.2 — iFlow CLI Integration
+
+**Release Date:** 2026-02-15
+
+### ✨ iFlow CLI Integration
+* **Direct API Integration**: Built-in iFlow CLI credential support for direct API access
+* **Model Access**: Free access to powerful iFlow models including GLM-5-thinking
+* **Credential Auto-Detection**: Automatically reads iFlow credentials from `~/.iflow/`
+* **Proxy Compatibility**: Seamless integration with existing iFlow proxy servers
+
+### 🎯 Key Improvements
+* **Simplified Setup**: No need for external proxy server configuration
+* **Enhanced Reliability**: Direct connection handling for better stability
+* **Credential Management**: Automatic credential detection and refreshing
+
+---
+
 ## 🚀 Reverie CLI v2.0.1 — Text-to-Image Integration & Stability Fixes
 
 **Release Date:** 2026-02-13
@@ -122,7 +139,7 @@
 
 #### Core Autonomy Enhancements
 * **Autonomous Decomposition**: Agent intelligently breaks user requests into coherent sub-tasks without requiring explicit instruction
-* **Intelligent Planning Phase**: 
+* **Intelligent Planning Phase**:
   - Deep codebase analysis using Context Engine before design
   - Comprehensive design documentation in implementation_plan.md
   - Detailed task breakdown with atomic work items

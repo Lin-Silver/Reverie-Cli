@@ -127,7 +127,7 @@ Reverie supports two configuration modes:
 
 See [WORKSPACE_CONFIG.md](WORKSPACE_CONFIG.md) for detailed documentation on multi-workspace configuration.
 
-### Text-to-Image Configuration (v2.0.1)
+### Text-to-Image Configuration (v2.0.2)
 
 Reverie now supports a built-in `text_to_image` tool (available in all modes) that calls `Comfy/generate_image.py`.
 

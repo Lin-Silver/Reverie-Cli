@@ -841,6 +841,12 @@ class ReverieAgent:
             headers = self._build_request_headers(stream=True)
             
             # Make request with retry logic
+            # For iFlow direct API streaming we increase the read timeout because responses
+            # can be long-running (large content / SSE). Respect user-configured
+            # api_timeout but ensure a sensible minimum for iFlow streams.
+            effective_timeout = self.api_timeout
+            if self._is_iflow_direct_request():
+                effective_timeout = max(self.api_timeout, 300)  # at least 5 minutes for iFlow
             try:
                 response = make_api_request_with_retry(
                     url=self.base_url,
@@ -849,7 +855,7 @@ class ReverieAgent:
                     max_retries=self.api_max_retries,
                     initial_backoff=self.api_initial_backoff,
                     stream=True,
-                    timeout=self.api_timeout
+                    timeout=effective_timeout
                 )
             except requests.RequestException as e:
                 logger.error(f"Streaming API request failed: {e}")
@@ -1548,6 +1554,10 @@ class ReverieAgent:
             headers = self._build_request_headers(stream=False)
             
             # Make request with retry logic
+            # Increase timeout for iFlow direct API when necessary (long responses)
+            effective_timeout = self.api_timeout
+            if self._is_iflow_direct_request():
+                effective_timeout = max(self.api_timeout, 300)
             try:
                 response = make_api_request_with_retry(
                     url=self.base_url,
@@ -1556,7 +1566,7 @@ class ReverieAgent:
                     max_retries=self.api_max_retries,
                     initial_backoff=self.api_initial_backoff,
                     stream=False,
-                    timeout=self.api_timeout
+                    timeout=effective_timeout
                 )
             except requests.RequestException as e:
                 logger.error(f"API request failed: {e}")

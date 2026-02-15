@@ -404,8 +404,10 @@ class ReverieInterface:
             provider=getattr(model, 'provider', 'openai-sdk'),
             thinking_mode=getattr(model, 'thinking_mode', None),
             operation_history=self.operation_history,
-            rollback_manager=self.rollback_manager
+            rollback_manager=self.rollback_manager,
+            config=config
         )
+        # Ensure the agent picks up values from the loaded Config (e.g. api_timeout)
         self.agent.config = config
         # Also inject config_manager into tool context for context threshold check
         self.agent.tool_executor.update_context('config_manager', self.config_manager)

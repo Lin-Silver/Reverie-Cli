@@ -17,6 +17,7 @@ import logging
 import uuid
 import hmac
 import hashlib
+import codecs
 
 from rich.markup import escape as rich_escape
 
@@ -241,12 +242,27 @@ class ReverieAgent:
         self.api_initial_backoff = 1.0
         self.api_timeout = 60
         self.api_enable_debug_logging = False
-        
+        # iFlow-specific timeout (seconds). Default is 20 minutes.
+        self.iflow_timeout = 1200
+
         if config:
             self.api_max_retries = getattr(config, 'api_max_retries', 3)
             self.api_initial_backoff = getattr(config, 'api_initial_backoff', 1.0)
             self.api_timeout = getattr(config, 'api_timeout', 60)
             self.api_enable_debug_logging = getattr(config, 'api_enable_debug_logging', False)
+
+            # Read iFlow timeout from config.iflow.timeout (or legacy iflow_timeout)
+            try:
+                cfg_iflow = getattr(config, 'iflow', None)
+                if isinstance(cfg_iflow, dict):
+                    self.iflow_timeout = int(cfg_iflow.get('timeout', cfg_iflow.get('iflow_timeout', self.iflow_timeout)))
+                else:
+                    # Allow Config-like objects with attribute iflow_timeout
+                    self.iflow_timeout = int(getattr(config, 'iflow_timeout', self.iflow_timeout))
+                if self.iflow_timeout <= 0:
+                    self.iflow_timeout = 1200
+            except Exception:
+                self.iflow_timeout = 1200
         
         # Configure logging level based on config
         if self.api_enable_debug_logging:
@@ -487,6 +503,32 @@ class ReverieAgent:
         if self._is_iflow_direct_request():
             return self._apply_iflow_model_suffix_logic(prepared)
 
+        # Non-iFlow `request` provider: accept model(depth) but only convert to
+        # a boolean `thinking` flag (do NOT forward thinking depth). Explicit
+        # `self.thinking_mode` (config) takes precedence over model suffix.
+        if self.provider == "request" and not self._is_iflow_direct_request():
+            if not (isinstance(self.thinking_mode, str) and self.thinking_mode.lower() in ["true", "false"]):
+                model_name = str(prepared.get("model", "")).strip()
+                if "(" in model_name and ")" in model_name:
+                    base_model = model_name.split("(", 1)[0].strip()
+                    suffix = model_name.split("(", 1)[1].split(")", 1)[0].strip().lower()
+                    thinking_suffixes = {"auto", "low", "medium", "high", "xhigh", "minimal"}
+                    if suffix in thinking_suffixes or suffix.isdigit():
+                        prepared["model"] = base_model
+                        chat_kwargs = prepared.get("chat_template_kwargs")
+                        if not isinstance(chat_kwargs, dict):
+                            chat_kwargs = {}
+                            prepared["chat_template_kwargs"] = chat_kwargs
+                        chat_kwargs["thinking"] = True
+                    elif suffix in {"none", "0"}:
+                        prepared["model"] = base_model
+                        chat_kwargs = prepared.get("chat_template_kwargs")
+                        if not isinstance(chat_kwargs, dict):
+                            chat_kwargs = {}
+                            prepared["chat_template_kwargs"] = chat_kwargs
+                        chat_kwargs["thinking"] = False
+
+        # Explicit thinking_mode from config takes precedence
         if self.thinking_mode and self.thinking_mode.lower() in ["true", "false"]:
             chat_kwargs = prepared.get("chat_template_kwargs")
             if not isinstance(chat_kwargs, dict):
@@ -495,6 +537,47 @@ class ReverieAgent:
             chat_kwargs["thinking"] = self.thinking_mode.lower() == "true"
 
         return prepared
+
+    def _openai_extra_body_for_thinking(self) -> Optional[Dict[str, Any]]:
+        """Build `extra_body` (OpenAI SDK) to enable/disable thinking for compatible models.
+
+        Rules:
+        - If `thinking_mode` is explicitly set to 'true', return chat_template_kwargs enabling thinking.
+        - If `thinking_mode` is 'false', return None (do not send thinking flags).
+        - If `thinking_mode` is unset, detect model suffix like "model(thinking)" and enable thinking for
+          recognized suffixes (auto, low, medium, high, xhigh, minimal, digits).
+        - For GLM-family models include `clear_thinking: False` when enabling thinking.
+        """
+        # Explicit override from config
+        if isinstance(self.thinking_mode, str) and self.thinking_mode.lower() in ("true", "false"):
+            if self.thinking_mode.lower() == "false":
+                return None
+            enable_thinking = True
+        else:
+            # Derive from model name suffix if present
+            model_name = str(self.model or "").strip()
+            enable_thinking = False
+            if "(" in model_name and ")" in model_name:
+                base_model = model_name.split("(", 1)[0].strip()
+                suffix = model_name.split("(", 1)[1].split(")", 1)[0].strip().lower()
+                thinking_suffixes = {"auto", "low", "medium", "high", "xhigh", "minimal"}
+                if suffix in thinking_suffixes or suffix.isdigit():
+                    enable_thinking = True
+                elif suffix in {"none", "0"}:
+                    return None
+            else:
+                # No explicit hint; do not enable thinking by default
+                return None
+
+        if not enable_thinking:
+            return None
+
+        chat_kwargs: Dict[str, Any] = {"enable_thinking": True, "thinking": True}
+        if "glm" in (self.model or "").lower():
+            # GLM variants prefer clear_thinking=False per proxy/iFlow logic
+            chat_kwargs["clear_thinking"] = False
+
+        return {"chat_template_kwargs": chat_kwargs}
     
     def set_context_engine(self, retriever, indexer, git_integration) -> None:
         """Update Context Engine references"""
@@ -584,12 +667,27 @@ class ReverieAgent:
         continuation_count = 0
         
         while True:
-            response = self._client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                tools=tools if tools else None,
-                stream=True
-            )
+            # For OpenAI-compatible SDK calls, include thinking flags via extra_body when applicable
+            extra_body = self._openai_extra_body_for_thinking()
+            model_for_sdk = self.model
+            if extra_body is not None and isinstance(model_for_sdk, str) and "(" in model_for_sdk and ")" in model_for_sdk:
+                # Strip depth suffix for ordinary SDK calls — only send boolean thinking
+                model_for_sdk = model_for_sdk.split("(", 1)[0].strip()
+            if extra_body is not None:
+                response = self._client.chat.completions.create(
+                    model=model_for_sdk,
+                    messages=messages,
+                    tools=tools if tools else None,
+                    stream=True,
+                    extra_body=extra_body
+                )
+            else:
+                response = self._client.chat.completions.create(
+                    model=model_for_sdk,
+                    messages=messages,
+                    tools=tools if tools else None,
+                    stream=True
+                )
             
             # Collect streamed response
             collected_content = ""
@@ -843,10 +941,11 @@ class ReverieAgent:
             # Make request with retry logic
             # For iFlow direct API streaming we increase the read timeout because responses
             # can be long-running (large content / SSE). Respect user-configured
-            # api_timeout but ensure a sensible minimum for iFlow streams.
+            # api_timeout but prefer any configured iFlow-specific timeout.
             effective_timeout = self.api_timeout
             if self._is_iflow_direct_request():
-                effective_timeout = max(self.api_timeout, 300)  # at least 5 minutes for iFlow
+                # Respect configured iFlow timeout (or fallback to 20 minutes)
+                effective_timeout = max(self.api_timeout, getattr(self, 'iflow_timeout', 1200))
             try:
                 response = make_api_request_with_retry(
                     url=self.base_url,
@@ -877,85 +976,93 @@ class ReverieAgent:
             # For iFlow direct API, properly handle SSE with chunk boundaries
             if self._is_iflow_direct_request():
                 # Buffer to accumulate incomplete lines across chunk boundaries
+                byte_decoder = codecs.getincrementaldecoder('utf-8')()
                 line_buffer = ""
-                
+
                 for chunk in response.iter_content(chunk_size=1024):
                     if not chunk:
                         continue
-                    
-                    # Add chunk to buffer
-                    line_buffer += chunk.decode("utf-8")
-                    
+
+                    # Decode bytes incrementally to avoid splitting multi-byte UTF-8 characters
+                    try:
+                        text_part = byte_decoder.decode(chunk)
+                    except Exception:
+                        # Fallback to best-effort replacement if decoding fails
+                        text_part = chunk.decode('utf-8', errors='replace')
+
+                    # Add decoded text to line buffer
+                    line_buffer += text_part
+
                     # Process complete lines
                     lines = line_buffer.split('\n')
-                    
+
                     # Keep the last potentially incomplete line in the buffer
                     line_buffer = lines[-1]
-                    
+
                     # Process all complete lines
                     for line in lines[:-1]:
                         line = line.rstrip()
                         if not line.strip():
                             continue
-                        
+
                         # SSE format: "data: {...}" or "data:{...}"
                         if not line.startswith("data:"):
                             continue
-                        
+
                         # Handle both "data: {...}" and "data:{...}" formats
                         data_str = line[5:].lstrip()
-                        
+
                         # Check for [DONE] marker
                         if data_str.strip() == "[DONE]":
                             break
-                        
+
                         try:
                             chunk_data = json.loads(data_str)
                         except json.JSONDecodeError:
                             continue
-                        
+
                         # Extract choice
                         choices = chunk_data.get("choices", [])
                         if not choices:
                             continue
-                        
+
                         choice = choices[0]
-                        
+
                         # Track finish reason
                         if "finish_reason" in choice:
                             finish_reason = choice["finish_reason"]
-                        
+
                         delta = choice.get("delta", {})
                         if not delta:
                             continue
-                        
+
                         # Handle reasoning/thinking content - iFlow uses "reasoning_content"
                         reasoning_content = delta.get("reasoning_content") or delta.get("thinking")
-                        
+
                         if reasoning_content:
                             collected_thinking += reasoning_content
                             if not thinking_started:
                                 yield THINKING_START_MARKER
                                 thinking_started = True
                             yield reasoning_content
-                        
+
                         # Handle content streaming
                         content = delta.get("content")
                         if content:
                             if thinking_started:
                                 yield THINKING_END_MARKER
                                 thinking_started = False
-                            
+
                             collected_content += content
                             stream_buffer += content
-                            
+
                             if token_to_hide in stream_buffer:
                                 parts = stream_buffer.split(token_to_hide)
                                 if parts[0]:
                                     yield parts[0]
                                 remaining = "".join(parts[1:])
                                 stream_buffer = remaining
-                            
+
                             # Check for partial match
                             partial_match_len = 0
                             for i in range(1, len(token_to_hide)):
@@ -963,7 +1070,7 @@ class ReverieAgent:
                                     suffix = stream_buffer[-i:]
                                     if token_to_hide.startswith(suffix):
                                         partial_match_len = i
-                            
+
                             if partial_match_len > 0:
                                 to_yield = stream_buffer[:-partial_match_len]
                                 stream_buffer = stream_buffer[-partial_match_len:]
@@ -972,13 +1079,13 @@ class ReverieAgent:
                             else:
                                 yield stream_buffer
                                 stream_buffer = ""
-                        
+
                         # Handle tool calls
                         tool_calls_delta = delta.get("tool_calls", [])
                         if tool_calls_delta:
                             for tool_call_delta in tool_calls_delta:
                                 index = tool_call_delta.get("index", 0)
-                                
+
                                 if index >= len(collected_tool_calls):
                                     collected_tool_calls.append({
                                         "id": tool_call_delta.get("id", ""),
@@ -988,7 +1095,7 @@ class ReverieAgent:
                                             "arguments": ""
                                         }
                                     })
-                                
+
                                 function_delta = tool_call_delta.get("function", {})
                                 if "name" in function_delta:
                                     collected_tool_calls[index]["function"]["name"] = function_delta["name"]
@@ -997,6 +1104,14 @@ class ReverieAgent:
                                 if "id" in tool_call_delta:
                                     collected_tool_calls[index]["id"] = tool_call_delta["id"]
                 
+                # Flush any buffered bytes in the incremental decoder to capture
+                # partial multibyte characters that spanned chunk boundaries.
+                try:
+                    line_buffer += byte_decoder.decode(b'', final=True)
+                except Exception:
+                    # If flushing fails, continue with whatever text we already have
+                    pass
+
                 # Process any remaining buffered line
                 if line_buffer.strip():
                     line = line_buffer.rstrip()
@@ -1037,7 +1152,7 @@ class ReverieAgent:
                     if not line:
                         continue
                     
-                    line_str = line.decode("utf-8")
+                    line_str = line.decode("utf-8", errors='replace')
                     
                     # SSE format: "data: {...}"
                     if not line_str.startswith("data: "):
@@ -1428,12 +1543,27 @@ class ReverieAgent:
         all_content = []
         
         while True:
-            response = self._client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                tools=tools if tools else None,
-                stream=False
-            )
+            # For OpenAI-compatible SDK calls, include thinking flags via extra_body when applicable
+            extra_body = self._openai_extra_body_for_thinking()
+            model_for_sdk = self.model
+            if extra_body is not None and isinstance(model_for_sdk, str) and "(" in model_for_sdk and ")" in model_for_sdk:
+                # Strip depth suffix for ordinary SDK calls — only send boolean thinking
+                model_for_sdk = model_for_sdk.split("(", 1)[0].strip()
+            if extra_body is not None:
+                response = self._client.chat.completions.create(
+                    model=model_for_sdk,
+                    messages=messages,
+                    tools=tools if tools else None,
+                    stream=False,
+                    extra_body=extra_body
+                )
+            else:
+                response = self._client.chat.completions.create(
+                    model=model_for_sdk,
+                    messages=messages,
+                    tools=tools if tools else None,
+                    stream=False
+                )
             
             choice = response.choices[0]
             message = choice.message
@@ -1557,7 +1687,8 @@ class ReverieAgent:
             # Increase timeout for iFlow direct API when necessary (long responses)
             effective_timeout = self.api_timeout
             if self._is_iflow_direct_request():
-                effective_timeout = max(self.api_timeout, 300)
+                # Respect configured iFlow timeout (or fallback to 20 minutes)
+                effective_timeout = max(self.api_timeout, getattr(self, 'iflow_timeout', 1200))
             try:
                 response = make_api_request_with_retry(
                     url=self.base_url,

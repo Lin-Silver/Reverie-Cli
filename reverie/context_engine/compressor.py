@@ -57,6 +57,35 @@ def validate_payload_for_compression(payload: Dict[str, Any]) -> Dict[str, Any]:
             raise ValueError(f"Cannot sanitize payload: {e2}")
 
 
+# Helper to build OpenAI `extra_body` when a model requires 'thinking' mode
+def _openai_extra_body_for_model(model: str) -> Optional[Dict[str, Any]]:
+    """Return extra_body dict with chat_template_kwargs if model indicates thinking.
+
+    Detects explicit 'thinking' suffixes (e.g. model(thinking), glm-*-thinking) or
+    numeric thinking suffixes. For GLM-family models set clear_thinking=False.
+    """
+    if not model:
+        return None
+    mn = str(model).strip().lower()
+    # Quick check for explicit 'thinking' token
+    if "thinking" in mn:
+        chat_kwargs = {"enable_thinking": True, "thinking": True}
+        if "glm" in mn:
+            chat_kwargs["clear_thinking"] = False
+        return {"chat_template_kwargs": chat_kwargs}
+
+    # Parenthesis suffix detection
+    if "(" in mn and ")" in mn:
+        suffix = mn.split("(", 1)[1].split(")", 1)[0].strip()
+        thinking_suffixes = {"auto", "low", "medium", "high", "xhigh", "minimal"}
+        if suffix in thinking_suffixes or suffix.isdigit():
+            chat_kwargs = {"enable_thinking": True, "thinking": True}
+            if "glm" in mn:
+                chat_kwargs["clear_thinking"] = False
+            return {"chat_template_kwargs": chat_kwargs}
+    return None
+
+
 def make_compression_request_with_retry(
     url: str,
     headers: Dict[str, str],
@@ -203,11 +232,25 @@ class ContextCompressor:
         try:
             # Use the provided client to summarize based on provider
             if provider == "openai-sdk":
-                response = client.chat.completions.create(
-                    model=model,
-                    messages=prompt,
-                    stream=False
-                )
+                # If model indicates thinking-capable mode, include chat_template_kwargs
+                extra_body = _openai_extra_body_for_model(model)
+                model_for_sdk = model
+                if extra_body is not None and isinstance(model_for_sdk, str) and "(" in model_for_sdk and ")" in model_for_sdk:
+                    model_for_sdk = model_for_sdk.split("(", 1)[0].strip()
+
+                if extra_body is not None:
+                    response = client.chat.completions.create(
+                        model=model_for_sdk,
+                        messages=prompt,
+                        stream=False,
+                        extra_body=extra_body
+                    )
+                else:
+                    response = client.chat.completions.create(
+                        model=model_for_sdk,
+                        messages=prompt,
+                        stream=False
+                    )
                 summary = response.choices[0].message.content
             elif provider == "request":
                 # Use requests library for request provider

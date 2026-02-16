@@ -209,6 +209,8 @@ def default_iflow_config() -> Dict[str, Any]:
         "selected_model_display_name": "",
         "api_url": IFLOW_API_URL,
         "max_context_tokens": 128000,
+        # Per-provider timeout (seconds) for iFlow direct API. Default = 20 minutes.
+        "timeout": 1200,
     }
 
 
@@ -300,6 +302,24 @@ def normalize_iflow_config(raw_iflow: Any) -> Dict[str, Any]:
     if max_tokens <= 0:
         max_tokens = 128000
     cfg["max_context_tokens"] = max_tokens
+
+    # Normalize iFlow-specific timeout (seconds). Accept legacy 'iflow_timeout' too.
+    # Ensure positive integer; default to 1200 (20 minutes) if invalid or missing.
+    timeout_val = None
+    if "timeout" in cfg:
+        timeout_val = cfg.get("timeout")
+    elif "iflow_timeout" in cfg:
+        timeout_val = cfg.get("iflow_timeout")
+
+    try:
+        timeout_int = int(timeout_val) if timeout_val is not None else 1200
+    except (TypeError, ValueError):
+        timeout_int = 1200
+    if timeout_int <= 0:
+        timeout_int = 1200
+    cfg["timeout"] = timeout_int
+    # remove legacy alias if present
+    cfg.pop("iflow_timeout", None)
 
     catalog = get_iflow_model_catalog()
     matched = find_iflow_model(cfg["selected_model_id"], catalog=catalog)

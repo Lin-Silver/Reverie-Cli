@@ -109,6 +109,97 @@ def validate_and_sanitize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         raise
 
 
+def parse_tool_arguments(raw: str) -> Dict[str, Any]:
+    """Robustly parse a tool 'arguments' string into a dict.
+
+    This helper attempts several fallbacks so streaming or partially-escaped
+    JSON fragments won't cause the whole tool call to fail. Returns an empty
+    dict on unrecoverable parse errors.
+    """
+    if not raw:
+        return {}
+
+    # Fast path: valid JSON
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as e:
+        logger.debug(f"Tool arguments JSON decode failed (fast path): {e}")
+
+    # Try a sanitized JSON attempt (remove control chars / trailing commas)
+    try:
+        sanitized = re.sub(r"[\x00-\x08\x0b-\x0c\x0e-\x1f]", "", raw)
+        sanitized = re.sub(r",\s*([\}\]])", r"\1", sanitized)
+        try:
+            return json.loads(sanitized)
+        except Exception:
+            pass
+    except Exception:
+        # continue to heuristics
+        pass
+
+    # Heuristic fallback: extract known keys (safe and targeted)
+    args: Dict[str, Any] = {}
+
+    # path
+    m = re.search(r'"path"\s*:\s*"([^"]+)"', raw)
+    if not m:
+        m = re.search(r"'path'\s*:\s*'([^']+)'", raw)
+    if m:
+        args['path'] = m.group(1)
+
+    # content (allow multiline capture)
+    m = re.search(r'"content"\s*:\s*"([\s\S]*?)"(?=,\s*"|\s*\})', raw)
+    if not m:
+        m = re.search(r"'content'\s*:\s*'([\s\S]*?)'(?=,\s*'|\s*\})", raw)
+    if m:
+        content_val = m.group(1)
+        try:
+            content_val = bytes(content_val, "utf-8").decode("unicode_escape")
+        except Exception:
+            pass
+        args['content'] = content_val
+
+    # overwrite
+    m = re.search(r'"overwrite"\s*:\s*(true|false)', raw, re.I)
+    if m:
+        args['overwrite'] = m.group(1).lower() == 'true'
+
+    if not args:
+        logger.debug(f"Could not parse tool arguments; returning empty dict (preview: {raw[:200]})")
+
+    return args
+
+
+def _sanitize_tool_calls(tool_calls: list) -> None:
+    """Ensure each tool_call.function.arguments is valid JSON string.
+
+    Mutates tool_calls in-place: if arguments are parseable by
+    parse_tool_arguments, replace with a clean json.dumps(dict).
+    If not parseable, replace with '{}' to avoid sending malformed
+    JSON to the provider (which previously produced 400s).
+    """
+    for tc in tool_calls:
+        fn = tc.get("function") or {}
+        raw = fn.get("arguments", "")
+        if not raw:
+            fn["arguments"] = json.dumps({})
+            tc["function"] = fn
+            continue
+
+        # If already valid JSON string, keep as-is
+        try:
+            json.loads(raw)
+            continue
+        except Exception:
+            # Try to salvage
+            parsed = parse_tool_arguments(raw)
+            try:
+                fn["arguments"] = json.dumps(parsed, ensure_ascii=False)
+            except Exception:
+                fn["arguments"] = json.dumps({})
+            tc["function"] = fn
+
+
 def make_api_request_with_retry(
     url: str,
     headers: Dict[str, str],
@@ -809,7 +900,8 @@ class ReverieAgent:
             
             # Check for tool calls
             if collected_tool_calls:
-                # Add assistant message with tool calls
+                # Sanitize tool-call arguments before storing them in messages
+                _sanitize_tool_calls(collected_tool_calls)
                 assistant_message = {
                     "role": "assistant",
                     "content": collected_content or None,
@@ -823,10 +915,7 @@ class ReverieAgent:
                     tool_name = tool_call["function"]["name"]
                     tool = self.tool_executor.get_tool(tool_name)
                     
-                    try:
-                        args = json.loads(tool_call["function"]["arguments"])
-                    except json.JSONDecodeError:
-                        args = {}
+                    args = parse_tool_arguments(tool_call["function"]["arguments"])
                     
                     # Check side effects
                     self._check_tool_side_effects(tool_name, args)
@@ -1262,6 +1351,8 @@ class ReverieAgent:
             
             # Check for tool calls
             if collected_tool_calls:
+                # Sanitize streamed tool-call arguments before storing them
+                _sanitize_tool_calls(collected_tool_calls)
                 assistant_message = {
                     "role": "assistant",
                     "content": collected_content or None,
@@ -1275,10 +1366,7 @@ class ReverieAgent:
                     tool_name = tool_call["function"]["name"]
                     tool = self.tool_executor.get_tool(tool_name)
                     
-                    try:
-                        args = json.loads(tool_call["function"]["arguments"])
-                    except json.JSONDecodeError:
-                        args = {}
+                    args = parse_tool_arguments(tool_call["function"]["arguments"])
                     
                     self._check_tool_side_effects(tool_name, args)
                     
@@ -1451,6 +1539,8 @@ class ReverieAgent:
                 
                 # Check for tool calls
                 if collected_tool_calls:
+                    # Sanitize tool args (defensive - block.input was json.dumps'ed above)
+                    _sanitize_tool_calls(collected_tool_calls)
                     assistant_message = {
                         "role": "assistant",
                         "content": collected_content or None,
@@ -1467,10 +1557,7 @@ class ReverieAgent:
                         tool_name = tool_call["function"]["name"]
                         tool = self.tool_executor.get_tool(tool_name)
                         
-                        try:
-                            args = json.loads(tool_call["function"]["arguments"])
-                        except json.JSONDecodeError:
-                            args = {}
+                        args = parse_tool_arguments(tool_call["function"]["arguments"])
                         
                         self._check_tool_side_effects(tool_name, args)
                         
@@ -1597,10 +1684,7 @@ class ReverieAgent:
                     tool_name = tool_call.function.name
                     tool = self.tool_executor.get_tool(tool_name)
                     
-                    try:
-                        args = json.loads(tool_call.function.arguments)
-                    except json.JSONDecodeError:
-                        args = {}
+                    args = parse_tool_arguments(tool_call.function.arguments)
                     
                     # Check side effects
                     self._check_tool_side_effects(tool_name, args)
@@ -1716,6 +1800,8 @@ class ReverieAgent:
             # Check for tool calls
             tool_calls = message.get("tool_calls", [])
             if tool_calls:
+                # Sanitize incoming tool-call argument strings before storing
+                _sanitize_tool_calls(tool_calls)
                 # Add assistant message
                 assistant_message = {
                     "role": "assistant",
@@ -1733,10 +1819,7 @@ class ReverieAgent:
                     tool_name = tool_call["function"]["name"]
                     tool = self.tool_executor.get_tool(tool_name)
                     
-                    try:
-                        args = json.loads(tool_call["function"]["arguments"])
-                    except json.JSONDecodeError:
-                        args = {}
+                    args = parse_tool_arguments(tool_call["function"]["arguments"])
                     
                     self._check_tool_side_effects(tool_name, args)
                     
@@ -1845,6 +1928,8 @@ class ReverieAgent:
             
             # Check for tool calls
             if collected_tool_calls:
+                # Sanitize tool args before adding to message history
+                _sanitize_tool_calls(collected_tool_calls)
                 assistant_message = {
                     "role": "assistant",
                     "content": collected_content or None,
@@ -1864,10 +1949,7 @@ class ReverieAgent:
                     tool_name = tool_call["function"]["name"]
                     tool = self.tool_executor.get_tool(tool_name)
                     
-                    try:
-                        args = json.loads(tool_call["function"]["arguments"])
-                    except json.JSONDecodeError:
-                        args = {}
+                    args = parse_tool_arguments(tool_call["function"]["arguments"])
                     
                     self._check_tool_side_effects(tool_name, args)
                     

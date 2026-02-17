@@ -36,7 +36,9 @@ from ..tools import (
     GameGDDManagerTool,
     StoryDesignTool,
     GameMathSimulatorTool,
-    GameStatsAnalyzerTool
+    GameStatsAnalyzerTool,
+    VisionUploadTool,
+    TokenCounterTool
 )
 
 
@@ -93,7 +95,9 @@ class ToolExecutor:
             GameGDDManagerTool,
             StoryDesignTool,
             GameMathSimulatorTool,
-            GameStatsAnalyzerTool
+            GameStatsAnalyzerTool,
+            VisionUploadTool,
+            TokenCounterTool
         ]
         
         for tool_class in tool_classes:

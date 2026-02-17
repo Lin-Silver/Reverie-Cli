@@ -1,3 +1,51 @@
+## 🚀 Reverie CLI v2.0.3 — Critical Fixes & Enhanced Context Management
+
+**Release Date:** 2026-02-17
+
+### 🔧 Critical Fixes
+* **Session Preservation on Model Switch**: Fixed critical bug where switching models would delete conversation history and session context. Messages are now properly preserved when changing models.
+* **Request Provider Thinking Mode**: Enhanced API calling for request provider to properly support thinking mode with `chat_template_kwargs` parameter
+* **Vision Support**: Added vision file upload capability for request provider models that support image analysis
+
+### 🎯 New Features
+* **Vision Upload Tool**: New `vision_upload` tool for uploading and processing images (PNG, JPG, GIF, BMP, WEBP, TIFF)
+  - Supports image analysis, description, and OCR
+  - Base64 encoding for AI model processing
+  - Works with request provider models that have vision capabilities
+* **Token Counter Tool**: New `count_tokens` tool for accurate token counting
+  - Uses tiktoken library for precise token counts
+  - Can check current conversation token usage
+  - Displays usage percentage and warnings
+  - Helps manage context limits proactively
+* **Real-time Token Display**: Status bar now shows current token usage
+  - Color-coded display (green < 60%, yellow 60-80%, red > 80%)
+  - Shows total tokens, max tokens, and usage percentage
+  - Updates in real-time during conversation
+* **Context Engine Command**: New `/CE` command for manual context management
+  - `/CE` - Show context status and token usage with color-coded warnings
+  - `/CE compress` - Manually compress conversation context
+  - `/CE info` - Show detailed context information and message breakdown
+  - `/CE stats` - Show comprehensive context statistics
+  - Case-sensitive command (must use uppercase CE)
+* **Enhanced Context Management**: Updated system prompts to encourage proactive context management
+  - AI now monitors token usage and suggests compression at 60% threshold
+  - Automatic context optimization before large operations
+  - Better integration with Context Engine for long conversations
+
+### 📚 System Prompt Updates
+* Added comprehensive tool descriptions for vision upload, token counting, and context management
+* Separated tool descriptions into dedicated module (`tool_descriptions.py`) for maintainability
+* Enhanced instructions for proactive context management across all modes
+* Updated all 5+ mode-specific system prompts with new tool capabilities
+
+### 🔄 API Improvements
+* Enhanced request provider to support `chat_template_kwargs` for thinking mode
+* Improved thinking mode detection and parameter passing
+* Better handling of model suffixes like `model(thinking)` for request provider
+* Fixed API payload validation and sanitization
+
+---
+
 ## 🚀 Reverie CLI v2.0.2 — iFlow CLI Integration
 
 **Release Date:** 2026-02-15

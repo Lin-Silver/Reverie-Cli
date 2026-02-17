@@ -25,17 +25,21 @@ class ContextManagementTool(BaseTool):
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["truncate_history", "summarize_history", "summarize_game_context"],
+                "enum": ["compress", "truncate_history", "summarize_history", "summarize_game_context", "checkpoint", "restore"],
                 "description": "The action to perform."
             },
             "keep_last_messages": {
                 "type": "integer",
-                "description": "For 'truncate_history': Number of recent messages to keep (e.g., 10). Default is 20.",
+                "description": "For 'truncate_history' or 'compress': Number of recent messages to keep (e.g., 10). Default is 20.",
                 "default": 20
             },
             "summary": {
                 "type": "string",
                 "description": "For 'summarize_history': The summary of the removed messages to inject as a system note."
+            },
+            "checkpoint_id": {
+                "type": "string",
+                "description": "For 'restore': The checkpoint ID to restore from."
             },
             "gdd_path": {
                 "type": "string",
@@ -58,6 +62,7 @@ class ContextManagementTool(BaseTool):
         action: str,
         keep_last_messages: int = 20,
         summary: str = "",
+        checkpoint_id: str = "",
         gdd_path: str = "",
         asset_manifest_path: str = "",
         task_list_path: str = ""
@@ -71,7 +76,10 @@ class ContextManagementTool(BaseTool):
             return ToolResult.fail("Context tool requires access to Agent instance")
         
         try:
-            if action == "truncate_history":
+            if action == "compress":
+                # Use the compressor for intelligent compression
+                return self._compress_with_llm(agent, keep_last_messages)
+            elif action == "truncate_history":
                 return self._truncate_history(agent, keep_last_messages)
             elif action == "summarize_history":
                 return self._summarize_history(agent, keep_last_messages, summary)
@@ -83,6 +91,10 @@ class ContextManagementTool(BaseTool):
                     asset_manifest_path=asset_manifest_path,
                     task_list_path=task_list_path
                 )
+            elif action == "checkpoint":
+                return self._create_checkpoint(agent)
+            elif action == "restore":
+                return self._restore_checkpoint(agent, checkpoint_id)
             else:
                 return ToolResult.fail(f"Unknown action: {action}")
                 
@@ -95,6 +107,14 @@ class ContextManagementTool(BaseTool):
         if len(history) <= keep_last:
             return ToolResult.ok(f"History is already short ({len(history)} messages). No changes made.")
             
+        # Save checkpoint before truncation
+        session_manager = self.context.get('session_manager')
+        if session_manager and hasattr(session_manager, 'get_current_session'):
+            current_session = session_manager.get_current_session()
+            if current_session:
+                # Save current state before truncation
+                session_manager.update_messages(history)
+        
         # Always keep system prompt (index 0 if it's there, but agent handles that separately usually)
         # Agent.messages usually starts with user/assistant exchanges. System prompt is separate.
         
@@ -112,6 +132,10 @@ class ContextManagementTool(BaseTool):
         
         agent.set_history(new_history)
         
+        # Save truncated state
+        if session_manager and current_session:
+            session_manager.update_messages(new_history)
+        
         return ToolResult.ok(f"Truncated history. Removed {removed_count} messages. Kept last {keep_last}.")
 
     def _summarize_history(self, agent, keep_last: int, summary: str) -> ToolResult:
@@ -122,7 +146,15 @@ class ContextManagementTool(BaseTool):
         history = agent.get_history()
         if len(history) <= keep_last:
             return ToolResult.ok(f"History is already short ({len(history)} messages). No changes made.")
-            
+        
+        # Save checkpoint before summarization
+        session_manager = self.context.get('session_manager')
+        if session_manager and hasattr(session_manager, 'get_current_session'):
+            current_session = session_manager.get_current_session()
+            if current_session:
+                # Save current state before summarization
+                session_manager.update_messages(history)
+        
         new_history = history[-keep_last:]
         removed_count = len(history) - len(new_history)
         
@@ -134,6 +166,10 @@ class ContextManagementTool(BaseTool):
         new_history.insert(0, summary_note)
         
         agent.set_history(new_history)
+        
+        # Save summarized state
+        if session_manager and current_session:
+            session_manager.update_messages(new_history)
         
         return ToolResult.ok(f"Compressed history with summary. Removed {removed_count} messages.")
 
@@ -232,3 +268,153 @@ class ContextManagementTool(BaseTool):
             return path
         except Exception:
             return None
+    
+    def _compress_with_llm(self, agent, keep_last: int) -> ToolResult:
+        """Compress history using LLM-based compression"""
+        from ..context_engine.compressor import ContextCompressor
+        
+        history = agent.get_history()
+        if len(history) <= keep_last:
+            return ToolResult.ok(f"History is already short ({len(history)} messages). No changes made.")
+        
+        # Get compressor
+        project_root = self.context.get('project_root')
+        if not project_root:
+            return ToolResult.fail("Project root not available for compression")
+        
+        compressor = ContextCompressor(Path(project_root) / '.reverie')
+        
+        # Get session info
+        session_manager = self.context.get('session_manager')
+        session_id = "default"
+        if session_manager and hasattr(session_manager, 'get_current_session'):
+            current_session = session_manager.get_current_session()
+            if current_session:
+                session_id = current_session.id
+        
+        # Get model info from agent
+        model = getattr(agent, 'model', 'gpt-4')
+        provider = getattr(agent, 'provider', 'openai-sdk')
+        base_url = getattr(agent, 'base_url', '')
+        api_key = getattr(agent, 'api_key', '')
+        
+        # Get client
+        client = None
+        if provider in ['openai-sdk', 'anthropic']:
+            client = getattr(agent, '_client', None)
+        
+        # Compress
+        try:
+            compressed_history = compressor.compress(
+                messages=history,
+                client=client,
+                model=model,
+                session_id=session_id,
+                provider=provider,
+                base_url=base_url,
+                api_key=api_key
+            )
+            
+            # Update agent history
+            agent.set_history(compressed_history)
+            
+            # Save to session
+            if session_manager and hasattr(session_manager, 'update_messages'):
+                session_manager.update_messages(compressed_history)
+            
+            removed_count = len(history) - len(compressed_history)
+            return ToolResult.ok(
+                f"Successfully compressed conversation history.\n"
+                f"Original: {len(history)} messages\n"
+                f"Compressed: {len(compressed_history)} messages\n"
+                f"Removed: {removed_count} messages\n"
+                f"Checkpoint saved before compression."
+            )
+        except Exception as e:
+            return ToolResult.fail(f"Compression failed: {str(e)}")
+    
+    def _create_checkpoint(self, agent) -> ToolResult:
+        """Create a checkpoint of current conversation state"""
+        from ..context_engine.compressor import ContextCompressor
+        
+        history = agent.get_history()
+        
+        # Get compressor
+        project_root = self.context.get('project_root')
+        if not project_root:
+            return ToolResult.fail("Project root not available for checkpoint")
+        
+        compressor = ContextCompressor(Path(project_root) / '.reverie')
+        
+        # Get session info
+        session_manager = self.context.get('session_manager')
+        session_id = "default"
+        if session_manager and hasattr(session_manager, 'get_current_session'):
+            current_session = session_manager.get_current_session()
+            if current_session:
+                session_id = current_session.id
+        
+        # Save checkpoint
+        checkpoint_path = compressor.save_checkpoint(
+            messages=history,
+            note="Manual checkpoint via context_management tool",
+            session_id=session_id
+        )
+        
+        if checkpoint_path:
+            return ToolResult.ok(
+                f"Checkpoint created successfully.\n"
+                f"Messages saved: {len(history)}\n"
+                f"Checkpoint file: {Path(checkpoint_path).name}"
+            )
+        else:
+            return ToolResult.fail("Failed to create checkpoint")
+    
+    def _restore_checkpoint(self, agent, checkpoint_id: str) -> ToolResult:
+        """Restore from a checkpoint"""
+        if not checkpoint_id:
+            return ToolResult.fail("Checkpoint ID is required for restore action")
+        
+        from ..context_engine.compressor import ContextCompressor
+        
+        # Get compressor
+        project_root = self.context.get('project_root')
+        if not project_root:
+            return ToolResult.fail("Project root not available for restore")
+        
+        compressor = ContextCompressor(Path(project_root) / '.reverie')
+        
+        # Find checkpoint file
+        checkpoint_path = Path(checkpoint_id)
+        if not checkpoint_path.is_absolute():
+            checkpoint_path = compressor.cache_dir / checkpoint_id
+        
+        if not checkpoint_path.exists():
+            return ToolResult.fail(f"Checkpoint not found: {checkpoint_id}")
+        
+        # Load checkpoint
+        try:
+            import json
+            with open(checkpoint_path, 'r', encoding='utf-8') as f:
+                checkpoint_data = json.load(f)
+            
+            messages = checkpoint_data.get('messages', [])
+            if not messages:
+                return ToolResult.fail("Checkpoint contains no messages")
+            
+            # Restore to agent
+            agent.set_history(messages)
+            
+            # Save to session
+            session_manager = self.context.get('session_manager')
+            if session_manager and hasattr(session_manager, 'update_messages'):
+                session_manager.update_messages(messages)
+            
+            return ToolResult.ok(
+                f"Successfully restored from checkpoint.\n"
+                f"Restored {len(messages)} messages\n"
+                f"Checkpoint: {checkpoint_data.get('note', 'N/A')}\n"
+                f"Timestamp: {checkpoint_data.get('timestamp', 'N/A')}"
+            )
+        except Exception as e:
+            return ToolResult.fail(f"Failed to restore checkpoint: {str(e)}")

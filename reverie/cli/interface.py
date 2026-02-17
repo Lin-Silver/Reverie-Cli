@@ -157,6 +157,41 @@ class ReverieInterface:
         model_name = config.active_model.model_display_name if config.active_model else "N/A"
         mode = config.mode or "reverie"
         
+        # Calculate token usage if agent is available
+        token_info = ""
+        if self.agent and hasattr(self.agent, 'messages'):
+            try:
+                # Import token counter tool
+                from ..tools.token_counter import TokenCounterTool
+                
+                # Create temporary token counter
+                token_counter = TokenCounterTool(self.project_root)
+                token_counter.context = {'agent': self.agent, 'config_manager': self.config_manager}
+                
+                # Count tokens
+                result = token_counter.execute(check_current_conversation=True)
+                
+                if result.success and result.data:
+                    total_tokens = result.data.get('total_tokens', 0)
+                    max_tokens = result.data.get('max_tokens', 128000)
+                    percentage = result.data.get('percentage', 0)
+                    
+                    # Format token display with color based on usage
+                    if percentage >= 80:
+                        token_color = self.theme.CORAL_VIBRANT  # Red for high usage
+                    elif percentage >= 60:
+                        token_color = self.theme.AMBER_GLOW  # Yellow for moderate usage
+                    else:
+                        token_color = self.theme.MINT_SOFT  # Green for low usage
+                    
+                    token_info = (
+                        f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM}[/{self.theme.TEXT_DIM}] "
+                        f"[{token_color}]{total_tokens:,}/{max_tokens:,} tokens ({percentage:.0f}%)[/{token_color}] "
+                    )
+            except Exception:
+                # Silently fail if token counting fails
+                pass
+        
         # Dreamscape styled status line
         return Text.from_markup(
             f"[{self.theme.PURPLE_MEDIUM}]{self.deco.LINE_HORIZONTAL * 2}[/{self.theme.PURPLE_MEDIUM}] "
@@ -166,6 +201,7 @@ class ReverieInterface:
             f"[{self.theme.PURPLE_SOFT}]{model_name}[/{self.theme.PURPLE_SOFT}] "
             f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM}[/{self.theme.TEXT_DIM}] "
             f"[bold {self.theme.BLUE_SOFT}]{mode.upper()}[/bold {self.theme.BLUE_SOFT}] "
+            f"{token_info}"
             f"[{self.theme.PINK_SOFT}]{self.deco.SPARKLE}[/{self.theme.PINK_SOFT}] "
             f"[{self.theme.PURPLE_MEDIUM}]{self.deco.LINE_HORIZONTAL * 2}[/{self.theme.PURPLE_MEDIUM}]"
         )
@@ -395,6 +431,11 @@ class ReverieInterface:
             self.config_manager.save(config)
             self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Config updated.[/{self.theme.MINT_VIBRANT}]")
 
+        # Preserve existing messages when reinitializing (e.g., model switch)
+        existing_messages = []
+        if hasattr(self, 'agent') and self.agent is not None:
+            existing_messages = self.agent.messages.copy()
+
         self.agent = ReverieAgent(
             base_url=model.base_url, api_key=model.api_key, model=model.model,
             model_display_name=model.model_display_name, project_root=self.project_root,
@@ -407,10 +448,18 @@ class ReverieInterface:
             rollback_manager=self.rollback_manager,
             config=config
         )
+        
+        # Restore messages after agent creation
+        if existing_messages:
+            self.agent.messages = existing_messages
+            self.console.print(f"[{self.theme.MINT_SOFT}]{self.deco.DOT_MEDIUM} Preserved {len(existing_messages)} messages from previous session[/{self.theme.MINT_SOFT}]")
+        
         # Ensure the agent picks up values from the loaded Config (e.g. api_timeout)
         self.agent.config = config
         # Also inject config_manager into tool context for context threshold check
         self.agent.tool_executor.update_context('config_manager', self.config_manager)
+        # Inject session_manager for context management tool
+        self.agent.tool_executor.update_context('session_manager', self.session_manager)
         # Inject console into tool context for proper input handling (especially on Windows)
         self.agent.tool_executor.update_context('console', self.console)
         # Inject status_live control for user input (will be set during _process_message)

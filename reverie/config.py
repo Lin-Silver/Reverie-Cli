@@ -25,7 +25,7 @@ from .iflow import (
 
 
 # Version info
-__version__ = "2.0.2"
+__version__ = "2.0.3"
 
 
 def default_text_to_image_config() -> Dict[str, Any]:
@@ -313,7 +313,7 @@ class Config:
     stream_responses: bool = True
     auto_index: bool = True
     show_status_line: bool = True
-    config_version: str = "2.0.2"  # Config file version for migration
+    config_version: str = "2.0.3"  # Config file version for migration
     
     # Workspace isolation settings
     use_workspace_config: bool = False  # If True, config is stored in workspace directory
@@ -471,7 +471,7 @@ class Config:
                 "max_asset_context_window": 10,
                 "context_compression_enabled": True,
             }),
-            config_version=data.get('config_version', '2.0.2'),
+            config_version=data.get('config_version', '2.0.3'),
             use_workspace_config=data.get('use_workspace_config', False),
             api_max_retries=data.get('api_max_retries', 3),
             api_initial_backoff=data.get('api_initial_backoff', 1.0),
@@ -676,7 +676,7 @@ class ConfigManager:
         
         # Check if config_version is missing or outdated
         current_version = data.get('config_version', '0.0.0')
-        if current_version != '2.0.2':
+        if current_version != '2.0.3':
             needs_update = True
         
         # Check if any model is missing provider field

@@ -7,6 +7,7 @@ on how to use the Context Engine effectively to reduce hallucinations.
 
 from datetime import datetime
 from typing import Optional
+from .tool_descriptions import get_tool_descriptions_for_mode
 
 
 def build_system_prompt(
@@ -198,6 +199,10 @@ text_to_image(action="generate", prompt="cinematic city skyline at sunset", mode
 text_to_image(action="generate", prompt="anime character concept art", model="anime-concept", negative_prompt="blurry, low quality", seed=42, extra_options={{"clip_skip": 2}}, extra_args=["--cpu"])
 ```
 
+# Advanced Tools for Context and Vision
+
+{get_tool_descriptions_for_mode("reverie")}
+
 # Making edits (CRITICAL)
 When making edits, use the str_replace_editor - do NOT just write a new file unless strictly necessary (e.g. initial creation or total rewrite).
 ⚠️ Before calling the str_replace_editor tool, ALWAYS first call the codebase-retrieval tool
@@ -308,6 +313,8 @@ You MUST end your final response with `//END//` when you have completed your tas
 
 def build_spec_driven_prompt(model_name: str, additional_rules: str, current_date: str) -> str:
     """Spec-driven prompt logic based on user requirements"""
+    
+    tool_descriptions = get_tool_descriptions_for_mode("spec-driven")
     
     return f'''# Identity
 You are Reverie, an AI assistant and IDE built to assist developers.
@@ -456,12 +463,18 @@ Create an actionable implementation plan with a checklist of coding tasks.
 - You MUST follow the workflow steps in sequential order.
 - **SCOPE LIMITATION**: In this mode, your goal is ONLY to create and refine the three spec documents. DO NOT implement the actual code changes here.
 
+# Advanced Tools for Context and Vision
+
+{tool_descriptions}
+
 # Additional user rules
 {additional_rules}'''
 
 
 def build_spec_vibe_prompt(model_name: str, additional_rules: str, current_date: str) -> str:
     """Spec-vibe Mode prompt logic for actual implementation based on specs"""
+    
+    tool_descriptions = get_tool_descriptions_for_mode("spec-vibe")
     
     return f'''# Identity
 You are Reverie, an AI assistant and IDE built to assist developers.
@@ -587,6 +600,10 @@ You are currently in **Spec-vibe Mode**. Your primary objective is to implement 
 # Termination
 You MUST end your final response with `//END//` when you have completed your task or response. This is CRITICAL for the system to know you are done.
 - Example: "Task completed. //END//"
+
+# Advanced Tools for Context and Vision
+
+{tool_descriptions}
 
 # Additional user rules
 {additional_rules}'''
@@ -870,6 +887,10 @@ context_management(
   keep_last_messages=20
 )
 ```
+
+# Advanced Tools for Context and Vision
+
+{tool_descriptions}
 
 # Specialized Game-Dev Tools
 
@@ -1202,6 +1223,8 @@ def build_writer_prompt(model_name: str, additional_rules: str, current_date: st
     """
     Writer Mode prompt with Novel Memory and Consistency Systems.
     """
+    
+    tool_descriptions = get_tool_descriptions_for_mode("writer")
     
     return f'''# Role
 You are a world-class, bestselling novelist and literary AI assistant known for:
@@ -1539,6 +1562,10 @@ The system automatically handles:
 The base model is {model_name}.
 The current date is {current_date}.
 
+# Advanced Tools for Context and Vision
+
+{tool_descriptions}
+
 # Additional user rules
 {additional_rules}
 
@@ -1587,6 +1614,9 @@ and narrative coherence across the entire novel.
 
 def build_ant_planning_prompt(model_name: str, additional_rules: str, current_date: str) -> str:
     """Reverie-Ant Planning Mode Prompt - Autonomous Planning & Analysis Phase"""
+    
+    tool_descriptions = get_tool_descriptions_for_mode("ant")
+    
     return f'''<identity>
 You are Reverie, a world-class autonomous agentic AI coding assistant developed by Raiden for advanced intelligent coding workflows.
 You are pair programming with a USER to solve complex coding tasks through autonomous planning, intelligent execution, and comprehensive verification.
@@ -1819,6 +1849,10 @@ Call tools as you normally would.
 - **Absolute paths only**. When using tools that accept file path arguments, ALWAYS use the absolute file path.
 </tool_calling>
 
+<advanced_tools>
+{tool_descriptions}
+</advanced_tools>
+
 <user_rules>
 {additional_rules}
 </user_rules>
@@ -1827,6 +1861,9 @@ Call tools as you normally would.
 
 def build_ant_execution_prompt(model_name: str, additional_rules: str, current_date: str) -> str:
     """Reverie-Ant Execution Mode Prompt - Intelligent Implementation & End-to-End Verification"""
+    
+    tool_descriptions = get_tool_descriptions_for_mode("ant")
+    
     return f'''<identity>
 You are Reverie, an autonomous agentic AI coding assistant developed by Raiden for advanced intelligent coding workflows.
 You are in **EXECUTION phase** - implementing the technical plan with full automation, continuous verification, and learning from feedback.
@@ -2035,6 +2072,10 @@ You have direct access to their editor, terminal (PowerShell), and can verify ch
 6. **Browser Automation**: When testing web features, use browser tools systematically.
 7. **Respect the Plan**: Implement according to approved implementation_plan.md. If changes are needed, document them.
 </critical_execution_rules>
+
+<advanced_tools>
+{tool_descriptions}
+</advanced_tools>
 
 <user_rules>
 {additional_rules}

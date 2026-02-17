@@ -10,6 +10,8 @@ Tools available to the AI Agent:
 - web_search: Search the web
 - task_manager: Organize complex work
 - nexus: Large-scale project development with 24+ hour support
+- vision_upload: Upload and process visual files for AI analysis
+- count_tokens: Count tokens in text or current conversation
 """
 
 from .base import BaseTool, ToolResult, ToolResultStatus
@@ -39,6 +41,8 @@ from .game_gdd_manager import GameGDDManagerTool
 from .story_design_tool import StoryDesignTool
 from .game_math_simulator import GameMathSimulatorTool
 from .game_stats_analyzer import GameStatsAnalyzerTool
+from .vision_upload import VisionUploadTool
+from .token_counter import TokenCounterTool
 
 __all__ = [
     'BaseTool',

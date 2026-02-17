@@ -62,6 +62,7 @@ class CommandHandler:
             'operations': self.cmd_operations,
             'gdd': self.cmd_gdd,
             'assets': self.cmd_assets,
+            'CE': self.cmd_context_engine,  # Context Engine management (case-sensitive)
         }
     
     def handle(self, command_line: str) -> bool:
@@ -74,13 +75,19 @@ class CommandHandler:
         if not parts:
             return True
         
+        cmd_original = parts[0]  # Keep original case
         cmd = parts[0].lower()
         args = parts[1] if len(parts) > 1 else ""
         
+        # Check for case-sensitive commands first (like CE)
+        if cmd_original in self.commands:
+            return self.commands[cmd_original](args)
+        
+        # Then check case-insensitive
         if cmd in self.commands:
             return self.commands[cmd](args)
         else:
-            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Unknown command: /{cmd}[/{self.theme.CORAL_SOFT}]")
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Unknown command: /{cmd_original}[/{self.theme.CORAL_SOFT}]")
             self.console.print(f"[{self.theme.TEXT_DIM}]Type /help for available commands.[/{self.theme.TEXT_DIM}]")
             return True
     
@@ -201,6 +208,16 @@ class CommandHandler:
             "/search <q>",
             "Web search (DuckDuckGo) for docs and answers. Results show in Markdown.",
             "/search rust async patterns\n/search python FastAPI"
+        )
+        tool_commands.add_row(
+            "/CE",
+            f"Context Engine management (case-sensitive):\n"
+            f"{self.deco.DOT_MEDIUM} /CE: Show context status and token usage\n"
+            f"{self.deco.DOT_MEDIUM} /CE compress: Compress conversation context\n"
+            f"{self.deco.DOT_MEDIUM} /CE info: Show detailed context information\n"
+            f"{self.deco.DOT_MEDIUM} /CE stats: Show context statistics\n"
+            f"[{self.theme.TEXT_DIM}]Manage context to prevent token overflow[/{self.theme.TEXT_DIM}]",
+            "/CE\n/CE compress\n/CE stats"
         )
         tool_commands.add_row(
             "/tools",
@@ -2340,3 +2357,226 @@ class CommandHandler:
         if Confirm.ask(f"[{self.theme.PURPLE_SOFT}]Exit Reverie?[/{self.theme.PURPLE_SOFT}]", default=True):
             return False
         return True
+
+    def cmd_context_engine(self, args: str) -> bool:
+        """
+        Context Engine management command (/CE)
+        
+        Usage:
+            /CE              - Show Context Engine status and available actions
+            /CE compress     - Compress current conversation context
+            /CE info         - Show detailed context information
+            /CE stats        - Show context statistics
+        """
+        from rich.table import Table
+        from rich.panel import Panel
+        from rich import box
+        
+        agent = self.app.get('agent')
+        config_manager = self.app.get('config_manager')
+        
+        if not agent:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} No active agent session.[/{self.theme.CORAL_SOFT}]")
+            return True
+        
+        args = args.strip().lower()
+        
+        # No args - show status and help
+        if not args:
+            self.console.print()
+            self.console.print(Panel(
+                f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Context Engine {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]",
+                border_style=self.theme.BORDER_PRIMARY,
+                box=box.ROUNDED,
+                padding=(0, 2)
+            ))
+            self.console.print()
+            
+            # Get token count
+            try:
+                from ..tools.token_counter import TokenCounterTool
+                token_counter = TokenCounterTool(self.app.get('project_root'))
+                token_counter.context = {'agent': agent, 'config_manager': config_manager}
+                result = token_counter.execute(check_current_conversation=True)
+                
+                if result.success and result.data:
+                    total_tokens = result.data.get('total_tokens', 0)
+                    max_tokens = result.data.get('max_tokens', 128000)
+                    percentage = result.data.get('percentage', 0)
+                    system_tokens = result.data.get('system_tokens', 0)
+                    messages_tokens = result.data.get('messages_tokens', 0)
+                    message_count = result.data.get('message_count', 0)
+                    
+                    # Create status table
+                    table = Table(show_header=False, box=box.SIMPLE, padding=(0, 2))
+                    table.add_column(style=self.theme.TEXT_SECONDARY, width=20)
+                    table.add_column(style=self.theme.TEXT_PRIMARY)
+                    
+                    table.add_row("System Prompt", f"[{self.theme.PURPLE_SOFT}]{system_tokens:,} tokens[/{self.theme.PURPLE_SOFT}]")
+                    table.add_row("Messages", f"[{self.theme.BLUE_SOFT}]{messages_tokens:,} tokens ({message_count} messages)[/{self.theme.BLUE_SOFT}]")
+                    table.add_row("Total Usage", f"[bold {self.theme.MINT_VIBRANT}]{total_tokens:,} / {max_tokens:,} tokens[/bold {self.theme.MINT_VIBRANT}]")
+                    
+                    # Color-coded percentage
+                    if percentage >= 80:
+                        perc_color = self.theme.CORAL_VIBRANT
+                        status_icon = "⚠️"
+                        status_text = "HIGH"
+                    elif percentage >= 60:
+                        perc_color = self.theme.AMBER_GLOW
+                        status_icon = "ℹ️"
+                        status_text = "MODERATE"
+                    else:
+                        perc_color = self.theme.MINT_SOFT
+                        status_icon = "✓"
+                        status_text = "GOOD"
+                    
+                    table.add_row("Usage", f"[{perc_color}]{status_icon} {percentage:.1f}% ({status_text})[/{perc_color}]")
+                    
+                    self.console.print(table)
+                    self.console.print()
+                    
+                    # Show warning if needed
+                    if percentage >= 80:
+                        self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.DOT_MEDIUM} Context usage is high. Consider compression.[/{self.theme.CORAL_SOFT}]")
+                        self.console.print()
+                    elif percentage >= 60:
+                        self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Context usage is moderate. Compression may be needed soon.[/{self.theme.AMBER_GLOW}]")
+                        self.console.print()
+                
+            except Exception as e:
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Failed to get token count: {str(e)}[/{self.theme.CORAL_SOFT}]")
+            
+            # Show available commands
+            cmd_table = Table(show_header=True, box=box.ROUNDED, border_style=self.theme.BORDER_SECONDARY)
+            cmd_table.add_column("Command", style=f"bold {self.theme.PINK_SOFT}", width=20)
+            cmd_table.add_column("Description", style=self.theme.TEXT_SECONDARY)
+            
+            cmd_table.add_row("/CE", "Show this status information")
+            cmd_table.add_row("/CE compress", "Compress conversation context")
+            cmd_table.add_row("/CE info", "Show detailed context information")
+            cmd_table.add_row("/CE stats", "Show context statistics")
+            
+            self.console.print(cmd_table)
+            self.console.print()
+            
+            return True
+        
+        # Compress command
+        elif args == "compress":
+            self.console.print()
+            self.console.print(f"[{self.theme.PURPLE_SOFT}]{self.deco.SPARKLE} Compressing conversation context...[/{self.theme.PURPLE_SOFT}]")
+            self.console.print()
+            
+            try:
+                from ..tools.context_management import ContextManagementTool
+                context_tool = ContextManagementTool(self.app.get('project_root'))
+                context_tool.context = {
+                    'agent': agent,
+                    'config_manager': config_manager,
+                    'project_root': self.app.get('project_root')
+                }
+                
+                result = context_tool.execute(action="compress")
+                
+                if result.success:
+                    self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} {result.output}[/{self.theme.MINT_VIBRANT}]")
+                    
+                    # Show new token count
+                    try:
+                        from ..tools.token_counter import TokenCounterTool
+                        token_counter = TokenCounterTool(self.app.get('project_root'))
+                        token_counter.context = {'agent': agent, 'config_manager': config_manager}
+                        count_result = token_counter.execute(check_current_conversation=True)
+                        
+                        if count_result.success and count_result.data:
+                            total_tokens = count_result.data.get('total_tokens', 0)
+                            max_tokens = count_result.data.get('max_tokens', 128000)
+                            percentage = count_result.data.get('percentage', 0)
+                            
+                            self.console.print()
+                            self.console.print(f"[{self.theme.TEXT_DIM}]New usage: {total_tokens:,} / {max_tokens:,} tokens ({percentage:.1f}%)[/{self.theme.TEXT_DIM}]")
+                    except Exception:
+                        pass
+                else:
+                    self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Compression failed: {result.error}[/{self.theme.CORAL_SOFT}]")
+                
+            except Exception as e:
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Error: {str(e)}[/{self.theme.CORAL_SOFT}]")
+            
+            self.console.print()
+            return True
+        
+        # Info command
+        elif args == "info":
+            self.console.print()
+            self.console.print(Panel(
+                f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Context Engine Information {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]",
+                border_style=self.theme.BORDER_PRIMARY,
+                box=box.ROUNDED,
+                padding=(0, 2)
+            ))
+            self.console.print()
+            
+            # Show detailed information
+            info_table = Table(show_header=False, box=box.SIMPLE, padding=(0, 2))
+            info_table.add_column(style=f"bold {self.theme.TEXT_SECONDARY}", width=25)
+            info_table.add_column(style=self.theme.TEXT_PRIMARY)
+            
+            # Message breakdown
+            if hasattr(agent, 'messages'):
+                messages = agent.messages
+                user_msgs = sum(1 for m in messages if m.get('role') == 'user')
+                assistant_msgs = sum(1 for m in messages if m.get('role') == 'assistant')
+                tool_msgs = sum(1 for m in messages if m.get('role') == 'tool')
+                
+                info_table.add_row("Total Messages", f"{len(messages)}")
+                info_table.add_row("User Messages", f"[{self.theme.BLUE_SOFT}]{user_msgs}[/{self.theme.BLUE_SOFT}]")
+                info_table.add_row("Assistant Messages", f"[{self.theme.PURPLE_SOFT}]{assistant_msgs}[/{self.theme.PURPLE_SOFT}]")
+                info_table.add_row("Tool Messages", f"[{self.theme.MINT_SOFT}]{tool_msgs}[/{self.theme.MINT_SOFT}]")
+            
+            # System prompt info
+            if hasattr(agent, 'system_prompt'):
+                prompt_length = len(agent.system_prompt)
+                info_table.add_row("System Prompt Length", f"{prompt_length:,} characters")
+            
+            # Mode info
+            if hasattr(agent, 'mode'):
+                info_table.add_row("Current Mode", f"[bold {self.theme.PINK_SOFT}]{agent.mode}[/bold {self.theme.PINK_SOFT}]")
+            
+            self.console.print(info_table)
+            self.console.print()
+            
+            return True
+        
+        # Stats command
+        elif args == "stats":
+            self.console.print()
+            self.console.print(Panel(
+                f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Context Statistics {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]",
+                border_style=self.theme.BORDER_PRIMARY,
+                box=box.ROUNDED,
+                padding=(0, 2)
+            ))
+            self.console.print()
+            
+            try:
+                from ..tools.token_counter import TokenCounterTool
+                token_counter = TokenCounterTool(self.app.get('project_root'))
+                token_counter.context = {'agent': agent, 'config_manager': config_manager}
+                result = token_counter.execute(check_current_conversation=True)
+                
+                if result.success:
+                    # Display the full output from token counter
+                    self.console.print(result.output)
+                else:
+                    self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Failed to get statistics: {result.error}[/{self.theme.CORAL_SOFT}]")
+            except Exception as e:
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Error: {str(e)}[/{self.theme.CORAL_SOFT}]")
+            
+            self.console.print()
+            return True
+        
+        else:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Unknown Context Engine command: {args}[/{self.theme.CORAL_SOFT}]")
+            self.console.print(f"[{self.theme.TEXT_DIM}]Type /CE for available commands.[/{self.theme.TEXT_DIM}]")
+            return True

@@ -82,6 +82,10 @@ class ReverieInterface:
         self.command_handler: Optional[CommandHandler] = None
         self.input_handler: Optional[InputHandler] = None
         self.status_line = StatusLine(self)
+        
+        # Cached tiktoken encoding for status bar token counting (lazy-loaded on first use)
+        self._tiktoken_encoding = None
+        self._tiktoken_available: Optional[bool] = None  # None = not yet checked
     
     def run(self) -> None:
         """Main entry point"""
@@ -157,40 +161,72 @@ class ReverieInterface:
         model_name = config.active_model.model_display_name if config.active_model else "N/A"
         mode = config.mode or "reverie"
         
-        # Calculate token usage if agent is available
+        # Calculate token usage directly from agent — bypass TokenCounterTool entirely
+        # to avoid any intermediate-layer failures that get swallowed silently.
         token_info = ""
         if self.agent and hasattr(self.agent, 'messages'):
             try:
-                # Import token counter tool
-                from ..tools.token_counter import TokenCounterTool
+                # --- Lazy-load tiktoken encoding (cached for the lifetime of the interface) ---
+                if self._tiktoken_available is None:
+                    try:
+                        import tiktoken
+                        self._tiktoken_encoding = tiktoken.get_encoding("cl100k_base")
+                        self._tiktoken_available = True
+                    except Exception:
+                        self._tiktoken_available = False
                 
-                # Create temporary token counter
-                token_counter = TokenCounterTool(self.project_root)
-                token_counter.context = {'agent': self.agent, 'config_manager': self.config_manager}
+                # --- Count tokens in system prompt + messages ---
+                system_prompt = getattr(self.agent, 'system_prompt', '')
+                messages = self.agent.messages  # list of dicts
                 
-                # Count tokens
-                result = token_counter.execute(check_current_conversation=True)
+                if self._tiktoken_available and self._tiktoken_encoding:
+                    enc = self._tiktoken_encoding
+                    # System prompt tokens
+                    total_tokens = len(enc.encode(system_prompt))
+                    # Message tokens (4 overhead per message + content)
+                    for msg in messages:
+                        total_tokens += 4
+                        content = msg.get('content', '')
+                        if isinstance(content, str):
+                            total_tokens += len(enc.encode(content))
+                        elif isinstance(content, list):
+                            # Multi-part content (e.g. tool results)
+                            for part in content:
+                                if isinstance(part, dict):
+                                    for v in part.values():
+                                        if isinstance(v, str):
+                                            total_tokens += len(enc.encode(v))
+                    total_tokens += 2  # reply primer
+                else:
+                    # Fallback: rough char-based estimate (1 token ≈ 4 chars)
+                    total_chars = len(system_prompt)
+                    for msg in messages:
+                        content = msg.get('content', '')
+                        if isinstance(content, str):
+                            total_chars += len(content)
+                    total_tokens = total_chars // 4 + 1
                 
-                if result.success and result.data:
-                    total_tokens = result.data.get('total_tokens', 0)
-                    max_tokens = result.data.get('max_tokens', 128000)
-                    percentage = result.data.get('percentage', 0)
-                    
-                    # Format token display with color based on usage
-                    if percentage >= 80:
-                        token_color = self.theme.CORAL_VIBRANT  # Red for high usage
-                    elif percentage >= 60:
-                        token_color = self.theme.AMBER_GLOW  # Yellow for moderate usage
-                    else:
-                        token_color = self.theme.MINT_SOFT  # Green for low usage
-                    
-                    token_info = (
-                        f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM}[/{self.theme.TEXT_DIM}] "
-                        f"[{token_color}]{total_tokens:,}/{max_tokens:,} tokens ({percentage:.0f}%)[/{token_color}] "
-                    )
+                # --- Get max context from already-loaded config ---
+                max_tokens = 128000  # default
+                if config.active_model and config.active_model.max_context_tokens:
+                    max_tokens = config.active_model.max_context_tokens
+                
+                percentage = (total_tokens / max_tokens * 100) if max_tokens else 0
+                
+                # --- Choose color based on usage level ---
+                if percentage >= 80:
+                    token_color = self.theme.CORAL_VIBRANT
+                elif percentage >= 60:
+                    token_color = self.theme.AMBER_GLOW
+                else:
+                    token_color = self.theme.MINT_SOFT
+                
+                token_info = (
+                    f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM}[/{self.theme.TEXT_DIM}] "
+                    f"[{token_color}]{total_tokens:,}/{max_tokens:,} tokens ({percentage:.0f}%)[/{token_color}] "
+                )
             except Exception:
-                # Silently fail if token counting fails
-                pass
+                pass  # Never crash the status bar
         
         # Dreamscape styled status line
         return Text.from_markup(

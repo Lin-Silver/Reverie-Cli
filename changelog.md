@@ -3,142 +3,19 @@
 **Release Date:** 2025-02-22
 
 ### 🔧 Critical Fixes
-
-#### Qwen Code API Integration
-* **Fixed API Endpoint**: Corrected API endpoint from incorrect `https://portal.qwen.ai/v1` to proper DashScope endpoint `https://dashscope.aliyuncs.com/compatible-mode/v1`
-* **Dynamic Endpoint Support**: Implemented `resource_url` reading from OAuth credentials for user-specific API endpoints
-* **Credential Detection**: Enhanced credential detection to prioritize `oauth_creds.json` (contains `resource_url`) over `qwen_accounts.json`
-* **URL Normalization**: Added automatic `https://` protocol prefix and `/v1` path suffix handling
-
-#### Model Context Length Corrections
-* **Qwen3.5-Plus**: Fixed context length from incorrect value to accurate 262,144 tokens
-* **All Models**: Updated all Qwen Code models to use their actual `context_length` values:
-  - Qwen3.5-Plus (`coder-model`): 262,144 tokens
-  - Qwen3-Coder-Plus: 32,768 tokens
-  - Qwen3-Coder-Flash: 8,192 tokens
-  - Qwen3-Vision: 32,768 tokens
-
-#### Token Display Accuracy
-* **Real-time Token Counting**: Status bar now displays accurate token usage based on model's actual context length
-* **Color-coded Warnings**: 
-  - Green (< 70%): Normal usage
-  - Yellow (70-80%): Approaching limit
-  - Red (> 80%): High usage warning
-* **Percentage Display**: Shows current tokens / max tokens with usage percentage
+* **Built-in Qwen Code Proxy**: Added native Qwen Code credential support with automatic endpoint detection
+* **Dynamic Endpoint**: Reads `resource_url` from OAuth credentials for user-specific API endpoints
+* **Model Context Length**: Fixed all Qwen Code model context lengths (Qwen3.5-Plus: 262K, Qwen3-Coder-Plus: 32K, Qwen3-Coder-Flash: 8K, Qwen3-Vision: 32K)
+* **Token Display**: Real-time token counting with color-coded warnings (green/yellow/red)
 
 ### ✨ New Features
-
-#### Enhanced Credential Management
-* **Resource URL Extraction**: Automatically extracts and uses `resource_url` from OAuth credentials
-* **Fallback Support**: Falls back to default DashScope endpoint if `resource_url` not found
-* **Error Handling**: Improved error messages and credential detection logging
-
-#### Helper Functions
-* **qwen_oauth_login()**: OAuth login placeholder (guides users to use qwen-code CLI)
-* **save_qwen_credentials()**: Save OAuth credentials to `~/.qwen/oauth_creds.json`
-* **Enhanced Detection**: `detect_qwencode_cli_credentials()` now returns `resource_url` along with `access_token`
-
-### 📚 Documentation
-
-#### Comprehensive Guides
-* **QWENCODE_INTEGRATION.md**: Detailed technical integration documentation
-  - API endpoint explanation
-  - Credential file format
-  - OAuth flow details
-  - Troubleshooting guide
-* **QWENCODE_FIX_SUMMARY.md**: Complete fix summary with technical details
-  - Root cause analysis
-  - Code changes breakdown
-  - API call flow diagram
-  - Compatibility notes
-* **QWENCODE_QUICK_START.md**: 5-minute quick start guide
-  - Step-by-step setup
-  - Model selection guide
-  - Common issues and solutions
-  - Best practices
-* **CHANGELOG_QWENCODE.md**: Detailed version-specific changelog
-
-#### Testing
-* **test_qwencode_fix.py**: Comprehensive test suite
-  - API URL validation
-  - Model catalog verification
-  - Credential detection testing
-  - Runtime data building
-  - URL suffix handling
-  - All tests passing (5/5) ✅
+* **Enhanced Credential Management**: Automatic `resource_url` extraction with DashScope fallback
+* **Helper Functions**: OAuth login, credential saving, and improved detection with `resource_url` support
 
 ### 🔄 Technical Improvements
-
-#### API Call Flow
-```
-User Request
-    ↓
-Reverie Agent
-    ↓
-Read ~/.qwen/oauth_creds.json
-    ↓
-Extract: access_token + resource_url
-    ↓
-Build API Request:
-  - URL: {resource_url}/v1/chat/completions
-  - Authorization: Bearer {access_token}
-  - Model: coder-model
-    ↓
-OpenAI SDK (Compatible Mode)
-    ↓
-DashScope API / Qwen Portal API
-    ↓
-Response
-```
-
-#### Credential Priority
-1. `~/.qwen/oauth_creds.json` (includes `resource_url`) - **Priority**
-2. `~/.qwen/qwen_accounts.json` (access_token only) - Fallback
-
-#### Code Quality
-* **Source Code Analysis**: Deep analysis of qwen-code official source code
-  - `packages/core/src/qwen/qwenOAuth2.ts`
-  - `packages/core/src/qwen/qwenContentGenerator.ts`
-  - `packages/core/src/core/openaiContentGenerator/constants.ts`
-* **Behavior Matching**: Ensured Reverie behavior matches qwen-code CLI exactly
-* **Error Handling**: Improved error messages and graceful fallbacks
-
-### 🎯 Usage Workflow
-
-```bash
-# 1. Authenticate with qwen-code CLI
-qwen-code auth
-
-# 2. Start Reverie and configure
-reverie
-/qwencode status
-/qwencode model coder-model
-
-# 3. Start using (automatic credential detection)
-hello
-```
-
-### 🐛 Bug Fixes
-* Fixed 401 "invalid access token or token expired" error
-* Fixed incorrect API endpoint causing authentication failures
-* Fixed token count display showing wrong maximum values
-* Fixed missing `resource_url` handling in credential detection
-
-### 📊 Compatibility
-* ✅ Fully compatible with qwen-code CLI v1.x
-* ✅ Supports OAuth 2.0 device flow authentication
-* ✅ Handles multiple `resource_url` formats (with/without protocol)
-* ✅ Backward compatible with existing credential files
-
-### 🔐 Security
-* Improved credential file reading with error handling
-* Safe token masking in status displays
-* Secure credential storage following qwen-code standards
-
-### ⚡ Performance
-* Accurate token counting prevents unnecessary context compression
-* Efficient credential caching
-* Optimized API endpoint resolution
+* API endpoint now correctly uses DashScope compatible mode
+* Credential priority: `oauth_creds.json` > `qwen_accounts.json`
+* Full compatibility with qwen-code CLI v1.x and OAuth 2.0 device flow
 
 ---
 

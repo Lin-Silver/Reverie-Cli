@@ -216,7 +216,7 @@ class ReverieInterface:
                 # --- Choose color based on usage level ---
                 if percentage >= 80:
                     token_color = self.theme.CORAL_VIBRANT
-                elif percentage >= 60:
+                elif percentage >= 70:
                     token_color = self.theme.AMBER_GLOW
                 else:
                     token_color = self.theme.MINT_SOFT

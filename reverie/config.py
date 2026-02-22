@@ -25,7 +25,7 @@ from .iflow import (
 
 
 # Version info
-__version__ = "2.0.3"
+__version__ = "2.0.4"
 
 
 def default_text_to_image_config() -> Dict[str, Any]:
@@ -306,14 +306,14 @@ class Config:
     """Main configuration"""
     models: List[ModelConfig] = field(default_factory=list)
     active_model_index: int = 0
-    active_model_source: str = "standard"  # standard | iflow
+    active_model_source: str = "standard"  # standard | iflow | qwencode
     mode: str = "reverie"
     theme: str = "default"
     max_context_tokens: int = 128000
     stream_responses: bool = True
     auto_index: bool = True
     show_status_line: bool = True
-    config_version: str = "2.0.3"  # Config file version for migration
+    config_version: str = "2.0.4"  # Config file version for migration
     
     # Workspace isolation settings
     use_workspace_config: bool = False  # If True, config is stored in workspace directory
@@ -327,6 +327,7 @@ class Config:
     # Text-to-image settings
     text_to_image: Dict[str, Any] = field(default_factory=default_text_to_image_config)
     iflow: Dict[str, Any] = field(default_factory=default_iflow_config)
+    qwencode: Dict[str, Any] = field(default_factory=dict)
     
     # Writer mode specific settings
     writer_mode: Dict[str, Any] = field(default_factory=lambda: {
@@ -367,6 +368,12 @@ class Config:
             if runtime_iflow_model:
                 return ModelConfig.from_dict(runtime_iflow_model)
 
+        if str(self.active_model_source).lower() == "qwencode":
+            from .qwencode import build_qwencode_runtime_model_data
+            runtime_qwencode_model = build_qwencode_runtime_model_data(self.qwencode)
+            if runtime_qwencode_model:
+                return ModelConfig.from_dict(runtime_qwencode_model)
+
         if 0 <= self.active_model_index < len(self.models):
             return self.models[self.active_model_index]
         return None
@@ -382,7 +389,11 @@ class Config:
         text_to_image.pop('default_model_index', None)
         tti_models = text_to_image['models']
         iflow = normalize_iflow_config(self.iflow)
-        active_model_source = "iflow" if str(self.active_model_source).lower() == "iflow" else "standard"
+        from .qwencode import normalize_qwencode_config
+        qwencode = normalize_qwencode_config(self.qwencode)
+        active_model_source = self.active_model_source.lower()
+        if active_model_source not in ("standard", "iflow", "qwencode"):
+            active_model_source = "standard"
 
         return {
             'models': [m.to_dict() for m in self.models],
@@ -405,6 +416,7 @@ class Config:
             'api_enable_debug_logging': self.api_enable_debug_logging,
             'text_to_image': text_to_image,
             'iflow': iflow,
+            'qwencode': qwencode,
         }
     
     @classmethod
@@ -429,8 +441,11 @@ class Config:
         text_to_image.pop('default_model_index', None)
         raw_iflow = data.get('iflow', {})
         iflow = normalize_iflow_config(raw_iflow)
+        raw_qwencode = data.get('qwencode', {})
+        from .qwencode import normalize_qwencode_config
+        qwencode = normalize_qwencode_config(raw_qwencode)
         active_model_source = str(data.get('active_model_source', 'standard')).strip().lower()
-        if active_model_source not in ('standard', 'iflow'):
+        if active_model_source not in ('standard', 'iflow', 'qwencode'):
             active_model_source = 'standard'
 
         return cls(
@@ -471,14 +486,15 @@ class Config:
                 "max_asset_context_window": 10,
                 "context_compression_enabled": True,
             }),
-            config_version=data.get('config_version', '2.0.3'),
+            config_version=data.get('config_version', '2.0.4'),
             use_workspace_config=data.get('use_workspace_config', False),
             api_max_retries=data.get('api_max_retries', 3),
             api_initial_backoff=data.get('api_initial_backoff', 1.0),
             api_timeout=data.get('api_timeout', 60),
             api_enable_debug_logging=data.get('api_enable_debug_logging', False),
             text_to_image=text_to_image,
-            iflow=iflow
+            iflow=iflow,
+            qwencode=qwencode
         )
 
 
@@ -676,7 +692,7 @@ class ConfigManager:
         
         # Check if config_version is missing or outdated
         current_version = data.get('config_version', '0.0.0')
-        if current_version != '2.0.3':
+        if current_version != '2.0.4':
             needs_update = True
         
         # Check if any model is missing provider field
@@ -709,7 +725,7 @@ class ConfigManager:
 
         # Check if active_model_source field is missing/invalid
         active_model_source = str(data.get('active_model_source', '')).strip().lower()
-        if active_model_source not in ('standard', 'iflow'):
+        if active_model_source not in ('standard', 'iflow', 'qwencode'):
             needs_update = True
 
         # Check if iflow section is missing or incomplete
@@ -723,6 +739,10 @@ class ConfigManager:
                 if field_name not in raw_iflow:
                     needs_update = True
                     break
+
+        # Check if qwencode section is missing
+        if 'qwencode' not in data:
+            needs_update = True
 
         # Check if gamer_mode field is missing
         if 'gamer_mode' not in data:

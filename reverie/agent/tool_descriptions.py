@@ -88,12 +88,12 @@ context_management(action="restore", checkpoint_id="checkpoint_123")
 ```
 
 **CRITICAL USAGE RULES**:
-1. **Proactive Management**: When token count exceeds 60% of max context, you MUST proactively call this tool
+1. **Proactive Management**: When token count exceeds 80% of max context, you MUST proactively call this tool
 2. **Before Large Operations**: Always check and compress context before:
    - Large file operations
    - Complex multi-step tasks
    - Extensive code generation
-3. **Automatic Triggers**: The system may automatically trigger compression at 80% usage
+3. **Automatic Triggers**: The system will automatically remind you at 80% usage
 4. **User Transparency**: Always inform the user when compressing context
 
 **Compression Strategy**:

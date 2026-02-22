@@ -25,131 +25,157 @@ _IFLOW_BASE_MODELS = [
         "id": "tstars2.0",
         "display_name": "TStars-2.0",
         "description": "iFlow TStars-2.0 multimodal assistant",
+        "context_length": 128000,
     },
     {
         "id": "qwen3-coder-plus",
         "display_name": "Qwen3-Coder-Plus",
         "description": "Qwen3 coding enhanced model",
+        "context_length": 32768,
     },
     {
         "id": "qwen3-max",
         "display_name": "Qwen3-Max",
         "description": "Qwen3 flagship model",
+        "context_length": 32768,
     },
     {
         "id": "qwen3-vl-plus",
         "display_name": "Qwen3-VL-Plus",
         "description": "Qwen3 multimodal vision-language model",
+        "context_length": 32768,
     },
     {
         "id": "qwen3-max-preview",
         "display_name": "Qwen3-Max-Preview",
         "description": "Qwen3 Max preview model",
+        "context_length": 32768,
     },
     {
         "id": "kimi-k2-0905",
         "display_name": "Kimi-K2-Instruct-0905",
         "description": "Moonshot Kimi K2 instruct model (0905)",
+        "context_length": 128000,
     },
     {
         "id": "glm-4.6",
         "display_name": "GLM-4.6",
         "description": "Zhipu GLM 4.6 general model",
+        "context_length": 128000,
     },
     {
         "id": "glm-4.7",
         "display_name": "GLM-4.7",
         "description": "Zhipu GLM 4.7 general model",
+        "context_length": 128000,
     },
     {
         "id": "glm-5",
         "display_name": "GLM-5",
         "description": "Zhipu GLM 5 general model",
+        "context_length": 128000,
     },
     {
         "id": "kimi-k2",
         "display_name": "Kimi-K2",
         "description": "Moonshot Kimi K2 general model",
+        "context_length": 128000,
     },
     {
         "id": "kimi-k2-thinking",
         "display_name": "Kimi-K2-Thinking",
         "description": "Moonshot Kimi K2 thinking model",
+        "context_length": 128000,
     },
     {
         "id": "deepseek-v3.2-chat",
         "display_name": "DeepSeek-V3.2-Chat",
         "description": "DeepSeek V3.2 chat model",
+        "context_length": 64000,
     },
     {
         "id": "deepseek-v3.2-reasoner",
         "display_name": "DeepSeek-V3.2-Reasoner",
         "description": "DeepSeek V3.2 reasoning model",
+        "context_length": 64000,
     },
     {
         "id": "deepseek-v3.2",
         "display_name": "DeepSeek-V3.2-Exp",
         "description": "DeepSeek V3.2 experimental model",
+        "context_length": 64000,
     },
     {
         "id": "deepseek-v3.1",
         "display_name": "DeepSeek-V3.1-Terminus",
         "description": "DeepSeek V3.1 Terminus model",
+        "context_length": 64000,
     },
     {
         "id": "deepseek-r1",
         "display_name": "DeepSeek-R1",
         "description": "DeepSeek R1 reasoning model",
+        "context_length": 64000,
     },
     {
         "id": "deepseek-v3",
         "display_name": "DeepSeek-V3-671B",
         "description": "DeepSeek V3 671B model",
+        "context_length": 64000,
     },
     {
         "id": "qwen3-32b",
         "display_name": "Qwen3-32B",
         "description": "Qwen3 32B model",
+        "context_length": 32768,
     },
     {
         "id": "qwen3-235b-a22b-thinking-2507",
         "display_name": "Qwen3-235B-Thinking",
         "description": "Qwen3 235B A22B thinking model (2507)",
+        "context_length": 32768,
     },
     {
         "id": "qwen3-235b-a22b-instruct",
         "display_name": "Qwen3-235B-Instruct",
         "description": "Qwen3 235B A22B instruct model",
+        "context_length": 32768,
     },
     {
         "id": "qwen3-235b",
         "display_name": "Qwen3-235B-A22B",
         "description": "Qwen3 235B A22B model",
+        "context_length": 32768,
     },
     {
         "id": "minimax-m2",
         "display_name": "MiniMax-M2",
         "description": "MiniMax M2 model",
+        "context_length": 200000,
     },
     {
         "id": "minimax-m2.1",
         "display_name": "MiniMax-M2.1",
         "description": "MiniMax M2.1 model",
+        "context_length": 200000,
     },
     {
         "id": "minimax-m2.5",
         "display_name": "MiniMax-M2.5",
         "description": "MiniMax M2.5 model",
+        "context_length": 200000,
     },
     {
         "id": "iflow-rome-30ba3b",
         "display_name": "iFlow-ROME",
         "description": "iFlow Rome 30BA3B model",
+        "context_length": 128000,
     },
     {
         "id": "kimi-k2.5",
         "display_name": "Kimi-K2.5",
         "description": "Moonshot Kimi K2.5 model",
+        "context_length": 128000,
     },
 ]
 
@@ -158,46 +184,55 @@ _IFLOW_THINKING_BASES = [
         "id": "glm-4.6",
         "display_name": "GLM-4.6-thinking",
         "description": "GLM-4.6 thinking profile",
+        "context_length": 128000,
     },
     {
         "id": "glm-4.7",
         "display_name": "GLM-4.7-thinking",
         "description": "GLM-4.7 thinking profile",
+        "context_length": 128000,
     },
     {
         "id": "glm-5",
         "display_name": "GLM-5-thinking",
         "description": "GLM-5 thinking profile",
+        "context_length": 128000,
     },
     {
         "id": "qwen3-max-preview",
         "display_name": "Qwen3-Max-Preview-thinking",
         "description": "Qwen3 Max preview thinking profile",
+        "context_length": 32768,
     },
     {
         "id": "qwen3-235b-a22b-thinking-2507",
         "display_name": "Qwen3-235B-Thinking-depth",
         "description": "Qwen3 235B thinking profile with depth control",
+        "context_length": 32768,
     },
     {
         "id": "kimi-k2-thinking",
         "display_name": "Kimi-K2-thinking-depth",
         "description": "Kimi K2 thinking profile with depth control",
+        "context_length": 128000,
     },
     {
         "id": "deepseek-v3.2-reasoner",
         "display_name": "DeepSeek-V3.2-Reasoner-thinking",
         "description": "DeepSeek V3.2 reasoner profile with depth control",
+        "context_length": 64000,
     },
     {
         "id": "deepseek-r1",
         "display_name": "DeepSeek-R1-thinking",
         "description": "DeepSeek R1 reasoning profile with depth control",
+        "context_length": 64000,
     },
     {
         "id": "minimax-m2.5",
         "display_name": "MiniMax-M2.5-thinking",
         "description": "MiniMax M2.5 reasoning profile with depth control",
+        "context_length": 200000,
     },
 ]
 
@@ -208,7 +243,7 @@ def default_iflow_config() -> Dict[str, Any]:
         "selected_model_id": "",
         "selected_model_display_name": "",
         "api_url": IFLOW_API_URL,
-        "max_context_tokens": 128000,
+        "max_context_tokens": 200000,
         # Per-provider timeout (seconds) for iFlow direct API. Default = 20 minutes.
         "timeout": 1200,
     }
@@ -232,6 +267,7 @@ def get_iflow_model_catalog() -> List[Dict[str, Any]]:
                 "is_thinking": False,
                 "thinking_depth": "none",
                 "base_model_id": model_id,
+                "context_length": item.get("context_length", 128000),
             }
         )
 
@@ -239,6 +275,7 @@ def get_iflow_model_catalog() -> List[Dict[str, Any]]:
         base_model_id = str(base.get("id", "")).strip()
         base_display_name = str(base.get("display_name", base_model_id)).strip()
         base_description = str(base.get("description", "")).strip()
+        base_context_length = base.get("context_length", 128000)
 
         if not base_model_id:
             continue
@@ -258,6 +295,7 @@ def get_iflow_model_catalog() -> List[Dict[str, Any]]:
                     "is_thinking": True,
                     "thinking_depth": depth,
                     "base_model_id": base_model_id,
+                    "context_length": base_context_length,
                 }
             )
 
@@ -296,11 +334,11 @@ def normalize_iflow_config(raw_iflow: Any) -> Dict[str, Any]:
     cfg.pop("proxy_api_key", None)
 
     try:
-        max_tokens = int(cfg.get("max_context_tokens", 128000))
+        max_tokens = int(cfg.get("max_context_tokens", 200000))
     except (TypeError, ValueError):
-        max_tokens = 128000
+        max_tokens = 200000
     if max_tokens <= 0:
-        max_tokens = 128000
+        max_tokens = 200000
     cfg["max_context_tokens"] = max_tokens
 
     # Normalize iFlow-specific timeout (seconds). Accept legacy 'iflow_timeout' too.
@@ -351,6 +389,7 @@ def resolve_iflow_selected_model(iflow_config: Any) -> Optional[Dict[str, Any]]:
         "is_thinking": False,
         "thinking_depth": "none",
         "base_model_id": model_id,
+        "context_length": 128000,
     }
 
 
@@ -368,12 +407,15 @@ def build_iflow_runtime_model_data(iflow_config: Any) -> Optional[Dict[str, Any]
     cred = detect_iflow_cli_credentials()
     api_key = cred["api_key"] if cred.get("found") else ""
 
+    # Use context_length from catalog, fallback to config max_context_tokens
+    context_length = selected.get("context_length", cfg.get("max_context_tokens", 200000))
+
     return {
         "model": selected["id"],
         "model_display_name": selected["display_name"],
         "base_url": cfg["api_url"],
         "api_key": api_key,
-        "max_context_tokens": cfg["max_context_tokens"],
+        "max_context_tokens": context_length,
         "provider": "request",
         "thinking_mode": None,
     }

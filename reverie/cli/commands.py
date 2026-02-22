@@ -40,6 +40,7 @@ class CommandHandler:
             'help': self.cmd_help,
             'model': self.cmd_model,
             'iflow': self.cmd_iflow,
+            'qwencode': self.cmd_qwencode,
             'add_model': self.cmd_add_model,
             'mode': self.cmd_mode,
             'status': self.cmd_status,
@@ -163,6 +164,11 @@ class CommandHandler:
             "/iflow",
             f"iFlow CLI integration:\n{self.deco.DOT_MEDIUM} /iflow: detect local iFlow login cache\n{self.deco.DOT_MEDIUM} /iflow model: select iFlow model catalog\n{self.deco.DOT_MEDIUM} iFlow model list is independent from /model",
             "/iflow\n/iflow model"
+        )
+        config_commands.add_row(
+            "/qwencode",
+            f"Qwen Code CLI integration:\n{self.deco.DOT_MEDIUM} /qwencode: detect local Qwen CLI login cache\n{self.deco.DOT_MEDIUM} /qwencode login: OAuth device flow login\n{self.deco.DOT_MEDIUM} /qwencode model: select Qwen Code model catalog\n{self.deco.DOT_MEDIUM} Qwen Code model list is independent from /model",
+            "/qwencode\n/qwencode login\n/qwencode model"
         )
         config_commands.add_row(
             "/setting",
@@ -807,6 +813,11 @@ class CommandHandler:
                 self.console.print(
                     f"[{self.theme.BLUE_SOFT}]Current iFlow model:[/{self.theme.BLUE_SOFT}] {selected['display_name']} ({selected['id']})"
                 )
+                context_length = selected.get('context_length', 0)
+                if context_length:
+                    self.console.print(
+                        f"[{self.theme.TEXT_DIM}]Context length: {context_length:,} tokens[/{self.theme.TEXT_DIM}]"
+                    )
             else:
                 self.console.print(
                     f"[{self.theme.TEXT_DIM}]Current iFlow model: (none)[/{self.theme.TEXT_DIM}]"
@@ -939,6 +950,274 @@ class CommandHandler:
         self.console.print()
         self.console.print(
             f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Switched to iFlow model: {selected_model['display_name']} ({selected_model['id']})[/{self.theme.MINT_VIBRANT}]"
+        )
+
+        if self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+
+        return True
+
+    def cmd_qwencode(self, args: str) -> bool:
+        """Qwen Code integration command."""
+        raw = args.strip()
+        if not raw:
+            return self._cmd_qwencode_status()
+
+        lowered = raw.lower()
+        if lowered in ("status", "check"):
+            return self._cmd_qwencode_status()
+        if lowered == "login":
+            return self._cmd_qwencode_login()
+        if lowered == "model":
+            return self._cmd_qwencode_model("")
+        if lowered.startswith("model "):
+            return self._cmd_qwencode_model(raw[6:].strip())
+
+        self.console.print(
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /qwencode [status|login|model][/{self.theme.AMBER_GLOW}]"
+        )
+        return True
+
+    def _cmd_qwencode_status(self) -> bool:
+        """Detect local Qwen Code CLI credentials and show current Qwen Code selection."""
+        from ..qwencode import (
+            detect_qwencode_cli_credentials,
+            normalize_qwencode_config,
+            resolve_qwencode_selected_model,
+        )
+
+        config_manager = self.app.get('config_manager')
+        config = config_manager.load() if config_manager else None
+
+        cred = detect_qwencode_cli_credentials()
+        self.console.print()
+
+        if cred.get("found"):
+            self.console.print(
+                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Qwen Code CLI credentials detected.[/{self.theme.MINT_VIBRANT}]"
+            )
+            self.console.print(
+                f"[{self.theme.MINT_SOFT}]Qwen Code CLI is installed and logged in. Use /qwencode model to select a model.[/{self.theme.MINT_SOFT}]"
+            )
+            source_file = cred.get("source_file", "")
+            if source_file:
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Credential source: {source_file}[/{self.theme.TEXT_DIM}]"
+                )
+        else:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Qwen Code CLI credentials were not found under ~/.qwen.[/{self.theme.CORAL_SOFT}]"
+            )
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]Use /qwencode login to authenticate, or install Qwen Code CLI first.[/{self.theme.AMBER_GLOW}]"
+            )
+
+        if config_manager and config:
+            qwencode_cfg = normalize_qwencode_config(getattr(config, "qwencode", {}))
+            selected = resolve_qwencode_selected_model(qwencode_cfg)
+            if selected:
+                self.console.print(
+                    f"[{self.theme.BLUE_SOFT}]Current Qwen Code model:[/{self.theme.BLUE_SOFT}] {selected['display_name']} ({selected['id']})"
+                )
+                context_length = selected.get('context_length', 0)
+                if context_length:
+                    self.console.print(
+                        f"[{self.theme.TEXT_DIM}]Context length: {context_length:,} tokens[/{self.theme.TEXT_DIM}]"
+                    )
+            else:
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Current Qwen Code model: (none)[/{self.theme.TEXT_DIM}]"
+                )
+
+            model_source = str(getattr(config, "active_model_source", "standard")).lower()
+            self.console.print(
+                f"[{self.theme.BLUE_SOFT}]Active model source:[/{self.theme.BLUE_SOFT}] {model_source}"
+            )
+            api_url = str(qwencode_cfg.get("api_url", "")).strip()
+            if api_url:
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Qwen Code API endpoint: {api_url}[/{self.theme.TEXT_DIM}]"
+                )
+
+        self.console.print()
+        return True
+
+    def _cmd_qwencode_login(self) -> bool:
+        """Perform Qwen OAuth device flow login."""
+        from ..qwencode import qwen_oauth_login, save_qwen_credentials
+        
+        self.console.print()
+        self.console.print(
+            f"[{self.theme.PURPLE_SOFT}]{self.deco.SPARKLE} Starting Qwen OAuth login...[/{self.theme.PURPLE_SOFT}]"
+        )
+        self.console.print()
+        
+        with self.console.status(f"[{self.theme.PURPLE_SOFT}]Initiating device flow...[/{self.theme.PURPLE_SOFT}]"):
+            login_result = qwen_oauth_login()
+        
+        if not login_result.get("success"):
+            # Show device code info if available
+            if login_result.get("user_code"):
+                self.console.print(
+                    f"[{self.theme.BLUE_SOFT}]Please visit:[/{self.theme.BLUE_SOFT}] {login_result.get('verification_uri', '')}"
+                )
+                self.console.print(
+                    f"[{self.theme.BLUE_SOFT}]Enter code:[/{self.theme.BLUE_SOFT}] {login_result.get('user_code', '')}"
+                )
+                self.console.print()
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Or visit: {login_result.get('verification_uri_complete', '')}[/{self.theme.TEXT_DIM}]"
+                )
+                self.console.print()
+                
+                # Continue polling
+                self.console.print(
+                    f"[{self.theme.AMBER_GLOW}]Waiting for authorization...[/{self.theme.AMBER_GLOW}]"
+                )
+            
+            error_msg = login_result.get("error", "Unknown error")
+            self.console.print(
+                f"[{self.theme.CORAL_VIBRANT}]{self.deco.CROSS} Login failed: {error_msg}[/{self.theme.CORAL_VIBRANT}]"
+            )
+            self.console.print()
+            return True
+        
+        # Save credentials
+        access_token = login_result.get("access_token", "")
+        refresh_token = login_result.get("refresh_token", "")
+        
+        if save_qwen_credentials(access_token, refresh_token):
+            self.console.print(
+                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Qwen login successful![/{self.theme.MINT_VIBRANT}]"
+            )
+            self.console.print(
+                f"[{self.theme.MINT_SOFT}]Credentials saved to ~/.qwen/oauth_creds.json[/{self.theme.MINT_SOFT}]"
+            )
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Use /qwencode model to select a model.[/{self.theme.TEXT_DIM}]"
+            )
+        else:
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Login successful but failed to save credentials.[/{self.theme.AMBER_GLOW}]"
+            )
+        
+        self.console.print()
+        return True
+
+    def _cmd_qwencode_model(self, model_query: str) -> bool:
+        """Select Qwen Code model from dedicated catalog."""
+        from ..qwencode import (
+            detect_qwencode_cli_credentials,
+            get_qwencode_model_catalog,
+            normalize_qwencode_config,
+        )
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        cred = detect_qwencode_cli_credentials()
+        if not cred.get("found"):
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Qwen Code CLI credentials were not found under ~/.qwen.[/{self.theme.CORAL_SOFT}]"
+            )
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]Run /qwencode first after logging into Qwen Code CLI.[/{self.theme.AMBER_GLOW}]"
+            )
+            return True
+
+        config = config_manager.load()
+        qwencode_cfg = normalize_qwencode_config(getattr(config, "qwencode", {}))
+
+        catalog = get_qwencode_model_catalog()
+        if not catalog:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Qwen Code model catalog is empty.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        selected_model = None
+        query = str(model_query or "").strip().lower()
+        if query:
+            for item in catalog:
+                model_id = str(item.get("id", "")).lower()
+                name = str(item.get("display_name", "")).lower()
+                if query == model_id or query == name:
+                    selected_model = item
+                    break
+            if not selected_model:
+                for item in catalog:
+                    model_id = str(item.get("id", "")).lower()
+                    name = str(item.get("display_name", "")).lower()
+                    if query in model_id or query in name:
+                        selected_model = item
+                        break
+
+            if not selected_model:
+                self.console.print(
+                    f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Qwen Code model not found: {model_query}[/{self.theme.CORAL_SOFT}]"
+                )
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Use /qwencode model to open the full selector.[/{self.theme.TEXT_DIM}]"
+                )
+                return True
+        else:
+            from .tui_selector import ModelSelector, SelectorAction
+
+            models_data = []
+            current_model_id = None
+            selected_id = str(qwencode_cfg.get("selected_model_id", "")).strip().lower()
+            for i, item in enumerate(catalog):
+                model_id = str(item.get("id", ""))
+                description = f"{model_id} | {item.get('description', '')}"
+                models_data.append(
+                    {
+                        "id": str(i),
+                        "name": item.get("display_name", model_id),
+                        "description": description,
+                        "model": item,
+                    }
+                )
+                if model_id.lower() == selected_id:
+                    current_model_id = str(i)
+
+            selector = ModelSelector(
+                console=self.console,
+                models=models_data,
+                current_model=current_model_id
+            )
+            result = selector.run()
+            if result.action != SelectorAction.SELECT or not result.selected_item:
+                return True
+
+            try:
+                selected_index = int(result.selected_item.id)
+            except (TypeError, ValueError):
+                self.console.print(
+                    f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid Qwen Code model selection.[/{self.theme.CORAL_SOFT}]"
+                )
+                return True
+
+            if selected_index < 0 or selected_index >= len(catalog):
+                self.console.print(
+                    f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid Qwen Code model index.[/{self.theme.CORAL_SOFT}]"
+                )
+                return True
+
+            selected_model = catalog[selected_index]
+
+        qwencode_cfg["selected_model_id"] = selected_model["id"]
+        qwencode_cfg["selected_model_display_name"] = selected_model["display_name"]
+        config.qwencode = qwencode_cfg
+        config.active_model_source = "qwencode"
+        config_manager.save(config)
+
+        self.console.print()
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Switched to Qwen Code model: {selected_model['display_name']} ({selected_model['id']})[/{self.theme.MINT_VIBRANT}]"
         )
 
         if self.app.get('reinit_agent'):

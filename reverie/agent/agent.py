@@ -2034,8 +2034,8 @@ class ReverieAgent:
         # Calculate current token estimate
         token_estimate = self.get_token_estimate()
         
-        # Check if we've exceeded 60% threshold
-        threshold = max_tokens * 0.6
+        # Check if we've exceeded 80% threshold
+        threshold = max_tokens * 0.8
         if token_estimate >= threshold:
             # Import here to avoid circular imports
             from ..context_engine.compressor import ContextCompressor

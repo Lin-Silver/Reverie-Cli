@@ -64,7 +64,20 @@ class ReverieInterface:
         self.rules_manager = RulesManager(project_root)
         
         self.project_data_dir = self.config_manager.project_data_dir
-        self.session_manager = SessionManager(self.project_data_dir)
+        
+        # Initialize enhanced session management
+        from ..session import SnapshotManager, MemoryIndexer
+        self.snapshot_manager = SnapshotManager(
+            project_root=project_root,
+            snapshots_dir=self.project_data_dir / 'snapshots'
+        )
+        self.memory_indexer = MemoryIndexer(self.project_data_dir)
+        
+        self.session_manager = SessionManager(
+            self.project_data_dir,
+            snapshot_manager=self.snapshot_manager,
+            memory_indexer=self.memory_indexer
+        )
         
         # Initialize operation history and rollback manager
         from ..session import OperationHistory, RollbackManager
@@ -294,6 +307,20 @@ class ReverieInterface:
         # Get current session ID
         session_id = self.session_manager.current_session.id if self.session_manager.current_session else "default"
         
+        # Create project snapshot before processing user question
+        try:
+            snapshot_info = self.snapshot_manager.create_snapshot(
+                description=f"Before question: {message[:50]}..."
+            )
+            if snapshot_info:
+                self.console.print(
+                    f"[{self.theme.MINT_SOFT}]{self.deco.DOT_SMALL} Snapshot created: {snapshot_info.id}[/{self.theme.MINT_SOFT}]"
+                )
+        except Exception as e:
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Warning: Failed to create snapshot: {e}[/{self.theme.AMBER_GLOW}]"
+            )
+        
         try:
             current_markdown_text = ""
             first_non_tool_chunk = True
@@ -480,6 +507,8 @@ class ReverieInterface:
             mode=config.mode or "reverie",
             provider=getattr(model, 'provider', 'openai-sdk'),
             thinking_mode=getattr(model, 'thinking_mode', None),
+            endpoint=getattr(model, 'endpoint', ''),
+            custom_headers=getattr(model, 'custom_headers', {}),
             operation_history=self.operation_history,
             rollback_manager=self.rollback_manager,
             config=config

@@ -167,8 +167,8 @@ class CommandHandler:
         )
         config_commands.add_row(
             "/qwencode",
-            f"Qwen Code CLI integration:\n{self.deco.DOT_MEDIUM} /qwencode: detect local Qwen CLI login cache\n{self.deco.DOT_MEDIUM} /qwencode login: OAuth device flow login\n{self.deco.DOT_MEDIUM} /qwencode model: select Qwen Code model catalog\n{self.deco.DOT_MEDIUM} Qwen Code model list is independent from /model",
-            "/qwencode\n/qwencode login\n/qwencode model"
+            f"Qwen Code CLI integration:\n{self.deco.DOT_MEDIUM} /qwencode: detect local Qwen CLI login cache\n{self.deco.DOT_MEDIUM} /qwencode login: validate/refresh local OAuth token\n{self.deco.DOT_MEDIUM} /qwencode model: select Qwen Code model catalog\n{self.deco.DOT_MEDIUM} /qwencode endpoint: set endpoint override for reverse proxy\n{self.deco.DOT_MEDIUM} Qwen Code model list is independent from /model",
+            "/qwencode\n/qwencode login\n/qwencode model\n/qwencode endpoint"
         )
         config_commands.add_row(
             "/setting",
@@ -972,9 +972,13 @@ class CommandHandler:
             return self._cmd_qwencode_model("")
         if lowered.startswith("model "):
             return self._cmd_qwencode_model(raw[6:].strip())
+        if lowered == "endpoint":
+            return self._cmd_qwencode_endpoint("")
+        if lowered.startswith("endpoint "):
+            return self._cmd_qwencode_endpoint(raw[9:].strip())
 
         self.console.print(
-            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /qwencode [status|login|model][/{self.theme.AMBER_GLOW}]"
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /qwencode [status|login|model|endpoint][/{self.theme.AMBER_GLOW}]"
         )
         return True
 
@@ -999,10 +1003,28 @@ class CommandHandler:
             self.console.print(
                 f"[{self.theme.MINT_SOFT}]Qwen Code CLI is installed and logged in. Use /qwencode model to select a model.[/{self.theme.MINT_SOFT}]"
             )
+            if cred.get("refreshed"):
+                self.console.print(
+                    f"[{self.theme.MINT_SOFT}]Access token was auto-refreshed from local OAuth cache.[/{self.theme.MINT_SOFT}]"
+                )
             source_file = cred.get("source_file", "")
             if source_file:
                 self.console.print(
                     f"[{self.theme.TEXT_DIM}]Credential source: {source_file}[/{self.theme.TEXT_DIM}]"
+                )
+            expires_at = cred.get("expires_at")
+            if isinstance(expires_at, int) and expires_at > 0:
+                expires_at_text = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(expires_at / 1000))
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Token expiry: {expires_at_text}[/{self.theme.TEXT_DIM}]"
+                )
+            if cred.get("resource_url"):
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Credential resource_url: {cred.get('resource_url')}[/{self.theme.TEXT_DIM}]"
+                )
+            if cred.get("is_expired") is True:
+                self.console.print(
+                    f"[{self.theme.AMBER_GLOW}]Token is expired. Run /qwencode login after completing `qwen` OAuth login.[/{self.theme.AMBER_GLOW}]"
                 )
         else:
             self.console.print(
@@ -1011,6 +1033,10 @@ class CommandHandler:
             self.console.print(
                 f"[{self.theme.AMBER_GLOW}]Use /qwencode login to authenticate, or install Qwen Code CLI first.[/{self.theme.AMBER_GLOW}]"
             )
+            if cred.get("errors"):
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Details: {' | '.join(str(x) for x in cred.get('errors', []))}[/{self.theme.TEXT_DIM}]"
+                )
 
         if config_manager and config:
             qwencode_cfg = normalize_qwencode_config(getattr(config, "qwencode", {}))
@@ -1038,69 +1064,134 @@ class CommandHandler:
                 self.console.print(
                     f"[{self.theme.TEXT_DIM}]Qwen Code API endpoint: {api_url}[/{self.theme.TEXT_DIM}]"
                 )
+            endpoint = str(qwencode_cfg.get("endpoint", "")).strip()
+            if endpoint:
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Endpoint override: {endpoint}[/{self.theme.TEXT_DIM}]"
+                )
 
         self.console.print()
         return True
 
     def _cmd_qwencode_login(self) -> bool:
-        """Perform Qwen OAuth device flow login."""
-        from ..qwencode import qwen_oauth_login, save_qwen_credentials
-        
+        """Validate or refresh local Qwen OAuth credentials."""
+        from ..qwencode import qwen_oauth_login
+
         self.console.print()
         self.console.print(
-            f"[{self.theme.PURPLE_SOFT}]{self.deco.SPARKLE} Starting Qwen OAuth login...[/{self.theme.PURPLE_SOFT}]"
+            f"[{self.theme.PURPLE_SOFT}]{self.deco.SPARKLE} Validating Qwen OAuth credentials...[/{self.theme.PURPLE_SOFT}]"
         )
         self.console.print()
-        
-        with self.console.status(f"[{self.theme.PURPLE_SOFT}]Initiating device flow...[/{self.theme.PURPLE_SOFT}]"):
-            login_result = qwen_oauth_login()
-        
+
+        with self.console.status(f"[{self.theme.PURPLE_SOFT}]Checking local CLI cache...[/{self.theme.PURPLE_SOFT}]"):
+            login_result = qwen_oauth_login(force_refresh=True)
+
         if not login_result.get("success"):
-            # Show device code info if available
-            if login_result.get("user_code"):
-                self.console.print(
-                    f"[{self.theme.BLUE_SOFT}]Please visit:[/{self.theme.BLUE_SOFT}] {login_result.get('verification_uri', '')}"
-                )
-                self.console.print(
-                    f"[{self.theme.BLUE_SOFT}]Enter code:[/{self.theme.BLUE_SOFT}] {login_result.get('user_code', '')}"
-                )
-                self.console.print()
-                self.console.print(
-                    f"[{self.theme.TEXT_DIM}]Or visit: {login_result.get('verification_uri_complete', '')}[/{self.theme.TEXT_DIM}]"
-                )
-                self.console.print()
-                
-                # Continue polling
-                self.console.print(
-                    f"[{self.theme.AMBER_GLOW}]Waiting for authorization...[/{self.theme.AMBER_GLOW}]"
-                )
-            
             error_msg = login_result.get("error", "Unknown error")
             self.console.print(
                 f"[{self.theme.CORAL_VIBRANT}]{self.deco.CROSS} Login failed: {error_msg}[/{self.theme.CORAL_VIBRANT}]"
             )
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]Please run `qwen`, complete OAuth login, then run /qwencode login again.[/{self.theme.AMBER_GLOW}]"
+            )
             self.console.print()
             return True
-        
-        # Save credentials
-        access_token = login_result.get("access_token", "")
-        refresh_token = login_result.get("refresh_token", "")
-        
-        if save_qwen_credentials(access_token, refresh_token):
+
+        is_expired = login_result.get("is_expired") is True
+        if is_expired:
             self.console.print(
-                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Qwen login successful![/{self.theme.MINT_VIBRANT}]"
+                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Credentials found but token is expired.[/{self.theme.AMBER_GLOW}]"
             )
+        elif login_result.get("refreshed"):
             self.console.print(
-                f"[{self.theme.MINT_SOFT}]Credentials saved to ~/.qwen/oauth_creds.json[/{self.theme.MINT_SOFT}]"
-            )
-            self.console.print(
-                f"[{self.theme.TEXT_DIM}]Use /qwencode model to select a model.[/{self.theme.TEXT_DIM}]"
+                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Qwen OAuth token refreshed successfully.[/{self.theme.MINT_VIBRANT}]"
             )
         else:
             self.console.print(
-                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Login successful but failed to save credentials.[/{self.theme.AMBER_GLOW}]"
+                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Qwen OAuth credentials are valid.[/{self.theme.MINT_VIBRANT}]"
             )
-        
+
+        source_file = str(login_result.get("source_file", "")).strip()
+        if source_file:
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Credential source: {source_file}[/{self.theme.TEXT_DIM}]"
+            )
+        expires_at = login_result.get("expires_at")
+        if isinstance(expires_at, int) and expires_at > 0:
+            expires_at_text = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(expires_at / 1000))
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Token expiry: {expires_at_text}[/{self.theme.TEXT_DIM}]"
+            )
+        if login_result.get("errors"):
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Notes: {' | '.join(str(x) for x in login_result.get('errors', []))}[/{self.theme.TEXT_DIM}]"
+            )
+        self.console.print(
+            f"[{self.theme.TEXT_DIM}]Use /qwencode model to select a model.[/{self.theme.TEXT_DIM}]"
+        )
+        self.console.print()
+        return True
+
+    def _cmd_qwencode_endpoint(self, endpoint_value: str) -> bool:
+        """Configure custom endpoint override for Qwen OpenAI-compatible requests."""
+        from ..qwencode import normalize_qwencode_config
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        qwencode_cfg = normalize_qwencode_config(getattr(config, "qwencode", {}))
+
+        candidate = str(endpoint_value or "").strip()
+        if not candidate:
+            current_endpoint = str(qwencode_cfg.get("endpoint", "")).strip()
+            placeholder = current_endpoint or "(none)"
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Current endpoint override: {placeholder}[/{self.theme.TEXT_DIM}]"
+            )
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Use 'clear' to remove endpoint override.[/{self.theme.TEXT_DIM}]"
+            )
+            candidate = Prompt.ask(
+                "Endpoint override (absolute URL or relative path)",
+                default=current_endpoint
+            ).strip()
+
+        lowered = candidate.lower()
+        if lowered in ("clear", "default", "none", "off"):
+            candidate = ""
+
+        if candidate and not (
+            candidate.startswith("http://")
+            or candidate.startswith("https://")
+            or candidate.startswith("/")
+        ):
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid endpoint. Use absolute URL or path starting with '/'.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        qwencode_cfg["endpoint"] = candidate
+        config.qwencode = qwencode_cfg
+        config_manager.save(config)
+
+        self.console.print()
+        if candidate:
+            self.console.print(
+                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Qwen endpoint override set to: {candidate}[/{self.theme.MINT_VIBRANT}]"
+            )
+        else:
+            self.console.print(
+                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Qwen endpoint override cleared.[/{self.theme.MINT_VIBRANT}]"
+            )
+
+        if self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+
         self.console.print()
         return True
 
@@ -1142,17 +1233,20 @@ class CommandHandler:
         selected_model = None
         query = str(model_query or "").strip().lower()
         if query:
+            normalized_query = str(
+                normalize_qwencode_config({"selected_model_id": query}).get("selected_model_id", "")
+            ).strip().lower()
             for item in catalog:
                 model_id = str(item.get("id", "")).lower()
                 name = str(item.get("display_name", "")).lower()
-                if query == model_id or query == name:
+                if query == model_id or query == name or (normalized_query and normalized_query == model_id):
                     selected_model = item
                     break
             if not selected_model:
                 for item in catalog:
                     model_id = str(item.get("id", "")).lower()
                     name = str(item.get("display_name", "")).lower()
-                    if query in model_id or query in name:
+                    if query in model_id or query in name or (normalized_query and normalized_query in model_id):
                         selected_model = item
                         break
 

@@ -312,6 +312,8 @@ class ReverieAgent:
         mode: str = "reverie",
         provider: str = "openai-sdk",
         thinking_mode: Optional[str] = None,
+        endpoint: str = "",
+        custom_headers: Optional[Dict[str, str]] = None,
         operation_history=None,
         rollback_manager=None,
         config=None
@@ -327,6 +329,17 @@ class ReverieAgent:
         self.ant_phase = "PLANNING"
         self.provider = provider
         self.thinking_mode = thinking_mode
+        self.endpoint = str(endpoint or "").strip()
+        self.custom_headers: Dict[str, str] = {}
+        if isinstance(custom_headers, dict):
+            for key, value in custom_headers.items():
+                k = str(key or "").strip()
+                v = str(value or "").strip()
+                if k and v:
+                    self.custom_headers[k] = v
+        # Runtime flag: when true, openai-sdk calls are routed via request provider
+        # to support full endpoint overrides (GCMP-like behavior).
+        self._openai_request_fallback_active = False
         
         # API configuration for stability
         self.api_max_retries = 3
@@ -433,10 +446,18 @@ class ReverieAgent:
         if self.provider == "openai-sdk":
             try:
                 from openai import OpenAI
-                self._client = OpenAI(
-                    base_url=self.base_url,
-                    api_key=self.api_key
-                )
+                client_kwargs: Dict[str, Any] = {
+                    "base_url": self.base_url,
+                    "api_key": self.api_key,
+                }
+                if self.custom_headers:
+                    client_kwargs["default_headers"] = dict(self.custom_headers)
+                try:
+                    self._client = OpenAI(**client_kwargs)
+                except TypeError:
+                    # Backward compatibility for OpenAI SDK versions without default_headers.
+                    client_kwargs.pop("default_headers", None)
+                    self._client = OpenAI(**client_kwargs)
             except ImportError:
                 raise ImportError(
                     "OpenAI SDK not installed. Run: pip install openai"
@@ -461,6 +482,94 @@ class ReverieAgent:
                 f"Unknown provider: {self.provider}. "
                 f"Supported providers: openai-sdk, request, anthropic"
             )
+
+    def _should_use_openai_http_fallback(self) -> bool:
+        """
+        Whether to route openai-sdk requests through the request-provider path.
+
+        This is used for endpoint override scenarios to mimic GCMP's per-model
+        endpoint replacement behavior.
+        """
+        if self.provider != "openai-sdk":
+            return False
+
+        endpoint = str(self.endpoint or "").strip()
+        if endpoint:
+            return True
+
+        base_url = str(self.base_url or "").strip().lower()
+        return base_url.endswith("/chat/completions")
+
+    def _resolve_openai_request_url(self) -> str:
+        """Resolve OpenAI-compatible request URL with optional endpoint override."""
+        endpoint = str(self.endpoint or "").strip()
+        base_url = str(self.base_url or "").strip().rstrip("/")
+
+        if endpoint:
+            if endpoint.startswith("http://") or endpoint.startswith("https://"):
+                return endpoint
+            if not base_url:
+                return endpoint
+            if endpoint.startswith("/"):
+                return f"{base_url}{endpoint}"
+            return f"{base_url}/{endpoint}"
+
+        if not base_url:
+            return ""
+
+        if base_url.lower().endswith("/chat/completions"):
+            return base_url
+
+        return f"{base_url}/chat/completions"
+
+    def _process_streaming_openai_http_fallback(self, session_id: str = "default") -> Generator[str, None, None]:
+        """
+        OpenAI-compatible HTTP fallback path.
+
+        Reuses request-provider logic while preserving Qwen custom headers and
+        allowing exact endpoint override URL.
+        """
+        request_url = self._resolve_openai_request_url()
+        if not request_url:
+            raise ValueError("OpenAI-compatible request URL is empty")
+
+        original_provider = self.provider
+        original_base_url = self.base_url
+        original_endpoint = self.endpoint
+        original_flag = self._openai_request_fallback_active
+        try:
+            self.provider = "request"
+            self.base_url = request_url
+            self.endpoint = ""
+            self._openai_request_fallback_active = True
+            yield from self._process_streaming_request(session_id=session_id)
+        finally:
+            self.provider = original_provider
+            self.base_url = original_base_url
+            self.endpoint = original_endpoint
+            self._openai_request_fallback_active = original_flag
+
+    def _process_non_streaming_openai_http_fallback(self, session_id: str = "default") -> str:
+        """Non-streaming OpenAI-compatible HTTP fallback path."""
+        request_url = self._resolve_openai_request_url()
+        if not request_url:
+            raise ValueError("OpenAI-compatible request URL is empty")
+
+        original_provider = self.provider
+        original_base_url = self.base_url
+        original_endpoint = self.endpoint
+        original_flag = self._openai_request_fallback_active
+        try:
+            self.provider = "request"
+            self.base_url = request_url
+            self.endpoint = ""
+            self._openai_request_fallback_active = True
+            return self._process_non_streaming_request(session_id=session_id)
+        finally:
+            self.provider = original_provider
+            self.base_url = original_base_url
+            self.endpoint = original_endpoint
+            self._openai_request_fallback_active = original_flag
 
     def _is_iflow_direct_request(self) -> bool:
         """Whether current request-provider config targets iFlow direct API."""
@@ -516,7 +625,9 @@ class ReverieAgent:
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json"
             }
-            if stream:
+            if self.custom_headers:
+                headers.update(self.custom_headers)
+            if stream and "Accept" not in headers:
                 headers["Accept"] = "text/event-stream"
             return headers
 
@@ -590,6 +701,9 @@ class ReverieAgent:
     def _prepare_request_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Prepare request-provider payload for generic API or iFlow direct API."""
         prepared = dict(payload)
+
+        if self._openai_request_fallback_active:
+            return prepared
 
         if self._is_iflow_direct_request():
             return self._apply_iflow_model_suffix_logic(prepared)
@@ -741,7 +855,10 @@ class ReverieAgent:
     def _process_streaming(self, session_id: str = "default") -> Generator[str, None, None]:
         """Process with streaming response"""
         if self.provider == "openai-sdk":
-            yield from self._process_streaming_openai_sdk(session_id=session_id)
+            if self._should_use_openai_http_fallback():
+                yield from self._process_streaming_openai_http_fallback(session_id=session_id)
+            else:
+                yield from self._process_streaming_openai_sdk(session_id=session_id)
         elif self.provider == "request":
             yield from self._process_streaming_request(session_id=session_id)
         elif self.provider == "anthropic":
@@ -1614,6 +1731,8 @@ class ReverieAgent:
     def _process_non_streaming(self, session_id: str = "default") -> str:
         """Process without streaming"""
         if self.provider == "openai-sdk":
+            if self._should_use_openai_http_fallback():
+                return self._process_non_streaming_openai_http_fallback(session_id=session_id)
             return self._process_non_streaming_openai_sdk(session_id=session_id)
         elif self.provider == "request":
             return self._process_non_streaming_request(session_id=session_id)
@@ -2016,7 +2135,12 @@ class ReverieAgent:
         self.messages = messages.copy()
     
     def _check_and_compress_context(self) -> None:
-        """Check if context exceeds 60% threshold and trigger compression if needed"""
+        """
+        Check context usage and trigger appropriate action.
+        
+        - At 80% threshold: Trigger session rotation with working memory
+        - At 60% threshold: Trigger in-session compression (optional)
+        """
         # Get max tokens from config or active model
         max_tokens = 128000
         config_manager = self.tool_executor.context.get('config_manager')
@@ -2034,56 +2158,108 @@ class ReverieAgent:
         # Calculate current token estimate
         token_estimate = self.get_token_estimate()
         
-        # Check if we've exceeded 80% threshold
-        threshold = max_tokens * 0.8
-        if token_estimate >= threshold:
-            # Import here to avoid circular imports
-            from ..context_engine.compressor import ContextCompressor
-            from ..config import get_project_data_dir
+        # Check if we've exceeded 80% threshold - trigger session rotation
+        rotation_threshold = max_tokens * 0.8
+        if token_estimate >= rotation_threshold:
+            self._handle_session_rotation(token_estimate, max_tokens)
+            return
+        
+        # Check if we've exceeded 60% threshold - trigger in-session compression
+        compression_threshold = max_tokens * 0.6
+        if token_estimate >= compression_threshold:
+            self._handle_in_session_compression(token_estimate, max_tokens)
+    
+    def _handle_session_rotation(self, current_tokens: int, max_tokens: int) -> None:
+        """
+        Handle session rotation at 80% threshold.
+        
+        Creates a new session with working memory injection.
+        """
+        session_manager = self.tool_executor.context.get('session_manager')
+        
+        if not session_manager:
+            # Fallback to in-session compression if no session manager
+            self._handle_in_session_compression(current_tokens, max_tokens)
+            return
+        
+        # Generate working memory summary
+        working_memory = session_manager.get_working_memory_summary()
+        
+        # Rotate to new session
+        new_session = session_manager.rotate_session(
+            working_memory=working_memory,
+            reason=f"Token usage reached {current_tokens:,} / {max_tokens:,} ({current_tokens/max_tokens*100:.1f}%)"
+        )
+        
+        # Clear current messages (new session starts fresh with working memory)
+        self.messages.clear()
+        
+        # Add rotation notification
+        rotation_note = {
+            "role": "system",
+            "content": (
+                f"[Context Engine] Session rotated — new session created. "
+                f"Previous context has been summarized and carried over. "
+                f"Session ID: {new_session.id}"
+            )
+        }
+        self.messages.append(rotation_note)
+        
+        print(f"\n[Context Engine] Session rotated — new session created. Previous context has been summarized and carried over.\n")
+    
+    def _handle_in_session_compression(self, current_tokens: int, max_tokens: int) -> None:
+        """
+        Handle in-session compression at 60% threshold.
+        
+        Compresses messages within the same session.
+        """
+        # Import here to avoid circular imports
+        from ..context_engine.compressor import ContextCompressor
+        from ..config import get_project_data_dir
+        
+        # Get session ID for checkpointing
+        session_manager = self.tool_executor.context.get('session_manager')
+        session_id = "default"
+        if session_manager and session_manager.get_current_session():
+            session_id = session_manager.get_current_session().id
+        
+        # Initialize compressor
+        project_data_dir = get_project_data_dir(self.project_root)
+        compressor = ContextCompressor(project_data_dir)
+        
+        # Build full message list including system prompt
+        full_messages = [{"role": "system", "content": self.system_prompt}]
+        full_messages.extend(self.messages)
+        
+        # Compress context
+        try:
+            compressed_messages = compressor.compress(
+                messages=full_messages,
+                client=self._client,
+                model=self.model,
+                session_id=session_id,
+                provider=self.provider,
+                base_url=self.base_url,
+                api_key=self.api_key
+            )
             
-            # Get session ID for checkpointing
-            session_manager = self.tool_executor.context.get('session_manager')
-            session_id = "default"
-            if session_manager and session_manager.get_current_session():
-                session_id = session_manager.get_current_session().id
+            # Update messages (exclude system prompt which is handled separately)
+            self.messages = compressed_messages[1:]  # Skip system prompt
             
-            # Initialize compressor
-            project_data_dir = get_project_data_dir(self.project_root)
-            compressor = ContextCompressor(project_data_dir)
+            # Add a notification about the compression
+            compression_note = {
+                "role": "system",
+                "content": f"[Context Engine: Session compressed from {current_tokens:,} to {self.get_token_estimate():,} tokens to maintain memory persistence]"
+            }
+            self.messages.insert(0, compression_note)
             
-            # Build full message list including system prompt
-            full_messages = [{"role": "system", "content": self.system_prompt}]
-            full_messages.extend(self.messages)
-            
-            # Compress context
-            try:
-                compressed_messages = compressor.compress(
-                    messages=full_messages,
-                    client=self._client,
-                    model=self.model,
-                    session_id=session_id,
-                    provider=self.provider,
-                    base_url=self.base_url,
-                    api_key=self.api_key
-                )
-                
-                # Update messages (exclude system prompt which is handled separately)
-                self.messages = compressed_messages[1:]  # Skip system prompt
-                
-                # Add a notification about the compression
-                compression_note = {
-                    "role": "system",
-                    "content": f"[Context Engine: Session compressed from {token_estimate:,} to {self.get_token_estimate():,} tokens to maintain memory persistence]"
-                }
-                self.messages.insert(0, compression_note)
-                
-            except Exception as e:
-                # If compression fails, add a warning but continue
-                warning_note = {
-                    "role": "system", 
-                    "content": f"[Context Engine Warning: Auto-compression failed - {str(e)}]"
-                }
-                self.messages.insert(0, warning_note)
+        except Exception as e:
+            # If compression fails, add a warning but continue
+            warning_note = {
+                "role": "system", 
+                "content": f"[Context Engine Warning: Auto-compression failed - {str(e)}]"
+            }
+            self.messages.insert(0, warning_note)
     
     def get_token_estimate(self) -> int:
         """Estimate tokens in current conversation"""

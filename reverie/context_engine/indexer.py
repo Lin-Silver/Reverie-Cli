@@ -137,6 +137,9 @@ class CodebaseIndexer:
         '*.pdf', '*.doc', '*.docx', '*.xls', '*.xlsx',
         '*.zip', '*.tar', '*.gz', '*.rar', '*.7z',
         '*.db', '*.sqlite', '*.sqlite3',
+        # Large vocabulary/tokenizer files (ML models)
+        '**/vocab.json', '**/tokenizer.json', '**/merges.txt',
+        '**/sentencepiece.bpe.model', '**/tokenizer.model',
     ]
     
     # Supported file extensions
@@ -371,33 +374,68 @@ class CodebaseIndexer:
     
     def scan_files(self) -> List[Path]:
         """Scan project for all supported files with size filtering"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
         files = []
         large_files = []
         
-        for root, dirs, filenames in os.walk(self.project_root):
-            root_path = Path(root)
+        logger.info(f"Starting file scan in: {self.project_root}")
+        dir_count = 0
+        file_count = 0
+        
+        try:
+            for root, dirs, filenames in os.walk(self.project_root):
+                root_path = Path(root)
+                dir_count += 1
+                
+                # Log progress every 100 directories
+                if dir_count % 100 == 0:
+                    logger.info(f"Scanned {dir_count} directories, found {len(files) + len(large_files)} files so far...")
+                
+                # Filter out ignored directories
+                original_dir_count = len(dirs)
+                dirs[:] = [d for d in dirs if not self._should_ignore(root_path / d)]
+                filtered_count = original_dir_count - len(dirs)
+                
+                if filtered_count > 0:
+                    logger.debug(f"Filtered {filtered_count} directories in {root_path}")
+                
+                for filename in filenames:
+                    file_count += 1
+                    file_path = root_path / filename
+                    
+                    # Log progress every 1000 files
+                    if file_count % 1000 == 0:
+                        logger.info(f"Processed {file_count} files, accepted {len(files) + len(large_files)} files...")
+                    
+                    if self._should_ignore(file_path):
+                        continue
+                    
+                    # Include code files, game assets, and game config files
+                    if not (self._is_supported_file(file_path) or 
+                           self._is_game_asset(file_path) or 
+                           self._is_game_config(file_path)):
+                        continue
+                    
+                    # Track large files separately (but still include them)
+                    try:
+                        if self._is_large_file(file_path):
+                            large_files.append(file_path)
+                            self._large_files.add(str(file_path))
+                        else:
+                            files.append(file_path)
+                    except Exception as e:
+                        logger.warning(f"Error checking file size for {file_path}: {e}")
+                        continue
             
-            # Filter out ignored directories
-            dirs[:] = [d for d in dirs if not self._should_ignore(root_path / d)]
+            logger.info(f"File scan complete: {dir_count} directories, {file_count} files checked")
+            logger.info(f"Found {len(files)} normal files, {len(large_files)} large files")
             
-            for filename in filenames:
-                file_path = root_path / filename
-                
-                if self._should_ignore(file_path):
-                    continue
-                
-                # Include code files, game assets, and game config files
-                if not (self._is_supported_file(file_path) or 
-                       self._is_game_asset(file_path) or 
-                       self._is_game_config(file_path)):
-                    continue
-                
-                # Track large files separately (but still include them)
-                if self._is_large_file(file_path):
-                    large_files.append(file_path)
-                    self._large_files.add(str(file_path))
-                else:
-                    files.append(file_path)
+        except Exception as e:
+            logger.error(f"Error during file scan: {e}")
+            import traceback
+            traceback.print_exc()
         
         # Append large files at the end (process last)
         files.extend(large_files)
@@ -414,9 +452,14 @@ class CodebaseIndexer:
         
         Optimized for large codebases with chunked processing.
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        
         start_time = time.time()
         result = IndexResult()
         callback = progress_callback or self.config.progress_callback
+        
+        logger.info("Starting full index...")
         
         # Clear existing data
         with self._index_lock:
@@ -425,79 +468,133 @@ class CodebaseIndexer:
             self._file_info.clear()
             self._large_files.clear()
         
+        logger.info("Cleared existing data")
+        
         # Scan for files
-        files = self.scan_files()
+        logger.info("Scanning files...")
+        scan_start = time.time()
+        
+        try:
+            files = self.scan_files()
+            scan_time = time.time() - scan_start
+            logger.info(f"File scan completed in {scan_time:.2f}s, found {len(files)} files")
+        except Exception as e:
+            logger.error(f"File scan failed: {e}")
+            result.success = False
+            result.errors.append(f"File scan failed: {e}")
+            return result
+        
         result.files_scanned = len(files)
         
         if callback:
             callback(0, len(files), "Starting indexing...")
         
         # Calculate total size
+        logger.info("Calculating total size...")
         for f in files:
             try:
                 result.total_bytes += f.stat().st_size
             except Exception:
                 pass
         
+        logger.info(f"Total size: {result.total_bytes / (1024*1024):.2f} MB")
+        
         # Chunked parallel parsing
         parse_start = time.time()
         chunk_size = self.config.chunk_size
+        total_chunks = (len(files) + chunk_size - 1) // chunk_size
+        
+        logger.info(f"Processing {len(files)} files in {total_chunks} chunks (chunk_size={chunk_size})")
         
         for chunk_idx in range(0, len(files), chunk_size):
             chunk = files[chunk_idx:chunk_idx + chunk_size]
+            chunk_num = chunk_idx // chunk_size + 1
+            
+            logger.info(f"Processing chunk {chunk_num}/{total_chunks} ({len(chunk)} files)...")
             
             if callback:
                 progress = min(chunk_idx + chunk_size, len(files))
-                callback(progress, len(files), f"Processing chunk {chunk_idx // chunk_size + 1}...")
+                callback(progress, len(files), f"Processing chunk {chunk_num}/{total_chunks}...")
             
             # Process chunk in parallel
-            with ThreadPoolExecutor(max_workers=self.config.max_workers) as executor:
-                futures = {
-                    executor.submit(self._parse_file_safe, f): f
-                    for f in chunk
-                }
-                
-                # Collect results
-                chunk_symbols = []
-                chunk_deps = []
-                
-                for future in as_completed(futures):
-                    file_path = futures[future]
-                    try:
-                        parse_result, file_info = future.result()
-                        
-                        if parse_result is None:
-                            result.files_skipped += 1
-                            continue
-                        
-                        if parse_result.success:
-                            result.files_parsed += 1
-                            result.symbols_extracted += parse_result.symbol_count
-                            result.dependencies_extracted += len(parse_result.dependencies)
-                            
-                            chunk_symbols.extend(parse_result.symbols)
-                            chunk_deps.extend(parse_result.dependencies)
-                            
-                            # Track file info
-                            if file_info:
-                                file_info.symbol_count = parse_result.symbol_count
-                                self._file_info[str(file_path)] = file_info
-                        else:
-                            result.files_failed += 1
-                            result.errors.extend(parse_result.errors)
+            try:
+                with ThreadPoolExecutor(max_workers=self.config.max_workers) as executor:
+                    # Submit all tasks and track which file each future corresponds to
+                    futures = {}
+                    for f in chunk:
+                        logger.debug(f"Submitting file for parsing: {f}")
+                        future = executor.submit(self._parse_file_safe, f)
+                        futures[future] = f
                     
-                    except Exception as e:
-                        result.files_failed += 1
-                        result.errors.append(f"{file_path}: {str(e)}")
-                
-                # Batch commit to symbol table and dependency graph
-                with self._index_lock:
-                    for symbol in chunk_symbols:
-                        self.symbol_table.add_symbol(symbol)
-                    for dep in chunk_deps:
-                        self.dependency_graph.add_dependency(dep)
+                    # Collect results with timeout
+                    chunk_symbols = []
+                    chunk_deps = []
+                    completed_count = 0
+                    
+                    for future in as_completed(futures, timeout=300):  # 5 minute timeout per chunk
+                        file_path = futures[future]
+                        completed_count += 1
+                        
+                        try:
+                            logger.debug(f"[{completed_count}/{len(chunk)}] Processing result for: {file_path}")
+                            parse_result, file_info = future.result(timeout=10)  # 10s per file
+                            
+                            if parse_result is None:
+                                result.files_skipped += 1
+                                logger.debug(f"  Skipped: {file_path}")
+                                continue
+                            
+                            if parse_result.success:
+                                result.files_parsed += 1
+                                result.symbols_extracted += parse_result.symbol_count
+                                result.dependencies_extracted += len(parse_result.dependencies)
+                                
+                                chunk_symbols.extend(parse_result.symbols)
+                                chunk_deps.extend(parse_result.dependencies)
+                                
+                                logger.debug(f"  Success: {parse_result.symbol_count} symbols, {len(parse_result.dependencies)} deps")
+                                
+                                # Track file info
+                                if file_info:
+                                    file_info.symbol_count = parse_result.symbol_count
+                                    self._file_info[str(file_path)] = file_info
+                            else:
+                                result.files_failed += 1
+                                result.errors.extend(parse_result.errors)
+                                logger.warning(f"  Failed: {parse_result.errors}")
+                        
+                        except TimeoutError:
+                            logger.warning(f"Timeout parsing file (10s): {file_path}")
+                            result.files_failed += 1
+                            result.errors.append(f"{file_path}: Timeout (10s)")
+                        except Exception as e:
+                            logger.warning(f"Error parsing file {file_path}: {e}")
+                            result.files_failed += 1
+                            result.errors.append(f"{file_path}: {str(e)}")
+                    
+                    # Batch commit to symbol table and dependency graph
+                    with self._index_lock:
+                        for symbol in chunk_symbols:
+                            self.symbol_table.add_symbol(symbol)
+                        for dep in chunk_deps:
+                            self.dependency_graph.add_dependency(dep)
+                    
+                    logger.info(f"Chunk {chunk_num} complete: {len(chunk_symbols)} symbols, {len(chunk_deps)} dependencies")
+                    
+            except TimeoutError:
+                logger.error(f"Chunk {chunk_num} timed out (300s)")
+                result.errors.append(f"Chunk {chunk_num} timed out")
+                # Try to identify which files were not completed
+                for future, file_path in futures.items():
+                    if not future.done():
+                        logger.error(f"  Stuck on file: {file_path}")
+                        result.errors.append(f"Timeout on: {file_path}")
+            except Exception as e:
+                logger.error(f"Error processing chunk {chunk_num}: {e}")
+                result.errors.append(f"Chunk {chunk_num}: {str(e)}")
         
         result.parse_time_ms = (time.time() - parse_start) * 1000
+        logger.info(f"Parsing completed in {result.parse_time_ms:.0f}ms")
         result.total_time_ms = (time.time() - start_time) * 1000
         
         # Add warning for large files
@@ -607,6 +704,9 @@ class CodebaseIndexer:
     
     def _parse_file_safe(self, file_path: Path) -> Tuple[Optional[ParseResult], Optional[FileInfo]]:
         """Parse a file with safety checks for large files"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
         try:
             # Skip binary files
             if self._is_binary_file(file_path):
@@ -627,9 +727,13 @@ class CodebaseIndexer:
                     errors=[f"File too large ({size_kb:.1f}KB > {self.config.max_file_size_kb}KB)"]
                 ), None
             
-            return self._parse_file(file_path)
+            logger.debug(f"Parsing file: {file_path}")
+            result = self._parse_file(file_path)
+            logger.debug(f"Parsed file: {file_path}")
+            return result
         
         except Exception as e:
+            logger.warning(f"Parse error for {file_path}: {e}")
             return ParseResult(
                 file_path=str(file_path),
                 language="unknown",

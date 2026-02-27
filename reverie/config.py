@@ -25,7 +25,7 @@ from .iflow import (
 
 
 # Version info
-__version__ = "2.0.4"
+__version__ = "2.1.0"
 
 
 def default_text_to_image_config() -> Dict[str, Any]:
@@ -284,12 +284,23 @@ class ModelConfig:
     max_context_tokens: Optional[int] = None
     provider: str = "openai-sdk"  # Options: openai-sdk, request, anthropic
     thinking_mode: Optional[str] = None  # For request provider: true, false, or None
+    endpoint: str = ""  # Optional custom endpoint path/url for OpenAI-compatible providers
+    custom_headers: Dict[str, str] = field(default_factory=dict)  # Optional request headers
     
     def to_dict(self) -> dict:
         return asdict(self)
     
     @classmethod
     def from_dict(cls, data: dict) -> 'ModelConfig':
+        raw_headers = data.get('custom_headers', data.get('customHeader', {}))
+        custom_headers: Dict[str, str] = {}
+        if isinstance(raw_headers, dict):
+            for key, value in raw_headers.items():
+                k = str(key or '').strip()
+                v = str(value or '').strip()
+                if k and v:
+                    custom_headers[k] = v
+
         return cls(
             model=data.get('model', ''),
             model_display_name=data.get('model_display_name', data.get('model', '')),
@@ -297,7 +308,9 @@ class ModelConfig:
             api_key=data.get('api_key', ''),
             max_context_tokens=data.get('max_context_tokens'),
             provider=data.get('provider', 'openai-sdk'),
-            thinking_mode=data.get('thinking_mode')
+            thinking_mode=data.get('thinking_mode'),
+            endpoint=str(data.get('endpoint', '') or '').strip(),
+            custom_headers=custom_headers
         )
 
 

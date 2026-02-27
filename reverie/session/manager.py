@@ -61,16 +61,31 @@ class SessionManager:
     """
     Manages conversation sessions, including persistence,
     archiving, and checkpointing.
+    
+    Enhanced with:
+    - Automatic session rotation at 80% token threshold
+    - Working memory injection for session continuity
+    - Integration with snapshot and memory systems
     """
     
-    def __init__(self, base_dir: Path):
+    def __init__(self, base_dir: Path, snapshot_manager=None, memory_indexer=None):
         self.base_dir = Path(base_dir)
         self.sessions_dir = self.base_dir / 'sessions'
         self.archives_dir = self.base_dir / 'archives'
         self.checkpoints_dir = self.base_dir / 'checkpoints'
         
         self._ensure_dirs()
-        self.current_session: Optional[Session] = None
+        self._current_session: Optional[Session] = None
+        
+        # Enhanced features
+        self.snapshot_manager = snapshot_manager
+        self.memory_indexer = memory_indexer
+        self.rotation_threshold = 0.8  # 80% token usage triggers rotation
+    
+    @property
+    def current_session(self) -> Optional[Session]:
+        """Get the current session"""
+        return self._current_session
     
     def _ensure_dirs(self) -> None:
         """Create necessary directories"""
@@ -184,3 +199,121 @@ class SessionManager:
         if self._current_session:
             self._current_session.messages.append(message)
             self.save_session()
+    
+    def check_rotation_needed(
+        self,
+        current_tokens: int,
+        max_tokens: int
+    ) -> bool:
+        """
+        Check if session rotation is needed based on token usage.
+        
+        Args:
+            current_tokens: Current token count
+            max_tokens: Maximum context tokens for the model
+        
+        Returns:
+            True if rotation is needed (>= 80% threshold)
+        """
+        if max_tokens <= 0:
+            return False
+        
+        usage_ratio = current_tokens / max_tokens
+        return usage_ratio >= self.rotation_threshold
+    
+    def rotate_session(
+        self,
+        working_memory: str,
+        reason: str = "Token threshold reached"
+    ) -> Session:
+        """
+        Rotate to a new session with working memory injection.
+        
+        Args:
+            working_memory: Compressed summary from previous session
+            reason: Reason for rotation
+        
+        Returns:
+            New session object
+        """
+        # Save current session
+        if self._current_session:
+            self.save_session()
+            
+            # Index the completed session for persistent memory
+            if self.memory_indexer:
+                self.memory_indexer.index_session(self._current_session.id)
+        
+        # Create new session
+        now = datetime.now()
+        # Use microseconds to ensure uniqueness
+        session_id = now.strftime('%Y%m%d_%H%M%S') + f"_{now.microsecond:06d}"
+        iso_time = now.isoformat()
+        
+        new_session = Session(
+            id=session_id,
+            name=f"Session {now.strftime('%Y-%m-%d %H:%M:%S')}",
+            created_at=iso_time,
+            updated_at=iso_time,
+            metadata={
+                'rotated_from': self._current_session.id if self._current_session else None,
+                'rotation_reason': reason,
+                'has_working_memory': bool(working_memory)
+            }
+        )
+        
+        # Inject working memory as first system message
+        if working_memory:
+            new_session.messages.append({
+                'role': 'system',
+                'content': f"[WORKING MEMORY - Previous Session Context]\n{working_memory}\n[END WORKING MEMORY]"
+            })
+        
+        self._current_session = new_session
+        self.save_session(new_session)
+        
+        return new_session
+    
+    def get_working_memory_summary(self) -> str:
+        """
+        Get working memory summary from current session.
+        
+        This should be called before rotation to generate a compressed
+        summary of the current session for injection into the new session.
+        
+        Returns:
+            Compressed summary string
+        """
+        if not self._current_session or not self._current_session.messages:
+            return ""
+        
+        # Simple summary: last few messages + key information
+        messages = self._current_session.messages
+        
+        # Extract key information
+        user_questions = [m for m in messages if m.get('role') == 'user']
+        tool_calls = []
+        
+        for m in messages:
+            if m.get('role') == 'assistant' and 'tool_calls' in m:
+                for tc in m['tool_calls']:
+                    if isinstance(tc, dict):
+                        func = tc.get('function', {})
+                        if isinstance(func, dict):
+                            tool_calls.append(func.get('name', ''))
+        
+        # Build summary
+        summary_parts = []
+        
+        if user_questions:
+            summary_parts.append(f"Recent topics: {len(user_questions)} user questions")
+            # Include last 2 questions
+            for q in user_questions[-2:]:
+                content = q.get('content', '')[:200]
+                summary_parts.append(f"- {content}")
+        
+        if tool_calls:
+            unique_tools = list(set(tool_calls))
+            summary_parts.append(f"Tools used: {', '.join(unique_tools[:10])}")
+        
+        return '\n'.join(summary_parts)

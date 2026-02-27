@@ -10,29 +10,31 @@ This module centralizes:
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import json
+import time
 
 
-# Default DashScope API URL (fallback if resource_url not found in credentials)
-QWENCODE_DEFAULT_API_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+# Default API URL aligned with GCMP's qwen provider config.
+QWENCODE_DEFAULT_API_URL = "https://portal.qwen.ai/v1"
+QWENCODE_DEFAULT_ENDPOINT = ""
+QWENCODE_TOKEN_URL = "https://chat.qwen.ai/api/v1/oauth2/token"
+QWENCODE_CLIENT_ID = "f0304373b74a44d2b584a3fb70ca9e56"
+QWENCODE_REFRESH_BUFFER_MS = 60 * 60 * 1000  # Refresh 1 hour before expiry.
 
-_QWENCODE_CREDENTIAL_FILES = (
-    ("oauth_creds.json", "access_token"),
-    ("qwen_accounts.json", "access_token"),
-)
+_QWENCODE_DEFAULT_HEADERS = {
+    "User-Agent": "QwenCode/0.10.6 (win32; x64)",
+    "X-DashScope-CacheControl": "enable",
+    "X-DashScope-UserAgent": "QwenCode/0.10.6 (win32; x64)",
+    "X-DashScope-AuthType": "qwen-oauth",
+}
+
+_QWENCODE_MODEL_ALIASES = {
+    "qwen3-coder-plus": "coder-model",
+    "qwen3-coder-flash": "coder-model",
+    "qwen3-vl-plus": "vision-model",
+    "qwen3-vision": "vision-model",
+}
 
 _QWENCODE_BASE_MODELS = [
-    {
-        "id": "qwen3-coder-plus",
-        "display_name": "Qwen3-Coder-Plus",
-        "description": "Qwen3 Coder Plus - Advanced code generation and understanding",
-        "context_length": 32768,
-    },
-    {
-        "id": "qwen3-coder-flash",
-        "display_name": "Qwen3-Coder-Flash",
-        "description": "Qwen3 Coder Flash - Fast code generation",
-        "context_length": 8192,
-    },
     {
         "id": "coder-model",
         "display_name": "Qwen3.5-Plus",
@@ -54,9 +56,197 @@ def default_qwencode_config() -> Dict[str, Any]:
         "selected_model_id": "",
         "selected_model_display_name": "",
         "api_url": QWENCODE_DEFAULT_API_URL,
+        "endpoint": QWENCODE_DEFAULT_ENDPOINT,
+        "custom_headers": {},
         "max_context_tokens": 200000,
         "timeout": 1200,
     }
+
+
+def _canonicalize_qwencode_model_id(model_id: Any) -> str:
+    value = str(model_id or "").strip()
+    if not value:
+        return ""
+    return _QWENCODE_MODEL_ALIASES.get(value.lower(), value)
+
+
+def _normalize_qwencode_endpoint(endpoint: Any) -> str:
+    value = str(endpoint or "").strip()
+    if not value:
+        return ""
+    lowered = value.lower()
+    if lowered in ("none", "off", "default", "clear"):
+        return ""
+    return value
+
+
+def _normalize_custom_headers(raw_headers: Any) -> Dict[str, str]:
+    headers: Dict[str, str] = {}
+    if not isinstance(raw_headers, dict):
+        return headers
+
+    for key, value in raw_headers.items():
+        k = str(key or "").strip()
+        v = str(value or "").strip()
+        if k and v:
+            headers[k] = v
+    return headers
+
+
+def _normalize_resource_url(value: str) -> str:
+    url = str(value or "").strip()
+    if not url:
+        return ""
+    if not url.startswith("http://") and not url.startswith("https://"):
+        url = f"https://{url}"
+    return url.rstrip("/")
+
+
+def _ensure_v1_suffix(api_url: str) -> str:
+    url = str(api_url or "").strip().rstrip("/")
+    if not url:
+        return ""
+    if not url.endswith("/v1"):
+        url = f"{url}/v1"
+    return url
+
+
+def _normalize_qwencode_api_url(value: Any) -> str:
+    url = _normalize_resource_url(str(value or ""))
+    if not url:
+        url = QWENCODE_DEFAULT_API_URL
+    return _ensure_v1_suffix(url)
+
+
+def get_qwencode_request_headers(extra_headers: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    """Build default GCMP-style Qwen request headers."""
+    headers = dict(_QWENCODE_DEFAULT_HEADERS)
+    if isinstance(extra_headers, dict):
+        for key, value in extra_headers.items():
+            k = str(key or "").strip()
+            v = str(value or "").strip()
+            if k and v:
+                headers[k] = v
+    return headers
+
+
+def _load_json_dict(path: Path, errors: List[str]) -> Optional[Dict[str, Any]]:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as exc:
+        errors.append(f"{path}: {exc}")
+        return None
+
+    if isinstance(data, dict):
+        return data
+    errors.append(f"{path}: invalid JSON object")
+    return None
+
+
+def _parse_expiry_ms(value: Any) -> Optional[int]:
+    try:
+        expiry = int(value)
+    except (TypeError, ValueError):
+        return None
+    if expiry <= 0:
+        return None
+    # Handle second-based timestamps from some clients.
+    if expiry < 10_000_000_000:
+        expiry *= 1000
+    return expiry
+
+
+def _oauth_creds_path() -> Path:
+    return Path.home() / ".qwen" / "oauth_creds.json"
+
+
+def _refresh_qwencode_oauth_credentials(credentials: Dict[str, Any], errors: List[str]) -> Optional[Dict[str, Any]]:
+    refresh_token = str(credentials.get("refresh_token", "")).strip()
+    if not refresh_token:
+        errors.append("oauth_creds.json missing refresh_token; cannot refresh access token")
+        return None
+
+    try:
+        import requests
+
+        response = requests.post(
+            QWENCODE_TOKEN_URL,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            data={
+                "grant_type": "refresh_token",
+                "client_id": QWENCODE_CLIENT_ID,
+                "refresh_token": refresh_token,
+            },
+            timeout=30,
+        )
+    except Exception as exc:
+        errors.append(f"refresh request failed: {exc}")
+        return None
+
+    if not response.ok:
+        raw_text = ""
+        try:
+            raw_text = response.text
+        except Exception:
+            raw_text = ""
+        errors.append(f"refresh failed ({response.status_code}): {raw_text[:240]}")
+        return None
+
+    try:
+        response_data = response.json()
+    except Exception as exc:
+        errors.append(f"refresh response parse failed: {exc}")
+        return None
+
+    access_token = str(response_data.get("access_token", "")).strip()
+    expires_in = response_data.get("expires_in")
+    try:
+        expires_in_int = int(expires_in)
+    except (TypeError, ValueError):
+        expires_in_int = 0
+
+    if not access_token or expires_in_int <= 0:
+        errors.append("refresh response missing access_token or expires_in")
+        return None
+
+    refreshed = dict(credentials)
+    refreshed["access_token"] = access_token
+    refreshed["refresh_token"] = str(response_data.get("refresh_token", refresh_token)).strip() or refresh_token
+    refreshed["expiry_date"] = int(time.time() * 1000) + expires_in_int * 1000
+
+    # Keep resource_url if present in either the old/new payload.
+    incoming_resource_url = str(response_data.get("resource_url", "")).strip()
+    if incoming_resource_url:
+        refreshed["resource_url"] = incoming_resource_url
+
+    try:
+        _save_oauth_credentials_data(refreshed)
+    except Exception as exc:
+        errors.append(f"save refreshed credentials failed: {exc}")
+        return None
+
+    return refreshed
+
+
+def _save_oauth_credentials_data(data: Dict[str, Any]) -> None:
+    creds_file = _oauth_creds_path()
+    creds_file.parent.mkdir(parents=True, exist_ok=True)
+
+    merged_data: Dict[str, Any] = {}
+    if creds_file.exists():
+        try:
+            with open(creds_file, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                merged_data.update(loaded)
+        except Exception:
+            # Ignore existing file parse errors; overwrite with new data.
+            pass
+
+    merged_data.update(data)
+    with open(creds_file, "w", encoding="utf-8") as f:
+        json.dump(merged_data, f, indent=2, ensure_ascii=False)
 
 
 def get_qwencode_model_catalog() -> List[Dict[str, Any]]:
@@ -83,7 +273,7 @@ def get_qwencode_model_catalog() -> List[Dict[str, Any]]:
 
 def find_qwencode_model(model_id: str, catalog: Optional[List[Dict[str, Any]]] = None) -> Optional[Dict[str, Any]]:
     """Find Qwen Code model by id (case-insensitive)."""
-    wanted = str(model_id or "").strip().lower()
+    wanted = _canonicalize_qwencode_model_id(model_id).lower()
     if not wanted:
         return None
 
@@ -100,9 +290,11 @@ def normalize_qwencode_config(raw_qwencode: Any) -> Dict[str, Any]:
     if isinstance(raw_qwencode, dict):
         cfg.update(raw_qwencode)
 
-    cfg["selected_model_id"] = str(cfg.get("selected_model_id", "")).strip()
+    cfg["selected_model_id"] = _canonicalize_qwencode_model_id(cfg.get("selected_model_id", ""))
     cfg["selected_model_display_name"] = str(cfg.get("selected_model_display_name", "")).strip()
-    cfg["api_url"] = str(cfg.get("api_url", QWENCODE_DEFAULT_API_URL)).strip() or QWENCODE_DEFAULT_API_URL
+    cfg["api_url"] = _normalize_qwencode_api_url(cfg.get("api_url", QWENCODE_DEFAULT_API_URL))
+    cfg["endpoint"] = _normalize_qwencode_endpoint(cfg.get("endpoint", ""))
+    cfg["custom_headers"] = _normalize_custom_headers(cfg.get("custom_headers", {}))
 
     try:
         max_tokens = int(cfg.get("max_context_tokens", 200000))
@@ -133,7 +325,7 @@ def normalize_qwencode_config(raw_qwencode: Any) -> Dict[str, Any]:
 def resolve_qwencode_selected_model(qwencode_config: Any) -> Optional[Dict[str, Any]]:
     """Resolve selected Qwen Code model metadata from config."""
     cfg = normalize_qwencode_config(qwencode_config)
-    model_id = cfg.get("selected_model_id", "")
+    model_id = _canonicalize_qwencode_model_id(cfg.get("selected_model_id", ""))
     if not model_id:
         return None
 
@@ -162,32 +354,33 @@ def build_qwencode_runtime_model_data(qwencode_config: Any) -> Optional[Dict[str
     if not selected:
         return None
 
-    cred = detect_qwencode_cli_credentials()
+    cred = detect_qwencode_cli_credentials(refresh_if_needed=True)
     api_key = cred["api_key"] if cred.get("found") else ""
-    
-    # Use resource_url from credentials if available, otherwise use config api_url
-    # This matches qwen-code behavior: resource_url from OAuth response is the actual API endpoint
-    api_url = cred.get("resource_url", cfg["api_url"])
-    
-    # Ensure the URL has /v1 suffix (matching qwen-code's getCurrentEndpoint logic)
-    if api_url and not api_url.endswith("/v1"):
-        api_url = api_url.rstrip("/") + "/v1"
+
+    # Prefer resource_url from OAuth cache, fallback to configured api_url.
+    # Keep `/v1` suffix to match Qwen/OpenAI-compatible API roots.
+    api_url = _normalize_qwencode_api_url(cred.get("resource_url") or cfg["api_url"])
 
     # Use the model's actual context_length as max_context_tokens
     max_context_tokens = selected.get("context_length", cfg["max_context_tokens"])
 
     return {
-        "model": selected["id"],
+        "model": _canonicalize_qwencode_model_id(selected["id"]),
         "model_display_name": selected["display_name"],
         "base_url": api_url,
         "api_key": api_key,
         "max_context_tokens": max_context_tokens,
         "provider": "openai-sdk",
         "thinking_mode": None,
+        "endpoint": cfg.get("endpoint", ""),
+        "custom_headers": get_qwencode_request_headers(cfg.get("custom_headers", {})),
     }
 
 
-def detect_qwencode_cli_credentials() -> Dict[str, Any]:
+def detect_qwencode_cli_credentials(
+    refresh_if_needed: bool = True,
+    force_refresh: bool = False,
+) -> Dict[str, Any]:
     """
     Detect Qwen Code CLI credentials from local cache.
 
@@ -210,40 +403,56 @@ def detect_qwencode_cli_credentials() -> Dict[str, Any]:
         "resource_url": "",
         "source_file": "",
         "source_field": "",
+        "expires_at": None,
+        "is_expired": None,
+        "refreshed": False,
         "errors": [],
     }
 
-    for filename, field_name in _QWENCODE_CREDENTIAL_FILES:
-        path = qwen_dir / filename
-        if not path.exists():
-            continue
+    oauth_file = _oauth_creds_path()
+    if oauth_file.exists():
+        oauth_data = _load_json_dict(oauth_file, result["errors"])
+        if isinstance(oauth_data, dict):
+            access_token = str(oauth_data.get("access_token", "")).strip()
+            expiry_ms = _parse_expiry_ms(oauth_data.get("expiry_date"))
+            is_expired = bool(expiry_ms is not None and expiry_ms <= int(time.time() * 1000))
+            needs_refresh = bool(
+                refresh_if_needed
+                and expiry_ms is not None
+                and expiry_ms <= int(time.time() * 1000) + QWENCODE_REFRESH_BUFFER_MS
+            )
 
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception as exc:
-            result["errors"].append(f"{path}: {exc}")
-            continue
+            if access_token and (force_refresh or needs_refresh):
+                refreshed = _refresh_qwencode_oauth_credentials(oauth_data, result["errors"])
+                if isinstance(refreshed, dict):
+                    oauth_data = refreshed
+                    access_token = str(oauth_data.get("access_token", "")).strip()
+                    expiry_ms = _parse_expiry_ms(oauth_data.get("expiry_date"))
+                    is_expired = bool(expiry_ms is not None and expiry_ms <= int(time.time() * 1000))
+                    result["refreshed"] = True
 
-        if not isinstance(data, dict):
-            continue
+            if access_token:
+                result["found"] = True
+                result["api_key"] = access_token
+                result["source_file"] = str(oauth_file)
+                result["source_field"] = "access_token"
+                result["expires_at"] = expiry_ms
+                result["is_expired"] = is_expired
+                result["resource_url"] = _normalize_resource_url(oauth_data.get("resource_url", ""))
+                return result
 
-        value = str(data.get(field_name, "")).strip()
-        if value:
-            result["found"] = True
-            result["api_key"] = value
-            result["source_file"] = str(path)
-            result["source_field"] = field_name
-            
-            # Extract resource_url if present (from OAuth credentials)
-            resource_url = str(data.get("resource_url", "")).strip()
-            if resource_url:
-                # Normalize: add https:// if missing
-                if not resource_url.startswith("http"):
-                    resource_url = f"https://{resource_url}"
-                result["resource_url"] = resource_url
-            
-            return result
+    # Fallback to qwen_accounts.json (access_token only, no refresh support).
+    accounts_file = qwen_dir / "qwen_accounts.json"
+    if accounts_file.exists():
+        accounts_data = _load_json_dict(accounts_file, result["errors"])
+        if isinstance(accounts_data, dict):
+            access_token = str(accounts_data.get("access_token", "")).strip()
+            if access_token:
+                result["found"] = True
+                result["api_key"] = access_token
+                result["source_file"] = str(accounts_file)
+                result["source_field"] = "access_token"
+                return result
 
     return result
 
@@ -263,22 +472,32 @@ def is_qwencode_api_url(url: str) -> bool:
     return "dashscope.aliyuncs.com" in value or "portal.qwen.ai" in value
 
 
-def qwen_oauth_login() -> Dict[str, Any]:
+def qwen_oauth_login(force_refresh: bool = True) -> Dict[str, Any]:
     """
-    Perform Qwen OAuth device flow login.
-    
-    Note: This is a placeholder. The actual OAuth flow should be implemented
-    using the qwen-code CLI or a similar OAuth client library.
-    
-    For now, users should use the qwen-code CLI to authenticate:
-        qwen-code auth
-    
-    Returns:
-        Dict with success status and credentials or error message
+    Validate or refresh Qwen OAuth credentials from local CLI cache.
+
+    Reverie does not run an in-process device-flow login. This mirrors GCMP's
+    approach: local CLI handles login, Reverie reads and refreshes credentials.
     """
+    cred = detect_qwencode_cli_credentials(refresh_if_needed=True, force_refresh=force_refresh)
+    if cred.get("found"):
+        return {
+            "success": True,
+            "access_token": cred.get("api_key", ""),
+            "resource_url": cred.get("resource_url", ""),
+            "source_file": cred.get("source_file", ""),
+            "refreshed": bool(cred.get("refreshed")),
+            "expires_at": cred.get("expires_at"),
+            "is_expired": cred.get("is_expired"),
+            "errors": cred.get("errors", []),
+        }
+
+    error = "Qwen CLI credentials not found. Run `qwen`, complete OAuth login, then retry."
+    if cred.get("errors"):
+        error = f"{error} Details: {' | '.join(str(x) for x in cred.get('errors', []))}"
     return {
         "success": False,
-        "error": "OAuth login not yet implemented. Please use 'qwen-code auth' CLI command to authenticate."
+        "error": error,
     }
 
 
@@ -294,30 +513,19 @@ def save_qwen_credentials(access_token: str, refresh_token: str, resource_url: s
     Returns:
         True if saved successfully, False otherwise
     """
-    import time
-    
-    qwen_dir = Path.home() / ".qwen"
-    creds_file = qwen_dir / "oauth_creds.json"
-    
     try:
-        # Create directory if it doesn't exist
-        qwen_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Prepare credentials data
+        now_ms = int(time.time() * 1000)
         creds_data = {
             "access_token": access_token,
             "refresh_token": refresh_token,
             "token_type": "Bearer",
-            "expiry_date": int(time.time() * 1000) + (3600 * 1000),  # 1 hour from now
+            "expiry_date": now_ms + (3600 * 1000),  # 1 hour from now
         }
-        
+
         if resource_url:
-            creds_data["resource_url"] = resource_url
-        
-        # Write to file
-        with open(creds_file, "w", encoding="utf-8") as f:
-            json.dump(creds_data, f, indent=2)
-        
+            creds_data["resource_url"] = _normalize_resource_url(resource_url)
+
+        _save_oauth_credentials_data(creds_data)
         return True
     except Exception as e:
         print(f"Error saving credentials: {e}")

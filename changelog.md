@@ -1,3 +1,21 @@
+## 🚀 Reverie CLI v2.1.0 — Session Memory & Snapshot System
+
+**Release Date:** 2026-02-27
+
+### ✨ New Features
+* **Session Snapshot System**: Automatic project snapshots before each question with one-click restoration and automatic cleanup (keeps max 10 snapshots)
+* **Memory Indexer**: Cross-session persistent memory with keyword/entity extraction, inverted index for fast retrieval, and semantic search over historical conversations
+* **Enhanced Session Manager**: Automatic session rotation at 80% token threshold with working memory injection for session continuity
+* **Agent Payload Sanitization**: Robust validation and sanitization of API request payloads to prevent JSON serialization errors
+* **Context Engine Improvements**: Multi-threaded indexing with increased worker count (8 workers), optimized large file handling (20MB limit, 5MB lightweight parse threshold)
+
+### 🔧 Enhancements
+* **Qwen Code Integration**: Improved credential detection and endpoint handling with better token management
+* **Command System**: Enhanced command registry with case-sensitive command support (e.g., /CE for Context Engine)
+* **Session Persistence**: Improved session save/load with better error handling and metadata management
+
+---
+
 ## 🚀 Reverie CLI v2.0.4 — Qwen Code Integration Fix & Enhancement
 
 **Release Date:** 2025-02-22

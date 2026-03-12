@@ -1157,6 +1157,7 @@ class ReverieAgent:
                     get_geminicli_request_headers,
                     normalize_geminicli_config,
                     parse_geminicli_sse_event,
+                    resolve_geminicli_project_id,
                     resolve_geminicli_request_url,
                 )
 
@@ -1166,12 +1167,21 @@ class ReverieAgent:
                     self.api_key = str(cred.get("api_key", "")).strip()
                 if not self.api_key:
                     raise ValueError("Gemini CLI credentials were not found. Please run /Geminicli login first.")
+                project_id = resolve_geminicli_project_id(
+                    base_url=self.base_url,
+                    access_token=self.api_key,
+                    configured_project_id=str(cfg.get("project_id", "")).strip(),
+                    extra_headers=self.custom_headers,
+                    timeout=int(cfg.get("timeout", 1200) or 1200),
+                )
                 request_url = resolve_geminicli_request_url(self.base_url, self.endpoint, stream=True)
                 payload = build_geminicli_request_payload(
                     model_name=self.model,
                     messages=messages,
                     tools=tools if tools else None,
-                    project_id=str(cfg.get("project_id", "")).strip(),
+                    project_id=project_id,
+                    session_id=session_id,
+                    user_prompt_id=f"reverie-{session_id}-{uuid.uuid4().hex[:12]}",
                 )
                 headers = get_geminicli_request_headers(
                     model_id=self.model,

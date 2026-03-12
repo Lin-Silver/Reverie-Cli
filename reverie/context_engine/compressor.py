@@ -569,6 +569,7 @@ class ContextCompressor:
                     build_geminicli_request_payload,
                     detect_geminicli_cli_credentials,
                     get_geminicli_request_headers,
+                    resolve_geminicli_project_id,
                     resolve_geminicli_request_url,
                 )
 
@@ -576,11 +577,18 @@ class ContextCompressor:
                 access_token = str(cred.get("api_key", "") or api_key or "").strip()
                 if not access_token:
                     return messages
+                project_id = resolve_geminicli_project_id(
+                    base_url=base_url,
+                    access_token=access_token,
+                    timeout=120,
+                )
 
                 payload = build_geminicli_request_payload(
                     model_name=model,
                     messages=prompt,
                     tools=None,
+                    project_id=project_id,
+                    session_id=session_id,
                 )
                 headers = get_geminicli_request_headers(
                     model_id=model,

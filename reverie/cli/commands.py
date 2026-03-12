@@ -2011,11 +2011,15 @@ class CommandHandler:
         cred = detect_geminicli_cli_credentials(refresh_if_needed=True)
         if not cred.get("found"):
             self.console.print(
-                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Gemini CLI credentials were not found under ~/.gemini.[/{self.theme.CORAL_SOFT}]"
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Gemini CLI credentials are unavailable.[/{self.theme.CORAL_SOFT}]"
             )
             self.console.print(
                 f"[{self.theme.AMBER_GLOW}]Run /Geminicli first after logging into Gemini CLI.[/{self.theme.AMBER_GLOW}]"
             )
+            if cred.get("errors"):
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Details: {' | '.join(str(x) for x in cred.get('errors', []))}[/{self.theme.TEXT_DIM}]"
+                )
             return True
 
         return self._select_external_provider_model(

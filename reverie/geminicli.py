@@ -13,6 +13,8 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import json
+import re
+import shutil
 import time
 import uuid
 
@@ -43,6 +45,7 @@ GEMINICLI_OPERATION_POLL_SECONDS = 2.0
 GEMINICLI_OPERATION_POLL_ATTEMPTS = 15
 
 _GEMINICLI_PROJECT_CACHE: Dict[str, str] = {}
+_GEMINICLI_OAUTH_CLIENT_CACHE: Optional[Tuple[str, str]] = None
 
 _GEMINICLI_DEFAULT_SAFETY_SETTINGS = [
     {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "OFF"},
@@ -163,16 +166,85 @@ def _google_accounts_path() -> Path:
 
 def _load_geminicli_oauth_client(errors: Optional[List[str]] = None) -> Optional[Tuple[str, str]]:
     """Load Gemini OAuth client credentials from environment variables."""
+    global _GEMINICLI_OAUTH_CLIENT_CACHE
+
+    if _GEMINICLI_OAUTH_CLIENT_CACHE is not None:
+        return _GEMINICLI_OAUTH_CLIENT_CACHE
+
     client_id = read_first_env(GEMINICLI_CLIENT_ID_ENV_VARS)
     client_secret = read_first_env(GEMINICLI_CLIENT_SECRET_ENV_VARS)
     if client_id and client_secret:
-        return client_id, client_secret
+        _GEMINICLI_OAUTH_CLIENT_CACHE = (client_id, client_secret)
+        return _GEMINICLI_OAUTH_CLIENT_CACHE
+
+    local_cli_client = _load_geminicli_oauth_client_from_local_install(errors)
+    if local_cli_client is not None:
+        _GEMINICLI_OAUTH_CLIENT_CACHE = local_cli_client
+        return _GEMINICLI_OAUTH_CLIENT_CACHE
 
     if errors is not None:
         errors.append(
             "Gemini OAuth refresh requires environment variables "
-            "REVERIE_GEMINICLI_CLIENT_ID and REVERIE_GEMINICLI_CLIENT_SECRET."
+            "REVERIE_GEMINICLI_CLIENT_ID and REVERIE_GEMINICLI_CLIENT_SECRET, "
+            "or a local official Gemini CLI installation."
         )
+    return None
+
+
+def _candidate_geminicli_bundle_paths() -> List[Path]:
+    candidates: List[Path] = []
+
+    gemini_executable = shutil.which("gemini")
+    if gemini_executable:
+        executable_path = Path(gemini_executable).resolve()
+        candidates.append(executable_path.parent / "node_modules" / "@google" / "gemini-cli" / "bundle" / "gemini.js")
+
+    appdata = str(os.environ.get("APPDATA", "") or "").strip()
+    if appdata:
+        candidates.append(Path(appdata) / "npm" / "node_modules" / "@google" / "gemini-cli" / "bundle" / "gemini.js")
+
+    candidates.extend(
+        [
+            Path("/usr/local/lib/node_modules/@google/gemini-cli/bundle/gemini.js"),
+            Path("/opt/homebrew/lib/node_modules/@google/gemini-cli/bundle/gemini.js"),
+            Path.home() / ".npm-global" / "lib" / "node_modules" / "@google" / "gemini-cli" / "bundle" / "gemini.js",
+        ]
+    )
+
+    unique_paths: List[Path] = []
+    seen: set[str] = set()
+    for path in candidates:
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_paths.append(path)
+    return unique_paths
+
+
+def _load_geminicli_oauth_client_from_local_install(
+    errors: Optional[List[str]] = None,
+) -> Optional[Tuple[str, str]]:
+    for bundle_path in _candidate_geminicli_bundle_paths():
+        if not bundle_path.exists():
+            continue
+        try:
+            text = bundle_path.read_text(encoding="utf-8", errors="ignore")
+        except Exception as exc:
+            if errors is not None:
+                errors.append(f"{bundle_path}: {exc}")
+            continue
+
+        client_id_match = re.search(r'OAUTH_CLIENT_ID\s*=\s*"([^"]+)"', text)
+        client_secret_match = re.search(r'OAUTH_CLIENT_SECRET\s*=\s*"([^"]+)"', text)
+        if client_id_match and client_secret_match:
+            client_id = str(client_id_match.group(1)).strip()
+            client_secret = str(client_secret_match.group(1)).strip()
+            if client_id and client_secret:
+                return client_id, client_secret
+
+    if errors is not None:
+        errors.append("Official Gemini CLI OAuth client metadata was not found in the local installation.")
     return None
 
 
@@ -415,6 +487,10 @@ def detect_geminicli_cli_credentials(
             result["refreshed"] = True
 
     if not access_token:
+        return result
+
+    if is_expired:
+        result["errors"].append("Gemini CLI access token is expired and could not be refreshed.")
         return result
 
     result["found"] = True

@@ -1166,6 +1166,9 @@ class ReverieAgent:
                 if cred.get("found"):
                     self.api_key = str(cred.get("api_key", "")).strip()
                 if not self.api_key:
+                    detail = " | ".join(str(item) for item in cred.get("errors", []) if str(item).strip())
+                    if detail:
+                        raise ValueError(f"Gemini CLI credentials are unavailable: {detail}")
                     raise ValueError("Gemini CLI credentials were not found. Please run /Geminicli login first.")
                 project_id = resolve_geminicli_project_id(
                     base_url=self.base_url,

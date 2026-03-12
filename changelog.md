@@ -12,6 +12,7 @@
 ### Post-Release Updates (Still v2.1.1) - 2026-03-12
 * Gemini CLI relay now works with personal Google-account login without requiring a project id, preserves Gemini thought signatures across tool loops, and adds `gemini-3-pro-preview` plus `gemini-3-flash-preview`.
 * Gemini CLI now mirrors the official Code Assist bootstrap flow before chat requests, automatically resolving the managed project via `loadCodeAssist/onboardUser` so `streamGenerateContent` no longer fails with empty-project 500s.
+* Gemini CLI token refresh now falls back to the locally installed official `gemini` bundle when env vars are not set, and expired-token paths fail fast with clearer auth errors instead of opaque upstream 401s.
 * Streaming follow-up input is now a plain prompt line instead of a large live box, and unsent draft text is preserved after normal completion or interruption.
 
 ---

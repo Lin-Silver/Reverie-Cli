@@ -48,6 +48,194 @@ def _collect_codex_summary_text(response: requests.Response) -> str:
                 parts.append(str(event.get("text", "") or ""))
     return "".join(parts).strip()
 
+
+MEMORY_BLOCK_HEADER = "[MEMORY CONSOLIDATION - Context Engine Cache]"
+MEMORY_BLOCK_END = "[END MEMORY]"
+WORKING_MEMORY_HEADER = "[WORKING MEMORY - Previous Session Context]"
+WORKING_MEMORY_END = "[END WORKING MEMORY]"
+CONTEXT_ENGINE_NOTE_PREFIX = "[Context Engine"
+
+
+def _message_text_from_value(value: Any) -> str:
+    """Convert provider-specific message content shapes into plain text."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        parts: List[str] = []
+        for item in value:
+            if isinstance(item, str):
+                text = item.strip()
+            elif isinstance(item, dict):
+                text = (
+                    item.get("text")
+                    or item.get("content")
+                    or item.get("output_text")
+                    or item.get("input_text")
+                    or ""
+                )
+                text = str(text).strip()
+            else:
+                text = str(item).strip()
+            if text:
+                parts.append(text)
+        return "\n".join(parts).strip()
+    return str(value).strip()
+
+
+def _get_message_text(message: Dict[str, Any]) -> str:
+    """Extract displayable text from a message dict."""
+    return _message_text_from_value(message.get("content"))
+
+
+def _truncate_for_memory(text: Any, limit: int = 320) -> str:
+    """Trim text for memory digests without losing the key facts."""
+    compact = " ".join(str(text or "").split())
+    if len(compact) <= limit:
+        return compact
+    return f"{compact[: limit - 3].rstrip()}..."
+
+
+def _tool_call_names(message: Dict[str, Any]) -> List[str]:
+    """Return normalized tool-call names from an assistant message."""
+    names: List[str] = []
+    tool_calls = message.get("tool_calls")
+    if not isinstance(tool_calls, list):
+        return names
+    for tool_call in tool_calls:
+        if not isinstance(tool_call, dict):
+            continue
+        function_obj = tool_call.get("function")
+        if isinstance(function_obj, dict):
+            name = str(function_obj.get("name", "")).strip()
+        else:
+            name = str(tool_call.get("name", "")).strip()
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
+def _unwrap_memory_block(content: str) -> str:
+    """Strip Reverie memory wrappers and return the inner summary."""
+    text = str(content or "").strip()
+    if text.startswith(MEMORY_BLOCK_HEADER):
+        text = text[len(MEMORY_BLOCK_HEADER):].lstrip()
+        if text.endswith(MEMORY_BLOCK_END):
+            text = text[:-len(MEMORY_BLOCK_END)].rstrip()
+    elif text.startswith(WORKING_MEMORY_HEADER):
+        text = text[len(WORKING_MEMORY_HEADER):].lstrip()
+        if text.endswith(WORKING_MEMORY_END):
+            text = text[:-len(WORKING_MEMORY_END)].rstrip()
+    return text.strip()
+
+
+def _split_system_memory_messages(messages: List[Dict[str, Any]]) -> tuple[List[Dict[str, Any]], List[str]]:
+    """Separate durable system prompts from Reverie-generated memory wrappers."""
+    system_msgs: List[Dict[str, Any]] = []
+    memory_blocks: List[str] = []
+
+    for message in messages:
+        if str(message.get("role", "")).strip().lower() != "system":
+            continue
+        content = _get_message_text(message)
+        stripped = content.lstrip()
+        if stripped.startswith(MEMORY_BLOCK_HEADER) or stripped.startswith(WORKING_MEMORY_HEADER):
+            memory_text = _unwrap_memory_block(content)
+            if memory_text:
+                memory_blocks.append(memory_text)
+            continue
+        if stripped.startswith(CONTEXT_ENGINE_NOTE_PREFIX):
+            continue
+        system_msgs.append(message)
+
+    return system_msgs, memory_blocks
+
+
+def _select_recent_messages(messages: List[Dict[str, Any]], keep_last: int) -> List[Dict[str, Any]]:
+    """Keep a recent window while preserving the start of the final interaction block."""
+    if len(messages) <= keep_last:
+        return list(messages)
+
+    start = max(0, len(messages) - keep_last)
+    while start > 0:
+        role = str(messages[start].get("role", "")).strip().lower()
+        previous_role = str(messages[start - 1].get("role", "")).strip().lower()
+        if role == "tool":
+            start -= 1
+            continue
+        if role == "assistant" and previous_role in ("user", "tool"):
+            start -= 1
+            continue
+        break
+
+    return list(messages[start:])
+
+
+def build_memory_digest(messages: List[Dict[str, Any]]) -> str:
+    """Build a compact, deterministic digest for session carry-over and anchors."""
+    if not messages:
+        return ""
+
+    _, memory_blocks = _split_system_memory_messages(messages)
+    non_system = [
+        message
+        for message in messages
+        if str(message.get("role", "")).strip().lower() != "system"
+    ]
+
+    recent_user: List[str] = []
+    recent_assistant: List[str] = []
+    recent_tool_outputs: List[str] = []
+    recent_tools: List[str] = []
+
+    for message in reversed(non_system):
+        role = str(message.get("role", "")).strip().lower()
+        content = _truncate_for_memory(_get_message_text(message))
+        if role == "user" and content and len(recent_user) < 4:
+            recent_user.append(content)
+        elif role == "assistant" and len(recent_assistant) < 3:
+            assistant_text = content or ", ".join(_tool_call_names(message))
+            assistant_text = _truncate_for_memory(assistant_text)
+            if assistant_text:
+                recent_assistant.append(assistant_text)
+            for tool_name in _tool_call_names(message):
+                if tool_name not in recent_tools:
+                    recent_tools.append(tool_name)
+        elif role == "tool" and content and len(recent_tool_outputs) < 3:
+            tool_name = str(
+                message.get("name")
+                or message.get("tool_name")
+                or message.get("tool_call_id")
+                or "tool"
+            ).strip()
+            recent_tool_outputs.append(f"{tool_name}: {_truncate_for_memory(content, limit=240)}")
+
+    sections: List[str] = []
+    if memory_blocks:
+        sections.append(
+            "Prior consolidated memory\n"
+            + "\n".join(f"- {_truncate_for_memory(block, limit=420)}" for block in memory_blocks[-2:])
+        )
+    if recent_user:
+        sections.append(
+            "Recent user requests\n"
+            + "\n".join(f"- {item}" for item in reversed(recent_user))
+        )
+    if recent_assistant:
+        sections.append(
+            "Recent assistant state\n"
+            + "\n".join(f"- {item}" for item in reversed(recent_assistant))
+        )
+    if recent_tools or recent_tool_outputs:
+        tool_lines: List[str] = []
+        if recent_tools:
+            tool_lines.append(f"- Tools in play: {', '.join(reversed(recent_tools[:8]))}")
+        tool_lines.extend(f"- {item}" for item in reversed(recent_tool_outputs))
+        sections.append("Recent tool activity\n" + "\n".join(tool_lines))
+
+    return "\n\n".join(section for section in sections if section.strip())
+
 def validate_payload_for_compression(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     Validate and sanitize payload for context compression API calls.
@@ -229,45 +417,88 @@ class ContextCompressor:
         """
         if not messages:
             return []
-            
-        # Identify system prompt
-        system_msgs = [m for m in messages if m.get('role') == 'system']
-        other_msgs = [m for m in messages if m.get('role') != 'system']
-        
-        # If conversation is short, don't separate too aggressively
-        if len(other_msgs) < 8:
+
+        system_msgs, memory_blocks = _split_system_memory_messages(messages)
+        other_msgs = [
+            message
+            for message in messages
+            if str(message.get("role", "")).strip().lower() != "system"
+        ]
+
+        # If conversation is short and we do not need to collapse prior memory wrappers, leave it alone.
+        if len(other_msgs) < 8 and not memory_blocks:
             return messages
-            
-        # Keep last 4 messages to maintain immediate context
-        recent_msgs = other_msgs[-4:]
-        history_to_compress = other_msgs[:-4]
-        
+
+        keep_last = 6 if len(other_msgs) < 18 else 8
+        recent_msgs = _select_recent_messages(other_msgs, keep_last)
+        history_to_compress = other_msgs[: max(0, len(other_msgs) - len(recent_msgs))]
+
         if not history_to_compress:
-            return messages
+            compact_history = list(system_msgs)
+            if memory_blocks:
+                compact_history.append(
+                    {
+                        "role": "system",
+                        "content": f"{MEMORY_BLOCK_HEADER}\n{memory_blocks[-1]}\n{MEMORY_BLOCK_END}",
+                    }
+                )
+            compact_history.extend(recent_msgs)
+            return compact_history or messages
 
         # Save checkpoint before compression (Safety)
         self.save_checkpoint(messages, "Pre-compression auto-save", session_id)
-        
-        # Prepare summarization prompt
-        conversation_text = ""
+
+        conversation_parts: List[str] = []
         for msg in history_to_compress:
-            role = msg.get('role', 'unknown')
-            content = msg.get('content')
-            if content:
-                conversation_text += f"{role.upper()}: {content}\n\n"
-            
+            role = str(msg.get("role", "unknown")).strip().lower() or "unknown"
+            content = _get_message_text(msg)
+            tool_names = _tool_call_names(msg)
+            if tool_names:
+                tool_line = f"Tool calls: {', '.join(tool_names)}"
+                content = f"{content}\n{tool_line}".strip() if content else tool_line
+            if not content:
+                continue
+
+            role_label = role.upper()
+            if role == "tool":
+                tool_name = str(
+                    msg.get("name")
+                    or msg.get("tool_name")
+                    or msg.get("tool_call_id")
+                    or "tool"
+                ).strip()
+                if tool_name:
+                    role_label = f"TOOL[{tool_name}]"
+            conversation_parts.append(f"{role_label}: {content}")
+
+        conversation_text = "\n\n".join(conversation_parts).strip()
+        if not conversation_text:
+            return messages
+
+        prior_memory_text = "\n\n".join(memory_blocks[-2:]).strip()
+        anchor_digest = build_memory_digest(other_msgs)
+
         prompt = [
             {
                 "role": "system", 
                 "content": (
-                    "You are a specialized Context Engine Optimizer. Your task is to compress scientific and technical memory. "
-                    "Analyze the provided conversation history and create a dense, structured technical summary. "
-                    "Focus on: 1. Core architectural decisions, 2. Key code snippets or logic implemented, 3. Dependencies identified, "
-                    "4. Current state of the project, 5. Pending tasks or identified bugs. "
-                    "Discard all conversational filler. This summary will be used as the primary 'long-term memory' for the agent."
+                    "You are Reverie's Context Engine Optimizer. Consolidate the conversation into durable working memory. "
+                    "Keep concrete technical facts, model/provider settings, file paths, decisions, constraints, open bugs, pending tasks, "
+                    "and user preferences. Discard filler. "
+                    "Return a concise but high-fidelity summary with these sections: "
+                    "Current Goal, Durable Decisions and Constraints, Implemented Work and Key Facts, Open Problems and Pending Work, "
+                    "Important Files Commands and Model Settings. Use bullets and never invent facts."
                 )
             },
-            {"role": "user", "content": f"Compress the following conversation into a high-fidelity technical summary for context retrieval:\n\n{conversation_text}"}
+            {
+                "role": "user",
+                "content": (
+                    "Consolidate the following context for long-term retrieval.\n\n"
+                    f"Existing consolidated memory:\n{prior_memory_text or '(none)'}\n\n"
+                    f"Memory anchors that must survive:\n{anchor_digest or '(none)'}\n\n"
+                    f"Conversation to compress:\n{conversation_text}"
+                ),
+            },
         ]
         
         try:
@@ -415,7 +646,7 @@ class ContextCompressor:
             # Construct new history
             summary_message = {
                 "role": "system", 
-                "content": f"[MEMORY CONSOLIDATION - Context Engine Cache]\n{summary}\n[END MEMORY]"
+                "content": f"{MEMORY_BLOCK_HEADER}\n{summary}\n{MEMORY_BLOCK_END}"
             }
             
             new_history = system_msgs + [summary_message] + recent_msgs

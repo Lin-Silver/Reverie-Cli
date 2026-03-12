@@ -437,30 +437,6 @@ class SessionManager:
         """
         if not self._current_session or not self._current_session.messages:
             return ""
+        from ..context_engine.compressor import build_memory_digest
 
-        messages = self._current_session.messages
-
-        user_questions = [m for m in messages if m.get('role') == 'user']
-        tool_calls = []
-
-        for m in messages:
-            if m.get('role') == 'assistant' and 'tool_calls' in m:
-                for tc in m['tool_calls']:
-                    if isinstance(tc, dict):
-                        func = tc.get('function', {})
-                        if isinstance(func, dict):
-                            tool_calls.append(func.get('name', ''))
-
-        summary_parts = []
-
-        if user_questions:
-            summary_parts.append(f"Recent topics: {len(user_questions)} user questions")
-            for q in user_questions[-2:]:
-                content = q.get('content', '')[:200]
-                summary_parts.append(f"- {content}")
-
-        if tool_calls:
-            unique_tools = list(set(tool_calls))
-            summary_parts.append(f"Tools used: {', '.join(unique_tools[:10])}")
-
-        return '\n'.join(summary_parts)
+        return build_memory_digest(self._current_session.messages)

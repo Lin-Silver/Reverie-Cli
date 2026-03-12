@@ -36,7 +36,7 @@ from .codex import (
 
 
 # Version info
-__version__ = "2.1.0"
+__version__ = "2.1.1"
 
 EXTERNAL_MODEL_SOURCES = ("iflow", "qwencode", "geminicli", "codex")
 SUPPORTED_ACTIVE_MODEL_SOURCES = ("standard",) + EXTERNAL_MODEL_SOURCES

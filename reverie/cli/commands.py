@@ -44,7 +44,6 @@ class CommandHandler:
             'qwencode': self.cmd_qwencode,
             'geminicli': self.cmd_geminicli,
             'codex': self.cmd_codex,
-            'add_model': self.cmd_add_model,
             'mode': self.cmd_mode,
             'status': self.cmd_status,
             'search': self.cmd_search,
@@ -100,52 +99,35 @@ class CommandHandler:
         query = args.strip()
         self.console.print()
 
-        if query:
-            parts = query.split(maxsplit=1)
-            action = parts[0].lower() if parts else ""
-            remainder = parts[1] if len(parts) > 1 else ""
-            normalized = normalize_help_topic(query) or normalize_help_topic(action)
-            if query.lower() == "all":
-                self._print_help_hero(detail_mode=True)
-                for section in HELP_SECTION_ORDER:
-                    entries = self._get_help_entries_for_section(section)
-                    if entries:
-                        self._print_help_section_details(section, entries)
-                self._print_help_tips()
-                self.console.print()
-                return True
+        if not query:
+            return self._cmd_help_ui()
 
-            if action in ("ui", "browse", "browser", "menu"):
-                return self._cmd_help_ui(initial_query=remainder)
-
-            if action in ("list", "overview", "index"):
-                self._print_help_hero(detail_mode=False)
-                for section in HELP_SECTION_ORDER:
-                    entries = self._get_help_entries_for_section(section)
-                    if entries:
-                        self.console.print(self._build_help_overview_table(section, entries))
-                        self.console.print()
-                self._print_help_tips()
-                self.console.print()
-                return True
-
-            if not normalized or normalized not in HELP_TOPICS:
-                self.console.print(
-                    f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} No help topic found for: {escape(query)}[/{self.theme.CORAL_SOFT}]"
-                )
-                self.console.print(
-                    f"[{self.theme.TEXT_DIM}]Try /help, /help all, or /help codex.[/{self.theme.TEXT_DIM}]"
-                )
-                self.console.print()
-                return True
-
+        if query.lower() == "all":
             self._print_help_hero(detail_mode=True)
-            self.console.print(self._build_help_detail_panel(HELP_TOPICS[normalized]))
-            self._print_help_tips(compact=True)
+            for section in HELP_SECTION_ORDER:
+                entries = self._get_help_entries_for_section(section)
+                if entries:
+                    self._print_help_section_details(section, entries)
+            self._print_help_tips()
             self.console.print()
             return True
 
-        return self._cmd_help_ui()
+        normalized = normalize_help_topic(query)
+        if not normalized or normalized not in HELP_TOPICS:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} No help topic found for: {escape(query)}[/{self.theme.CORAL_SOFT}]"
+            )
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Try /help, /help all, or /help codex.[/{self.theme.TEXT_DIM}]"
+            )
+            self.console.print()
+            return True
+
+        self._print_help_hero(detail_mode=True)
+        self.console.print(self._build_help_detail_panel(HELP_TOPICS[normalized]))
+        self._print_help_tips(compact=True)
+        self.console.print()
+        return True
 
     def _get_help_entries_for_section(self, section: str) -> List[Dict[str, object]]:
         """Return help topics for a section in catalog order."""
@@ -171,17 +153,17 @@ class CommandHandler:
     def _print_help_hero(self, detail_mode: bool = False) -> None:
         """Render the help hero banner."""
         subtitle = (
-            "Focused command reference with every supported form and example."
+            "Focused command reference with full forms and runnable examples."
             if detail_mode
-            else "Interactive browser plus grouped command map with child actions, aliases, and usage patterns."
+            else "Interactive browser for every command, subcommand, and example in one place."
         )
         hero = Panel(
             f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Reverie Command Guide {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]\n"
             f"[{self.theme.PURPLE_MEDIUM}]{subtitle}[/{self.theme.PURPLE_MEDIUM}]\n\n"
             f"[bold {self.theme.BLUE_SOFT}]Quick Start[/bold {self.theme.BLUE_SOFT}]\n"
             f"[{self.theme.TEXT_SECONDARY}]1.[/{self.theme.TEXT_SECONDARY}] /help for the live browser and pinned detail pages\n"
-            f"[{self.theme.TEXT_SECONDARY}]2.[/{self.theme.TEXT_SECONDARY}] /help <command> for one static command-specific panel\n"
-            f"[{self.theme.TEXT_SECONDARY}]3.[/{self.theme.TEXT_SECONDARY}] /help list or /help all for printable references",
+            f"[{self.theme.TEXT_SECONDARY}]2.[/{self.theme.TEXT_SECONDARY}] /help <command> for one detailed command page\n"
+            f"[{self.theme.TEXT_SECONDARY}]3.[/{self.theme.TEXT_SECONDARY}] /help all for the full printable reference",
             border_style=self.theme.BORDER_PRIMARY,
             padding=(1, 2),
             box=box.ROUNDED,
@@ -352,11 +334,11 @@ class CommandHandler:
         ]
         if compact:
             lines.append(
-                f"[{self.theme.PINK_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.PINK_SOFT}] Use /help to reopen the live browser or /help list for a static overview"
+                f"[{self.theme.PINK_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.PINK_SOFT}] Use /help to reopen the live browser or /help all for the full reference"
             )
         else:
             lines.append(
-                f"[{self.theme.PINK_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.PINK_SOFT}] Bare /help opens the live browser; /help list prints the grouped overview"
+                f"[{self.theme.PINK_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.PINK_SOFT}] Bare /help opens the live browser; /help <command> prints one detailed page"
             )
 
         self.console.print(
@@ -677,7 +659,9 @@ class CommandHandler:
                 len(all_items),
             ),
             auto_refresh=False,
-            vertical_overflow="visible",
+            screen=True,
+            transient=True,
+            vertical_overflow="ellipsis",
             console=self.console,
         ) as live:
             while True:
@@ -2047,36 +2031,88 @@ class CommandHandler:
         """Codex CLI integration command."""
         raw = args.strip()
         if not raw:
-            return self._cmd_codex_status()
+            return self._cmd_codex_activate()
 
         lowered = raw.lower()
         if lowered in ("low", "medium", "high", "xhigh", "extra high", "extra-high", "extra_high"):
             return self._cmd_codex_thinking(raw)
-        if lowered in ("status", "check"):
-            return self._cmd_codex_status()
         if lowered == "login":
             return self._cmd_codex_login()
         if lowered == "model":
-            return self._cmd_codex_model("")
+            return self._cmd_codex_model("", prompt_reasoning=True)
         if lowered.startswith("model "):
-            return self._cmd_codex_model(raw[6:].strip())
+            return self._cmd_codex_model(raw[6:].strip(), prompt_reasoning=False)
         if lowered == "thinking":
             return self._cmd_codex_thinking("")
         if lowered.startswith("thinking "):
             return self._cmd_codex_thinking(raw[9:].strip())
-        if lowered == "reasoning":
-            return self._cmd_codex_thinking("")
-        if lowered.startswith("reasoning "):
-            return self._cmd_codex_thinking(raw[10:].strip())
+        if lowered in ("status", "check"):
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Use /codex to switch to the Codex source and inspect the current Codex setup.[/{self.theme.TEXT_DIM}]"
+            )
+            return True
+        if lowered == "reasoning" or lowered.startswith("reasoning "):
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Use /codex thinking instead. Reverie now keeps the Codex command surface tighter.[/{self.theme.TEXT_DIM}]"
+            )
+            return True
         if lowered == "endpoint":
             return self._cmd_codex_endpoint("")
         if lowered.startswith("endpoint "):
             return self._cmd_codex_endpoint(raw[9:].strip())
 
         self.console.print(
-            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /codex [status|login|model|thinking|endpoint] or /codex [low|medium|high|extra high][/{self.theme.AMBER_GLOW}]"
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /codex [login|model|thinking|endpoint] or /codex [low|medium|high|extra high][/{self.theme.AMBER_GLOW}]"
         )
         return True
+
+    def _cmd_codex_activate(self) -> bool:
+        """Switch Reverie to Codex using the stored Codex selection."""
+        from ..codex import (
+            detect_codex_cli_credentials,
+            normalize_codex_config,
+            resolve_codex_selected_model,
+        )
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        cred = detect_codex_cli_credentials()
+        if not cred.get("found"):
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Codex CLI credentials were not found under ~/.codex.[/{self.theme.CORAL_SOFT}]"
+            )
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]Use /codex login to authenticate, then run /codex again.[/{self.theme.AMBER_GLOW}]"
+            )
+            return True
+
+        config = config_manager.load()
+        codex_cfg = normalize_codex_config(getattr(config, "codex", {}))
+        selected = resolve_codex_selected_model(codex_cfg)
+        if not selected:
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]No Codex model is selected yet. Launching the Codex model flow.[/{self.theme.TEXT_DIM}]"
+            )
+            return self._cmd_codex_model("", prompt_reasoning=True)
+
+        previous_source = str(getattr(config, "active_model_source", "standard")).lower()
+        config.codex = codex_cfg
+        config.active_model_source = "codex"
+        config_manager.save(config)
+
+        if previous_source != "codex" and self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+
+        self.console.print()
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Switched Reverie to Codex: {selected['display_name']} ({selected['id']})[/{self.theme.MINT_VIBRANT}]"
+        )
+        return self._cmd_codex_status()
 
     def _cmd_codex_status(self) -> bool:
         """Detect local Codex CLI credentials and show current Codex selection."""
@@ -2099,7 +2135,7 @@ class CommandHandler:
                 f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Codex CLI credentials detected.[/{self.theme.MINT_VIBRANT}]"
             )
             self.console.print(
-                f"[{self.theme.MINT_SOFT}]Codex CLI is installed and logged in. Use /codex model to select a model.[/{self.theme.MINT_SOFT}]"
+                f"[{self.theme.MINT_SOFT}]Codex CLI is installed and logged in. Use /codex to activate it, or /codex model to change models.[/{self.theme.MINT_SOFT}]"
             )
             source_file = cred.get("source_file", "")
             if source_file:
@@ -2222,7 +2258,7 @@ class CommandHandler:
                 f"[{self.theme.TEXT_DIM}]Notes: {' | '.join(str(x) for x in login_result.get('errors', []))}[/{self.theme.TEXT_DIM}]"
             )
         self.console.print(
-            f"[{self.theme.TEXT_DIM}]Use /codex model to select a model.[/{self.theme.TEXT_DIM}]"
+            f"[{self.theme.TEXT_DIM}]Use /codex to activate Codex, or /codex model to change models.[/{self.theme.TEXT_DIM}]"
         )
         self.console.print()
         return True
@@ -2347,11 +2383,12 @@ class CommandHandler:
 
         return True
 
-    def _cmd_codex_model(self, model_query: str) -> bool:
+    def _cmd_codex_model(self, model_query: str, prompt_reasoning: Optional[bool] = None) -> bool:
         """Select Codex model from dedicated catalog."""
         from ..codex import (
             detect_codex_cli_credentials,
             get_codex_model_catalog,
+            get_codex_reasoning_label,
             normalize_codex_config,
         )
 
@@ -2365,14 +2402,58 @@ class CommandHandler:
             )
             return True
 
-        return self._select_external_provider_model(
-            config_attr="codex",
-            normalize_config=normalize_codex_config,
-            catalog=get_codex_model_catalog(),
-            provider_label="Codex",
-            active_source="codex",
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        catalog = get_codex_model_catalog()
+        if not catalog:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Codex model catalog is empty.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        codex_cfg = normalize_codex_config(getattr(config, "codex", {}))
+        selected_model = self._resolve_catalog_selection(
+            catalog=catalog,
+            current_selected_id=str(codex_cfg.get("selected_model_id", "")),
             model_query=model_query,
+            provider_label="Codex",
         )
+        if not selected_model:
+            return True
+
+        codex_cfg["selected_model_id"] = selected_model["id"]
+        codex_cfg["selected_model_display_name"] = selected_model["display_name"]
+        codex_cfg = normalize_codex_config(codex_cfg)
+        config.codex = codex_cfg
+        config.active_model_source = "codex"
+        config_manager.save(config)
+
+        self.console.print()
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Switched to Codex model: {selected_model['display_name']} ({selected_model['id']})[/{self.theme.MINT_VIBRANT}]"
+        )
+        self.console.print(
+            f"[{self.theme.TEXT_DIM}]Reasoning depth: {get_codex_reasoning_label(codex_cfg.get('reasoning_effort', 'medium'))}[/{self.theme.TEXT_DIM}]"
+        )
+
+        if self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+
+        should_prompt_reasoning = prompt_reasoning if prompt_reasoning is not None else not str(model_query or "").strip()
+        available_levels = selected_model.get("reasoning_levels", []) or []
+        if should_prompt_reasoning and len(available_levels) > 1:
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Continuing into Codex reasoning-depth selection.[/{self.theme.TEXT_DIM}]"
+            )
+            return self._cmd_codex_thinking("")
+
+        return True
 
     def cmd_model(self, args: str) -> bool:
         """List and select models, or add/delete one"""

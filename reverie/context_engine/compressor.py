@@ -569,7 +569,6 @@ class ContextCompressor:
                     build_geminicli_request_payload,
                     detect_geminicli_cli_credentials,
                     get_geminicli_request_headers,
-                    infer_geminicli_project_id,
                     resolve_geminicli_request_url,
                 )
 
@@ -578,16 +577,10 @@ class ContextCompressor:
                 if not access_token:
                     return messages
 
-                project_root = self.cache_dir.parent.parent
-                project_id = infer_geminicli_project_id(project_root)
-                if not project_id:
-                    return messages
-
                 payload = build_geminicli_request_payload(
                     model_name=model,
                     messages=prompt,
                     tools=None,
-                    project_id=project_id,
                 )
                 headers = get_geminicli_request_headers(
                     model_id=model,

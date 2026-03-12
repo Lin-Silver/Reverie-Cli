@@ -337,6 +337,13 @@ def _sanitize_messages_for_relay(messages: List[Dict[str, Any]]) -> List[Dict[st
                         },
                     }
                 )
+                thought_signature = str(
+                    tool_call.get("thought_signature")
+                    or tool_call.get("gemini_thought_signature")
+                    or ""
+                ).strip()
+                if thought_signature:
+                    normalized_tool_calls[-1]["thought_signature"] = thought_signature
 
             if normalized_tool_calls:
                 _sanitize_tool_calls(normalized_tool_calls)
@@ -1051,6 +1058,7 @@ class ReverieAgent:
                 {
                     "id": "",
                     "type": "function",
+                    "thought_signature": "",
                     "function": {
                         "name": "",
                         "arguments": "",
@@ -1147,7 +1155,6 @@ class ReverieAgent:
                     build_geminicli_request_payload,
                     detect_geminicli_cli_credentials,
                     get_geminicli_request_headers,
-                    infer_geminicli_project_id,
                     normalize_geminicli_config,
                     parse_geminicli_sse_event,
                     resolve_geminicli_request_url,
@@ -1159,15 +1166,12 @@ class ReverieAgent:
                     self.api_key = str(cred.get("api_key", "")).strip()
                 if not self.api_key:
                     raise ValueError("Gemini CLI credentials were not found. Please run /Geminicli login first.")
-                project_id = str(cfg.get("project_id", "")).strip() or infer_geminicli_project_id(self.project_root)
-                if not project_id:
-                    raise ValueError("Gemini CLI project id is not configured. Please run /Geminicli project.")
                 request_url = resolve_geminicli_request_url(self.base_url, self.endpoint, stream=True)
                 payload = build_geminicli_request_payload(
                     model_name=self.model,
                     messages=messages,
                     tools=tools if tools else None,
-                    project_id=project_id,
+                    project_id=str(cfg.get("project_id", "")).strip(),
                 )
                 headers = get_geminicli_request_headers(
                     model_id=self.model,
@@ -1293,6 +1297,7 @@ class ReverieAgent:
                         tool_call["id"] = str(event.get("id", "")).strip() or tool_call["id"]
                         tool_call["function"]["name"] = str(event.get("name", "")).strip() or tool_call["function"]["name"]
                         tool_call["function"]["arguments"] = str(event.get("arguments", "") or "")
+                        tool_call["thought_signature"] = str(event.get("thought_signature", "") or "").strip() or tool_call.get("thought_signature", "")
                         continue
 
                     if event_type == "tool_call_start":
@@ -1300,12 +1305,14 @@ class ReverieAgent:
                         tool_call = self._ensure_stream_tool_call(collected_tool_calls, index)
                         tool_call["id"] = str(event.get("id", "")).strip() or tool_call["id"]
                         tool_call["function"]["name"] = str(event.get("name", "")).strip() or tool_call["function"]["name"]
+                        tool_call["thought_signature"] = str(event.get("thought_signature", "") or "").strip() or tool_call.get("thought_signature", "")
                         continue
 
                     if event_type == "tool_call_args":
                         index = int(event.get("index", 0) or 0)
                         tool_call = self._ensure_stream_tool_call(collected_tool_calls, index)
                         tool_call["function"]["arguments"] += str(event.get("arguments", "") or "")
+                        tool_call["thought_signature"] = str(event.get("thought_signature", "") or "").strip() or tool_call.get("thought_signature", "")
                         continue
 
                     if event_type == "finish":

@@ -9,6 +9,10 @@
 * Strengthened session continuity: context compression now consolidates prior memory blocks, preserves stronger memory anchors and a larger recent interaction window, and session rotation carries a richer working-memory digest forward.
 * Hardened local secret handling and config persistence, including environment-based Gemini OAuth credentials and safer writes for local auth/config JSON.
 
+### Post-Release Updates (Still v2.1.1) - 2026-03-12
+* Gemini CLI relay now works with personal Google-account login without requiring a project id, preserves Gemini thought signatures across tool loops, and adds `gemini-3-pro-preview` plus `gemini-3-flash-preview`.
+* Streaming follow-up input is now a plain prompt line instead of a large live box, and unsent draft text is preserved after normal completion or interruption.
+
 ---
 
 ## 🚀 Reverie CLI v2.0.4 — Qwen Code Integration Fix & Enhancement

@@ -1764,7 +1764,7 @@ class CommandHandler:
             return self._cmd_geminicli_project(raw[8:].strip())
 
         self.console.print(
-            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /Geminicli [status|login|model|endpoint|project][/{self.theme.AMBER_GLOW}]"
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /Geminicli [status|login|model|endpoint][/{self.theme.AMBER_GLOW}]"
         )
         return True
 
@@ -1850,15 +1850,15 @@ class CommandHandler:
             inferred_project = infer_geminicli_project_id(project_root)
             if configured_project:
                 self.console.print(
-                    f"[{self.theme.TEXT_DIM}]Gemini project id: {configured_project}[/{self.theme.TEXT_DIM}]"
+                    f"[{self.theme.TEXT_DIM}]Gemini project override: {configured_project} (optional)[/{self.theme.TEXT_DIM}]"
                 )
             elif inferred_project:
                 self.console.print(
-                    f"[{self.theme.TEXT_DIM}]Gemini project id (inferred): {inferred_project}[/{self.theme.TEXT_DIM}]"
+                    f"[{self.theme.TEXT_DIM}]Gemini project override (inferred): {inferred_project} (optional)[/{self.theme.TEXT_DIM}]"
                 )
             else:
                 self.console.print(
-                    f"[{self.theme.TEXT_DIM}]Gemini project id: (none)[/{self.theme.TEXT_DIM}]"
+                    f"[{self.theme.TEXT_DIM}]Gemini project override: (none, personal Google login works without it)[/{self.theme.TEXT_DIM}]"
                 )
 
             api_url = str(geminicli_cfg.get("api_url", "")).strip()
@@ -1886,7 +1886,7 @@ class CommandHandler:
         self.console.print()
 
         with self.console.status(f"[{self.theme.PURPLE_SOFT}]Checking local CLI cache...[/{self.theme.PURPLE_SOFT}]"):
-            login_result = geminicli_oauth_login(force_refresh=True)
+            login_result = geminicli_oauth_login(force_refresh=False)
 
         if not login_result.get("success"):
             error_msg = login_result.get("error", "Unknown error")
@@ -1929,7 +1929,7 @@ class CommandHandler:
                 f"[{self.theme.TEXT_DIM}]Notes: {' | '.join(str(x) for x in login_result.get('errors', []))}[/{self.theme.TEXT_DIM}]"
             )
         self.console.print(
-            f"[{self.theme.TEXT_DIM}]Use /Geminicli model to select a model.[/{self.theme.TEXT_DIM}]"
+            f"[{self.theme.TEXT_DIM}]Use /Geminicli model to select a model. Project override is optional.[/{self.theme.TEXT_DIM}]"
         )
         self.console.print()
         return True

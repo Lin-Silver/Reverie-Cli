@@ -174,6 +174,7 @@ class ReverieInterface:
         self._stream_input_state: Optional[StreamInputState] = None
         self._stream_input_thread: Optional[threading.Thread] = None
         self._status_live = None
+        self._pending_input_draft = ""
         
         # Cached tiktoken encoding for status bar token counting (lazy-loaded on first use)
         self._tiktoken_encoding = None
@@ -410,47 +411,20 @@ class ReverieInterface:
             }
         return self._stream_input_state.snapshot()
 
-    def _build_stream_input_panel(self) -> Panel:
-        """Render the bottom interjection input bar while streaming."""
+    def _build_stream_input_prompt(self) -> Text:
+        """Render the streaming-time interjection prompt as a plain prompt line."""
         snapshot = self._snapshot_stream_input_state()
-        width = max(int(getattr(self.console.size, "width", 0) or self.console.width or 0), 60)
-        compact = width < 100
         buffer_text = str(snapshot.get("buffer", "") or "")
         is_paused = bool(snapshot.get("paused"))
-
-        title = f"[bold {self.theme.BLUE_SOFT}]{self.deco.DIAMOND} Live Input[/bold {self.theme.BLUE_SOFT}]"
-        if is_paused:
-            content = Text.from_markup(
-                f"[{self.theme.TEXT_DIM}]Streaming input is paused while Reverie waits for tool/user input.[/{self.theme.TEXT_DIM}]"
-            )
-        elif buffer_text:
-            prompt = Text()
-            prompt.append("Interject ", style=f"bold {self.theme.PURPLE_SOFT}")
-            prompt.append(f"{self.deco.CHEVRON_RIGHT} ", style=self.theme.BLUE_SOFT)
+        prompt = Text()
+        prompt.append(f"{self.deco.SPARKLE_FILLED} ", style=self.theme.PINK_SOFT)
+        prompt.append("Reverie", style=f"bold {self.theme.PURPLE_SOFT}")
+        prompt.append(f" {self.deco.CHEVRON_RIGHT} ", style=self.theme.BLUE_SOFT)
+        if buffer_text:
             prompt.append(buffer_text, style=f"bold {self.theme.TEXT_PRIMARY}")
-            content = prompt
-        else:
-            content = Text.from_markup(
-                f"[{self.theme.TEXT_DIM}]Type a follow-up while the model is writing. Press Enter to interrupt and send it, or Esc to stop the current reply.[/{self.theme.TEXT_DIM}]"
-            )
-
-        footer = Text()
-        footer.append("Enter", style=self.theme.BLUE_SOFT)
-        footer.append(" send now  ", style=self.theme.TEXT_DIM)
-        footer.append("Esc", style=self.theme.BLUE_SOFT)
-        footer.append(" stop output  ", style=self.theme.TEXT_DIM)
-        footer.append("Backspace", style=self.theme.BLUE_SOFT)
-        footer.append(" edit", style=self.theme.TEXT_DIM)
-        if compact:
-            footer = Text("Enter send  Esc stop  Backspace edit", style=self.theme.TEXT_DIM)
-
-        return Panel(
-            Group(content, footer),
-            title=title,
-            border_style=self.theme.BORDER_SUBTLE,
-            box=box.ROUNDED,
-            padding=(0, 1),
-        )
+        elif is_paused:
+            prompt.append("(input paused)", style=self.theme.TEXT_DIM)
+        return prompt
 
     def _get_streaming_footer(self):
         """Compose the live footer shown during streaming output."""
@@ -461,8 +435,18 @@ class ReverieInterface:
                 renderables.append(self._get_status_line())
         except Exception:
             pass
-        renderables.append(self._build_stream_input_panel())
+        renderables.append(self._build_stream_input_prompt())
         return Group(*renderables)
+
+    def _consume_pending_input_draft(self) -> str:
+        """Return and clear any draft captured during streaming."""
+        draft = str(self._pending_input_draft or "")
+        self._pending_input_draft = ""
+        return draft
+
+    def _store_pending_input_draft(self, value: str) -> None:
+        """Persist an unsent streaming draft for the next prompt."""
+        self._pending_input_draft = str(value or "")
 
     def _pause_stream_input_capture(self) -> None:
         """Pause background streaming-input capture."""
@@ -580,7 +564,10 @@ class ReverieInterface:
         
         while True:
             try:
-                user_input = self.input_handler.interactive_input("Reverie> ")
+                user_input = self.input_handler.interactive_input(
+                    "Reverie> ",
+                    initial_text=self._consume_pending_input_draft(),
+                )
                 
                 if user_input is None: 
                     break 
@@ -611,8 +598,11 @@ class ReverieInterface:
         self.current_task_start = time.time()
         config = self.config_manager.load()
         follow_up_message: Optional[str] = None
+        draft_message: Optional[str] = None
         interrupted_by_user = False
         response_stream = None
+        current_markdown_text = ""
+        thinking_content = ""
         
         # Get current session ID
         session_id = self.session_manager.current_session.id if self.session_manager.current_session else "default"
@@ -632,13 +622,11 @@ class ReverieInterface:
             )
         
         try:
-            current_markdown_text = ""
             first_non_tool_chunk = True
             response_header_printed = False
             
             # Thinking content state management
             in_thinking_mode = False
-            thinking_content = ""
             
             # Create live footer with status + input bar during streaming
             from rich.live import Live
@@ -766,6 +754,7 @@ class ReverieInterface:
             finally:
                 snapshot = self._snapshot_stream_input_state()
                 follow_up_message = str(snapshot.get("submitted_text") or "").strip() or None
+                draft_message = str(snapshot.get("buffer") or "").rstrip() or None
                 interrupted_by_user = bool(snapshot.get("interrupt_requested"))
                 if response_stream and hasattr(response_stream, "close"):
                     try:
@@ -780,12 +769,19 @@ class ReverieInterface:
         except KeyboardInterrupt:
             snapshot = self._snapshot_stream_input_state()
             follow_up_message = str(snapshot.get("submitted_text") or "").strip() or follow_up_message
+            draft_message = str(snapshot.get("buffer") or "").rstrip() or draft_message
             interrupted_by_user = bool(snapshot.get("interrupt_requested")) or interrupted_by_user
             if response_stream and hasattr(response_stream, "close"):
                 try:
                     response_stream.close()
                 except Exception:
                     pass
+            if current_markdown_text.strip():
+                self.console.print(format_markdown(current_markdown_text))
+                current_markdown_text = ""
+            if thinking_content.strip():
+                self._print_thinking_content(thinking_content)
+                thinking_content = ""
             if interrupted_by_user:
                 message_text = "Output stopped. Ready for your next instruction."
                 if follow_up_message:
@@ -808,6 +804,13 @@ class ReverieInterface:
                     self.session_manager.update_messages(self.agent.get_history())
                 except Exception as session_error:
                     self.console.print(f"\n[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Warning: Failed to save session: {session_error}[/{self.theme.AMBER_GLOW}]")
+
+        if follow_up_message:
+            self._store_pending_input_draft("")
+        elif draft_message:
+            self._store_pending_input_draft(draft_message)
+        else:
+            self._store_pending_input_draft("")
         
         # Display updated status line after processing if enabled
         if config.show_status_line and not follow_up_message:

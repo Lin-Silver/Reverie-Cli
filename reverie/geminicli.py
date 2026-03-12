@@ -9,9 +9,9 @@ This module centralizes:
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlsplit
 import json
 import time
 
@@ -36,7 +36,6 @@ GEMINICLI_CLIENT_SECRET_ENV_VARS = (
 GEMINICLI_REFRESH_BUFFER_MS = 30 * 60 * 1000
 GEMINICLI_VERSION = "0.31.0"
 GEMINICLI_API_CLIENT_HEADER = "google-genai-sdk/1.41.0 gl-node/v22.19.0"
-_GEMINICLI_THOUGHT_SIGNATURE = "skip_thought_signature_validator"
 
 _GEMINICLI_DEFAULT_SAFETY_SETTINGS = [
     {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "OFF"},
@@ -47,6 +46,20 @@ _GEMINICLI_DEFAULT_SAFETY_SETTINGS = [
 ]
 
 _GEMINICLI_MODELS = [
+    {
+        "id": "gemini-3-pro-preview",
+        "display_name": "Gemini 3 Pro Preview",
+        "description": "Gemini 3 Pro Preview",
+        "context_length": 1_048_576,
+        "max_output_tokens": 65_536,
+    },
+    {
+        "id": "gemini-3-flash-preview",
+        "display_name": "Gemini 3 Flash Preview",
+        "description": "Gemini 3 Flash Preview",
+        "context_length": 1_048_576,
+        "max_output_tokens": 65_536,
+    },
     {
         "id": "gemini-2.5-pro",
         "display_name": "Gemini 2.5 Pro",
@@ -519,13 +532,15 @@ def build_geminicli_request_payload(
 ) -> Dict[str, Any]:
     """Translate OpenAI-style messages/tools into Gemini CLI request payload."""
     payload: Dict[str, Any] = {
-        "project": str(project_id or "").strip(),
         "model": model_name,
         "request": {
             "contents": [],
             "safetySettings": list(_GEMINICLI_DEFAULT_SAFETY_SETTINGS),
         },
     }
+    project_value = str(project_id or "").strip()
+    if project_value:
+        payload["project"] = project_value
 
     if reasoning_effort:
         effort = str(reasoning_effort).strip().lower()
@@ -537,7 +552,7 @@ def build_geminicli_request_payload(
                 thinking_cfg["thinkingLevel"] = effort
             payload["request"].setdefault("generationConfig", {})["thinkingConfig"] = thinking_cfg
 
-    tool_call_name_by_id: Dict[str, str] = {}
+    tool_call_meta_by_id: Dict[str, Dict[str, str]] = {}
     tool_responses: Dict[str, str] = {}
     for message in messages:
         if str(message.get("role", "")).strip().lower() == "assistant":
@@ -546,8 +561,16 @@ def build_geminicli_request_payload(
                     continue
                 tool_call_id = str(tool_call.get("id", "")).strip()
                 name = str(((tool_call.get("function") or {}).get("name", ""))).strip()
+                thought_signature = str(
+                    tool_call.get("thought_signature")
+                    or tool_call.get("gemini_thought_signature")
+                    or ""
+                ).strip()
                 if tool_call_id and name:
-                    tool_call_name_by_id[tool_call_id] = name
+                    tool_call_meta_by_id[tool_call_id] = {
+                        "name": name,
+                        "thought_signature": thought_signature,
+                    }
         elif str(message.get("role", "")).strip().lower() == "tool":
             tool_call_id = str(message.get("tool_call_id", "")).strip()
             content = str(message.get("content", "") or "")
@@ -585,21 +608,27 @@ def build_geminicli_request_payload(
                         args_obj = json.loads(args_raw)
                     except Exception:
                         args_obj = args_raw
-                    node["parts"].append(
-                        {
-                            "functionCall": {
-                                "name": name,
-                                "args": args_obj,
-                            },
-                            "thoughtSignature": _GEMINICLI_THOUGHT_SIGNATURE,
+                    part: Dict[str, Any] = {
+                        "functionCall": {
+                            "name": name,
+                            "args": args_obj,
                         }
-                    )
+                    }
+                    thought_signature = str(
+                        tool_call.get("thought_signature")
+                        or tool_call.get("gemini_thought_signature")
+                        or ""
+                    ).strip()
+                    if thought_signature:
+                        part["thoughtSignature"] = thought_signature
+                    node["parts"].append(part)
                 payload["request"]["contents"].append(node)
 
                 response_node = {"role": "user", "parts": []}
                 for tool_call in assistant_tool_calls:
                     tool_call_id = str(tool_call.get("id", "")).strip()
-                    name = tool_call_name_by_id.get(tool_call_id, "")
+                    tool_meta = tool_call_meta_by_id.get(tool_call_id, {})
+                    name = str(tool_meta.get("name", "")).strip()
                     if not tool_call_id or not name:
                         continue
                     raw_result = tool_responses.get(tool_call_id, "{}")
@@ -607,16 +636,18 @@ def build_geminicli_request_payload(
                         parsed_result = json.loads(raw_result)
                     except Exception:
                         parsed_result = raw_result
-                    response_node["parts"].append(
-                        {
-                            "functionResponse": {
-                                "name": name,
-                                "response": {
-                                    "result": parsed_result,
-                                },
-                            }
+                    response_part: Dict[str, Any] = {
+                        "functionResponse": {
+                            "name": name,
+                            "response": {
+                                "result": parsed_result,
+                            },
                         }
-                    )
+                    }
+                    thought_signature = str(tool_meta.get("thought_signature", "")).strip()
+                    if thought_signature:
+                        response_part["thoughtSignature"] = thought_signature
+                    response_node["parts"].append(response_part)
                 if response_node["parts"]:
                     payload["request"]["contents"].append(response_node)
                 continue
@@ -692,6 +723,7 @@ def parse_geminicli_sse_event(data_str: str) -> List[Dict[str, Any]]:
             function_call = part.get("functionCall")
             if isinstance(function_call, dict):
                 name = str(function_call.get("name", "")).strip()
+                thought_signature = str(part.get("thoughtSignature", "") or "").strip()
                 args_obj = function_call.get("args", {})
                 try:
                     arguments = json.dumps(args_obj, ensure_ascii=False, separators=(",", ":"))
@@ -704,6 +736,7 @@ def parse_geminicli_sse_event(data_str: str) -> List[Dict[str, Any]]:
                         "id": f"{name}-{tool_index}-{int(time.time() * 1000)}",
                         "name": name,
                         "arguments": arguments,
+                        "thought_signature": thought_signature,
                     }
                 )
                 tool_index += 1

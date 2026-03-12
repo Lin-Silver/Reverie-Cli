@@ -65,8 +65,54 @@ class InputHandler:
             prompt_parts.append(f" {self.deco.CHEVRON_RIGHT} ", style=self.theme.BLUE_SOFT)
             
             self.console.print(prompt_parts, end="")
-    
-    def get_input(self, prompt_text: str = "Reverie> ") -> Optional[str]:
+
+    def _get_seeded_single_line_input(self, prompt_text: str, initial_text: str) -> Optional[str]:
+        """Capture a single line while preserving an existing draft buffer."""
+        try:
+            import msvcrt
+        except ImportError:
+            self._render_prompt(prompt_text, is_continuation=False)
+            line = Prompt.ask("", default=initial_text, show_default=False)
+            return line
+
+        buffer = str(initial_text or "")
+        self._render_prompt(prompt_text, is_continuation=False)
+        if buffer:
+            self.console.print(buffer, end="")
+
+        while True:
+            try:
+                key = msvcrt.getwch()
+            except OSError:
+                continue
+
+            if key in ("\x00", "\xe0"):
+                try:
+                    msvcrt.getwch()
+                except OSError:
+                    pass
+                continue
+            if key in ("\r", "\n"):
+                self.console.print()
+                if buffer.strip():
+                    self.history.append(buffer)
+                    self.history_index = len(self.history)
+                return buffer
+            if key == "\x03":
+                self.console.print()
+                return None
+            if key == "\x08":
+                if buffer:
+                    buffer = buffer[:-1]
+                    sys.stdout.write("\b \b")
+                    sys.stdout.flush()
+                continue
+            if key.isprintable():
+                buffer += key
+                sys.stdout.write(key)
+                sys.stdout.flush()
+
+    def get_input(self, prompt_text: str = "Reverie> ", initial_text: str = "") -> Optional[str]:
         """
         Get input from user with multiline support.
         
@@ -78,6 +124,10 @@ class InputHandler:
         Returns None if user wants to exit (Ctrl+C twice)
         """
         import msvcrt
+
+        seeded_text = str(initial_text or "")
+        if seeded_text:
+            return self._get_seeded_single_line_input(prompt_text, seeded_text)
         
         lines = []
         in_multiline = False
@@ -235,13 +285,13 @@ class InputHandler:
         self.console.print()
         return None
     
-    def interactive_input(self, prompt_text: str = "Reverie> ") -> Optional[str]:
+    def interactive_input(self, prompt_text: str = "Reverie> ", initial_text: str = "") -> Optional[str]:
         """
         Get input with interactive command completion.
         
         When user types / and pauses, show available commands.
         """
-        result = self.get_input(prompt_text)
+        result = self.get_input(prompt_text, initial_text=initial_text)
         
         if result is None:
             return None

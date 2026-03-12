@@ -5,7 +5,7 @@ import os
 
 datas = [('README.md', '.')]
 binaries = []
-hiddenimports = ['rich', 'rich.console', 'rich.panel', 'rich.table', 'rich.syntax', 'rich.markdown', 'rich.progress', 'rich.prompt', 'rich.text', 'click', 'requests', 'openai', 'git', 'duckduckgo_search', 'tqdm', 
+hiddenimports = ['rich', 'rich.console', 'rich.panel', 'rich.table', 'rich.syntax', 'rich.markdown', 'rich.progress', 'rich.prompt', 'rich.text', 'click', 'requests', 'openai', 'git', 'ddgs', 'bs4', 'yaml', 'tqdm', 
                  'reverie.cli.input_handler', 'reverie.cli.commands', 'reverie.cli.display', 'reverie.cli.theme', 'reverie.cli.markdown_formatter', 'reverie.cli.session_ui',
                  'reverie.config', 'reverie.rules_manager', 'reverie.session', 'reverie.agent', 'reverie.context_engine']
 
@@ -25,13 +25,29 @@ if resource_root:
 else:
     comfy_src = repo_root / "Comfy"
 
+icon_path_env = os.environ.get("REVERIE_ICON_PATH", "").strip()
+resolved_icon = None
+if icon_path_env:
+    candidate = Path(icon_path_env)
+    if candidate.exists():
+        resolved_icon = candidate
+if resolved_icon is None:
+    for fallback_icon in (repo_root / "reverie.ico", repo_root / "reverie.png"):
+        if fallback_icon.exists():
+            resolved_icon = fallback_icon
+            break
+
 add_data_if_exists(comfy_src / "generate_image.py", "reverie_resources/comfy")
 add_data_if_exists(comfy_src / "embedded_comfy.b64", "reverie_resources/comfy")
 
-tmp_ret = collect_all('rich')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('openai')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+for package_name in ('rich', 'bs4'):
+    try:
+        tmp_ret = collect_all(package_name)
+        datas += tmp_ret[0]
+        binaries += tmp_ret[1]
+        hiddenimports += tmp_ret[2]
+    except Exception:
+        pass
 
 
 a = Analysis(
@@ -68,5 +84,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['reverie.png'],
+    icon=[str(resolved_icon)] if resolved_icon else None,
 )

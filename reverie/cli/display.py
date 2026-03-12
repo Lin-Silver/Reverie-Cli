@@ -8,11 +8,13 @@ Enhanced with Dreamscape Theme featuring:
 - Immersive visual experience
 """
 
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Dict, Tuple
+from pathlib import Path
+import json
 import difflib
 import re
 
-from rich.console import Console
+from rich.console import Console, Group
 from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.table import Table
@@ -20,6 +22,8 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 from rich.markdown import Markdown
 from rich.text import Text
 from rich.align import Align
+from rich.columns import Columns
+from rich.markup import escape
 from rich import box
 from rich.pager import Pager
 
@@ -33,50 +37,207 @@ class DisplayComponents:
         self.console = console or Console()
         self.theme = THEME
         self.deco = DECO
+
+    def _console_width(self) -> int:
+        """Best-effort terminal width with a sane fallback."""
+        try:
+            width = int(getattr(self.console.size, "width", 0) or self.console.width or 0)
+        except Exception:
+            width = 0
+        return max(width, 60)
+
+    def _is_compact(self, cutoff: int = 108) -> bool:
+        """Whether the current terminal should prefer compact layouts."""
+        return self._console_width() < cutoff
+
+    def _fit_panel_width(self, preferred: int = 118, margin: int = 4, min_width: int = 56) -> int:
+        """Choose a panel width that behaves well across narrow and wide terminals."""
+        available = max(min_width, self._console_width() - max(0, margin))
+        return max(min_width, min(preferred, available))
+
+    def _truncate_text(self, value: Any, max_length: int) -> str:
+        """Trim long labels without destroying readability."""
+        text = str(value or "").strip()
+        if len(text) <= max_length:
+            return text
+        if max_length <= 3:
+            return text[:max_length]
+        return f"{text[:max_length - 3]}..."
+
+    def _format_compact_number(self, value: Any) -> str:
+        """Render large counts in a compact, terminal-friendly form."""
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            return str(value or "0")
+
+        abs_number = abs(number)
+        if abs_number >= 1_000_000:
+            return f"{number / 1_000_000:.2f}M".rstrip("0").rstrip(".")
+        if abs_number >= 1_000:
+            return f"{number / 1_000:.1f}K".rstrip("0").rstrip(".")
+        return str(number)
+
+    def _build_badge_line(
+        self,
+        badges: List[Tuple[str, str, str, str]],
+        separator_color: Optional[str] = None,
+    ) -> Text:
+        """Build a compact metrics/badges line."""
+        text = Text()
+        joiner_color = separator_color or self.theme.TEXT_DIM
+        for index, (label, value, label_color, value_color) in enumerate(badges):
+            if index:
+                text.append(f" {self.deco.DOT_MEDIUM} ", style=joiner_color)
+            if label:
+                text.append(f"{label} ", style=label_color)
+            text.append(str(value), style=f"bold {value_color}")
+        return text
     
     def show_welcome(self, mode: str = "reverie") -> None:
-        """Display the large ASCII banner plus version and mode"""
+        """Display the large ASCII banner plus version and mode."""
         from .. import __version__
-        
-        # IMPORTANT: Keep original banner colors as requested
-        # Subtle Lavender Gradient (Original Style - DO NOT MODIFY)
+
+        # IMPORTANT: Keep original banner colors as requested.
         colors = ["#f3e5f5", "#f0e0f8", "#ede0fb", "#ead0fe", "#e7c0ff", "#e4b0ff"]
-        
+
         banner_lines = [
             "   ██████╗ ███████╗██╗   ██╗███████╗██████╗ ██╗███████╗",
             "   ██╔══██╗██╔════╝██║   ██║██╔════╝██╔══██╗██║██╔════╝",
             "   ██████╔╝█████╗  ██║   ██║█████╗  ██████╔╝██║█████╗  ",
             "   ██╔══██╗██╔══╝  ╚██╗ ██╔╝██╔══╝  ██╔══██╗██║██╔══╝  ",
             "   ██║  ██║███████╗ ╚████╔╝ ███████╗██║  ██║██║███████╗",
-            "   ╚═╝  ╚═╝╚══════╝  ╚═══╝  ╚══════╝╚═╝  ╚═╝╚═╝╚══════╝"
+            "   ╚═╝  ╚═╝╚══════╝  ╚═══╝  ╚══════╝╚═╝  ╚═╝╚═╝╚══════╝",
         ]
-        
+
         styled_banner = ""
-        for i, line in enumerate(banner_lines):
-            color = colors[min(i, len(colors)-1)]
+        for index, line in enumerate(banner_lines):
+            color = colors[min(index, len(colors) - 1)]
             styled_banner += f"[bold {color}]{line}[/bold {color}]\n"
-        
-        # Enhanced info section with dreamy aesthetics
-        sparkle_line = f"[{self.theme.PURPLE_MEDIUM}]{self.deco.SPARKLE_LINE * 6}[/{self.theme.PURPLE_MEDIUM}]"
-        
-        info_text = (
-            f"\n{sparkle_line}\n"
+
+        compact = self._is_compact(112)
+        banner_text = Text.from_markup(styled_banner.rstrip())
+        banner_text.no_wrap = True
+
+        intro_text = Text.from_markup(
             f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} World-Class Context Engine Coding Assistant {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]\n"
-            f"[{self.theme.TEXT_DIM}]v{__version__} {self.deco.DOT_MEDIUM} Created by Raiden[/{self.theme.TEXT_DIM}]\n"
-            f"{sparkle_line}\n\n"
-            f"[{self.theme.PURPLE_SOFT}]{self.deco.CHEVRON_RIGHT} Type [bold]/help[/bold] for commands • Mode: [bold {self.theme.BLUE_SOFT}]{mode.upper()}[/bold {self.theme.BLUE_SOFT}][/{self.theme.PURPLE_SOFT}]"
+            f"[{self.theme.TEXT_SECONDARY}]Sharper hierarchy, cleaner output rhythm, and stronger terminal fit without changing the Dreamscape palette.[/{self.theme.TEXT_SECONDARY}]"
         )
 
-        # Use width=None to auto-detect terminal width, remove expand=True to prevent display issues
-        self.console.print(Panel(
-            Align.center(Text.from_markup(styled_banner + info_text)),
-            border_style=self.theme.BORDER_PRIMARY,
-            padding=(1, 2),
-            width=None,
-            box=box.ROUNDED
-        ))
+        session_panel = Panel(
+            Group(
+                self._build_badge_line(
+                    [
+                        ("Version", f"v{__version__}", self.theme.TEXT_DIM, self.theme.MINT_SOFT),
+                        ("Mode", str(mode or "reverie").upper(), self.theme.TEXT_DIM, self.theme.BLUE_SOFT),
+                    ]
+                ),
+                Text.from_markup(f"[{self.theme.TEXT_DIM}]Created by Raiden[/{self.theme.TEXT_DIM}]"),
+            ),
+            title=f"[bold {self.theme.PURPLE_SOFT}]{self.deco.DIAMOND} Session[/bold {self.theme.PURPLE_SOFT}]",
+            border_style=self.theme.BORDER_SUBTLE,
+            box=box.ROUNDED,
+            padding=(0, 1),
+        )
+
+        quickstart_panel = Panel(
+            Text.from_markup(
+                f"[bold {self.theme.BLUE_SOFT}]/help[/bold {self.theme.BLUE_SOFT}] command guide\n"
+                f"[bold {self.theme.BLUE_SOFT}]/status[/bold {self.theme.BLUE_SOFT}] model and token state\n"
+                f"[bold {self.theme.BLUE_SOFT}]/model[/bold {self.theme.BLUE_SOFT}] standard catalog\n"
+                f"[bold {self.theme.BLUE_SOFT}]/CE[/bold {self.theme.BLUE_SOFT}] context engine controls"
+            ),
+            title=f"[bold {self.theme.PURPLE_SOFT}]{self.deco.DIAMOND} Quick Start[/bold {self.theme.PURPLE_SOFT}]",
+            border_style=self.theme.BORDER_SUBTLE,
+            box=box.ROUNDED,
+            padding=(0, 1),
+        )
+
+        info_renderable = (
+            Group(session_panel, quickstart_panel)
+            if compact
+            else Columns([session_panel, quickstart_panel], equal=True, expand=True)
+        )
+
+        body = Group(
+            Align.center(banner_text) if self._console_width() >= 110 else Align.left(banner_text),
+            Align.center(intro_text) if not compact else intro_text,
+            info_renderable,
+        )
+
+        self.console.print(
+            Panel(
+                body,
+                border_style=self.theme.BORDER_PRIMARY,
+                padding=(1 if not compact else 0, 1 if compact else 2),
+                width=self._fit_panel_width(120, margin=2 if compact else 4),
+                box=box.ROUNDED,
+            )
+        )
         self.console.print()
-    
+
+    def show_response_header(
+        self,
+        model_name: str,
+        provider_label: str = "",
+        mode: str = "",
+    ) -> None:
+        """Render a compact assistant response header."""
+        compact = self._is_compact(96)
+        title = Text()
+        title.append(f"{self.deco.SPARKLE} Reverie", style=f"bold {self.theme.PINK_SOFT}")
+        title.append("  ")
+        title.append(
+            self._truncate_text(model_name or "Assistant", 28 if compact else 44),
+            style=f"bold {self.theme.PURPLE_SOFT}",
+        )
+
+        badges = self._build_badge_line(
+            [
+                ("Source", provider_label or "Relay", self.theme.TEXT_DIM, self.theme.BLUE_SOFT),
+                ("Mode", str(mode or "reverie").upper(), self.theme.TEXT_DIM, self.theme.PINK_SOFT),
+            ]
+        )
+
+        if compact:
+            body = Group(title, badges)
+        else:
+            grid = Table.grid(expand=True)
+            grid.add_column(ratio=1)
+            grid.add_column(justify="right", no_wrap=True)
+            grid.add_row(title, badges)
+            body = grid
+
+        self.console.print(
+            Panel(
+                body,
+                border_style=self.theme.BORDER_SUBTLE,
+                box=box.ROUNDED,
+                padding=(0, 1),
+                width=self._fit_panel_width(118),
+            )
+        )
+
+    def show_thinking_banner(self, model_name: str = "") -> None:
+        """Render a dedicated banner before streamed reasoning content."""
+        model_suffix = ""
+        if model_name:
+            model_suffix = f" [{self._truncate_text(model_name, 28)}]"
+        content = Text.from_markup(
+            f"[italic {self.theme.THINKING_SOFT}]{self.deco.THOUGHT_BUBBLE}[/italic {self.theme.THINKING_SOFT}] "
+            f"[italic bold {self.theme.THINKING_MEDIUM}]Reasoning Trace{escape(model_suffix)}[/italic bold {self.theme.THINKING_MEDIUM}]\n"
+            f"[{self.theme.TEXT_DIM}]Live reasoning notes are shown line by line and then flow back into the final answer.[/{self.theme.TEXT_DIM}]"
+        )
+        self.console.print(
+            Panel(
+                content,
+                border_style=self.theme.THINKING_BORDER,
+                box=box.ROUNDED,
+                padding=(0, 1),
+                width=self._fit_panel_width(108),
+            )
+        )
+
     def show_status(
         self,
         message: str,
@@ -117,7 +278,8 @@ class DisplayComponents:
                 title=f"[bold {self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Success[/bold {self.theme.MINT_VIBRANT}]",
                 border_style=self.theme.MINT_SOFT,
                 box=box.ROUNDED,
-                padding=(0, 1)
+                padding=(0, 1),
+                width=self._fit_panel_width(108),
             ))
         else:
             msg = f"[bold {self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY}[/bold {self.theme.MINT_VIBRANT}] [{self.theme.MINT_SOFT}]{message}[/{self.theme.MINT_SOFT}]"
@@ -149,7 +311,8 @@ class DisplayComponents:
                 title=f"[bold {self.theme.CORAL_VIBRANT}]{self.deco.CROSS_FANCY} Error[/bold {self.theme.CORAL_VIBRANT}]",
                 border_style=self.theme.CORAL_VIBRANT,
                 box=box.ROUNDED,
-                padding=(0, 1)
+                padding=(0, 1),
+                width=self._fit_panel_width(108),
             ))
         else:
             msg = f"[bold {self.theme.CORAL_VIBRANT}]{self.deco.CROSS_FANCY}[/bold {self.theme.CORAL_VIBRANT}] [{self.theme.CORAL_SOFT}]{message}[/{self.theme.CORAL_SOFT}]"
@@ -181,7 +344,8 @@ class DisplayComponents:
                 title=f"[bold {self.theme.AMBER_GLOW}]! Warning[/bold {self.theme.AMBER_GLOW}]",
                 border_style=self.theme.AMBER_GLOW,
                 box=box.ROUNDED,
-                padding=(0, 1)
+                padding=(0, 1),
+                width=self._fit_panel_width(108),
             ))
         else:
             msg = f"[bold {self.theme.AMBER_GLOW}]![/bold {self.theme.AMBER_GLOW}] [{self.theme.PEACH_SOFT}]{message}[/{self.theme.PEACH_SOFT}]"
@@ -213,7 +377,8 @@ class DisplayComponents:
                 title=f"[{self.theme.BLUE_SOFT}]{self.deco.RHOMBUS} Info[/{self.theme.BLUE_SOFT}]",
                 border_style=self.theme.BLUE_SOFT,
                 box=box.ROUNDED,
-                padding=(0, 1)
+                padding=(0, 1),
+                width=self._fit_panel_width(108),
             ))
         else:
             msg = f"[{self.theme.BLUE_SOFT}]{self.deco.RHOMBUS}[/{self.theme.BLUE_SOFT}] [{self.theme.TEXT_SECONDARY}]{message}[/{self.theme.TEXT_SECONDARY}]"
@@ -638,9 +803,256 @@ class DisplayComponents:
             subtitle=formatted_subtitle,
             border_style=border,
             box=box.ROUNDED,
-            padding=(0, 1)
+            padding=(0, 1),
+            width=self._fit_panel_width(118),
         ))
-    
+
+    def _resolve_tool_color(self, tool_name: str) -> str:
+        """Pick a stable accent color for a tool family."""
+        tool_colors = {
+            "gdd": self.theme.TOOL_GDD,
+            "story": self.theme.TOOL_STORY,
+            "asset": self.theme.TOOL_ASSET,
+            "balance": self.theme.TOOL_BALANCE,
+            "level": self.theme.TOOL_LEVEL,
+            "config": self.theme.TOOL_CONFIG,
+            "read": self.theme.BLUE_SOFT,
+            "write": self.theme.PINK_SOFT,
+            "edit": self.theme.PURPLE_SOFT,
+            "search": self.theme.BLUE_SOFT,
+            "grep": self.theme.BLUE_SOFT,
+            "web": self.theme.BLUE_SOFT,
+            "image": self.theme.PEACH_SOFT,
+        }
+        lowered = str(tool_name or "").strip().lower()
+        for key, color in tool_colors.items():
+            if key in lowered:
+                return color
+        return self.theme.PURPLE_SOFT
+
+    def _format_tool_argument_summary(self, arguments: Optional[Dict[str, Any]], max_items: int = 4) -> str:
+        """Build a compact, one-line summary of tool arguments."""
+        if not isinstance(arguments, dict) or not arguments:
+            return ""
+
+        compact = self._is_compact(96)
+        max_items = min(max_items, 2 if compact else 4)
+        value_limit = 24 if compact else 42
+        parts = []
+        for key, value in list(arguments.items())[:max_items]:
+            rendered = value
+            if isinstance(rendered, (dict, list)):
+                rendered = json.dumps(rendered, ensure_ascii=False)
+            rendered_text = str(rendered or "").replace("\n", " ").strip()
+            if len(rendered_text) > value_limit:
+                rendered_text = f"{rendered_text[:value_limit - 3]}..."
+            parts.append(f"{key}={rendered_text}")
+
+        extra = len(arguments) - max_items
+        if extra > 0:
+            parts.append(f"+{extra} more")
+        return "  |  ".join(parts)
+
+    def _build_tool_output_renderable(
+        self,
+        output: Any,
+        arguments: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[Any, str]:
+        """Convert tool output into a rich renderable plus a metadata footer."""
+        raw_text = str(output or "").rstrip()
+        if not raw_text:
+            empty_text = Text("No textual output returned.", style=self.theme.TEXT_DIM)
+            return empty_text, "empty output"
+
+        parsed_json = None
+        compact = self._is_compact(96)
+        preview_line_limit = 10 if compact else 16
+        if raw_text.startswith("{") or raw_text.startswith("["):
+            try:
+                parsed_json = json.loads(raw_text)
+            except Exception:
+                parsed_json = None
+
+        if isinstance(parsed_json, dict) and parsed_json and len(parsed_json) <= 8:
+            table = Table(
+                box=box.SIMPLE_HEAVY if not compact else box.SIMPLE,
+                show_header=False,
+                border_style=self.theme.BORDER_SUBTLE,
+                pad_edge=False,
+            )
+            table.add_column(style=self.theme.BLUE_SOFT, no_wrap=True)
+            table.add_column(style=self.theme.TEXT_SECONDARY)
+            for key, value in parsed_json.items():
+                rendered_value = value
+                if isinstance(rendered_value, (dict, list)):
+                    rendered_value = json.dumps(rendered_value, ensure_ascii=False)
+                table.add_row(str(key), str(rendered_value))
+            footer = f"{len(parsed_json)} fields"
+            return table, footer
+
+        if isinstance(parsed_json, list):
+            preview = parsed_json[:6]
+            syntax = Syntax(
+                json.dumps(preview, indent=2, ensure_ascii=False),
+                "json",
+                theme="monokai",
+                line_numbers=False,
+                word_wrap=True,
+            )
+            extra = len(parsed_json) - len(preview)
+            footer = f"{len(parsed_json)} items"
+            if extra > 0:
+                footer = f"{footer}  |  showing first {len(preview)}"
+            return syntax, footer
+
+        inferred_language = ""
+        path_value = ""
+        if isinstance(arguments, dict):
+            path_value = str(arguments.get("path", "") or arguments.get("file_path", "")).strip()
+        suffix = Path(path_value).suffix.lower()
+        suffix_to_language = {
+            ".py": "python",
+            ".js": "javascript",
+            ".ts": "typescript",
+            ".tsx": "tsx",
+            ".json": "json",
+            ".md": "markdown",
+            ".yml": "yaml",
+            ".yaml": "yaml",
+            ".html": "html",
+            ".css": "css",
+            ".sh": "bash",
+            ".ps1": "powershell",
+        }
+        if suffix in suffix_to_language:
+            inferred_language = suffix_to_language[suffix]
+
+        lines = raw_text.splitlines()
+        preview_lines = lines[:preview_line_limit]
+        preview_text = "\n".join(preview_lines)
+        if inferred_language and len(preview_lines) >= 4:
+            renderable = Syntax(
+                preview_text,
+                inferred_language,
+                theme="monokai",
+                line_numbers=False,
+                word_wrap=True,
+            )
+        else:
+            renderable = Text(preview_text, style=self.theme.TEXT_SECONDARY)
+
+        footer_parts = [f"{len(lines)} lines", f"{len(raw_text):,} chars"]
+        if len(lines) > len(preview_lines):
+            footer_parts.append(f"showing first {len(preview_lines)}")
+        return renderable, "  |  ".join(footer_parts)
+
+    def show_tool_invocation(
+        self,
+        tool_name: str,
+        message: str,
+        arguments: Optional[Dict[str, Any]] = None,
+        tool_call_id: str = "",
+    ) -> None:
+        """Render a compact tool execution card."""
+        accent = self._resolve_tool_color(tool_name)
+        argument_summary = self._format_tool_argument_summary(arguments)
+        header = Table.grid(expand=True)
+        header.add_column(ratio=1)
+        header.add_column(justify="right", no_wrap=True)
+        header.add_row(
+            Text(str(message or f"Executing {tool_name}..."), style=f"bold {self.theme.TEXT_PRIMARY}"),
+            Text(f"call {tool_call_id[-8:]}" if tool_call_id else "running", style=accent),
+        )
+
+        parts: List[Any] = [header]
+        if argument_summary:
+            parts.append(Text(argument_summary, style=self.theme.TEXT_DIM))
+
+        self.console.print(
+            Panel(
+                Group(*parts),
+                title=f"[bold {accent}]{self.deco.SPARKLE} Tool {self.deco.DOT_MEDIUM} {tool_name}[/]",
+                border_style=accent,
+                box=box.ROUNDED,
+                padding=(0, 1),
+                width=self._fit_panel_width(118),
+            )
+        )
+
+    def show_tool_result_card(
+        self,
+        tool_name: str,
+        success: bool,
+        output: Any = "",
+        error: str = "",
+        arguments: Optional[Dict[str, Any]] = None,
+        tool_call_id: str = "",
+    ) -> None:
+        """Render a structured tool result card."""
+        accent = self._resolve_tool_color(tool_name) if success else self.theme.CORAL_VIBRANT
+        title_icon = self.deco.CHECK_FANCY if success else self.deco.CROSS_FANCY
+        title_text = f"{title_icon} {tool_name}"
+        argument_summary = self._format_tool_argument_summary(arguments)
+        header = Table.grid(expand=True)
+        header.add_column(ratio=1)
+        header.add_column(justify="right", no_wrap=True)
+        header.add_row(
+            Text("Completed" if success else "Failed", style=f"bold {accent}"),
+            Text(f"call {tool_call_id[-8:]}" if tool_call_id else ("ok" if success else "error"), style=self.theme.TEXT_DIM),
+        )
+
+        if success:
+            renderable, footer = self._build_tool_output_renderable(output, arguments=arguments)
+            parts: List[Any] = [header]
+            if argument_summary:
+                parts.append(Text(argument_summary, style=self.theme.TEXT_DIM))
+            parts.extend([renderable, Text(footer, style=self.theme.TEXT_DIM)])
+            group = Group(*parts)
+        else:
+            message = str(error or "Tool execution failed").strip()
+            parts = [header]
+            if argument_summary:
+                parts.append(Text(argument_summary, style=self.theme.TEXT_DIM))
+            parts.extend([
+                Text(message, style=self.theme.CORAL_SOFT),
+                Text("execution error", style=self.theme.TEXT_DIM),
+            ])
+            group = Group(*parts)
+
+        self.console.print(
+            Panel(
+                group,
+                title=f"[bold {accent}]{title_text}[/]",
+                border_style=accent,
+                box=box.ROUNDED,
+                padding=(0, 1),
+                width=self._fit_panel_width(118),
+            )
+        )
+
+    def show_stream_event(self, event: Dict[str, Any]) -> bool:
+        """Render a structured stream event if supported."""
+        event_type = str(event.get("event", "") or "").strip().lower()
+        if event_type == "tool_start":
+            self.show_tool_invocation(
+                tool_name=str(event.get("tool_name", "") or "tool"),
+                message=str(event.get("message", "") or "").strip(),
+                arguments=event.get("arguments") if isinstance(event.get("arguments"), dict) else None,
+                tool_call_id=str(event.get("tool_call_id", "") or "").strip(),
+            )
+            return True
+        if event_type == "tool_result":
+            self.show_tool_result_card(
+                tool_name=str(event.get("tool_name", "") or "tool"),
+                success=bool(event.get("success")),
+                output=event.get("output", ""),
+                error=str(event.get("error", "") or "").strip(),
+                arguments=event.get("arguments") if isinstance(event.get("arguments"), dict) else None,
+                tool_call_id=str(event.get("tool_call_id", "") or "").strip(),
+            )
+            return True
+        return False
+
     def show_tool_output(
         self,
         tool_name: str,

@@ -1,14 +1,14 @@
-"""
+﻿"""
 Command Handler - Process CLI commands with Dreamscape Theme
 
 Handles all commands starting with / with dreamy pink-purple-blue aesthetics
 """
 
-from typing import Optional, Callable, Dict, Any
+from typing import Optional, Callable, Dict, Any, List
 from pathlib import Path
 import time
 
-from rich.console import Console
+from rich.console import Console, Group
 from rich.table import Table
 from rich.prompt import Prompt, Confirm
 from rich.panel import Panel
@@ -19,6 +19,7 @@ from rich.padding import Padding
 from rich import box
 from rich.markup import escape
 
+from .help_catalog import HELP_SECTION_ORDER, HELP_TOPICS, normalize_help_topic
 from .theme import THEME, DECO, DREAM
 
 
@@ -41,6 +42,8 @@ class CommandHandler:
             'model': self.cmd_model,
             'iflow': self.cmd_iflow,
             'qwencode': self.cmd_qwencode,
+            'geminicli': self.cmd_geminicli,
+            'codex': self.cmd_codex,
             'add_model': self.cmd_add_model,
             'mode': self.cmd_mode,
             'status': self.cmd_status,
@@ -93,262 +96,671 @@ class CommandHandler:
             return True
     
     def cmd_help(self, args: str) -> bool:
-        """Show detailed help with beautiful dreamy formatting"""
-        
-        # Main title with sparkles
+        """Show the full command guide or detailed help for a specific command."""
+        query = args.strip()
         self.console.print()
-        title_panel = Panel(
-            f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Reverie CLI - Command Help {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]\n"
-            f"[{self.theme.PURPLE_MEDIUM}]World-class context engine coding assistant[/{self.theme.PURPLE_MEDIUM}]",
-            border_style=self.theme.BORDER_PRIMARY,
-            padding=(0, 2),
-            box=box.ROUNDED
+
+        if query:
+            parts = query.split(maxsplit=1)
+            action = parts[0].lower() if parts else ""
+            remainder = parts[1] if len(parts) > 1 else ""
+            normalized = normalize_help_topic(query) or normalize_help_topic(action)
+            if query.lower() == "all":
+                self._print_help_hero(detail_mode=True)
+                for section in HELP_SECTION_ORDER:
+                    entries = self._get_help_entries_for_section(section)
+                    if entries:
+                        self._print_help_section_details(section, entries)
+                self._print_help_tips()
+                self.console.print()
+                return True
+
+            if action in ("ui", "browse", "browser", "menu"):
+                return self._cmd_help_ui(initial_query=remainder)
+
+            if action in ("list", "overview", "index"):
+                self._print_help_hero(detail_mode=False)
+                for section in HELP_SECTION_ORDER:
+                    entries = self._get_help_entries_for_section(section)
+                    if entries:
+                        self.console.print(self._build_help_overview_table(section, entries))
+                        self.console.print()
+                self._print_help_tips()
+                self.console.print()
+                return True
+
+            if not normalized or normalized not in HELP_TOPICS:
+                self.console.print(
+                    f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} No help topic found for: {escape(query)}[/{self.theme.CORAL_SOFT}]"
+                )
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Try /help, /help all, or /help codex.[/{self.theme.TEXT_DIM}]"
+                )
+                self.console.print()
+                return True
+
+            self._print_help_hero(detail_mode=True)
+            self.console.print(self._build_help_detail_panel(HELP_TOPICS[normalized]))
+            self._print_help_tips(compact=True)
+            self.console.print()
+            return True
+
+        return self._cmd_help_ui()
+
+    def _get_help_entries_for_section(self, section: str) -> List[Dict[str, object]]:
+        """Return help topics for a section in catalog order."""
+        return [
+            topic
+            for topic in HELP_TOPICS.values()
+            if str(topic.get("section", "")).strip() == section
+        ]
+
+    def _help_section_accent(self, section: str) -> str:
+        """Resolve accent color for help sections."""
+        accents = {
+            "Core": self.theme.BLUE_SOFT,
+            "Models & Modes": self.theme.PURPLE_SOFT,
+            "Providers": self.theme.MINT_SOFT,
+            "Tools & Context": self.theme.AMBER_GLOW,
+            "Sessions & Recovery": self.theme.BLUE_MEDIUM,
+            "Project & Rules": self.theme.PEACH_SOFT,
+            "Game": self.theme.PINK_SOFT,
+        }
+        return accents.get(section, self.theme.BORDER_PRIMARY)
+
+    def _print_help_hero(self, detail_mode: bool = False) -> None:
+        """Render the help hero banner."""
+        subtitle = (
+            "Focused command reference with every supported form and example."
+            if detail_mode
+            else "Interactive browser plus grouped command map with child actions, aliases, and usage patterns."
         )
-        self.console.print(title_panel)
-        self.console.print()
-        
-        # Basic commands
-        basic_commands = Table(
-            title=f"[bold {self.theme.PINK_SOFT}]{self.deco.DIAMOND} Basic Commands[/bold {self.theme.PINK_SOFT}]",
+        hero = Panel(
+            f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Reverie Command Guide {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]\n"
+            f"[{self.theme.PURPLE_MEDIUM}]{subtitle}[/{self.theme.PURPLE_MEDIUM}]\n\n"
+            f"[bold {self.theme.BLUE_SOFT}]Quick Start[/bold {self.theme.BLUE_SOFT}]\n"
+            f"[{self.theme.TEXT_SECONDARY}]1.[/{self.theme.TEXT_SECONDARY}] /help for the live browser and pinned detail pages\n"
+            f"[{self.theme.TEXT_SECONDARY}]2.[/{self.theme.TEXT_SECONDARY}] /help <command> for one static command-specific panel\n"
+            f"[{self.theme.TEXT_SECONDARY}]3.[/{self.theme.TEXT_SECONDARY}] /help list or /help all for printable references",
+            border_style=self.theme.BORDER_PRIMARY,
+            padding=(1, 2),
             box=box.ROUNDED,
-            border_style=self.theme.BORDER_PRIMARY,
-            show_lines=True,
-            title_justify="left"
         )
-        basic_commands.add_column("Command", style=f"bold {self.theme.BLUE_SOFT}", width=15)
-        basic_commands.add_column("Description", style=self.theme.TEXT_SECONDARY)
-        basic_commands.add_column("Example", style=f"dim {self.theme.MINT_SOFT}")
-        
-        basic_commands.add_row(
-            "/help",
-            "Show this help with all available commands and usage.",
-            "/help"
-        )
-        basic_commands.add_row(
-            "/status",
-            "View current status: active model, tokens, session time, index stats.",
-            "/status"
-        )
-        basic_commands.add_row(
-            "/clear",
-            "Clear the terminal to keep the workspace tidy.",
-            "/clear"
-        )
-        basic_commands.add_row(
-            "/exit",
-            "Save the session and exit. Data is saved for next launch.",
-            "/exit or /quit"
-        )
-        
-        self.console.print(basic_commands)
+        self.console.print(hero)
         self.console.print()
-        
-        # Models and config
-        config_commands = Table(
-            title=f"[bold {self.theme.PINK_SOFT}]{self.deco.DIAMOND} Models & Settings[/bold {self.theme.PINK_SOFT}]",
+
+    def _build_help_overview_table(self, title: str, entries: List[Dict[str, object]]) -> Panel:
+        """Build one grouped help table."""
+        accent = self._help_section_accent(title)
+        table = Table(
+            box=box.SIMPLE_HEAVY,
+            border_style=accent,
+            expand=True,
+            show_lines=False,
+            pad_edge=False,
+        )
+        table.add_column("Command", style=f"bold {accent}", width=16, no_wrap=True)
+        table.add_column("Description", style=self.theme.TEXT_SECONDARY, ratio=3)
+        table.add_column("Subcommands / Forms", style=self.theme.TEXT_DIM, ratio=4)
+
+        for topic in entries:
+            aliases = topic.get("aliases", []) or []
+            alias_text = ""
+            if aliases:
+                alias_text = f"\n[{self.theme.TEXT_DIM}]Aliases: {escape(', '.join(str(alias) for alias in aliases))}[/{self.theme.TEXT_DIM}]"
+            table.add_row(
+                escape(str(topic.get("command", ""))),
+                f"{escape(str(topic.get('summary', '')))}{alias_text}",
+                escape(str(topic.get("overview", ""))),
+            )
+
+        return Panel(
+            table,
+            title=f"[bold {accent}]{self.deco.DIAMOND} {escape(title)}[/bold {accent}]",
+            border_style=accent,
+            padding=(0, 1),
             box=box.ROUNDED,
-            border_style=self.theme.BORDER_PRIMARY,
-            show_lines=True,
-            title_justify="left"
-        )
-        config_commands.add_column("Command", style=f"bold {self.theme.BLUE_SOFT}", width=15)
-        config_commands.add_column("Description", style=self.theme.TEXT_SECONDARY)
-        config_commands.add_column("Example", style=f"dim {self.theme.MINT_SOFT}")
-        
-        config_commands.add_row(
-            "/model",
-            f"Model manager:\n{self.deco.DOT_MEDIUM} List configured models\n{self.deco.DOT_MEDIUM} Switch active model\n{self.deco.DOT_MEDIUM} Add model: /model add\n{self.deco.DOT_MEDIUM} Delete: /model delete <#>",
-            "/model\n/model add\n/model delete 2"
-        )
-        config_commands.add_row(
-            "/iflow",
-            f"iFlow CLI integration:\n{self.deco.DOT_MEDIUM} /iflow: detect local iFlow login cache\n{self.deco.DOT_MEDIUM} /iflow model: select iFlow model catalog\n{self.deco.DOT_MEDIUM} iFlow model list is independent from /model",
-            "/iflow\n/iflow model"
-        )
-        config_commands.add_row(
-            "/qwencode",
-            f"Qwen Code CLI integration:\n{self.deco.DOT_MEDIUM} /qwencode: detect local Qwen CLI login cache\n{self.deco.DOT_MEDIUM} /qwencode login: validate/refresh local OAuth token\n{self.deco.DOT_MEDIUM} /qwencode model: select Qwen Code model catalog\n{self.deco.DOT_MEDIUM} /qwencode endpoint: set endpoint override for reverse proxy\n{self.deco.DOT_MEDIUM} Qwen Code model list is independent from /model",
-            "/qwencode\n/qwencode login\n/qwencode model\n/qwencode endpoint"
-        )
-        config_commands.add_row(
-            "/setting",
-            f"Interactive settings menu:\n{self.deco.DOT_MEDIUM} Mode (reverie/reverie-gamer/spec-driven/spec-vibe/writer)\n{self.deco.DOT_MEDIUM} Theme\n{self.deco.DOT_MEDIUM} Custom rules\n{self.deco.DOT_MEDIUM} Auto-index toggle",
-            "/setting"
-        )
-        config_commands.add_row(
-            "/mode [name]",
-            f"View or switch operational modes:\n"
-            f"{self.deco.DOT_MEDIUM} No args: Display current mode and list all available modes\n"
-            f"{self.deco.DOT_MEDIUM} With mode name: Switch to specified mode\n"
-            f"{self.deco.DOT_MEDIUM} Available: reverie, reverie-gamer, spec-driven, spec-vibe, writer, reverie-ant\n"
-            f"[{self.theme.TEXT_DIM}]Each mode provides specialized tools and workflows[/{self.theme.TEXT_DIM}]",
-            "/mode\n/mode reverie-gamer\n/mode spec-driven"
-        )
-        config_commands.add_row(
-            "/rules",
-            f"Manage custom rules:\n{self.deco.DOT_MEDIUM} List rules\n{self.deco.DOT_MEDIUM} Edit rules.txt: /rules edit\n{self.deco.DOT_MEDIUM} Add rule: /rules add <text>\n{self.deco.DOT_MEDIUM} Remove: /rules remove <#>",
-            "/rules\n/rules edit\n/rules add Always use async\n/rules remove 1"
-        )
-        config_commands.add_row(
-            "/workspace",
-            f"Workspace configuration mode:\n{self.deco.DOT_MEDIUM} Enable/disable workspace-local config\n{self.deco.DOT_MEDIUM} Copy config between workspace and global\n{self.deco.DOT_MEDIUM} Multi-workspace support",
-            "/workspace status\n/workspace enable\n/workspace copy-to-workspace"
-        )
-        
-        self.console.print(config_commands)
-        self.console.print()
-        
-        # Tools and features
-        tool_commands = Table(
-            title=f"[bold {self.theme.PINK_SOFT}]{self.deco.DIAMOND} Tools & Features[/bold {self.theme.PINK_SOFT}]",
-            box=box.ROUNDED,
-            border_style=self.theme.BORDER_PRIMARY,
-            show_lines=True,
-            title_justify="left"
-        )
-        tool_commands.add_column("Command", style=f"bold {self.theme.BLUE_SOFT}", width=15)
-        tool_commands.add_column("Description", style=self.theme.TEXT_SECONDARY)
-        tool_commands.add_column("Example", style=f"dim {self.theme.MINT_SOFT}")
-        
-        tool_commands.add_row(
-            "/search <q>",
-            "Web search (DuckDuckGo) for docs and answers. Results show in Markdown.",
-            "/search rust async patterns\n/search python FastAPI"
-        )
-        tool_commands.add_row(
-            "/CE",
-            f"Context Engine management (case-sensitive):\n"
-            f"{self.deco.DOT_MEDIUM} /CE: Show context status and token usage\n"
-            f"{self.deco.DOT_MEDIUM} /CE compress: Compress conversation context\n"
-            f"{self.deco.DOT_MEDIUM} /CE info: Show detailed context information\n"
-            f"{self.deco.DOT_MEDIUM} /CE stats: Show context statistics\n"
-            f"[{self.theme.TEXT_DIM}]Manage context to prevent token overflow[/{self.theme.TEXT_DIM}]",
-            "/CE\n/CE compress\n/CE stats"
-        )
-        tool_commands.add_row(
-            "/tools",
-            f"List available tools the AI can use:\n{self.deco.DOT_MEDIUM} Read/write files\n{self.deco.DOT_MEDIUM} Run commands\n{self.deco.DOT_MEDIUM} Search code\n{self.deco.DOT_MEDIUM} Git actions, etc.",
-            "/tools"
-        )
-        tool_commands.add_row(
-            "/index",
-            "Re-index the codebase: scan files, extract symbols and dependencies. Use after structure changes.",
-            "/index"
-        )
-        tool_commands.add_row(
-            "/tti",
-            f"Text-to-image command:\n"
-            f"{self.deco.DOT_MEDIUM} /tti models: list TTI models and choose default\n"
-            f"{self.deco.DOT_MEDIUM} /tti add: add a new TTI model\n"
-            f"{self.deco.DOT_MEDIUM} /tti <prompt>: generate image using default model and default parameters\n"
-            f"{self.deco.DOT_MEDIUM} Supports both /tti and /TTI (case-insensitive)",
-            "/tti models\n/tti add\n/tti <cinematic city skyline at sunset>"
         )
 
-        self.console.print(tool_commands)
-        self.console.print()
-        
-        # Game Development Commands (Reverie-Gamer)
-        game_commands = Table(
-            title=f"[bold {self.theme.PINK_SOFT}]{self.deco.DIAMOND} Game Development Commands (Reverie-Gamer)[/bold {self.theme.PINK_SOFT}]",
+    def _build_help_detail_panel(self, topic: Dict[str, object], compact: bool = False) -> Panel:
+        """Build the detailed help panel for a single command."""
+        section = str(topic.get("section", "")).strip()
+        accent = self._help_section_accent(section)
+        command = str(topic.get("command", "")).strip()
+        aliases = topic.get("aliases", []) or []
+        summary = str(topic.get("summary", "")).strip()
+        detail = str(topic.get("detail", "")).strip()
+        subcommands = topic.get("subcommands", []) or []
+        examples = topic.get("examples", []) or []
+
+        header_lines = [
+            f"[bold {accent}]{escape(command)}[/bold {accent}]",
+            f"[{self.theme.TEXT_SECONDARY}]{escape(summary)}[/{self.theme.TEXT_SECONDARY}]",
+        ]
+        if detail:
+            header_lines.append(f"[{self.theme.TEXT_DIM}]{escape(detail)}[/{self.theme.TEXT_DIM}]")
+        if aliases:
+            header_lines.append(
+                f"[{self.theme.TEXT_DIM}]Aliases: {escape(', '.join(str(alias) for alias in aliases))}[/{self.theme.TEXT_DIM}]"
+            )
+
+        forms = Table(
+            box=box.SIMPLE_HEAVY,
+            border_style=accent,
+            expand=True,
+            show_header=True,
+            pad_edge=False,
+        )
+        forms.add_column("Form / Action", style=f"bold {accent}", width=26 if compact else 32)
+        forms.add_column("What It Does", style=self.theme.TEXT_SECONDARY, ratio=3)
+        forms.add_column("Example", style=self.theme.TEXT_DIM, ratio=2)
+        for item in subcommands:
+            forms.add_row(
+                escape(str(item.get("usage", ""))),
+                escape(str(item.get("description", ""))),
+                escape(self._resolve_help_example(item)),
+            )
+
+        renderables: List[object] = [Text.from_markup("\n".join(header_lines)), forms]
+        if examples:
+            example_lines = [
+                f"[{self.theme.TEXT_DIM}]{self.deco.CHEVRON_RIGHT} {escape(str(example))}[/{self.theme.TEXT_DIM}]"
+                for example in examples
+            ]
+            renderables.append(
+                Text.from_markup(
+                    f"[bold {accent}]Examples[/bold {accent}]\n" + "\n".join(example_lines)
+                )
+            )
+
+        return Panel(
+            Group(*renderables),
+            title=f"[bold {accent}]{self.deco.DIAMOND} {escape(command)}[/bold {accent}]",
+            subtitle=f"[{self.theme.TEXT_DIM}]Section: {escape(section)}[/{self.theme.TEXT_DIM}]",
+            border_style=accent,
+            padding=(1, 2),
             box=box.ROUNDED,
-            border_style=self.theme.BORDER_PRIMARY,
-            show_lines=True,
-            title_justify="left"
         )
-        game_commands.add_column("Command", style=f"bold {self.theme.BLUE_SOFT}", width=15)
-        game_commands.add_column("Description", style=self.theme.TEXT_SECONDARY)
-        game_commands.add_column("Example", style=f"dim {self.theme.MINT_SOFT}")
-        
-        game_commands.add_row(
-            "/gdd [action]",
-            f"Manage Game Design Document:\n"
-            f"{self.deco.DOT_MEDIUM} create: Create new GDD with project details\n"
-            f"{self.deco.DOT_MEDIUM} view: Display complete GDD in formatted view\n"
-            f"{self.deco.DOT_MEDIUM} summary: Show condensed GDD overview\n"
-            f"[{self.theme.TEXT_DIM}]Essential for GDD-First workflow in game development[/{self.theme.TEXT_DIM}]",
-            "/gdd create\n/gdd view\n/gdd summary"
+
+    def _resolve_help_example(self, item: Dict[str, object]) -> str:
+        """Resolve an example string for a help subcommand row."""
+        explicit = str(item.get("example", "")).strip()
+        if explicit:
+            return explicit
+
+        usage = str(item.get("usage", "")).strip()
+        if not usage:
+            return ""
+
+        if usage == "Categories":
+            return "In /setting, highlight a row and press Enter to edit it."
+        if usage.startswith("Action: "):
+            action = usage.split(": ", 1)[1].strip()
+            if action == "n":
+                return "At the /sessions prompt, enter n"
+            if action == "d":
+                return "At the /sessions prompt, enter d, then choose a session number"
+            if action == "<number>":
+                return "At the /sessions prompt, enter 2"
+
+        example = usage
+        replacements = [
+            ("<command>", "codex"),
+            ("<query>", "latest sqlite wal docs"),
+            ("<number>", "2"),
+            ("<count>", "20"),
+            ("<model-id>", "gpt-5.4"),
+            ("<mode-name>", "spec-driven"),
+            ("<theme>", "ocean"),
+            ("<project-id>", "my-project-123"),
+            ("<url|/path|clear>", "http://127.0.0.1:8000/v1/chat/completions"),
+            ("<low|medium|high|extra high>", "high"),
+            ("<seconds>", "120"),
+            ("<prompt>", "cinematic neon skyline concept art"),
+            ("<your prompt>", "cinematic neon skyline concept art"),
+            ("<text>", "Always run tests before finalizing"),
+            ("<checkpoint-id>", "cp_20260311_001"),
+            ("<index>", "2"),
+            ("<count>", "4"),
+        ]
+        for placeholder, replacement in replacements:
+            example = example.replace(placeholder, replacement)
+        return example
+
+    def _print_help_section_details(self, section: str, entries: List[Dict[str, object]]) -> None:
+        """Print all detailed panels for a section."""
+        accent = self._help_section_accent(section)
+        self.console.print(
+            Panel(
+                f"[bold {accent}]{self.deco.DIAMOND} {escape(section)}[/bold {accent}]",
+                border_style=accent,
+                padding=(0, 2),
+                box=box.ROUNDED,
+            )
         )
-        game_commands.add_row(
-            "/assets [type]",
-            f"List and manage game assets:\n"
-            f"{self.deco.DOT_MEDIUM} No args: List all detected game assets\n"
-            f"{self.deco.DOT_MEDIUM} With type: Filter by asset type (sprite, audio, model, etc.)\n"
-            f"{self.deco.DOT_MEDIUM} Shows asset paths, sizes, and usage information\n"
-            f"[{self.theme.TEXT_DIM}]Helps track sprites, audio, models, and other game resources[/{self.theme.TEXT_DIM}]",
-            "/assets\n/assets sprite\n/assets audio"
-        )
-        
-        self.console.print(game_commands)
         self.console.print()
-        
-        # Session management
-        session_commands = Table(
-            title=f"[bold {self.theme.PINK_SOFT}]{self.deco.DIAMOND} Session Management[/bold {self.theme.PINK_SOFT}]",
+        for topic in entries:
+            self.console.print(self._build_help_detail_panel(topic))
+            self.console.print()
+
+    def _print_help_tips(self, compact: bool = False) -> None:
+        """Render help footer tips."""
+        lines = [
+            f"[{self.theme.PINK_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.PINK_SOFT}] Ask normally; slash commands are for control paths and tooling",
+            f"[{self.theme.PINK_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.PINK_SOFT}] Use a trailing \\ or triple quotes for multi-line input",
+            f"[{self.theme.PINK_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.PINK_SOFT}] Ctrl+C once cancels input; twice exits",
+        ]
+        if compact:
+            lines.append(
+                f"[{self.theme.PINK_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.PINK_SOFT}] Use /help to reopen the live browser or /help list for a static overview"
+            )
+        else:
+            lines.append(
+                f"[{self.theme.PINK_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.PINK_SOFT}] Bare /help opens the live browser; /help list prints the grouped overview"
+            )
+
+        self.console.print(
+            Panel(
+                f"[bold {self.theme.PURPLE_MEDIUM}]{self.deco.SPARKLE} Input Tips[/bold {self.theme.PURPLE_MEDIUM}]\n\n"
+                + "\n".join(lines),
+                border_style=self.theme.BORDER_PRIMARY,
+                padding=(0, 2),
+                box=box.ROUNDED,
+            )
+        )
+
+    def _get_help_topic_items(self) -> List[Dict[str, object]]:
+        """Flatten help topics into UI-friendly items while preserving catalog order."""
+        items: List[Dict[str, object]] = []
+        seen: set[str] = set()
+
+        for section in HELP_SECTION_ORDER:
+            for key, topic in HELP_TOPICS.items():
+                if str(topic.get("section", "")).strip() != section:
+                    continue
+                item = dict(topic)
+                item["_topic_key"] = key
+                items.append(item)
+                seen.add(key)
+
+        for key, topic in HELP_TOPICS.items():
+            if key in seen:
+                continue
+            item = dict(topic)
+            item["_topic_key"] = key
+            items.append(item)
+
+        return items
+
+    def _build_help_topic_preview(self, topic: Dict[str, object], limit: int = 3) -> str:
+        """Build a compact preview of full command forms for the help browser list."""
+        forms = [
+            str(item.get("usage", "")).strip()
+            for item in (topic.get("subcommands", []) or [])
+            if str(item.get("usage", "")).strip()
+        ]
+        if not forms:
+            fallback = str(topic.get("overview", "")).strip()
+            return fallback or str(topic.get("summary", "")).strip()
+
+        preview = "  |  ".join(forms[:limit])
+        if len(forms) > limit:
+            preview = f"{preview}  |  +{len(forms) - limit} more"
+        return preview
+
+    def _filter_help_topic_items(self, items: List[Dict[str, object]], query: str) -> List[Dict[str, object]]:
+        """Filter help topics by command, aliases, summaries, and full subcommand forms."""
+        raw_query = str(query or "").strip().lower()
+        if not raw_query:
+            return list(items)
+
+        terms = [term for term in raw_query.split() if term]
+        filtered: List[Dict[str, object]] = []
+
+        for item in items:
+            search_parts = [
+                str(item.get("command", "")),
+                str(item.get("section", "")),
+                str(item.get("summary", "")),
+                str(item.get("detail", "")),
+                str(item.get("overview", "")),
+                " ".join(str(alias) for alias in (item.get("aliases", []) or [])),
+            ]
+            for subcommand in item.get("subcommands", []) or []:
+                search_parts.extend(
+                    [
+                        str(subcommand.get("usage", "")),
+                        str(subcommand.get("description", "")),
+                        self._resolve_help_example(subcommand),
+                    ]
+                )
+
+            haystack = " ".join(part.lower() for part in search_parts if part)
+            if all(term in haystack for term in terms):
+                filtered.append(item)
+
+        return filtered
+
+    def _help_browser_visible_count(self) -> int:
+        """Choose a stable visible-row count for the help browser list."""
+        height = int(getattr(self.console.size, "height", 0) or 32)
+        width = int(getattr(self.console.size, "width", 0) or self.console.width or 100)
+        reserve = 17 if width >= 124 else 22
+        return max(6, min(14, height - reserve))
+
+    def _clamp_help_browser_scroll(self, selected_idx: int, scroll_offset: int, total: int, max_visible: int) -> int:
+        """Keep the selected row inside the visible range."""
+        if total <= 0:
+            return 0
+        max_visible = max(1, min(max_visible, total))
+        if selected_idx < scroll_offset:
+            scroll_offset = selected_idx
+        elif selected_idx >= scroll_offset + max_visible:
+            scroll_offset = selected_idx - max_visible + 1
+        return max(0, min(scroll_offset, max(0, total - max_visible)))
+
+    def _build_help_browser_summary_panel(
+        self,
+        total_count: int,
+        filtered_count: int,
+        selected_topic: Dict[str, object],
+        search_query: str,
+        is_searching: bool,
+    ) -> Panel:
+        """Build the top summary panel for the interactive help browser."""
+        command = str(selected_topic.get("command", "")).strip()
+        section = str(selected_topic.get("section", "")).strip()
+        accent = self._help_section_accent(section)
+        count_text = f"{filtered_count}/{total_count} commands" if filtered_count != total_count else f"{total_count} commands"
+
+        title_grid = Table.grid(expand=True)
+        title_grid.add_column(ratio=1)
+        title_grid.add_column(justify="right", no_wrap=True)
+        title_grid.add_row(
+            Text.assemble(
+                (f"{self.deco.SPARKLE} ", self.theme.PINK_SOFT),
+                ("Help Browser", f"bold {self.theme.PINK_SOFT}"),
+            ),
+            Text(count_text, style=self.theme.TEXT_DIM),
+        )
+
+        search_display = search_query + ("_" if is_searching else "")
+        body_lines = [
+            f"[{self.theme.TEXT_SECONDARY}]Browse commands, full child forms, and runnable examples. Press [bold {self.theme.BLUE_SOFT}]Enter[/bold {self.theme.BLUE_SOFT}] or [bold {self.theme.BLUE_SOFT}]Esc[/bold {self.theme.BLUE_SOFT}] to pin the current page into the transcript.[/{self.theme.TEXT_SECONDARY}]",
+            f"[{self.theme.TEXT_DIM}]Focused:[/{self.theme.TEXT_DIM}] [bold {accent}]{escape(command)}[/bold {accent}] [{self.theme.TEXT_DIM}]· {escape(section)}[/{self.theme.TEXT_DIM}]",
+        ]
+        if search_query or is_searching:
+            body_lines.append(
+                f"[bold {self.theme.PURPLE_SOFT}]{self.deco.SEARCH} Filter[/bold {self.theme.PURPLE_SOFT}] "
+                f"[{self.theme.TEXT_PRIMARY}]{escape(search_display)}[/{self.theme.TEXT_PRIMARY}]"
+            )
+        else:
+            body_lines.append(
+                f"[{self.theme.TEXT_DIM}]Press / to filter by command, section, subcommand usage, or example text.[/{self.theme.TEXT_DIM}]"
+            )
+
+        return Panel(
+            Group(title_grid, Text.from_markup("\n".join(body_lines))),
+            border_style=self.theme.BORDER_PRIMARY,
+            padding=(1, 2),
             box=box.ROUNDED,
-            border_style=self.theme.BORDER_PRIMARY,
-            show_lines=True,
-            title_justify="left"
         )
-        session_commands.add_column("Command", style=f"bold {self.theme.BLUE_SOFT}", width=15)
-        session_commands.add_column("Description", style=self.theme.TEXT_SECONDARY)
-        session_commands.add_column("Example", style=f"dim {self.theme.MINT_SOFT}")
-        
-        session_commands.add_row(
-            "/sessions",
-            f"Manage conversation sessions:\n{self.deco.DOT_MEDIUM} List history\n{self.deco.DOT_MEDIUM} Load previous\n{self.deco.DOT_MEDIUM} Create new\n{self.deco.DOT_MEDIUM} Delete old",
-            "/sessions"
+
+    def _build_help_browser_list_panel(
+        self,
+        filtered_items: List[Dict[str, object]],
+        selected_idx: int,
+        scroll_offset: int,
+        max_visible: int,
+    ) -> Panel:
+        """Build the command list panel for the interactive help browser."""
+        if not filtered_items:
+            return Panel(
+                Text.from_markup(
+                    f"[{self.theme.TEXT_DIM}]No matching commands. Refine the filter or press Esc to pin the last selected help page.[/{self.theme.TEXT_DIM}]"
+                ),
+                title=f"[bold {self.theme.BLUE_SOFT}]{self.deco.DIAMOND} Commands[/bold {self.theme.BLUE_SOFT}]",
+                border_style=self.theme.BORDER_SUBTLE,
+                padding=(1, 2),
+                box=box.ROUNDED,
+            )
+
+        table = Table(
+            box=box.SIMPLE_HEAVY,
+            border_style=self.theme.BORDER_SUBTLE,
+            expand=True,
+            show_header=True,
+            pad_edge=False,
+            show_lines=False,
         )
-        session_commands.add_row(
-            "/history [n]",
-            "Show conversation history. Display the last n messages (default 10).",
-            "/history\n/history 20"
+        table.add_column("", width=2, no_wrap=True)
+        table.add_column("Command", style=f"bold {self.theme.BLUE_SOFT}", width=16, no_wrap=True)
+        table.add_column("Section", style=self.theme.TEXT_DIM, width=18, no_wrap=True)
+        table.add_column("Forms Preview", style=self.theme.TEXT_SECONDARY, ratio=3)
+
+        end_idx = min(scroll_offset + max_visible, len(filtered_items))
+        visible_items = filtered_items[scroll_offset:end_idx]
+        for row_index, topic in enumerate(visible_items):
+            actual_idx = scroll_offset + row_index
+            is_selected = actual_idx == selected_idx
+            indicator = Text("›" if is_selected else "", style=f"bold {self.theme.PINK_SOFT}")
+            command_style = f"bold {self.theme.TEXT_PRIMARY} on {self.theme.PURPLE_DEEP}" if is_selected else f"bold {self.theme.BLUE_SOFT}"
+            section_style = self.theme.TEXT_SECONDARY if is_selected else self.theme.TEXT_DIM
+            preview_style = self.theme.TEXT_PRIMARY if is_selected else self.theme.TEXT_SECONDARY
+            table.add_row(
+                indicator,
+                Text(str(topic.get("command", "")).strip(), style=command_style),
+                Text(str(topic.get("section", "")).strip(), style=section_style),
+                Text(self._build_help_topic_preview(topic), style=preview_style, overflow="fold"),
+            )
+
+        visible_range = (
+            f"{scroll_offset + 1}-{end_idx} / {len(filtered_items)}"
+            if visible_items
+            else f"0 / {len(filtered_items)}"
         )
-        session_commands.add_row(
-            "/rollback",
-            f"Rollback to previous state:\n{self.deco.DOT_MEDIUM} Rollback to previous question\n{self.deco.DOT_MEDIUM} Rollback to previous tool call\n{self.deco.DOT_MEDIUM} Rollback to specific checkpoint",
-            "/rollback question\n/rollback tool\n/rollback <id>"
+        return Panel(
+            table,
+            title=f"[bold {self.theme.BLUE_SOFT}]{self.deco.DIAMOND} Commands[/bold {self.theme.BLUE_SOFT}]",
+            subtitle=f"[{self.theme.TEXT_DIM}]Visible: {visible_range}[/{self.theme.TEXT_DIM}]",
+            border_style=self.theme.BORDER_SUBTLE,
+            padding=(0, 1),
+            box=box.ROUNDED,
         )
-        session_commands.add_row(
-            "/undo",
-            "Undo the last rollback operation.",
-            "/undo"
+
+    def _build_help_browser_footer_panel(
+        self,
+        filtered_count: int,
+        search_query: str,
+        is_searching: bool,
+    ) -> Panel:
+        """Build the navigation footer for the interactive help browser."""
+        footer_text = Text()
+        footer_text.append("Navigate ", style=self.theme.TEXT_DIM)
+        footer_text.append("↑↓ / j k", style=self.theme.BLUE_SOFT)
+        footer_text.append("  Page ", style=self.theme.TEXT_DIM)
+        footer_text.append("PgUp/PgDn", style=self.theme.BLUE_SOFT)
+        footer_text.append("  Pin ", style=self.theme.TEXT_DIM)
+        footer_text.append("Enter / Esc", style=self.theme.BLUE_SOFT)
+        footer_text.append("  Filter ", style=self.theme.TEXT_DIM)
+        footer_text.append("/", style=self.theme.BLUE_SOFT)
+        footer_text.append("  Edit ", style=self.theme.TEXT_DIM)
+        footer_text.append("Backspace", style=self.theme.BLUE_SOFT)
+
+        status_text = "Typing filter" if is_searching else ("Filter active" if search_query else "Live browser")
+        status_color = self.theme.PURPLE_SOFT if (is_searching or search_query) else self.theme.TEXT_DIM
+
+        footer_grid = Table.grid(expand=True)
+        footer_grid.add_column(ratio=1)
+        footer_grid.add_column(justify="right", no_wrap=True)
+        footer_grid.add_row(
+            footer_text,
+            Text(f"{filtered_count} visible · {status_text}", style=status_color),
         )
-        session_commands.add_row(
-            "/redo",
-            "Redo the last undone rollback operation.",
-            "/redo"
+
+        return Panel(
+            footer_grid,
+            border_style=self.theme.BORDER_SUBTLE,
+            padding=(0, 1),
+            box=box.ROUNDED,
         )
-        session_commands.add_row(
-            "/checkpoints",
-            f"Interactive checkpoint manager:\n{self.deco.DOT_MEDIUM} Browse checkpoints with arrow keys\n{self.deco.DOT_MEDIUM} Select to restore\n{self.deco.DOT_MEDIUM} View checkpoint details",
-            "/checkpoints"
+
+    def _render_help_ui(
+        self,
+        filtered_items: List[Dict[str, object]],
+        selected_idx: int,
+        scroll_offset: int,
+        max_visible: int,
+        selected_topic: Dict[str, object],
+        search_query: str,
+        is_searching: bool,
+        total_count: int,
+    ) -> Group:
+        """Compose the full interactive help browser layout."""
+        summary_panel = self._build_help_browser_summary_panel(
+            total_count,
+            len(filtered_items),
+            selected_topic,
+            search_query,
+            is_searching,
         )
-        session_commands.add_row(
-            "/operations",
-            "Show operation history and statistics.",
-            "/operations"
-        )
-        
-        self.console.print(session_commands)
+        list_panel = self._build_help_browser_list_panel(filtered_items, selected_idx, scroll_offset, max_visible)
+        width = int(getattr(self.console.size, "width", 0) or self.console.width or 100)
+        detail_panel = self._build_help_detail_panel(selected_topic, compact=width < 138)
+        footer_panel = self._build_help_browser_footer_panel(len(filtered_items), search_query, is_searching)
+
+        if width >= 106:
+            body = Columns([list_panel, detail_panel], expand=True, equal=False)
+        else:
+            body = Group(list_panel, detail_panel)
+        return Group(summary_panel, body, footer_panel)
+
+    def _cmd_help_ui(self, initial_query: str = "") -> bool:
+        """Launch the interactive help browser and pin the selected page on exit."""
+        try:
+            import msvcrt
+        except ImportError:
+            self._print_help_hero(detail_mode=False)
+            for section in HELP_SECTION_ORDER:
+                entries = self._get_help_entries_for_section(section)
+                if entries:
+                    self.console.print(self._build_help_overview_table(section, entries))
+                    self.console.print()
+            self._print_help_tips()
+            self.console.print()
+            return True
+
+        all_items = self._get_help_topic_items()
+        if not all_items:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Help catalog is empty.[/{self.theme.CORAL_SOFT}]")
+            return True
+
+        search_query = str(initial_query or "").strip()
+        is_searching = bool(search_query)
+        filtered_items = self._filter_help_topic_items(all_items, search_query)
+        selected_idx = 0
+        scroll_offset = 0
+        selected_topic = filtered_items[0] if filtered_items else all_items[0]
+        max_visible = self._help_browser_visible_count()
+
+        from rich.live import Live
+
+        with Live(
+            self._render_help_ui(
+                filtered_items,
+                selected_idx,
+                scroll_offset,
+                max_visible,
+                selected_topic,
+                search_query,
+                is_searching,
+                len(all_items),
+            ),
+            auto_refresh=False,
+            vertical_overflow="visible",
+            console=self.console,
+        ) as live:
+            while True:
+                if msvcrt.kbhit():
+                    key = msvcrt.getch()
+
+                    if key == b"\x1b":
+                        break
+                    if key == b"/":
+                        is_searching = True
+                    elif key in (b"\r", b"\n"):
+                        break
+                    elif key == b"\x08":
+                        if search_query:
+                            search_query = search_query[:-1]
+                            filtered_items = self._filter_help_topic_items(all_items, search_query)
+                            selected_idx = min(selected_idx, max(0, len(filtered_items) - 1))
+                            scroll_offset = 0
+                            if filtered_items:
+                                selected_topic = filtered_items[selected_idx]
+                        else:
+                            is_searching = False
+                    elif key in (b"k", b"K") and filtered_items:
+                        selected_idx = (selected_idx - 1) % len(filtered_items)
+                        selected_topic = filtered_items[selected_idx]
+                    elif key in (b"j", b"J") and filtered_items:
+                        selected_idx = (selected_idx + 1) % len(filtered_items)
+                        selected_topic = filtered_items[selected_idx]
+                    elif key in (b"\x00", b"\xe0"):
+                        key = msvcrt.getch()
+                        if key == b"H" and filtered_items:
+                            selected_idx = (selected_idx - 1) % len(filtered_items)
+                            selected_topic = filtered_items[selected_idx]
+                        elif key == b"P" and filtered_items:
+                            selected_idx = (selected_idx + 1) % len(filtered_items)
+                            selected_topic = filtered_items[selected_idx]
+                        elif key == b"I" and filtered_items:
+                            selected_idx = max(0, selected_idx - max_visible)
+                            selected_topic = filtered_items[selected_idx]
+                        elif key == b"Q" and filtered_items:
+                            selected_idx = min(len(filtered_items) - 1, selected_idx + max_visible)
+                            selected_topic = filtered_items[selected_idx]
+                        elif key == b"G" and filtered_items:
+                            selected_idx = 0
+                            selected_topic = filtered_items[selected_idx]
+                        elif key == b"O" and filtered_items:
+                            selected_idx = len(filtered_items) - 1
+                            selected_topic = filtered_items[selected_idx]
+                    elif 32 <= key[0] <= 126:
+                        search_query += key.decode("ascii", errors="ignore")
+                        is_searching = True
+                        filtered_items = self._filter_help_topic_items(all_items, search_query)
+                        selected_idx = 0
+                        scroll_offset = 0
+                        if filtered_items:
+                            selected_topic = filtered_items[0]
+                    else:
+                        time.sleep(0.025)
+                        continue
+
+                    max_visible = self._help_browser_visible_count()
+                    scroll_offset = self._clamp_help_browser_scroll(selected_idx, scroll_offset, len(filtered_items), max_visible)
+                    if filtered_items:
+                        selected_topic = filtered_items[selected_idx]
+
+                    live.update(
+                        self._render_help_ui(
+                            filtered_items,
+                            selected_idx,
+                            scroll_offset,
+                            max_visible,
+                            selected_topic,
+                            search_query,
+                            is_searching,
+                            len(all_items),
+                        ),
+                        refresh=True,
+                    )
+                time.sleep(0.025)
+
         self.console.print()
-        
-        # Quick tips with dreamy panel
-        tips = Panel(
-            f"[bold {self.theme.PURPLE_MEDIUM}]{self.deco.SPARKLE} Tips[/bold {self.theme.PURPLE_MEDIUM}]\n\n"
-            f"[{self.theme.PINK_SOFT}]{self.deco.CHEVRON_RIGHT} Input[/{self.theme.PINK_SOFT}]  Type questions or requests directly; the AI will respond.\n"
-            f"[{self.theme.PINK_SOFT}]{self.deco.CHEVRON_RIGHT} Multi-line[/{self.theme.PINK_SOFT}]  Use a trailing \\ or triple quotes to enter multi-line text.\n"
-            f"[{self.theme.PINK_SOFT}]{self.deco.CHEVRON_RIGHT} Interrupt[/{self.theme.PINK_SOFT}]  Ctrl+C once cancels input; twice exits the program.\n"
-            f"[{self.theme.PINK_SOFT}]{self.deco.CHEVRON_RIGHT} History[/{self.theme.PINK_SOFT}]  Use ↑/↓ to browse input history.\n"
-            f"[{self.theme.PINK_SOFT}]{self.deco.CHEVRON_RIGHT} Completion[/{self.theme.PINK_SOFT}]  Type /command to see available completions.\n"
-            f"[{self.theme.PINK_SOFT}]{self.deco.CHEVRON_RIGHT} Tools[/{self.theme.PINK_SOFT}]  Type tools (or /tools) to list all available tools.",
-            border_style=self.theme.BORDER_PRIMARY,
-            padding=(0, 2),
-            box=box.ROUNDED
-        )
-        self.console.print(tips)
+        self.console.print(self._build_help_detail_panel(selected_topic))
         self.console.print()
-        
         return True
     
     def cmd_tools(self, args: str) -> bool:
@@ -670,7 +1082,7 @@ class CommandHandler:
                     f"[{self.theme.TEXT_DIM}]{model.base_url}[/{self.theme.TEXT_DIM}]"
                 )
                 source = str(getattr(config, "active_model_source", "standard")).lower() if config else "standard"
-                source_label = "iFlow" if source == "iflow" else "Standard"
+                source_label = self._format_model_source_label(source)
                 table.add_row(
                     f"{self.deco.DOT_MEDIUM} Source",
                     f"[{self.theme.TEXT_DIM}]{source_label}[/{self.theme.TEXT_DIM}]"
@@ -753,6 +1165,234 @@ class CommandHandler:
         self.console.print()
         return True
 
+    def _format_model_source_label(self, source: str) -> str:
+        """Return a readable model source label."""
+        mapping = {
+            "standard": "Standard",
+            "iflow": "iFlow",
+            "qwencode": "Qwen Code",
+            "geminicli": "Gemini CLI",
+            "codex": "Codex",
+        }
+        return mapping.get(str(source or "").strip().lower(), "Standard")
+
+    def _configure_provider_endpoint(
+        self,
+        *,
+        config_attr: str,
+        normalize_config: Callable[[Any], Dict[str, Any]],
+        provider_label: str,
+        endpoint_value: str,
+    ) -> bool:
+        """Configure endpoint override for an external provider."""
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        provider_cfg = normalize_config(getattr(config, config_attr, {}))
+
+        candidate = str(endpoint_value or "").strip()
+        if not candidate:
+            current_endpoint = str(provider_cfg.get("endpoint", "")).strip()
+            placeholder = current_endpoint or "(none)"
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Current endpoint override: {placeholder}[/{self.theme.TEXT_DIM}]"
+            )
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Use 'clear' to remove endpoint override.[/{self.theme.TEXT_DIM}]"
+            )
+            candidate = Prompt.ask(
+                "Endpoint override (absolute URL or relative path)",
+                default=current_endpoint
+            ).strip()
+
+        lowered = candidate.lower()
+        if lowered in ("clear", "default", "none", "off"):
+            candidate = ""
+
+        if candidate and not (
+            candidate.startswith("http://")
+            or candidate.startswith("https://")
+            or candidate.startswith("/")
+        ):
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid endpoint. Use absolute URL or path starting with '/'.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        provider_cfg["endpoint"] = candidate
+        setattr(config, config_attr, provider_cfg)
+        config_manager.save(config)
+
+        self.console.print()
+        if candidate:
+            self.console.print(
+                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} {provider_label} endpoint override set to: {candidate}[/{self.theme.MINT_VIBRANT}]"
+            )
+        else:
+            self.console.print(
+                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} {provider_label} endpoint override cleared.[/{self.theme.MINT_VIBRANT}]"
+            )
+
+        if self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+
+        self.console.print()
+        return True
+
+    def _resolve_catalog_selection(
+        self,
+        *,
+        catalog,
+        current_selected_id: str,
+        model_query: str,
+        provider_label: str,
+        normalize_query: Optional[Callable[[str], str]] = None,
+    ):
+        """Resolve selected model by query or TUI selector."""
+        selected_model = None
+        query = str(model_query or "").strip().lower()
+        normalized_query = ""
+        if query and normalize_query:
+            try:
+                normalized_query = str(normalize_query(query) or "").strip().lower()
+            except Exception:
+                normalized_query = ""
+
+        if query:
+            exact_queries = [query]
+            if normalized_query and normalized_query not in exact_queries:
+                exact_queries.append(normalized_query)
+
+            for item in catalog:
+                model_id = str(item.get("id", "")).lower()
+                name = str(item.get("display_name", "")).lower()
+                if any(q == model_id or q == name for q in exact_queries):
+                    selected_model = item
+                    break
+
+            if not selected_model:
+                partial_queries = [query]
+                if normalized_query and normalized_query not in partial_queries:
+                    partial_queries.append(normalized_query)
+                for item in catalog:
+                    model_id = str(item.get("id", "")).lower()
+                    name = str(item.get("display_name", "")).lower()
+                    if any(q and (q in model_id or q in name) for q in partial_queries):
+                        selected_model = item
+                        break
+
+            if not selected_model:
+                self.console.print(
+                    f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} {provider_label} model not found: {model_query}[/{self.theme.CORAL_SOFT}]"
+                )
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Use /{provider_label.lower().replace(' ', '')} model to open the full selector.[/{self.theme.TEXT_DIM}]"
+                )
+                return None
+            return selected_model
+
+        from .tui_selector import ModelSelector, SelectorAction
+
+        models_data = []
+        current_model_id = None
+        selected_id = str(current_selected_id or "").strip().lower()
+        for i, item in enumerate(catalog):
+            model_id = str(item.get("id", ""))
+            description = f"{model_id} | {item.get('description', '')}"
+            models_data.append(
+                {
+                    "id": str(i),
+                    "name": item.get("display_name", model_id),
+                    "description": description,
+                    "model": item,
+                }
+            )
+            if model_id.lower() == selected_id:
+                current_model_id = str(i)
+
+        selector = ModelSelector(
+            console=self.console,
+            models=models_data,
+            current_model=current_model_id
+        )
+        result = selector.run()
+        if result.action != SelectorAction.SELECT or not result.selected_item:
+            return None
+
+        try:
+            selected_index = int(result.selected_item.id)
+        except (TypeError, ValueError):
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid {provider_label} model selection.[/{self.theme.CORAL_SOFT}]"
+            )
+            return None
+
+        if selected_index < 0 or selected_index >= len(catalog):
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid {provider_label} model index.[/{self.theme.CORAL_SOFT}]"
+            )
+            return None
+
+        return catalog[selected_index]
+
+    def _select_external_provider_model(
+        self,
+        *,
+        config_attr: str,
+        normalize_config: Callable[[Any], Dict[str, Any]],
+        catalog,
+        provider_label: str,
+        active_source: str,
+        model_query: str,
+        normalize_query: Optional[Callable[[str], str]] = None,
+    ) -> bool:
+        """Persist model selection for an external provider."""
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        if not catalog:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} {provider_label} model catalog is empty.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        provider_cfg = normalize_config(getattr(config, config_attr, {}))
+        selected_model = self._resolve_catalog_selection(
+            catalog=catalog,
+            current_selected_id=str(provider_cfg.get("selected_model_id", "")),
+            model_query=model_query,
+            provider_label=provider_label,
+            normalize_query=normalize_query,
+        )
+        if not selected_model:
+            return True
+
+        provider_cfg["selected_model_id"] = selected_model["id"]
+        provider_cfg["selected_model_display_name"] = selected_model["display_name"]
+        setattr(config, config_attr, provider_cfg)
+        config.active_model_source = active_source
+        config_manager.save(config)
+
+        self.console.print()
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Switched to {provider_label} model: {selected_model['display_name']} ({selected_model['id']})[/{self.theme.MINT_VIBRANT}]"
+        )
+
+        if self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+
+        return True
+
     def cmd_iflow(self, args: str) -> bool:
         """iFlow integration command."""
         raw = args.strip()
@@ -766,9 +1406,13 @@ class CommandHandler:
             return self._cmd_iflow_model("")
         if lowered.startswith("model "):
             return self._cmd_iflow_model(raw[6:].strip())
+        if lowered == "endpoint":
+            return self._cmd_iflow_endpoint("")
+        if lowered.startswith("endpoint "):
+            return self._cmd_iflow_endpoint(raw[9:].strip())
 
         self.console.print(
-            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /iflow OR /iflow model[/{self.theme.AMBER_GLOW}]"
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /iflow [status|model|endpoint][/{self.theme.AMBER_GLOW}]"
         )
         return True
 
@@ -825,16 +1469,32 @@ class CommandHandler:
 
             model_source = str(getattr(config, "active_model_source", "standard")).lower()
             self.console.print(
-                f"[{self.theme.BLUE_SOFT}]Active model source:[/{self.theme.BLUE_SOFT}] {model_source}"
+                f"[{self.theme.BLUE_SOFT}]Active model source:[/{self.theme.BLUE_SOFT}] {self._format_model_source_label(model_source)}"
             )
             api_url = str(iflow_cfg.get("api_url", "")).strip()
             if api_url:
                 self.console.print(
                     f"[{self.theme.TEXT_DIM}]iFlow API endpoint: {api_url}[/{self.theme.TEXT_DIM}]"
                 )
+            endpoint = str(iflow_cfg.get("endpoint", "")).strip()
+            if endpoint:
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Endpoint override: {endpoint}[/{self.theme.TEXT_DIM}]"
+                )
 
         self.console.print()
         return True
+
+    def _cmd_iflow_endpoint(self, endpoint_value: str) -> bool:
+        """Configure custom endpoint override for iFlow reverse proxy requests."""
+        from ..iflow import normalize_iflow_config
+
+        return self._configure_provider_endpoint(
+            config_attr="iflow",
+            normalize_config=normalize_iflow_config,
+            provider_label="iFlow",
+            endpoint_value=endpoint_value,
+        )
 
     def _cmd_iflow_model(self, model_query: str) -> bool:
         """Select iFlow model from dedicated catalog."""
@@ -861,101 +1521,15 @@ class CommandHandler:
             )
             return True
 
-        config = config_manager.load()
-        iflow_cfg = normalize_iflow_config(getattr(config, "iflow", {}))
-
         catalog = get_iflow_model_catalog()
-        if not catalog:
-            self.console.print(
-                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} iFlow model catalog is empty.[/{self.theme.CORAL_SOFT}]"
-            )
-            return True
-
-        selected_model = None
-        query = str(model_query or "").strip().lower()
-        if query:
-            for item in catalog:
-                model_id = str(item.get("id", "")).lower()
-                name = str(item.get("display_name", "")).lower()
-                if query == model_id or query == name:
-                    selected_model = item
-                    break
-            if not selected_model:
-                for item in catalog:
-                    model_id = str(item.get("id", "")).lower()
-                    name = str(item.get("display_name", "")).lower()
-                    if query in model_id or query in name:
-                        selected_model = item
-                        break
-
-            if not selected_model:
-                self.console.print(
-                    f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} iFlow model not found: {model_query}[/{self.theme.CORAL_SOFT}]"
-                )
-                self.console.print(
-                    f"[{self.theme.TEXT_DIM}]Use /iflow model to open the full selector.[/{self.theme.TEXT_DIM}]"
-                )
-                return True
-        else:
-            from .tui_selector import ModelSelector, SelectorAction
-
-            models_data = []
-            current_model_id = None
-            selected_id = str(iflow_cfg.get("selected_model_id", "")).strip().lower()
-            for i, item in enumerate(catalog):
-                model_id = str(item.get("id", ""))
-                description = f"{model_id} | {item.get('description', '')}"
-                models_data.append(
-                    {
-                        "id": str(i),
-                        "name": item.get("display_name", model_id),
-                        "description": description,
-                        "model": item,
-                    }
-                )
-                if model_id.lower() == selected_id:
-                    current_model_id = str(i)
-
-            selector = ModelSelector(
-                console=self.console,
-                models=models_data,
-                current_model=current_model_id
-            )
-            result = selector.run()
-            if result.action != SelectorAction.SELECT or not result.selected_item:
-                return True
-
-            try:
-                selected_index = int(result.selected_item.id)
-            except (TypeError, ValueError):
-                self.console.print(
-                    f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid iFlow model selection.[/{self.theme.CORAL_SOFT}]"
-                )
-                return True
-
-            if selected_index < 0 or selected_index >= len(catalog):
-                self.console.print(
-                    f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid iFlow model index.[/{self.theme.CORAL_SOFT}]"
-                )
-                return True
-
-            selected_model = catalog[selected_index]
-
-        iflow_cfg["selected_model_id"] = selected_model["id"]
-        iflow_cfg["selected_model_display_name"] = selected_model["display_name"]
-        config.iflow = iflow_cfg
-        config.active_model_source = "iflow"
-        config_manager.save(config)
-
-        self.console.print()
-        self.console.print(
-            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Switched to iFlow model: {selected_model['display_name']} ({selected_model['id']})[/{self.theme.MINT_VIBRANT}]"
+        return self._select_external_provider_model(
+            config_attr="iflow",
+            normalize_config=normalize_iflow_config,
+            catalog=catalog,
+            provider_label="iFlow",
+            active_source="iflow",
+            model_query=model_query,
         )
-
-        if self.app.get('reinit_agent'):
-            self.app['reinit_agent']()
-
-        return True
 
     def cmd_qwencode(self, args: str) -> bool:
         """Qwen Code integration command."""
@@ -1057,7 +1631,7 @@ class CommandHandler:
 
             model_source = str(getattr(config, "active_model_source", "standard")).lower()
             self.console.print(
-                f"[{self.theme.BLUE_SOFT}]Active model source:[/{self.theme.BLUE_SOFT}] {model_source}"
+                f"[{self.theme.BLUE_SOFT}]Active model source:[/{self.theme.BLUE_SOFT}] {self._format_model_source_label(model_source)}"
             )
             api_url = str(qwencode_cfg.get("api_url", "")).strip()
             if api_url:
@@ -1136,64 +1710,12 @@ class CommandHandler:
         """Configure custom endpoint override for Qwen OpenAI-compatible requests."""
         from ..qwencode import normalize_qwencode_config
 
-        config_manager = self.app.get('config_manager')
-        if not config_manager:
-            self.console.print(
-                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
-            )
-            return True
-
-        config = config_manager.load()
-        qwencode_cfg = normalize_qwencode_config(getattr(config, "qwencode", {}))
-
-        candidate = str(endpoint_value or "").strip()
-        if not candidate:
-            current_endpoint = str(qwencode_cfg.get("endpoint", "")).strip()
-            placeholder = current_endpoint or "(none)"
-            self.console.print(
-                f"[{self.theme.TEXT_DIM}]Current endpoint override: {placeholder}[/{self.theme.TEXT_DIM}]"
-            )
-            self.console.print(
-                f"[{self.theme.TEXT_DIM}]Use 'clear' to remove endpoint override.[/{self.theme.TEXT_DIM}]"
-            )
-            candidate = Prompt.ask(
-                "Endpoint override (absolute URL or relative path)",
-                default=current_endpoint
-            ).strip()
-
-        lowered = candidate.lower()
-        if lowered in ("clear", "default", "none", "off"):
-            candidate = ""
-
-        if candidate and not (
-            candidate.startswith("http://")
-            or candidate.startswith("https://")
-            or candidate.startswith("/")
-        ):
-            self.console.print(
-                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid endpoint. Use absolute URL or path starting with '/'.[/{self.theme.CORAL_SOFT}]"
-            )
-            return True
-
-        qwencode_cfg["endpoint"] = candidate
-        config.qwencode = qwencode_cfg
-        config_manager.save(config)
-
-        self.console.print()
-        if candidate:
-            self.console.print(
-                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Qwen endpoint override set to: {candidate}[/{self.theme.MINT_VIBRANT}]"
-            )
-        else:
-            self.console.print(
-                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Qwen endpoint override cleared.[/{self.theme.MINT_VIBRANT}]"
-            )
-
-        if self.app.get('reinit_agent'):
-            self.app['reinit_agent']()
-
-        self.console.print()
-        return True
+        return self._configure_provider_endpoint(
+            config_attr="qwencode",
+            normalize_config=normalize_qwencode_config,
+            provider_label="Qwen Code",
+            endpoint_value=endpoint_value,
+        )
 
     def _cmd_qwencode_model(self, model_query: str) -> bool:
         """Select Qwen Code model from dedicated catalog."""
@@ -1220,68 +1742,574 @@ class CommandHandler:
             )
             return True
 
-        config = config_manager.load()
-        qwencode_cfg = normalize_qwencode_config(getattr(config, "qwencode", {}))
-
         catalog = get_qwencode_model_catalog()
-        if not catalog:
+        return self._select_external_provider_model(
+            config_attr="qwencode",
+            normalize_config=normalize_qwencode_config,
+            catalog=catalog,
+            provider_label="Qwen Code",
+            active_source="qwencode",
+            model_query=model_query,
+            normalize_query=lambda raw_query: str(
+                normalize_qwencode_config({"selected_model_id": raw_query}).get("selected_model_id", "")
+            ),
+        )
+
+    def cmd_geminicli(self, args: str) -> bool:
+        """Gemini CLI integration command."""
+        raw = args.strip()
+        if not raw:
+            return self._cmd_geminicli_status()
+
+        lowered = raw.lower()
+        if lowered in ("status", "check"):
+            return self._cmd_geminicli_status()
+        if lowered == "login":
+            return self._cmd_geminicli_login()
+        if lowered == "model":
+            return self._cmd_geminicli_model("")
+        if lowered.startswith("model "):
+            return self._cmd_geminicli_model(raw[6:].strip())
+        if lowered == "endpoint":
+            return self._cmd_geminicli_endpoint("")
+        if lowered.startswith("endpoint "):
+            return self._cmd_geminicli_endpoint(raw[9:].strip())
+        if lowered == "project":
+            return self._cmd_geminicli_project("")
+        if lowered.startswith("project "):
+            return self._cmd_geminicli_project(raw[8:].strip())
+
+        self.console.print(
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /Geminicli [status|login|model|endpoint|project][/{self.theme.AMBER_GLOW}]"
+        )
+        return True
+
+    def _cmd_geminicli_status(self) -> bool:
+        """Detect local Gemini CLI credentials and show current Gemini selection."""
+        from ..geminicli import (
+            detect_geminicli_cli_credentials,
+            infer_geminicli_project_id,
+            normalize_geminicli_config,
+            resolve_geminicli_selected_model,
+        )
+
+        config_manager = self.app.get('config_manager')
+        config = config_manager.load() if config_manager else None
+
+        cred = detect_geminicli_cli_credentials(refresh_if_needed=True)
+        self.console.print()
+
+        if cred.get("found"):
             self.console.print(
-                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Qwen Code model catalog is empty.[/{self.theme.CORAL_SOFT}]"
+                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Gemini CLI credentials detected.[/{self.theme.MINT_VIBRANT}]"
+            )
+            self.console.print(
+                f"[{self.theme.MINT_SOFT}]Gemini CLI is installed and logged in. Use /Geminicli model to select a model.[/{self.theme.MINT_SOFT}]"
+            )
+            if cred.get("refreshed"):
+                self.console.print(
+                    f"[{self.theme.MINT_SOFT}]Access token was auto-refreshed from local OAuth cache.[/{self.theme.MINT_SOFT}]"
+                )
+            source_file = cred.get("source_file", "")
+            if source_file:
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Credential source: {source_file}[/{self.theme.TEXT_DIM}]"
+                )
+            email = str(cred.get("email", "")).strip()
+            if email:
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Active account: {email}[/{self.theme.TEXT_DIM}]"
+                )
+            expires_at = cred.get("expires_at")
+            if isinstance(expires_at, int) and expires_at > 0:
+                expires_at_text = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(expires_at / 1000))
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Token expiry: {expires_at_text}[/{self.theme.TEXT_DIM}]"
+                )
+        else:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Gemini CLI credentials were not found under ~/.gemini.[/{self.theme.CORAL_SOFT}]"
+            )
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]Use /Geminicli login to authenticate, or install Gemini CLI first.[/{self.theme.AMBER_GLOW}]"
+            )
+            if cred.get("errors"):
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Details: {' | '.join(str(x) for x in cred.get('errors', []))}[/{self.theme.TEXT_DIM}]"
+                )
+
+        if config_manager and config:
+            geminicli_cfg = normalize_geminicli_config(getattr(config, "geminicli", {}))
+            selected = resolve_geminicli_selected_model(geminicli_cfg)
+            agent = self.app.get('agent')
+            project_root = self.app.get('project_root') or getattr(agent, 'project_root', None) or Path.cwd()
+            if selected:
+                self.console.print(
+                    f"[{self.theme.BLUE_SOFT}]Current Gemini model:[/{self.theme.BLUE_SOFT}] {selected['display_name']} ({selected['id']})"
+                )
+                context_length = selected.get('context_length', 0)
+                if context_length:
+                    self.console.print(
+                        f"[{self.theme.TEXT_DIM}]Context length: {context_length:,} tokens[/{self.theme.TEXT_DIM}]"
+                    )
+            else:
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Current Gemini model: (none)[/{self.theme.TEXT_DIM}]"
+                )
+
+            model_source = str(getattr(config, "active_model_source", "standard")).lower()
+            self.console.print(
+                f"[{self.theme.BLUE_SOFT}]Active model source:[/{self.theme.BLUE_SOFT}] {self._format_model_source_label(model_source)}"
+            )
+
+            configured_project = str(geminicli_cfg.get("project_id", "")).strip()
+            inferred_project = infer_geminicli_project_id(project_root)
+            if configured_project:
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Gemini project id: {configured_project}[/{self.theme.TEXT_DIM}]"
+                )
+            elif inferred_project:
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Gemini project id (inferred): {inferred_project}[/{self.theme.TEXT_DIM}]"
+                )
+            else:
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Gemini project id: (none)[/{self.theme.TEXT_DIM}]"
+                )
+
+            api_url = str(geminicli_cfg.get("api_url", "")).strip()
+            if api_url:
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Gemini API endpoint: {api_url}[/{self.theme.TEXT_DIM}]"
+                )
+            endpoint = str(geminicli_cfg.get("endpoint", "")).strip()
+            if endpoint:
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Endpoint override: {endpoint}[/{self.theme.TEXT_DIM}]"
+                )
+
+        self.console.print()
+        return True
+
+    def _cmd_geminicli_login(self) -> bool:
+        """Validate or refresh local Gemini OAuth credentials."""
+        from ..geminicli import geminicli_oauth_login
+
+        self.console.print()
+        self.console.print(
+            f"[{self.theme.PURPLE_SOFT}]{self.deco.SPARKLE} Validating Gemini OAuth credentials...[/{self.theme.PURPLE_SOFT}]"
+        )
+        self.console.print()
+
+        with self.console.status(f"[{self.theme.PURPLE_SOFT}]Checking local CLI cache...[/{self.theme.PURPLE_SOFT}]"):
+            login_result = geminicli_oauth_login(force_refresh=True)
+
+        if not login_result.get("success"):
+            error_msg = login_result.get("error", "Unknown error")
+            self.console.print(
+                f"[{self.theme.CORAL_VIBRANT}]{self.deco.CROSS} Login failed: {error_msg}[/{self.theme.CORAL_VIBRANT}]"
+            )
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]Please run `gemini`, complete OAuth login, then run /Geminicli login again.[/{self.theme.AMBER_GLOW}]"
+            )
+            self.console.print()
+            return True
+
+        if login_result.get("refreshed"):
+            self.console.print(
+                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Gemini OAuth token refreshed successfully.[/{self.theme.MINT_VIBRANT}]"
+            )
+        else:
+            self.console.print(
+                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Gemini OAuth credentials are valid.[/{self.theme.MINT_VIBRANT}]"
+            )
+
+        source_file = str(login_result.get("source_file", "")).strip()
+        if source_file:
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Credential source: {source_file}[/{self.theme.TEXT_DIM}]"
+            )
+        email = str(login_result.get("email", "")).strip()
+        if email:
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Active account: {email}[/{self.theme.TEXT_DIM}]"
+            )
+        expires_at = login_result.get("expires_at")
+        if isinstance(expires_at, int) and expires_at > 0:
+            expires_at_text = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(expires_at / 1000))
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Token expiry: {expires_at_text}[/{self.theme.TEXT_DIM}]"
+            )
+        if login_result.get("errors"):
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Notes: {' | '.join(str(x) for x in login_result.get('errors', []))}[/{self.theme.TEXT_DIM}]"
+            )
+        self.console.print(
+            f"[{self.theme.TEXT_DIM}]Use /Geminicli model to select a model.[/{self.theme.TEXT_DIM}]"
+        )
+        self.console.print()
+        return True
+
+    def _cmd_geminicli_endpoint(self, endpoint_value: str) -> bool:
+        """Configure custom endpoint override for Gemini CLI requests."""
+        from ..geminicli import normalize_geminicli_config
+
+        return self._configure_provider_endpoint(
+            config_attr="geminicli",
+            normalize_config=normalize_geminicli_config,
+            provider_label="Gemini CLI",
+            endpoint_value=endpoint_value,
+        )
+
+    def _cmd_geminicli_project(self, project_value: str) -> bool:
+        """Configure Gemini CLI project id."""
+        from ..geminicli import infer_geminicli_project_id, normalize_geminicli_config
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
             )
             return True
 
-        selected_model = None
-        query = str(model_query or "").strip().lower()
-        if query:
-            normalized_query = str(
-                normalize_qwencode_config({"selected_model_id": query}).get("selected_model_id", "")
-            ).strip().lower()
-            for item in catalog:
-                model_id = str(item.get("id", "")).lower()
-                name = str(item.get("display_name", "")).lower()
-                if query == model_id or query == name or (normalized_query and normalized_query == model_id):
-                    selected_model = item
-                    break
-            if not selected_model:
-                for item in catalog:
-                    model_id = str(item.get("id", "")).lower()
-                    name = str(item.get("display_name", "")).lower()
-                    if query in model_id or query in name or (normalized_query and normalized_query in model_id):
-                        selected_model = item
-                        break
+        config = config_manager.load()
+        geminicli_cfg = normalize_geminicli_config(getattr(config, "geminicli", {}))
+        agent = self.app.get('agent')
+        project_root = self.app.get('project_root') or getattr(agent, 'project_root', None) or Path.cwd()
+        inferred_project = infer_geminicli_project_id(project_root)
 
-            if not selected_model:
+        candidate = str(project_value or "").strip()
+        if not candidate:
+            current_project = str(geminicli_cfg.get("project_id", "")).strip()
+            placeholder = current_project or inferred_project or "(none)"
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Current Gemini project id: {placeholder}[/{self.theme.TEXT_DIM}]"
+            )
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Use 'clear' to remove stored project id.[/{self.theme.TEXT_DIM}]"
+            )
+            candidate = Prompt.ask(
+                "Gemini project id",
+                default=current_project or inferred_project
+            ).strip()
+
+        if candidate.lower() in ("clear", "none", "off", "default"):
+            candidate = ""
+
+        geminicli_cfg["project_id"] = candidate
+        config.geminicli = geminicli_cfg
+        config_manager.save(config)
+
+        self.console.print()
+        if candidate:
+            self.console.print(
+                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Gemini project id set to: {candidate}[/{self.theme.MINT_VIBRANT}]"
+            )
+        else:
+            self.console.print(
+                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Gemini project id cleared.[/{self.theme.MINT_VIBRANT}]"
+            )
+
+        if self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+
+        self.console.print()
+        return True
+
+    def _cmd_geminicli_model(self, model_query: str) -> bool:
+        """Select Gemini CLI model from dedicated catalog."""
+        from ..geminicli import (
+            detect_geminicli_cli_credentials,
+            get_geminicli_model_catalog,
+            normalize_geminicli_config,
+        )
+
+        cred = detect_geminicli_cli_credentials(refresh_if_needed=True)
+        if not cred.get("found"):
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Gemini CLI credentials were not found under ~/.gemini.[/{self.theme.CORAL_SOFT}]"
+            )
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]Run /Geminicli first after logging into Gemini CLI.[/{self.theme.AMBER_GLOW}]"
+            )
+            return True
+
+        return self._select_external_provider_model(
+            config_attr="geminicli",
+            normalize_config=normalize_geminicli_config,
+            catalog=get_geminicli_model_catalog(),
+            provider_label="Gemini CLI",
+            active_source="geminicli",
+            model_query=model_query,
+        )
+
+    def cmd_codex(self, args: str) -> bool:
+        """Codex CLI integration command."""
+        raw = args.strip()
+        if not raw:
+            return self._cmd_codex_status()
+
+        lowered = raw.lower()
+        if lowered in ("low", "medium", "high", "xhigh", "extra high", "extra-high", "extra_high"):
+            return self._cmd_codex_thinking(raw)
+        if lowered in ("status", "check"):
+            return self._cmd_codex_status()
+        if lowered == "login":
+            return self._cmd_codex_login()
+        if lowered == "model":
+            return self._cmd_codex_model("")
+        if lowered.startswith("model "):
+            return self._cmd_codex_model(raw[6:].strip())
+        if lowered == "thinking":
+            return self._cmd_codex_thinking("")
+        if lowered.startswith("thinking "):
+            return self._cmd_codex_thinking(raw[9:].strip())
+        if lowered == "reasoning":
+            return self._cmd_codex_thinking("")
+        if lowered.startswith("reasoning "):
+            return self._cmd_codex_thinking(raw[10:].strip())
+        if lowered == "endpoint":
+            return self._cmd_codex_endpoint("")
+        if lowered.startswith("endpoint "):
+            return self._cmd_codex_endpoint(raw[9:].strip())
+
+        self.console.print(
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /codex [status|login|model|thinking|endpoint] or /codex [low|medium|high|extra high][/{self.theme.AMBER_GLOW}]"
+        )
+        return True
+
+    def _cmd_codex_status(self) -> bool:
+        """Detect local Codex CLI credentials and show current Codex selection."""
+        from ..codex import (
+            detect_codex_cli_credentials,
+            get_codex_reasoning_label,
+            get_codex_reasoning_efforts,
+            normalize_codex_config,
+            resolve_codex_selected_model,
+        )
+
+        config_manager = self.app.get('config_manager')
+        config = config_manager.load() if config_manager else None
+
+        cred = detect_codex_cli_credentials()
+        self.console.print()
+
+        if cred.get("found"):
+            self.console.print(
+                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Codex CLI credentials detected.[/{self.theme.MINT_VIBRANT}]"
+            )
+            self.console.print(
+                f"[{self.theme.MINT_SOFT}]Codex CLI is installed and logged in. Use /codex model to select a model.[/{self.theme.MINT_SOFT}]"
+            )
+            source_file = cred.get("source_file", "")
+            if source_file:
                 self.console.print(
-                    f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Qwen Code model not found: {model_query}[/{self.theme.CORAL_SOFT}]"
+                    f"[{self.theme.TEXT_DIM}]Credential source: {source_file}[/{self.theme.TEXT_DIM}]"
+                )
+            auth_mode = str(cred.get("auth_mode", "")).strip()
+            if auth_mode:
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Auth mode: {auth_mode}[/{self.theme.TEXT_DIM}]"
+                )
+            account_id = str(cred.get("account_id", "")).strip()
+            if account_id:
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Account id: {account_id}[/{self.theme.TEXT_DIM}]"
+                )
+        else:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Codex CLI credentials were not found under ~/.codex.[/{self.theme.CORAL_SOFT}]"
+            )
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]Use /codex login to authenticate, or install Codex CLI first.[/{self.theme.AMBER_GLOW}]"
+            )
+            if cred.get("errors"):
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Details: {' | '.join(str(x) for x in cred.get('errors', []))}[/{self.theme.TEXT_DIM}]"
+                )
+
+        if config_manager and config:
+            codex_cfg = normalize_codex_config(getattr(config, "codex", {}))
+            selected = resolve_codex_selected_model(codex_cfg)
+            if selected:
+                self.console.print(
+                    f"[{self.theme.BLUE_SOFT}]Current Codex model:[/{self.theme.BLUE_SOFT}] {selected['display_name']} ({selected['id']})"
+                )
+                context_length = selected.get('context_length', 0)
+                if context_length:
+                    self.console.print(
+                        f"[{self.theme.TEXT_DIM}]Context length: {context_length:,} tokens[/{self.theme.TEXT_DIM}]"
+                    )
+                levels = get_codex_reasoning_efforts(selected["id"])
+                current_effort = str(codex_cfg.get("reasoning_effort", "")).strip().lower()
+                if current_effort:
+                    self.console.print(
+                        f"[{self.theme.TEXT_DIM}]Reasoning depth: {get_codex_reasoning_label(current_effort)} ({', '.join(get_codex_reasoning_label(level) for level in levels)})[/{self.theme.TEXT_DIM}]"
+                    )
+            else:
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Current Codex model: (none)[/{self.theme.TEXT_DIM}]"
+                )
+
+            model_source = str(getattr(config, "active_model_source", "standard")).lower()
+            self.console.print(
+                f"[{self.theme.BLUE_SOFT}]Active model source:[/{self.theme.BLUE_SOFT}] {self._format_model_source_label(model_source)}"
+            )
+            api_url = str(codex_cfg.get("api_url", "")).strip()
+            if api_url:
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Codex API endpoint: {api_url}[/{self.theme.TEXT_DIM}]"
+                )
+            endpoint = str(codex_cfg.get("endpoint", "")).strip()
+            if endpoint:
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Endpoint override: {endpoint}[/{self.theme.TEXT_DIM}]"
+                )
+
+        self.console.print()
+        return True
+
+    def _cmd_codex_login(self) -> bool:
+        """Validate or refresh local Codex credentials."""
+        from ..codex import codex_oauth_login
+
+        self.console.print()
+        self.console.print(
+            f"[{self.theme.PURPLE_SOFT}]{self.deco.SPARKLE} Validating Codex credentials...[/{self.theme.PURPLE_SOFT}]"
+        )
+        self.console.print()
+
+        with self.console.status(f"[{self.theme.PURPLE_SOFT}]Checking local CLI cache...[/{self.theme.PURPLE_SOFT}]"):
+            login_result = codex_oauth_login(force_refresh=True)
+
+        if not login_result.get("success"):
+            error_msg = login_result.get("error", "Unknown error")
+            self.console.print(
+                f"[{self.theme.CORAL_VIBRANT}]{self.deco.CROSS} Login failed: {error_msg}[/{self.theme.CORAL_VIBRANT}]"
+            )
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]Please run `codex login`, complete authentication, then run /codex login again.[/{self.theme.AMBER_GLOW}]"
+            )
+            self.console.print()
+            return True
+
+        if login_result.get("refreshed"):
+            self.console.print(
+                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Codex access token refreshed successfully.[/{self.theme.MINT_VIBRANT}]"
+            )
+        else:
+            self.console.print(
+                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Codex credentials are valid.[/{self.theme.MINT_VIBRANT}]"
+            )
+
+        source_file = str(login_result.get("source_file", "")).strip()
+        if source_file:
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Credential source: {source_file}[/{self.theme.TEXT_DIM}]"
+            )
+        auth_mode = str(login_result.get("auth_mode", "")).strip()
+        if auth_mode:
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Auth mode: {auth_mode}[/{self.theme.TEXT_DIM}]"
+            )
+        account_id = str(login_result.get("account_id", "")).strip()
+        if account_id:
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Account id: {account_id}[/{self.theme.TEXT_DIM}]"
+            )
+        if login_result.get("errors"):
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Notes: {' | '.join(str(x) for x in login_result.get('errors', []))}[/{self.theme.TEXT_DIM}]"
+            )
+        self.console.print(
+            f"[{self.theme.TEXT_DIM}]Use /codex model to select a model.[/{self.theme.TEXT_DIM}]"
+        )
+        self.console.print()
+        return True
+
+    def _cmd_codex_endpoint(self, endpoint_value: str) -> bool:
+        """Configure custom endpoint override for Codex requests."""
+        from ..codex import normalize_codex_config
+
+        return self._configure_provider_endpoint(
+            config_attr="codex",
+            normalize_config=normalize_codex_config,
+            provider_label="Codex",
+            endpoint_value=endpoint_value,
+        )
+
+    def _cmd_codex_thinking(self, value: str) -> bool:
+        """Configure reasoning depth for the selected Codex model."""
+        from ..codex import (
+            get_codex_reasoning_catalog,
+            get_codex_reasoning_label,
+            normalize_codex_config,
+            normalize_codex_reasoning_choice,
+            resolve_codex_selected_model,
+        )
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        codex_cfg = normalize_codex_config(getattr(config, "codex", {}))
+        selected = resolve_codex_selected_model(codex_cfg)
+        if not selected:
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Select a Codex model first with /codex model.[/{self.theme.AMBER_GLOW}]"
+            )
+            return True
+
+        reasoning_items = get_codex_reasoning_catalog(selected["id"])
+        if not reasoning_items:
+            reasoning_items = [
+                {
+                    "id": "medium",
+                    "label": "Medium",
+                    "description": "Balances speed and reasoning depth for everyday tasks",
+                }
+            ]
+
+        chosen_level = ""
+        raw_value = str(value or "").strip().lower()
+        if raw_value:
+            normalized_value = normalize_codex_reasoning_choice(raw_value)
+            available_levels = {item["id"] for item in reasoning_items}
+            if normalized_value not in available_levels:
+                self.console.print(
+                    f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Unsupported Codex reasoning depth: {value}[/{self.theme.CORAL_SOFT}]"
                 )
                 self.console.print(
-                    f"[{self.theme.TEXT_DIM}]Use /qwencode model to open the full selector.[/{self.theme.TEXT_DIM}]"
+                    f"[{self.theme.TEXT_DIM}]Available for {selected['display_name']}: {', '.join(item['label'] for item in reasoning_items)}[/{self.theme.TEXT_DIM}]"
                 )
                 return True
+            chosen_level = normalized_value
         else:
             from .tui_selector import ModelSelector, SelectorAction
 
-            models_data = []
-            current_model_id = None
-            selected_id = str(qwencode_cfg.get("selected_model_id", "")).strip().lower()
-            for i, item in enumerate(catalog):
-                model_id = str(item.get("id", ""))
-                description = f"{model_id} | {item.get('description', '')}"
-                models_data.append(
+            levels_data = []
+            current_level = str(codex_cfg.get("reasoning_effort", "")).strip().lower()
+            current_selector_id = None
+            for index, item in enumerate(reasoning_items):
+                levels_data.append(
                     {
-                        "id": str(i),
-                        "name": item.get("display_name", model_id),
-                        "description": description,
-                        "model": item,
+                        "id": str(index),
+                        "name": item["label"],
+                        "description": item["description"],
+                        "model": {"id": item["id"]},
                     }
                 )
-                if model_id.lower() == selected_id:
-                    current_model_id = str(i)
+                if item["id"] == current_level:
+                    current_selector_id = str(index)
 
             selector = ModelSelector(
                 console=self.console,
-                models=models_data,
-                current_model=current_model_id
+                models=levels_data,
+                current_model=current_selector_id,
             )
             result = selector.run()
             if result.action != SelectorAction.SELECT or not result.selected_item:
@@ -1291,33 +2319,60 @@ class CommandHandler:
                 selected_index = int(result.selected_item.id)
             except (TypeError, ValueError):
                 self.console.print(
-                    f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid Qwen Code model selection.[/{self.theme.CORAL_SOFT}]"
+                    f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid Codex reasoning selection.[/{self.theme.CORAL_SOFT}]"
                 )
                 return True
 
-            if selected_index < 0 or selected_index >= len(catalog):
+            if selected_index < 0 or selected_index >= len(reasoning_items):
                 self.console.print(
-                    f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid Qwen Code model index.[/{self.theme.CORAL_SOFT}]"
+                    f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid Codex reasoning index.[/{self.theme.CORAL_SOFT}]"
                 )
                 return True
+            chosen_level = reasoning_items[selected_index]["id"]
 
-            selected_model = catalog[selected_index]
-
-        qwencode_cfg["selected_model_id"] = selected_model["id"]
-        qwencode_cfg["selected_model_display_name"] = selected_model["display_name"]
-        config.qwencode = qwencode_cfg
-        config.active_model_source = "qwencode"
+        codex_cfg["reasoning_effort"] = chosen_level
+        config.codex = codex_cfg
         config_manager.save(config)
 
         self.console.print()
         self.console.print(
-            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Switched to Qwen Code model: {selected_model['display_name']} ({selected_model['id']})[/{self.theme.MINT_VIBRANT}]"
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Codex reasoning depth set to {get_codex_reasoning_label(chosen_level)} for {selected['display_name']}.[/{self.theme.MINT_VIBRANT}]"
+        )
+        self.console.print(
+            f"[{self.theme.TEXT_DIM}]Reverie keeps the model id fixed and applies the selected depth automatically during Codex requests.[/{self.theme.TEXT_DIM}]"
         )
 
-        if self.app.get('reinit_agent'):
+        if str(getattr(config, "active_model_source", "standard")).lower() == "codex" and self.app.get('reinit_agent'):
             self.app['reinit_agent']()
 
         return True
+
+    def _cmd_codex_model(self, model_query: str) -> bool:
+        """Select Codex model from dedicated catalog."""
+        from ..codex import (
+            detect_codex_cli_credentials,
+            get_codex_model_catalog,
+            normalize_codex_config,
+        )
+
+        cred = detect_codex_cli_credentials()
+        if not cred.get("found"):
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Codex CLI credentials were not found under ~/.codex.[/{self.theme.CORAL_SOFT}]"
+            )
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]Run /codex first after logging into Codex CLI.[/{self.theme.AMBER_GLOW}]"
+            )
+            return True
+
+        return self._select_external_provider_model(
+            config_attr="codex",
+            normalize_config=normalize_codex_config,
+            catalog=get_codex_model_catalog(),
+            provider_label="Codex",
+            active_source="codex",
+            model_query=model_query,
+        )
 
     def cmd_model(self, args: str) -> bool:
         """List and select models, or add/delete one"""
@@ -1884,70 +2939,91 @@ class CommandHandler:
         if not session_manager:
             self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Session manager not available[/{self.theme.CORAL_SOFT}]")
             return True
-        
+
         sessions = session_manager.list_sessions()
         current = session_manager.get_current_session()
-        
-        if not sessions:
-            self.console.print(f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} No sessions yet.[/{self.theme.TEXT_DIM}]")
-            return True
-        
-        table = Table(
-            title=f"[bold {self.theme.PINK_SOFT}]{self.deco.CRYSTAL} Sessions[/bold {self.theme.PINK_SOFT}]",
-            box=box.ROUNDED,
-            border_style=self.theme.BORDER_PRIMARY
-        )
-        table.add_column("#", style=self.theme.TEXT_DIM)
-        table.add_column("Name", style=f"bold {self.theme.BLUE_SOFT}")
-        table.add_column("Messages", style=self.theme.TEXT_SECONDARY)
-        table.add_column("Updated", style=self.theme.TEXT_DIM)
-        table.add_column("", style=self.theme.MINT_SOFT)
-        
-        for i, session in enumerate(sessions, 1):
-            is_current = f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY}[/{self.theme.MINT_VIBRANT}]" if current and session.id == current.id else ""
-            table.add_row(
-                str(i),
-                session.name,
-                str(session.message_count),
-                session.updated_at[:16].replace('T', ' '),
-                is_current
+        agent = self.app.get('agent')
+        workspace_path = getattr(session_manager, 'workspace_path', '')
+
+        if sessions:
+            table = Table(
+                title=f"[bold {self.theme.PINK_SOFT}]{self.deco.CRYSTAL} Sessions[/bold {self.theme.PINK_SOFT}]",
+                box=box.ROUNDED,
+                border_style=self.theme.BORDER_PRIMARY,
+                caption=f"[{self.theme.TEXT_DIM}]Current directory: {escape(str(workspace_path))}[/{self.theme.TEXT_DIM}]" if workspace_path else ""
             )
-        
-        self.console.print(table)
-        
-        self.console.print(f"\n[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} Actions: (n)ew, (number) to load, (d) to delete[/{self.theme.TEXT_DIM}]")
-        
+            table.add_column("#", style=self.theme.TEXT_DIM)
+            table.add_column("Name", style=f"bold {self.theme.BLUE_SOFT}")
+            table.add_column("Messages", style=self.theme.TEXT_SECONDARY)
+            table.add_column("Updated", style=self.theme.TEXT_DIM)
+            table.add_column("", style=self.theme.MINT_SOFT)
+
+            for i, session in enumerate(sessions, 1):
+                is_current = f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY}[/{self.theme.MINT_VIBRANT}]" if current and session.id == current.id else ""
+                table.add_row(
+                    str(i),
+                    session.name,
+                    str(session.message_count),
+                    session.updated_at[:16].replace('T', ' '),
+                    is_current
+                )
+
+            self.console.print(table)
+        else:
+            self.console.print(f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} No sessions in the current directory yet.[/{self.theme.TEXT_DIM}]")
+            if workspace_path:
+                self.console.print(f"[{self.theme.TEXT_DIM}]Current directory: {escape(str(workspace_path))}[/{self.theme.TEXT_DIM}]")
+
+        actions_text = "Actions: (n)ew, (number) to load, (d) to delete" if sessions else "Actions: (n)ew"
+        self.console.print(f"\n[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} {actions_text}[/{self.theme.TEXT_DIM}]")
+
         try:
             choice = Prompt.ask(f"[{self.theme.PURPLE_SOFT}]Action[/{self.theme.PURPLE_SOFT}]", default="")
-            
+
             if choice.lower() == 'n':
                 name = Prompt.ask(f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Session name", default="")
                 session = session_manager.create_session(name or None)
+                if agent:
+                    agent.set_history(session.messages)
                 self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Created session: {session.name}[/{self.theme.MINT_VIBRANT}]")
-                
+
             elif choice.lower() == 'd':
+                if not sessions:
+                    self.console.print(f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} Nothing to delete.[/{self.theme.TEXT_DIM}]")
+                    return True
+
                 idx = Prompt.ask(f"[{self.theme.PURPLE_SOFT}]Delete session #[/{self.theme.PURPLE_SOFT}]")
                 try:
                     idx = int(idx) - 1
                     if 0 <= idx < len(sessions):
-                        if Confirm.ask(f"Delete '{sessions[idx].name}'?"):
-                            session_manager.delete_session(sessions[idx].id)
-                            self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Deleted[/{self.theme.MINT_VIBRANT}]")
+                        target = sessions[idx]
+                        if Confirm.ask(f"Delete '{target.name}'?"):
+                            was_current = bool(current and target.id == current.id)
+                            session_manager.delete_session(target.id)
+
+                            if was_current:
+                                replacement = session_manager.restore_last_session()
+                                if replacement is None:
+                                    replacement = session_manager.create_session()
+                                if agent:
+                                    agent.set_history(replacement.messages)
+                                self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Deleted. Active session: {replacement.name}[/{self.theme.MINT_VIBRANT}]")
+                            else:
+                                self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Deleted[/{self.theme.MINT_VIBRANT}]")
                 except ValueError:
                     pass
-                    
+
             elif choice.isdigit():
                 idx = int(choice) - 1
                 if 0 <= idx < len(sessions):
                     session = session_manager.load_session(sessions[idx].id)
                     if session:
                         self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Loaded: {session.name}[/{self.theme.MINT_VIBRANT}]")
-                        # Update agent history
-                        if self.app.get('agent'):
-                            self.app['agent'].set_history(session.messages)
+                        if agent:
+                            agent.set_history(session.messages)
         except KeyboardInterrupt:
             self.console.print()
-        
+
         return True
     
     def cmd_history(self, args: str) -> bool:
@@ -2017,166 +3093,817 @@ class CommandHandler:
         return True
     
     def cmd_setting(self, args: str) -> bool:
-        """Interactive settings menu with keyboard navigation and dreamy styling"""
-        import os
-        import sys
-        
-        # We need msvcrt for Windows key detection
+        """Manage settings through a richer TUI or direct subcommands."""
+        raw = args.strip()
+        lowered = raw.lower()
+
+        if not raw or lowered in ("ui", "open", "menu"):
+            return self._cmd_setting_ui()
+        if lowered in ("status", "show"):
+            return self._cmd_setting_status()
+        if lowered.startswith("rules"):
+            rule_args = raw[5:].strip() if len(raw) > 5 else ""
+            return self._cmd_setting_rules(rule_args)
+
+        parts = raw.split(maxsplit=1)
+        action = parts[0].strip().lower().replace("_", "-")
+        value = parts[1].strip() if len(parts) > 1 else ""
+
+        if action == "mode":
+            return self._cmd_setting_mode(value)
+        if action == "model":
+            return self._cmd_setting_model(value)
+        if action == "theme":
+            return self._cmd_setting_theme(value)
+        if action == "auto-index":
+            return self._cmd_setting_bool("auto_index", "Auto Index", value)
+        if action == "status-line":
+            return self._cmd_setting_bool("show_status_line", "Status Line", value)
+        if action == "stream":
+            return self._cmd_setting_bool("stream_responses", "Stream Responses", value)
+        if action in ("timeout", "api-timeout"):
+            return self._cmd_setting_int("api_timeout", "API Timeout", value, min_value=10, max_value=3600)
+        if action in ("retries", "api-retries"):
+            return self._cmd_setting_int("api_max_retries", "API Retries", value, min_value=0, max_value=12)
+        if action in ("debug", "debug-logging"):
+            return self._cmd_setting_bool("api_enable_debug_logging", "Debug Logging", value)
+        if action == "workspace":
+            return self._cmd_setting_workspace(value)
+
+        self.console.print(
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} "
+            f"Usage: /setting [status|ui|mode|model|theme|auto-index|status-line|stream|timeout|retries|debug|workspace|rules]"
+            f"[/{self.theme.AMBER_GLOW}]"
+        )
+        return True
+
+    def _setting_mode_options(self) -> List[str]:
+        """Available runtime modes for `/mode` and `/setting`."""
+        return [
+            "reverie",
+            "reverie-gamer",
+            "reverie-ant",
+            "spec-driven",
+            "spec-vibe",
+            "writer",
+        ]
+
+    def _setting_theme_options(self) -> List[str]:
+        """Available theme values stored in config."""
+        return ["default", "dark", "light", "ocean"]
+
+    def _get_setting_items(self, config, config_manager, rules_manager) -> List[Dict[str, Any]]:
+        """Build setting metadata for the interactive settings view."""
+        return [
+            {
+                "name": "Mode",
+                "key": "mode",
+                "kind": "choice",
+                "choices": self._setting_mode_options(),
+                "description": "Switch the active Reverie operating mode and prompt strategy.",
+                "command": "/setting mode <mode-name>",
+            },
+            {
+                "name": "Active Source",
+                "key": "active_model_source",
+                "kind": "readonly",
+                "description": "Current model source. Use /model or provider-native commands to switch sources.",
+                "command": "/status",
+            },
+            {
+                "name": "Standard Model",
+                "key": "active_model_index",
+                "kind": "choice",
+                "choices": list(range(len(config.models))),
+                "description": "Active model inside the standard catalog. Selecting here also switches source back to Standard.",
+                "command": "/setting model <index> or /model",
+            },
+            {
+                "name": "Theme",
+                "key": "theme",
+                "kind": "choice",
+                "choices": self._setting_theme_options(),
+                "description": "Persisted theme preset used by the CLI.",
+                "command": "/setting theme <theme>",
+            },
+            {
+                "name": "Auto Index",
+                "key": "auto_index",
+                "kind": "bool",
+                "description": "Automatically index the workspace when cache is cold.",
+                "command": "/setting auto-index on|off",
+            },
+            {
+                "name": "Status Line",
+                "key": "show_status_line",
+                "kind": "bool",
+                "description": "Show the live status line before and after responses.",
+                "command": "/setting status-line on|off",
+            },
+            {
+                "name": "Stream Responses",
+                "key": "stream_responses",
+                "kind": "bool",
+                "description": "Stream assistant output token-by-token when the provider supports it.",
+                "command": "/setting stream on|off",
+            },
+            {
+                "name": "API Timeout",
+                "key": "api_timeout",
+                "kind": "int",
+                "min": 10,
+                "max": 3600,
+                "step": 10,
+                "description": "Default API timeout in seconds for model requests.",
+                "command": "/setting timeout <seconds>",
+            },
+            {
+                "name": "API Retries",
+                "key": "api_max_retries",
+                "kind": "int",
+                "min": 0,
+                "max": 12,
+                "step": 1,
+                "description": "Retry count for recoverable API failures.",
+                "command": "/setting retries <count>",
+            },
+            {
+                "name": "Debug Logging",
+                "key": "api_enable_debug_logging",
+                "kind": "bool",
+                "description": "Enable verbose API logging for troubleshooting.",
+                "command": "/setting debug on|off",
+            },
+            {
+                "name": "Workspace Config",
+                "key": "use_workspace_config",
+                "kind": "workspace",
+                "description": "Choose whether settings are stored in the current workspace or the global Reverie config.",
+                "command": "/setting workspace on|off",
+            },
+            {
+                "name": "Rules",
+                "key": "rules",
+                "kind": "rules",
+                "description": "Edit additional instruction rules applied to the active session.",
+                "command": "/setting rules",
+            },
+        ]
+
+    def _setting_display_value(self, item: Dict[str, Any], config, config_manager, rules_manager) -> str:
+        """Render a compact value label for a settings item."""
+        key = str(item.get("key", "")).strip()
+        kind = str(item.get("kind", "")).strip()
+
+        if kind == "readonly" and key == "active_model_source":
+            return self._format_model_source_label(str(getattr(config, "active_model_source", "standard")).lower())
+        if kind == "workspace":
+            enabled = bool(config_manager.is_workspace_mode())
+            return f"[{self.theme.MINT_SOFT}]Workspace[/{self.theme.MINT_SOFT}]" if enabled else f"[{self.theme.PURPLE_MEDIUM}]Global[/{self.theme.PURPLE_MEDIUM}]"
+        if kind == "rules":
+            if not rules_manager:
+                return f"[{self.theme.TEXT_DIM}](rules manager unavailable)[/{self.theme.TEXT_DIM}]"
+            rules = [rule.strip() for rule in rules_manager.get_rules() if str(rule).strip()]
+            if not rules:
+                return f"[{self.theme.TEXT_DIM}](none)[/{self.theme.TEXT_DIM}]"
+            preview = rules[0]
+            if len(rules) > 1:
+                preview += f" +{len(rules) - 1} more"
+            return escape(preview[:56] + ("..." if len(preview) > 56 else ""))
+
+        value = getattr(config, key, None)
+        if key == "active_model_index":
+            if not config.models:
+                return f"[{self.theme.TEXT_DIM}](no standard models)[/{self.theme.TEXT_DIM}]"
+            if 0 <= int(value) < len(config.models):
+                label = escape(config.models[int(value)].model_display_name)
+                if str(getattr(config, "active_model_source", "standard")).lower() != "standard":
+                    label += f" [{self.theme.TEXT_DIM}](inactive while provider source is external)[/{self.theme.TEXT_DIM}]"
+                return label
+            return f"[{self.theme.TEXT_DIM}](invalid)[/{self.theme.TEXT_DIM}]"
+        if isinstance(value, bool):
+            return f"[{self.theme.MINT_SOFT}]ON[/{self.theme.MINT_SOFT}]" if value else f"[{self.theme.TEXT_DIM}]OFF[/{self.theme.TEXT_DIM}]"
+        if value is None or value == "":
+            return f"[{self.theme.TEXT_DIM}](empty)[/{self.theme.TEXT_DIM}]"
+        return escape(str(value))
+
+    def _resolve_setting_active_model_label(self, config) -> str:
+        """Resolve a lightweight active-model label without provider credential lookups."""
+        source = str(getattr(config, "active_model_source", "standard") or "standard").strip().lower()
+        if source == "standard":
+            index = int(getattr(config, "active_model_index", 0) or 0)
+            if 0 <= index < len(getattr(config, "models", [])):
+                return str(config.models[index].model_display_name).strip() or "(unnamed standard model)"
+            return "(no standard model)"
+
+        source_label = self._format_model_source_label(source)
+        return f"{source_label} provider selection"
+
+    def _build_setting_summary_panel(self, config, config_manager, rules_manager) -> Panel:
+        """Top summary panel for the settings UI."""
+        active_model_name = self._resolve_setting_active_model_label(config)
+        source_label = self._format_model_source_label(str(getattr(config, "active_model_source", "standard")).lower())
+        storage_label = "Workspace" if config_manager.is_workspace_mode() else "Global"
+
+        summary = Table(box=box.SIMPLE, show_header=False, pad_edge=False)
+        summary.add_column(style=self.theme.TEXT_DIM, width=14)
+        summary.add_column(style=f"bold {self.theme.TEXT_PRIMARY}")
+        summary.add_column(style=self.theme.TEXT_DIM, width=14)
+        summary.add_column(style=f"bold {self.theme.TEXT_PRIMARY}")
+        summary.add_row("Mode", escape(str(config.mode or "reverie")), "Source", source_label)
+        summary.add_row("Model", escape(active_model_name), "Storage", storage_label)
+        summary.add_row(
+            "Streaming",
+            "ON" if bool(getattr(config, "stream_responses", True)) else "OFF",
+            "Rules",
+            str(len(rules_manager.get_rules())) if rules_manager else "0",
+        )
+
+        return Panel(
+            summary,
+            title=f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Reverie Settings {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]",
+            subtitle=f"[{self.theme.TEXT_DIM}]Fast controls for runtime behavior, persistence, and API defaults.[/{self.theme.TEXT_DIM}]",
+            border_style=self.theme.BORDER_PRIMARY,
+            padding=(0, 2),
+            box=box.ROUNDED,
+        )
+
+    def _build_setting_list_panel(self, items: List[Dict[str, Any]], selected_idx: int, config, config_manager, rules_manager) -> Panel:
+        """Settings list panel for the TUI."""
+        table = Table(box=box.SIMPLE, show_header=False, pad_edge=False)
+        table.add_column("Item", style=f"bold {self.theme.BLUE_SOFT}", width=24)
+        table.add_column("Value", style=self.theme.TEXT_PRIMARY)
+
+        for index, item in enumerate(items):
+            is_selected = index == selected_idx
+            marker = f"{self.deco.CHEVRON_RIGHT}" if is_selected else " "
+            item_name = f"{marker} {item['name']}"
+            value_text = self._setting_display_value(item, config, config_manager, rules_manager)
+            if is_selected:
+                table.add_row(
+                    f"[bold {self.theme.PINK_SOFT}]{escape(item_name)}[/bold {self.theme.PINK_SOFT}]",
+                    f"[reverse]{value_text}[/reverse]",
+                )
+            else:
+                table.add_row(escape(item_name), value_text)
+
+        return Panel(
+            table,
+            title=f"[bold {self.theme.BLUE_SOFT}]{self.deco.DIAMOND} Settings[/bold {self.theme.BLUE_SOFT}]",
+            border_style=self.theme.BORDER_SUBTLE,
+            padding=(0, 1),
+            box=box.ROUNDED,
+        )
+
+    def _build_setting_detail_panel(self, item: Dict[str, Any], config, config_manager, rules_manager) -> Panel:
+        """Detailed description panel for the selected setting."""
+        kind = str(item.get("kind", "")).strip()
+        key = str(item.get("key", "")).strip()
+        description = str(item.get("description", "")).strip()
+        command = str(item.get("command", "")).strip()
+
+        detail_lines = [
+            f"[bold {self.theme.PURPLE_SOFT}]{escape(item['name'])}[/bold {self.theme.PURPLE_SOFT}]",
+            f"[{self.theme.TEXT_SECONDARY}]{escape(description)}[/{self.theme.TEXT_SECONDARY}]",
+            "",
+            f"[{self.theme.TEXT_DIM}]Current[/{self.theme.TEXT_DIM}] {self._setting_display_value(item, config, config_manager, rules_manager)}",
+        ]
+
+        if kind == "choice":
+            choices = item.get("choices", []) or []
+            if key == "active_model_index":
+                if config.models:
+                    preview = ", ".join(f"{idx + 1}:{model.model_display_name}" for idx, model in enumerate(config.models[:4]))
+                    if len(config.models) > 4:
+                        preview += ", ..."
+                else:
+                    preview = "(no standard models configured)"
+            else:
+                preview = ", ".join(str(choice) for choice in choices)
+            detail_lines.append(f"[{self.theme.TEXT_DIM}]Choices[/{self.theme.TEXT_DIM}] {escape(preview)}")
+        elif kind == "int":
+            detail_lines.append(
+                f"[{self.theme.TEXT_DIM}]Range[/{self.theme.TEXT_DIM}] {item.get('min', 0)} - {item.get('max', 0)}"
+            )
+        elif kind == "workspace":
+            workspace_path = getattr(config_manager, "workspace_config_path", "")
+            global_path = getattr(config_manager, "global_config_path", "")
+            detail_lines.append(f"[{self.theme.TEXT_DIM}]Workspace file[/{self.theme.TEXT_DIM}] {escape(str(workspace_path))}")
+            detail_lines.append(f"[{self.theme.TEXT_DIM}]Global file[/{self.theme.TEXT_DIM}] {escape(str(global_path))}")
+        elif kind == "rules" and rules_manager:
+            rules = [rule.strip() for rule in rules_manager.get_rules() if str(rule).strip()]
+            if rules:
+                detail_lines.append(f"[{self.theme.TEXT_DIM}]Rules[/{self.theme.TEXT_DIM}]")
+                detail_lines.extend(
+                    f"[{self.theme.TEXT_SECONDARY}]{self.deco.DOT_MEDIUM} {escape(rule)}[/{self.theme.TEXT_SECONDARY}]"
+                    for rule in rules[:5]
+                )
+                if len(rules) > 5:
+                    detail_lines.append(f"[{self.theme.TEXT_DIM}]... and {len(rules) - 5} more[/{self.theme.TEXT_DIM}]")
+
+        detail_lines.extend(
+            [
+                "",
+                f"[{self.theme.TEXT_DIM}]Command equivalent[/{self.theme.TEXT_DIM}] {escape(command)}",
+            ]
+        )
+
+        return Panel(
+            Text.from_markup("\n".join(detail_lines)),
+            title=f"[bold {self.theme.PURPLE_SOFT}]{self.deco.DIAMOND} Details[/bold {self.theme.PURPLE_SOFT}]",
+            border_style=self.theme.BORDER_SUBTLE,
+            padding=(1, 2),
+            box=box.ROUNDED,
+        )
+
+    def _build_setting_footer_panel(self) -> Panel:
+        """Footer panel with setting TUI controls."""
+        footer = (
+            f"[{self.theme.TEXT_DIM}]"
+            f"{self.deco.DOT_MEDIUM} ↑/↓ or j/k: Navigate  "
+            f"{self.deco.DOT_MEDIUM} ←/→ or h/l: Quick change  "
+            f"{self.deco.DOT_MEDIUM} Enter: Edit precisely  "
+            f"{self.deco.DOT_MEDIUM} Esc: Save & exit"
+            f"[/{self.theme.TEXT_DIM}]"
+        )
+        return Panel(
+            Text.from_markup(footer),
+            border_style=self.theme.BORDER_SUBTLE,
+            padding=(0, 1),
+            box=box.ROUNDED,
+        )
+
+    def _render_setting_ui(self, selected_idx: int, config, config_manager, rules_manager) -> Group:
+        """Compose the full settings TUI renderable."""
+        items = self._get_setting_items(config, config_manager, rules_manager)
+        summary_panel = self._build_setting_summary_panel(config, config_manager, rules_manager)
+        list_panel = self._build_setting_list_panel(items, selected_idx, config, config_manager, rules_manager)
+        detail_panel = self._build_setting_detail_panel(items[selected_idx], config, config_manager, rules_manager)
+        footer_panel = self._build_setting_footer_panel()
+
+        width = int(getattr(self.console.size, "width", 0) or self.console.width or 0)
+        if width >= 84:
+            body = Columns([list_panel, detail_panel], expand=True, equal=False)
+        else:
+            body = Group(list_panel, detail_panel)
+        return Group(summary_panel, body, footer_panel)
+
+    def _setting_parse_bool(self, value: str):
+        """Parse common boolean input values."""
+        lowered = str(value or "").strip().lower()
+        if lowered in ("on", "true", "1", "yes", "enable", "enabled"):
+            return True
+        if lowered in ("off", "false", "0", "no", "disable", "disabled"):
+            return False
+        return None
+
+    def _setting_save_and_reinit(self, config, message: str, reinit: bool = True) -> bool:
+        """Save config and optionally reinitialize the agent."""
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]")
+            return True
+        config_manager.save(config)
+        if reinit and self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+        self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} {message}[/{self.theme.MINT_VIBRANT}]")
+        return True
+
+    def _cmd_setting_status(self) -> bool:
+        """Show a settings dashboard without entering the interactive TUI."""
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]")
+            return True
+
+        rules_manager = self.app.get('rules_manager')
+        config = config_manager.load()
+        self.console.print()
+        self.console.print(self._build_setting_summary_panel(config, config_manager, rules_manager))
+        self.console.print()
+        self.console.print(self._build_setting_list_panel(self._get_setting_items(config, config_manager, rules_manager), 0, config, config_manager, rules_manager))
+        self.console.print()
+        self.console.print(
+            Panel(
+                f"[{self.theme.TEXT_DIM}]Direct edits:[/{self.theme.TEXT_DIM}] "
+                f"[bold {self.theme.BLUE_SOFT}]/setting mode writer[/bold {self.theme.BLUE_SOFT}]  "
+                f"[bold {self.theme.BLUE_SOFT}]/setting timeout 120[/bold {self.theme.BLUE_SOFT}]  "
+                f"[bold {self.theme.BLUE_SOFT}]/setting workspace on[/bold {self.theme.BLUE_SOFT}]",
+                border_style=self.theme.BORDER_SUBTLE,
+                padding=(0, 2),
+                box=box.ROUNDED,
+            )
+        )
+        self.console.print()
+        return True
+
+    def _select_standard_model_index(self, model_query: str, prompt_if_missing: bool = False) -> int:
+        """Resolve a standard-model selection by index or fuzzy name."""
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            return -1
+
+        config = config_manager.load()
+        if not config.models:
+            return -1
+
+        if not model_query and prompt_if_missing:
+            choices_preview = "\n".join(
+                f"[{self.theme.TEXT_SECONDARY}]{idx + 1}.[/{self.theme.TEXT_SECONDARY}] {escape(model.model_display_name)}"
+                for idx, model in enumerate(config.models)
+            )
+            self.console.print()
+            self.console.print(
+                Panel(
+                    Text.from_markup(choices_preview),
+                    title=f"[bold {self.theme.BLUE_SOFT}]{self.deco.DIAMOND} Standard Models[/bold {self.theme.BLUE_SOFT}]",
+                    border_style=self.theme.BORDER_SUBTLE,
+                    padding=(0, 2),
+                    box=box.ROUNDED,
+                )
+            )
+            model_query = Prompt.ask("Select model number", default=str(config.active_model_index + 1)).strip()
+
+        if not model_query:
+            return -1
+
+        if model_query.isdigit():
+            idx = int(model_query) - 1
+            if 0 <= idx < len(config.models):
+                return idx
+            return -1
+
+        wanted = model_query.strip().lower()
+        exact_match = None
+        partial_matches = []
+        for idx, model in enumerate(config.models):
+            display = str(model.model_display_name).strip().lower()
+            model_id = str(model.model).strip().lower()
+            if wanted in (display, model_id):
+                exact_match = idx
+                break
+            if wanted in display or wanted in model_id:
+                partial_matches.append(idx)
+        if exact_match is not None:
+            return exact_match
+        if len(partial_matches) == 1:
+            return partial_matches[0]
+        return -1
+
+    def _cmd_setting_mode(self, value: str) -> bool:
+        """Change the active mode from `/setting`."""
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]")
+            return True
+        config = config_manager.load()
+        choices = self._setting_mode_options()
+        candidate = str(value or "").strip().lower()
+        if not candidate:
+            candidate = Prompt.ask("Mode", default=config.mode or "reverie", choices=choices).strip().lower()
+        if candidate not in choices:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid mode: {candidate}[/{self.theme.CORAL_SOFT}]")
+            return True
+        config.mode = candidate
+        return self._setting_save_and_reinit(config, f"Mode set to {candidate}.")
+
+    def _cmd_setting_model(self, value: str) -> bool:
+        """Change the active standard model from `/setting`."""
+        if not value:
+            return self.cmd_model("")
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]")
+            return True
+        index = self._select_standard_model_index(value, prompt_if_missing=False)
+        config = config_manager.load()
+        if index < 0 or index >= len(config.models):
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Standard model not found: {escape(value)}[/{self.theme.CORAL_SOFT}]")
+            return True
+        config.active_model_index = index
+        config.active_model_source = "standard"
+        selected_name = config.models[index].model_display_name
+        return self._setting_save_and_reinit(config, f"Standard model set to {selected_name}.")
+
+    def _cmd_setting_theme(self, value: str) -> bool:
+        """Update the stored theme value."""
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]")
+            return True
+        config = config_manager.load()
+        choices = self._setting_theme_options()
+        candidate = str(value or "").strip().lower()
+        if not candidate:
+            candidate = Prompt.ask("Theme", default=config.theme or "default", choices=choices).strip().lower()
+        if candidate not in choices:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid theme: {candidate}[/{self.theme.CORAL_SOFT}]")
+            return True
+        config.theme = candidate
+        return self._setting_save_and_reinit(config, f"Theme set to {candidate}.", reinit=False)
+
+    def _cmd_setting_bool(self, attr: str, label: str, value: str) -> bool:
+        """Toggle or set a boolean config value."""
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]")
+            return True
+        config = config_manager.load()
+        current = bool(getattr(config, attr))
+        parsed = self._setting_parse_bool(value)
+        if parsed is None:
+            parsed = Confirm.ask(f"{label}", default=current)
+        setattr(config, attr, parsed)
+        return self._setting_save_and_reinit(config, f"{label} set to {'ON' if parsed else 'OFF'}.", reinit=False)
+
+    def _cmd_setting_int(self, attr: str, label: str, value: str, min_value: int, max_value: int) -> bool:
+        """Set a numeric config value with validation."""
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]")
+            return True
+        config = config_manager.load()
+        raw = str(value or "").strip()
+        if not raw:
+            raw = Prompt.ask(label, default=str(getattr(config, attr))).strip()
+        try:
+            parsed = int(raw)
+        except ValueError:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} {label} must be an integer.[/{self.theme.CORAL_SOFT}]")
+            return True
+        if parsed < min_value or parsed > max_value:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} {label} must be between {min_value} and {max_value}.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+        setattr(config, attr, parsed)
+        return self._setting_save_and_reinit(config, f"{label} set to {parsed}.", reinit=False)
+
+    def _apply_workspace_mode_setting(self, enabled: bool):
+        """Apply workspace/global config mode and return success with a user-facing message."""
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            return False, "Config manager not available."
+
+        if enabled:
+            if config_manager.is_workspace_mode():
+                return True, "Workspace mode is already enabled."
+            if not config_manager.has_workspace_config():
+                if not config_manager.has_global_config():
+                    return False, "No configuration found. Configure a model before enabling workspace mode."
+                if not config_manager.copy_config_to_workspace():
+                    return False, "Failed to copy the global config into the workspace."
+            config_manager.set_workspace_mode(True)
+            config = config_manager.load()
+            config.use_workspace_config = True
+            config_manager.save(config)
+            return True, f"Workspace mode enabled. Config path: {config_manager.workspace_config_path}"
+
+        if not config_manager.is_workspace_mode():
+            return True, "Workspace mode is already disabled."
+        config_manager.set_workspace_mode(False)
+        config = config_manager.load()
+        config.use_workspace_config = False
+        config_manager.save(config)
+        return True, f"Workspace mode disabled. Config path: {config_manager.global_config_path}"
+
+    def _cmd_setting_workspace(self, value: str) -> bool:
+        """Toggle workspace config mode from `/setting`."""
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]")
+            return True
+
+        parsed = self._setting_parse_bool(value)
+        if parsed is None:
+            parsed = Confirm.ask("Enable workspace-local config?", default=config_manager.is_workspace_mode())
+
+        success, message = self._apply_workspace_mode_setting(parsed)
+        color = self.theme.MINT_VIBRANT if success else self.theme.CORAL_SOFT
+        icon = self.deco.CHECK_FANCY if success else self.deco.CROSS
+        self.console.print(f"[{color}]{icon} {escape(message)}[/{color}]")
+        if success and self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+        return True
+
+    def _cmd_setting_rules(self, value: str = "") -> bool:
+        """Open or delegate rules editing from `/setting`."""
+        if value:
+            return self.cmd_rules(value)
+
+        rules_manager = self.app.get('rules_manager')
+        if not rules_manager:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Rules manager not available[/{self.theme.CORAL_SOFT}]")
+            return True
+
+        self.console.print()
+        self.console.print(
+            Panel(
+                f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Edit Session Rules {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]\n"
+                f"[{self.theme.TEXT_SECONDARY}]Enter one rule per line. Submit a blank line to finish. Existing rules will be replaced.[/{self.theme.TEXT_SECONDARY}]",
+                border_style=self.theme.BORDER_PRIMARY,
+                padding=(1, 2),
+                box=box.ROUNDED,
+            )
+        )
+
+        existing_rules = [rule.strip() for rule in rules_manager.get_rules() if str(rule).strip()]
+        if existing_rules:
+            self.console.print(f"[{self.theme.TEXT_DIM}]Current rules:[/{self.theme.TEXT_DIM}]")
+            for rule in existing_rules:
+                self.console.print(f"  [{self.theme.PURPLE_SOFT}]{self.deco.DOT_MEDIUM}[/{self.theme.PURPLE_SOFT}] {escape(rule)}")
+
+        new_rules: List[str] = []
+        try:
+            while True:
+                line = input(f"{self.deco.CHEVRON_RIGHT} ").strip()
+                if not line:
+                    break
+                new_rules.append(line)
+        except KeyboardInterrupt:
+            self.console.print()
+            self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Rules edit cancelled.[/{self.theme.AMBER_GLOW}]")
+            return True
+
+        rules_manager._rules = new_rules
+        rules_manager.save()
+        if self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+        self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Rules updated ({len(new_rules)} total).[/{self.theme.MINT_VIBRANT}]")
+        self.console.print()
+        return True
+
+    def _setting_step_item(self, item: Dict[str, Any], config, config_manager, rules_manager, direction: int) -> bool:
+        """Apply a quick left/right change in the settings TUI."""
+        kind = str(item.get("kind", "")).strip()
+        key = str(item.get("key", "")).strip()
+
+        if kind in ("readonly", "rules"):
+            return False
+        if kind == "workspace":
+            target = not bool(config_manager.is_workspace_mode())
+            success, _ = self._apply_workspace_mode_setting(target)
+            return success
+        if kind == "bool":
+            setattr(config, key, not bool(getattr(config, key)))
+            config_manager.save(config)
+            return True
+        if kind == "int":
+            step = int(item.get("step", 1))
+            min_value = int(item.get("min", 0))
+            max_value = int(item.get("max", 999999))
+            current = int(getattr(config, key))
+            current += step * direction
+            current = max(min_value, min(max_value, current))
+            setattr(config, key, current)
+            config_manager.save(config)
+            return True
+        if kind == "choice":
+            choices = item.get("choices", []) or []
+            if not choices:
+                return False
+            current = getattr(config, key)
+            try:
+                current_index = choices.index(current)
+            except ValueError:
+                current_index = 0
+            new_index = (current_index + direction) % len(choices)
+            new_value = choices[new_index]
+            setattr(config, key, new_value)
+            if key == "active_model_index":
+                config.active_model_source = "standard"
+            config_manager.save(config)
+            return True
+        return False
+
+    def _setting_edit_item(self, item: Dict[str, Any], config, config_manager, rules_manager) -> bool:
+        """Edit the selected setting with a precise prompt."""
+        kind = str(item.get("kind", "")).strip()
+        key = str(item.get("key", "")).strip()
+
+        if kind == "rules":
+            self._cmd_setting_rules("")
+            return True
+        if kind == "readonly":
+            return False
+        if kind == "workspace":
+            success, _ = self._apply_workspace_mode_setting(not bool(config_manager.is_workspace_mode()))
+            return success
+        if kind == "bool":
+            setattr(config, key, not bool(getattr(config, key)))
+            config_manager.save(config)
+            return True
+        if kind == "int":
+            raw = Prompt.ask(item["name"], default=str(getattr(config, key))).strip()
+            try:
+                parsed = int(raw)
+            except ValueError:
+                return False
+            min_value = int(item.get("min", 0))
+            max_value = int(item.get("max", 999999))
+            if parsed < min_value or parsed > max_value:
+                return False
+            setattr(config, key, parsed)
+            config_manager.save(config)
+            return True
+        if kind == "choice":
+            if key == "active_model_index":
+                selected_idx = self._select_standard_model_index("", prompt_if_missing=True)
+                if selected_idx < 0:
+                    return False
+                config.active_model_index = selected_idx
+                config.active_model_source = "standard"
+                config_manager.save(config)
+                return True
+            choices = [str(choice) for choice in (item.get("choices", []) or [])]
+            current = str(getattr(config, key) or "")
+            picked = Prompt.ask(item["name"], default=current, choices=choices).strip()
+            setattr(config, key, picked)
+            config_manager.save(config)
+            return True
+        return False
+
+    def _cmd_setting_ui(self) -> bool:
+        """Launch the richer interactive settings TUI."""
         try:
             import msvcrt
         except ImportError:
-            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Keyboard navigation is only supported on Windows.[/{self.theme.CORAL_SOFT}]")
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Interactive settings UI is only supported on Windows.[/{self.theme.CORAL_SOFT}]")
+            self.console.print(f"[{self.theme.TEXT_DIM}]Use /setting status or /setting <subcommand> instead.[/{self.theme.TEXT_DIM}]")
             return True
-            
+
         config_manager = self.app.get('config_manager')
         if not config_manager:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]")
             return True
-            
-        config = config_manager.load()
-        
-        # Settings categories
         rules_manager = self.app.get('rules_manager')
-        categories = [
-            {"name": "Mode", "key": "mode", "options": ["reverie", "reverie-gamer", "reverie-ant", "spec-driven", "spec-vibe", "writer"]},
-            {"name": "Active Model", "key": "active_model_index", "options": list(range(len(config.models)))},
-            {"name": "Theme", "key": "theme", "options": ["default", "dark", "light", "ocean"]},
-            {"name": "Auto Index", "key": "auto_index", "options": [True, False]},
-            {"name": "Status Line", "key": "show_status_line", "options": [True, False]},
-            {"name": "Rules", "key": "rules", "type": "text"}
-        ]
-        
-        selected_cat_idx = 0
-        
-        from rich.live import Live
-        from rich.layout import Layout
-        
-        def generate_settings_view(cat_idx, current_config):
-            table = Table(box=box.SIMPLE, show_header=False)
-            table.add_column("Category", style=f"bold {self.theme.BLUE_SOFT}", width=20)
-            table.add_column("Value", style=f"bold {self.theme.MINT_SOFT}")
-            
-            for i, cat in enumerate(categories):
-                marker = f"{self.deco.CHEVRON_RIGHT} " if i == cat_idx else "   "
-                style = f"bold {self.theme.PINK_SOFT}" if i == cat_idx else self.theme.TEXT_SECONDARY
-                
-                name = cat["name"]
-                key = cat["key"]
-                
-                if key == "rules":
-                    val = rules_manager.get_rules_text() if rules_manager else ""
-                else:
-                    val = getattr(current_config, key)
-                
-                if key == "active_model_index":
-                    display_val = current_config.models[val].model_display_name if current_config.models else "None"
-                elif isinstance(val, bool):
-                    display_val = f"[{self.theme.MINT_SOFT}]ON[/{self.theme.MINT_SOFT}]" if val else f"[{self.theme.TEXT_DIM}]OFF[/{self.theme.TEXT_DIM}]"
-                elif key == "rules":
-                    display_val = val.replace('\n', ' ')
-                    if not val: display_val = f"[{self.theme.TEXT_DIM}](empty) - Press Enter to edit[/{self.theme.TEXT_DIM}]"
-                else:
-                    display_val = str(val)
-                
-                if i == cat_idx:
-                    table.add_row(f"[{self.theme.PINK_SOFT}]{marker}{name}[/{self.theme.PINK_SOFT}]", f"[reverse] {display_val} [/reverse]", style=style)
-                else:
-                    table.add_row(f"{marker}{name}", display_val, style=style)
-            
-            help_text = (
-                f"\n[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} ↑/↓: Navigate "
-                f"{self.deco.DOT_MEDIUM} ←/→: Change "
-                f"{self.deco.DOT_MEDIUM} Enter: Edit/Confirm "
-                f"{self.deco.DOT_MEDIUM} Esc: Exit[/{self.theme.TEXT_DIM}]"
-            )
-            return Panel(
-                Align.center(table),
-                title=f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Reverie Settings {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]",
-                subtitle=help_text,
-                border_style=self.theme.BORDER_PRIMARY,
-                padding=(1, 2),
-                box=box.ROUNDED
-            )
+        config = config_manager.load()
+        selected_idx = 0
+        changed = False
 
-        with Live(generate_settings_view(selected_cat_idx, config), refresh_per_second=10) as live:
+        from rich.live import Live
+
+        with Live(
+            self._render_setting_ui(selected_idx, config, config_manager, rules_manager),
+            auto_refresh=False,
+            vertical_overflow="visible",
+            console=self.console,
+        ) as live:
             while True:
                 if msvcrt.kbhit():
                     key = msvcrt.getch()
-                    
-                    if key == b'\x1b': # Esc
-                        break
-                    elif key == b'\r': # Enter
-                        cat = categories[selected_cat_idx]
-                        if cat["key"] == "rules":
-                            live.stop()
-                            self.console.print(f"\n[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Edit Rules (One per line, empty line to finish):[/bold {self.theme.PINK_SOFT}]")
-                            
-                            # Clear existing rules if user wants to start over, 
-                            # or just let them add. The prompt says "Edit Rules".
-                            # Let's show current rules first.
-                            current_rules = rules_manager.get_rules()
-                            if current_rules:
-                                self.console.print(f"[{self.theme.TEXT_DIM}]Current rules:[/{self.theme.TEXT_DIM}]")
-                                for r in current_rules:
-                                    self.console.print(f" [{self.theme.PURPLE_SOFT}]{self.deco.DOT_MEDIUM}[/{self.theme.PURPLE_SOFT}] {r}")
-                            
-                            new_rules = []
-                            while True:
-                                line = input(f"{self.deco.CHEVRON_RIGHT} ").strip()
-                                if not line: break
-                                new_rules.append(line)
-                            
-                            if new_rules:
-                                # Replace all rules for simplicity in this menu
-                                rules_manager._rules = new_rules
-                                rules_manager.save()
-                                self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Rules updated.[/{self.theme.MINT_VIBRANT}]")
-                            live.start()
-                        elif cat["key"] == "mode":
-                             # Toggle mode
-                             idx = (categories[selected_cat_idx]["options"].index(config.mode) + 1) % len(categories[selected_cat_idx]["options"])
-                             config.mode = categories[selected_cat_idx]["options"][idx]
-                             config_manager.save(config)
-                        else:
-                            pass
-                            
-                    elif key == b'\x00' or key == b'\xe0': # Special keys (arrows)
-                        key = msvcrt.getch()
-                        if key == b'H': # Up
-                            selected_cat_idx = (selected_cat_idx - 1) % len(categories)
-                        elif key == b'P': # Down
-                            selected_cat_idx = (selected_cat_idx + 1) % len(categories)
-                        elif key == b'K': # Left
-                            cat = categories[selected_cat_idx]
-                            if "options" in cat:
-                                cur_val = getattr(config, cat["key"])
-                                opts = cat["options"]
-                                cur_idx = opts.index(cur_val)
-                                new_idx = (cur_idx - 1) % len(opts)
-                                setattr(config, cat["key"], opts[new_idx])
-                                if cat["key"] == "active_model_index":
-                                    config.active_model_source = "standard"
-                                config_manager.save(config)
-                        elif key == b'M': # Right
-                            cat = categories[selected_cat_idx]
-                            if "options" in cat:
-                                cur_val = getattr(config, cat["key"])
-                                opts = cat["options"]
-                                cur_idx = opts.index(cur_val)
-                                new_idx = (cur_idx + 1) % len(opts)
-                                setattr(config, cat["key"], opts[new_idx])
-                                if cat["key"] == "active_model_index":
-                                    config.active_model_source = "standard"
-                                config_manager.save(config)
-                    
-                    live.update(generate_settings_view(selected_cat_idx, config))
-                
-                time.sleep(0.01)
+                    items = self._get_setting_items(config, config_manager, rules_manager)
+                    selected_item = items[selected_idx]
+                    should_reload_config = False
 
-        # Apply changes to running app
-        if self.app.get('reinit_agent'):
+                    if key == b"\x1b":
+                        break
+                    if key in (b"k", b"K"):
+                        selected_idx = (selected_idx - 1) % len(items)
+                    elif key in (b"j", b"J"):
+                        selected_idx = (selected_idx + 1) % len(items)
+                    elif key in (b"h", b"H", b"a", b"A"):
+                        changed = self._setting_step_item(selected_item, config, config_manager, rules_manager, -1) or changed
+                        should_reload_config = str(selected_item.get("kind", "")).strip() == "workspace"
+                    elif key in (b"l", b"L", b"d", b"D", b" "):
+                        changed = self._setting_step_item(selected_item, config, config_manager, rules_manager, 1) or changed
+                        should_reload_config = str(selected_item.get("kind", "")).strip() == "workspace"
+                    elif key == b"\r":
+                        live.stop()
+                        changed = self._setting_edit_item(selected_item, config, config_manager, rules_manager) or changed
+                        kind = str(selected_item.get("kind", "")).strip()
+                        should_reload_config = kind == "workspace"
+                        if kind == "rules":
+                            should_reload_config = False
+                        if should_reload_config:
+                            config = config_manager.load()
+                        live.start()
+                    elif key in (b"\x00", b"\xe0"):
+                        key = msvcrt.getch()
+                        if key == b"H":
+                            selected_idx = (selected_idx - 1) % len(items)
+                        elif key == b"P":
+                            selected_idx = (selected_idx + 1) % len(items)
+                        elif key == b"K":
+                            changed = self._setting_step_item(selected_item, config, config_manager, rules_manager, -1) or changed
+                            should_reload_config = str(selected_item.get("kind", "")).strip() == "workspace"
+                        elif key == b"M":
+                            changed = self._setting_step_item(selected_item, config, config_manager, rules_manager, 1) or changed
+                            should_reload_config = str(selected_item.get("kind", "")).strip() == "workspace"
+
+                    if should_reload_config:
+                        config = config_manager.load()
+                    live.update(self._render_setting_ui(selected_idx, config, config_manager, rules_manager), refresh=True)
+                time.sleep(0.025)
+
+        if changed and self.app.get('reinit_agent'):
             self.app['reinit_agent']()
-            
-        self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Settings saved and applied.[/{self.theme.MINT_VIBRANT}]")
+
+        self.console.print()
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Settings {'updated and applied' if changed else 'reviewed'}.[/{self.theme.MINT_VIBRANT}]"
+        )
+        self.console.print()
         return True
     
     def cmd_rules(self, args: str) -> bool:

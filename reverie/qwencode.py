@@ -7,45 +7,52 @@ This module centralizes:
 - Qwen Code API settings helpers
 """
 
+from __future__ import annotations
+
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlsplit
 import json
 import time
 
+from .security_utils import write_json_secure
 
-# Default API URL aligned with GCMP's qwen provider config.
+
 QWENCODE_DEFAULT_API_URL = "https://portal.qwen.ai/v1"
 QWENCODE_DEFAULT_ENDPOINT = ""
 QWENCODE_TOKEN_URL = "https://chat.qwen.ai/api/v1/oauth2/token"
 QWENCODE_CLIENT_ID = "f0304373b74a44d2b584a3fb70ca9e56"
-QWENCODE_REFRESH_BUFFER_MS = 60 * 60 * 1000  # Refresh 1 hour before expiry.
+QWENCODE_REFRESH_BUFFER_MS = 60 * 60 * 1000
 
 _QWENCODE_DEFAULT_HEADERS = {
-    "User-Agent": "QwenCode/0.10.6 (win32; x64)",
+    "User-Agent": "QwenCode/0.11.1 (win32; x64)",
+    "X-DashScope-UserAgent": "QwenCode/0.11.1 (win32; x64)",
     "X-DashScope-CacheControl": "enable",
-    "X-DashScope-UserAgent": "QwenCode/0.10.6 (win32; x64)",
     "X-DashScope-AuthType": "qwen-oauth",
+    "X-Stainless-Runtime-Version": "v22.17.0",
+    "X-Stainless-Lang": "js",
+    "X-Stainless-Arch": "x64",
+    "X-Stainless-Package-Version": "5.11.0",
+    "X-Stainless-Os": "Windows",
+    "X-Stainless-Runtime": "node",
+    "X-Stainless-Retry-Count": "0",
+    "Sec-Fetch-Mode": "cors",
 }
 
 _QWENCODE_MODEL_ALIASES = {
     "qwen3-coder-plus": "coder-model",
-    "qwen3-coder-flash": "coder-model",
-    "qwen3-vl-plus": "vision-model",
-    "qwen3-vision": "vision-model",
+    "qwen3.5plus": "coder-model",
+    "qwen3.5-plus": "coder-model",
+    "qwen-3.5-plus": "coder-model",
+    "qwen3.5 plus": "coder-model",
 }
 
 _QWENCODE_BASE_MODELS = [
     {
         "id": "coder-model",
-        "display_name": "Qwen3.5-Plus",
-        "description": "Qwen 3.5 Plus - Efficient hybrid model with leading coding performance",
-        "context_length": 262144,
-    },
-    {
-        "id": "vision-model",
-        "display_name": "Qwen3-Vision",
-        "description": "Qwen3 Vision Model - Multimodal vision understanding",
-        "context_length": 32768,
+        "display_name": "coder-model",
+        "description": "Qwen 3.5 Plus - efficient hybrid model with leading coding performance",
+        "context_length": 1_000_000,
     },
 ]
 
@@ -58,7 +65,7 @@ def default_qwencode_config() -> Dict[str, Any]:
         "api_url": QWENCODE_DEFAULT_API_URL,
         "endpoint": QWENCODE_DEFAULT_ENDPOINT,
         "custom_headers": {},
-        "max_context_tokens": 200000,
+        "max_context_tokens": 1_000_000,
         "timeout": 1200,
     }
 
@@ -118,8 +125,21 @@ def _normalize_qwencode_api_url(value: Any) -> str:
     return _ensure_v1_suffix(url)
 
 
+def resolve_qwencode_request_url(api_url: str, endpoint: str = "") -> str:
+    """Resolve Qwen request URL with optional endpoint override."""
+    endpoint_value = str(endpoint or "").strip()
+    if endpoint_value:
+        if endpoint_value.startswith("http://") or endpoint_value.startswith("https://"):
+            return endpoint_value
+        base = _normalize_qwencode_api_url(api_url)
+        if endpoint_value.startswith("/"):
+            return f"{base}{endpoint_value}"
+        return f"{base}/{endpoint_value}"
+    return f"{_normalize_qwencode_api_url(api_url)}/chat/completions"
+
+
 def get_qwencode_request_headers(extra_headers: Optional[Dict[str, str]] = None) -> Dict[str, str]:
-    """Build default GCMP-style Qwen request headers."""
+    """Build Qwen request headers matching the CLI as closely as practical."""
     headers = dict(_QWENCODE_DEFAULT_HEADERS)
     if isinstance(extra_headers, dict):
         for key, value in extra_headers.items():
@@ -151,7 +171,6 @@ def _parse_expiry_ms(value: Any) -> Optional[int]:
         return None
     if expiry <= 0:
         return None
-    # Handle second-based timestamps from some clients.
     if expiry < 10_000_000_000:
         expiry *= 1000
     return expiry
@@ -185,12 +204,7 @@ def _refresh_qwencode_oauth_credentials(credentials: Dict[str, Any], errors: Lis
         return None
 
     if not response.ok:
-        raw_text = ""
-        try:
-            raw_text = response.text
-        except Exception:
-            raw_text = ""
-        errors.append(f"refresh failed ({response.status_code}): {raw_text[:240]}")
+        errors.append(f"refresh failed ({response.status_code})")
         return None
 
     try:
@@ -215,7 +229,6 @@ def _refresh_qwencode_oauth_credentials(credentials: Dict[str, Any], errors: Lis
     refreshed["refresh_token"] = str(response_data.get("refresh_token", refresh_token)).strip() or refresh_token
     refreshed["expiry_date"] = int(time.time() * 1000) + expires_in_int * 1000
 
-    # Keep resource_url if present in either the old/new payload.
     incoming_resource_url = str(response_data.get("resource_url", "")).strip()
     if incoming_resource_url:
         refreshed["resource_url"] = incoming_resource_url
@@ -241,12 +254,10 @@ def _save_oauth_credentials_data(data: Dict[str, Any]) -> None:
             if isinstance(loaded, dict):
                 merged_data.update(loaded)
         except Exception:
-            # Ignore existing file parse errors; overwrite with new data.
             pass
 
     merged_data.update(data)
-    with open(creds_file, "w", encoding="utf-8") as f:
-        json.dump(merged_data, f, indent=2, ensure_ascii=False)
+    write_json_secure(creds_file, merged_data)
 
 
 def get_qwencode_model_catalog() -> List[Dict[str, Any]]:
@@ -264,7 +275,7 @@ def get_qwencode_model_catalog() -> List[Dict[str, Any]]:
                 "id": model_id,
                 "display_name": str(item.get("display_name", model_id)).strip(),
                 "description": str(item.get("description", "")).strip(),
-                "context_length": item.get("context_length", 32768),
+                "context_length": int(item.get("context_length", 32768)),
             }
         )
 
@@ -297,11 +308,11 @@ def normalize_qwencode_config(raw_qwencode: Any) -> Dict[str, Any]:
     cfg["custom_headers"] = _normalize_custom_headers(cfg.get("custom_headers", {}))
 
     try:
-        max_tokens = int(cfg.get("max_context_tokens", 200000))
+        max_tokens = int(cfg.get("max_context_tokens", 1_000_000))
     except (TypeError, ValueError):
-        max_tokens = 200000
+        max_tokens = 1_000_000
     if max_tokens <= 0:
-        max_tokens = 200000
+        max_tokens = 1_000_000
     cfg["max_context_tokens"] = max_tokens
 
     try:
@@ -315,9 +326,13 @@ def normalize_qwencode_config(raw_qwencode: Any) -> Dict[str, Any]:
     catalog = get_qwencode_model_catalog()
     matched = find_qwencode_model(cfg["selected_model_id"], catalog=catalog)
     if matched:
+        cfg["selected_model_id"] = matched["id"]
         cfg["selected_model_display_name"] = matched["display_name"]
-    elif cfg["selected_model_id"] and not cfg["selected_model_display_name"]:
-        cfg["selected_model_display_name"] = cfg["selected_model_id"]
+        cfg["max_context_tokens"] = int(matched.get("context_length", cfg["max_context_tokens"]))
+    elif cfg["selected_model_id"]:
+        cfg["selected_model_id"] = ""
+        cfg["selected_model_display_name"] = ""
+        cfg["max_context_tokens"] = 1_000_000
 
     return cfg
 
@@ -339,16 +354,12 @@ def resolve_qwencode_selected_model(qwencode_config: Any) -> Optional[Dict[str, 
         "id": model_id,
         "display_name": display_name,
         "description": "Custom Qwen Code model id",
-        "context_length": 32768,
+        "context_length": cfg.get("max_context_tokens", 1_000_000),
     }
 
 
 def build_qwencode_runtime_model_data(qwencode_config: Any) -> Optional[Dict[str, Any]]:
-    """
-    Build runtime model config dict for agent initialization.
-
-    This keeps Qwen Code models independent from the `/model` list.
-    """
+    """Build runtime model config dict for agent initialization."""
     cfg = normalize_qwencode_config(qwencode_config)
     selected = resolve_qwencode_selected_model(cfg)
     if not selected:
@@ -356,23 +367,18 @@ def build_qwencode_runtime_model_data(qwencode_config: Any) -> Optional[Dict[str
 
     cred = detect_qwencode_cli_credentials(refresh_if_needed=True)
     api_key = cred["api_key"] if cred.get("found") else ""
-
-    # Prefer resource_url from OAuth cache, fallback to configured api_url.
-    # Keep `/v1` suffix to match Qwen/OpenAI-compatible API roots.
     api_url = _normalize_qwencode_api_url(cred.get("resource_url") or cfg["api_url"])
-
-    # Use the model's actual context_length as max_context_tokens
     max_context_tokens = selected.get("context_length", cfg["max_context_tokens"])
 
     return {
         "model": _canonicalize_qwencode_model_id(selected["id"]),
         "model_display_name": selected["display_name"],
-        "base_url": api_url,
+        "base_url": resolve_qwencode_request_url(api_url, cfg.get("endpoint", "")),
         "api_key": api_key,
         "max_context_tokens": max_context_tokens,
-        "provider": "openai-sdk",
+        "provider": "request",
         "thinking_mode": None,
-        "endpoint": cfg.get("endpoint", ""),
+        "endpoint": "",
         "custom_headers": get_qwencode_request_headers(cfg.get("custom_headers", {})),
     }
 
@@ -387,14 +393,6 @@ def detect_qwencode_cli_credentials(
     Priority:
     1) ~/.qwen/oauth_creds.json -> access_token + resource_url
     2) ~/.qwen/qwen_accounts.json -> access_token
-    
-    Returns dict with:
-    - found: bool
-    - api_key: str (access_token)
-    - resource_url: str (API endpoint from OAuth, e.g., dashscope.aliyuncs.com)
-    - source_file: str
-    - source_field: str
-    - errors: list
     """
     qwen_dir = Path.home() / ".qwen"
     result = {
@@ -441,7 +439,6 @@ def detect_qwencode_cli_credentials(
                 result["resource_url"] = _normalize_resource_url(oauth_data.get("resource_url", ""))
                 return result
 
-    # Fallback to qwen_accounts.json (access_token only, no refresh support).
     accounts_file = qwen_dir / "qwen_accounts.json"
     if accounts_file.exists():
         accounts_data = _load_json_dict(accounts_file, result["errors"])
@@ -466,19 +463,13 @@ def mask_secret(secret: str) -> str:
 
 
 def is_qwencode_api_url(url: str) -> bool:
-    """Whether the URL points to Qwen Code API endpoint (DashScope)."""
+    """Whether the URL points to Qwen Code API endpoint."""
     value = str(url or "").strip().lower()
-    # Check for DashScope endpoints (the actual API used by qwen-code)
     return "dashscope.aliyuncs.com" in value or "portal.qwen.ai" in value
 
 
 def qwen_oauth_login(force_refresh: bool = True) -> Dict[str, Any]:
-    """
-    Validate or refresh Qwen OAuth credentials from local CLI cache.
-
-    Reverie does not run an in-process device-flow login. This mirrors GCMP's
-    approach: local CLI handles login, Reverie reads and refreshes credentials.
-    """
+    """Validate or refresh Qwen OAuth credentials from local CLI cache."""
     cred = detect_qwencode_cli_credentials(refresh_if_needed=True, force_refresh=force_refresh)
     if cred.get("found"):
         return {
@@ -502,24 +493,14 @@ def qwen_oauth_login(force_refresh: bool = True) -> Dict[str, Any]:
 
 
 def save_qwen_credentials(access_token: str, refresh_token: str, resource_url: str = "") -> bool:
-    """
-    Save Qwen OAuth credentials to ~/.qwen/oauth_creds.json
-    
-    Args:
-        access_token: OAuth access token
-        refresh_token: OAuth refresh token
-        resource_url: API endpoint URL (optional)
-    
-    Returns:
-        True if saved successfully, False otherwise
-    """
+    """Save Qwen OAuth credentials to ~/.qwen/oauth_creds.json."""
     try:
         now_ms = int(time.time() * 1000)
         creds_data = {
             "access_token": access_token,
             "refresh_token": refresh_token,
             "token_type": "Bearer",
-            "expiry_date": now_ms + (3600 * 1000),  # 1 hour from now
+            "expiry_date": now_ms + (3600 * 1000),
         }
 
         if resource_url:

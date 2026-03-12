@@ -94,8 +94,12 @@ class UserInputTool(BaseTool):
         # Stop status line live display if it's running (to prevent input being overwritten)
         get_status_live = self.context.get('get_status_live') if self.context else None
         status_live = get_status_live() if get_status_live else None
+        pause_stream_input = self.context.get('pause_stream_input_capture') if self.context else None
+        resume_stream_input = self.context.get('resume_stream_input_capture') if self.context else None
         if status_live:
             status_live.stop()
+        if pause_stream_input:
+            pause_stream_input()
         
         # Display the question in a prominent panel (Requirement 8.2)
         question_panel = Panel(
@@ -209,6 +213,9 @@ class UserInputTool(BaseTool):
             return ToolResult.fail(
                 f"Failed to get user input: {str(e)}"
             )
+        finally:
+            if resume_stream_input:
+                resume_stream_input()
     
     def _get_multiline_input(self, console) -> str:
         """

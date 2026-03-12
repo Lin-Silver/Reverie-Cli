@@ -1,4 +1,4 @@
-"""
+﻿"""
 Configuration Management
 
 Handles loading and saving configuration including:
@@ -17,15 +17,29 @@ import hashlib
 import re
 import shutil
 
+from .security_utils import write_json_secure
 from .iflow import (
     build_iflow_runtime_model_data,
     default_iflow_config,
     normalize_iflow_config,
 )
+from .geminicli import (
+    build_geminicli_runtime_model_data,
+    default_geminicli_config,
+    normalize_geminicli_config,
+)
+from .codex import (
+    build_codex_runtime_model_data,
+    default_codex_config,
+    normalize_codex_config,
+)
 
 
 # Version info
 __version__ = "2.1.0"
+
+EXTERNAL_MODEL_SOURCES = ("iflow", "qwencode", "geminicli", "codex")
+SUPPORTED_ACTIVE_MODEL_SOURCES = ("standard",) + EXTERNAL_MODEL_SOURCES
 
 
 def default_text_to_image_config() -> Dict[str, Any]:
@@ -45,6 +59,8 @@ def default_text_to_image_config() -> Dict[str, Any]:
         "default_scheduler": "normal",
         "default_negative_prompt": "",
         "force_cpu": False,
+        "auto_install_missing_deps": True,
+        "auto_install_max_missing_deps": 6,
     }
 
 
@@ -245,16 +261,30 @@ def get_app_root() -> Path:
     return Path.cwd()
 
 
-def get_project_data_name(project_path: Path) -> str:
+def get_legacy_project_data_name(project_path: Path) -> str:
     """
-    Generate a unique folder name for a project based on its path.
+    Generate the legacy project cache folder name.
+
+    This format is human-readable but not collision-safe because path separators
+    and literal underscores can normalize to the same value.
     """
     full_path = str(project_path.resolve())
-    # Replace invalid filesystem characters with underscores
     safe_name = re.sub(r'[<>:"/\\|?*]', '_', full_path)
-    # Collapse consecutive underscores for readability
     safe_name = re.sub(r'_+', '_', safe_name).strip('_')
     return safe_name
+
+
+def get_project_data_name(project_path: Path) -> str:
+    """
+    Generate a collision-resistant folder name for a project based on its path.
+    """
+    full_path = str(project_path.resolve())
+    safe_name = get_legacy_project_data_name(project_path)
+    path_hash = hashlib.sha1(full_path.encode('utf-8')).hexdigest()[:12]
+
+    if safe_name:
+        return f"{safe_name}_{path_hash}"
+    return path_hash
 
 
 def get_project_data_dir(project_path: Path) -> Path:
@@ -319,7 +349,7 @@ class Config:
     """Main configuration"""
     models: List[ModelConfig] = field(default_factory=list)
     active_model_index: int = 0
-    active_model_source: str = "standard"  # standard | iflow | qwencode
+    active_model_source: str = "standard"  # standard | iflow | qwencode | geminicli | codex
     mode: str = "reverie"
     theme: str = "default"
     max_context_tokens: int = 128000
@@ -341,6 +371,8 @@ class Config:
     text_to_image: Dict[str, Any] = field(default_factory=default_text_to_image_config)
     iflow: Dict[str, Any] = field(default_factory=default_iflow_config)
     qwencode: Dict[str, Any] = field(default_factory=dict)
+    geminicli: Dict[str, Any] = field(default_factory=dict)
+    codex: Dict[str, Any] = field(default_factory=dict)
     
     # Writer mode specific settings
     writer_mode: Dict[str, Any] = field(default_factory=lambda: {
@@ -376,16 +408,28 @@ class Config:
     
     @property
     def active_model(self) -> Optional[ModelConfig]:
-        if str(self.active_model_source).lower() == "iflow":
+        source = str(self.active_model_source).lower()
+
+        if source == "iflow":
             runtime_iflow_model = build_iflow_runtime_model_data(self.iflow)
             if runtime_iflow_model:
                 return ModelConfig.from_dict(runtime_iflow_model)
 
-        if str(self.active_model_source).lower() == "qwencode":
+        if source == "qwencode":
             from .qwencode import build_qwencode_runtime_model_data
             runtime_qwencode_model = build_qwencode_runtime_model_data(self.qwencode)
             if runtime_qwencode_model:
                 return ModelConfig.from_dict(runtime_qwencode_model)
+
+        if source == "geminicli":
+            runtime_geminicli_model = build_geminicli_runtime_model_data(self.geminicli)
+            if runtime_geminicli_model:
+                return ModelConfig.from_dict(runtime_geminicli_model)
+
+        if source == "codex":
+            runtime_codex_model = build_codex_runtime_model_data(self.codex)
+            if runtime_codex_model:
+                return ModelConfig.from_dict(runtime_codex_model)
 
         if 0 <= self.active_model_index < len(self.models):
             return self.models[self.active_model_index]
@@ -404,8 +448,10 @@ class Config:
         iflow = normalize_iflow_config(self.iflow)
         from .qwencode import normalize_qwencode_config
         qwencode = normalize_qwencode_config(self.qwencode)
+        geminicli = normalize_geminicli_config(self.geminicli)
+        codex = normalize_codex_config(self.codex)
         active_model_source = self.active_model_source.lower()
-        if active_model_source not in ("standard", "iflow", "qwencode"):
+        if active_model_source not in SUPPORTED_ACTIVE_MODEL_SOURCES:
             active_model_source = "standard"
 
         return {
@@ -430,6 +476,8 @@ class Config:
             'text_to_image': text_to_image,
             'iflow': iflow,
             'qwencode': qwencode,
+            'geminicli': geminicli,
+            'codex': codex,
         }
     
     @classmethod
@@ -457,8 +505,12 @@ class Config:
         raw_qwencode = data.get('qwencode', {})
         from .qwencode import normalize_qwencode_config
         qwencode = normalize_qwencode_config(raw_qwencode)
+        raw_geminicli = data.get('geminicli', {})
+        geminicli = normalize_geminicli_config(raw_geminicli)
+        raw_codex = data.get('codex', {})
+        codex = normalize_codex_config(raw_codex)
         active_model_source = str(data.get('active_model_source', 'standard')).strip().lower()
-        if active_model_source not in ('standard', 'iflow', 'qwencode'):
+        if active_model_source not in SUPPORTED_ACTIVE_MODEL_SOURCES:
             active_model_source = 'standard'
 
         return cls(
@@ -507,7 +559,9 @@ class Config:
             api_enable_debug_logging=data.get('api_enable_debug_logging', False),
             text_to_image=text_to_image,
             iflow=iflow,
-            qwencode=qwencode
+            qwencode=qwencode,
+            geminicli=geminicli,
+            codex=codex
         )
 
 
@@ -519,7 +573,7 @@ class ConfigManager:
     1. Global mode: config.json in app_root/.reverie/ (shared across workspaces)
     2. Workspace mode: config.json in project_root/.reverie/ (isolated per workspace)
     
-    Project-specific data is always stored in .reverie/project_caches/[project_path]/.
+    Project-specific data is always stored in .reverie/project_caches/[project_key]/.
     """
     
     def __init__(self, project_root: Path, force_workspace_config: bool = False):
@@ -592,8 +646,7 @@ class ConfigManager:
             self.workspace_reverie_dir.mkdir(parents=True, exist_ok=True)
             
             # Save to workspace config
-            with open(self.workspace_config_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
+            write_json_secure(self.workspace_config_path, data)
             
             # Clear cache and switch to workspace mode
             self._config = None
@@ -628,8 +681,7 @@ class ConfigManager:
             self.reverie_dir.mkdir(parents=True, exist_ok=True)
             
             # Save to global config
-            with open(self.global_config_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
+            write_json_secure(self.global_config_path, data)
             
             # Clear cache and switch to global mode
             self._config = None
@@ -738,7 +790,7 @@ class ConfigManager:
 
         # Check if active_model_source field is missing/invalid
         active_model_source = str(data.get('active_model_source', '')).strip().lower()
-        if active_model_source not in ('standard', 'iflow', 'qwencode'):
+        if active_model_source not in SUPPORTED_ACTIVE_MODEL_SOURCES:
             needs_update = True
 
         # Check if iflow section is missing or incomplete
@@ -756,6 +808,28 @@ class ConfigManager:
         # Check if qwencode section is missing
         if 'qwencode' not in data:
             needs_update = True
+
+        # Check if geminicli section is missing
+        if 'geminicli' not in data:
+            needs_update = True
+        elif not isinstance(data.get('geminicli'), dict):
+            needs_update = True
+        else:
+            for field_name in default_geminicli_config().keys():
+                if field_name not in data.get('geminicli', {}):
+                    needs_update = True
+                    break
+
+        # Check if codex section is missing
+        if 'codex' not in data:
+            needs_update = True
+        elif not isinstance(data.get('codex'), dict):
+            needs_update = True
+        else:
+            for field_name in default_codex_config().keys():
+                if field_name not in data.get('codex', {}):
+                    needs_update = True
+                    break
 
         # Check if gamer_mode field is missing
         if 'gamer_mode' not in data:
@@ -829,9 +903,8 @@ class ConfigManager:
             self.set_workspace_mode(self._config.use_workspace_config)
         
         self.ensure_dirs()
-        
-        with open(self.config_path, 'w', encoding='utf-8') as f:
-            json.dump(self._config.to_dict(), f, indent=2, ensure_ascii=False)
+
+        write_json_secure(self.config_path, self._config.to_dict())
     
     def is_configured(self) -> bool:
         """Check if initial configuration is done"""
@@ -842,7 +915,17 @@ class ConfigManager:
             return True
 
         iflow = normalize_iflow_config(getattr(config, "iflow", {}))
-        return bool(iflow.get("selected_model_id"))
+        if iflow.get("selected_model_id"):
+            return True
+
+        from .qwencode import normalize_qwencode_config
+        if normalize_qwencode_config(getattr(config, "qwencode", {})).get("selected_model_id"):
+            return True
+        if normalize_geminicli_config(getattr(config, "geminicli", {})).get("selected_model_id"):
+            return True
+        if normalize_codex_config(getattr(config, "codex", {})).get("selected_model_id"):
+            return True
+        return False
     
     def add_model(self, model_config: ModelConfig) -> None:
         """Add a new model configuration"""
@@ -863,6 +946,15 @@ class ConfigManager:
                 iflow = normalize_iflow_config(getattr(config, "iflow", {}))
                 if iflow.get("selected_model_id"):
                     config.active_model_source = "iflow"
+                else:
+                    from .qwencode import normalize_qwencode_config
+
+                    if normalize_qwencode_config(getattr(config, "qwencode", {})).get("selected_model_id"):
+                        config.active_model_source = "qwencode"
+                    elif normalize_geminicli_config(getattr(config, "geminicli", {})).get("selected_model_id"):
+                        config.active_model_source = "geminicli"
+                    elif normalize_codex_config(getattr(config, "codex", {})).get("selected_model_id"):
+                        config.active_model_source = "codex"
             self.save(config)
             return True
         return False
@@ -881,3 +973,4 @@ class ConfigManager:
         """Get the currently active model"""
         config = self.load()
         return config.active_model
+

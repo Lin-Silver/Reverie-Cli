@@ -100,6 +100,23 @@ class TUISelector:
         self.search_query = ""
         self.is_searching = False
         self.filtered_items = items.copy()
+
+    def _console_width(self) -> int:
+        """Best-effort terminal width."""
+        try:
+            width = int(getattr(self.console.size, "width", 0) or self.console.width or 0)
+        except Exception:
+            width = 0
+        return max(width, 60)
+
+    def _truncate(self, value: str, max_length: int) -> str:
+        """Trim long selector fields for narrow terminals."""
+        text = str(value or "").strip()
+        if len(text) <= max_length:
+            return text
+        if max_length <= 3:
+            return text[:max_length]
+        return f"{text[:max_length - 3]}..."
     
     def run(self) -> SelectorResult:
         """
@@ -116,7 +133,12 @@ class TUISelector:
         # Initial render
         content = self._build_content()
         
-        with Live(content, console=self.console, refresh_per_second=30) as live:
+        with Live(
+            content,
+            console=self.console,
+            auto_refresh=False,
+            vertical_overflow="visible",
+        ) as live:
             while True:
                 # Wait for key press
                 if msvcrt.kbhit():
@@ -180,14 +202,16 @@ class TUISelector:
                         # Other keys, skip
                         continue
                     
-                    # Update the live display
-                    live.update(self._build_content())
-                
+                    # Update only when state changes so the terminal keeps normal scroll behavior.
+                    live.update(self._build_content(), refresh=True)
+
                 # Small sleep to prevent CPU spinning
-                time.sleep(0.01)
+                time.sleep(0.025)
     
     def _navigate_up(self) -> None:
         """Navigate up in the list"""
+        if not self.filtered_items:
+            return
         if self.selected_index > 0:
             self.selected_index -= 1
             if self.selected_index < self.scroll_offset:
@@ -195,6 +219,8 @@ class TUISelector:
     
     def _navigate_down(self) -> None:
         """Navigate down in the list"""
+        if not self.filtered_items:
+            return
         if self.selected_index < len(self.filtered_items) - 1:
             self.selected_index += 1
             if self.selected_index >= self.scroll_offset + self.max_visible:
@@ -202,29 +228,37 @@ class TUISelector:
     
     def _page_up(self) -> None:
         """Page up"""
+        if not self.filtered_items:
+            return
         page_size = self.max_visible - 1
         self.selected_index = max(0, self.selected_index - page_size)
         self.scroll_offset = max(0, self.scroll_offset - page_size)
     
     def _page_down(self) -> None:
         """Page down"""
+        if not self.filtered_items:
+            return
         page_size = self.max_visible - 1
         self.selected_index = min(
             len(self.filtered_items) - 1,
             self.selected_index + page_size
         )
         self.scroll_offset = min(
-            len(self.filtered_items) - self.max_visible,
+            max(0, len(self.filtered_items) - self.max_visible),
             self.scroll_offset + page_size
         )
     
     def _go_home(self) -> None:
         """Go to first item"""
+        if not self.filtered_items:
+            return
         self.selected_index = 0
         self.scroll_offset = 0
     
     def _go_end(self) -> None:
         """Go to last item"""
+        if not self.filtered_items:
+            return
         self.selected_index = len(self.filtered_items) - 1
         self.scroll_offset = max(
             0,
@@ -247,98 +281,125 @@ class TUISelector:
         self.scroll_offset = 0
     
     def _build_content(self) -> Align:
-        """Build the complete content for display"""
+        """Build the complete content for display."""
         from rich.console import Group
-        
-        # Create title panel
-        title_text = Text()
-        title_text.append(f"{self.deco.SPARKLE} ", style=self.theme.PINK_SOFT)
-        title_text.append(self.title, style=f"bold {self.theme.PURPLE_SOFT}")
-        
-        title_panel = Panel(
-            title_text,
-            border_style=self.theme.BORDER_PRIMARY,
-            padding=(0, 2),
-            box=box.ROUNDED
+
+        width = self._console_width()
+        compact = width < 96
+        show_description = self.show_descriptions and width >= 90
+
+        title_grid = Table.grid(expand=True)
+        title_grid.add_column(ratio=1)
+        title_grid.add_column(justify="right", no_wrap=True)
+        title_grid.add_row(
+            Text.assemble(
+                (f"{self.deco.SPARKLE} ", self.theme.PINK_SOFT),
+                (self.title, f"bold {self.theme.PURPLE_SOFT}"),
+            ),
+            Text(
+                f"{len(self.filtered_items)} items" + (" filtered" if self.search_query else ""),
+                style=self.theme.TEXT_DIM,
+            ),
         )
-        
-        # Create items table
+
+        title_panel = Panel(
+            title_grid,
+            border_style=self.theme.BORDER_PRIMARY,
+            padding=(0, 1),
+            box=box.ROUNDED,
+        )
+
         table = Table(
             show_header=False,
             box=box.ROUNDED,
             border_style=self.theme.BORDER_SECONDARY,
             padding=(0, 1),
-            show_lines=False
+            show_lines=False,
+            expand=True,
         )
-        
-        table.add_column("indicator", width=3)
+        table.add_column("indicator", width=3, no_wrap=True)
+        table.add_column("index", width=4, style=self.theme.TEXT_DIM, justify="right", no_wrap=True)
         table.add_column("title", style=self.theme.TEXT_PRIMARY)
-        
-        if self.show_descriptions:
+        if show_description:
             table.add_column("description", style=self.theme.TEXT_SECONDARY)
-        
-        # Calculate visible items
-        end_index = min(
-            self.scroll_offset + self.max_visible,
-            len(self.filtered_items)
-        )
-        
+
+        end_index = min(self.scroll_offset + self.max_visible, len(self.filtered_items))
         visible_items = self.filtered_items[self.scroll_offset:end_index]
-        
-        # Add items to table
+
         for i, item in enumerate(visible_items):
             actual_index = self.scroll_offset + i
             is_selected = actual_index == self.selected_index
-            
-            # Indicator
-            if is_selected:
-                indicator = Text(f"{self.deco.CHEVRON_RIGHT}", style=f"bold {self.theme.PINK_SOFT}")
+            indicator = Text(f"{self.deco.CHEVRON_RIGHT}", style=f"bold {self.theme.PINK_SOFT}") if is_selected else Text("  ")
+            title_style = f"bold {self.theme.BLUE_SOFT} on {self.theme.PURPLE_DEEP}" if is_selected else self.theme.TEXT_PRIMARY
+            title_text = Text(self._truncate(item.title, 30 if compact else 48), style=title_style)
+            row_index = Text(f"{actual_index + 1}.", style=self.theme.TEXT_DIM)
+
+            if show_description:
+                desc_style = self.theme.TEXT_SECONDARY if is_selected else self.theme.TEXT_DIM
+                desc_text = Text(self._truncate(item.description, 34 if compact else 62), style=desc_style)
+                table.add_row(indicator, row_index, title_text, desc_text)
             else:
-                indicator = Text("  ")
-            
-            # Title with enhanced visual feedback
-            if is_selected:
-                # Selected item: bold with background highlight
-                title_style = f"bold {self.theme.BLUE_SOFT} on {self.theme.PURPLE_DEEP}"
-            else:
-                title_style = self.theme.TEXT_PRIMARY
-            
-            title_text = Text(item.title, style=title_style)
-            
-            # Description
-            if self.show_descriptions:
-                desc_text = Text(item.description, style=self.theme.TEXT_DIM)
-                table.add_row(indicator, title_text, desc_text)
-            else:
-                table.add_row(indicator, title_text)
-        
-        # Build content group
-        content_parts = [title_panel, "", table, "", self._get_help_text()]
-        
-        # Add search bar if searching
+                table.add_row(indicator, row_index, title_text)
+
+        content_parts = [title_panel]
+        if visible_items:
+            content_parts.extend(["", table])
+        else:
+            content_parts.extend([
+                "",
+                Panel(
+                    Text("No matching items. Refine the search or press Esc to cancel.", style=self.theme.TEXT_DIM),
+                    border_style=self.theme.BORDER_SUBTLE,
+                    box=box.ROUNDED,
+                    padding=(0, 1),
+                ),
+            ])
+
+        if compact and visible_items and self.show_descriptions:
+            selected_item = self.filtered_items[self.selected_index]
+            if selected_item.description:
+                content_parts.extend([
+                    "",
+                    Panel(
+                        Text(selected_item.description, style=self.theme.TEXT_SECONDARY),
+                        title=f"[bold {self.theme.BLUE_SOFT}]Details[/bold {self.theme.BLUE_SOFT}]",
+                        border_style=self.theme.BORDER_SUBTLE,
+                        box=box.ROUNDED,
+                        padding=(0, 1),
+                    ),
+                ])
+
         if self.is_searching:
             search_text = Text()
             search_text.append(f"{self.deco.SEARCH} Search: ", style=f"bold {self.theme.PURPLE_SOFT}")
             search_text.append(self.search_query, style=f"bold {self.theme.TEXT_PRIMARY}")
-            search_text.append("_", style=f"bold {self.theme.PINK_SOFT}")  # Blinking cursor effect
-            
+            search_text.append("_", style=f"bold {self.theme.PINK_SOFT}")
             search_panel = Panel(
                 search_text,
                 border_style=self.theme.PINK_SOFT,
                 padding=(0, 1),
-                box=box.ROUNDED
+                box=box.ROUNDED,
             )
-            content_parts.append(search_panel)
-        
-        # Add scroll indicator if needed
-        if len(self.filtered_items) > self.max_visible:
-            scroll_info = Text()
-            scroll_info.append(f"Showing {self.scroll_offset + 1}-{min(self.scroll_offset + self.max_visible, len(self.filtered_items))} of {len(self.filtered_items)}", 
-                             style=self.theme.TEXT_DIM)
-            content_parts.append(scroll_info)
-        
+            content_parts.extend(["", search_panel])
+
+        visible_end = self.scroll_offset + len(visible_items)
+        footer_grid = Table.grid(expand=True)
+        footer_grid.add_column(ratio=1)
+        footer_grid.add_column(justify="right", no_wrap=True)
+        footer_grid.add_row(
+            self._get_help_text(compact=compact),
+            Text(
+                (f"{self.scroll_offset + 1}-{visible_end} / {len(self.filtered_items)}" if visible_items else f"0 / {len(self.filtered_items)}"),
+                style=self.theme.TEXT_DIM,
+            ),
+        )
+        content_parts.extend([
+            "",
+            Panel(footer_grid, border_style=self.theme.BORDER_SUBTLE, box=box.ROUNDED, padding=(0, 1)),
+        ])
+
         return Align(Group(*content_parts), vertical="top")
-    
+
     def _render(self) -> None:
         """Render the selector UI (deprecated, use _build_content with Live)"""
         # This method is kept for backward compatibility but should not be used
@@ -346,35 +407,23 @@ class TUISelector:
         content = self._build_content()
         self.console.print(content)
     
-    def _get_help_text(self) -> Text:
-        """Get help text for navigation"""
+    def _get_help_text(self, compact: bool = False) -> Text:
+        """Get help text for navigation."""
         help_text = Text()
-        
-        # Navigation label
         help_text.append("Navigation: ", style=self.theme.TEXT_DIM)
-        
-        # Navigate
-        help_text.append("↑↓", style=self.theme.BLUE_SOFT)
+        help_text.append("Up/Down", style=self.theme.BLUE_SOFT)
         help_text.append(" Navigate ", style=self.theme.TEXT_DIM)
-        
-        # Select
         help_text.append("Enter", style=self.theme.BLUE_SOFT)
         help_text.append(" Select ", style=self.theme.TEXT_DIM)
-        
-        # Cancel
         if self.allow_cancel:
             help_text.append("Esc", style=self.theme.BLUE_SOFT)
             help_text.append(" Cancel ", style=self.theme.TEXT_DIM)
-        
-        # Search
-        if self.allow_search:
+        if self.allow_search and not compact:
             help_text.append("/", style=self.theme.BLUE_SOFT)
             help_text.append(" Search ", style=self.theme.TEXT_DIM)
-        
-        # Page
-        help_text.append("PgUp/PgDn", style=self.theme.BLUE_SOFT)
-        help_text.append(" Page", style=self.theme.TEXT_DIM)
-        
+        if not compact:
+            help_text.append("PgUp/PgDn", style=self.theme.BLUE_SOFT)
+            help_text.append(" Page", style=self.theme.TEXT_DIM)
         return help_text
 
 
@@ -457,25 +506,19 @@ class SessionSelector(TUISelector):
         current_session: Optional[str] = None
     ):
         items = []
+        current_index = 0
         for session in sessions:
             created_at = session.get('created_at', '')
             message_count = session.get('message_count', 0)
-            
-            description = f"{created_at} • {message_count} messages"
-            
+            description = f"{created_at} | {message_count} messages"
             items.append(SelectorItem(
                 id=session['id'],
                 title=session['name'],
                 description=description,
                 metadata=session
             ))
-        
-        # Set current session as selected
-        if current_session:
-            for i, item in enumerate(items):
-                if item.id == current_session:
-                    self.selected_index = i
-                    break
+            if current_session and session['id'] == current_session:
+                current_index = len(items) - 1
         
         super().__init__(
             console=console,
@@ -485,6 +528,8 @@ class SessionSelector(TUISelector):
             allow_cancel=True,
             show_descriptions=True
         )
+        self.selected_index = current_index
+        self.scroll_offset = max(0, self.selected_index - self.max_visible + 1)
 
 
 class CheckpointSelector(TUISelector):

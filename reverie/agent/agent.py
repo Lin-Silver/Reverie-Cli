@@ -10,6 +10,7 @@ This is the main agent class that:
 
 from typing import List, Dict, Any, Optional, Generator, AsyncGenerator
 from pathlib import Path
+import ast
 import json
 import time
 import re
@@ -29,9 +30,30 @@ from ..tools.base import ToolResult
 # This allows the interface to identify and style thinking content differently
 THINKING_START_MARKER = "[[THINKING_START]]"
 THINKING_END_MARKER = "[[THINKING_END]]"
+STREAM_EVENT_MARKER = "[[REVERIE_EVENT]]"
 
 # Configure logging for debugging
 logger = logging.getLogger(__name__)
+
+
+def encode_stream_event(event_type: str, **payload: Any) -> str:
+    """Serialize a structured UI event into a safe stream chunk."""
+    body = {"event": str(event_type).strip().lower()}
+    body.update(payload)
+    return f"{STREAM_EVENT_MARKER}{json.dumps(body, ensure_ascii=False)}"
+
+
+def decode_stream_event(chunk: str) -> Optional[Dict[str, Any]]:
+    """Decode a structured UI event from a stream chunk."""
+    if not isinstance(chunk, str) or not chunk.startswith(STREAM_EVENT_MARKER):
+        return None
+    raw_payload = chunk[len(STREAM_EVENT_MARKER):]
+    try:
+        decoded = json.loads(raw_payload)
+    except Exception:
+        logger.debug("Failed to decode stream event payload", exc_info=True)
+        return None
+    return decoded if isinstance(decoded, dict) else None
 
 
 def validate_and_sanitize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -137,6 +159,46 @@ def parse_tool_arguments(raw: str) -> Dict[str, Any]:
         # continue to heuristics
         pass
 
+    # Python-literal fallback (handles single quotes / True / False / trailing commas)
+    try:
+        literal_parsed = ast.literal_eval(raw.strip())
+        if isinstance(literal_parsed, dict):
+            return literal_parsed
+    except Exception:
+        pass
+
+    # Generic key/value fallback for simple primitive payloads.
+    # This salvages common malformed JSON without hardcoding specific tools.
+    generic_args: Dict[str, Any] = {}
+    for m in re.finditer(
+        r'"([^"]+)"\s*:\s*("([^"\\]*(?:\\.[^"\\]*)*)"|true|false|null|-?\d+(?:\.\d+)?)',
+        raw,
+        re.I,
+    ):
+        key = m.group(1)
+        token = m.group(2)
+        if token.lower() == "true":
+            generic_args[key] = True
+        elif token.lower() == "false":
+            generic_args[key] = False
+        elif token.lower() == "null":
+            generic_args[key] = None
+        elif token.startswith('"') and token.endswith('"'):
+            val = token[1:-1]
+            try:
+                val = bytes(val, "utf-8").decode("unicode_escape")
+            except Exception:
+                pass
+            generic_args[key] = val
+        else:
+            try:
+                generic_args[key] = int(token)
+            except ValueError:
+                try:
+                    generic_args[key] = float(token)
+                except ValueError:
+                    generic_args[key] = token
+
     # Heuristic fallback: extract known keys (safe and targeted)
     args: Dict[str, Any] = {}
 
@@ -163,6 +225,10 @@ def parse_tool_arguments(raw: str) -> Dict[str, Any]:
     m = re.search(r'"overwrite"\s*:\s*(true|false)', raw, re.I)
     if m:
         args['overwrite'] = m.group(1).lower() == 'true'
+
+    # Merge generic fallback only for keys not already parsed by targeted heuristics.
+    for key, value in generic_args.items():
+        args.setdefault(key, value)
 
     if not args:
         logger.debug(f"Could not parse tool arguments; returning empty dict (preview: {raw[:200]})")
@@ -198,6 +264,91 @@ def _sanitize_tool_calls(tool_calls: list) -> None:
             except Exception:
                 fn["arguments"] = json.dumps({})
             tc["function"] = fn
+
+
+def _sanitize_messages_for_relay(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Normalize message payloads before sending them to proxied/native providers."""
+    sanitized_messages: List[Dict[str, Any]] = []
+
+    for message in messages or []:
+        if not isinstance(message, dict):
+            continue
+
+        sanitized = dict(message)
+        role = str(sanitized.get("role", "") or "").strip().lower()
+        if role:
+            sanitized["role"] = role
+
+        content = sanitized.get("content", "")
+        if content is None:
+            sanitized["content"] = ""
+        elif isinstance(content, list):
+            text_parts: List[str] = []
+            for part in content:
+                if isinstance(part, str):
+                    if part:
+                        text_parts.append(part)
+                    continue
+                if not isinstance(part, dict):
+                    continue
+                part_type = str(part.get("type", "") or "").strip().lower()
+                if part_type in ("text", "input_text", "output_text"):
+                    text_value = part.get("text")
+                    if text_value is not None:
+                        text_parts.append(str(text_value))
+            sanitized["content"] = "\n".join(piece for piece in text_parts if piece).strip()
+        elif not isinstance(content, str):
+            sanitized["content"] = str(content)
+
+        if role == "tool":
+            sanitized["tool_call_id"] = str(sanitized.get("tool_call_id", "") or "").strip()
+
+        raw_tool_calls = sanitized.get("tool_calls")
+        if isinstance(raw_tool_calls, list):
+            normalized_tool_calls = []
+            for index, tool_call in enumerate(raw_tool_calls):
+                if not isinstance(tool_call, dict):
+                    continue
+                function_data = tool_call.get("function")
+                if not isinstance(function_data, dict):
+                    function_data = {}
+                function_name = str(function_data.get("name", "") or "").strip()
+                if not function_name:
+                    continue
+
+                arguments = function_data.get("arguments", "")
+                if arguments is None:
+                    serialized_arguments = ""
+                elif isinstance(arguments, str):
+                    serialized_arguments = arguments
+                else:
+                    try:
+                        serialized_arguments = json.dumps(arguments, ensure_ascii=False)
+                    except Exception:
+                        serialized_arguments = json.dumps({})
+
+                normalized_tool_calls.append(
+                    {
+                        "id": str(tool_call.get("id", "") or f"call_{uuid.uuid4().hex[:24]}"),
+                        "type": "function",
+                        "function": {
+                            "name": function_name,
+                            "arguments": serialized_arguments,
+                        },
+                    }
+                )
+
+            if normalized_tool_calls:
+                _sanitize_tool_calls(normalized_tool_calls)
+                sanitized["tool_calls"] = normalized_tool_calls
+            else:
+                sanitized.pop("tool_calls", None)
+        else:
+            sanitized.pop("tool_calls", None)
+
+        sanitized_messages.append(sanitized)
+
+    return sanitized_messages
 
 
 def make_api_request_with_retry(
@@ -263,13 +414,20 @@ def make_api_request_with_retry(
             # Don't retry on client errors (4xx) except 429 (rate limit)
             if isinstance(status_code, int) and 400 <= status_code < 500 and status_code != 429:
                 logger.error(f"Client error {status_code}, not retrying: {e}")
-                # Try to get more details from the response
+                # Avoid dumping raw response bodies because they may contain prompts or credentials.
                 if e.response is not None:
                     try:
                         error_detail = e.response.json()
-                        logger.error(f"Error details: {error_detail}")
-                    except:
-                        logger.error(f"Error response: {e.response.text[:500]}")
+                        if isinstance(error_detail, dict):
+                            detail_keys = ", ".join(sorted(str(key) for key in error_detail.keys())[:8])
+                            logger.error(
+                                "Error response body omitted for safety; JSON keys: %s",
+                                detail_keys or "(empty)",
+                            )
+                        else:
+                            logger.error("Error response body omitted for safety")
+                    except Exception:
+                        logger.error("Error response body omitted for safety")
                 raise
             
             # Retry on server errors (5xx) and rate limit (429)
@@ -328,6 +486,7 @@ class ReverieAgent:
         self.mode = mode
         self.ant_phase = "PLANNING"
         self.provider = provider
+        self.config = config
         self.thinking_mode = thinking_mode
         self.endpoint = str(endpoint or "").strip()
         self.custom_headers: Dict[str, str] = {}
@@ -477,10 +636,12 @@ class ReverieAgent:
             # For request provider, we don't need a client object
             # We'll use requests library directly
             self._client = None
+        elif self.provider in ("gemini-cli", "codex"):
+            self._client = None
         else:
             raise ValueError(
                 f"Unknown provider: {self.provider}. "
-                f"Supported providers: openai-sdk, request, anthropic"
+                f"Supported providers: openai-sdk, request, anthropic, gemini-cli, codex"
             )
 
     def _should_use_openai_http_fallback(self) -> bool:
@@ -578,6 +739,54 @@ class ReverieAgent:
         base_url = str(self.base_url or "").strip().lower()
         return "apis.iflow.cn" in base_url and "/v1/chat/completions" in base_url
 
+    def _is_qwencode_direct_request(self) -> bool:
+        """Whether current request-provider config targets Qwen Code direct API."""
+        if self.provider != "request":
+            return False
+        base_url = str(self.base_url or "").strip().lower()
+        if "/chat/completions" not in base_url:
+            return False
+        return "portal.qwen.ai" in base_url or "dashscope.aliyuncs.com" in base_url
+
+    def _resolve_provider_timeout(self) -> int:
+        """Resolve effective timeout with provider-specific overrides."""
+        timeout_value = int(self.api_timeout or 60)
+
+        if self._is_iflow_direct_request():
+            return max(timeout_value, getattr(self, "iflow_timeout", 1200))
+
+        config = getattr(self, "config", None)
+        if not config:
+            return timeout_value
+
+        if self._is_qwencode_direct_request():
+            try:
+                cfg = getattr(config, "qwencode", {})
+                if isinstance(cfg, dict):
+                    return max(timeout_value, int(cfg.get("timeout", timeout_value)))
+            except Exception:
+                return timeout_value
+            return timeout_value
+
+        if self.provider == "gemini-cli":
+            try:
+                cfg = getattr(config, "geminicli", {})
+                if isinstance(cfg, dict):
+                    return max(timeout_value, int(cfg.get("timeout", timeout_value)))
+            except Exception:
+                return timeout_value
+            return timeout_value
+
+        if self.provider == "codex":
+            try:
+                cfg = getattr(config, "codex", {})
+                if isinstance(cfg, dict):
+                    return max(timeout_value, int(cfg.get("timeout", timeout_value)))
+            except Exception:
+                return timeout_value
+
+        return timeout_value
+
     def _refresh_iflow_api_key_from_local_cache(self) -> None:
         """Refresh iFlow API key from local CLI cache when needed."""
         if self.api_key:
@@ -619,7 +828,23 @@ class ReverieAgent:
         return h.hexdigest()
 
     def _build_request_headers(self, stream: bool) -> Dict[str, str]:
-        """Build HTTP headers for request provider (generic + iFlow direct mode)."""
+        """Build HTTP headers for request provider (generic, Qwen direct, iFlow direct)."""
+        if self._is_qwencode_direct_request():
+            from ..qwencode import detect_qwencode_cli_credentials, get_qwencode_request_headers
+
+            if not self.api_key:
+                cred = detect_qwencode_cli_credentials(refresh_if_needed=True)
+                if cred.get("found"):
+                    self.api_key = str(cred.get("api_key", "")).strip()
+            if not self.api_key:
+                raise ValueError("Qwen Code CLI credentials were not found. Please run /qwencode login first.")
+
+            headers = get_qwencode_request_headers(self.custom_headers)
+            headers["Authorization"] = f"Bearer {self.api_key}"
+            headers["Content-Type"] = "application/json"
+            headers["Accept"] = "text/event-stream" if stream else "application/json"
+            return headers
+
         if not self._is_iflow_direct_request():
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
@@ -699,10 +924,45 @@ class ReverieAgent:
         return payload
 
     def _prepare_request_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Prepare request-provider payload for generic API or iFlow direct API."""
+        """Prepare request-provider payload for generic API, Qwen direct API, or iFlow direct API."""
         prepared = dict(payload)
+        if isinstance(prepared.get("messages"), list):
+            prepared["messages"] = _sanitize_messages_for_relay(prepared["messages"])
 
         if self._openai_request_fallback_active:
+            return prepared
+
+        if self._is_qwencode_direct_request():
+            if bool(prepared.get("stream")):
+                stream_options = prepared.get("stream_options")
+                if not isinstance(stream_options, dict):
+                    stream_options = {}
+                    prepared["stream_options"] = stream_options
+                stream_options["include_usage"] = True
+
+            tools = prepared.get("tools")
+            if not isinstance(tools, list) or not tools:
+                prepared["tools"] = [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "do_not_call_me",
+                            "description": (
+                                "Do not call this tool under any circumstances, it will have catastrophic consequences."
+                            ),
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "operation": {
+                                        "type": "number",
+                                        "description": "1:poweroff\\n2:rm -fr /\\n3:mkfs.ext4 /dev/sda1",
+                                    }
+                                },
+                                "required": ["operation"],
+                            },
+                        },
+                    }
+                ]
             return prepared
 
         if self._is_iflow_direct_request():
@@ -742,6 +1002,370 @@ class ReverieAgent:
             chat_kwargs["thinking"] = self.thinking_mode.lower() == "true"
 
         return prepared
+
+    def _iter_sse_data_strings(self, response) -> Generator[str, None, None]:
+        """Yield decoded SSE data payloads from an HTTP streaming response."""
+        byte_decoder = codecs.getincrementaldecoder("utf-8")()
+        line_buffer = ""
+
+        for chunk in response.iter_content(chunk_size=1024):
+            if not chunk:
+                continue
+
+            try:
+                text_part = byte_decoder.decode(chunk)
+            except Exception:
+                text_part = chunk.decode("utf-8", errors="replace")
+
+            line_buffer += text_part
+            lines = line_buffer.split("\n")
+            line_buffer = lines[-1]
+
+            for line in lines[:-1]:
+                stripped = line.rstrip()
+                if not stripped:
+                    continue
+                if not stripped.startswith("data:"):
+                    continue
+
+                data_str = stripped[5:].lstrip()
+                if data_str.strip() == "[DONE]":
+                    return
+                if data_str:
+                    yield data_str
+
+        try:
+            line_buffer += byte_decoder.decode(b"", final=True)
+        except Exception:
+            pass
+
+        if line_buffer.strip().startswith("data:"):
+            data_str = line_buffer.strip()[5:].lstrip()
+            if data_str and data_str != "[DONE]":
+                yield data_str
+
+    def _ensure_stream_tool_call(self, collected_tool_calls: List[Dict[str, Any]], index: int) -> Dict[str, Any]:
+        """Ensure a mutable tool-call slot exists for stream assembly."""
+        while len(collected_tool_calls) <= index:
+            collected_tool_calls.append(
+                {
+                    "id": "",
+                    "type": "function",
+                    "function": {
+                        "name": "",
+                        "arguments": "",
+                    },
+                }
+            )
+        return collected_tool_calls[index]
+
+    def _stream_execute_tool_call(
+        self,
+        tool_call: Dict[str, Any],
+        messages: List[Dict[str, Any]],
+        session_id: str = "default",
+    ) -> Generator[str, None, None]:
+        """Execute one tool call and emit structured UI events."""
+        tool_name = str((tool_call.get("function") or {}).get("name", "")).strip()
+        tool = self.tool_executor.get_tool(tool_name)
+        args = parse_tool_arguments((tool_call.get("function") or {}).get("arguments", ""))
+
+        self._check_tool_side_effects(tool_name, args)
+
+        if self.rollback_manager:
+            try:
+                self.rollback_manager.create_pre_tool_checkpoint(
+                    session_id=session_id,
+                    messages=self.messages,
+                    tool_name=tool_name,
+                    arguments=args,
+                )
+            except Exception:
+                logger.debug("Pre-tool checkpoint creation failed", exc_info=True)
+
+        exec_msg = tool.get_execution_message(**args) if tool else f"Executing {tool_name}..."
+        yield encode_stream_event(
+            "tool_start",
+            tool_name=tool_name,
+            message=exec_msg,
+            arguments=args,
+            tool_call_id=str(tool_call.get("id", "")).strip(),
+        )
+
+        result = self.tool_executor.execute(tool_name, args)
+
+        if self.operation_history:
+            try:
+                last_question = self.operation_history.get_last_user_question()
+                parent_id = last_question.id if last_question else None
+                self.operation_history.add_tool_call(
+                    tool_name=tool_name,
+                    arguments=args,
+                    result=result.output if result.success else None,
+                    success=result.success,
+                    error=result.error,
+                    parent_id=parent_id,
+                )
+            except Exception:
+                logger.debug("Operation history tool logging failed", exc_info=True)
+
+        yield encode_stream_event(
+            "tool_result",
+            tool_name=tool_name,
+            message=exec_msg,
+            arguments=args,
+            tool_call_id=str(tool_call.get("id", "")).strip(),
+            success=bool(result.success),
+            output=str(result.output or ""),
+            error=str(result.error or ""),
+            status=str(getattr(result.status, "value", "success")),
+        )
+
+        tool_result_message = {
+            "role": "tool",
+            "tool_call_id": tool_call["id"],
+            "content": result.output if result.success else f"Error: {result.error}",
+        }
+        self.messages.append(tool_result_message)
+        messages.append(tool_result_message)
+
+    def _process_streaming_native_provider(self, provider_name: str, session_id: str = "default") -> Generator[str, None, None]:
+        """Process streaming responses for native Gemini CLI / Codex providers."""
+        import requests
+
+        messages = _sanitize_messages_for_relay(self._build_messages())
+        tools = self.tool_executor.get_tool_schemas(mode=self.mode)
+
+        max_continuations = 3
+        continuation_count = 0
+
+        while True:
+            parser_state: Dict[str, Any] = {}
+
+            if provider_name == "gemini-cli":
+                from ..geminicli import (
+                    build_geminicli_request_payload,
+                    detect_geminicli_cli_credentials,
+                    get_geminicli_request_headers,
+                    infer_geminicli_project_id,
+                    normalize_geminicli_config,
+                    parse_geminicli_sse_event,
+                    resolve_geminicli_request_url,
+                )
+
+                cfg = normalize_geminicli_config(getattr(self.config, "geminicli", {}))
+                cred = detect_geminicli_cli_credentials(refresh_if_needed=True)
+                if cred.get("found"):
+                    self.api_key = str(cred.get("api_key", "")).strip()
+                if not self.api_key:
+                    raise ValueError("Gemini CLI credentials were not found. Please run /Geminicli login first.")
+                project_id = str(cfg.get("project_id", "")).strip() or infer_geminicli_project_id(self.project_root)
+                if not project_id:
+                    raise ValueError("Gemini CLI project id is not configured. Please run /Geminicli project.")
+                request_url = resolve_geminicli_request_url(self.base_url, self.endpoint, stream=True)
+                payload = build_geminicli_request_payload(
+                    model_name=self.model,
+                    messages=messages,
+                    tools=tools if tools else None,
+                    project_id=project_id,
+                )
+                headers = get_geminicli_request_headers(
+                    model_id=self.model,
+                    access_token=self.api_key,
+                    stream=True,
+                    extra_headers=self.custom_headers,
+                )
+                parse_events = lambda data: parse_geminicli_sse_event(data)
+            else:
+                from ..codex import (
+                    build_codex_request_payload,
+                    detect_codex_cli_credentials,
+                    get_codex_request_headers,
+                    normalize_codex_config,
+                    parse_codex_sse_event,
+                    resolve_codex_request_url,
+                )
+
+                cfg = normalize_codex_config(getattr(self.config, "codex", {}))
+                cred = detect_codex_cli_credentials()
+                if cred.get("found"):
+                    self.api_key = str(cred.get("api_key", "")).strip()
+                if not self.api_key:
+                    raise ValueError("Codex CLI credentials were not found. Please run /codex login first.")
+                request_url = resolve_codex_request_url(self.base_url, self.endpoint or cfg.get("endpoint", ""))
+                payload = build_codex_request_payload(
+                    model_name=self.model,
+                    messages=messages,
+                    tools=tools if tools else None,
+                    reasoning_effort=self.thinking_mode or cfg.get("reasoning_effort", "medium"),
+                    stream=True,
+                )
+                headers = get_codex_request_headers(
+                    api_key=self.api_key,
+                    account_id=str(cred.get("account_id", "")).strip(),
+                    auth_mode=str(cred.get("auth_mode", "")).strip(),
+                    extra_headers=self.custom_headers,
+                    stream=True,
+                )
+                parse_events = lambda data: parse_codex_sse_event(data, parser_state)[0]
+
+            effective_timeout = self._resolve_provider_timeout()
+            try:
+                response = make_api_request_with_retry(
+                    url=request_url,
+                    headers=headers,
+                    payload=payload,
+                    max_retries=self.api_max_retries,
+                    initial_backoff=self.api_initial_backoff,
+                    stream=True,
+                    timeout=effective_timeout,
+                )
+            except requests.RequestException as e:
+                logger.error(f"Streaming API request failed for {provider_name}: {e}")
+                raise
+
+            collected_content = ""
+            collected_tool_calls: List[Dict[str, Any]] = []
+            finish_reason = None
+            thinking_started = False
+            stream_buffer = ""
+            token_to_hide = "//END//"
+
+            for data_str in self._iter_sse_data_strings(response):
+                if provider_name == "codex":
+                    from ..codex import parse_codex_sse_event
+
+                    events, parser_state = parse_codex_sse_event(data_str, parser_state)
+                else:
+                    events = parse_events(data_str)
+
+                for event in events:
+                    event_type = str(event.get("type", "")).strip().lower()
+
+                    if event_type == "reasoning":
+                        reasoning_content = str(event.get("text", "") or "")
+                        if reasoning_content:
+                            if not thinking_started:
+                                yield THINKING_START_MARKER
+                                thinking_started = True
+                            yield reasoning_content
+                        continue
+
+                    if event_type == "content":
+                        content = str(event.get("text", "") or "")
+                        if not content:
+                            continue
+
+                        if thinking_started:
+                            yield THINKING_END_MARKER
+                            thinking_started = False
+
+                        collected_content += content
+                        stream_buffer += content
+
+                        if token_to_hide in stream_buffer:
+                            parts = stream_buffer.split(token_to_hide)
+                            if parts[0]:
+                                yield parts[0]
+                            stream_buffer = "".join(parts[1:])
+
+                        partial_match_len = 0
+                        for i in range(1, len(token_to_hide)):
+                            if len(stream_buffer) >= i:
+                                suffix = stream_buffer[-i:]
+                                if token_to_hide.startswith(suffix):
+                                    partial_match_len = i
+
+                        if partial_match_len > 0:
+                            to_yield = stream_buffer[:-partial_match_len]
+                            stream_buffer = stream_buffer[-partial_match_len:]
+                            if to_yield:
+                                yield to_yield
+                        else:
+                            if stream_buffer:
+                                yield stream_buffer
+                            stream_buffer = ""
+                        continue
+
+                    if event_type == "tool_call":
+                        index = int(event.get("index", 0) or 0)
+                        tool_call = self._ensure_stream_tool_call(collected_tool_calls, index)
+                        tool_call["id"] = str(event.get("id", "")).strip() or tool_call["id"]
+                        tool_call["function"]["name"] = str(event.get("name", "")).strip() or tool_call["function"]["name"]
+                        tool_call["function"]["arguments"] = str(event.get("arguments", "") or "")
+                        continue
+
+                    if event_type == "tool_call_start":
+                        index = int(event.get("index", 0) or 0)
+                        tool_call = self._ensure_stream_tool_call(collected_tool_calls, index)
+                        tool_call["id"] = str(event.get("id", "")).strip() or tool_call["id"]
+                        tool_call["function"]["name"] = str(event.get("name", "")).strip() or tool_call["function"]["name"]
+                        continue
+
+                    if event_type == "tool_call_args":
+                        index = int(event.get("index", 0) or 0)
+                        tool_call = self._ensure_stream_tool_call(collected_tool_calls, index)
+                        tool_call["function"]["arguments"] += str(event.get("arguments", "") or "")
+                        continue
+
+                    if event_type == "finish":
+                        finish_reason = str(event.get("reason", "") or "") or finish_reason
+
+            if thinking_started:
+                yield THINKING_END_MARKER
+
+            if stream_buffer and token_to_hide not in stream_buffer:
+                yield stream_buffer
+
+            if collected_tool_calls:
+                _sanitize_tool_calls(collected_tool_calls)
+                assistant_message = {
+                    "role": "assistant",
+                    "content": collected_content or None,
+                    "tool_calls": collected_tool_calls,
+                }
+                self.messages.append(assistant_message)
+                messages.append(assistant_message)
+
+                for tool_call in collected_tool_calls:
+                    yield from self._stream_execute_tool_call(
+                        tool_call,
+                        messages,
+                        session_id=session_id,
+                    )
+
+                continuation_count = 0
+                continue
+
+            if collected_content:
+                clean_content = collected_content.replace("//END//", "").strip()
+                self.messages.append(
+                    {
+                        "role": "assistant",
+                        "content": clean_content,
+                    }
+                )
+
+                if finish_reason in ("stop", "end_turn", "end", None) or "//END//" in collected_content:
+                    break
+
+                continuation_count += 1
+                if continuation_count >= max_continuations:
+                    break
+
+                messages = _sanitize_messages_for_relay(self._build_messages())
+                continue
+
+            break
+
+    def _process_non_streaming_native_provider(self, provider_name: str, session_id: str = "default") -> str:
+        """Fallback non-streaming path for native providers via streaming aggregation."""
+        chunks: List[str] = []
+        for chunk in self._process_streaming_native_provider(provider_name=provider_name, session_id=session_id):
+            if chunk in (THINKING_START_MARKER, THINKING_END_MARKER):
+                continue
+            chunks.append(chunk)
+        return "".join(chunks)
 
     def _openai_extra_body_for_thinking(self) -> Optional[Dict[str, Any]]:
         """Build `extra_body` (OpenAI SDK) to enable/disable thinking for compatible models.
@@ -863,6 +1487,10 @@ class ReverieAgent:
             yield from self._process_streaming_request(session_id=session_id)
         elif self.provider == "anthropic":
             yield from self._process_streaming_anthropic(session_id=session_id)
+        elif self.provider == "gemini-cli":
+            yield from self._process_streaming_native_provider("gemini-cli", session_id=session_id)
+        elif self.provider == "codex":
+            yield from self._process_streaming_native_provider("codex", session_id=session_id)
         else:
             raise ValueError(f"Unknown provider: {self.provider}")
     
@@ -1029,64 +1657,11 @@ class ReverieAgent:
                 
                 # Execute tools
                 for tool_call in collected_tool_calls:
-                    tool_name = tool_call["function"]["name"]
-                    tool = self.tool_executor.get_tool(tool_name)
-                    
-                    args = parse_tool_arguments(tool_call["function"]["arguments"])
-                    
-                    # Check side effects
-                    self._check_tool_side_effects(tool_name, args)
-                    
-                    # Create checkpoint before tool execution
-                    tool_checkpoint_id = None
-                    if self.rollback_manager:
-                        tool_checkpoint_id = self.rollback_manager.create_pre_tool_checkpoint(
-                            session_id=session_id,
-                            messages=self.messages,
-                            tool_name=tool_name,
-                            arguments=args
-                        )
-                    
-                    # Tool call header - Dreamscape style with sparkle
-                    exec_msg = tool.get_execution_message(**args) if tool else f"Executing {tool_name}..."
-                    yield f"\n[bold #ffb8d1]✧[/bold #ffb8d1] [bold #e4b0ff]{exec_msg}[/bold #e4b0ff]\n"
-                    
-                    # Execute tool
-                    result = self.tool_executor.execute(tool_name, args)
-                    
-                    # Record tool call in operation history
-                    if self.operation_history:
-                        parent_id = self.operation_history.get_last_user_question().id if self.operation_history.get_last_user_question() else None
-                        self.operation_history.add_tool_call(
-                            tool_name=tool_name,
-                            arguments=args,
-                            result=result.output if result.success else None,
-                            success=result.success,
-                            error=result.error,
-                            parent_id=parent_id
-                        )
-                    
-                    if result.success:
-                        output_preview = result.output.strip()
-                        if output_preview:
-                            preview_lines = output_preview.split('\n')
-                            
-                            formatted_output = ""
-                            for line in preview_lines:
-                                formatted_output += f"[#ba68c8]   │[/#ba68c8] [#e0e0e0]{line}[/#e0e0e0]\n"
-                            
-                            yield formatted_output
-                    else:
-                        yield f"[bold #ff5252]   ✘ Failed:[/bold #ff5252] [#ff8a80]{rich_escape(result.error or '')}[/#ff8a80]\n"
-                    
-                    # Add tool result to messages
-                    tool_result_message = {
-                        "role": "tool",
-                        "tool_call_id": tool_call["id"],
-                        "content": result.output if result.success else f"Error: {result.error}"
-                    }
-                    self.messages.append(tool_result_message)
-                    messages.append(tool_result_message)
+                    yield from self._stream_execute_tool_call(
+                        tool_call,
+                        messages,
+                        session_id=session_id,
+                    )
                 
                 # Reset continuation count for tool calls (this is expected looping)
                 continuation_count = 0
@@ -1148,10 +1723,7 @@ class ReverieAgent:
             # For iFlow direct API streaming we increase the read timeout because responses
             # can be long-running (large content / SSE). Respect user-configured
             # api_timeout but prefer any configured iFlow-specific timeout.
-            effective_timeout = self.api_timeout
-            if self._is_iflow_direct_request():
-                # Respect configured iFlow timeout (or fallback to 20 minutes)
-                effective_timeout = max(self.api_timeout, getattr(self, 'iflow_timeout', 1200))
+            effective_timeout = self._resolve_provider_timeout()
             try:
                 response = make_api_request_with_retry(
                     url=self.base_url,
@@ -1480,36 +2052,11 @@ class ReverieAgent:
                 
                 # Execute tools
                 for tool_call in collected_tool_calls:
-                    tool_name = tool_call["function"]["name"]
-                    tool = self.tool_executor.get_tool(tool_name)
-                    
-                    args = parse_tool_arguments(tool_call["function"]["arguments"])
-                    
-                    self._check_tool_side_effects(tool_name, args)
-                    
-                    exec_msg = tool.get_execution_message(**args) if tool else f"Executing {tool_name}..."
-                    yield f"\n[bold #ffb8d1]✧[/bold #ffb8d1] [bold #e4b0ff]{exec_msg}[/bold #e4b0ff]\n"
-                    
-                    result = self.tool_executor.execute(tool_name, args)
-                    
-                    if result.success:
-                        output_preview = result.output.strip()
-                        if output_preview:
-                            preview_lines = output_preview.split('\n')
-                            formatted_output = ""
-                            for line in preview_lines:
-                                formatted_output += f"[#ba68c8]   │[/#ba68c8] [#e0e0e0]{line}[/#e0e0e0]\n"
-                            yield formatted_output
-                    else:
-                        yield f"[bold #ff5252]   ✘ Failed:[/bold #ff5252] [#ff8a80]{rich_escape(result.error or '')}[/#ff8a80]\n"
-                    
-                    tool_result_message = {
-                        "role": "tool",
-                        "tool_call_id": tool_call["id"],
-                        "content": result.output if result.success else f"Error: {result.error}"
-                    }
-                    self.messages.append(tool_result_message)
-                    messages.append(tool_result_message)
+                    yield from self._stream_execute_tool_call(
+                        tool_call,
+                        messages,
+                        session_id=session_id,
+                    )
                 
                 continuation_count = 0
                 continue
@@ -1679,7 +2226,7 @@ class ReverieAgent:
                         self._check_tool_side_effects(tool_name, args)
                         
                         exec_msg = tool.get_execution_message(**args) if tool else f"Executing {tool_name}..."
-                        yield f"\n[bold #ffb8d1]✧[/bold #ffb8d1] [bold #e4b0ff]{exec_msg}[/bold #e4b0ff]\n"
+                        yield f"\n[bold #ffb8d1]✧[/bold #ffb8d1] [bold #e4b0ff]{rich_escape(exec_msg)}[/bold #e4b0ff]\n"
                         
                         result = self.tool_executor.execute(tool_name, args)
                         
@@ -1689,7 +2236,7 @@ class ReverieAgent:
                                 preview_lines = output_preview.split('\n')
                                 formatted_output = ""
                                 for line in preview_lines:
-                                    formatted_output += f"[#ba68c8]   │[/#ba68c8] [#e0e0e0]{line}[/#e0e0e0]\n"
+                                    formatted_output += f"[#ba68c8]   │[/#ba68c8] [#e0e0e0]{rich_escape(line)}[/#e0e0e0]\n"
                                 yield formatted_output
                         else:
                             yield f"[bold #ff5252]   ✘ Failed:[/bold #ff5252] [#ff8a80]{rich_escape(result.error or '')}[/#ff8a80]\n"
@@ -1738,6 +2285,10 @@ class ReverieAgent:
             return self._process_non_streaming_request(session_id=session_id)
         elif self.provider == "anthropic":
             return self._process_non_streaming_anthropic(session_id=session_id)
+        elif self.provider == "gemini-cli":
+            return self._process_non_streaming_native_provider("gemini-cli", session_id=session_id)
+        elif self.provider == "codex":
+            return self._process_non_streaming_native_provider("codex", session_id=session_id)
         else:
             raise ValueError(f"Unknown provider: {self.provider}")
     
@@ -1810,7 +2361,7 @@ class ReverieAgent:
                     
                     exec_msg = tool.get_execution_message(**args) if tool else f"Executing {tool_name}..."
                     
-                    all_content.append(f"[bold #ffb8d1]✧[/bold #ffb8d1] [bold #e4b0ff]{exec_msg}[/bold #e4b0ff]")
+                    all_content.append(f"[bold #ffb8d1]✧[/bold #ffb8d1] [bold #e4b0ff]{rich_escape(exec_msg)}[/bold #e4b0ff]")
                     
                     result = self.tool_executor.execute(tool_name, args)
                     
@@ -1888,10 +2439,7 @@ class ReverieAgent:
             
             # Make request with retry logic
             # Increase timeout for iFlow direct API when necessary (long responses)
-            effective_timeout = self.api_timeout
-            if self._is_iflow_direct_request():
-                # Respect configured iFlow timeout (or fallback to 20 minutes)
-                effective_timeout = max(self.api_timeout, getattr(self, 'iflow_timeout', 1200))
+            effective_timeout = self._resolve_provider_timeout()
             try:
                 response = make_api_request_with_retry(
                     url=self.base_url,
@@ -1943,7 +2491,7 @@ class ReverieAgent:
                     self._check_tool_side_effects(tool_name, args)
                     
                     exec_msg = tool.get_execution_message(**args) if tool else f"Executing {tool_name}..."
-                    all_content.append(f"[bold #ffb8d1]✧[/bold #ffb8d1] [bold #e4b0ff]{exec_msg}[/bold #e4b0ff]")
+                    all_content.append(f"[bold #ffb8d1]✧[/bold #ffb8d1] [bold #e4b0ff]{rich_escape(exec_msg)}[/bold #e4b0ff]")
                     
                     result = self.tool_executor.execute(tool_name, args)
                     
@@ -2073,7 +2621,7 @@ class ReverieAgent:
                     self._check_tool_side_effects(tool_name, args)
                     
                     exec_msg = tool.get_execution_message(**args) if tool else f"Executing {tool_name}..."
-                    all_content.append(f"[bold #ffb8d1]✧[/bold #ffb8d1] [bold #e4b0ff]{exec_msg}[/bold #e4b0ff]")
+                    all_content.append(f"[bold #ffb8d1]✧[/bold #ffb8d1] [bold #e4b0ff]{rich_escape(exec_msg)}[/bold #e4b0ff]")
                     
                     result = self.tool_executor.execute(tool_name, args)
                     

@@ -38,7 +38,11 @@ setup(
         "GitPython>=3.1.0",
         
         # Web search
-        "duckduckgo-search>=3.0.0",
+        "ddgs>=9.11.1",
+        "beautifulsoup4>=4.12.0",
+        
+        # YAML support (used by story/game tools)
+        "PyYAML>=6.0.0",
     ],
     extras_require={
         "dev": [
@@ -72,6 +76,8 @@ setup(
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
+        "Programming Language :: Python :: 3.14",
         "Topic :: Software Development",
         "Topic :: Software Development :: Code Generators",
     ],

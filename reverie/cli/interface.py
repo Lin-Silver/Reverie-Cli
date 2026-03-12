@@ -1,4 +1,4 @@
-"""
+﻿"""
 Main Interface - The primary CLI interface with Dreamscape Theme
 
 Handles:
@@ -10,6 +10,9 @@ Handles:
 
 import time
 import sys
+import threading
+import _thread
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, List
 
@@ -18,6 +21,7 @@ from rich.prompt import Prompt, Confirm
 from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
+from rich.table import Table
 from rich.markup import escape
 from rich import box
 
@@ -35,7 +39,12 @@ from ..config import (
 )
 from ..rules_manager import RulesManager
 from ..session import SessionManager
-from ..agent import ReverieAgent, THINKING_START_MARKER, THINKING_END_MARKER
+from ..agent import (
+    ReverieAgent,
+    THINKING_START_MARKER,
+    THINKING_END_MARKER,
+    decode_stream_event,
+)
 from ..context_engine import CodebaseIndexer, ContextRetriever, GitIntegration
 
 
@@ -46,6 +55,71 @@ class StatusLine:
     
     def __rich__(self):
         return self.interface._get_status_line()
+
+
+@dataclass
+class StreamInputState:
+    """Shared state for streaming-time interjection input."""
+
+    buffer: str = ""
+    submitted_text: Optional[str] = None
+    interrupt_requested: bool = False
+    active: bool = False
+    paused: bool = False
+    lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    def snapshot(self) -> dict:
+        with self.lock:
+            return {
+                "buffer": self.buffer,
+                "submitted_text": self.submitted_text,
+                "interrupt_requested": self.interrupt_requested,
+                "active": self.active,
+                "paused": self.paused,
+            }
+
+    def append(self, value: str) -> None:
+        with self.lock:
+            self.buffer += value
+
+    def backspace(self) -> None:
+        with self.lock:
+            self.buffer = self.buffer[:-1]
+
+    def request_interrupt(self) -> None:
+        with self.lock:
+            self.interrupt_requested = True
+
+    def request_submit(self) -> Optional[str]:
+        with self.lock:
+            value = self.buffer.rstrip()
+            if not value.strip():
+                return None
+            self.submitted_text = value
+            self.interrupt_requested = True
+            return value
+
+    def pause(self) -> None:
+        with self.lock:
+            self.paused = True
+
+    def resume(self) -> None:
+        with self.lock:
+            self.paused = False
+
+    def stop(self) -> None:
+        with self.lock:
+            self.active = False
+
+
+class StreamingFooter:
+    """Dynamic footer shown while the model is actively streaming."""
+
+    def __init__(self, interface):
+        self.interface = interface
+
+    def __rich__(self):
+        return self.interface._get_streaming_footer()
 
 
 class ReverieInterface:
@@ -75,6 +149,7 @@ class ReverieInterface:
         
         self.session_manager = SessionManager(
             self.project_data_dir,
+            project_root=self.project_root,
             snapshot_manager=self.snapshot_manager,
             memory_indexer=self.memory_indexer
         )
@@ -95,50 +170,74 @@ class ReverieInterface:
         self.command_handler: Optional[CommandHandler] = None
         self.input_handler: Optional[InputHandler] = None
         self.status_line = StatusLine(self)
+        self.streaming_footer = StreamingFooter(self)
+        self._stream_input_state: Optional[StreamInputState] = None
+        self._stream_input_thread: Optional[threading.Thread] = None
+        self._status_live = None
         
         # Cached tiktoken encoding for status bar token counting (lazy-loaded on first use)
         self._tiktoken_encoding = None
         self._tiktoken_available: Optional[bool] = None  # None = not yet checked
+
+    def _fast_clear_terminal(self) -> None:
+        """Clear the visible terminal area without spawning extra shell processes."""
+        try:
+            if sys.stdout and hasattr(sys.stdout, "write"):
+                sys.stdout.write("\033[2J\033[H")
+                sys.stdout.flush()
+        except Exception:
+            pass
+
+        try:
+            self.console.clear()
+        except Exception:
+            pass
+
+    def _truncate_label(self, value: str, max_length: int) -> str:
+        """Trim long labels for narrow terminals."""
+        text = str(value or "").strip()
+        if len(text) <= max_length:
+            return text
+        if max_length <= 1:
+            return text[:max_length]
+        return f"{text[:max_length - 1]}…"
+
+    def _format_compact_quantity(self, value: int) -> str:
+        """Compact metric formatter for status surfaces."""
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            return str(value)
+        if abs(number) >= 1_000_000:
+            return f"{number / 1_000_000:.2f}M".rstrip("0").rstrip(".")
+        if abs(number) >= 1_000:
+            return f"{number / 1_000:.1f}K".rstrip("0").rstrip(".")
+        return str(number)
+
+    def _resolve_provider_label(self, config: Config) -> str:
+        """Resolve the user-facing provider/source label."""
+        provider_name = str(getattr(config.active_model, "provider", "openai-sdk") if config.active_model else "openai-sdk").strip().lower()
+        source_name = str(getattr(config, "active_model_source", "standard") or "standard").strip().lower()
+        provider_labels = {
+            "openai-sdk": "OpenAI",
+            "request": "Relay",
+            "anthropic": "Anthropic",
+            "gemini-cli": "Gemini",
+            "codex": "Codex",
+        }
+        source_labels = {
+            "standard": "",
+            "iflow": "iFlow",
+            "qwencode": "Qwen Code",
+            "geminicli": "Gemini CLI",
+            "codex": "Codex",
+        }
+        return source_labels.get(source_name, "") or provider_labels.get(provider_name, provider_name or "provider")
     
     def run(self) -> None:
         """Main entry point"""
         try:
-            # Clear terminal completely including scrollback history
-            import os
-            import sys
-            
-            if os.name == 'nt':  # Windows
-                # Try multiple methods to clear Windows terminal
-                try:
-                    # Method 1: Standard cls command
-                    os.system('cls')
-                except:
-                    pass
-                
-                try:
-                    # Method 2: PowerShell clear-host
-                    os.system('clear-host')
-                except:
-                    pass
-                
-                try:
-                    # Method 3: ANSI escape sequences for modern terminals
-                    print('\033[2J\033[3J\033[H', end='', flush=True)
-                except:
-                    pass
-                
-                # Method 4: Additional clear for stubborn terminals
-                try:
-                    sys.stdout.write('\033c')
-                    sys.stdout.flush()
-                except:
-                    pass
-            else:  # Unix/Linux/Mac
-                # Clear screen and scrollback buffer
-                print('\033[2J\033[3J\033[H', end='', flush=True)
-            
-            # Final Rich console clear
-            self.console.clear()
+            self._fast_clear_terminal()
             
             if not self.config_manager.is_configured():
                 self.run_setup_wizard()
@@ -160,26 +259,42 @@ class ReverieInterface:
             import traceback
             traceback.print_exc()
 
-    def _get_status_line(self) -> Text:
-        """Generate a dreamy status line for real-time display"""
+    def _get_status_line(self):
+        """Generate a responsive live status panel."""
         elapsed = self.total_active_time
         if self.current_task_start:
             elapsed += (time.time() - self.current_task_start)
-            
+
         hours, remainder = divmod(int(elapsed), 3600)
         minutes, seconds = divmod(remainder, 60)
         time_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-        
+
         config = self.config_manager.load()
-        model_name = config.active_model.model_display_name if config.active_model else "N/A"
+        active_model = config.active_model
         mode = config.mode or "reverie"
-        
-        # Calculate token usage directly from agent — bypass TokenCounterTool entirely
-        # to avoid any intermediate-layer failures that get swallowed silently.
-        token_info = ""
+        provider_label = self._resolve_provider_label(config)
+        model_name = active_model.model_display_name if active_model else "N/A"
+        width = max(int(getattr(self.console.size, "width", 0) or self.console.width or 0), 60)
+        compact = width < 112
+        tiny = width < 86
+        model_label = self._truncate_label(model_name, 24 if tiny else 36 if compact else 52)
+        project_label = self._truncate_label(self.project_root.name or str(self.project_root), 12 if tiny else 18)
+
+        reasoning_label = ""
+        provider_name = str(getattr(active_model, "provider", "openai-sdk") if active_model else "openai-sdk").strip().lower()
+        if provider_name == "codex" and active_model:
+            from ..codex import get_codex_reasoning_label
+
+            reasoning_mode = str(getattr(active_model, "thinking_mode", "") or "").strip()
+            if reasoning_mode:
+                reasoning_label = get_codex_reasoning_label(reasoning_mode)
+
+        total_tokens = None
+        max_tokens = 128000
+        percentage = 0.0
+        token_color = self.theme.MINT_SOFT
         if self.agent and hasattr(self.agent, 'messages'):
             try:
-                # --- Lazy-load tiktoken encoding (cached for the lifetime of the interface) ---
                 if self._tiktoken_available is None:
                     try:
                         import tiktoken
@@ -187,73 +302,277 @@ class ReverieInterface:
                         self._tiktoken_available = True
                     except Exception:
                         self._tiktoken_available = False
-                
-                # --- Count tokens in system prompt + messages ---
+
                 system_prompt = getattr(self.agent, 'system_prompt', '')
-                messages = self.agent.messages  # list of dicts
-                
+                messages = self.agent.messages
+
                 if self._tiktoken_available and self._tiktoken_encoding:
                     enc = self._tiktoken_encoding
-                    # System prompt tokens
                     total_tokens = len(enc.encode(system_prompt))
-                    # Message tokens (4 overhead per message + content)
                     for msg in messages:
                         total_tokens += 4
                         content = msg.get('content', '')
                         if isinstance(content, str):
                             total_tokens += len(enc.encode(content))
                         elif isinstance(content, list):
-                            # Multi-part content (e.g. tool results)
                             for part in content:
                                 if isinstance(part, dict):
-                                    for v in part.values():
-                                        if isinstance(v, str):
-                                            total_tokens += len(enc.encode(v))
-                    total_tokens += 2  # reply primer
+                                    for value in part.values():
+                                        if isinstance(value, str):
+                                            total_tokens += len(enc.encode(value))
+                    total_tokens += 2
                 else:
-                    # Fallback: rough char-based estimate (1 token ≈ 4 chars)
                     total_chars = len(system_prompt)
                     for msg in messages:
                         content = msg.get('content', '')
                         if isinstance(content, str):
                             total_chars += len(content)
                     total_tokens = total_chars // 4 + 1
-                
-                # --- Get max context from already-loaded config ---
-                max_tokens = 128000  # default
-                if config.active_model and config.active_model.max_context_tokens:
-                    max_tokens = config.active_model.max_context_tokens
-                
+
+                if active_model and active_model.max_context_tokens:
+                    max_tokens = active_model.max_context_tokens
+
                 percentage = (total_tokens / max_tokens * 100) if max_tokens else 0
-                
-                # --- Choose color based on usage level ---
                 if percentage >= 80:
                     token_color = self.theme.CORAL_VIBRANT
                 elif percentage >= 70:
                     token_color = self.theme.AMBER_GLOW
-                else:
-                    token_color = self.theme.MINT_SOFT
-                
-                token_info = (
-                    f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM}[/{self.theme.TEXT_DIM}] "
-                    f"[{token_color}]{total_tokens:,}/{max_tokens:,} tokens ({percentage:.0f}%)[/{token_color}] "
-                )
             except Exception:
-                pass  # Never crash the status bar
-        
-        # Dreamscape styled status line
-        return Text.from_markup(
-            f"[{self.theme.PURPLE_MEDIUM}]{self.deco.LINE_HORIZONTAL * 2}[/{self.theme.PURPLE_MEDIUM}] "
-            f"[{self.theme.PINK_SOFT}]{self.deco.SPARKLE}[/{self.theme.PINK_SOFT}] "
-            f"[bold {self.theme.TEXT_PRIMARY}]{time_str}[/bold {self.theme.TEXT_PRIMARY}] "
-            f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM}[/{self.theme.TEXT_DIM}] "
-            f"[{self.theme.PURPLE_SOFT}]{model_name}[/{self.theme.PURPLE_SOFT}] "
-            f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM}[/{self.theme.TEXT_DIM}] "
-            f"[bold {self.theme.BLUE_SOFT}]{mode.upper()}[/bold {self.theme.BLUE_SOFT}] "
-            f"{token_info}"
-            f"[{self.theme.PINK_SOFT}]{self.deco.SPARKLE}[/{self.theme.PINK_SOFT}] "
-            f"[{self.theme.PURPLE_MEDIUM}]{self.deco.LINE_HORIZONTAL * 2}[/{self.theme.PURPLE_MEDIUM}]"
+                total_tokens = None
+
+        top_left = Text()
+        top_left.append(f"{self.deco.SPARKLE} Reverie", style=f"bold {self.theme.PINK_SOFT}")
+        top_left.append(f" {self.deco.DOT_MEDIUM} ", style=self.theme.TEXT_DIM)
+        top_left.append(model_label, style=f"bold {self.theme.PURPLE_SOFT}")
+
+        top_right = Text()
+        top_right.append(project_label, style=self.theme.TEXT_DIM)
+        top_right.append(f" {self.deco.DOT_MEDIUM} ", style=self.theme.TEXT_DIM)
+        top_right.append(time_str, style=f"bold {self.theme.TEXT_PRIMARY}")
+
+        top_grid = Table.grid(expand=True)
+        top_grid.add_column(ratio=1)
+        top_grid.add_column(justify="right", no_wrap=True)
+        top_grid.add_row(top_left, top_right)
+
+        summary = Text()
+        summary.append(provider_label, style=self.theme.BLUE_SOFT)
+        summary.append(f" {self.deco.DOT_MEDIUM} ", style=self.theme.TEXT_DIM)
+        summary.append(str(mode).upper(), style=f"bold {self.theme.BLUE_SOFT}")
+        if reasoning_label:
+            summary.append(f" {self.deco.DOT_MEDIUM} ", style=self.theme.TEXT_DIM)
+            summary.append(reasoning_label, style=self.theme.AMBER_GLOW)
+        if total_tokens is not None:
+            summary.append(f" {self.deco.DOT_MEDIUM} ", style=self.theme.TEXT_DIM)
+            usage = f"{self._format_compact_quantity(total_tokens)}/{self._format_compact_quantity(max_tokens)}"
+            if not tiny:
+                usage += f" ({percentage:.0f}%)"
+            summary.append(usage, style=token_color)
+
+        if compact:
+            body = Group(top_grid, summary)
+        else:
+            secondary = Text()
+            secondary.append("Source ", style=self.theme.TEXT_DIM)
+            secondary.append(provider_label, style=self.theme.BLUE_SOFT)
+            secondary.append(f" {self.deco.DOT_MEDIUM} ", style=self.theme.TEXT_DIM)
+            secondary.append("Mode ", style=self.theme.TEXT_DIM)
+            secondary.append(str(mode).upper(), style=f"bold {self.theme.BLUE_SOFT}")
+            if reasoning_label:
+                secondary.append(f" {self.deco.DOT_MEDIUM} ", style=self.theme.TEXT_DIM)
+                secondary.append("Reasoning ", style=self.theme.TEXT_DIM)
+                secondary.append(reasoning_label, style=self.theme.AMBER_GLOW)
+            if total_tokens is not None:
+                secondary.append(f" {self.deco.DOT_MEDIUM} ", style=self.theme.TEXT_DIM)
+                secondary.append("Context ", style=self.theme.TEXT_DIM)
+                secondary.append(
+                    f"{self._format_compact_quantity(total_tokens)}/{self._format_compact_quantity(max_tokens)} ({percentage:.0f}%)",
+                    style=token_color,
+                )
+            body = Group(top_grid, secondary)
+
+        return Panel(
+            body,
+            border_style=self.theme.BORDER_SUBTLE,
+            box=box.ROUNDED,
+            padding=(0, 1),
         )
+
+    def _snapshot_stream_input_state(self) -> dict:
+        """Return a snapshot of the active streaming-input state."""
+        if not self._stream_input_state:
+            return {
+                "buffer": "",
+                "submitted_text": None,
+                "interrupt_requested": False,
+                "active": False,
+                "paused": False,
+            }
+        return self._stream_input_state.snapshot()
+
+    def _build_stream_input_panel(self) -> Panel:
+        """Render the bottom interjection input bar while streaming."""
+        snapshot = self._snapshot_stream_input_state()
+        width = max(int(getattr(self.console.size, "width", 0) or self.console.width or 0), 60)
+        compact = width < 100
+        buffer_text = str(snapshot.get("buffer", "") or "")
+        is_paused = bool(snapshot.get("paused"))
+
+        title = f"[bold {self.theme.BLUE_SOFT}]{self.deco.DIAMOND} Live Input[/bold {self.theme.BLUE_SOFT}]"
+        if is_paused:
+            content = Text.from_markup(
+                f"[{self.theme.TEXT_DIM}]Streaming input is paused while Reverie waits for tool/user input.[/{self.theme.TEXT_DIM}]"
+            )
+        elif buffer_text:
+            prompt = Text()
+            prompt.append("Interject ", style=f"bold {self.theme.PURPLE_SOFT}")
+            prompt.append(f"{self.deco.CHEVRON_RIGHT} ", style=self.theme.BLUE_SOFT)
+            prompt.append(buffer_text, style=f"bold {self.theme.TEXT_PRIMARY}")
+            content = prompt
+        else:
+            content = Text.from_markup(
+                f"[{self.theme.TEXT_DIM}]Type a follow-up while the model is writing. Press Enter to interrupt and send it, or Esc to stop the current reply.[/{self.theme.TEXT_DIM}]"
+            )
+
+        footer = Text()
+        footer.append("Enter", style=self.theme.BLUE_SOFT)
+        footer.append(" send now  ", style=self.theme.TEXT_DIM)
+        footer.append("Esc", style=self.theme.BLUE_SOFT)
+        footer.append(" stop output  ", style=self.theme.TEXT_DIM)
+        footer.append("Backspace", style=self.theme.BLUE_SOFT)
+        footer.append(" edit", style=self.theme.TEXT_DIM)
+        if compact:
+            footer = Text("Enter send  Esc stop  Backspace edit", style=self.theme.TEXT_DIM)
+
+        return Panel(
+            Group(content, footer),
+            title=title,
+            border_style=self.theme.BORDER_SUBTLE,
+            box=box.ROUNDED,
+            padding=(0, 1),
+        )
+
+    def _get_streaming_footer(self):
+        """Compose the live footer shown during streaming output."""
+        renderables = []
+        try:
+            config = self.config_manager.load()
+            if config.show_status_line:
+                renderables.append(self._get_status_line())
+        except Exception:
+            pass
+        renderables.append(self._build_stream_input_panel())
+        return Group(*renderables)
+
+    def _pause_stream_input_capture(self) -> None:
+        """Pause background streaming-input capture."""
+        if self._stream_input_state:
+            self._stream_input_state.pause()
+
+    def _resume_stream_input_capture(self) -> None:
+        """Resume background streaming-input capture."""
+        if self._stream_input_state:
+            self._stream_input_state.resume()
+
+    def _stream_input_capture_loop(self, state: StreamInputState) -> None:
+        """Background key-capture loop for streaming-time interjections."""
+        try:
+            import msvcrt
+        except ImportError:
+            return
+
+        while True:
+            snapshot = state.snapshot()
+            if not snapshot.get("active"):
+                return
+            if snapshot.get("paused"):
+                time.sleep(0.025)
+                continue
+            if not msvcrt.kbhit():
+                time.sleep(0.025)
+                continue
+
+            try:
+                key = msvcrt.getwch()
+            except OSError:
+                time.sleep(0.025)
+                continue
+
+            if key in ("\x00", "\xe0"):
+                try:
+                    msvcrt.getwch()
+                except OSError:
+                    pass
+                continue
+            if key == "\x1b":
+                state.request_interrupt()
+                _thread.interrupt_main()
+                return
+            if key in ("\r", "\n"):
+                if state.request_submit():
+                    _thread.interrupt_main()
+                    return
+                continue
+            if key == "\x08":
+                state.backspace()
+                continue
+            if key == "\x03":
+                state.request_interrupt()
+                _thread.interrupt_main()
+                return
+            if key.isprintable():
+                state.append(key)
+
+    def _start_stream_input_capture(self) -> None:
+        """Start background capture for streaming-time follow-up input."""
+        self._stop_stream_input_capture()
+        state = StreamInputState(active=True)
+        thread = threading.Thread(
+            target=self._stream_input_capture_loop,
+            args=(state,),
+            daemon=True,
+            name="reverie-stream-input",
+        )
+        self._stream_input_state = state
+        self._stream_input_thread = thread
+        thread.start()
+
+    def _stop_stream_input_capture(self) -> None:
+        """Stop background capture for streaming-time follow-up input."""
+        state = self._stream_input_state
+        thread = self._stream_input_thread
+        if state:
+            state.stop()
+        if thread and thread.is_alive() and thread is not threading.current_thread():
+            thread.join(timeout=0.15)
+        self._stream_input_thread = None
+
+    def _print_interjected_message(self, message: str) -> None:
+        """Echo a submitted follow-up into the transcript before dispatching it."""
+        text = str(message or "").strip()
+        if not text:
+            return
+
+        prompt = Text()
+        prompt.append(f"{self.deco.SPARKLE_FILLED} ", style=self.theme.PINK_SOFT)
+        prompt.append("Reverie", style=f"bold {self.theme.PURPLE_SOFT}")
+        prompt.append(f" {self.deco.CHEVRON_RIGHT} ", style=self.theme.BLUE_SOFT)
+        prompt.append(text, style=f"bold {self.theme.TEXT_PRIMARY}")
+        self.console.print(prompt)
+
+    def _dispatch_user_input(self, user_input: str) -> bool:
+        """Route raw user input through commands or message handling."""
+        normalized_input = str(user_input or "").strip()
+        if not normalized_input:
+            return True
+
+        if normalized_input.lower() == "tools":
+            return self.command_handler.handle("/tools")
+
+        if normalized_input.startswith('/'):
+            return self.command_handler.handle(normalized_input)
+
+        return self._process_message(user_input)
 
     def main_loop(self) -> None:
         """Main interaction loop"""
@@ -267,21 +586,8 @@ class ReverieInterface:
                     break 
                 if not user_input.strip(): 
                     continue
-
-                normalized_input = user_input.strip()
-                if normalized_input.lower() == "tools":
-                    should_continue = self.command_handler.handle("/tools")
-                    if not should_continue:
-                        break
-                    continue
-                
-                if normalized_input.startswith('/'):
-                    should_continue = self.command_handler.handle(normalized_input)
-                    if not should_continue: 
-                        break
-                    continue
-                
-                self._process_message(user_input)
+                if not self._dispatch_user_input(user_input):
+                    break
                 
             except KeyboardInterrupt:
                 self.console.print(f"\n[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} Use /exit to quit.[/{self.theme.TEXT_DIM}]")
@@ -297,12 +603,16 @@ class ReverieInterface:
             self.session_manager.update_messages(self.agent.get_history())
         self.console.print(f"\n[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Session saved. Goodbye! {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]")
     
-    def _process_message(self, message: str) -> None:
+    def _process_message(self, message: str) -> bool:
         """Process message with direct streaming output to avoid truncation"""
-        if not self.agent: return
+        if not self.agent:
+            return True
 
         self.current_task_start = time.time()
         config = self.config_manager.load()
+        follow_up_message: Optional[str] = None
+        interrupted_by_user = False
+        response_stream = None
         
         # Get current session ID
         session_id = self.session_manager.current_session.id if self.session_manager.current_session else "default"
@@ -324,39 +634,43 @@ class ReverieInterface:
         try:
             current_markdown_text = ""
             first_non_tool_chunk = True
+            response_header_printed = False
             
             # Thinking content state management
             in_thinking_mode = False
             thinking_content = ""
-            first_thinking_chunk = True
             
-            # Create live display for status line if enabled
-            status_live = None
-            if config.show_status_line:
-                from rich.live import Live
-                status_live = Live(self.status_line, console=self.console, refresh_per_second=1, transient=True)
-                status_live.start()
-                self._status_live = status_live  # Store reference for user input tool
+            # Create live footer with status + input bar during streaming
+            from rich.live import Live
+            footer_live = Live(
+                self.streaming_footer,
+                console=self.console,
+                refresh_per_second=6,
+                transient=True,
+                vertical_overflow="visible",
+            )
+            footer_live.start()
+            self._status_live = footer_live
+            self._start_stream_input_capture()
             
             try:
-                import msvcrt
-                for chunk in self.agent.process_message(message, stream=config.stream_responses, session_id=session_id):
-                    # Check for ESC key execution interruption
-                    if msvcrt.kbhit():
-                        key = msvcrt.getch()
-                        # Check for ESC (0x1b)
-                        if key == b'\x1b':
-                            self.console.print(f"\n[{self.theme.CORAL_SOFT}]{self.deco.DOT_MEDIUM} Output stopped by user (ESC)[/{self.theme.CORAL_SOFT}]")
-                            break
-
+                response_stream = self.agent.process_message(message, stream=config.stream_responses, session_id=session_id)
+                for chunk in response_stream:
                     # Handle thinking markers
                     if chunk == THINKING_START_MARKER:
                         # Flush any pending content before entering thinking mode
                         if current_markdown_text:
                             self.console.print(format_markdown(current_markdown_text), end="")
                             current_markdown_text = ""
+                        if not response_header_printed:
+                            self.display.show_response_header(
+                                model_name=getattr(config.active_model, "model_display_name", "Reverie"),
+                                provider_label=self._resolve_provider_label(config),
+                                mode=config.mode,
+                            )
+                            response_header_printed = True
                         in_thinking_mode = True
-                        first_thinking_chunk = True
+                        self.display.show_thinking_banner(getattr(config.active_model, "model_display_name", ""))
                         continue
                     
                     if chunk == THINKING_END_MARKER:
@@ -372,14 +686,6 @@ class ReverieInterface:
                     
                     # Handle thinking content
                     if in_thinking_mode:
-                        if first_thinking_chunk:
-                            # Print thinking header
-                            self.console.print(
-                                f"[italic {self.theme.THINKING_SOFT}]{DECO.THOUGHT_BUBBLE}[/italic {self.theme.THINKING_SOFT}] "
-                                f"[italic bold {self.theme.THINKING_MEDIUM}]Thinking...[/italic bold {self.theme.THINKING_MEDIUM}]"
-                            )
-                            first_thinking_chunk = False
-                        
                         thinking_content += chunk
                         # Stream thinking content line by line for better UX
                         if '\n' in thinking_content:
@@ -393,23 +699,57 @@ class ReverieInterface:
                                     )
                             thinking_content = lines[-1]
                         continue
+
+                    decoded_event = decode_stream_event(chunk)
+                    if decoded_event:
+                        if current_markdown_text:
+                            self.console.print(format_markdown(current_markdown_text), end="")
+                            current_markdown_text = ""
+                        if thinking_content.strip():
+                            self._print_thinking_content(thinking_content)
+                            thinking_content = ""
+                        in_thinking_mode = False
+                        if not response_header_printed:
+                            self.display.show_response_header(
+                                model_name=getattr(config.active_model, "model_display_name", "Reverie"),
+                                provider_label=self._resolve_provider_label(config),
+                                mode=config.mode,
+                            )
+                            response_header_printed = True
+                        if not self.display.show_stream_event(decoded_event):
+                            self.console.print(chunk)
+                        continue
                     
-                    # Check for tool/system markers
-                    if chunk.startswith('\n[') or chunk.startswith('['):
+                    # Check for known tool/system styled markers.
+                    # Keep this strict so normal markdown like "[text](url)"
+                    # doesn't get sent into Rich markup parsing.
+                    stripped_chunk = chunk.lstrip('\n')
+                    is_tool_markup = stripped_chunk.startswith((
+                        "[bold #ffb8d1]✧",
+                        "[bold #ff5252]",
+                        "[bold #66bb6a]",
+                        "[#ba68c8]   │",
+                    ))
+
+                    if is_tool_markup:
                         # Flush pending markdown
                         if current_markdown_text:
                             self.console.print(format_markdown(current_markdown_text), end="")
                             current_markdown_text = ""
-                        # Add tool output directly
-                        self.console.print(Text.from_markup(chunk))
+                        # Add tool output directly; if markup is malformed, render as plain text.
+                        try:
+                            self.console.print(Text.from_markup(chunk))
+                        except Exception:
+                            self.console.print(escape(chunk))
                     else:
-                        # Add "Reverie:" prefix for first non-tool chunk
                         if first_non_tool_chunk and chunk.strip():
-                            # Add prefix before the first meaningful content with dreamy styling
-                            self.console.print(
-                                f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}] "
-                                f"[bold {self.theme.PURPLE_SOFT}]Reverie:[/bold {self.theme.PURPLE_SOFT}]"
-                            )
+                            if not response_header_printed:
+                                self.display.show_response_header(
+                                    model_name=getattr(config.active_model, "model_display_name", "Reverie"),
+                                    provider_label=self._resolve_provider_label(config),
+                                    mode=config.mode,
+                                )
+                                response_header_printed = True
                             first_non_tool_chunk = False
                         
                         # Accumulate content
@@ -424,16 +764,42 @@ class ReverieInterface:
                     self._print_thinking_content(thinking_content)
             
             finally:
-                # Stop live display
-                if status_live:
-                    status_live.stop()
+                snapshot = self._snapshot_stream_input_state()
+                follow_up_message = str(snapshot.get("submitted_text") or "").strip() or None
+                interrupted_by_user = bool(snapshot.get("interrupt_requested"))
+                if response_stream and hasattr(response_stream, "close"):
+                    try:
+                        response_stream.close()
+                    except Exception:
+                        pass
+                self._stop_stream_input_capture()
+                self._stream_input_state = None
+                footer_live.stop()
+                self._status_live = None
                 
         except KeyboardInterrupt:
-            self.console.print(f"\n[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} Process interrupted by user[/{self.theme.TEXT_DIM}]")
+            snapshot = self._snapshot_stream_input_state()
+            follow_up_message = str(snapshot.get("submitted_text") or "").strip() or follow_up_message
+            interrupted_by_user = bool(snapshot.get("interrupt_requested")) or interrupted_by_user
+            if response_stream and hasattr(response_stream, "close"):
+                try:
+                    response_stream.close()
+                except Exception:
+                    pass
+            if interrupted_by_user:
+                message_text = "Output stopped. Ready for your next instruction."
+                if follow_up_message:
+                    message_text = "Output stopped. Sending your follow-up now."
+                self.console.print(f"\n[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} {message_text}[/{self.theme.AMBER_GLOW}]")
+            else:
+                self.console.print(f"\n[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} Process interrupted by user[/{self.theme.TEXT_DIM}]")
         except Exception as e:
             self.console.print(f"\n[bold {self.theme.CORAL_VIBRANT}]{self.deco.CROSS_FANCY} Error: {escape(str(e))}[/bold {self.theme.CORAL_VIBRANT}]")
             # Don't re-raise the exception to prevent app from stopping
         finally:
+            self._stop_stream_input_capture()
+            self._stream_input_state = None
+            self._status_live = None
             if self.current_task_start:
                 self.total_active_time += (time.time() - self.current_task_start)
                 self.current_task_start = None
@@ -444,9 +810,14 @@ class ReverieInterface:
                     self.console.print(f"\n[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Warning: Failed to save session: {session_error}[/{self.theme.AMBER_GLOW}]")
         
         # Display updated status line after processing if enabled
-        if config.show_status_line:
+        if config.show_status_line and not follow_up_message:
             self.console.print(self.status_line)
         self.console.print() # Final spacer for prompt
+
+        if follow_up_message:
+            self._print_interjected_message(follow_up_message)
+            return self._dispatch_user_input(follow_up_message)
+        return True
     
     def _print_thinking_content(self, content: str) -> None:
         """Helper method to print thinking content with proper formatting"""
@@ -530,6 +901,8 @@ class ReverieInterface:
         # Inject status_live control for user input (will be set during _process_message)
         self._status_live = None
         self.agent.tool_executor.update_context('get_status_live', lambda: self._status_live)
+        self.agent.tool_executor.update_context('pause_stream_input_capture', self._pause_stream_input_capture)
+        self.agent.tool_executor.update_context('resume_stream_input_capture', self._resume_stream_input_capture)
         self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY}[/{self.theme.MINT_VIBRANT}] [{self.theme.MINT_SOFT}]Agent ready ({model.model_display_name})[/{self.theme.MINT_SOFT}]")
 
     def _build_additional_rules_with_tti(self, config: Config) -> str:
@@ -567,8 +940,15 @@ class ReverieInterface:
         return tti_block
 
     def _init_session(self) -> None:
-        session = self.session_manager.create_session()
-        self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY}[/{self.theme.MINT_VIBRANT}] [{self.theme.MINT_SOFT}]New session: {session.name}[/{self.theme.MINT_SOFT}]")
+        session, resumed = self.session_manager.ensure_session()
+
+        if self.agent:
+            self.agent.set_history(session.messages)
+
+        if resumed:
+            self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY}[/{self.theme.MINT_VIBRANT}] [{self.theme.MINT_SOFT}]Resumed session: {session.name}[/{self.theme.MINT_SOFT}]")
+        else:
+            self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY}[/{self.theme.MINT_VIBRANT}] [{self.theme.MINT_SOFT}]New session: {session.name}[/{self.theme.MINT_SOFT}]")
 
     def _get_app_context(self) -> dict:
         return {

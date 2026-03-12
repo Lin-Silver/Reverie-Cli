@@ -1,18 +1,36 @@
-## 🚀 Reverie CLI v2.1.0 — Session Memory & Snapshot System
+## Reverie CLI v2.1.0 - Session Memory & Reliability
 
 **Release Date:** 2026-02-27
 
-### ✨ New Features
-* **Session Snapshot System**: Automatic project snapshots before each question with one-click restoration and automatic cleanup (keeps max 10 snapshots)
-* **Memory Indexer**: Cross-session persistent memory with keyword/entity extraction, inverted index for fast retrieval, and semantic search over historical conversations
-* **Enhanced Session Manager**: Automatic session rotation at 80% token threshold with working memory injection for session continuity
-* **Agent Payload Sanitization**: Robust validation and sanitization of API request payloads to prevent JSON serialization errors
-* **Context Engine Improvements**: Multi-threaded indexing with increased worker count (8 workers), optimized large file handling (20MB limit, 5MB lightweight parse threshold)
+### Highlights
+* Session snapshots, cross-session memory indexing, and improved session rotation
+* Safer payload handling, faster Context Engine indexing, and steadier CLI integrations
 
-### 🔧 Enhancements
-* **Qwen Code Integration**: Improved credential detection and endpoint handling with better token management
-* **Command System**: Enhanced command registry with case-sensitive command support (e.g., /CE for Context Engine)
-* **Session Persistence**: Improved session save/load with better error handling and metadata management
+### Post-Release Updates (Still v2.1.0) - 2026-03-04
+* Stabilized Python 3.14 build flow, web search fallback, and TTI dependency retries
+* Tightened prompt/tool-calling reliability and packaging checks
+
+### Post-Release Updates (Still v2.1.0) - 2026-03-09
+* Reworked iFlow, Qwen, Gemini CLI, and Codex relay integration with native commands and endpoint overrides
+* Fixed provider catalogs: Qwen now uses `coder-model` at 1M context, iFlow aligns to the current CLI list, and Codex is limited to the supported GPT-5.x Codex models
+* Added Codex reasoning-depth selection and extra message/tool-call sanitization to reduce relay format errors
+
+### Post-Release Updates (Still v2.1.0) - 2026-03-10
+* Added CLI-style Codex reasoning selection with `Low`, `Medium`, `High`, and `Extra High` labels
+* Reworked live tool/log rendering into structured tool cards with clearer status details
+
+### Post-Release Updates (Still v2.1.0) - 2026-03-11
+* Fixed the `/codex thinking` selector path and refreshed `/help` into a denser grouped layout
+* Expanded `/help` into a full command catalog with all subcommands, per-command drill-down via `/help <command>`, and synced command-completion descriptions
+* Turned `/help` into a browser-style command guide: live navigation, full child-command previews, filterable help pages, and pinned detail panels that stay in the transcript after exit
+* Added per-subcommand examples to the detailed help panels and expanded `/setting` into a richer settings dashboard with direct subcommands for mode, model, theme, API, workspace, and rules controls
+* Optimized startup and settings performance: terminal clear is now lightweight, `/setting` no longer hits provider runtime resolution while rendering, and the settings TUI now refreshes only on input with better full-screen detail visibility
+* Fixed non-maximized terminal behavior for interactive help/settings/selectors: normal scrollback is preserved, wheel scrolling stays with the terminal, and medium-width windows keep more panels side-by-side instead of clipping the lower content
+* Streaming replies can now be interrupted with `Esc`, and Reverie keeps a live bottom input bar so you can type and submit a follow-up while output is still in progress
+* Hardened secret handling: Gemini OAuth client credentials now come from environment variables, local config/oauth JSON writes use safer file writes, and token refresh errors no longer echo raw response bodies
+* Corrected Codex model metadata so GPT-5.4 now reports a 1.05M window and GPT-5.1/5.2/5.3 Codex variants use 400K-class windows
+* Reworked the core TUI: responsive welcome card, compact live status panel, clearer response headers, richer tool cards, denser selectors, and cleaner command completion
+* Improved terminal adaptation and input UX: multiline input now preserves structure, selector focus/empty states are clearer, and narrow terminals get more compact layouts
 
 ---
 

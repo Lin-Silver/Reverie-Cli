@@ -4,15 +4,23 @@ iFlow integration helpers.
 This module centralizes:
 - Local iFlow CLI credential detection (`~/.iflow`)
 - iFlow model catalog definitions
-- iFlow proxy settings helpers
+- iFlow reverse-proxy settings helpers
 """
 
+from __future__ import annotations
+
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlsplit
+import hashlib
+import hmac
 import json
+import time
+import uuid
 
 
 IFLOW_API_URL = "https://apis.iflow.cn/v1/chat/completions"
+IFLOW_MODELS_URL = "https://apis.iflow.cn/v1/models"
 IFLOW_THINKING_DEPTHS = ("minimal", "low", "medium", "high", "xhigh", "auto")
 
 _IFLOW_CREDENTIAL_FILES = (
@@ -20,221 +28,75 @@ _IFLOW_CREDENTIAL_FILES = (
     ("oauth_creds.json", "apiKey"),
 )
 
-_IFLOW_BASE_MODELS = [
-    {
-        "id": "tstars2.0",
-        "display_name": "TStars-2.0",
-        "description": "iFlow TStars-2.0 multimodal assistant",
-        "context_length": 128000,
-    },
-    {
-        "id": "qwen3-coder-plus",
-        "display_name": "Qwen3-Coder-Plus",
-        "description": "Qwen3 coding enhanced model",
-        "context_length": 32768,
-    },
-    {
-        "id": "qwen3-max",
-        "display_name": "Qwen3-Max",
-        "description": "Qwen3 flagship model",
-        "context_length": 32768,
-    },
-    {
-        "id": "qwen3-vl-plus",
-        "display_name": "Qwen3-VL-Plus",
-        "description": "Qwen3 multimodal vision-language model",
-        "context_length": 32768,
-    },
-    {
-        "id": "qwen3-max-preview",
-        "display_name": "Qwen3-Max-Preview",
-        "description": "Qwen3 Max preview model",
-        "context_length": 32768,
-    },
-    {
-        "id": "kimi-k2-0905",
-        "display_name": "Kimi-K2-Instruct-0905",
-        "description": "Moonshot Kimi K2 instruct model (0905)",
-        "context_length": 128000,
-    },
-    {
-        "id": "glm-4.6",
-        "display_name": "GLM-4.6",
-        "description": "Zhipu GLM 4.6 general model",
-        "context_length": 128000,
-    },
-    {
-        "id": "glm-4.7",
+_IFLOW_MODEL_METADATA = {
+    "glm-4.7": {
         "display_name": "GLM-4.7",
-        "description": "Zhipu GLM 4.7 general model",
+        "description": "Zhipu GLM 4.7",
         "context_length": 128000,
+        "thinking": True,
     },
-    {
-        "id": "glm-5",
+    "iflow-rome-30ba3b": {
+        "display_name": "iFlow-ROME-30BA3B(Preview)",
+        "description": "iFlow ROME 30BA3B preview model",
+        "context_length": 128000,
+        "thinking": False,
+    },
+    "deepseek-v3.2": {
+        "display_name": "DeepSeek-V3.2",
+        "description": "DeepSeek V3.2",
+        "context_length": 64000,
+        "thinking": True,
+    },
+    "glm-5": {
         "display_name": "GLM-5",
-        "description": "Zhipu GLM 5 general model",
+        "description": "Zhipu GLM 5",
         "context_length": 128000,
+        "thinking": True,
     },
-    {
-        "id": "kimi-k2",
-        "display_name": "Kimi-K2",
-        "description": "Moonshot Kimi K2 general model",
-        "context_length": 128000,
+    "qwen3-coder-plus": {
+        "display_name": "Qwen3-Coder-Plus",
+        "description": "Qwen3 coder model",
+        "context_length": 32768,
+        "thinking": False,
     },
-    {
-        "id": "kimi-k2-thinking",
+    "kimi-k2-thinking": {
         "display_name": "Kimi-K2-Thinking",
         "description": "Moonshot Kimi K2 thinking model",
         "context_length": 128000,
+        "thinking": True,
     },
-    {
-        "id": "deepseek-v3.2-chat",
-        "display_name": "DeepSeek-V3.2-Chat",
-        "description": "DeepSeek V3.2 chat model",
-        "context_length": 64000,
-    },
-    {
-        "id": "deepseek-v3.2-reasoner",
-        "display_name": "DeepSeek-V3.2-Reasoner",
-        "description": "DeepSeek V3.2 reasoning model",
-        "context_length": 64000,
-    },
-    {
-        "id": "deepseek-v3.2",
-        "display_name": "DeepSeek-V3.2-Exp",
-        "description": "DeepSeek V3.2 experimental model",
-        "context_length": 64000,
-    },
-    {
-        "id": "deepseek-v3.1",
-        "display_name": "DeepSeek-V3.1-Terminus",
-        "description": "DeepSeek V3.1 Terminus model",
-        "context_length": 64000,
-    },
-    {
-        "id": "deepseek-r1",
-        "display_name": "DeepSeek-R1",
-        "description": "DeepSeek R1 reasoning model",
-        "context_length": 64000,
-    },
-    {
-        "id": "deepseek-v3",
-        "display_name": "DeepSeek-V3-671B",
-        "description": "DeepSeek V3 671B model",
-        "context_length": 64000,
-    },
-    {
-        "id": "qwen3-32b",
-        "display_name": "Qwen3-32B",
-        "description": "Qwen3 32B model",
-        "context_length": 32768,
-    },
-    {
-        "id": "qwen3-235b-a22b-thinking-2507",
-        "display_name": "Qwen3-235B-Thinking",
-        "description": "Qwen3 235B A22B thinking model (2507)",
-        "context_length": 32768,
-    },
-    {
-        "id": "qwen3-235b-a22b-instruct",
-        "display_name": "Qwen3-235B-Instruct",
-        "description": "Qwen3 235B A22B instruct model",
-        "context_length": 32768,
-    },
-    {
-        "id": "qwen3-235b",
-        "display_name": "Qwen3-235B-A22B",
-        "description": "Qwen3 235B A22B model",
-        "context_length": 32768,
-    },
-    {
-        "id": "minimax-m2",
-        "display_name": "MiniMax-M2",
-        "description": "MiniMax M2 model",
-        "context_length": 200000,
-    },
-    {
-        "id": "minimax-m2.1",
-        "display_name": "MiniMax-M2.1",
-        "description": "MiniMax M2.1 model",
-        "context_length": 200000,
-    },
-    {
-        "id": "minimax-m2.5",
+    "minimax-m2.5": {
         "display_name": "MiniMax-M2.5",
         "description": "MiniMax M2.5 model",
         "context_length": 200000,
+        "thinking": True,
     },
-    {
-        "id": "iflow-rome-30ba3b",
-        "display_name": "iFlow-ROME",
-        "description": "iFlow Rome 30BA3B model",
-        "context_length": 128000,
-    },
-    {
-        "id": "kimi-k2.5",
+    "kimi-k2.5": {
         "display_name": "Kimi-K2.5",
         "description": "Moonshot Kimi K2.5 model",
         "context_length": 128000,
+        "thinking": False,
     },
-]
+    "kimi-k2-0905": {
+        "display_name": "Kimi-K2-0905",
+        "description": "Moonshot Kimi K2 0905 model",
+        "context_length": 128000,
+        "thinking": False,
+    },
+}
 
-_IFLOW_THINKING_BASES = [
-    {
-        "id": "glm-4.6",
-        "display_name": "GLM-4.6-thinking",
-        "description": "GLM-4.6 thinking profile",
-        "context_length": 128000,
-    },
-    {
-        "id": "glm-4.7",
-        "display_name": "GLM-4.7-thinking",
-        "description": "GLM-4.7 thinking profile",
-        "context_length": 128000,
-    },
-    {
-        "id": "glm-5",
-        "display_name": "GLM-5-thinking",
-        "description": "GLM-5 thinking profile",
-        "context_length": 128000,
-    },
-    {
-        "id": "qwen3-max-preview",
-        "display_name": "Qwen3-Max-Preview-thinking",
-        "description": "Qwen3 Max preview thinking profile",
-        "context_length": 32768,
-    },
-    {
-        "id": "qwen3-235b-a22b-thinking-2507",
-        "display_name": "Qwen3-235B-Thinking-depth",
-        "description": "Qwen3 235B thinking profile with depth control",
-        "context_length": 32768,
-    },
-    {
-        "id": "kimi-k2-thinking",
-        "display_name": "Kimi-K2-thinking-depth",
-        "description": "Kimi K2 thinking profile with depth control",
-        "context_length": 128000,
-    },
-    {
-        "id": "deepseek-v3.2-reasoner",
-        "display_name": "DeepSeek-V3.2-Reasoner-thinking",
-        "description": "DeepSeek V3.2 reasoner profile with depth control",
-        "context_length": 64000,
-    },
-    {
-        "id": "deepseek-r1",
-        "display_name": "DeepSeek-R1-thinking",
-        "description": "DeepSeek R1 reasoning profile with depth control",
-        "context_length": 64000,
-    },
-    {
-        "id": "minimax-m2.5",
-        "display_name": "MiniMax-M2.5-thinking",
-        "description": "MiniMax M2.5 reasoning profile with depth control",
-        "context_length": 200000,
-    },
+_IFLOW_FALLBACK_ORDER = [
+    "glm-4.7",
+    "iflow-rome-30ba3b",
+    "deepseek-v3.2",
+    "glm-5",
+    "qwen3-coder-plus",
+    "kimi-k2-thinking",
+    "minimax-m2.5",
+    "kimi-k2.5",
+    "kimi-k2-0905",
 ]
+_IFLOW_ALLOWED_BASE_MODEL_SET = {model_id.lower() for model_id in _IFLOW_FALLBACK_ORDER}
 
 
 def default_iflow_config() -> Dict[str, Any]:
@@ -243,63 +105,196 @@ def default_iflow_config() -> Dict[str, Any]:
         "selected_model_id": "",
         "selected_model_display_name": "",
         "api_url": IFLOW_API_URL,
+        "endpoint": "",
         "max_context_tokens": 200000,
-        # Per-provider timeout (seconds) for iFlow direct API. Default = 20 minutes.
         "timeout": 1200,
     }
 
 
-def get_iflow_model_catalog() -> List[Dict[str, Any]]:
-    """Return iFlow model catalog including thinking-depth variants."""
-    catalog: List[Dict[str, Any]] = []
-    seen_model_ids = set()
+def _normalize_iflow_api_url(value: Any) -> str:
+    url = str(value or "").strip()
+    if not url:
+        return IFLOW_API_URL
+    if not url.startswith("http://") and not url.startswith("https://"):
+        url = f"https://{url}"
+    return url.rstrip("/")
 
-    for item in _IFLOW_BASE_MODELS:
-        model_id = str(item.get("id", "")).strip()
-        if not model_id or model_id.lower() in seen_model_ids:
+
+def _normalize_iflow_endpoint(value: Any) -> str:
+    endpoint = str(value or "").strip()
+    if not endpoint:
+        return ""
+    if endpoint.lower() in ("none", "off", "default", "clear"):
+        return ""
+    return endpoint
+
+
+def _load_json_dict(path: Path, errors: List[str]) -> Optional[Dict[str, Any]]:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as exc:
+        errors.append(f"{path}: {exc}")
+        return None
+
+    if isinstance(data, dict):
+        return data
+    errors.append(f"{path}: invalid JSON object")
+    return None
+
+
+def _generate_iflow_signature(api_key: str, session_id: str, timestamp_ms: int) -> str:
+    payload = f"iFlow-Cli:{session_id}:{timestamp_ms}"
+    digest = hmac.new(api_key.encode(), payload.encode(), hashlib.sha256)
+    return digest.hexdigest()
+
+
+def _build_iflow_auth_headers(api_key: str, accept: str = "application/json") -> Dict[str, str]:
+    session_id = f"session-{uuid.uuid4()}"
+    timestamp = int(time.time() * 1000)
+    return {
+        "Authorization": f"Bearer {api_key}",
+        "User-Agent": "iFlow-Cli",
+        "session-id": session_id,
+        "x-iflow-timestamp": str(timestamp),
+        "x-iflow-signature": _generate_iflow_signature(api_key, session_id, timestamp),
+        "Accept": accept,
+    }
+
+
+def _build_iflow_base_catalog() -> List[Dict[str, Any]]:
+    catalog: List[Dict[str, Any]] = []
+    seen_ids = set()
+    for model_id in _IFLOW_FALLBACK_ORDER:
+        meta = _IFLOW_MODEL_METADATA.get(model_id, {})
+        lower_id = model_id.lower()
+        if lower_id in seen_ids:
             continue
-        seen_model_ids.add(model_id.lower())
+        seen_ids.add(lower_id)
         catalog.append(
             {
                 "id": model_id,
-                "display_name": str(item.get("display_name", model_id)).strip(),
-                "description": str(item.get("description", "")).strip(),
+                "display_name": str(meta.get("display_name", model_id)),
+                "description": str(meta.get("description", "")),
                 "is_thinking": False,
                 "thinking_depth": "none",
                 "base_model_id": model_id,
-                "context_length": item.get("context_length", 128000),
+                "context_length": int(meta.get("context_length", 128000)),
             }
         )
+    return catalog
 
-    for base in _IFLOW_THINKING_BASES:
-        base_model_id = str(base.get("id", "")).strip()
-        base_display_name = str(base.get("display_name", base_model_id)).strip()
-        base_description = str(base.get("description", "")).strip()
-        base_context_length = base.get("context_length", 128000)
 
-        if not base_model_id:
+def _append_iflow_thinking_variants(catalog: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    items = list(catalog)
+    seen = {str(item.get("id", "")).strip().lower() for item in items}
+    for item in list(catalog):
+        model_id = str(item.get("id", "")).strip()
+        meta = _IFLOW_MODEL_METADATA.get(model_id, {})
+        if not meta.get("thinking"):
             continue
-
         for depth in IFLOW_THINKING_DEPTHS:
-            model_id = f"{base_model_id}({depth})"
-            model_id_key = model_id.lower()
-            if model_id_key in seen_model_ids:
+            thinking_id = f"{model_id}({depth})"
+            lower_id = thinking_id.lower()
+            if lower_id in seen:
                 continue
-
-            seen_model_ids.add(model_id_key)
-            catalog.append(
+            seen.add(lower_id)
+            items.append(
                 {
-                    "id": model_id,
-                    "display_name": f"{base_display_name} [{depth}]",
-                    "description": f"{base_description}; depth={depth}",
+                    "id": thinking_id,
+                    "display_name": f"{item['display_name']} [{depth}]",
+                    "description": f"{item['description']}; depth={depth}",
                     "is_thinking": True,
                     "thinking_depth": depth,
-                    "base_model_id": base_model_id,
-                    "context_length": base_context_length,
+                    "base_model_id": model_id,
+                    "context_length": int(item.get("context_length", 128000)),
                 }
             )
+    return items
 
+
+def _fetch_remote_iflow_models(api_key: str, errors: List[str]) -> List[Dict[str, Any]]:
+    if not api_key:
+        return []
+
+    try:
+        import requests
+
+        response = requests.get(
+            IFLOW_MODELS_URL,
+            headers=_build_iflow_auth_headers(api_key),
+            timeout=20,
+        )
+    except Exception as exc:
+        errors.append(f"remote model fetch failed: {exc}")
+        return []
+
+    if not response.ok:
+        errors.append(f"remote model fetch failed ({response.status_code})")
+        return []
+
+    try:
+        payload = response.json()
+    except Exception as exc:
+        errors.append(f"remote model fetch parse failed: {exc}")
+        return []
+
+    data = payload.get("data")
+    if not isinstance(data, list):
+        return []
+
+    catalog: List[Dict[str, Any]] = []
+    seen_ids = set()
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        model_id = str(item.get("id", "")).strip()
+        if not model_id:
+            continue
+        lower_id = model_id.lower()
+        if lower_id not in _IFLOW_ALLOWED_BASE_MODEL_SET:
+            continue
+        if lower_id in seen_ids:
+            continue
+        seen_ids.add(lower_id)
+        meta = _IFLOW_MODEL_METADATA.get(model_id, {})
+        catalog.append(
+            {
+                "id": model_id,
+                "display_name": str(meta.get("display_name", model_id)),
+                "description": str(meta.get("description", "")),
+                "is_thinking": False,
+                "thinking_depth": "none",
+                "base_model_id": model_id,
+                "context_length": int(meta.get("context_length", 128000)),
+                "created": item.get("created"),
+            }
+        )
     return catalog
+
+
+def get_iflow_model_catalog() -> List[Dict[str, Any]]:
+    """Return iFlow model catalog, preferring the current remote account model list."""
+    cred = detect_iflow_cli_credentials()
+    errors = cred.get("errors", []) if isinstance(cred.get("errors"), list) else []
+    remote_catalog = _fetch_remote_iflow_models(str(cred.get("api_key", "")).strip(), errors)
+    base_catalog = _build_iflow_base_catalog()
+    if remote_catalog:
+        remote_by_id = {
+            str(item.get("id", "")).strip().lower(): item
+            for item in remote_catalog
+            if str(item.get("id", "")).strip()
+        }
+        merged_catalog: List[Dict[str, Any]] = []
+        for item in base_catalog:
+            merged = dict(item)
+            remote_item = remote_by_id.get(str(item.get("id", "")).strip().lower(), {})
+            if remote_item:
+                if remote_item.get("created") is not None:
+                    merged["created"] = remote_item.get("created")
+            merged_catalog.append(merged)
+        return _append_iflow_thinking_variants(merged_catalog)
+    return _append_iflow_thinking_variants(base_catalog)
 
 
 def find_iflow_model(model_id: str, catalog: Optional[List[Dict[str, Any]]] = None) -> Optional[Dict[str, Any]]:
@@ -321,7 +316,6 @@ def normalize_iflow_config(raw_iflow: Any) -> Dict[str, Any]:
     if isinstance(raw_iflow, dict):
         cfg.update(raw_iflow)
 
-    # Migrate legacy keys from previous local-proxy design.
     if not str(cfg.get("api_url", "")).strip():
         legacy_url = str(cfg.get("proxy_base_url", "")).strip()
         if legacy_url and "127.0.0.1:8000" not in legacy_url:
@@ -329,7 +323,8 @@ def normalize_iflow_config(raw_iflow: Any) -> Dict[str, Any]:
 
     cfg["selected_model_id"] = str(cfg.get("selected_model_id", "")).strip()
     cfg["selected_model_display_name"] = str(cfg.get("selected_model_display_name", "")).strip()
-    cfg["api_url"] = str(cfg.get("api_url", IFLOW_API_URL)).strip() or IFLOW_API_URL
+    cfg["api_url"] = _normalize_iflow_api_url(cfg.get("api_url", IFLOW_API_URL))
+    cfg["endpoint"] = _normalize_iflow_endpoint(cfg.get("endpoint", ""))
     cfg.pop("proxy_base_url", None)
     cfg.pop("proxy_api_key", None)
 
@@ -341,30 +336,25 @@ def normalize_iflow_config(raw_iflow: Any) -> Dict[str, Any]:
         max_tokens = 200000
     cfg["max_context_tokens"] = max_tokens
 
-    # Normalize iFlow-specific timeout (seconds). Accept legacy 'iflow_timeout' too.
-    # Ensure positive integer; default to 1200 (20 minutes) if invalid or missing.
-    timeout_val = None
-    if "timeout" in cfg:
-        timeout_val = cfg.get("timeout")
-    elif "iflow_timeout" in cfg:
-        timeout_val = cfg.get("iflow_timeout")
-
+    timeout_val = cfg.get("timeout", cfg.get("iflow_timeout", 1200))
     try:
-        timeout_int = int(timeout_val) if timeout_val is not None else 1200
+        timeout_int = int(timeout_val)
     except (TypeError, ValueError):
         timeout_int = 1200
     if timeout_int <= 0:
         timeout_int = 1200
     cfg["timeout"] = timeout_int
-    # remove legacy alias if present
     cfg.pop("iflow_timeout", None)
 
     catalog = get_iflow_model_catalog()
     matched = find_iflow_model(cfg["selected_model_id"], catalog=catalog)
     if matched:
+        cfg["selected_model_id"] = matched["id"]
         cfg["selected_model_display_name"] = matched["display_name"]
-    elif cfg["selected_model_id"] and not cfg["selected_model_display_name"]:
-        cfg["selected_model_display_name"] = cfg["selected_model_id"]
+        cfg["max_context_tokens"] = int(matched.get("context_length", cfg["max_context_tokens"]))
+    elif cfg["selected_model_id"]:
+        cfg["selected_model_id"] = ""
+        cfg["selected_model_display_name"] = ""
 
     return cfg
 
@@ -389,16 +379,29 @@ def resolve_iflow_selected_model(iflow_config: Any) -> Optional[Dict[str, Any]]:
         "is_thinking": False,
         "thinking_depth": "none",
         "base_model_id": model_id,
-        "context_length": 128000,
+        "context_length": cfg.get("max_context_tokens", 128000),
     }
 
 
-def build_iflow_runtime_model_data(iflow_config: Any) -> Optional[Dict[str, Any]]:
-    """
-    Build runtime model config dict for agent initialization.
+def resolve_iflow_request_url(api_url: str, endpoint: str = "") -> str:
+    """Resolve iFlow request URL with optional endpoint override."""
+    endpoint_value = str(endpoint or "").strip()
+    if endpoint_value:
+        if endpoint_value.startswith("http://") or endpoint_value.startswith("https://"):
+            return endpoint_value
+        base = _normalize_iflow_api_url(api_url)
+        if base.lower().endswith("/chat/completions"):
+            split = urlsplit(base)
+            base = f"{split.scheme}://{split.netloc}"
+        if endpoint_value.startswith("/"):
+            return f"{base}{endpoint_value}"
+        return f"{base}/{endpoint_value}"
 
-    This keeps iFlow models independent from the `/model` list.
-    """
+    return _normalize_iflow_api_url(api_url)
+
+
+def build_iflow_runtime_model_data(iflow_config: Any) -> Optional[Dict[str, Any]]:
+    """Build runtime model config dict for agent initialization."""
     cfg = normalize_iflow_config(iflow_config)
     selected = resolve_iflow_selected_model(cfg)
     if not selected:
@@ -406,18 +409,17 @@ def build_iflow_runtime_model_data(iflow_config: Any) -> Optional[Dict[str, Any]
 
     cred = detect_iflow_cli_credentials()
     api_key = cred["api_key"] if cred.get("found") else ""
-
-    # Use context_length from catalog, fallback to config max_context_tokens
     context_length = selected.get("context_length", cfg.get("max_context_tokens", 200000))
 
     return {
         "model": selected["id"],
         "model_display_name": selected["display_name"],
-        "base_url": cfg["api_url"],
+        "base_url": resolve_iflow_request_url(cfg["api_url"], cfg.get("endpoint", "")),
         "api_key": api_key,
         "max_context_tokens": context_length,
         "provider": "request",
         "thinking_mode": None,
+        "endpoint": "",
     }
 
 
@@ -443,13 +445,7 @@ def detect_iflow_cli_credentials() -> Dict[str, Any]:
         if not path.exists():
             continue
 
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception as exc:
-            result["errors"].append(f"{path}: {exc}")
-            continue
-
+        data = _load_json_dict(path, result["errors"])
         if not isinstance(data, dict):
             continue
 
@@ -473,6 +469,6 @@ def mask_secret(secret: str) -> str:
 
 
 def is_iflow_direct_api_url(url: str) -> bool:
-    """Whether the URL points to iFlow direct chat completions endpoint."""
+    """Whether the URL points to an iFlow chat completions endpoint."""
     value = str(url or "").strip().lower()
-    return "apis.iflow.cn" in value and "/v1/chat/completions" in value
+    return "apis.iflow.cn" in value and "/chat/completions" in value

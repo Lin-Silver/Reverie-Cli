@@ -99,6 +99,38 @@ Examples:
         "required": [],
     }
 
+    MODULE_TO_PIP_PACKAGE = {
+        "yaml": "PyYAML",
+        "PIL": "Pillow",
+        "cv2": "opencv-python",
+        "bs4": "beautifulsoup4",
+        "skimage": "scikit-image",
+        "comfy_kitchen": "comfy-kitchen",
+        "onnxruntime_gpu": "onnxruntime-gpu",
+        "google.protobuf": "protobuf",
+    }
+    AUTO_INSTALLABLE_MODULE_ROOTS = {
+        "einops",
+        "numpy",
+        "scipy",
+        "requests",
+        "safetensors",
+        "transformers",
+        "diffusers",
+        "accelerate",
+        "torch",
+        "torchaudio",
+        "torchvision",
+        "xformers",
+        "modelscope",
+        "librosa",
+        "soundfile",
+        "onnx",
+        "onnxruntime",
+    }
+    AUTO_INSTALL_TIMEOUT_SECONDS = 20 * 60
+    AUTO_INSTALL_MAX_ATTEMPTS_DEFAULT = 6
+
     def __init__(self, context: Optional[Dict] = None):
         super().__init__(context)
         self._project_root = Path(context.get("project_root", Path.cwd())) if context else Path.cwd()
@@ -265,29 +297,80 @@ Examples:
             return ToolResult.fail("timeout_seconds must be a positive integer")
 
         run_cwd = self._project_root
-        try:
-            result = subprocess.run(
-                cmd,
-                cwd=str(run_cwd),
-                capture_output=True,
-                text=True,
-                timeout=timeout_seconds,
+        result, run_error = self._run_process(cmd=cmd, cwd=run_cwd, timeout_seconds=timeout_seconds)
+        if run_error:
+            return ToolResult.fail(run_error)
+
+        initial_result = result
+        auto_install_reports: List[Dict[str, Any]] = []
+        retry_performed = False
+        if result.returncode != 0 and self._is_truthy(config.get("auto_install_missing_deps", True), default=True):
+            max_attempts = self._coerce_positive_int(
+                config.get("auto_install_max_missing_deps"),
+                default=self.AUTO_INSTALL_MAX_ATTEMPTS_DEFAULT,
+                max_value=20,
             )
-        except subprocess.TimeoutExpired:
-            return ToolResult.fail(f"Image generation timed out after {timeout_seconds} seconds")
-        except Exception as exc:
-            return ToolResult.fail(f"Failed to launch text-to-image generation: {exc}")
+            attempted_modules = set()
+            for _ in range(max_attempts):
+                missing_module = self._extract_missing_module_name(result.stdout or "", result.stderr or "")
+                if not missing_module:
+                    break
+
+                missing_key = missing_module.strip().lower()
+                if missing_key in attempted_modules:
+                    break
+                attempted_modules.add(missing_key)
+
+                install_report = self._install_missing_module(
+                    python_exe=python_exe,
+                    module_name=missing_module,
+                )
+                auto_install_reports.append(install_report)
+                if not install_report.get("installed"):
+                    break
+
+                retry_performed = True
+                result, run_error = self._run_process(
+                    cmd=cmd,
+                    cwd=run_cwd,
+                    timeout_seconds=timeout_seconds,
+                )
+                if run_error:
+                    return ToolResult.fail(run_error)
+                if result.returncode == 0:
+                    break
 
         saved_images = self._parse_saved_images(result.stdout or "")
-        output_lines = [
+        preface_lines: List[str] = []
+        if auto_install_reports:
+            for report in auto_install_reports:
+                pkg = report.get("package") or "<unknown>"
+                mod = report.get("module") or "<unknown>"
+                status = "success" if report.get("installed") else "failed"
+                preface_lines.append(f"Auto-install missing module: {mod} -> {pkg} ({status})")
+        if retry_performed and initial_result is not None:
+            preface_lines.append(f"Initial command exit code: {initial_result.returncode}")
+
+        output_lines = preface_lines + [
             f"Command exit code: {result.returncode}",
             f"Model display name: {model_display_name}",
             f"Model path: {model_path}",
             f"Output target: {output_path}",
         ]
+
         if saved_images:
             output_lines.append("Generated images:")
             output_lines.extend(f"- {p}" for p in saved_images)
+        if auto_install_reports:
+            output_lines.append("\n--- AUTO INSTALL ---")
+            for idx, report in enumerate(auto_install_reports, start=1):
+                module_name = report.get("module") or "<unknown>"
+                package_name = report.get("package") or "<unknown>"
+                status = "success" if report.get("installed") else "failed"
+                output_lines.append(f"[{idx}] {module_name} -> {package_name} ({status})")
+                log_text = str(report.get("log", "") or "").strip()
+                if log_text:
+                    output_lines.append(log_text)
         if result.stdout:
             output_lines.append("\n--- STDOUT ---")
             output_lines.append(result.stdout.strip())
@@ -556,6 +639,112 @@ Examples:
         if not match:
             return None
         return match.group(1).strip() or None
+
+    def _run_process(
+        self,
+        cmd: List[str],
+        cwd: Path,
+        timeout_seconds: int,
+    ) -> tuple[Optional[subprocess.CompletedProcess[str]], Optional[str]]:
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=str(cwd),
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+            )
+            return result, None
+        except subprocess.TimeoutExpired:
+            return None, f"Image generation timed out after {timeout_seconds} seconds"
+        except Exception as exc:
+            return None, f"Failed to launch text-to-image generation: {exc}"
+
+    def _install_missing_module(self, python_exe: Path, module_name: str) -> Dict[str, Any]:
+        package_name = self._resolve_package_for_module(module_name)
+        if not package_name:
+            return {
+                "attempted": False,
+                "installed": False,
+                "module": module_name,
+                "package": "",
+                "log": f"Cannot auto-install unknown module '{module_name}'.",
+            }
+
+        cmd = [
+            str(python_exe),
+            "-m",
+            "pip",
+            "install",
+            "--upgrade",
+            "--disable-pip-version-check",
+            package_name,
+        ]
+        result, error = self._run_process(
+            cmd=cmd,
+            cwd=self._project_root,
+            timeout_seconds=self.AUTO_INSTALL_TIMEOUT_SECONDS,
+        )
+        if error:
+            return {
+                "attempted": True,
+                "installed": False,
+                "module": module_name,
+                "package": package_name,
+                "log": error,
+            }
+
+        install_log = ""
+        if result and result.stdout:
+            install_log += result.stdout.strip()
+        if result and result.stderr:
+            install_log += ("\n" if install_log else "") + result.stderr.strip()
+
+        return {
+            "attempted": True,
+            "installed": bool(result and result.returncode == 0),
+            "module": module_name,
+            "package": package_name,
+            "log": install_log,
+        }
+
+    def _resolve_package_for_module(self, module_name: str) -> Optional[str]:
+        raw = str(module_name or "").strip()
+        if not raw:
+            return None
+
+        if raw in self.MODULE_TO_PIP_PACKAGE:
+            return self.MODULE_TO_PIP_PACKAGE[raw]
+
+        root = raw.split(".", 1)[0].strip()
+        if not root:
+            return None
+
+        if root in self.MODULE_TO_PIP_PACKAGE:
+            return self.MODULE_TO_PIP_PACKAGE[root]
+
+        if root in self.AUTO_INSTALLABLE_MODULE_ROOTS:
+            return root
+
+        return None
+
+    @staticmethod
+    def _is_truthy(value: Any, default: bool = True) -> bool:
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() not in {"0", "false", "no", "off"}
+
+    @staticmethod
+    def _coerce_positive_int(value: Any, default: int, max_value: int) -> int:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            parsed = default
+        if parsed <= 0:
+            parsed = default
+        return min(parsed, max_value)
 
     @staticmethod
     def _parse_saved_images(stdout: str) -> List[str]:

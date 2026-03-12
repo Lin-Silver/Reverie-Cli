@@ -7,6 +7,47 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
+def _iter_sse_data_strings(response: requests.Response):
+    """Yield SSE `data:` payloads from a streaming HTTP response."""
+    for line in response.iter_lines(decode_unicode=True):
+        if not line:
+            continue
+        if not line.startswith("data:"):
+            continue
+        data_str = line[5:].lstrip()
+        if not data_str or data_str == "[DONE]":
+            if data_str == "[DONE]":
+                break
+            continue
+        yield data_str
+
+
+def _collect_geminicli_summary_text(response: requests.Response) -> str:
+    """Collect assistant text from Gemini CLI SSE output."""
+    from ..geminicli import parse_geminicli_sse_event
+
+    parts = []
+    for data_str in _iter_sse_data_strings(response):
+        for event in parse_geminicli_sse_event(data_str):
+            if str(event.get("type", "")).strip().lower() == "content":
+                parts.append(str(event.get("text", "") or ""))
+    return "".join(parts).strip()
+
+
+def _collect_codex_summary_text(response: requests.Response) -> str:
+    """Collect assistant text from Codex SSE output."""
+    from ..codex import parse_codex_sse_event
+
+    parts = []
+    parser_state = {}
+    for data_str in _iter_sse_data_strings(response):
+        events, parser_state = parse_codex_sse_event(data_str, parser_state)
+        for event in events:
+            if str(event.get("type", "")).strip().lower() == "content":
+                parts.append(str(event.get("text", "") or ""))
+    return "".join(parts).strip()
+
 def validate_payload_for_compression(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     Validate and sanitize payload for context compression API calls.
@@ -182,7 +223,7 @@ class ContextCompressor:
             client: Client object (for openai-sdk and anthropic providers)
             model: Model name
             session_id: Session ID for checkpointing
-            provider: Provider type (openai-sdk, request, anthropic)
+            provider: Provider type (openai-sdk, request, anthropic, gemini-cli, codex)
             base_url: Base URL for request provider
             api_key: API key for request provider
         """
@@ -292,8 +333,84 @@ class ContextCompressor:
                 
                 response = client.messages.create(**kwargs)
                 summary = response.content[0].text
+            elif provider == "gemini-cli":
+                from ..geminicli import (
+                    build_geminicli_request_payload,
+                    detect_geminicli_cli_credentials,
+                    get_geminicli_request_headers,
+                    infer_geminicli_project_id,
+                    resolve_geminicli_request_url,
+                )
+
+                cred = detect_geminicli_cli_credentials(refresh_if_needed=True)
+                access_token = str(cred.get("api_key", "") or api_key or "").strip()
+                if not access_token:
+                    return messages
+
+                project_root = self.cache_dir.parent.parent
+                project_id = infer_geminicli_project_id(project_root)
+                if not project_id:
+                    return messages
+
+                payload = build_geminicli_request_payload(
+                    model_name=model,
+                    messages=prompt,
+                    tools=None,
+                    project_id=project_id,
+                )
+                headers = get_geminicli_request_headers(
+                    model_id=model,
+                    access_token=access_token,
+                    stream=True,
+                )
+                response = requests.post(
+                    resolve_geminicli_request_url(base_url, "", stream=True),
+                    headers=headers,
+                    json=payload,
+                    stream=True,
+                    timeout=120,
+                )
+                response.raise_for_status()
+                summary = _collect_geminicli_summary_text(response)
+            elif provider == "codex":
+                from ..codex import (
+                    build_codex_request_payload,
+                    detect_codex_cli_credentials,
+                    get_codex_request_headers,
+                    resolve_codex_request_url,
+                )
+
+                cred = detect_codex_cli_credentials()
+                access_token = str(cred.get("api_key", "") or api_key or "").strip()
+                if not access_token:
+                    return messages
+
+                payload = build_codex_request_payload(
+                    model_name=model,
+                    messages=prompt,
+                    tools=None,
+                    stream=True,
+                )
+                headers = get_codex_request_headers(
+                    api_key=access_token,
+                    account_id=str(cred.get("account_id", "")).strip(),
+                    auth_mode=str(cred.get("auth_mode", "")).strip(),
+                    stream=True,
+                )
+                response = requests.post(
+                    resolve_codex_request_url(base_url, ""),
+                    headers=headers,
+                    json=payload,
+                    stream=True,
+                    timeout=120,
+                )
+                response.raise_for_status()
+                summary = _collect_codex_summary_text(response)
             else:
                 raise ValueError(f"Unknown provider: {provider}")
+
+            if not str(summary or "").strip():
+                return messages
             
             # Construct new history
             summary_message = {

@@ -8,7 +8,14 @@ The AI Agent that orchestrates tool usage and conversation:
 - THINKING_START_MARKER, THINKING_END_MARKER: Markers for thinking content
 """
 
-from .agent import ReverieAgent, THINKING_START_MARKER, THINKING_END_MARKER
+from .agent import (
+    ReverieAgent,
+    THINKING_START_MARKER,
+    THINKING_END_MARKER,
+    STREAM_EVENT_MARKER,
+    encode_stream_event,
+    decode_stream_event,
+)
 from .system_prompt import build_system_prompt, get_tool_definitions
 from .tool_executor import ToolExecutor
 
@@ -16,6 +23,9 @@ __all__ = [
     'ReverieAgent',
     'THINKING_START_MARKER',
     'THINKING_END_MARKER',
+    'STREAM_EVENT_MARKER',
+    'encode_stream_event',
+    'decode_stream_event',
     'build_system_prompt',
     'get_tool_definitions',
     'ToolExecutor',

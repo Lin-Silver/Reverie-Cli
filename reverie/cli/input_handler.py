@@ -13,34 +13,18 @@ from typing import List, Optional, Tuple, Callable
 import sys
 
 from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
 from rich.text import Text
 from rich.prompt import Prompt
+from rich import box
 
+from .help_catalog import build_command_completion_map
 from .theme import THEME, DECO
 
 
 # Available commands with descriptions
-COMMANDS = {
-    '/help': 'Show available commands',
-    '/model': 'List and select models',
-    '/iflow': 'iFlow CLI status and iFlow model selection',
-    '/qwencode': 'Qwen Code CLI status and Qwen Code model selection',
-    '/mode': 'Switch modes quickly',
-    '/status': 'Show current status',
-    '/search': 'Search the web (usage: /search <query>)',
-    '/sessions': 'Manage sessions',
-    '/history': 'View conversation history',
-    '/clear': 'Clear the screen',
-    '/index': 'Re-index the codebase',
-    '/setting': 'Interactive settings menu',
-    '/tti': 'Text-to-image: /tti models, /tti add, or /tti <prompt>',
-    '/gdd': 'Create or view the GDD',
-    '/assets': 'List game assets',
-    '/rules': 'Manage custom rules',
-    '/tools': 'List available tools',
-    '/exit': 'Exit Reverie',
-    '/quit': 'Exit Reverie',
-}
+COMMANDS = build_command_completion_map()
 
 
 class InputHandler:
@@ -55,6 +39,14 @@ class InputHandler:
         self.history_index = 0
         self.theme = THEME
         self.deco = DECO
+
+    def _console_width(self) -> int:
+        """Best-effort terminal width."""
+        try:
+            width = int(getattr(self.console.size, "width", 0) or self.console.width or 0)
+        except Exception:
+            width = 0
+        return max(width, 60)
     
     def _render_prompt(self, prompt_text: str, is_continuation: bool = False) -> None:
         """Render the dreamy themed prompt"""
@@ -171,8 +163,8 @@ class InputHandler:
                 return None
         
         result = '\n'.join(lines)
-        
-        result = result.replace('\n', '')
+        if not in_multiline and len(lines) <= 1:
+            result = result.replace('\n', '')
         
         if result.strip():
             self.history.append(result)
@@ -206,21 +198,40 @@ class InputHandler:
         """
         if not completions:
             return None
-        
-        self.console.print(
-            f"\n[{self.theme.PURPLE_SOFT}]{self.deco.SPARKLE} Available commands:[/{self.theme.PURPLE_SOFT}]"
+
+        compact = self._console_width() < 96
+        table = Table(
+            show_header=False,
+            box=box.SIMPLE_HEAVY if not compact else box.SIMPLE,
+            border_style=self.theme.BORDER_SUBTLE,
+            pad_edge=False,
+            expand=True,
         )
-        
-        for i, (cmd, desc) in enumerate(completions, 1):
-            colors = [self.theme.PINK_SOFT, self.theme.PURPLE_SOFT, self.theme.BLUE_SOFT]
-            color = colors[i % len(colors)]
-            
-            self.console.print(
-                f"  [{color}]{self.deco.CHEVRON_RIGHT}[/{color}] "
-                f"[bold {self.theme.BLUE_SOFT}]{cmd}[/bold {self.theme.BLUE_SOFT}]  "
-                f"[{self.theme.TEXT_DIM}]{desc}[/{self.theme.TEXT_DIM}]"
+        table.add_column(style=f"bold {self.theme.BLUE_SOFT}", no_wrap=True)
+        if not compact:
+            table.add_column(style=self.theme.TEXT_DIM)
+
+        for cmd, desc in completions[:10]:
+            if compact:
+                table.add_row(cmd)
+            else:
+                table.add_row(cmd, desc)
+
+        footer = f"[{self.theme.TEXT_DIM}]Keep typing to narrow the list.[/{self.theme.TEXT_DIM}]"
+        if len(completions) > 10:
+            footer += f"\n[{self.theme.TEXT_DIM}]Showing first 10 of {len(completions)} matches.[/{self.theme.TEXT_DIM}]"
+
+        self.console.print()
+        self.console.print(
+            Panel(
+                table,
+                title=f"[bold {self.theme.PURPLE_SOFT}]{self.deco.SPARKLE} Command Matches[/bold {self.theme.PURPLE_SOFT}]",
+                subtitle=footer,
+                border_style=self.theme.BORDER_PRIMARY,
+                box=box.ROUNDED,
+                padding=(0, 1),
             )
-        
+        )
         self.console.print()
         return None
     

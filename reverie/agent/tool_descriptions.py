@@ -104,12 +104,59 @@ context_management(action="restore", checkpoint_id="checkpoint_123")
 """
 
 
+def get_web_search_description() -> str:
+    """Description for enhanced web search tool"""
+    return """
+## Web Search Tool (web_search)
+
+Search the web with resilient fallback and optional page extraction.
+
+**Minimal call (preferred)**:
+```
+web_search(query="python contextvars tutorial")
+```
+
+**Key parameters**:
+- `query` (required): Search text
+- `max_results` (optional): Result count (default 5, max 12)
+- `fetch_content` (optional): Fetch readable content from results (default true)
+- `include_domains` / `exclude_domains` (optional): Domain filters
+- `recency` (optional): One of `d`, `w`, `m`, `y` (DuckDuckGo recency hint)
+- `request_timeout` / `max_retries` / `fetch_workers` (optional): Network robustness and concurrency
+- `max_content_chars` (optional): Per-page output cap
+- `output_format` (optional): `text` or `markdown`
+
+**Best usage pattern**:
+1. Start with minimal call (`query` only)
+2. Add filters only when needed
+3. Use domain include filters for docs/release-note queries
+4. Keep `max_results` small for focused retrieval
+"""
+
+
+def get_tool_calling_reliability_notes() -> str:
+    """General notes to reduce tool call errors."""
+    return """
+## Tool Calling Reliability Notes
+
+To reduce avoidable tool failures:
+- Use exact schema key names when possible.
+- Prefer flat argument objects (avoid wrapping inside `args` / `parameters`).
+- Start with required parameters only, then add optional ones.
+- For numeric/boolean values, provide native types when possible (`5`, `true`) instead of quoted strings.
+
+The runtime now auto-normalizes common variants (case-insensitive keys, common aliases, simple type coercion), but canonical key names remain the most reliable.
+"""
+
+
 def get_all_tool_descriptions() -> str:
     """Get all tool descriptions combined"""
     return "\n".join([
+        get_web_search_description(),
         get_vision_tool_description(),
         get_token_counter_description(),
-        get_context_management_description()
+        get_context_management_description(),
+        get_tool_calling_reliability_notes(),
     ])
 
 
@@ -125,9 +172,11 @@ def get_tool_descriptions_for_mode(mode: str) -> str:
     """
     # All modes get these core tools
     descriptions = [
+        get_web_search_description(),
         get_vision_tool_description(),
         get_token_counter_description(),
-        get_context_management_description()
+        get_context_management_description(),
+        get_tool_calling_reliability_notes(),
     ]
     
     return "\n".join(descriptions)

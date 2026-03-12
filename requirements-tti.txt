@@ -3,73 +3,74 @@
 # Install only when you plan to run local TTI generation:
 #   pip install -r requirements-tti.txt
 
---extra-index-url https://download.pytorch.org/whl/cu130
---extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/ # https://github.com/microsoft/onnxruntime/issues/21684
+--extra-index-url https://download.pytorch.org/whl/cu130  
+--extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/   # https://github.com/microsoft/onnxruntime/issues/21684  
 
-accelerate==1.11.0
-certifi==2025.10.5
-charset-normalizer==3.4.4
-colorama==0.4.6
-diffusers==0.35.2
-filelock==3.20.0
-fsspec==2024.2.0
-huggingface-hub==0.36.0
-idna==3.11
-importlib_metadata==8.7.0
-Jinja2==3.1.6
-MarkupSafe==2.1.5
-mpmath==1.3.0
-networkx==3.4.2
-numpy==1.26.4
-packaging==24.1
-pillow==12.0.0
-psutil==7.1.2
-PyYAML==6.0.3
-regex==2025.10.23
-requests==2.32.5
-safetensors==0.6.2
-scipy==1.13.1
-soundfile==0.12.1
-sympy==1.13.1
-torch
-torchaudio
-torchvision
-tqdm==4.67.1
-transformers==4.46.3
-typing_extensions==4.15.0
-urllib3==2.5.0
-zipp==3.23.0
-hyperpyyaml
-modelscope
-conformer==0.3.2
-deepspeed==0.15.1; sys_platform == 'linux'
-fastapi==0.115.6
-fastapi-cli==0.0.4
-gdown==5.1.0
-grpcio>=1.78.0
-grpcio-tools==1.57.0
-hydra-core==1.3.2
-inflect==7.3.1
-librosa==0.10.2
-lightning==2.2.4
-matplotlib==3.7.5
-omegaconf==2.3.0
-onnx==1.16.0
-onnxruntime==1.18.0; sys_platform == 'darwin' or sys_platform == 'win32'
-onnxruntime-gpu==1.18.0; sys_platform == 'linux'
-openai-whisper
-protobuf==4.25
-pyarrow==18.1.0
-pydantic==2.7.0
-pyworld==0.3.4
-rich==13.7.1
-tensorboard==2.14.0
-tensorrt-cu12==10.0.1; sys_platform == 'linux'
-tensorrt-cu12-bindings==10.0.1; sys_platform == 'linux'
-tensorrt-cu12-libs==10.0.1; sys_platform == 'linux'
-uvicorn==0.30.0
-wetext==0.0.4
-wget==3.2
-torchcodec
-torchsde
-comfy-kitchen
+accelerate  # Original: accelerate==1.11.0
+certifi  # Original: certifi==2025.10.5
+charset-normalizer  # Original: charset-normalizer==3.4.4
+colorama  # Original: colorama==0.4.6
+diffusers  # Original: diffusers==0.35.2
+einops  # Original: einops>=0.7.0
+filelock  # Original: filelock==3.20.0
+fsspec  # Original: fsspec==2024.2.0
+huggingface-hub  # Original: huggingface-hub==0.36.0
+idna  # Original: idna==3.11
+importlib_metadata  # Original: importlib_metadata==8.7.0
+Jinja2  # Original: Jinja2==3.1.6
+MarkupSafe  # Original: MarkupSafe==2.1.5
+mpmath  # Original: mpmath==1.3.0
+networkx  # Original: networkx==3.4.2
+numpy  # Original: numpy==1.26.4
+packaging  # Original: packaging==24.1
+pillow  # Original: pillow==12.0.0
+psutil  # Original: psutil==7.1.2
+PyYAML  # Original: PyYAML==6.0.3
+regex  # Original: regex==2025.10.23
+requests  # Original: requests==2.32.5
+safetensors  # Original: safetensors==0.6.2
+scipy  # Original: scipy==1.13.1
+soundfile  # Original: soundfile==0.12.1
+sympy  # Original: sympy==1.13.1
+torch  # Original: torch (no version constraint)
+torchaudio  # Original: torchaudio (no version constraint)
+torchvision  # Original: torchvision (no version constraint)
+tqdm  # Original: tqdm==4.67.1
+transformers  # Original: transformers==4.46.3
+typing_extensions  # Original: typing_extensions==4.15.0
+urllib3  # Original: urllib3==2.5.0
+zipp  # Original: zipp==3.23.0
+hyperpyyaml  # Original: hyperpyyaml (no version constraint)
+modelscope  # Original: modelscope (no version constraint)
+conformer  # Original: conformer==0.3.2
+deepspeed; sys_platform == 'linux'  # Original: deepspeed==0.15.1; sys_platform == 'linux'
+fastapi  # Original: fastapi==0.115.6
+fastapi-cli  # Original: fastapi-cli==0.0.4
+gdown  # Original: gdown==5.1.0
+grpcio  # Original: grpcio>=1.78.0
+grpcio-tools  # Original: grpcio-tools==1.57.0
+hydra-core  # Original: hydra-core==1.3.2
+inflect  # Original: inflect==7.3.1
+librosa  # Original: librosa==0.10.2
+lightning  # Original: lightning==2.2.4
+matplotlib  # Original: matplotlib==3.7.5
+omegaconf  # Original: omegaconf==2.3.0
+onnx  # Original: onnx==1.16.0
+onnxruntime; sys_platform == 'darwin' or sys_platform == 'win32'  # Original: onnxruntime==1.18.0; sys_platform == 'darwin' or sys_platform == 'win32'
+onnxruntime-gpu; sys_platform == 'linux'  # Original: onnxruntime-gpu==1.18.0; sys_platform == 'linux'
+openai-whisper  # Original: openai-whisper (no version constraint)
+protobuf  # Original: protobuf==4.25
+pyarrow  # Original: pyarrow==18.1.0
+pydantic  # Original: pydantic==2.7.0
+pyworld  # Original: pyworld==0.3.4
+rich  # Original: rich==13.7.1
+tensorboard  # Original: tensorboard==2.14.0
+tensorrt-cu12; sys_platform == 'linux'  # Original: tensorrt-cu12==10.0.1; sys_platform == 'linux'
+tensorrt-cu12-bindings; sys_platform == 'linux'  # Original: tensorrt-cu12-bindings==10.0.1; sys_platform == 'linux'
+tensorrt-cu12-libs; sys_platform == 'linux'  # Original: tensorrt-cu12-libs==10.0.1; sys_platform == 'linux'
+uvicorn  # Original: uvicorn==0.30.0
+wetext  # Original: wetext==0.0.4
+wget  # Original: wget==3.2
+torchcodec  # Original: torchcodec (no version constraint)
+torchsde  # Original: torchsde (no version constraint)
+comfy-kitchen  # Original: comfy-kitchen (no version constraint)

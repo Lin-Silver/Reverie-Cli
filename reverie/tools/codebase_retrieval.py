@@ -105,16 +105,40 @@ Examples:
         if self._retriever is None and self.context:
             self._retriever = self.context.get('retriever')
         return self._retriever
+
+    @staticmethod
+    def _normalize_string(value: Any, default: str = "") -> str:
+        if value is None:
+            return default
+        text = str(value).strip()
+        return text or default
+
+    @staticmethod
+    def _normalize_bool(value: Any, default: bool) -> bool:
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _normalize_int(value: Any, default: int) -> int:
+        if value is None:
+            return default
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
     
     def execute(self, **kwargs) -> ToolResult:
-        query_type = kwargs.get('query_type')
-        query = kwargs.get('query', '')
-        include_source = kwargs.get('include_source', True)
-        include_dependencies = kwargs.get('include_dependencies', True)
-        max_depth = kwargs.get('max_depth', 2)
-        filter_kind = kwargs.get('filter_kind', 'all')
-        direction = kwargs.get('direction', 'outgoing')
-        limit = kwargs.get('limit', 20)
+        query_type = self._normalize_string(kwargs.get('query_type')).lower()
+        query = self._normalize_string(kwargs.get('query', ''))
+        include_source = self._normalize_bool(kwargs.get('include_source', True), True)
+        include_dependencies = self._normalize_bool(kwargs.get('include_dependencies', True), True)
+        max_depth = self._normalize_int(kwargs.get('max_depth', 2), 2)
+        filter_kind = self._normalize_string(kwargs.get('filter_kind', 'all'), 'all').lower()
+        direction = self._normalize_string(kwargs.get('direction', 'outgoing'), 'outgoing').lower()
+        limit = self._normalize_int(kwargs.get('limit', 20), 20)
         
         retriever = self._get_retriever()
         

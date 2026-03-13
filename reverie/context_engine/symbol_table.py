@@ -272,7 +272,8 @@ class SymbolTable:
     
     def find_by_name(self, name: str) -> List[Symbol]:
         """Find all symbols with a given simple name"""
-        qnames = self._name_index.get(name, set())
+        lookup_name = str(name or "")
+        qnames = self._name_index.get(lookup_name, set())
         return [self._symbols[qn] for qn in qnames if qn in self._symbols]
     
     def find_by_pattern(self, pattern: str, limit: int = 999999) -> List[Symbol]:
@@ -281,10 +282,15 @@ class SymbolTable:
         Used for fuzzy search.
         """
         import fnmatch
+
+        pattern_lower = str(pattern or "").strip().lower()
+        if not pattern_lower:
+            return []
+
         results = []
         
         for qname in self._symbols:
-            if fnmatch.fnmatch(qname.lower(), pattern.lower()):
+            if fnmatch.fnmatch(qname.lower(), pattern_lower):
                 results.append(self._symbols[qname])
                 if len(results) >= limit:
                     break
@@ -294,7 +300,9 @@ class SymbolTable:
     def find_by_prefix(self, prefix: str, limit: int = 999999) -> List[Symbol]:
         """Find symbols with qualified names starting with prefix"""
         results = []
-        prefix_lower = prefix.lower()
+        prefix_lower = str(prefix or "").strip().lower()
+        if not prefix_lower:
+            return results
         
         for qname in self._symbols:
             if qname.lower().startswith(prefix_lower):
@@ -387,7 +395,10 @@ class SymbolTable:
         import fnmatch
         
         candidates = []
-        query_lower = query.lower()
+        query_lower = str(query or "").strip().lower()
+        if not query_lower:
+            return []
+        file_pattern_text = str(file_pattern).strip() if file_pattern is not None else None
         
         for qname, symbol in self._symbols.items():
             # Kind filter
@@ -395,7 +406,7 @@ class SymbolTable:
                 continue
             
             # File pattern filter
-            if file_pattern and not fnmatch.fnmatch(symbol.file_path, file_pattern):
+            if file_pattern_text and not fnmatch.fnmatch(symbol.file_path, file_pattern_text):
                 continue
             
             # Query matching
@@ -416,7 +427,7 @@ class SymbolTable:
             elif query_lower in qname_lower:
                 score = 40
             # Wildcard match
-            elif '*' in query and fnmatch.fnmatch(qname_lower, query_lower):
+            elif '*' in query_lower and fnmatch.fnmatch(qname_lower, query_lower):
                 score = 30
             else:
                 continue

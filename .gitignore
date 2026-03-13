@@ -2,11 +2,13 @@
 build/
 dist/
 search-mcp/
-Comfy/
+_embedded_tmp/
+add-on/
 
 reverie_cli.egg-info/
 *.exe
 *.spec
+*.0
 
 # 忽略 Python 缓存
 __pycache__/

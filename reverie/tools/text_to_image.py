@@ -130,6 +130,8 @@ Examples:
     }
     AUTO_INSTALL_TIMEOUT_SECONDS = 20 * 60
     AUTO_INSTALL_MAX_ATTEMPTS_DEFAULT = 6
+    MIN_TORCH_SEED = -(1 << 63)
+    MAX_TORCH_SEED = (1 << 64) - 1
 
     def __init__(self, context: Optional[Dict] = None):
         super().__init__(context)
@@ -208,6 +210,10 @@ Examples:
                 seed = int(seed)
             except (TypeError, ValueError):
                 return ToolResult.fail("seed must be an integer")
+            if seed < self.MIN_TORCH_SEED or seed > self.MAX_TORCH_SEED:
+                return ToolResult.fail(
+                    f"seed must be between {self.MIN_TORCH_SEED} and {self.MAX_TORCH_SEED}"
+                )
 
         if width <= 0 or height <= 0:
             return ToolResult.fail("width and height must be positive integers")

@@ -587,8 +587,7 @@ class StoryDesignTool(BaseTool):
 
     def _resolve_path(self, raw: str) -> Path:
         """Resolve path relative to project root"""
-        path = Path(raw)
-        return path if path.is_absolute() else (self.project_root / path)
+        return self.resolve_workspace_path(raw, purpose="resolve story path")
 
     def get_execution_message(self, **kwargs) -> str:
         action = kwargs.get("action", "unknown")

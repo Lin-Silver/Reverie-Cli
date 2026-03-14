@@ -83,9 +83,10 @@ class GameBalanceAnalyzerTool(BaseTool):
         if not data_source:
             return ToolResult.fail("data_source is required")
 
-        path = Path(data_source)
-        if not path.is_absolute():
-            path = self.project_root / path
+        try:
+            path = self.resolve_workspace_path(data_source, purpose="load balance data")
+        except Exception as exc:
+            return ToolResult.fail(str(exc))
 
         try:
             rows = load_table_data(path, data_key=data_key)

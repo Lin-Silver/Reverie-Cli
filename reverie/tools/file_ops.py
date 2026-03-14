@@ -25,7 +25,7 @@ class FileOpsTool(BaseTool):
     
     name = "file_ops"
     
-    description = """Perform file system operations.
+    description = """Perform file system operations inside the active workspace only.
 
 Operations:
 - read: Read entire file content
@@ -34,6 +34,11 @@ Operations:
 - info: Get file metadata (size, modified time, etc.)
 - mkdir: Create directory
 - delete: Delete file (requires confirmation in most cases)
+
+Security:
+- All paths are confined to the current Reverie workspace
+- Directory deletion is disabled
+- Paths outside the workspace are blocked
 
 Examples:
 - Read file: {"operation": "read", "path": "src/config.json"}
@@ -93,12 +98,7 @@ Examples:
 
     def _resolve_path(self, path: str) -> Path:
         """Resolve path relative to project root"""
-        p = Path(path)
-        if p.is_absolute():
-            return p
-        if self._project_root:
-            return Path(self._project_root) / p
-        return p.resolve()
+        return self.resolve_workspace_path(path, purpose="access path")
     
     def execute(self, **kwargs) -> ToolResult:
         operation = kwargs.get('operation')
@@ -271,7 +271,7 @@ Examples:
         
         if file_path.is_dir():
             return ToolResult.fail(
-                "Directory deletion not supported for safety. Use command_exec with rmdir if needed."
+                "Directory deletion is disabled for safety. Reverie will not delete directories via AI tools."
             )
         
         file_path.unlink()

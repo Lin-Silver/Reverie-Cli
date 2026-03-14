@@ -316,7 +316,7 @@ class GameAssetManagerTool(BaseTool):
 
     def _import_asset(self, source_path: str, asset_dir: Path, target_name: Optional[str], asset_type: str) -> ToolResult:
         """Import new asset into project"""
-        source = Path(source_path)
+        source = self._resolve_path(source_path)
         if not source.exists():
             return ToolResult.fail(f"Source file not found: {source_path}")
 
@@ -581,8 +581,7 @@ class GameAssetManagerTool(BaseTool):
 
     def _resolve_path(self, raw: str) -> Path:
         """Resolve path relative to project root"""
-        path = Path(raw)
-        return path if path.is_absolute() else (self.project_root / path)
+        return self.resolve_workspace_path(raw, purpose="resolve asset path")
 
     def get_execution_message(self, **kwargs) -> str:
         action = kwargs.get("action", "unknown")

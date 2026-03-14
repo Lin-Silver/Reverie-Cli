@@ -287,5 +287,4 @@ class GameConfigEditorTool(BaseTool):
         return base
 
     def _resolve_path(self, raw: str) -> Path:
-        path = Path(raw)
-        return path if path.is_absolute() else (self.project_root / path)
+        return self.resolve_workspace_path(raw, purpose="resolve config path")

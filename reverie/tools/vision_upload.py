@@ -30,13 +30,13 @@ class VisionUploadTool(BaseTool):
             "type": "function",
             "function": {
                 "name": "vision_upload",
-                "description": "Upload and encode visual files (images) for AI model processing. Use this when the user wants the AI to analyze, describe, or process image files. Supports PNG, JPG, GIF, BMP, WEBP, TIFF formats.",
+                "description": "Upload and encode visual files (images) from the active workspace for AI model processing. Use this when the user wants the AI to analyze, describe, or process image files. Supports PNG, JPG, GIF, BMP, WEBP, TIFF formats.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "file_path": {
                             "type": "string",
-                            "description": "Path to the image file (relative to project root or absolute path)"
+                            "description": "Path to the image file inside the active workspace"
                         },
                         "description": {
                             "type": "string",
@@ -61,9 +61,7 @@ class VisionUploadTool(BaseTool):
         """
         try:
             # Resolve path
-            path = Path(file_path)
-            if not path.is_absolute():
-                path = self.project_root / path
+            path = self.resolve_workspace_path(file_path, purpose="upload image")
             
             # Check if file exists
             if not path.exists():

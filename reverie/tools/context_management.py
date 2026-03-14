@@ -260,12 +260,7 @@ class ContextManagementTool(BaseTool):
 
     def _resolve_path(self, raw_path: str) -> Optional[Path]:
         try:
-            path = Path(raw_path)
-            if not path.is_absolute():
-                project_root = self.context.get("project_root")
-                if project_root:
-                    path = Path(project_root) / path
-            return path
+            return self.resolve_workspace_path(raw_path, purpose="resolve context-management path")
         except Exception:
             return None
     
@@ -386,8 +381,16 @@ class ContextManagementTool(BaseTool):
         
         # Find checkpoint file
         checkpoint_path = Path(checkpoint_id)
-        if not checkpoint_path.is_absolute():
-            checkpoint_path = compressor.cache_dir / checkpoint_id
+        if checkpoint_path.is_absolute():
+            checkpoint_path = self.ensure_workspace_path(
+                checkpoint_path,
+                purpose="restore checkpoint",
+            )
+        else:
+            checkpoint_path = self.ensure_workspace_path(
+                compressor.cache_dir / checkpoint_id,
+                purpose="restore checkpoint",
+            )
         
         if not checkpoint_path.exists():
             return ToolResult.fail(f"Checkpoint not found: {checkpoint_id}")

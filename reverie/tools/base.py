@@ -8,6 +8,15 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Dict, Any, Optional, List
 from enum import Enum
+from pathlib import Path
+
+from ..security_utils import (
+    WorkspaceSecurityError,
+    append_command_audit,
+    ensure_workspace_path,
+    get_workspace_root,
+    resolve_workspace_path,
+)
 
 
 class ToolResultStatus(Enum):
@@ -85,6 +94,37 @@ class BaseTool(ABC):
         - config: Configuration dict
         """
         self.context = context or {}
+
+    def get_project_root(self) -> Path:
+        """Return the canonical workspace root for this tool."""
+        return get_workspace_root(self.context.get("project_root"))
+
+    def resolve_workspace_path(self, raw_path: Any, *, purpose: str = "access") -> Path:
+        """Resolve user-provided paths relative to the active workspace root."""
+        return resolve_workspace_path(
+            raw_path,
+            self.get_project_root(),
+            purpose=f"{self.name} {purpose}",
+        )
+
+    def ensure_workspace_path(self, path: Any, *, purpose: str = "access") -> Path:
+        """Validate that an existing path stays inside the active workspace root."""
+        return ensure_workspace_path(
+            path,
+            self.get_project_root(),
+            purpose=f"{self.name} {purpose}",
+        )
+
+    def audit_command_event(self, event: Dict[str, Any]) -> None:
+        """Persist a workspace-local command/security audit event."""
+        append_command_audit(self.get_project_root(), {"tool": self.name, **(event or {})})
+
+    def format_workspace_violation(self, action: str, path_value: Any) -> str:
+        """Return a consistent workspace-boundary rejection message."""
+        return (
+            f"Blocked {action}: '{path_value}' is outside the active workspace "
+            f"'{self.get_project_root()}'."
+        )
     
     @abstractmethod
     def execute(self, **kwargs) -> ToolResult:

@@ -1,3 +1,16 @@
+## Reverie CLI v2.1.2 - Workspace Sandbox & Command Audit
+
+**Release Date:** 2026-03-14
+
+### Highlights
+* Locked AI file access to the active Reverie workspace: file creation, editing, deletion, config/story/game tools, image upload, and path-based helpers now reject escapes, absolute out-of-workspace paths, and `..` traversal.
+* Rebuilt `command_exec` into a read-only, audited diagnostic surface: arbitrary shells/interpreters are blocked, unsafe control operators are rejected, workspace cwd is enforced, and every allowed/blocked attempt is written to `.reverie/security/command_audit.jsonl`.
+* Hardened archive extraction against zip-slip path escapes and tightened tool-side path validation across asset import/export and checkpoint restore flows.
+* Tightened risky subprocess surfaces for security-first deployments: text-to-image auto dependency installation is disabled by default, unsafe passthrough arguments are blocked, and generation now requires the bundled trusted runtime.
+* Added regression coverage for workspace escape blocking, command audit logging, and malicious archive extraction attempts.
+
+---
+
 ## Reverie CLI v2.1.1 - Command Flow, UX, and Memory Upgrade
 
 **Release Date:** 2026-03-12

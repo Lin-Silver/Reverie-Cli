@@ -29,7 +29,7 @@ class StrReplaceEditorTool(BaseTool):
     
     name = "str_replace_editor"
     
-    description = """Edit files by viewing, creating, or replacing specific text.
+    description = """Edit files inside the active workspace by viewing, creating, or replacing specific text.
 
 Commands:
 - view: View file contents with line numbers
@@ -41,6 +41,7 @@ IMPORTANT:
 - For str_replace, old_str must match EXACTLY (including whitespace)
 - Always use codebase-retrieval first to understand the code before editing
 - The old_str must be unique in the file to avoid ambiguous replacements
+- Paths outside the active workspace are blocked
 
 Examples:
 - View file: {"command": "view", "path": "src/main.py"}
@@ -59,7 +60,7 @@ Examples:
             },
             "path": {
                 "type": "string",
-                "description": "Absolute or relative path to the file"
+                "description": "Workspace-relative path, or an absolute path that still resolves inside the workspace"
             },
             "old_str": {
                 "type": "string",
@@ -108,12 +109,7 @@ Examples:
 
     def _resolve_path(self, path: str) -> Path:
         """Resolve path relative to project root if needed"""
-        p = Path(path)
-        if p.is_absolute():
-            return p
-        if self._project_root:
-            return Path(self._project_root) / p
-        return p.resolve()
+        return self.resolve_workspace_path(path, purpose="access editor path")
     
     def execute(self, **kwargs) -> ToolResult:
         command = kwargs.get('command')

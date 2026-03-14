@@ -7,7 +7,7 @@ class CreateFileTool(BaseTool):
     Tool for creating new files with content.
     """
     name = "create_file"
-    description = """Create a new file with the specified content.
+    description = """Create a new file with the specified content inside the active workspace.
 Use this tool to create new files from scratch, including large files.
 Do NOT use this for editing existing files.
 """
@@ -16,7 +16,7 @@ Do NOT use this for editing existing files.
         "properties": {
             "path": {
                 "type": "string",
-                "description": "Absolute path or path relative to project root"
+                "description": "Workspace-relative path or an absolute path still inside the project root"
             },
             "content": {
                 "type": "string",
@@ -44,10 +44,11 @@ Do NOT use this for editing existing files.
 
         if not path or content is None:
             return ToolResult.fail("Path and content are required")
-            
-        file_path = Path(path)
-        if not file_path.is_absolute() and self._project_root:
-            file_path = Path(self._project_root) / file_path
+
+        try:
+            file_path = self.resolve_workspace_path(path, purpose="create file")
+        except Exception as e:
+            return ToolResult.fail(str(e))
             
         if file_path.exists() and not overwrite:
              return ToolResult.fail(f"File already exists: {file_path}. Set overwrite=True to replace it.")

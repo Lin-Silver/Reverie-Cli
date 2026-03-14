@@ -36,7 +36,7 @@ from .codex import (
 
 
 # Version info
-__version__ = "2.1.1"
+__version__ = "2.1.2"
 
 EXTERNAL_MODEL_SOURCES = ("iflow", "qwencode", "geminicli", "codex")
 SUPPORTED_ACTIVE_MODEL_SOURCES = ("standard",) + EXTERNAL_MODEL_SOURCES
@@ -59,7 +59,7 @@ def default_text_to_image_config() -> Dict[str, Any]:
         "default_scheduler": "normal",
         "default_negative_prompt": "",
         "force_cpu": False,
-        "auto_install_missing_deps": True,
+        "auto_install_missing_deps": False,
         "auto_install_max_missing_deps": 6,
     }
 

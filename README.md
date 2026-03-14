@@ -28,6 +28,12 @@ Reverie is an agentic coding tool that uses a sophisticated Context Engine to un
   - 10+ built-in tools for coding tasks
   - Nexus tool for large-scale projects
 
+- **Workspace-Locked Security Sandbox**:
+  - AI file and path tools are confined to the active project directory
+  - Command execution is limited to audited read-only diagnostics
+  - Blocked/allowed command attempts are recorded in `.reverie/security/command_audit.jsonl`
+  - Archive extraction blocks zip-slip and path traversal attacks
+
 - **Rich CLI Interface**:
   - Modern TUI with keyboard navigation (arrow keys, Enter, Escape)
   - Syntax-highlighted code display

@@ -13,8 +13,10 @@ from pathlib import Path
 import json
 import zipfile
 import hashlib
+import shutil
 
 from .base import BaseTool, ToolResult
+from ..security_utils import ensure_archive_member_path
 
 
 class GameAssetPackerTool(BaseTool):
@@ -213,10 +215,20 @@ class GameAssetPackerTool(BaseTool):
         # Extract files
         extracted_files = []
         with zipfile.ZipFile(archive_path, 'r') as zf:
-            file_list = zf.namelist()
-            for file_name in file_list:
-                zf.extract(file_name, target_dir)
-                extracted_files.append(file_name)
+            for member in zf.infolist():
+                destination = ensure_archive_member_path(
+                    member.filename,
+                    target_dir,
+                    self.project_root,
+                )
+                if member.is_dir():
+                    destination.mkdir(parents=True, exist_ok=True)
+                    continue
+
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                with zf.open(member, "r") as source, destination.open("wb") as target:
+                    shutil.copyfileobj(source, target)
+                extracted_files.append(member.filename)
 
         output = f"Successfully extracted {len(extracted_files)} file(s) to {target_dir}\n"
         output += "Extracted files:\n"
@@ -350,8 +362,7 @@ class GameAssetPackerTool(BaseTool):
 
     def _resolve_path(self, raw: str) -> Path:
         """Resolve path relative to project root"""
-        path = Path(raw)
-        return path if path.is_absolute() else (self.project_root / path)
+        return self.resolve_workspace_path(raw, purpose="resolve asset packer path")
 
     def get_execution_message(self, **kwargs) -> str:
         action = kwargs.get("action", "unknown")

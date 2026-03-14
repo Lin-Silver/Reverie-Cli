@@ -23,6 +23,7 @@ from ..config import (
     resolve_tti_default_display_name,
     sanitize_tti_path,
 )
+from ..security_utils import is_path_within_workspace
 
 
 class TextToImageTool(BaseTool):
@@ -150,6 +151,13 @@ Examples:
         if action != "generate":
             return ToolResult.fail(f"Unsupported action: {action}")
 
+        if kwargs.get("script_path"):
+            return ToolResult.fail("script_path override is disabled in secure mode.")
+        if kwargs.get("extra_args"):
+            return ToolResult.fail("extra_args is disabled in secure mode.")
+        if kwargs.get("extra_options"):
+            return ToolResult.fail("extra_options is disabled in secure mode.")
+
         prompt = kwargs.get("prompt", "").strip()
         if not prompt:
             return ToolResult.fail("Parameter 'prompt' is required for generate action")
@@ -158,11 +166,16 @@ Examples:
         if not config.get("enabled", True):
             return ToolResult.fail("text_to_image is disabled in config.json (text_to_image.enabled=false)")
 
-        script_path = self._resolve_script_path(config=config, script_override=kwargs.get("script_path"))
+        script_path = self._resolve_script_path(config=config, script_override=None)
         if not script_path.exists():
             return ToolResult.fail(
                 f"Text-to-image script not found: {script_path}. "
                 "Please check text_to_image.script_path in config.json or bundled resources."
+            )
+        if not self._is_trusted_runtime_script(script_path):
+            return ToolResult.fail(
+                "text_to_image generation is disabled in secure workspace mode unless Reverie is "
+                "using its bundled immutable runtime resources."
             )
 
         selected_model = self._select_model(
@@ -268,32 +281,6 @@ Examples:
         if use_cpu:
             cmd.append("--cpu")
 
-        extra_options = kwargs.get("extra_options")
-        if extra_options is not None:
-            if not isinstance(extra_options, dict):
-                return ToolResult.fail("extra_options must be an object/dict")
-            for key, value in extra_options.items():
-                if not isinstance(key, str) or not key.strip():
-                    return ToolResult.fail("extra_options keys must be non-empty strings")
-                flag = "--" + key.strip().replace("_", "-")
-                if value is None:
-                    continue
-                if isinstance(value, bool):
-                    if value:
-                        cmd.append(flag)
-                    continue
-                if isinstance(value, list):
-                    for item in value:
-                        cmd.extend([flag, str(item)])
-                    continue
-                cmd.extend([flag, str(value)])
-
-        extra_args = kwargs.get("extra_args")
-        if extra_args is not None:
-            if not isinstance(extra_args, list) or not all(isinstance(arg, str) for arg in extra_args):
-                return ToolResult.fail("extra_args must be an array of strings")
-            cmd.extend(extra_args)
-
         timeout_seconds = kwargs.get("timeout_seconds", 60 * 60)
         try:
             timeout_seconds = int(timeout_seconds)
@@ -307,57 +294,9 @@ Examples:
         if run_error:
             return ToolResult.fail(run_error)
 
-        initial_result = result
         auto_install_reports: List[Dict[str, Any]] = []
-        retry_performed = False
-        if result.returncode != 0 and self._is_truthy(config.get("auto_install_missing_deps", True), default=True):
-            max_attempts = self._coerce_positive_int(
-                config.get("auto_install_max_missing_deps"),
-                default=self.AUTO_INSTALL_MAX_ATTEMPTS_DEFAULT,
-                max_value=20,
-            )
-            attempted_modules = set()
-            for _ in range(max_attempts):
-                missing_module = self._extract_missing_module_name(result.stdout or "", result.stderr or "")
-                if not missing_module:
-                    break
-
-                missing_key = missing_module.strip().lower()
-                if missing_key in attempted_modules:
-                    break
-                attempted_modules.add(missing_key)
-
-                install_report = self._install_missing_module(
-                    python_exe=python_exe,
-                    module_name=missing_module,
-                )
-                auto_install_reports.append(install_report)
-                if not install_report.get("installed"):
-                    break
-
-                retry_performed = True
-                result, run_error = self._run_process(
-                    cmd=cmd,
-                    cwd=run_cwd,
-                    timeout_seconds=timeout_seconds,
-                )
-                if run_error:
-                    return ToolResult.fail(run_error)
-                if result.returncode == 0:
-                    break
-
         saved_images = self._parse_saved_images(result.stdout or "")
-        preface_lines: List[str] = []
-        if auto_install_reports:
-            for report in auto_install_reports:
-                pkg = report.get("package") or "<unknown>"
-                mod = report.get("module") or "<unknown>"
-                status = "success" if report.get("installed") else "failed"
-                preface_lines.append(f"Auto-install missing module: {mod} -> {pkg} ({status})")
-        if retry_performed and initial_result is not None:
-            preface_lines.append(f"Initial command exit code: {initial_result.returncode}")
-
-        output_lines = preface_lines + [
+        output_lines = [
             f"Command exit code: {result.returncode}",
             f"Model display name: {model_display_name}",
             f"Model path: {model_path}",
@@ -616,9 +555,20 @@ Examples:
             )
 
         if out_path.is_absolute() or self._looks_like_absolute_path(normalized):
-            return out_path
+            return self.resolve_workspace_path(out_path, purpose="write generated images")
 
-        return (self._project_root / out_path).resolve()
+        return self.resolve_workspace_path(out_path, purpose="write generated images")
+
+    def _is_trusted_runtime_script(self, script_path: Path) -> bool:
+        bundled_dir = self._get_bundled_comfy_dir()
+        if not bundled_dir:
+            return False
+        bundled_root = bundled_dir.resolve()
+        script_resolved = script_path.resolve()
+        return (
+            script_resolved == bundled_root
+            or bundled_root in script_resolved.parents
+        ) and not is_path_within_workspace(script_resolved, self._project_root)
 
     @staticmethod
     def _looks_like_absolute_path(path_text: str) -> bool:

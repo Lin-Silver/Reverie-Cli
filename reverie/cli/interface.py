@@ -279,7 +279,7 @@ class ReverieInterface:
             "codex": "Codex",
         }
         source_labels = {
-            "standard": "",
+            "standard": "config.json",
             "iflow": "iFlow",
             "qwencode": "Qwen Code",
             "geminicli": "Gemini CLI",

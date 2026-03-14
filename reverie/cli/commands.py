@@ -1153,13 +1153,13 @@ class CommandHandler:
     def _format_model_source_label(self, source: str) -> str:
         """Return a readable model source label."""
         mapping = {
-            "standard": "Standard",
+            "standard": "config.json",
             "iflow": "iFlow",
             "qwencode": "Qwen Code",
             "geminicli": "Gemini CLI",
             "codex": "Codex",
         }
-        return mapping.get(str(source or "").strip().lower(), "Standard")
+        return mapping.get(str(source or "").strip().lower(), "config.json")
 
     def _configure_provider_endpoint(
         self,

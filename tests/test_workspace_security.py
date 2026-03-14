@@ -9,6 +9,8 @@ from unittest.mock import patch
 from rich.console import Console
 
 from reverie.cli.commands import CommandHandler
+from reverie.cli.interface import ReverieInterface
+from reverie.config import Config, ModelConfig
 from reverie.security_utils import purge_workspace_state
 from reverie.tools.command_exec import CommandExecTool
 
@@ -114,6 +116,27 @@ class WorkspaceSecurityTests(unittest.TestCase):
 
         self.assertTrue(handler.handle("/Clean force"))
         self.assertEqual(calls, ["called"])
+
+    def test_standard_model_source_label_uses_config_json(self) -> None:
+        console = Console(file=io.StringIO(), force_terminal=False, width=120)
+        handler = CommandHandler(console, {})
+        self.assertEqual(handler._format_model_source_label("standard"), "config.json")
+
+        interface = ReverieInterface.__new__(ReverieInterface)
+        config = Config(
+            models=[
+                ModelConfig(
+                    model="demo-model",
+                    model_display_name="Demo Model",
+                    base_url="https://example.test/v1",
+                    api_key="test-key",
+                    provider="openai-sdk",
+                )
+            ],
+            active_model_index=0,
+            active_model_source="standard",
+        )
+        self.assertEqual(interface._resolve_provider_label(config), "config.json")
 
 
 if __name__ == "__main__":

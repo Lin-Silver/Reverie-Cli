@@ -50,6 +50,7 @@ class CommandHandler:
             'sessions': self.cmd_sessions,
             'history': self.cmd_history,
             'clear': self.cmd_clear,
+            'clean': self.cmd_clean,
             'index': self.cmd_index,
             'tools': self.cmd_tools,
             'setting': self.cmd_setting,
@@ -3152,6 +3153,98 @@ class CommandHandler:
     def cmd_clear(self, args: str) -> bool:
         """Clear the screen"""
         self.console.clear()
+        return True
+
+    def cmd_clean(self, args: str) -> bool:
+        """Delete current-workspace cache, memory, backups, and audit logs."""
+        raw = args.strip().lower()
+        if raw not in ("", "force", "--force"):
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Usage: /clean or /clean force[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        clean_workspace_state = self.app.get('clean_workspace_state')
+        config_manager = self.app.get('config_manager')
+        if not callable(clean_workspace_state) or not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Workspace clean is not available in the current session.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        workspace_root = getattr(config_manager, 'project_root', None)
+        project_data_dir = getattr(config_manager, 'project_data_dir', None)
+
+        if raw not in ("force", "--force"):
+            self.console.print()
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} This will delete only the current workspace's memories, sessions, snapshots, backups, and command audit logs.[/{self.theme.AMBER_GLOW}]"
+            )
+            if workspace_root:
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Workspace: {escape(str(workspace_root))}[/{self.theme.TEXT_DIM}]"
+                )
+            if project_data_dir:
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Project cache: {escape(str(project_data_dir))}[/{self.theme.TEXT_DIM}]"
+                )
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Workspace config and rules are preserved.[/{self.theme.TEXT_DIM}]"
+            )
+            self.console.print()
+            confirmed = Confirm.ask(
+                f"[{self.theme.CORAL_SOFT}]Run /clean for this workspace?[/{self.theme.CORAL_SOFT}]",
+                default=False,
+            )
+            if not confirmed:
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} Workspace clean cancelled.[/{self.theme.TEXT_DIM}]"
+                )
+                return True
+
+        self.console.print()
+        self.console.print(
+            f"[{self.theme.PURPLE_SOFT}]{self.deco.SPARKLE} Cleaning current workspace state...[/{self.theme.PURPLE_SOFT}]"
+        )
+
+        try:
+            result = clean_workspace_state()
+        except Exception as exc:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Workspace clean failed: {escape(str(exc))}[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        if result.get("success"):
+            deleted = result.get("deleted", []) or []
+            missing = result.get("missing", []) or []
+            session_name = str(result.get("session_name", "") or "").strip()
+
+            self.console.print(
+                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Workspace memory cleared.[/{self.theme.MINT_VIBRANT}]"
+            )
+            if deleted:
+                self.console.print(
+                    f"[{self.theme.TEXT_SECONDARY}]Deleted {len(deleted)} workspace cache target(s).[/{self.theme.TEXT_SECONDARY}]"
+                )
+            if missing:
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Skipped {len(missing)} target(s) that did not exist.[/{self.theme.TEXT_DIM}]"
+                )
+            if session_name:
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Started fresh session: {escape(session_name)}[/{self.theme.TEXT_DIM}]"
+                )
+        else:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Workspace clean failed.[/{self.theme.CORAL_SOFT}]"
+            )
+            for error in (result.get("errors", []) or [])[:5]:
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}] - {escape(str(error))}[/{self.theme.TEXT_DIM}]"
+                )
+
+        self.console.print()
         return True
     
     def cmd_index(self, args: str) -> bool:

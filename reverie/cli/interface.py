@@ -14,7 +14,7 @@ import threading
 import _thread
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
 from rich.console import Console, Group
 from rich.prompt import Prompt, Confirm
@@ -136,28 +136,7 @@ class ReverieInterface:
         self.config_manager = ConfigManager(project_root)
         self.config_manager.ensure_dirs()
         self.rules_manager = RulesManager(project_root)
-        
-        self.project_data_dir = self.config_manager.project_data_dir
-        
-        # Initialize enhanced session management
-        from ..session import SnapshotManager, MemoryIndexer
-        self.snapshot_manager = SnapshotManager(
-            project_root=project_root,
-            snapshots_dir=self.project_data_dir / 'snapshots'
-        )
-        self.memory_indexer = MemoryIndexer(self.project_data_dir)
-        
-        self.session_manager = SessionManager(
-            self.project_data_dir,
-            project_root=self.project_root,
-            snapshot_manager=self.snapshot_manager,
-            memory_indexer=self.memory_indexer
-        )
-        
-        # Initialize operation history and rollback manager
-        from ..session import OperationHistory, RollbackManager
-        self.operation_history = OperationHistory("current")
-        self.rollback_manager = RollbackManager(self.project_data_dir, self.operation_history)
+        self._init_workspace_services()
         
         self.indexer: Optional[CodebaseIndexer] = None
         self.retriever: Optional[ContextRetriever] = None
@@ -179,6 +158,79 @@ class ReverieInterface:
         # Cached tiktoken encoding for status bar token counting (lazy-loaded on first use)
         self._tiktoken_encoding = None
         self._tiktoken_available: Optional[bool] = None  # None = not yet checked
+
+    def _init_workspace_services(self) -> None:
+        """Initialize cache/session/rollback services for the current workspace."""
+        self.project_data_dir = self.config_manager.project_data_dir
+
+        from ..session import SnapshotManager, MemoryIndexer
+        self.snapshot_manager = SnapshotManager(
+            project_root=self.project_root,
+            snapshots_dir=self.project_data_dir / 'snapshots'
+        )
+        self.memory_indexer = MemoryIndexer(self.project_data_dir)
+
+        self.session_manager = SessionManager(
+            self.project_data_dir,
+            project_root=self.project_root,
+            snapshot_manager=self.snapshot_manager,
+            memory_indexer=self.memory_indexer
+        )
+
+        from ..session import OperationHistory, RollbackManager
+        self.operation_history = OperationHistory("current")
+        self.rollback_manager = RollbackManager(self.project_data_dir, self.operation_history)
+
+    def _refresh_command_context(self) -> None:
+        """Refresh command handler context after runtime objects are recreated."""
+        if self.command_handler:
+            self.command_handler.app = self._get_app_context()
+
+    def clean_workspace_state(self) -> Dict[str, Any]:
+        """
+        Delete current-workspace memory/cache/audit data and start a fresh session.
+
+        Config and rules are intentionally preserved.
+        """
+        from ..security_utils import collect_workspace_cleanup_targets, purge_workspace_state
+
+        cleanup_targets = collect_workspace_cleanup_targets(
+            self.project_root,
+            self.config_manager.project_data_dir,
+        )
+        cleanup_result = purge_workspace_state(
+            self.project_root,
+            self.config_manager.project_data_dir,
+        )
+
+        result: Dict[str, Any] = {
+            "success": not cleanup_result["errors"],
+            "workspace_root": str(self.project_root),
+            "project_data_dir": str(self.config_manager.project_data_dir),
+            "targets": [str(path) for path in cleanup_targets],
+            **cleanup_result,
+        }
+
+        if cleanup_result["errors"]:
+            return result
+
+        self._pending_input_draft = ""
+        self._status_live = None
+        self.agent = None
+        self.indexer = None
+        self.retriever = None
+        self.git_integration = None
+
+        self.config_manager.ensure_dirs()
+        self._init_workspace_services()
+        self._init_context_engine()
+        self._init_agent()
+        self._init_session()
+        self._refresh_command_context()
+
+        current_session = self.session_manager.get_current_session()
+        result["session_name"] = current_session.name if current_session else ""
+        return result
 
     def _fast_clear_terminal(self) -> None:
         """Clear the visible terminal area without spawning extra shell processes."""
@@ -848,11 +900,15 @@ class ReverieInterface:
             with self.console.status(f"[{self.theme.PURPLE_SOFT}]{self.deco.SPARKLE} Indexing...[/{self.theme.PURPLE_SOFT}]"):
                 self.indexer.full_index()
         self.retriever = ContextRetriever(self.indexer.symbol_table, self.indexer.dependency_graph, self.project_root)
+        self._refresh_command_context()
 
     def _init_agent(self) -> None:
         config = self.config_manager.load()
         model = config.active_model
-        if not model: return
+        if not model:
+            self.agent = None
+            self._refresh_command_context()
+            return
 
         # Check for missing max_context_tokens
         if model.max_context_tokens is None:
@@ -907,6 +963,7 @@ class ReverieInterface:
         self.agent.tool_executor.update_context('pause_stream_input_capture', self._pause_stream_input_capture)
         self.agent.tool_executor.update_context('resume_stream_input_capture', self._resume_stream_input_capture)
         self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY}[/{self.theme.MINT_VIBRANT}] [{self.theme.MINT_SOFT}]Agent ready ({model.model_display_name})[/{self.theme.MINT_SOFT}]")
+        self._refresh_command_context()
 
     def _build_additional_rules_with_tti(self, config: Config) -> str:
         """Append TTI model metadata from config.json into model context."""
@@ -952,6 +1009,7 @@ class ReverieInterface:
             self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY}[/{self.theme.MINT_VIBRANT}] [{self.theme.MINT_SOFT}]Resumed session: {session.name}[/{self.theme.MINT_SOFT}]")
         else:
             self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY}[/{self.theme.MINT_VIBRANT}] [{self.theme.MINT_SOFT}]New session: {session.name}[/{self.theme.MINT_SOFT}]")
+        self._refresh_command_context()
 
     def _get_app_context(self) -> dict:
         return {
@@ -961,7 +1019,9 @@ class ReverieInterface:
             'agent': self.agent, 'start_time': self.start_time, 
             'total_active_time': self.total_active_time,
             'current_task_start': self.current_task_start,
+            'project_root': self.project_root,
             'reinit_agent': self._init_agent,
+            'clean_workspace_state': self.clean_workspace_state,
             'operation_history': self.operation_history,
             'rollback_manager': self.rollback_manager
         }

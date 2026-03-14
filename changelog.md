@@ -9,6 +9,11 @@
 * Tightened risky subprocess surfaces for security-first deployments: text-to-image auto dependency installation is disabled by default, unsafe passthrough arguments are blocked, and generation now requires the bundled trusted runtime.
 * Added regression coverage for workspace escape blocking, command audit logging, and malicious archive extraction attempts.
 
+### Post-Release Updates (Still v2.1.2) - 2026-03-14
+* Refined `command_exec` so safe `.NET` scaffolding and solution/project management commands (such as `dotnet new sln -n ...`) are allowed again, but only inside a workspace-local sandbox with redirected `DOTNET_CLI_HOME`, NuGet caches, and temp directories.
+* Added `/clean` to delete only the current workspace's memory/cache/audit state, including the matching `project_caches/<workspace-id>` folder and workspace-local `.reverie/context_cache` / `.reverie/security`, while preserving config and rules.
+* Kept higher-risk `.NET` execution flows such as `build`, `test`, `run`, `publish`, `restore`, `tool`, `workload`, and `dev-certs` blocked because they cannot guarantee the same strict workspace boundary.
+
 ---
 
 ## Reverie CLI v2.1.1 - Command Flow, UX, and Memory Upgrade

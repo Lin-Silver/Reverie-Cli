@@ -6,7 +6,7 @@ Tools available to the AI Agent:
 - git-commit-retrieval: Access git history, blame, commits
 - str_replace_editor: Edit files using string replacement
 - file_ops: File system operations
-- command_exec: Execute shell commands
+- command_exec: Execute audited workspace commands
 - web_search: Search the web
 - task_manager: Organize complex work
 - nexus: Large-scale project development with 24+ hour support

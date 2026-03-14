@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Iterable
+from typing import Any, Dict, Iterable, List
 from datetime import datetime, timezone
 import json
 import os
+import shutil
 import stat
 import tempfile
 
@@ -159,3 +160,55 @@ def append_command_audit(project_root: Any, event: Dict[str, Any]) -> None:
     with audit_path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
     apply_restrictive_permissions(audit_path)
+
+
+def collect_workspace_cleanup_targets(project_root: Any, project_data_dir: Any) -> List[Path]:
+    """Return the exact current-workspace cache/audit directories eligible for cleanup."""
+    workspace_root = get_workspace_root(project_root)
+    raw_targets = [
+        Path(project_data_dir).resolve(strict=False),
+        (workspace_root / ".reverie" / "context_cache").resolve(strict=False),
+        (workspace_root / ".reverie" / "security").resolve(strict=False),
+    ]
+
+    unique_targets: List[Path] = []
+    seen_keys = set()
+    for target in raw_targets:
+        key = str(target).lower() if os.name == "nt" else str(target)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        unique_targets.append(target)
+    return unique_targets
+
+
+def purge_workspace_state(project_root: Any, project_data_dir: Any) -> Dict[str, List[str]]:
+    """
+    Delete only the current workspace's cache/memory/audit directories.
+
+    This never walks arbitrary user-provided paths. Targets are derived from the
+    active workspace root and the workspace's exact project cache directory.
+    """
+    deleted: List[str] = []
+    missing: List[str] = []
+    errors: List[str] = []
+
+    for target in collect_workspace_cleanup_targets(project_root, project_data_dir):
+        if not target.exists() and not target.is_symlink():
+            missing.append(str(target))
+            continue
+
+        try:
+            if target.is_symlink() or target.is_file():
+                target.unlink()
+            else:
+                shutil.rmtree(target)
+            deleted.append(str(target))
+        except Exception as exc:
+            errors.append(f"{target}: {exc}")
+
+    return {
+        "deleted": deleted,
+        "missing": missing,
+        "errors": errors,
+    }

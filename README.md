@@ -30,8 +30,9 @@ Reverie is an agentic coding tool that uses a sophisticated Context Engine to un
 
 - **Workspace-Locked Security Sandbox**:
   - AI file and path tools are confined to the active project directory
-  - Command execution is limited to audited read-only diagnostics
+  - Command execution is limited to audited workspace diagnostics plus sandboxed workspace-local `dotnet` scaffolding/solution-management flows
   - Blocked/allowed command attempts are recorded in `.reverie/security/command_audit.jsonl`
+  - `/clean` wipes only the current workspace's cache/memory/audit data and leaves config/rules intact
   - Archive extraction blocks zip-slip and path traversal attacks
 
 - **Rich CLI Interface**:
@@ -199,6 +200,7 @@ These dependencies are intentionally kept separate from the main project require
 | `/sessions` | Manage sessions |
 | `/history [limit]` | View conversation history |
 | `/clear` | Clear the screen |
+| `/clean` | Clear only the current workspace's cache, memory, backups, and audit history |
 | `/index` | Re-index the codebase |
 | `/tti models` | Show configured TTI models and interactively select default model |
 | `/tti add` | Add a new TTI model entry (`path`, `display_name`, `introduction`) |

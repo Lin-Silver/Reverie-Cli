@@ -619,6 +619,7 @@ def get_tool_definitions(mode: str = "reverie") -> list:
         GitCommitRetrievalTool,
         StrReplaceEditorTool,
         FileOpsTool,
+        DeleteFileTool,
         CommandExecTool,
         WebSearchTool,
         ContextManagementTool,
@@ -648,6 +649,7 @@ def get_tool_definitions(mode: str = "reverie") -> list:
         GitCommitRetrievalTool(),
         StrReplaceEditorTool(),
         FileOpsTool(),
+        DeleteFileTool(),
         CommandExecTool(),
         WebSearchTool(),
         ContextManagementTool(),
@@ -1905,7 +1907,7 @@ For each component in implementation_plan.md:
 ## Step 3: Continuous Testing & Verification
 **Unit Testing**: For each file/module:
 - Write unit tests using the project's test framework
-- Use command_exec only for audited workspace diagnostics or sandboxed workspace-local `dotnet` scaffolding/solution-management flows
+- Use command_exec for audited workspace commands inside the active workspace, but never for terminal move/delete/rename flows
 - Fix any failures before moving to next component
 - Document test commands in walkthrough.md
 
@@ -1913,7 +1915,7 @@ For each component in implementation_plan.md:
 - Test component interactions
 - Verify data flow between components
 - Check edge cases and error handling
-- Use command_exec only for workspace-safe diagnostics or sandboxed workspace-local `dotnet` scaffolding/solution-management flows while validating integration issues
+- Use command_exec for workspace-safe verification commands, but keep all terminal move/delete/rename actions out of command_exec
 
 **End-to-End Testing**: For applications:
 - If web app: Use browser tools to test UI workflows, API responses, form submissions
@@ -2010,7 +2012,7 @@ All generated artifacts (task.md, implementation_plan.md, walkthrough.md) should
 When encountering errors or test failures:
 
 1. **Analyze the error**: Don't just retry
-   - Call command_exec only for audited workspace diagnostics and sandboxed workspace-local `dotnet` scaffolding/solution-management flows
+   - Call command_exec for audited workspace commands, but route deletions through delete_file instead of terminal commands
    - Check error logs or stack traces
    - Understand root cause, not just symptom
 
@@ -2050,11 +2052,11 @@ Update walkthrough.md in real-time:
 <tool_selection_guide>
 **For code writing**: str_replace_editor, create_file
 **For understanding existing code**: codebase_retrieval
-**For testing**: command_exec (audited diagnostics and sandboxed workspace-local `dotnet` scaffolding only), create_file (write test files)
+**For testing**: command_exec (audited workspace execution with move/delete blacklist), create_file (write test files)
 **For UI validation**: Use browser tools when available
 **For storing progress**: context_management, task_boundary, notify_user
-**For terminal operations**: command_exec with detailed audited output capture inside the workspace sandbox
-**For file operations**: file_ops (workspace-local read/list/mkdir/delete-file), str_replace_editor (modify)
+**For terminal operations**: command_exec with detailed audited output capture inside the workspace sandbox, excluding terminal move/delete/rename flows
+**For file operations**: file_ops (workspace-local read/list/mkdir), delete_file (single-file deletion), str_replace_editor (modify)
 </tool_selection_guide>
 
 <user_information>

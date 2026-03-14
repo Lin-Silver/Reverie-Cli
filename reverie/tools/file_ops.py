@@ -6,7 +6,7 @@ Provides:
 - List directory
 - Check file existence
 - Get file info
-- Delete files (with confirmation)
+- Create directories
 """
 
 from typing import Optional, Dict, List
@@ -33,11 +33,10 @@ Operations:
 - exists: Check if file/directory exists
 - info: Get file metadata (size, modified time, etc.)
 - mkdir: Create directory
-- delete: Delete file (requires confirmation in most cases)
 
 Security:
 - All paths are confined to the current Reverie workspace
-- Directory deletion is disabled
+- File deletion is not available here; use the dedicated delete_file tool
 - Paths outside the workspace are blocked
 
 Examples:
@@ -51,7 +50,7 @@ Examples:
         "properties": {
             "operation": {
                 "type": "string",
-                "enum": ["read", "list", "exists", "info", "mkdir", "delete"],
+                "enum": ["read", "list", "exists", "info", "mkdir"],
                 "description": "Operation to perform"
             },
             "path": {
@@ -66,11 +65,6 @@ Examples:
             "pattern": {
                 "type": "string",
                 "description": "For list: filter by pattern (e.g., '*.py')"
-            },
-            "confirm_delete": {
-                "type": "boolean",
-                "description": "For delete: confirm deletion",
-                "default": False
             }
         },
         "required": ["operation", "path"]
@@ -91,8 +85,7 @@ Examples:
             "list": f"Listing directory: {path}",
             "exists": f"Checking existence of: {path}",
             "info": f"Getting info for: {path}",
-            "mkdir": f"Creating directory: {path}",
-            "delete": f"Deleting file: {path}"
+            "mkdir": f"Creating directory: {path}"
         }
         return ops_map.get(operation, f"File operation: {operation} on {path}")
 
@@ -125,7 +118,7 @@ Examples:
             elif operation == "mkdir":
                 return self._mkdir(file_path)
             elif operation == "delete":
-                return self._delete(file_path, kwargs.get('confirm_delete', False))
+                return ToolResult.fail("File deletion moved to the delete_file tool. Use delete_file with confirm_delete=true.")
             else:
                 return ToolResult.fail(f"Unknown operation: {operation}")
         except Exception as e:
@@ -255,24 +248,6 @@ Examples:
                 return ToolResult.ok(f"Directory already exists: {dir_path}")
             else:
                 return ToolResult.fail(f"Path exists and is not a directory: {dir_path}")
-        
+
         dir_path.mkdir(parents=True, exist_ok=True)
         return ToolResult.ok(f"Created directory: {dir_path}")
-    
-    def _delete(self, file_path: Path, confirmed: bool) -> ToolResult:
-        """Delete file (with safety checks)"""
-        if not file_path.exists():
-            return ToolResult.fail(f"Path not found: {file_path}")
-        
-        if not confirmed:
-            return ToolResult.fail(
-                f"Deletion requires confirmation. Call with confirm_delete=true to delete: {file_path}"
-            )
-        
-        if file_path.is_dir():
-            return ToolResult.fail(
-                "Directory deletion is disabled for safety. Reverie will not delete directories via AI tools."
-            )
-        
-        file_path.unlink()
-        return ToolResult.ok(f"Deleted: {file_path}")

@@ -6,7 +6,8 @@ Tools available to the AI Agent:
 - git-commit-retrieval: Access git history, blame, commits
 - str_replace_editor: Edit files using string replacement
 - file_ops: File system operations
-- command_exec: Execute audited workspace commands
+- delete_file: Delete a single workspace file with confirmation
+- command_exec: Execute audited workspace commands with move/delete blacklist
 - web_search: Search the web
 - task_manager: Organize complex work
 - nexus: Large-scale project development with 24+ hour support
@@ -19,6 +20,7 @@ from .codebase_retrieval import CodebaseRetrievalTool
 from .git_commit_retrieval import GitCommitRetrievalTool
 from .str_replace_editor import StrReplaceEditorTool
 from .file_ops import FileOpsTool
+from .delete_file import DeleteFileTool
 from .command_exec import CommandExecTool
 from .web_search import WebSearchTool
 from .task_manager import TaskManagerTool
@@ -52,6 +54,7 @@ __all__ = [
     'GitCommitRetrievalTool',
     'StrReplaceEditorTool',
     'FileOpsTool',
+    'DeleteFileTool',
     'CommandExecTool',
     'WebSearchTool',
     'TaskManagerTool',

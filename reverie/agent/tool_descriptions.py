@@ -1,8 +1,8 @@
 """
 Tool Descriptions for System Prompts
 
-This module contains detailed descriptions of all available tools
-that can be included in system prompts across different modes.
+This module contains detailed descriptions of available tools and mode-specific
+tool-calling guidance used by system prompts.
 """
 
 
@@ -134,6 +134,76 @@ web_search(query="python contextvars tutorial")
 """
 
 
+def get_workspace_command_description() -> str:
+    """Description for workspace command execution."""
+    return """
+## Workspace Command Tool (command_exec)
+
+Run audited terminal commands inside the active workspace.
+
+**Rules**:
+- Normal project-local commands are allowed
+- Terminal move/delete/rename commands are blocked
+- Inline scripts and script files are scanned for common file move/delete APIs
+- The working directory must remain inside the active workspace
+- Use `delete_file` for actual file deletion
+
+**Good examples**:
+```
+command_exec(command="git status")
+command_exec(command="python -c \\"print(1); print(2)\\"")
+command_exec(command="dotnet new sln -n Reverie.Downloader")
+```
+
+**Blocked examples**:
+```
+command_exec(command="del old.log")
+command_exec(command="git mv a.txt b.txt")
+command_exec(command="python -c \\"import os; os.remove('a.txt')\\"")
+```
+"""
+
+
+def get_delete_file_description() -> str:
+    """Description for dedicated file deletion."""
+    return """
+## Delete File Tool (delete_file)
+
+Delete exactly one file inside the active workspace.
+
+**Rules**:
+- The path must resolve inside the current workspace
+- Directory deletion is not allowed
+- `confirm_delete=true` is required
+- Prefer this tool any time a file should be removed
+
+**Example**:
+```
+delete_file(path="logs/debug.log", confirm_delete=True)
+```
+"""
+
+
+def get_workspace_file_ops_description() -> str:
+    """Description for non-destructive file operations."""
+    return """
+## Workspace File Operations Tool (file_ops)
+
+Use this tool for non-destructive filesystem work inside the active workspace.
+
+**Supported operations**:
+- `read`
+- `list`
+- `exists`
+- `info`
+- `mkdir`
+
+**Important**:
+- `file_ops` does not delete files
+- Use `delete_file` for file deletion
+"""
+
+
 def get_tool_calling_reliability_notes() -> str:
     """General notes to reduce tool call errors."""
     return """
@@ -153,6 +223,9 @@ def get_all_tool_descriptions() -> str:
     """Get all tool descriptions combined"""
     return "\n".join([
         get_web_search_description(),
+        get_workspace_command_description(),
+        get_workspace_file_ops_description(),
+        get_delete_file_description(),
         get_vision_tool_description(),
         get_token_counter_description(),
         get_context_management_description(),
@@ -160,23 +233,98 @@ def get_all_tool_descriptions() -> str:
     ])
 
 
+def _normalize_mode(mode: str) -> str:
+    raw = str(mode or "reverie").strip().lower()
+    aliases = {
+        "reverie-gamer": "reverie-gamer",
+        "reverie-spec-driven": "spec-driven",
+        "reverie-ant": "ant",
+    }
+    return aliases.get(raw, raw)
+
+
+def _get_mode_tool_workflow(mode: str) -> str:
+    mode = _normalize_mode(mode)
+
+    if mode == "spec-driven":
+        return """
+## Spec-Driven Mode Tool Workflow
+
+- Start with retrieval and context tools to understand the existing implementation before proposing changes.
+- Use `command_exec` for validation, builds, and diagnostics inside the workspace, but never for file move/delete actions.
+- Use `file_ops` for inspection and `delete_file` only when a real file must be removed.
+- Keep tool calls tightly aligned to the approved spec and verification plan.
+"""
+
+    if mode == "spec-vibe":
+        return """
+## Spec-Vibe Mode Tool Workflow
+
+- Move quickly, but still gather enough code context before editing.
+- Use `command_exec` for fast feedback loops, smoke tests, and scaffolding while respecting the move/delete blacklist.
+- Prefer `create_file` and `str_replace_editor` for implementation changes, then verify with focused terminal commands.
+- Use `delete_file` only when cleanup is explicitly needed.
+"""
+
+    if mode == "writer":
+        return """
+## Writer Mode Tool Workflow
+
+- Prioritize writer-specific narrative tools first, then fall back to generic code/file tools only when needed.
+- Use `file_ops` for reading notes, outlines, and manuscript files.
+- Use `delete_file` only when the user explicitly wants a draft file removed.
+- Use `command_exec` sparingly for project-local checks and never for terminal delete/move flows.
+"""
+
+    if mode == "reverie-gamer":
+        return """
+## Gamer Mode Tool Workflow
+
+- Prefer game-design, balance, level, and asset tools before generic terminal usage.
+- Use `command_exec` for game-project diagnostics, local build checks, and content pipeline verification inside the workspace.
+- Keep asset/file deletion out of the terminal; use `delete_file` for single-file cleanup.
+- Use `file_ops` for asset inspection and folder listing when game-specific tools are not enough.
+"""
+
+    if mode == "ant":
+        return """
+## Ant Mode Tool Workflow
+
+- Use `task_boundary` and `notify_user` to structure long-running work and communicate progress.
+- Pair planning/execution steps with focused tool calls instead of broad terminal scripts.
+- Use `command_exec` for audited workspace execution, but never for terminal move/delete/rename operations.
+- Use `file_ops` for non-destructive inspection and `delete_file` for explicit file removal.
+"""
+
+    return """
+## Reverie Mode Tool Workflow
+
+- Gather code context first, then edit with the narrowest effective tool.
+- Use `command_exec` for audited workspace commands, builds, tests, and diagnostics that do not move or delete files.
+- Use `file_ops` for safe read/list/info/mkdir tasks.
+- Use `delete_file` whenever a file truly needs to be removed.
+"""
+
+
 def get_tool_descriptions_for_mode(mode: str) -> str:
     """
     Get tool descriptions relevant for a specific mode.
-    
+
     Args:
         mode: The mode name (reverie, writer, gamer, etc.)
-        
+
     Returns:
         Combined tool descriptions for the mode
     """
-    # All modes get these core tools
     descriptions = [
+        _get_mode_tool_workflow(mode),
+        get_workspace_command_description(),
+        get_workspace_file_ops_description(),
+        get_delete_file_description(),
         get_web_search_description(),
         get_vision_tool_description(),
         get_token_counter_description(),
         get_context_management_description(),
         get_tool_calling_reliability_notes(),
     ]
-    
     return "\n".join(descriptions)

@@ -329,18 +329,39 @@ class TaskStore:
         del self.tasks[task_id]
         self.save()
         return True
+
+    def iter_tasks(self) -> List[tuple[int, Task]]:
+        """Return tasks in display order with indentation level."""
+        ordered: List[tuple[int, Task]] = []
+        visited = set()
+
+        def walk(task_id: str, indent: int = 0):
+            if task_id in visited or task_id not in self.tasks:
+                return
+
+            visited.add(task_id)
+            task = self.tasks[task_id]
+            ordered.append((indent, task))
+
+            for child_id in task.children:
+                walk(child_id, indent + 1)
+
+        for task_id in self.root_tasks:
+            walk(task_id)
+
+        # Include orphaned tasks so the rendered output always shows the full list.
+        for task_id in self.tasks:
+            walk(task_id)
+
+        return ordered
     
     def to_markdown(self) -> str:
         """Convert task list to markdown with Rich colors"""
         lines = ["[bold underline cyan]Task List[/bold underline cyan]", ""]
-        
-        def render_task(task_id: str, indent: int = 0):
-            if task_id not in self.tasks:
-                return
-            
-            task = self.tasks[task_id]
+
+        for indent, task in self.iter_tasks():
             prefix = "  " * indent
-            
+
             # State styling
             if task.state == TaskState.COMPLETED:
                 style = "green"
@@ -380,14 +401,8 @@ class TaskStore:
                 lines.append(f"{prefix}  [dim]deps: {escape(', '.join(task.dependencies))}[/dim]")
             if task.blockers:
                 lines.append(f"{prefix}  [dim]blockers: {escape(', '.join(task.blockers))}[/dim]")
-            
-            for child_id in task.children:
-                render_task(child_id, indent + 1)
-        
-        for task_id in self.root_tasks:
-            render_task(task_id)
-        
-        if not self.root_tasks:
+
+        if not self.tasks:
             lines.append("[dim italic]No tasks yet.[/dim italic]")
         
         return '\n'.join(lines)
@@ -623,6 +638,145 @@ Examples:
         
         else:
             return ToolResult.fail(f"Unknown operation: {operation}")
+
+    def _matches_filters(self, task: Task, filters: Optional[Dict] = None) -> bool:
+        """Return True when a task matches the supplied filters."""
+        if not filters:
+            return True
+
+        state_filter = filters.get("state")
+        phase_filter = filters.get("phase")
+        tag_filter = filters.get("tag")
+        priority_filter = filters.get("priority")
+
+        if state_filter and task.state.name != state_filter:
+            return False
+        if phase_filter and task.phase != phase_filter:
+            return False
+        if tag_filter and tag_filter not in task.tags:
+            return False
+        if priority_filter and task.priority != priority_filter:
+            return False
+        return True
+
+    def _collect_task_entries(self, filters: Optional[Dict] = None) -> List[Dict]:
+        """Collect task data in display order for text and structured results."""
+        entries = []
+
+        for indent, task in _task_store.iter_tasks():
+            if not self._matches_filters(task, filters):
+                continue
+
+            entry = task.to_dict()
+            entry["state_icon"] = task.state.value
+            entry["state_label"] = task.state.name.replace("_", " ").title()
+            entry["indent"] = indent
+            entries.append(entry)
+
+        return entries
+
+    def _build_summary_data(self) -> Dict[str, int]:
+        """Build aggregate counts for the full task list."""
+        tasks = list(_task_store.tasks.values())
+        return {
+            "total": len(tasks),
+            "not_started": sum(1 for task in tasks if task.state == TaskState.NOT_STARTED),
+            "in_progress": sum(1 for task in tasks if task.state == TaskState.IN_PROGRESS),
+            "completed": sum(1 for task in tasks if task.state == TaskState.COMPLETED),
+            "cancelled": sum(1 for task in tasks if task.state == TaskState.CANCELLED),
+        }
+
+    def _render_task_entries(self, entries: List[Dict], title: str) -> str:
+        """Render a detailed task list that includes every task state."""
+        lines = [f"[bold underline cyan]{escape(title)}[/bold underline cyan]", ""]
+
+        if not entries:
+            lines.append("[dim italic]No tasks yet.[/dim italic]")
+            return "\n".join(lines)
+
+        for entry in entries:
+            prefix = "  " * entry["indent"]
+            meta = [
+                f"ID: {entry['id']}",
+                f"State: {entry['state']}",
+                f"Priority: {entry['priority']}",
+                f"Phase: {entry['phase']}",
+            ]
+            if entry.get("progress"):
+                meta.append(f"Progress: {int(float(entry['progress']) * 100)}%")
+            if entry.get("estimate"):
+                meta.append(f"Estimate: {entry['estimate']}")
+            if entry.get("due_date"):
+                meta.append(f"Due: {entry['due_date']}")
+
+            lines.append(
+                f"{prefix}{escape(entry['state_icon'])} [bold]{escape(entry['name'])}[/bold] "
+                f"[dim]({' | '.join(escape(item) for item in meta)})[/dim]"
+            )
+
+            if entry.get("description"):
+                lines.append(f"{prefix}  [dim]{escape(entry['description'])}[/dim]")
+            if entry.get("tags"):
+                lines.append(f"{prefix}  [dim]Tags: {escape(', '.join(entry['tags']))}[/dim]")
+            if entry.get("dependencies"):
+                lines.append(f"{prefix}  [dim]Dependencies: {escape(', '.join(entry['dependencies']))}[/dim]")
+            if entry.get("blockers"):
+                lines.append(f"{prefix}  [dim]Blockers: {escape(', '.join(entry['blockers']))}[/dim]")
+
+        return "\n".join(lines)
+
+    def _render_summary(self, summary: Dict[str, int]) -> str:
+        """Render summary counts for the full task list."""
+        return (
+            "\n\n[dim]" + ("-" * 40) + "[/dim]\n"
+            f"[bold]Total:[/bold] {summary['total']} | "
+            f"[bold]Not Started:[/bold] {summary['not_started']} | "
+            f"[bold]In Progress:[/bold] {summary['in_progress']} | "
+            f"[bold]Completed:[/bold] {summary['completed']} | "
+            f"[bold]Cancelled:[/bold] {summary['cancelled']}"
+        )
+
+    def _build_task_payload(self, filters: Optional[Dict] = None) -> Dict:
+        """Build structured result data with the full task list and task states."""
+        all_entries = self._collect_task_entries()
+        filtered_entries = self._collect_task_entries(filters) if filters else all_entries
+        summary = self._build_summary_data()
+
+        return {
+            "tasks": all_entries,
+            "task_statuses": [
+                {
+                    "id": entry["id"],
+                    "name": entry["name"],
+                    "state": entry["state"],
+                    "state_icon": entry["state_icon"],
+                }
+                for entry in all_entries
+            ],
+            "filtered_tasks": filtered_entries,
+            "filters": filters or {},
+            "summary": summary,
+        }
+
+    def _build_task_result(
+        self,
+        message: str,
+        *,
+        filters: Optional[Dict] = None,
+        extra_data: Optional[Dict] = None
+    ) -> ToolResult:
+        """Create a task-manager result that always includes the full task list."""
+        payload = self._build_task_payload(filters)
+        if extra_data:
+            payload.update(extra_data)
+
+        sections = [message]
+        if filters:
+            sections.append(self._render_task_entries(payload["filtered_tasks"], "Filtered Task List"))
+        sections.append(self._render_task_entries(payload["tasks"], "Full Task List"))
+        sections.append(self._render_summary(payload["summary"]))
+
+        return ToolResult.ok("\n\n".join(section for section in sections if section), data=payload)
     
     def _add_tasks(self, tasks: List[Dict]) -> ToolResult:
         """Add new tasks"""
@@ -661,8 +815,14 @@ Examples:
         if errors:
             output_parts.append("\nErrors:")
             output_parts.extend(errors)
-        
-        return ToolResult.ok('\n'.join(output_parts))
+
+        return self._build_task_result(
+            '\n'.join(output_parts),
+            extra_data={
+                "added_tasks": [task.to_dict() for task in added],
+                "errors": errors,
+            }
+        )
     
     def _update_single(
         self,
@@ -716,9 +876,12 @@ Examples:
         
         if not task:
             return ToolResult.fail(f"Task could not be updated: {task_id}")
-        
-        return ToolResult.ok(
-            f"Updated task:\n- {escape(task.state.value)} {escape(task.name)}"
+
+        return self._build_task_result(
+            f"Updated task:\n- {escape(task.state.value)} {escape(task.name)}",
+            extra_data={
+                "updated_tasks": [task.to_dict()],
+            }
         )
     
     def _update_batch(self, tasks: List[Dict]) -> ToolResult:
@@ -793,11 +956,22 @@ Examples:
         
         if errors:
             output_parts.append(f"\nErrors: {', '.join(errors)}")
-        
-        return ToolResult.ok('\n'.join(output_parts))
+
+        return self._build_task_result(
+            '\n'.join(output_parts),
+            extra_data={
+                "updated_tasks": [task.to_dict() for task in updated],
+                "errors": errors,
+            }
+        )
     
     def _view_tasklist(self, filters: Optional[Dict] = None) -> ToolResult:
         """View all tasks, optionally filtered"""
+        message = "Viewing full project task list"
+        if filters:
+            message = f"Viewing task list with filters: {json.dumps(filters, ensure_ascii=False)}"
+        return self._build_task_result(message, filters=filters)
+
         if not filters:
             markdown = _task_store.to_markdown()
         else:
@@ -819,6 +993,11 @@ Examples:
 
     def _filtered_markdown(self, filters: Dict) -> str:
         """Render task list with filters"""
+        entries = self._collect_task_entries(filters)
+        if not entries:
+            return "[bold underline cyan]Task List (Filtered)[/bold underline cyan]\n\n[dim italic]No tasks match filters.[/dim italic]"
+        return self._render_task_entries(entries, "Task List (Filtered)")
+
         state_filter = filters.get("state")
         phase_filter = filters.get("phase")
         tag_filter = filters.get("tag")

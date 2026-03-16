@@ -16,15 +16,15 @@ import time
 import re
 import logging
 import uuid
-import hmac
-import hashlib
 import codecs
 
 from rich.markup import escape as rich_escape
 
 from .system_prompt import build_system_prompt
 from .tool_executor import ToolExecutor
+from ..iflow import build_iflow_request_headers, is_iflow_direct_api_url
 from ..tools.base import ToolResult
+from ..nvidia import build_nvidia_request_defaults
 
 # Special marker for thinking content (used in streaming)
 # This allows the interface to identify and style thinking content differently
@@ -54,6 +54,286 @@ def decode_stream_event(chunk: str) -> Optional[Dict[str, Any]]:
         logger.debug("Failed to decode stream event payload", exc_info=True)
         return None
     return decoded if isinstance(decoded, dict) else None
+
+
+def _get_object_value(value: Any, key: str, default: Any = None) -> Any:
+    """Return a dict key or object attribute without raising."""
+    if isinstance(value, dict):
+        return value.get(key, default)
+    return getattr(value, key, default)
+
+
+def _coerce_text_fragments(value: Any) -> str:
+    """Flatten provider-specific text payloads into a plain string."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (int, float, bool)):
+        return str(value)
+    if isinstance(value, (list, tuple)):
+        return "".join(_coerce_text_fragments(item) for item in value)
+    if isinstance(value, dict):
+        for key in (
+            "text",
+            "content",
+            "value",
+            "output_text",
+            "input_text",
+            "thinking",
+            "reasoning_content",
+        ):
+            if key in value:
+                text = _coerce_text_fragments(value.get(key))
+                if text:
+                    return text
+        if isinstance(value.get("parts"), list):
+            return _coerce_text_fragments(value.get("parts"))
+        return ""
+
+    for attr in (
+        "text",
+        "content",
+        "value",
+        "output_text",
+        "input_text",
+        "thinking",
+        "reasoning_content",
+    ):
+        candidate = getattr(value, attr, None)
+        if candidate is not None:
+            text = _coerce_text_fragments(candidate)
+            if text:
+                return text
+    return ""
+
+
+def _normalize_message_content_for_relay(content: Any) -> Any:
+    """Preserve multimodal content blocks for OpenAI-compatible relays when present."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, (int, float, bool)):
+        return str(content)
+    if not isinstance(content, list):
+        return str(content)
+
+    normalized_parts: List[Dict[str, Any]] = []
+    text_parts: List[str] = []
+    has_media = False
+
+    for part in content:
+        if isinstance(part, str):
+            text_value = str(part)
+            if text_value:
+                normalized_parts.append({"type": "text", "text": text_value})
+                text_parts.append(text_value)
+            continue
+
+        if not isinstance(part, dict):
+            continue
+
+        part_type = str(part.get("type", "") or "").strip().lower()
+        if part_type in ("text", "input_text", "output_text"):
+            text_value = _coerce_text_fragments(part.get("text"))
+            if text_value:
+                normalized_parts.append({"type": "text", "text": text_value})
+                text_parts.append(text_value)
+            continue
+
+        if part_type == "image_url":
+            image_payload = part.get("image_url")
+            url = ""
+            if isinstance(image_payload, dict):
+                url = str(image_payload.get("url", "") or "").strip()
+            elif image_payload is not None:
+                url = str(image_payload).strip()
+            if url:
+                normalized_parts.append({"type": "image_url", "image_url": {"url": url}})
+                has_media = True
+            continue
+
+        if part_type in ("image", "input_image"):
+            source = part.get("source") if isinstance(part.get("source"), dict) else {}
+            media_type = str(source.get("media_type", "image/png") or "image/png").strip()
+            data = str(source.get("data", "") or "").strip()
+            if data:
+                normalized_parts.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{media_type};base64,{data}"},
+                    }
+                )
+                has_media = True
+
+    if has_media:
+        return normalized_parts
+    return "\n".join(piece for piece in text_parts if piece).strip()
+
+
+def _extract_text_from_candidates(value: Any, *candidate_keys: str) -> str:
+    """Return the first non-empty flattened text from the provided field names."""
+    for key in candidate_keys:
+        candidate = _get_object_value(value, key, None)
+        text = _coerce_text_fragments(candidate)
+        if text:
+            return text
+    return ""
+
+
+def _raise_for_wrapped_api_error(payload: Any, provider_label: str = "API") -> None:
+    """Raise a readable error for wrapped OpenAI-compatible error payloads."""
+    if not isinstance(payload, dict):
+        return
+
+    error_block = payload.get("error")
+    if isinstance(error_block, dict):
+        error_message = str(
+            error_block.get("message")
+            or error_block.get("msg")
+            or payload.get("msg")
+            or payload.get("message")
+            or ""
+        ).strip()
+        if error_message:
+            error_code = error_block.get("code") or payload.get("status")
+            if error_code is not None:
+                raise ValueError(f"{provider_label} returned an error ({error_code}): {error_message}")
+            raise ValueError(f"{provider_label} returned an error: {error_message}")
+
+    status = payload.get("status")
+    message = str(payload.get("msg") or payload.get("message") or "").strip()
+    success_statuses = {None, 0, 200, "0", "200", "success", True}
+    if message and status not in success_statuses:
+        raise ValueError(f"{provider_label} returned an error ({status}): {message}")
+
+
+def _unwrap_openai_compatible_payload(payload: Any) -> Dict[str, Any]:
+    """Return the dict that actually contains OpenAI-style `choices`, if present."""
+    if not isinstance(payload, dict):
+        return {}
+
+    if isinstance(payload.get("choices"), list):
+        return payload
+
+    for key in ("body", "data", "response"):
+        candidate = payload.get(key)
+        if isinstance(candidate, dict) and isinstance(candidate.get("choices"), list):
+            return candidate
+
+    return {}
+
+
+def _tool_result_content(result: ToolResult) -> Any:
+    """Return the most expressive content payload for a tool result."""
+    if isinstance(result.data, dict):
+        for key in ("message_content", "relay_content"):
+            candidate = result.data.get(key)
+            if isinstance(candidate, list) and candidate:
+                return candidate
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate
+    return result.output if result.success else f"Error: {result.error}"
+
+
+def _build_assistant_history_message(
+    content: Any,
+    tool_calls: Optional[List[Dict[str, Any]]] = None,
+    reasoning_content: str = "",
+) -> Dict[str, Any]:
+    """Build a normalized assistant history message with optional reasoning trace."""
+    message: Dict[str, Any] = {
+        "role": "assistant",
+        "content": content,
+    }
+    if isinstance(tool_calls, list):
+        message["tool_calls"] = tool_calls
+    if str(reasoning_content or "").strip():
+        message["reasoning_content"] = str(reasoning_content).strip()
+    return message
+
+
+def _build_anthropic_assistant_tool_blocks(
+    assistant_text: str,
+    tool_calls: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Convert collected tool calls into Anthropic assistant content blocks."""
+    blocks: List[Dict[str, Any]] = []
+    if assistant_text:
+        blocks.append({"type": "text", "text": assistant_text})
+
+    for tool_call in tool_calls:
+        function = tool_call.get("function") if isinstance(tool_call, dict) else {}
+        raw_arguments = ""
+        if isinstance(function, dict):
+            raw_arguments = str(function.get("arguments", "") or "")
+        blocks.append(
+            {
+                "type": "tool_use",
+                "id": str(tool_call.get("id", "") or ""),
+                "name": str(function.get("name", "") or ""),
+                "input": parse_tool_arguments(raw_arguments),
+            }
+        )
+    return blocks
+
+
+def _build_anthropic_tool_result_block(tool_call_id: str, result: ToolResult) -> Dict[str, Any]:
+    """Build an Anthropic `tool_result` block from a tool execution result."""
+    return {
+        "type": "tool_result",
+        "tool_use_id": str(tool_call_id or ""),
+        "content": str(_coerce_text_fragments(_tool_result_content(result)) or ""),
+        "is_error": not bool(result.success),
+    }
+
+
+def _convert_messages_to_anthropic_format(messages: List[Dict[str, Any]]) -> tuple[Optional[str], List[Dict[str, Any]]]:
+    """Translate Reverie history into Anthropic-compatible message blocks."""
+    system_message: Optional[str] = None
+    anthropic_messages: List[Dict[str, Any]] = []
+
+    for msg in messages:
+        role = str(msg.get("role", "") or "").strip().lower()
+        content_text = _extract_text_from_candidates(msg, "content")
+
+        if role == "system":
+            system_message = content_text
+            continue
+
+        if role == "assistant":
+            tool_calls = msg.get("tool_calls", [])
+            if isinstance(tool_calls, list) and tool_calls:
+                anthropic_messages.append(
+                    {
+                        "role": "assistant",
+                        "content": _build_anthropic_assistant_tool_blocks(content_text, tool_calls),
+                    }
+                )
+            else:
+                anthropic_messages.append({"role": "assistant", "content": content_text})
+            continue
+
+        if role == "tool":
+            anthropic_messages.append(
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": str(msg.get("tool_call_id", "") or ""),
+                            "content": content_text,
+                            "is_error": content_text.startswith("Error:"),
+                        }
+                    ],
+                }
+            )
+            continue
+
+        anthropic_messages.append({"role": "user", "content": content_text})
+
+    return system_message, anthropic_messages
 
 
 def validate_and_sanitize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -279,26 +559,7 @@ def _sanitize_messages_for_relay(messages: List[Dict[str, Any]]) -> List[Dict[st
         if role:
             sanitized["role"] = role
 
-        content = sanitized.get("content", "")
-        if content is None:
-            sanitized["content"] = ""
-        elif isinstance(content, list):
-            text_parts: List[str] = []
-            for part in content:
-                if isinstance(part, str):
-                    if part:
-                        text_parts.append(part)
-                    continue
-                if not isinstance(part, dict):
-                    continue
-                part_type = str(part.get("type", "") or "").strip().lower()
-                if part_type in ("text", "input_text", "output_text"):
-                    text_value = part.get("text")
-                    if text_value is not None:
-                        text_parts.append(str(text_value))
-            sanitized["content"] = "\n".join(piece for piece in text_parts if piece).strip()
-        elif not isinstance(content, str):
-            sanitized["content"] = str(content)
+        sanitized["content"] = _normalize_message_content_for_relay(sanitized.get("content", ""))
 
         if role == "tool":
             sanitized["tool_call_id"] = str(sanitized.get("tool_call_id", "") or "").strip()
@@ -417,6 +678,33 @@ def make_api_request_with_retry(
         except requests.exceptions.HTTPError as e:
             last_error = e
             status_code = e.response.status_code if e.response is not None else "unknown"
+
+            if (
+                status_code == 406
+                and "apis.iflow.cn" in str(url or "").lower()
+                and isinstance(sanitized_payload, dict)
+                and sanitized_payload.get("tools")
+            ):
+                compatibility_payload = dict(sanitized_payload)
+                compatibility_payload.pop("tools", None)
+                compatibility_payload.pop("tool_choice", None)
+                compatibility_payload.pop("parallel_tool_calls", None)
+                compatibility_payload.pop("stream_options", None)
+                logger.warning("iFlow returned 406; retrying once with compatibility payload (tools removed)")
+                try:
+                    fallback_response = requests.post(
+                        url,
+                        headers=headers,
+                        json=compatibility_payload,
+                        stream=stream,
+                        timeout=timeout,
+                    )
+                    fallback_response.raise_for_status()
+                    logger.debug("iFlow compatibility fallback succeeded")
+                    return fallback_response
+                except requests.exceptions.RequestException as fallback_error:
+                    last_error = fallback_error
+                    logger.error("iFlow compatibility fallback failed: %s", fallback_error)
             
             # Don't retry on client errors (4xx) except 429 (rate limit)
             if isinstance(status_code, int) and 400 <= status_code < 500 and status_code != 429:
@@ -743,8 +1031,7 @@ class ReverieAgent:
         """Whether current request-provider config targets iFlow direct API."""
         if self.provider != "request":
             return False
-        base_url = str(self.base_url or "").strip().lower()
-        return "apis.iflow.cn" in base_url and "/v1/chat/completions" in base_url
+        return is_iflow_direct_api_url(str(self.base_url or "").strip())
 
     def _is_qwencode_direct_request(self) -> bool:
         """Whether current request-provider config targets Qwen Code direct API."""
@@ -754,6 +1041,13 @@ class ReverieAgent:
         if "/chat/completions" not in base_url:
             return False
         return "portal.qwen.ai" in base_url or "dashscope.aliyuncs.com" in base_url
+
+    def _is_nvidia_request(self) -> bool:
+        """Whether current request-provider config targets the NVIDIA endpoint."""
+        if self.provider != "request":
+            return False
+        base_url = str(self.base_url or "").strip().lower()
+        return "integrate.api.nvidia.com" in base_url and "/chat/completions" in base_url
 
     def _resolve_provider_timeout(self) -> int:
         """Resolve effective timeout with provider-specific overrides."""
@@ -792,47 +1086,28 @@ class ReverieAgent:
             except Exception:
                 return timeout_value
 
+        if self._is_nvidia_request():
+            try:
+                cfg = getattr(config, "nvidia", {})
+                if isinstance(cfg, dict):
+                    return max(timeout_value, int(cfg.get("timeout", timeout_value)))
+            except Exception:
+                return timeout_value
+
         return timeout_value
 
     def _refresh_iflow_api_key_from_local_cache(self) -> None:
         """Refresh iFlow API key from local CLI cache when needed."""
         if self.api_key:
             return
-        
-        # Direct implementation matching proxy.py's get_iflow_key function
-        import os
-        import json
-        
-        IFLOW_ACCOUNTS_FILE = os.path.expanduser("~/.iflow/iflow_accounts.json")
-        IFLOW_OAUTH_FILE = os.path.expanduser("~/.iflow/oauth_creds.json")
-        
-        # Priority 1: ~/.iflow/iflow_accounts.json
-        if os.path.exists(IFLOW_ACCOUNTS_FILE):
-            try:
-                with open(IFLOW_ACCOUNTS_FILE, 'r') as f:
-                    data = json.load(f)
-                    if data.get("iflowApiKey"):
-                        self.api_key = data.get("iflowApiKey")
-                        return
-            except Exception as e:
-                logger.error(f"Error reading iflow_accounts.json: {e}")
+        try:
+            from ..iflow import detect_iflow_cli_credentials
 
-        # Priority 2: ~/.iflow/oauth_creds.json
-        if os.path.exists(IFLOW_OAUTH_FILE):
-            try:
-                with open(IFLOW_OAUTH_FILE, 'r') as f:
-                    data = json.load(f)
-                    if data.get("apiKey"):
-                        self.api_key = data.get("apiKey")
-                        return
-            except Exception as e:
-                logger.error(f"Error reading oauth_creds.json: {e}")
-
-    def _generate_iflow_signature(self, api_key: str, user_agent: str, session_id: str, timestamp_ms: int) -> str:
-        # Exact copy of proxy.py's generate_signature function
-        payload = f"{user_agent}:{session_id}:{timestamp_ms}"
-        h = hmac.new(api_key.encode(), payload.encode(), hashlib.sha256)
-        return h.hexdigest()
+            cred = detect_iflow_cli_credentials()
+            if cred.get("found"):
+                self.api_key = str(cred.get("api_key", "")).strip()
+        except Exception:
+            logger.debug("Failed to refresh iFlow credentials from local cache", exc_info=True)
 
     def _build_request_headers(self, stream: bool) -> Dict[str, str]:
         """Build HTTP headers for request provider (generic, Qwen direct, iFlow direct)."""
@@ -869,27 +1144,11 @@ class ReverieAgent:
                 "iFlow CLI credentials were not found. Please login with iFlow CLI and run /iflow."
             )
 
-        # Use the exact same approach as proxy.py
-        user_agent = "iFlow-Cli"
-        session_id = f"session-{uuid.uuid4()}"
-        timestamp = int(time.time() * 1000)  # Use same variable name as proxy.py
-        signature = self._generate_iflow_signature(
-            api_key=self.api_key,
-            user_agent=user_agent,
-            session_id=session_id,
-            timestamp_ms=timestamp  # Pass timestamp directly
+        return build_iflow_request_headers(
+            self.api_key,
+            stream=stream,
+            custom_headers=self.custom_headers,
         )
-
-        # Headers exactly matching proxy.py
-        return {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-            "User-Agent": user_agent,
-            "session-id": session_id,
-            "x-iflow-timestamp": str(timestamp),
-            "x-iflow-signature": signature,
-            "Accept": "text/event-stream" if stream else "application/json",
-        }
 
     def _apply_iflow_model_suffix_logic(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -974,6 +1233,18 @@ class ReverieAgent:
 
         if self._is_iflow_direct_request():
             return self._apply_iflow_model_suffix_logic(prepared)
+
+        if self._is_nvidia_request():
+            defaults = build_nvidia_request_defaults(getattr(self.config, "nvidia", {}))
+            for key in ("max_tokens", "temperature", "top_p", "top_k", "presence_penalty", "repetition_penalty"):
+                prepared.setdefault(key, defaults[key])
+            chat_kwargs = prepared.get("chat_template_kwargs")
+            if not isinstance(chat_kwargs, dict):
+                chat_kwargs = {}
+                prepared["chat_template_kwargs"] = chat_kwargs
+            for key, value in defaults.get("chat_template_kwargs", {}).items():
+                chat_kwargs.setdefault(key, value)
+            return prepared
 
         # Non-iFlow `request` provider: accept model(depth) but only convert to
         # a boolean `thinking` flag (do NOT forward thinking depth). Explicit
@@ -1132,7 +1403,7 @@ class ReverieAgent:
         tool_result_message = {
             "role": "tool",
             "tool_call_id": tool_call["id"],
-            "content": result.output if result.success else f"Error: {result.error}",
+            "content": _tool_result_content(result),
         }
         self.messages.append(tool_result_message)
         messages.append(tool_result_message)
@@ -1339,11 +1610,11 @@ class ReverieAgent:
 
             if collected_tool_calls:
                 _sanitize_tool_calls(collected_tool_calls)
-                assistant_message = {
-                    "role": "assistant",
-                    "content": collected_content or None,
-                    "tool_calls": collected_tool_calls,
-                }
+                assistant_message = _build_assistant_history_message(
+                    collected_content or None,
+                    tool_calls=collected_tool_calls,
+                    reasoning_content=collected_thinking,
+                )
                 self.messages.append(assistant_message)
                 messages.append(assistant_message)
 
@@ -1360,10 +1631,10 @@ class ReverieAgent:
             if collected_content:
                 clean_content = collected_content.replace("//END//", "").strip()
                 self.messages.append(
-                    {
-                        "role": "assistant",
-                        "content": clean_content,
-                    }
+                    _build_assistant_history_message(
+                        clean_content,
+                        reasoning_content=collected_thinking,
+                    )
                 )
 
                 if finish_reason in ("stop", "end_turn", "end", None) or "//END//" in collected_content:
@@ -1430,12 +1701,20 @@ class ReverieAgent:
     
     def set_context_engine(self, retriever, indexer, git_integration) -> None:
         """Update Context Engine references"""
+        previous_context = dict(getattr(self.tool_executor, "context", {}) or {})
         self.tool_executor = ToolExecutor(
             project_root=self.project_root,
             retriever=retriever,
             indexer=indexer,
-            git_integration=git_integration
+            git_integration=git_integration,
+            lsp_manager=previous_context.get("lsp_manager"),
+            memory_indexer=previous_context.get("memory_indexer"),
         )
+        for key, value in previous_context.items():
+            if key in {"project_root", "retriever", "indexer", "git_integration", "lsp_manager", "memory_indexer"}:
+                continue
+            self.tool_executor.update_context(key, value)
+        self.tool_executor.update_context("agent", self)
     
     def _build_messages(self) -> List[Dict]:
         """Build message list for API call"""
@@ -1574,12 +1853,12 @@ class ReverieAgent:
                 
                 # Handle reasoning/thinking content FIRST (for thinking models like o1, DeepSeek-R1, etc.)
                 # Check for reasoning_content in delta (OpenAI o1 / DeepSeek style)
-                reasoning_content = None
-                if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
-                    reasoning_content = delta.reasoning_content
-                elif hasattr(delta, 'thinking') and delta.thinking:
-                    # Alternative field name used by some providers
-                    reasoning_content = delta.thinking
+                reasoning_content = _extract_text_from_candidates(
+                    delta,
+                    "reasoning_content",
+                    "thinking",
+                    "reasoning",
+                )
                 
                 if reasoning_content:
                     collected_thinking += reasoning_content
@@ -1591,13 +1870,13 @@ class ReverieAgent:
                 
                 # Content streaming - yield with buffering
                 # If we were in thinking mode and now receiving regular content, end thinking first
-                if delta.content:
+                content_piece = _extract_text_from_candidates(delta, "content")
+                if content_piece:
                     # Check if we need to transition from thinking mode to regular content
                     if thinking_started:
                         yield THINKING_END_MARKER
                         thinking_started = False  # Reset so we don't emit again
-                    
-                    content_piece = delta.content
+
                     collected_content += content_piece
                     stream_buffer += content_piece
                     
@@ -1667,11 +1946,11 @@ class ReverieAgent:
             if collected_tool_calls:
                 # Sanitize tool-call arguments before storing them in messages
                 _sanitize_tool_calls(collected_tool_calls)
-                assistant_message = {
-                    "role": "assistant",
-                    "content": collected_content or None,
-                    "tool_calls": collected_tool_calls
-                }
+                assistant_message = _build_assistant_history_message(
+                    collected_content or None,
+                    tool_calls=collected_tool_calls,
+                    reasoning_content=collected_thinking,
+                )
                 self.messages.append(assistant_message)
                 messages.append(assistant_message)
                 
@@ -1693,10 +1972,12 @@ class ReverieAgent:
                 clean_content = collected_content.replace("//END//", "").strip()
                 
                 # Save to messages
-                self.messages.append({
-                    "role": "assistant",
-                    "content": clean_content
-                })
+                self.messages.append(
+                    _build_assistant_history_message(
+                        clean_content,
+                        reasoning_content=collected_thinking,
+                    )
+                )
                 
                 # Check if model finished naturally or needs continuation
                 if finish_reason in ('stop', 'end_turn', 'end', None) or "//END//" in collected_content:
@@ -1758,297 +2039,104 @@ class ReverieAgent:
                 logger.error(f"Streaming API request failed: {e}")
                 raise
             
-            # Collect streamed response
             collected_content = ""
             collected_thinking = ""
             collected_tool_calls = []
             finish_reason = None
-            
-            # Flag to track if we're in thinking mode
             thinking_started = False
-            
-            # Buffer for handling split tokens (to hide //END//)
             stream_buffer = ""
             token_to_hide = "//END//"
-            
-            # For iFlow direct API, properly handle SSE with chunk boundaries
-            if self._is_iflow_direct_request():
-                # Buffer to accumulate incomplete lines across chunk boundaries
-                byte_decoder = codecs.getincrementaldecoder('utf-8')()
-                line_buffer = ""
+            provider_label = "iFlow API" if self._is_iflow_direct_request() else "Request provider"
 
-                for chunk in response.iter_content(chunk_size=1024):
-                    if not chunk:
-                        continue
-
-                    # Decode bytes incrementally to avoid splitting multi-byte UTF-8 characters
-                    try:
-                        text_part = byte_decoder.decode(chunk)
-                    except Exception:
-                        # Fallback to best-effort replacement if decoding fails
-                        text_part = chunk.decode('utf-8', errors='replace')
-
-                    # Add decoded text to line buffer
-                    line_buffer += text_part
-
-                    # Process complete lines
-                    lines = line_buffer.split('\n')
-
-                    # Keep the last potentially incomplete line in the buffer
-                    line_buffer = lines[-1]
-
-                    # Process all complete lines
-                    for line in lines[:-1]:
-                        line = line.rstrip()
-                        if not line.strip():
-                            continue
-
-                        # SSE format: "data: {...}" or "data:{...}"
-                        if not line.startswith("data:"):
-                            continue
-
-                        # Handle both "data: {...}" and "data:{...}" formats
-                        data_str = line[5:].lstrip()
-
-                        # Check for [DONE] marker
-                        if data_str.strip() == "[DONE]":
-                            break
-
-                        try:
-                            chunk_data = json.loads(data_str)
-                        except json.JSONDecodeError:
-                            continue
-
-                        # Extract choice
-                        choices = chunk_data.get("choices", [])
-                        if not choices:
-                            continue
-
-                        choice = choices[0]
-
-                        # Track finish reason
-                        if "finish_reason" in choice:
-                            finish_reason = choice["finish_reason"]
-
-                        delta = choice.get("delta", {})
-                        if not delta:
-                            continue
-
-                        # Handle reasoning/thinking content - iFlow uses "reasoning_content"
-                        reasoning_content = delta.get("reasoning_content") or delta.get("thinking")
-
-                        if reasoning_content:
-                            collected_thinking += reasoning_content
-                            if not thinking_started:
-                                yield THINKING_START_MARKER
-                                thinking_started = True
-                            yield reasoning_content
-
-                        # Handle content streaming
-                        content = delta.get("content")
-                        if content:
-                            if thinking_started:
-                                yield THINKING_END_MARKER
-                                thinking_started = False
-
-                            collected_content += content
-                            stream_buffer += content
-
-                            if token_to_hide in stream_buffer:
-                                parts = stream_buffer.split(token_to_hide)
-                                if parts[0]:
-                                    yield parts[0]
-                                remaining = "".join(parts[1:])
-                                stream_buffer = remaining
-
-                            # Check for partial match
-                            partial_match_len = 0
-                            for i in range(1, len(token_to_hide)):
-                                if len(stream_buffer) >= i:
-                                    suffix = stream_buffer[-i:]
-                                    if token_to_hide.startswith(suffix):
-                                        partial_match_len = i
-
-                            if partial_match_len > 0:
-                                to_yield = stream_buffer[:-partial_match_len]
-                                stream_buffer = stream_buffer[-partial_match_len:]
-                                if to_yield:
-                                    yield to_yield
-                            else:
-                                yield stream_buffer
-                                stream_buffer = ""
-
-                        # Handle tool calls
-                        tool_calls_delta = delta.get("tool_calls", [])
-                        if tool_calls_delta:
-                            for tool_call_delta in tool_calls_delta:
-                                index = tool_call_delta.get("index", 0)
-
-                                if index >= len(collected_tool_calls):
-                                    collected_tool_calls.append({
-                                        "id": tool_call_delta.get("id", ""),
-                                        "type": "function",
-                                        "function": {
-                                            "name": "",
-                                            "arguments": ""
-                                        }
-                                    })
-
-                                function_delta = tool_call_delta.get("function", {})
-                                if "name" in function_delta:
-                                    collected_tool_calls[index]["function"]["name"] = function_delta["name"]
-                                if "arguments" in function_delta:
-                                    collected_tool_calls[index]["function"]["arguments"] += function_delta["arguments"]
-                                if "id" in tool_call_delta:
-                                    collected_tool_calls[index]["id"] = tool_call_delta["id"]
-                
-                # Flush any buffered bytes in the incremental decoder to capture
-                # partial multibyte characters that spanned chunk boundaries.
+            for data_str in self._iter_sse_data_strings(response):
                 try:
-                    line_buffer += byte_decoder.decode(b'', final=True)
-                except Exception:
-                    # If flushing fails, continue with whatever text we already have
-                    pass
+                    chunk_data = json.loads(data_str)
+                except json.JSONDecodeError:
+                    continue
 
-                # Process any remaining buffered line
-                if line_buffer.strip():
-                    line = line_buffer.rstrip()
-                    if line.startswith("data:"):
-                        data_str = line[5:].lstrip()
-                        if data_str.strip() != "[DONE]":
-                            try:
-                                chunk_data = json.loads(data_str)
-                                choices = chunk_data.get("choices", [])
-                                if choices:
-                                    choice = choices[0]
-                                    if "finish_reason" in choice:
-                                        finish_reason = choice["finish_reason"]
-                                    
-                                    delta = choice.get("delta", {})
-                                    if delta:
-                                        reasoning_content = delta.get("reasoning_content") or delta.get("thinking")
-                                        if reasoning_content:
-                                            collected_thinking += reasoning_content
-                                            if not thinking_started:
-                                                yield THINKING_START_MARKER
-                                                thinking_started = True
-                                            yield reasoning_content
-                                        
-                                        content = delta.get("content")
-                                        if content:
-                                            if thinking_started:
-                                                yield THINKING_END_MARKER
-                                                thinking_started = False
-                                            collected_content += content
-                                            yield content
-                            except json.JSONDecodeError:
-                                pass
-            else:
-                # Original parsing logic for non-iFlow APIs
-                # Parse SSE stream
-                for line in response.iter_lines():
-                    if not line:
-                        continue
-                    
-                    line_str = line.decode("utf-8", errors='replace')
-                    
-                    # SSE format: "data: {...}"
-                    if not line_str.startswith("data: "):
-                        continue
-                    
-                    data_str = line_str[6:]  # Remove "data: " prefix
-                    
-                    # Check for [DONE] marker
-                    if data_str.strip() == "[DONE]":
-                        break
-                    
-                    try:
-                        chunk_data = json.loads(data_str)
-                    except json.JSONDecodeError:
-                        continue
-                    
-                    # Extract choice
-                    choices = chunk_data.get("choices", [])
-                    if not choices:
-                        continue
-                    
-                    choice = choices[0]
-                    
-                    # Track finish reason
-                    if "finish_reason" in choice:
-                        finish_reason = choice["finish_reason"]
-                    
-                    delta = choice.get("delta", {})
-                    if not delta:
-                        continue
-                    
-                    # Handle reasoning/thinking content
-                    reasoning_content = delta.get("reasoning_content") or delta.get("thinking")
-                    
-                    if reasoning_content:
-                        collected_thinking += reasoning_content
-                        if not thinking_started:
-                            yield THINKING_START_MARKER
-                            thinking_started = True
-                        yield reasoning_content
-                    
-                    # Handle content streaming
-                    content = delta.get("content")
-                    if content:
-                        if thinking_started:
-                            yield THINKING_END_MARKER
-                            thinking_started = False
-                        
-                        collected_content += content
-                        stream_buffer += content
-                        
-                        if token_to_hide in stream_buffer:
-                            parts = stream_buffer.split(token_to_hide)
-                            if parts[0]:
-                                yield parts[0]
-                            remaining = "".join(parts[1:])
-                            stream_buffer = remaining
-                        
-                        # Check for partial match
-                        partial_match_len = 0
-                        for i in range(1, len(token_to_hide)):
-                            if len(stream_buffer) >= i:
-                                suffix = stream_buffer[-i:]
-                                if token_to_hide.startswith(suffix):
-                                    partial_match_len = i
-                        
-                        if partial_match_len > 0:
-                            to_yield = stream_buffer[:-partial_match_len]
-                            stream_buffer = stream_buffer[-partial_match_len:]
-                            if to_yield:
-                                yield to_yield
-                        else:
+                _raise_for_wrapped_api_error(chunk_data, provider_label=provider_label)
+                normalized_chunk = _unwrap_openai_compatible_payload(chunk_data) or chunk_data
+
+                choices = normalized_chunk.get("choices", [])
+                if not choices:
+                    continue
+
+                choice = choices[0]
+                finish_reason = choice.get("finish_reason") or finish_reason
+
+                delta = choice.get("delta") or {}
+                if not isinstance(delta, dict):
+                    continue
+
+                reasoning_content = _extract_text_from_candidates(
+                    delta,
+                    "reasoning_content",
+                    "thinking",
+                    "reasoning",
+                )
+                if reasoning_content:
+                    collected_thinking += reasoning_content
+                    if not thinking_started:
+                        yield THINKING_START_MARKER
+                        thinking_started = True
+                    yield reasoning_content
+
+                content = _extract_text_from_candidates(delta, "content")
+                if content:
+                    if thinking_started:
+                        yield THINKING_END_MARKER
+                        thinking_started = False
+
+                    collected_content += content
+                    stream_buffer += content
+
+                    if token_to_hide in stream_buffer:
+                        parts = stream_buffer.split(token_to_hide)
+                        if parts[0]:
+                            yield parts[0]
+                        stream_buffer = "".join(parts[1:])
+
+                    partial_match_len = 0
+                    for i in range(1, len(token_to_hide)):
+                        if len(stream_buffer) >= i:
+                            suffix = stream_buffer[-i:]
+                            if token_to_hide.startswith(suffix):
+                                partial_match_len = i
+
+                    if partial_match_len > 0:
+                        to_yield = stream_buffer[:-partial_match_len]
+                        stream_buffer = stream_buffer[-partial_match_len:]
+                        if to_yield:
+                            yield to_yield
+                    else:
+                        if stream_buffer:
                             yield stream_buffer
-                            stream_buffer = ""
-                    
-                    # Handle tool calls
-                    tool_calls_delta = delta.get("tool_calls", [])
-                    if tool_calls_delta:
-                        for tool_call_delta in tool_calls_delta:
-                            index = tool_call_delta.get("index", 0)
-                            
-                            if index >= len(collected_tool_calls):
-                                collected_tool_calls.append({
+                        stream_buffer = ""
+
+                tool_calls_delta = delta.get("tool_calls", [])
+                if tool_calls_delta:
+                    for tool_call_delta in tool_calls_delta:
+                        index = int(tool_call_delta.get("index", 0) or 0)
+
+                        if index >= len(collected_tool_calls):
+                            collected_tool_calls.append(
+                                {
                                     "id": tool_call_delta.get("id", ""),
                                     "type": "function",
                                     "function": {
                                         "name": "",
-                                        "arguments": ""
-                                    }
-                                })
-                            
-                            function_delta = tool_call_delta.get("function", {})
-                            if "name" in function_delta:
-                                collected_tool_calls[index]["function"]["name"] = function_delta["name"]
-                            if "arguments" in function_delta:
-                                collected_tool_calls[index]["function"]["arguments"] += function_delta["arguments"]
-                            if "id" in tool_call_delta:
-                                collected_tool_calls[index]["id"] = tool_call_delta["id"]
+                                        "arguments": "",
+                                    },
+                                }
+                            )
+
+                        function_delta = tool_call_delta.get("function", {})
+                        if "name" in function_delta:
+                            collected_tool_calls[index]["function"]["name"] = function_delta["name"]
+                        if "arguments" in function_delta:
+                            collected_tool_calls[index]["function"]["arguments"] += function_delta["arguments"]
+                        if "id" in tool_call_delta:
+                            collected_tool_calls[index]["id"] = tool_call_delta["id"]
             
             # If thinking was streamed, emit end marker
             if thinking_started:
@@ -2062,11 +2150,11 @@ class ReverieAgent:
             if collected_tool_calls:
                 # Sanitize streamed tool-call arguments before storing them
                 _sanitize_tool_calls(collected_tool_calls)
-                assistant_message = {
-                    "role": "assistant",
-                    "content": collected_content or None,
-                    "tool_calls": collected_tool_calls
-                }
+                assistant_message = _build_assistant_history_message(
+                    collected_content or None,
+                    tool_calls=collected_tool_calls,
+                    reasoning_content=collected_thinking,
+                )
                 self.messages.append(assistant_message)
                 messages.append(assistant_message)
                 
@@ -2084,10 +2172,12 @@ class ReverieAgent:
             # No tool calls - save content and check if we should continue
             if collected_content:
                 clean_content = collected_content.replace("//END//", "").strip()
-                self.messages.append({
-                    "role": "assistant",
-                    "content": clean_content
-                })
+                self.messages.append(
+                    _build_assistant_history_message(
+                        clean_content,
+                        reasoning_content=collected_thinking,
+                    )
+                )
                 
                 if finish_reason in ('stop', 'end_turn', 'end', None) or "//END//" in collected_content:
                     break
@@ -2110,17 +2200,7 @@ class ReverieAgent:
         continuation_count = 0
         
         # Convert messages to Anthropic format
-        anthropic_messages = []
-        system_message = None
-        
-        for msg in messages:
-            if msg["role"] == "system":
-                system_message = msg["content"]
-            else:
-                anthropic_messages.append({
-                    "role": msg["role"],
-                    "content": msg["content"]
-                })
+        system_message, anthropic_messages = _convert_messages_to_anthropic_format(messages)
         
         while True:
             # Build kwargs for Anthropic API
@@ -2225,18 +2305,21 @@ class ReverieAgent:
                 if collected_tool_calls:
                     # Sanitize tool args (defensive - block.input was json.dumps'ed above)
                     _sanitize_tool_calls(collected_tool_calls)
-                    assistant_message = {
-                        "role": "assistant",
-                        "content": collected_content or None,
-                        "tool_calls": collected_tool_calls
-                    }
+                    assistant_message = _build_assistant_history_message(
+                        collected_content or None,
+                        tool_calls=collected_tool_calls,
+                        reasoning_content=collected_thinking,
+                    )
                     self.messages.append(assistant_message)
-                    anthropic_messages.append({
-                        "role": "assistant",
-                        "content": collected_content or ""
-                    })
+                    anthropic_messages.append(
+                        {
+                            "role": "assistant",
+                            "content": _build_anthropic_assistant_tool_blocks(collected_content, collected_tool_calls),
+                        }
+                    )
                     
                     # Execute tools
+                    tool_result_blocks: List[Dict[str, Any]] = []
                     for tool_call in collected_tool_calls:
                         tool_name = tool_call["function"]["name"]
                         tool = self.tool_executor.get_tool(tool_name)
@@ -2264,13 +2347,13 @@ class ReverieAgent:
                         tool_result_message = {
                             "role": "tool",
                             "tool_call_id": tool_call["id"],
-                            "content": result.output if result.success else f"Error: {result.error}"
+                            "content": _tool_result_content(result)
                         }
                         self.messages.append(tool_result_message)
-                        anthropic_messages.append({
-                            "role": "user",
-                            "content": f"Tool result: {result.output if result.success else f'Error: {result.error}'}"
-                        })
+                        tool_result_blocks.append(_build_anthropic_tool_result_block(tool_call["id"], result))
+
+                    if tool_result_blocks:
+                        anthropic_messages.append({"role": "user", "content": tool_result_blocks})
                     
                     continuation_count = 0
                     continue
@@ -2278,10 +2361,12 @@ class ReverieAgent:
                 # No tool calls - save content and check if we should continue
                 if collected_content:
                     clean_content = collected_content.replace("//END//", "").strip()
-                    self.messages.append({
-                        "role": "assistant",
-                        "content": clean_content
-                    })
+                    self.messages.append(
+                        _build_assistant_history_message(
+                            clean_content,
+                            reasoning_content=collected_thinking,
+                        )
+                    )
                     
                     if "//END//" in collected_content:
                         break
@@ -2290,7 +2375,7 @@ class ReverieAgent:
                     if continuation_count >= max_continuations:
                         break
                     
-                    anthropic_messages = self._build_messages()
+                    system_message, anthropic_messages = _convert_messages_to_anthropic_format(self._build_messages())
                     continue
             
             break
@@ -2344,14 +2429,20 @@ class ReverieAgent:
             
             choice = response.choices[0]
             message = choice.message
+            message_content = _coerce_text_fragments(getattr(message, "content", None))
+            message_reasoning = _extract_text_from_candidates(
+                message,
+                "reasoning_content",
+                "thinking",
+                "reasoning",
+            )
             
             # Check for tool calls
             if message.tool_calls:
                 # Add assistant message
-                assistant_message = {
-                    "role": "assistant",
-                    "content": message.content,
-                    "tool_calls": [
+                assistant_message = _build_assistant_history_message(
+                    message_content or None,
+                    tool_calls=[
                         {
                             "id": tc.id,
                             "type": "function",
@@ -2361,13 +2452,14 @@ class ReverieAgent:
                             }
                         }
                         for tc in message.tool_calls
-                    ]
-                }
+                    ],
+                    reasoning_content=message_reasoning,
+                )
                 self.messages.append(assistant_message)
                 messages.append(assistant_message)
                 
-                if message.content:
-                    all_content.append(message.content)
+                if message_content:
+                    all_content.append(message_content)
                 
                 # Execute each tool
                 for tool_call in message.tool_calls:
@@ -2394,7 +2486,7 @@ class ReverieAgent:
                     tool_result_message = {
                         "role": "tool",
                         "tool_call_id": tool_call.id,
-                        "content": result.output if result.success else f"Error: {result.error}"
+                        "content": _tool_result_content(result)
                     }
                     self.messages.append(tool_result_message)
                     messages.append(tool_result_message)
@@ -2403,15 +2495,17 @@ class ReverieAgent:
                 continue
             
             # No tool calls, final response check
-            if message.content:
-                content = message.content
+            if message_content:
+                content = message_content
                 
                 if "//END//" in content:
                     clean_content = content.replace("//END//", "").strip()
-                    self.messages.append({
-                        "role": "assistant",
-                        "content": clean_content
-                    })
+                    self.messages.append(
+                        _build_assistant_history_message(
+                            clean_content,
+                            reasoning_content=message_reasoning,
+                        )
+                    )
                     all_content.append(clean_content) # Use clean content for return
                     break
                 
@@ -2419,10 +2513,12 @@ class ReverieAgent:
                 if self.messages and self.messages[-1].get("role") == "assistant" and "tool_calls" not in self.messages[-1]:
                     self.messages[-1]["content"] += content
                 else:
-                    self.messages.append({
-                        "role": "assistant",
-                        "content": content
-                    })
+                    self.messages.append(
+                        _build_assistant_history_message(
+                            content,
+                            reasoning_content=message_reasoning,
+                        )
+                    )
                 
                 all_content.append(content)
                 
@@ -2475,14 +2571,24 @@ class ReverieAgent:
                 raise
             
             response_data = response.json()
+            provider_label = "iFlow API" if self._is_iflow_direct_request() else "Request provider"
+            _raise_for_wrapped_api_error(response_data, provider_label=provider_label)
+            normalized_response = _unwrap_openai_compatible_payload(response_data) or response_data
             
             # Extract choice
-            choices = response_data.get("choices", [])
+            choices = normalized_response.get("choices", [])
             if not choices:
-                break
+                raise ValueError(f"{provider_label} returned no choices in the response payload")
             
             choice = choices[0]
             message = choice.get("message", {})
+            message_content = _extract_text_from_candidates(message, "content")
+            message_reasoning = _extract_text_from_candidates(
+                message,
+                "reasoning_content",
+                "thinking",
+                "reasoning",
+            )
             
             # Check for tool calls
             tool_calls = message.get("tool_calls", [])
@@ -2490,16 +2596,16 @@ class ReverieAgent:
                 # Sanitize incoming tool-call argument strings before storing
                 _sanitize_tool_calls(tool_calls)
                 # Add assistant message
-                assistant_message = {
-                    "role": "assistant",
-                    "content": message.get("content"),
-                    "tool_calls": tool_calls
-                }
+                assistant_message = _build_assistant_history_message(
+                    message_content or None,
+                    tool_calls=tool_calls,
+                    reasoning_content=message_reasoning,
+                )
                 self.messages.append(assistant_message)
                 messages.append(assistant_message)
                 
-                if message.get("content"):
-                    all_content.append(message["content"])
+                if message_content:
+                    all_content.append(message_content)
                 
                 # Execute each tool
                 for tool_call in tool_calls:
@@ -2523,7 +2629,7 @@ class ReverieAgent:
                     tool_result_message = {
                         "role": "tool",
                         "tool_call_id": tool_call["id"],
-                        "content": result.output if result.success else f"Error: {result.error}"
+                        "content": _tool_result_content(result)
                     }
                     self.messages.append(tool_result_message)
                     messages.append(tool_result_message)
@@ -2531,24 +2637,28 @@ class ReverieAgent:
                 continue
             
             # No tool calls, final response check
-            content = message.get("content")
+            content = message_content
             if content:
                 if "//END//" in content:
                     clean_content = content.replace("//END//", "").strip()
-                    self.messages.append({
-                        "role": "assistant",
-                        "content": clean_content
-                    })
+                    self.messages.append(
+                        _build_assistant_history_message(
+                            clean_content,
+                            reasoning_content=message_reasoning,
+                        )
+                    )
                     all_content.append(clean_content)
                     break
                 
                 if self.messages and self.messages[-1].get("role") == "assistant" and "tool_calls" not in self.messages[-1]:
                     self.messages[-1]["content"] += content
                 else:
-                    self.messages.append({
-                        "role": "assistant",
-                        "content": content
-                    })
+                    self.messages.append(
+                        _build_assistant_history_message(
+                            content,
+                            reasoning_content=message_reasoning,
+                        )
+                    )
                 
                 all_content.append(content)
                 messages = self._build_messages()
@@ -2566,17 +2676,7 @@ class ReverieAgent:
         all_content = []
         
         # Convert messages to Anthropic format
-        anthropic_messages = []
-        system_message = None
-        
-        for msg in messages:
-            if msg["role"] == "system":
-                system_message = msg["content"]
-            else:
-                anthropic_messages.append({
-                    "role": msg["role"],
-                    "content": msg["content"]
-                })
+        system_message, anthropic_messages = _convert_messages_to_anthropic_format(messages)
         
         while True:
             # Build kwargs for Anthropic API
@@ -2617,21 +2717,23 @@ class ReverieAgent:
             if collected_tool_calls:
                 # Sanitize tool args before adding to message history
                 _sanitize_tool_calls(collected_tool_calls)
-                assistant_message = {
-                    "role": "assistant",
-                    "content": collected_content or None,
-                    "tool_calls": collected_tool_calls
-                }
+                assistant_message = _build_assistant_history_message(
+                    collected_content or None,
+                    tool_calls=collected_tool_calls,
+                )
                 self.messages.append(assistant_message)
-                anthropic_messages.append({
-                    "role": "assistant",
-                    "content": collected_content or ""
-                })
+                anthropic_messages.append(
+                    {
+                        "role": "assistant",
+                        "content": _build_anthropic_assistant_tool_blocks(collected_content, collected_tool_calls),
+                    }
+                )
                 
                 if collected_content:
                     all_content.append(collected_content)
                 
                 # Execute each tool
+                tool_result_blocks: List[Dict[str, Any]] = []
                 for tool_call in collected_tool_calls:
                     tool_name = tool_call["function"]["name"]
                     tool = self.tool_executor.get_tool(tool_name)
@@ -2653,13 +2755,13 @@ class ReverieAgent:
                     tool_result_message = {
                         "role": "tool",
                         "tool_call_id": tool_call["id"],
-                        "content": result.output if result.success else f"Error: {result.error}"
+                        "content": _tool_result_content(result)
                     }
                     self.messages.append(tool_result_message)
-                    anthropic_messages.append({
-                        "role": "user",
-                        "content": f"Tool result: {result.output if result.success else f'Error: {result.error}'}"
-                    })
+                    tool_result_blocks.append(_build_anthropic_tool_result_block(tool_call["id"], result))
+
+                if tool_result_blocks:
+                    anthropic_messages.append({"role": "user", "content": tool_result_blocks})
                 
                 continue
             
@@ -2667,23 +2769,17 @@ class ReverieAgent:
             if collected_content:
                 if "//END//" in collected_content:
                     clean_content = collected_content.replace("//END//", "").strip()
-                    self.messages.append({
-                        "role": "assistant",
-                        "content": clean_content
-                    })
+                    self.messages.append(_build_assistant_history_message(clean_content))
                     all_content.append(clean_content)
                     break
                 
                 if self.messages and self.messages[-1].get("role") == "assistant" and "tool_calls" not in self.messages[-1]:
                     self.messages[-1]["content"] += collected_content
                 else:
-                    self.messages.append({
-                        "role": "assistant",
-                        "content": collected_content
-                    })
+                    self.messages.append(_build_assistant_history_message(collected_content))
                 
                 all_content.append(collected_content)
-                anthropic_messages = self._build_messages()
+                system_message, anthropic_messages = _convert_messages_to_anthropic_format(self._build_messages())
                 continue
             
             break

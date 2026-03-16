@@ -96,7 +96,7 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
         "section": "Models & Modes",
         "summary": "Show or switch Reverie operating modes.",
         "detail": "The mode affects system prompts, tool framing, and how Reverie approaches the task.",
-        "overview": "show, reverie|reverie-gamer|spec-driven|spec-vibe|writer|reverie-ant",
+        "overview": "show, reverie|reverie-gamer|spec-driven|spec-vibe|writer|reverie-ant|computer-controller",
         "subcommands": [
             {"usage": "/mode", "description": "Show the current mode and the full mode table."},
             {"usage": "/mode reverie", "description": "Switch to the general-purpose coding assistant mode."},
@@ -105,8 +105,9 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
             {"usage": "/mode spec-vibe", "description": "Switch to the lighter-weight spec workflow."},
             {"usage": "/mode writer", "description": "Switch to creative writing and documentation mode."},
             {"usage": "/mode reverie-ant", "description": "Switch to the advanced planning/execution mode."},
+            {"usage": "/mode computer-controller", "description": "Switch to the NVIDIA-backed desktop-control mode."},
         ],
-        "examples": ["/mode", "/mode spec-driven", "/mode reverie"],
+        "examples": ["/mode", "/mode spec-driven", "/mode computer-controller"],
     },
     "iflow": {
         "command": "/iflow",
@@ -177,6 +178,23 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
             {"usage": "/codex endpoint <url|/path|clear>", "description": "Set or clear the reverse-proxy endpoint override."},
         ],
         "examples": ["/codex", "/codex model", "/codex model gpt-5.4", "/codex extra high"],
+    },
+    "nvidia": {
+        "command": "/nvidia",
+        "section": "Providers",
+        "summary": "Configure the NVIDIA API key, model, and endpoint used by Computer Controller mode.",
+        "detail": "Use this to save the NVIDIA API key interactively, inspect the active NVIDIA setup, or override the endpoint for reverse proxies.",
+        "overview": "status, login, activate, model [id], endpoint [value]",
+        "subcommands": [
+            {"usage": "/nvidia", "description": "Show the current NVIDIA Computer Controller configuration."},
+            {"usage": "/nvidia login", "description": "Prompt for and save the NVIDIA API key."},
+            {"usage": "/nvidia activate", "description": "Switch the active model source to NVIDIA."},
+            {"usage": "/nvidia model", "description": "Open the NVIDIA model selector."},
+            {"usage": "/nvidia model <model-id>", "description": "Switch directly to a supported NVIDIA model."},
+            {"usage": "/nvidia endpoint", "description": "Show the current endpoint override prompt."},
+            {"usage": "/nvidia endpoint <url|/path|clear>", "description": "Set or clear the endpoint override."},
+        ],
+        "examples": ["/nvidia", "/nvidia login", "/nvidia activate", "/nvidia endpoint https://integrate.api.nvidia.com/v1/chat/completions"],
     },
     "tools": {
         "command": "/tools",

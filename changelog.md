@@ -1,3 +1,21 @@
+## Reverie CLI v2.1.3 - Computer Controller, Mode Switching, and Context Intelligence
+
+**Release Date:** 2026-03-15
+
+### Highlights
+* Added `computer-controller` mode as a dedicated desktop-control workflow powered by NVIDIA-hosted `qwen/qwen3.5-397b-a17b`, plus a new unified `computer_control` tool for screenshot observation, mouse actions, keyboard input, scrolling, dragging, waits, and screen-state inspection.
+* Added `/nvidia` provider management with interactive API-key entry, model activation, endpoint overrides, and automatic source switching when entering Computer Controller mode.
+* Added `switch_mode` so non-desktop modes can proactively move between Reverie, Reverie-Gamer, Reverie-Ant, Spec-Driven, Spec-Vibe, and Writer while updating tool availability and system prompts in-session.
+* Reworked the main Reverie system prompt for generic LLMs with stronger repository-first retrieval, spec-style planning discipline, full-project delivery expectations, and a stricter test/build/verification standard.
+* Upgraded workspace memory and Context Engine flow: session-level memory is now refreshed back into the active conversation, workspace-global memory summaries are injected automatically, `codebase-retrieval` can query memory/LSP data, and an optional LSP bridge exposes diagnostics, definitions, symbols, and status.
+* Improved provider transport reliability: Codex models are standardized to `258K`, iFlow now reads the current CLI settings/remote model catalog more accurately, direct iFlow requests use CLI-style signed headers, and request-provider response parsing is more robust across wrapped text/reasoning payloads.
+
+### Notes
+* Computer Controller mode is intentionally isolated from `switch_mode`; it is entered explicitly and stays focused on desktop control instead of general coding workflows.
+* iFlow direct requests now include a compatibility fallback when the upstream rejects tool-related OpenAI fields, reducing `406` failures on stricter accounts or models.
+
+---
+
 ## Reverie CLI v2.1.2 - Workspace Sandbox & Command Audit
 
 **Release Date:** 2026-03-14
@@ -65,7 +83,7 @@
 * Fixed non-maximized terminal behavior for interactive help/settings/selectors: normal scrollback is preserved, wheel scrolling stays with the terminal, and medium-width windows keep more panels side-by-side instead of clipping the lower content
 * Streaming replies can now be interrupted with `Esc`, and Reverie keeps a live bottom input bar so you can type and submit a follow-up while output is still in progress
 * Hardened secret handling: Gemini OAuth client credentials now come from environment variables, local config/oauth JSON writes use safer file writes, and token refresh errors no longer echo raw response bodies
-* Corrected Codex model metadata so GPT-5.4 now reports a 1.05M window and GPT-5.1/5.2/5.3 Codex variants use 400K-class windows
+* Normalized supported Codex model metadata so all GPT-5.x Codex variants now report a 258K context window in Reverie
 * Reworked the core TUI: responsive welcome card, compact live status panel, clearer response headers, richer tool cards, denser selectors, and cleaner command completion
 * Improved terminal adaptation and input UX: multiline input now preserves structure, selector focus/empty states are clearer, and narrow terminals get more compact layouts
 

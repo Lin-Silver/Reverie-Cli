@@ -33,12 +33,17 @@ from .codex import (
     default_codex_config,
     normalize_codex_config,
 )
+from .nvidia import (
+    build_nvidia_runtime_model_data,
+    default_nvidia_config,
+    normalize_nvidia_config,
+)
 
 
 # Version info
-__version__ = "2.1.2"
+__version__ = "2.1.3"
 
-EXTERNAL_MODEL_SOURCES = ("iflow", "qwencode", "geminicli", "codex")
+EXTERNAL_MODEL_SOURCES = ("iflow", "qwencode", "geminicli", "codex", "nvidia")
 SUPPORTED_ACTIVE_MODEL_SOURCES = ("standard",) + EXTERNAL_MODEL_SOURCES
 
 
@@ -349,14 +354,14 @@ class Config:
     """Main configuration"""
     models: List[ModelConfig] = field(default_factory=list)
     active_model_index: int = 0
-    active_model_source: str = "standard"  # standard | iflow | qwencode | geminicli | codex
+    active_model_source: str = "standard"  # standard | iflow | qwencode | geminicli | codex | nvidia
     mode: str = "reverie"
     theme: str = "default"
     max_context_tokens: int = 128000
     stream_responses: bool = True
     auto_index: bool = True
     show_status_line: bool = True
-    config_version: str = "2.0.4"  # Config file version for migration
+    config_version: str = "2.1.3"  # Config file version for migration
     
     # Workspace isolation settings
     use_workspace_config: bool = False  # If True, config is stored in workspace directory
@@ -373,6 +378,7 @@ class Config:
     qwencode: Dict[str, Any] = field(default_factory=dict)
     geminicli: Dict[str, Any] = field(default_factory=dict)
     codex: Dict[str, Any] = field(default_factory=dict)
+    nvidia: Dict[str, Any] = field(default_factory=default_nvidia_config)
     
     # Writer mode specific settings
     writer_mode: Dict[str, Any] = field(default_factory=lambda: {
@@ -431,6 +437,11 @@ class Config:
             if runtime_codex_model:
                 return ModelConfig.from_dict(runtime_codex_model)
 
+        if source == "nvidia":
+            runtime_nvidia_model = build_nvidia_runtime_model_data(self.nvidia)
+            if runtime_nvidia_model:
+                return ModelConfig.from_dict(runtime_nvidia_model)
+
         if 0 <= self.active_model_index < len(self.models):
             return self.models[self.active_model_index]
         return None
@@ -450,6 +461,7 @@ class Config:
         qwencode = normalize_qwencode_config(self.qwencode)
         geminicli = normalize_geminicli_config(self.geminicli)
         codex = normalize_codex_config(self.codex)
+        nvidia = normalize_nvidia_config(self.nvidia)
         active_model_source = self.active_model_source.lower()
         if active_model_source not in SUPPORTED_ACTIVE_MODEL_SOURCES:
             active_model_source = "standard"
@@ -478,6 +490,7 @@ class Config:
             'qwencode': qwencode,
             'geminicli': geminicli,
             'codex': codex,
+            'nvidia': nvidia,
         }
     
     @classmethod
@@ -509,6 +522,8 @@ class Config:
         geminicli = normalize_geminicli_config(raw_geminicli)
         raw_codex = data.get('codex', {})
         codex = normalize_codex_config(raw_codex)
+        raw_nvidia = data.get('nvidia', {})
+        nvidia = normalize_nvidia_config(raw_nvidia)
         active_model_source = str(data.get('active_model_source', 'standard')).strip().lower()
         if active_model_source not in SUPPORTED_ACTIVE_MODEL_SOURCES:
             active_model_source = 'standard'
@@ -551,7 +566,7 @@ class Config:
                 "max_asset_context_window": 10,
                 "context_compression_enabled": True,
             }),
-            config_version=data.get('config_version', '2.0.4'),
+            config_version=data.get('config_version', '2.1.3'),
             use_workspace_config=data.get('use_workspace_config', False),
             api_max_retries=data.get('api_max_retries', 3),
             api_initial_backoff=data.get('api_initial_backoff', 1.0),
@@ -561,7 +576,8 @@ class Config:
             iflow=iflow,
             qwencode=qwencode,
             geminicli=geminicli,
-            codex=codex
+            codex=codex,
+            nvidia=nvidia,
         )
 
 
@@ -757,7 +773,7 @@ class ConfigManager:
         
         # Check if config_version is missing or outdated
         current_version = data.get('config_version', '0.0.0')
-        if current_version != '2.0.4':
+        if current_version != '2.1.3':
             needs_update = True
         
         # Check if any model is missing provider field
@@ -828,6 +844,17 @@ class ConfigManager:
         else:
             for field_name in default_codex_config().keys():
                 if field_name not in data.get('codex', {}):
+                    needs_update = True
+                    break
+
+        # Check if nvidia section is missing
+        if 'nvidia' not in data:
+            needs_update = True
+        elif not isinstance(data.get('nvidia'), dict):
+            needs_update = True
+        else:
+            for field_name in default_nvidia_config().keys():
+                if field_name not in data.get('nvidia', {}):
                     needs_update = True
                     break
 
@@ -925,6 +952,9 @@ class ConfigManager:
             return True
         if normalize_codex_config(getattr(config, "codex", {})).get("selected_model_id"):
             return True
+        nvidia = normalize_nvidia_config(getattr(config, "nvidia", {}))
+        if nvidia.get("api_key") and nvidia.get("selected_model_id"):
+            return True
         return False
     
     def add_model(self, model_config: ModelConfig) -> None:
@@ -955,6 +985,8 @@ class ConfigManager:
                         config.active_model_source = "geminicli"
                     elif normalize_codex_config(getattr(config, "codex", {})).get("selected_model_id"):
                         config.active_model_source = "codex"
+                    elif normalize_nvidia_config(getattr(config, "nvidia", {})).get("api_key"):
+                        config.active_model_source = "nvidia"
             self.save(config)
             return True
         return False

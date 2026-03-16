@@ -12,6 +12,7 @@ from typing import Dict, Any, Optional, List
 from pathlib import Path
 import json
 
+from ..modes import normalize_mode
 from ..tools import (
     BaseTool,
     ToolResult,
@@ -40,7 +41,9 @@ from ..tools import (
     GameMathSimulatorTool,
     GameStatsAnalyzerTool,
     VisionUploadTool,
-    TokenCounterTool
+    TokenCounterTool,
+    ModeSwitchTool,
+    ComputerControlTool,
 )
 
 
@@ -69,7 +72,9 @@ class ToolExecutor:
         project_root: Path,
         retriever=None,
         indexer=None,
-        git_integration=None
+        git_integration=None,
+        lsp_manager=None,
+        memory_indexer=None,
     ):
         self.project_root = project_root
         
@@ -78,7 +83,9 @@ class ToolExecutor:
             'project_root': project_root,
             'retriever': retriever,
             'indexer': indexer,
-            'git_integration': git_integration
+            'git_integration': git_integration,
+            'lsp_manager': lsp_manager,
+            'memory_indexer': memory_indexer,
         }
         
         # Initialize tools
@@ -113,7 +120,9 @@ class ToolExecutor:
             GameMathSimulatorTool,
             GameStatsAnalyzerTool,
             VisionUploadTool,
-            TokenCounterTool
+            TokenCounterTool,
+            ModeSwitchTool,
+            ComputerControlTool,
         ]
         
         for tool_class in tool_classes:
@@ -262,23 +271,31 @@ class ToolExecutor:
         and safe for JSON serialization before returning them.
         """
         schemas = []
+        normalized_mode = normalize_mode(mode)
+
         for name, tool in self._tools.items():
             # Filter task_manager in non-reverie modes
-            if name == "task_manager" and mode not in ["reverie", "reverie-gamer", "Reverie-Gamer"]:
+            if name == "task_manager" and normalized_mode not in ["reverie", "reverie-gamer"]:
                 continue
             
             # Filter ask_clarification in non-writer modes
-            if name == "ask_clarification" and mode != "writer":
+            if name == "ask_clarification" and normalized_mode != "writer":
                 continue
                 
             # Filter Reverie-ant tools
-            if name in ["task_boundary", "notify_user"] and mode not in ["reverie-ant", "Reverie-ant"]:
+            if name in ["task_boundary", "notify_user"] and normalized_mode != "reverie-ant":
                 continue
                 
             # Filter TaskManager in Reverie-ant (optional, but requested in prompt logic)
             # The prompt for Ant says "task_manager... tool is only for Reverie".
             # If we strictly follow, we hide it.
-            if name == "task_manager" and mode in ["reverie-ant", "Reverie-ant"]:
+            if name == "task_manager" and normalized_mode == "reverie-ant":
+                continue
+
+            if name == "switch_mode" and normalized_mode == "computer-controller":
+                continue
+
+            if name == "computer_control" and normalized_mode != "computer-controller":
                 continue
 
             gamer_tools = {
@@ -292,7 +309,7 @@ class ToolExecutor:
                 "game_math_simulator",
                 "game_stats_analyzer",
             }
-            if name in gamer_tools and mode not in ["reverie-gamer", "Reverie-Gamer"]:
+            if name in gamer_tools and normalized_mode != "reverie-gamer":
                 continue
                 
             # Get schema and validate it

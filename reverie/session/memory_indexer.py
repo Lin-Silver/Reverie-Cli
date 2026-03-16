@@ -183,6 +183,33 @@ class MemoryIndexer:
     def _create_fragment_id(self, session_id: str, message_index: int) -> str:
         """Create a unique fragment ID"""
         return f"{session_id}_{message_index}"
+
+    def _rebuild_indexes_from_fragments(self) -> None:
+        """Rebuild inverted indexes from the current in-memory fragments."""
+        keyword_index = defaultdict(list)
+        entity_index = defaultdict(list)
+        tool_index = defaultdict(list)
+        session_summaries = dict(self.index.session_summaries) if self.index else {}
+
+        session_ids = set()
+        for fragment_id, fragment in self.fragments.items():
+            session_ids.add(fragment.session_id)
+            for keyword in fragment.keywords:
+                keyword_index[keyword].append(fragment_id)
+            for entity in fragment.entities:
+                entity_index[entity].append(fragment_id)
+            for tool_name in fragment.tool_calls:
+                tool_index[tool_name].append(fragment_id)
+
+        self.index = ProjectIndex(
+            last_updated=datetime.now().isoformat(),
+            total_sessions=len(session_ids),
+            total_messages=len(self.fragments),
+            keyword_index=dict(keyword_index),
+            entity_index=dict(entity_index),
+            tool_index=dict(tool_index),
+            session_summaries=session_summaries,
+        )
     
     def index_session(self, session_id: str) -> int:
         """
@@ -195,6 +222,30 @@ class MemoryIndexer:
         
         if not session_path.exists():
             return 0
+
+    def refresh_session(self, session_id: str) -> int:
+        """
+        Re-index a single session and persist the refreshed project index.
+
+        Returns:
+            Number of fragments indexed for the session.
+        """
+        if not self.index:
+            self.load_index()
+
+        stale_fragment_ids = [
+            fragment_id
+            for fragment_id, fragment in self.fragments.items()
+            if fragment.session_id == session_id
+        ]
+        for fragment_id in stale_fragment_ids:
+            self.fragments.pop(fragment_id, None)
+
+        indexed_count = self.index_session(session_id)
+        self._rebuild_indexes_from_fragments()
+        self._save_index()
+        self._save_fragments()
+        return indexed_count
         
         try:
             with open(session_path, 'r', encoding='utf-8') as f:
@@ -422,3 +473,80 @@ class MemoryIndexer:
         
         self.index.session_summaries[session_id] = summary
         self._save_index()
+
+    def get_recent_fragments(self, limit: int = 8) -> List[MemoryFragment]:
+        """Return the most recent indexed fragments across the workspace."""
+        if not self.index:
+            self.load_index()
+
+        items = sorted(
+            self.fragments.values(),
+            key=lambda fragment: (fragment.timestamp, fragment.message_index),
+            reverse=True,
+        )
+        return items[: max(1, int(limit or 8))]
+
+    def build_workspace_memory_summary(
+        self,
+        query: str = "",
+        max_fragments: int = 8,
+        max_chars: int = 3200,
+    ) -> str:
+        """
+        Build a compact global-memory block for the current workspace.
+
+        When a query is provided, relevant fragments are preferred. Otherwise,
+        the summary uses the most recent fragments plus top entities and tools.
+        """
+        if not self.index:
+            self.load_index()
+        if not self.index and self.sessions_dir.exists():
+            self.build_index()
+
+        if not self.index:
+            return ""
+
+        lines: List[str] = [
+            "## Workspace Global Memory",
+            f"- Indexed sessions: {self.index.total_sessions}",
+            f"- Indexed message fragments: {self.index.total_messages}",
+        ]
+
+        top_entities = sorted(
+            self.index.entity_index.items(),
+            key=lambda item: len(item[1]),
+            reverse=True,
+        )[:6]
+        if top_entities:
+            entity_text = ", ".join(f"{name}({len(refs)})" for name, refs in top_entities)
+            lines.append(f"- Frequent entities: {entity_text}")
+
+        top_tools = sorted(
+            self.index.tool_index.items(),
+            key=lambda item: len(item[1]),
+            reverse=True,
+        )[:6]
+        if top_tools:
+            tool_text = ", ".join(f"{name}({len(refs)})" for name, refs in top_tools)
+            lines.append(f"- Common tools: {tool_text}")
+
+        summary_ids = sorted(self.index.session_summaries.keys(), reverse=True)[:4]
+        if summary_ids:
+            lines.append("- Recent session summaries:")
+            for session_id in summary_ids:
+                summary = str(self.index.session_summaries.get(session_id, "") or "").strip()
+                if summary:
+                    lines.append(f"  - {summary[:220]}")
+
+        fragments = self.search(query, max_results=max_fragments, max_tokens=max_chars // 4) if str(query or "").strip() else self.get_recent_fragments(limit=max_fragments)
+        if fragments:
+            lines.append("- Relevant memory fragments:")
+            for fragment in fragments:
+                compact = " ".join(str(fragment.content or "").split())
+                compact = compact[:260] + ("..." if len(compact) > 260 else "")
+                lines.append(f"  - [{fragment.role}] {compact}")
+
+        summary = "\n".join(lines).strip()
+        if len(summary) > max_chars:
+            summary = summary[: max_chars - 3].rstrip() + "..."
+        return summary

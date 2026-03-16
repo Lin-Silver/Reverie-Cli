@@ -24,9 +24,9 @@ CODEX_DEFAULT_RESPONSE_ENDPOINT = "/responses"
 CODEX_TOKEN_URL = "https://auth.openai.com/oauth/token"
 CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 CODEX_CLIENT_VERSION = "0.101.0"
-CODEX_USER_AGENT = "codex_cli_rs/0.101.0 (Windows NT 10.0; Win64; x64) Reverie/2.1.2"
+CODEX_USER_AGENT = "codex_cli_rs/0.101.0 (Windows NT 10.0; Win64; x64) Reverie/2.1.3"
 CODEX_DEFAULT_REASONING_EFFORT = "medium"
-CODEX_DEFAULT_MAX_CONTEXT_TOKENS = 400_000
+CODEX_DEFAULT_MAX_CONTEXT_TOKENS = 258_000
 CODEX_REASONING_PRESETS = (
     {
         "id": "low",
@@ -59,42 +59,42 @@ _CODEX_ALLOWED_MODELS = [
         "id": "gpt-5.3-codex",
         "display_name": "GPT-5.3-Codex",
         "description": "GPT-5.3 Codex",
-        "context_length": 400_000,
+        "context_length": 258_000,
         "reasoning_levels": ["low", "medium", "high", "xhigh"],
     },
     {
         "id": "gpt-5.4",
         "display_name": "GPT-5.4",
         "description": "GPT-5.4",
-        "context_length": 1_050_000,
+        "context_length": 258_000,
         "reasoning_levels": ["low", "medium", "high", "xhigh"],
     },
     {
         "id": "gpt-5.2-codex",
         "display_name": "GPT-5.2-Codex",
         "description": "GPT-5.2 Codex",
-        "context_length": 400_000,
+        "context_length": 258_000,
         "reasoning_levels": ["low", "medium", "high", "xhigh"],
     },
     {
         "id": "gpt-5.1-codex-max",
         "display_name": "GPT-5.1-Codex-Max",
         "description": "GPT-5.1 Codex Max",
-        "context_length": 400_000,
+        "context_length": 258_000,
         "reasoning_levels": ["low", "medium", "high", "xhigh"],
     },
     {
         "id": "gpt-5.2",
         "display_name": "GPT-5.2",
         "description": "GPT-5.2",
-        "context_length": 400_000,
+        "context_length": 258_000,
         "reasoning_levels": ["low", "medium", "high", "xhigh"],
     },
     {
         "id": "gpt-5.1-codex-mini",
         "display_name": "GPT-5.1-Codex-Mini",
         "description": "GPT-5.1 Codex Mini",
-        "context_length": 400_000,
+        "context_length": 258_000,
         "reasoning_levels": ["medium", "high"],
     },
 ]
@@ -248,10 +248,7 @@ def _parse_codex_model_cache(errors: List[str]) -> List[Dict[str, Any]]:
             continue
         seen_ids.add(lower_id)
         metadata = _CODEX_MODEL_METADATA.get(lower_id, {})
-        try:
-            context_length = int(item.get("context_window", metadata.get("context_length", CODEX_DEFAULT_MAX_CONTEXT_TOKENS)))
-        except (TypeError, ValueError):
-            context_length = int(metadata.get("context_length", CODEX_DEFAULT_MAX_CONTEXT_TOKENS))
+        context_length = int(metadata.get("context_length", CODEX_DEFAULT_MAX_CONTEXT_TOKENS))
         raw_reasoning_levels = item.get("supported_reasoning_levels", [])
         reasoning_levels = []
         if isinstance(raw_reasoning_levels, list):
@@ -306,10 +303,6 @@ def get_codex_model_catalog() -> List[Dict[str, Any]]:
             if level and level not in merged_levels:
                 merged_levels.append(level)
 
-        try:
-            cached_context_length = int(cached_item.get("context_length", 0) or 0)
-        except (TypeError, ValueError):
-            cached_context_length = 0
         metadata_context_length = int(item.get("context_length", CODEX_DEFAULT_MAX_CONTEXT_TOKENS))
 
         catalog.append(
@@ -317,7 +310,7 @@ def get_codex_model_catalog() -> List[Dict[str, Any]]:
                 "id": item["id"],
                 "display_name": _safe_string(cached_item.get("display_name", item["display_name"])) or item["display_name"],
                 "description": _safe_string(cached_item.get("description", item.get("description", ""))) or item.get("description", ""),
-                "context_length": max(metadata_context_length, cached_context_length),
+                "context_length": metadata_context_length,
                 "visibility": _safe_string(cached_item.get("visibility", "")),
                 "reasoning_levels": merged_levels or metadata_levels,
             }

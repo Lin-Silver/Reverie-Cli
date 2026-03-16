@@ -35,6 +35,7 @@ from .semantic_indexer import SemanticIndexer, SemanticNode, CodePattern
 from .knowledge_graph import KnowledgeGraph, Entity, Relation, RelationType, PathResult
 from .commit_history_indexer import CommitHistoryIndexer, CommitPattern, CodeEvolution, TeamConvention, ChangeType
 from .context_engine_core import ContextEngineCore, ContextQuery, ContextResult
+from .lsp_manager import LSPManager
 
 
 __all__ = [
@@ -90,4 +91,5 @@ __all__ = [
     'ContextEngineCore',
     'ContextQuery',
     'ContextResult',
+    'LSPManager',
 ]

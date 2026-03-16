@@ -816,6 +816,7 @@ class DisplayComponents:
             "balance": self.theme.TOOL_BALANCE,
             "level": self.theme.TOOL_LEVEL,
             "config": self.theme.TOOL_CONFIG,
+            "computer": self.theme.BLUE_SOFT,
             "read": self.theme.BLUE_SOFT,
             "write": self.theme.PINK_SOFT,
             "edit": self.theme.PURPLE_SOFT,
@@ -963,15 +964,22 @@ class DisplayComponents:
             Text(str(message or f"Executing {tool_name}..."), style=f"bold {self.theme.TEXT_PRIMARY}"),
             Text(f"call {tool_call_id[-8:]}" if tool_call_id else "running", style=accent),
         )
+        title_label = "Computer Controller" if str(tool_name or "").strip().lower() == "computer_control" else f"Tool {self.deco.DOT_MEDIUM} {tool_name}"
+        status_line = self._build_badge_line(
+            [
+                ("Status", "Running", self.theme.TEXT_DIM, accent),
+                ("Tool", tool_name, self.theme.TEXT_DIM, self.theme.BLUE_SOFT),
+            ]
+        )
 
-        parts: List[Any] = [header]
+        parts: List[Any] = [header, status_line]
         if argument_summary:
             parts.append(Text(argument_summary, style=self.theme.TEXT_DIM))
 
         self.console.print(
             Panel(
                 Group(*parts),
-                title=f"[bold {accent}]{self.deco.SPARKLE} Tool {self.deco.DOT_MEDIUM} {tool_name}[/]",
+                title=f"[bold {accent}]{self.deco.SPARKLE} {title_label}[/]",
                 border_style=accent,
                 box=box.ROUNDED,
                 padding=(0, 1),
@@ -991,7 +999,8 @@ class DisplayComponents:
         """Render a structured tool result card."""
         accent = self._resolve_tool_color(tool_name) if success else self.theme.CORAL_VIBRANT
         title_icon = self.deco.CHECK_FANCY if success else self.deco.CROSS_FANCY
-        title_text = f"{title_icon} {tool_name}"
+        title_body = "Computer Controller" if str(tool_name or "").strip().lower() == "computer_control" else tool_name
+        title_text = f"{title_icon} {title_body}"
         argument_summary = self._format_tool_argument_summary(arguments)
         header = Table.grid(expand=True)
         header.add_column(ratio=1)
@@ -1003,14 +1012,34 @@ class DisplayComponents:
 
         if success:
             renderable, footer = self._build_tool_output_renderable(output, arguments=arguments)
-            parts: List[Any] = [header]
+            status_line = self._build_badge_line(
+                [
+                    ("Status", "Success", self.theme.TEXT_DIM, accent),
+                    ("Tool", tool_name, self.theme.TEXT_DIM, self.theme.BLUE_SOFT),
+                ]
+            )
+            parts: List[Any] = [header, status_line]
             if argument_summary:
                 parts.append(Text(argument_summary, style=self.theme.TEXT_DIM))
-            parts.extend([renderable, Text(footer, style=self.theme.TEXT_DIM)])
+            if str(output or "").strip():
+                parts.extend([renderable, Text(footer, style=self.theme.TEXT_DIM)])
+            else:
+                parts.extend(
+                    [
+                        Text("No textual output returned", style=self.theme.TEXT_SECONDARY),
+                        Text("The tool may have completed through file changes, state updates, or side effects.", style=self.theme.TEXT_DIM),
+                    ]
+                )
             group = Group(*parts)
         else:
             message = str(error or "Tool execution failed").strip()
-            parts = [header]
+            status_line = self._build_badge_line(
+                [
+                    ("Status", "Failed", self.theme.TEXT_DIM, accent),
+                    ("Tool", tool_name, self.theme.TEXT_DIM, self.theme.BLUE_SOFT),
+                ]
+            )
+            parts = [header, status_line]
             if argument_summary:
                 parts.append(Text(argument_summary, style=self.theme.TEXT_DIM))
             parts.extend([

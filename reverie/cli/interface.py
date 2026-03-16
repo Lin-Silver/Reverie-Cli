@@ -46,6 +46,9 @@ from ..agent import (
     decode_stream_event,
 )
 from ..context_engine import CodebaseIndexer, ContextRetriever, GitIntegration
+from ..context_engine import LSPManager
+from ..modes import normalize_mode
+from ..nvidia import normalize_nvidia_config
 
 
 class StatusLine:
@@ -141,6 +144,7 @@ class ReverieInterface:
         self.indexer: Optional[CodebaseIndexer] = None
         self.retriever: Optional[ContextRetriever] = None
         self.git_integration: Optional[GitIntegration] = None
+        self.lsp_manager: Optional[LSPManager] = None
         self.agent: Optional[ReverieAgent] = None
         
         self.total_active_time = 0.0
@@ -220,6 +224,7 @@ class ReverieInterface:
         self.indexer = None
         self.retriever = None
         self.git_integration = None
+        self.lsp_manager = None
 
         self.config_manager.ensure_dirs()
         self._init_workspace_services()
@@ -277,6 +282,7 @@ class ReverieInterface:
             "anthropic": "Anthropic",
             "gemini-cli": "Gemini",
             "codex": "Codex",
+            "nvidia": "NVIDIA",
         }
         source_labels = {
             "standard": "config.json",
@@ -284,6 +290,7 @@ class ReverieInterface:
             "qwencode": "Qwen Code",
             "geminicli": "Gemini CLI",
             "codex": "Codex",
+            "nvidia": "NVIDIA",
         }
         return source_labels.get(source_name, "") or provider_labels.get(provider_name, provider_name or "provider")
     
@@ -854,6 +861,11 @@ class ReverieInterface:
             if self.agent:
                 try:
                     self.session_manager.update_messages(self.agent.get_history())
+                    current_session = self.session_manager.get_current_session()
+                    if current_session and self.memory_indexer:
+                        self.memory_indexer.refresh_session(current_session.id)
+                        self._sync_workspace_memory_message(current_session)
+                        self.agent.set_history(current_session.messages)
                 except Exception as session_error:
                     self.console.print(f"\n[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Warning: Failed to save session: {session_error}[/{self.theme.AMBER_GLOW}]")
 
@@ -888,6 +900,7 @@ class ReverieInterface:
         self.console.print(f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} Initializing Context Engine...[/{self.theme.TEXT_DIM}]")
         self.indexer = CodebaseIndexer(project_root=self.project_root, cache_dir=cache_dir)
         self.git_integration = GitIntegration(self.project_root)
+        self.lsp_manager = LSPManager(self.project_root)
         config = self.config_manager.load()
         from ..context_engine.cache import CacheManager
         cache_manager = CacheManager(cache_dir)
@@ -904,6 +917,11 @@ class ReverieInterface:
 
     def _init_agent(self) -> None:
         config = self.config_manager.load()
+        if normalize_mode(config.mode) == "computer-controller":
+            nvidia_cfg = normalize_nvidia_config(getattr(config, "nvidia", {}))
+            if nvidia_cfg.get("api_key") and str(getattr(config, "active_model_source", "standard")).lower() != "nvidia":
+                config.active_model_source = "nvidia"
+                self.config_manager.save(config)
         model = config.active_model
         if not model:
             self.agent = None
@@ -955,6 +973,8 @@ class ReverieInterface:
         self.agent.tool_executor.update_context('config_manager', self.config_manager)
         # Inject session_manager for context management tool
         self.agent.tool_executor.update_context('session_manager', self.session_manager)
+        self.agent.tool_executor.update_context('memory_indexer', self.memory_indexer)
+        self.agent.tool_executor.update_context('lsp_manager', self.lsp_manager)
         # Inject console into tool context for proper input handling (especially on Windows)
         self.agent.tool_executor.update_context('console', self.console)
         # Inject status_live control for user input (will be set during _process_message)
@@ -994,13 +1014,58 @@ class ReverieInterface:
                     f"  [{idx}] display_name={item['display_name']}; path={item['path']}; introduction={intro_text}"
                 )
 
-        tti_block = "\n".join(lines)
+        lsp_lines = [
+            "## Context Engine Enhancements",
+            f"- Workspace global memory: {'enabled' if self.memory_indexer else 'disabled'}",
+            f"- Optional LSP bridge: {'available' if self.lsp_manager and self.lsp_manager.build_status_report().get('available') else 'unavailable'}",
+            "- If LSP data is available, prefer it for diagnostics, definitions, workspace symbols, and reference-oriented navigation.",
+            "- After implementation work, run the relevant build/test/verification commands before concluding.",
+            "- After tool use, always produce a user-visible textual response instead of stopping at tool output only.",
+        ]
+
+        workspace_memory = self.memory_indexer.build_workspace_memory_summary(max_fragments=6, max_chars=2200) if self.memory_indexer else ""
+        memory_block = f"{workspace_memory}" if workspace_memory else "## Workspace Global Memory\n- No prior workspace memory has been indexed yet."
+
+        merged_blocks = [tti_block for tti_block in ["\n".join(lines), "\n".join(lsp_lines), memory_block] if tti_block.strip()]
+        merged_text = "\n\n".join(merged_blocks)
         if base_rules:
-            return f"{base_rules}\n\n{tti_block}"
-        return tti_block
+            return f"{base_rules}\n\n{merged_text}"
+        return merged_text
+
+    def _sync_workspace_memory_message(self, session) -> None:
+        """Inject a fresh workspace-memory note into the active session."""
+        if not session or not self.memory_indexer:
+            return
+
+        try:
+            self.memory_indexer.refresh_session(session.id)
+        except Exception:
+            pass
+
+        memory_text = self.memory_indexer.build_workspace_memory_summary(max_fragments=8, max_chars=3200)
+        if not memory_text:
+            return
+
+        prefix = "[WORKSPACE GLOBAL MEMORY]"
+        memory_message = {
+            "role": "system",
+            "content": f"{prefix}\n{memory_text}\n[END WORKSPACE GLOBAL MEMORY]",
+        }
+        session.messages = [
+            message
+            for message in session.messages
+            if not (
+                isinstance(message, dict)
+                and str(message.get("role", "")).strip().lower() == "system"
+                and str(message.get("content", "")).startswith(prefix)
+            )
+        ]
+        session.messages.insert(0, memory_message)
+        self.session_manager.update_messages(session.messages)
 
     def _init_session(self) -> None:
         session, resumed = self.session_manager.ensure_session()
+        self._sync_workspace_memory_message(session)
 
         if self.agent:
             self.agent.set_history(session.messages)
@@ -1016,6 +1081,7 @@ class ReverieInterface:
             'config_manager': self.config_manager, 'rules_manager': self.rules_manager,
             'session_manager': self.session_manager, 'indexer': self.indexer,
             'retriever': self.retriever, 'git_integration': self.git_integration,
+            'lsp_manager': self.lsp_manager, 'memory_indexer': self.memory_indexer,
             'agent': self.agent, 'start_time': self.start_time, 
             'total_active_time': self.total_active_time,
             'current_task_start': self.current_task_start,

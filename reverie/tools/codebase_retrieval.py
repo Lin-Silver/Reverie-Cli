@@ -40,6 +40,8 @@ Query types:
 - file: Get the structure and contents of a file
 - search: Search for symbols matching a pattern
 - dependencies: Get what a symbol depends on or what depends on it
+- memory: Query workspace-global memory distilled from past sessions
+- lsp: Query optional LSP-powered symbols, definitions, or diagnostics
 
 Examples:
 - Query a function: {"query_type": "symbol", "query": "MyClass.my_method"}
@@ -52,7 +54,7 @@ Examples:
         "properties": {
             "query_type": {
                 "type": "string",
-                "enum": ["symbol", "file", "search", "dependencies", "outline"],
+                "enum": ["symbol", "file", "search", "dependencies", "outline", "memory", "lsp"],
                 "description": "Type of query to perform"
             },
             "query": {
@@ -90,6 +92,22 @@ Examples:
                 "type": "integer",
                 "description": "Maximum number of results (default: 20)",
                 "default": 20
+            },
+            "lsp_action": {
+                "type": "string",
+                "enum": ["workspace_symbols", "document_symbols", "definitions", "diagnostics", "status"],
+                "description": "For LSP queries: which capability to use.",
+                "default": "workspace_symbols"
+            },
+            "line": {
+                "type": "integer",
+                "description": "For LSP definitions: 0-based line number in the file.",
+                "default": 0
+            },
+            "character": {
+                "type": "integer",
+                "description": "For LSP definitions: 0-based character position.",
+                "default": 0
             }
         },
         "required": ["query_type", "query"]
@@ -139,6 +157,9 @@ Examples:
         filter_kind = self._normalize_string(kwargs.get('filter_kind', 'all'), 'all').lower()
         direction = self._normalize_string(kwargs.get('direction', 'outgoing'), 'outgoing').lower()
         limit = self._normalize_int(kwargs.get('limit', 20), 20)
+        lsp_action = self._normalize_string(kwargs.get('lsp_action', 'workspace_symbols'), 'workspace_symbols').lower()
+        line = self._normalize_int(kwargs.get('line', 0), 0)
+        character = self._normalize_int(kwargs.get('character', 0), 0)
         
         retriever = self._get_retriever()
         
@@ -166,6 +187,12 @@ Examples:
             
             elif query_type == "outline":
                 return self._query_outline(retriever, query)
+
+            elif query_type == "memory":
+                return self._query_memory(query, limit)
+
+            elif query_type == "lsp":
+                return self._query_lsp(query, lsp_action, line, character, limit)
             
             else:
                 return ToolResult.fail(f"Unknown query type: {query_type}")
@@ -388,3 +415,86 @@ Examples:
     def _query_outline(self, retriever, file_path: str) -> ToolResult:
         """Get outline/structure of a file"""
         return self._query_file(retriever, file_path, include_source=False)
+
+    def _query_memory(self, query: str, limit: int) -> ToolResult:
+        """Query workspace-global memory."""
+        memory_indexer = self.context.get("memory_indexer")
+        if not memory_indexer:
+            return ToolResult.fail("Workspace memory index is not available.")
+
+        summary = memory_indexer.build_workspace_memory_summary(query=query, max_fragments=limit, max_chars=3600)
+        if not summary:
+            return ToolResult.ok("Workspace memory is currently empty.", data={"count": 0})
+        return ToolResult.ok(summary, data={"count": limit})
+
+    def _query_lsp(self, query: str, action: str, line: int, character: int, limit: int) -> ToolResult:
+        """Query optional LSP-backed capabilities."""
+        lsp_manager = self.context.get("lsp_manager")
+        if not lsp_manager:
+            return ToolResult.fail("LSP manager is not available.")
+
+        action_name = self._normalize_string(action, "workspace_symbols").lower()
+        if action_name == "status":
+            status = lsp_manager.build_status_report()
+            if not status.get("available"):
+                return ToolResult.ok("No supported local language servers were detected.", data=status)
+            lines = ["# LSP Status", f"Servers: {len(status.get('servers', []))}"]
+            for server in status.get("servers", [])[:limit]:
+                lines.append(
+                    f"- {server.get('key')} ({', '.join(server.get('extensions', []))}) -> {' '.join(server.get('command', []))}"
+                )
+            return ToolResult.ok("\n".join(lines), data=status)
+
+        if action_name == "workspace_symbols":
+            results = lsp_manager.workspace_symbols(query, limit=limit)
+            if not results:
+                return ToolResult.ok(f"No LSP workspace symbols found for '{query}'.", data={"count": 0})
+            lines = [f"# LSP workspace symbols for: {query}"]
+            for item in results[:limit]:
+                name = str(item.get("name", "") or "").strip()
+                kind = item.get("kind")
+                location = item.get("location", {}) if isinstance(item.get("location"), dict) else {}
+                uri = str(location.get("uri", "") or "").strip()
+                lines.append(f"- {name} (kind={kind}) {uri}")
+            return ToolResult.ok("\n".join(lines), data={"count": len(results)})
+
+        if action_name == "document_symbols":
+            results = lsp_manager.document_symbols(query)
+            if not results:
+                return ToolResult.ok(f"No LSP document symbols found for '{query}'.", data={"count": 0})
+            lines = [f"# LSP document symbols for: {query}"]
+            for item in results[:limit]:
+                name = str(item.get("name", "") or "").strip()
+                kind = item.get("kind")
+                lines.append(f"- {name} (kind={kind})")
+            return ToolResult.ok("\n".join(lines), data={"count": len(results)})
+
+        if action_name == "definitions":
+            results = lsp_manager.definitions(query, line=line, character=character)
+            if not results:
+                return ToolResult.ok(
+                    f"No LSP definitions found for {query}:{line}:{character}.",
+                    data={"count": 0},
+                )
+            lines = [f"# LSP definitions for: {query}:{line}:{character}"]
+            for item in results[:limit]:
+                uri = str(item.get("uri", "") or "").strip()
+                range_info = item.get("range", {}) if isinstance(item.get("range"), dict) else {}
+                start = range_info.get("start", {}) if isinstance(range_info.get("start"), dict) else {}
+                lines.append(f"- {uri}:{start.get('line', 0)}:{start.get('character', 0)}")
+            return ToolResult.ok("\n".join(lines), data={"count": len(results)})
+
+        if action_name == "diagnostics":
+            results = lsp_manager.diagnostics(query)
+            if not results:
+                return ToolResult.ok(f"No LSP diagnostics for '{query}'.", data={"count": 0})
+            lines = [f"# LSP diagnostics for: {query}"]
+            for item in results[:limit]:
+                severity = item.get("severity")
+                message = str(item.get("message", "") or "").strip()
+                range_info = item.get("range", {}) if isinstance(item.get("range"), dict) else {}
+                start = range_info.get("start", {}) if isinstance(range_info.get("start"), dict) else {}
+                lines.append(f"- severity={severity} line={start.get('line', 0)} col={start.get('character', 0)} {message}")
+            return ToolResult.ok("\n".join(lines), data={"count": len(results)})
+
+        return ToolResult.fail(f"Unknown lsp_action: {action}")

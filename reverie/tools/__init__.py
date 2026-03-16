@@ -45,6 +45,8 @@ from .game_math_simulator import GameMathSimulatorTool
 from .game_stats_analyzer import GameStatsAnalyzerTool
 from .vision_upload import VisionUploadTool
 from .token_counter import TokenCounterTool
+from .mode_switch import ModeSwitchTool
+from .computer_control import ComputerControlTool
 
 __all__ = [
     'BaseTool',
@@ -78,4 +80,6 @@ __all__ = [
     "StoryDesignTool",
     "GameMathSimulatorTool",
     "GameStatsAnalyzerTool",
+    "ModeSwitchTool",
+    "ComputerControlTool",
 ]

@@ -18,12 +18,15 @@ import json
 import time
 import uuid
 
-
-IFLOW_API_URL = "https://apis.iflow.cn/v1/chat/completions"
-IFLOW_MODELS_URL = "https://apis.iflow.cn/v1/models"
+IFLOW_DEFAULT_BASE_URL = "https://apis.iflow.cn/v1"
+IFLOW_API_URL = f"{IFLOW_DEFAULT_BASE_URL}/chat/completions"
+IFLOW_MODELS_URL = f"{IFLOW_DEFAULT_BASE_URL}/models"
 IFLOW_THINKING_DEPTHS = ("minimal", "low", "medium", "high", "xhigh", "auto")
+IFLOW_SETTINGS_FILE = "settings.json"
+IFLOW_USER_AGENT = "iFlow-Cli"
 
 _IFLOW_CREDENTIAL_FILES = (
+    (IFLOW_SETTINGS_FILE, "apiKey"),
     ("iflow_accounts.json", "iflowApiKey"),
     ("oauth_creds.json", "apiKey"),
 )
@@ -59,6 +62,30 @@ _IFLOW_MODEL_METADATA = {
         "context_length": 32768,
         "thinking": False,
     },
+    "qwen3-max": {
+        "display_name": "Qwen3-Max",
+        "description": "Qwen3 Max model",
+        "context_length": 131072,
+        "thinking": False,
+    },
+    "qwen3-vl-plus": {
+        "display_name": "Qwen3-VL-Plus",
+        "description": "Qwen3 multimodal model",
+        "context_length": 32768,
+        "thinking": False,
+    },
+    "qwen3-max-preview": {
+        "display_name": "Qwen3-Max-Preview",
+        "description": "Qwen3 Max preview model",
+        "context_length": 131072,
+        "thinking": False,
+    },
+    "kimi-k2": {
+        "display_name": "Kimi-K2",
+        "description": "Moonshot Kimi K2 model",
+        "context_length": 128000,
+        "thinking": False,
+    },
     "kimi-k2-thinking": {
         "display_name": "Kimi-K2-Thinking",
         "description": "Moonshot Kimi K2 thinking model",
@@ -83,20 +110,65 @@ _IFLOW_MODEL_METADATA = {
         "context_length": 128000,
         "thinking": False,
     },
+    "deepseek-r1": {
+        "display_name": "DeepSeek-R1",
+        "description": "DeepSeek reasoning model",
+        "context_length": 128000,
+        "thinking": False,
+    },
+    "deepseek-v3": {
+        "display_name": "DeepSeek-V3",
+        "description": "DeepSeek V3 model",
+        "context_length": 64000,
+        "thinking": False,
+    },
+    "qwen3-32b": {
+        "display_name": "Qwen3-32B",
+        "description": "Qwen3 32B model",
+        "context_length": 131072,
+        "thinking": False,
+    },
+    "qwen3-235b-a22b-thinking-2507": {
+        "display_name": "Qwen3-235B-A22B-Thinking-2507",
+        "description": "Qwen3 235B thinking model",
+        "context_length": 131072,
+        "thinking": False,
+    },
+    "qwen3-235b-a22b-instruct": {
+        "display_name": "Qwen3-235B-A22B-Instruct",
+        "description": "Qwen3 235B instruct model",
+        "context_length": 131072,
+        "thinking": False,
+    },
+    "qwen3-235b": {
+        "display_name": "Qwen3-235B",
+        "description": "Qwen3 235B model",
+        "context_length": 131072,
+        "thinking": False,
+    },
 }
 
 _IFLOW_FALLBACK_ORDER = [
-    "glm-4.7",
     "iflow-rome-30ba3b",
-    "deepseek-v3.2",
-    "glm-5",
     "qwen3-coder-plus",
+    "qwen3-max",
+    "qwen3-vl-plus",
+    "qwen3-max-preview",
+    "kimi-k2",
+    "kimi-k2-0905",
+    "deepseek-v3.2",
+    "deepseek-r1",
+    "deepseek-v3",
+    "qwen3-32b",
+    "qwen3-235b-a22b-thinking-2507",
+    "qwen3-235b-a22b-instruct",
+    "qwen3-235b",
+    "glm-5",
+    "glm-4.7",
     "kimi-k2-thinking",
     "minimax-m2.5",
     "kimi-k2.5",
-    "kimi-k2-0905",
 ]
-_IFLOW_ALLOWED_BASE_MODEL_SET = {model_id.lower() for model_id in _IFLOW_FALLBACK_ORDER}
 
 
 def default_iflow_config() -> Dict[str, Any]:
@@ -104,7 +176,7 @@ def default_iflow_config() -> Dict[str, Any]:
     return {
         "selected_model_id": "",
         "selected_model_display_name": "",
-        "api_url": IFLOW_API_URL,
+        "api_url": IFLOW_DEFAULT_BASE_URL,
         "endpoint": "",
         "max_context_tokens": 200000,
         "timeout": 1200,
@@ -143,22 +215,71 @@ def _load_json_dict(path: Path, errors: List[str]) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _generate_iflow_signature(api_key: str, session_id: str, timestamp_ms: int) -> str:
-    payload = f"iFlow-Cli:{session_id}:{timestamp_ms}"
-    digest = hmac.new(api_key.encode(), payload.encode(), hashlib.sha256)
-    return digest.hexdigest()
+def _load_iflow_settings(errors: Optional[List[str]] = None) -> Dict[str, Any]:
+    """Load ~/.iflow/settings.json if present."""
+    path = Path.home() / ".iflow" / IFLOW_SETTINGS_FILE
+    if not path.exists():
+        return {}
+    data = _load_json_dict(path, errors if isinstance(errors, list) else [])
+    return data if isinstance(data, dict) else {}
 
 
 def _build_iflow_auth_headers(api_key: str, accept: str = "application/json") -> Dict[str, str]:
-    session_id = f"session-{uuid.uuid4()}"
-    timestamp = int(time.time() * 1000)
     return {
         "Authorization": f"Bearer {api_key}",
-        "User-Agent": "iFlow-Cli",
-        "session-id": session_id,
-        "x-iflow-timestamp": str(timestamp),
-        "x-iflow-signature": _generate_iflow_signature(api_key, session_id, timestamp),
+        "Content-Type": "application/json",
         "Accept": accept,
+    }
+
+
+def create_iflow_signature(user_agent: str, session_id: str, timestamp_ms: int, api_key: str) -> str:
+    """Generate iFlow-compatible HMAC signature for direct chat requests."""
+    secret = str(api_key or "").strip()
+    if not secret:
+        return ""
+    payload = f"{user_agent}:{session_id}:{int(timestamp_ms)}".encode("utf-8")
+    return hmac.new(secret.encode("utf-8"), payload, hashlib.sha256).hexdigest()
+
+
+def build_iflow_request_headers(
+    api_key: str,
+    stream: bool = False,
+    custom_headers: Optional[Dict[str, Any]] = None,
+) -> Dict[str, str]:
+    """Build direct-request headers compatible with the current iFlow CLI flow."""
+    user_agent = IFLOW_USER_AGENT
+    session_id = f"session-{uuid.uuid4()}"
+    timestamp_ms = int(time.time() * 1000)
+    headers = {
+        "Authorization": f"Bearer {str(api_key or '').strip()}",
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream" if stream else "application/json",
+        "User-Agent": user_agent,
+        "session-id": session_id,
+        "x-iflow-timestamp": str(timestamp_ms),
+    }
+    signature = create_iflow_signature(user_agent, session_id, timestamp_ms, api_key)
+    if signature:
+        headers["x-iflow-signature"] = signature
+
+    if isinstance(custom_headers, dict):
+        for key, value in custom_headers.items():
+            key_text = str(key or "").strip()
+            if not key_text:
+                continue
+            headers[key_text] = str(value)
+    return headers
+
+
+def _merge_iflow_metadata(model_id: str, raw_item: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Merge static metadata with any remotely discovered model fields."""
+    item = raw_item if isinstance(raw_item, dict) else {}
+    meta = _IFLOW_MODEL_METADATA.get(model_id, {})
+    return {
+        "display_name": str(meta.get("display_name") or item.get("display_name") or model_id),
+        "description": str(meta.get("description") or item.get("description") or model_id),
+        "context_length": int(item.get("context_length") or meta.get("context_length", 128000)),
+        "thinking": bool(meta.get("thinking", False)),
     }
 
 
@@ -166,7 +287,7 @@ def _build_iflow_base_catalog() -> List[Dict[str, Any]]:
     catalog: List[Dict[str, Any]] = []
     seen_ids = set()
     for model_id in _IFLOW_FALLBACK_ORDER:
-        meta = _IFLOW_MODEL_METADATA.get(model_id, {})
+        meta = _merge_iflow_metadata(model_id)
         lower_id = model_id.lower()
         if lower_id in seen_ids:
             continue
@@ -180,6 +301,7 @@ def _build_iflow_base_catalog() -> List[Dict[str, Any]]:
                 "thinking_depth": "none",
                 "base_model_id": model_id,
                 "context_length": int(meta.get("context_length", 128000)),
+                "remote_available": False,
             }
         )
     return catalog
@@ -190,7 +312,7 @@ def _append_iflow_thinking_variants(catalog: List[Dict[str, Any]]) -> List[Dict[
     seen = {str(item.get("id", "")).strip().lower() for item in items}
     for item in list(catalog):
         model_id = str(item.get("id", "")).strip()
-        meta = _IFLOW_MODEL_METADATA.get(model_id, {})
+        meta = _merge_iflow_metadata(model_id)
         if not meta.get("thinking"):
             continue
         for depth in IFLOW_THINKING_DEPTHS:
@@ -213,7 +335,18 @@ def _append_iflow_thinking_variants(catalog: List[Dict[str, Any]]) -> List[Dict[
     return items
 
 
-def _fetch_remote_iflow_models(api_key: str, errors: List[str]) -> List[Dict[str, Any]]:
+def _resolve_iflow_models_url(api_url: str) -> str:
+    """Resolve the models endpoint from a configured iFlow base URL."""
+    base = _normalize_iflow_api_url(api_url)
+    if base.lower().endswith("/models"):
+        return base
+    if base.lower().endswith("/chat/completions"):
+        split = urlsplit(base)
+        return f"{split.scheme}://{split.netloc}/v1/models"
+    return f"{base}/models"
+
+
+def _fetch_remote_iflow_models(api_key: str, api_url: str, errors: List[str]) -> List[Dict[str, Any]]:
     if not api_key:
         return []
 
@@ -221,7 +354,7 @@ def _fetch_remote_iflow_models(api_key: str, errors: List[str]) -> List[Dict[str
         import requests
 
         response = requests.get(
-            IFLOW_MODELS_URL,
+            _resolve_iflow_models_url(api_url),
             headers=_build_iflow_auth_headers(api_key),
             timeout=20,
         )
@@ -252,12 +385,10 @@ def _fetch_remote_iflow_models(api_key: str, errors: List[str]) -> List[Dict[str
         if not model_id:
             continue
         lower_id = model_id.lower()
-        if lower_id not in _IFLOW_ALLOWED_BASE_MODEL_SET:
-            continue
         if lower_id in seen_ids:
             continue
         seen_ids.add(lower_id)
-        meta = _IFLOW_MODEL_METADATA.get(model_id, {})
+        meta = _merge_iflow_metadata(model_id, item)
         catalog.append(
             {
                 "id": model_id,
@@ -268,6 +399,7 @@ def _fetch_remote_iflow_models(api_key: str, errors: List[str]) -> List[Dict[str
                 "base_model_id": model_id,
                 "context_length": int(meta.get("context_length", 128000)),
                 "created": item.get("created"),
+                "remote_available": True,
             }
         )
     return catalog
@@ -277,22 +409,40 @@ def get_iflow_model_catalog() -> List[Dict[str, Any]]:
     """Return iFlow model catalog, preferring the current remote account model list."""
     cred = detect_iflow_cli_credentials()
     errors = cred.get("errors", []) if isinstance(cred.get("errors"), list) else []
-    remote_catalog = _fetch_remote_iflow_models(str(cred.get("api_key", "")).strip(), errors)
+    remote_catalog = _fetch_remote_iflow_models(
+        str(cred.get("api_key", "")).strip(),
+        str(cred.get("base_url", "")).strip() or IFLOW_DEFAULT_BASE_URL,
+        errors,
+    )
     base_catalog = _build_iflow_base_catalog()
     if remote_catalog:
-        remote_by_id = {
-            str(item.get("id", "")).strip().lower(): item
-            for item in remote_catalog
+        merged_by_id = {
+            str(item.get("id", "")).strip().lower(): dict(item)
+            for item in base_catalog
             if str(item.get("id", "")).strip()
         }
-        merged_catalog: List[Dict[str, Any]] = []
-        for item in base_catalog:
-            merged = dict(item)
-            remote_item = remote_by_id.get(str(item.get("id", "")).strip().lower(), {})
-            if remote_item:
-                if remote_item.get("created") is not None:
-                    merged["created"] = remote_item.get("created")
-            merged_catalog.append(merged)
+        for remote_item in remote_catalog:
+            model_id = str(remote_item.get("id", "")).strip()
+            if not model_id:
+                continue
+            lower_id = model_id.lower()
+            merged = dict(merged_by_id.get(lower_id, {}))
+            merged.update(remote_item)
+            merged["id"] = model_id
+            merged["base_model_id"] = model_id
+            merged["is_thinking"] = False
+            merged["thinking_depth"] = "none"
+            merged["remote_available"] = True
+            merged_by_id[lower_id] = merged
+
+        order_index = {model_id.lower(): idx for idx, model_id in enumerate(_IFLOW_FALLBACK_ORDER)}
+        merged_catalog = sorted(
+            merged_by_id.values(),
+            key=lambda item: (
+                order_index.get(str(item.get("id", "")).strip().lower(), 10_000),
+                str(item.get("display_name", item.get("id", ""))).lower(),
+            ),
+        )
         return _append_iflow_thinking_variants(merged_catalog)
     return _append_iflow_thinking_variants(base_catalog)
 
@@ -315,15 +465,20 @@ def normalize_iflow_config(raw_iflow: Any) -> Dict[str, Any]:
     cfg = default_iflow_config()
     if isinstance(raw_iflow, dict):
         cfg.update(raw_iflow)
+    settings = _load_iflow_settings()
+    settings_base_url = str(settings.get("baseUrl", "") or "").strip()
+    settings_model_id = str(settings.get("modelName", "") or "").strip()
 
     if not str(cfg.get("api_url", "")).strip():
         legacy_url = str(cfg.get("proxy_base_url", "")).strip()
         if legacy_url and "127.0.0.1:8000" not in legacy_url:
             cfg["api_url"] = legacy_url
+        elif settings_base_url:
+            cfg["api_url"] = settings_base_url
 
     cfg["selected_model_id"] = str(cfg.get("selected_model_id", "")).strip()
     cfg["selected_model_display_name"] = str(cfg.get("selected_model_display_name", "")).strip()
-    cfg["api_url"] = _normalize_iflow_api_url(cfg.get("api_url", IFLOW_API_URL))
+    cfg["api_url"] = _normalize_iflow_api_url(cfg.get("api_url", settings_base_url or IFLOW_DEFAULT_BASE_URL))
     cfg["endpoint"] = _normalize_iflow_endpoint(cfg.get("endpoint", ""))
     cfg.pop("proxy_base_url", None)
     cfg.pop("proxy_api_key", None)
@@ -347,7 +502,15 @@ def normalize_iflow_config(raw_iflow: Any) -> Dict[str, Any]:
     cfg.pop("iflow_timeout", None)
 
     catalog = get_iflow_model_catalog()
+    has_remote_catalog = any(bool(item.get("remote_available")) for item in catalog)
+    if not cfg["selected_model_id"] and settings_model_id:
+        matched = find_iflow_model(settings_model_id, catalog=catalog)
+        if matched and (bool(matched.get("remote_available")) or not has_remote_catalog):
+            cfg["selected_model_id"] = matched["id"]
+            cfg["selected_model_display_name"] = matched["display_name"]
     matched = find_iflow_model(cfg["selected_model_id"], catalog=catalog)
+    if matched and has_remote_catalog and not bool(matched.get("remote_available")):
+        matched = None
     if matched:
         cfg["selected_model_id"] = matched["id"]
         cfg["selected_model_display_name"] = matched["display_name"]
@@ -397,7 +560,10 @@ def resolve_iflow_request_url(api_url: str, endpoint: str = "") -> str:
             return f"{base}{endpoint_value}"
         return f"{base}/{endpoint_value}"
 
-    return _normalize_iflow_api_url(api_url)
+    base = _normalize_iflow_api_url(api_url)
+    if base.lower().endswith("/chat/completions"):
+        return base
+    return f"{base}/chat/completions"
 
 
 def build_iflow_runtime_model_data(iflow_config: Any) -> Optional[Dict[str, Any]]:
@@ -437,8 +603,16 @@ def detect_iflow_cli_credentials() -> Dict[str, Any]:
         "api_key": "",
         "source_file": "",
         "source_field": "",
+        "base_url": "",
+        "model_name": "",
+        "auth_type": "",
         "errors": [],
     }
+    settings = _load_iflow_settings(result["errors"])
+    if isinstance(settings, dict):
+        result["base_url"] = str(settings.get("baseUrl", "")).strip()
+        result["model_name"] = str(settings.get("modelName", "")).strip()
+        result["auth_type"] = str(settings.get("selectedAuthType", "")).strip()
 
     for filename, field_name in _IFLOW_CREDENTIAL_FILES:
         path = iflow_dir / filename

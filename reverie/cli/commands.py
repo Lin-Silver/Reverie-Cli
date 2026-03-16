@@ -21,6 +21,7 @@ from rich.markup import escape
 
 from .help_catalog import HELP_SECTION_ORDER, HELP_TOPICS, normalize_help_topic
 from .theme import THEME, DECO, DREAM
+from ..modes import get_mode_description, list_modes, normalize_mode
 
 
 class CommandHandler:
@@ -44,6 +45,7 @@ class CommandHandler:
             'qwencode': self.cmd_qwencode,
             'geminicli': self.cmd_geminicli,
             'codex': self.cmd_codex,
+            'nvidia': self.cmd_nvidia,
             'mode': self.cmd_mode,
             'status': self.cmd_status,
             'search': self.cmd_search,
@@ -1158,6 +1160,7 @@ class CommandHandler:
             "qwencode": "Qwen Code",
             "geminicli": "Gemini CLI",
             "codex": "Codex",
+            "nvidia": "NVIDIA",
         }
         return mapping.get(str(source or "").strip().lower(), "config.json")
 
@@ -1376,6 +1379,40 @@ class CommandHandler:
         if self.app.get('reinit_agent'):
             self.app['reinit_agent']()
 
+        return True
+
+    def _ensure_nvidia_configuration(self, config) -> bool:
+        """Prompt for NVIDIA API key when needed and bind the source."""
+        from ..nvidia import normalize_nvidia_config
+
+        nvidia_cfg = normalize_nvidia_config(getattr(config, "nvidia", {}))
+        api_key = str(nvidia_cfg.get("api_key", "") or "").strip()
+        if not api_key:
+            self.console.print()
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Computer Controller mode uses NVIDIA-hosted Qwen vision. Enter an API key to continue.[/{self.theme.TEXT_DIM}]"
+            )
+            api_key = Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] NVIDIA API Key",
+                password=True,
+            ).strip()
+            if not api_key:
+                self.console.print(
+                    f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} NVIDIA API key is required for Computer Controller mode.[/{self.theme.CORAL_SOFT}]"
+                )
+                return False
+            nvidia_cfg["api_key"] = api_key
+
+        config.nvidia = normalize_nvidia_config(nvidia_cfg)
+        config.active_model_source = "nvidia"
+        return True
+
+    def _apply_mode_selection(self, config, candidate: str) -> bool:
+        """Apply normalized mode changes with any mode-specific provider setup."""
+        normalized_mode = normalize_mode(candidate)
+        config.mode = normalized_mode
+        if normalized_mode == "computer-controller":
+            return self._ensure_nvidia_configuration(config)
         return True
 
     def cmd_iflow(self, args: str) -> bool:
@@ -2460,6 +2497,150 @@ class CommandHandler:
 
         return True
 
+    def cmd_nvidia(self, args: str) -> bool:
+        """Manage NVIDIA Computer Controller provider settings."""
+        raw = args.strip()
+        if not raw:
+            return self._cmd_nvidia_status()
+
+        lowered = raw.lower()
+        if lowered in ("status", "check"):
+            return self._cmd_nvidia_status()
+        if lowered in ("login", "key", "apikey", "api-key"):
+            return self._cmd_nvidia_login()
+        if lowered in ("activate", "use"):
+            return self._cmd_nvidia_activate()
+        if lowered == "model":
+            return self._cmd_nvidia_model("")
+        if lowered.startswith("model "):
+            return self._cmd_nvidia_model(raw[6:].strip())
+        if lowered == "endpoint":
+            return self._cmd_nvidia_endpoint("")
+        if lowered.startswith("endpoint "):
+            return self._cmd_nvidia_endpoint(raw[9:].strip())
+
+        self.console.print(
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /nvidia [status|login|activate|model|endpoint][/{self.theme.AMBER_GLOW}]"
+        )
+        return True
+
+    def _cmd_nvidia_status(self) -> bool:
+        from ..nvidia import mask_secret, normalize_nvidia_config, resolve_nvidia_selected_model
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        nvidia_cfg = normalize_nvidia_config(getattr(config, "nvidia", {}))
+        selected = resolve_nvidia_selected_model(nvidia_cfg)
+        model_source = str(getattr(config, "active_model_source", "standard") or "standard").strip().lower()
+
+        lines = [
+            f"[{self.theme.BLUE_SOFT}]Active model source:[/{self.theme.BLUE_SOFT}] {self._format_model_source_label(model_source)}",
+            f"[{self.theme.BLUE_SOFT}]Configured key:[/{self.theme.BLUE_SOFT}] {mask_secret(str(nvidia_cfg.get('api_key', '') or '')) if nvidia_cfg.get('api_key') else '(not set)'}",
+            f"[{self.theme.BLUE_SOFT}]API URL:[/{self.theme.BLUE_SOFT}] {escape(str(nvidia_cfg.get('api_url', '')))}",
+            f"[{self.theme.BLUE_SOFT}]Endpoint:[/{self.theme.BLUE_SOFT}] {escape(str(nvidia_cfg.get('endpoint', '')))}",
+            f"[{self.theme.BLUE_SOFT}]Thinking:[/{self.theme.BLUE_SOFT}] {'ON' if bool(nvidia_cfg.get('enable_thinking', True)) else 'OFF'}",
+            f"[{self.theme.BLUE_SOFT}]Default max tokens:[/{self.theme.BLUE_SOFT}] {nvidia_cfg.get('max_tokens', 16384)}",
+        ]
+        if selected:
+            lines.insert(1, f"[{self.theme.BLUE_SOFT}]Selected model:[/{self.theme.BLUE_SOFT}] {escape(selected['display_name'])} ({escape(selected['id'])})")
+
+        self.console.print()
+        self.console.print(
+            Panel(
+                Text.from_markup("\n".join(lines)),
+                title=f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} NVIDIA Computer Controller {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]",
+                border_style=self.theme.BORDER_PRIMARY,
+                box=box.ROUNDED,
+                padding=(1, 2),
+            )
+        )
+        self.console.print()
+        return True
+
+    def _cmd_nvidia_login(self) -> bool:
+        from ..nvidia import normalize_nvidia_config
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        nvidia_cfg = normalize_nvidia_config(getattr(config, "nvidia", {}))
+        api_key = Prompt.ask(
+            f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] NVIDIA API Key",
+            password=True,
+        ).strip()
+        if not api_key:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} NVIDIA API key cannot be empty.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        nvidia_cfg["api_key"] = api_key
+        config.nvidia = normalize_nvidia_config(nvidia_cfg)
+        if normalize_mode(getattr(config, "mode", "reverie")) == "computer-controller":
+            config.active_model_source = "nvidia"
+        config_manager.save(config)
+
+        if self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} NVIDIA API key saved.[/{self.theme.MINT_VIBRANT}]"
+        )
+        return True
+
+    def _cmd_nvidia_activate(self) -> bool:
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        if not self._ensure_nvidia_configuration(config):
+            return True
+        config.active_model_source = "nvidia"
+        config_manager.save(config)
+        if self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} NVIDIA source activated.[/{self.theme.MINT_VIBRANT}]"
+        )
+        return True
+
+    def _cmd_nvidia_endpoint(self, endpoint_value: str) -> bool:
+        from ..nvidia import normalize_nvidia_config
+
+        return self._configure_provider_endpoint(
+            config_attr="nvidia",
+            normalize_config=normalize_nvidia_config,
+            provider_label="NVIDIA",
+            endpoint_value=endpoint_value,
+        )
+
+    def _cmd_nvidia_model(self, model_query: str) -> bool:
+        from ..nvidia import get_nvidia_model_catalog, normalize_nvidia_config
+
+        return self._select_external_provider_model(
+            config_attr="nvidia",
+            normalize_config=normalize_nvidia_config,
+            catalog=get_nvidia_model_catalog(),
+            provider_label="NVIDIA",
+            active_source="nvidia",
+            model_query=model_query,
+        )
+
     def cmd_model(self, args: str) -> bool:
         """List and select models, or add/delete one"""
         args = args.strip().lower()
@@ -2550,21 +2731,17 @@ class CommandHandler:
             return True
 
         config = config_manager.load()
-        mode = args.strip()
+        raw_mode = args.strip()
+        mode = normalize_mode(raw_mode) if raw_mode else ""
         
         # Available modes
-        available_modes = [
-            "reverie",
-            "reverie-gamer",
-            "spec-driven",
-            "spec-vibe",
-            "writer",
-            "reverie-ant"
-        ]
+        available_modes = list_modes(include_computer=True)
         
         # If no mode specified, show current mode and available modes
         if not mode:
-            current_mode = config.mode or "reverie"
+            current_mode = normalize_mode(config.mode or "reverie")
+            if current_mode not in available_modes:
+                current_mode = "reverie"
             
             self.console.print()
             self.console.print(Panel(
@@ -2590,18 +2767,9 @@ class CommandHandler:
             table.add_column("Description", style=self.theme.TEXT_SECONDARY)
             table.add_column("", style=self.theme.MINT_SOFT, width=5)
             
-            mode_descriptions = {
-                "reverie": "General-purpose coding assistant with context engine",
-                "reverie-gamer": "Game development mode with specialized tools for RPG and game design",
-                "spec-driven": "Specification-driven development with structured workflows",
-                "spec-vibe": "Lightweight spec mode with flexible approach",
-                "writer": "Creative writing and documentation mode",
-                "reverie-ant": "Advanced task management with planning and execution phases"
-            }
-            
             for mode_name in available_modes:
                 is_current = f"{self.deco.CHECK_FANCY}" if mode_name == current_mode else ""
-                description = mode_descriptions.get(mode_name, "")
+                description = get_mode_description(mode_name)
                 table.add_row(mode_name, description, is_current)
             
             self.console.print(table)
@@ -2618,7 +2786,8 @@ class CommandHandler:
             return True
 
         # Switch mode
-        config.mode = mode
+        if not self._apply_mode_selection(config, mode):
+            return True
         config_manager.save(config)
 
         # Reinit agent to apply new mode
@@ -3317,14 +3486,7 @@ class CommandHandler:
 
     def _setting_mode_options(self) -> List[str]:
         """Available runtime modes for `/mode` and `/setting`."""
-        return [
-            "reverie",
-            "reverie-gamer",
-            "reverie-ant",
-            "spec-driven",
-            "spec-vibe",
-            "writer",
-        ]
+        return list_modes(include_computer=True)
 
     def _setting_theme_options(self) -> List[str]:
         """Available theme values stored in config."""
@@ -3736,13 +3898,15 @@ class CommandHandler:
             return True
         config = config_manager.load()
         choices = self._setting_mode_options()
-        candidate = str(value or "").strip().lower()
+        raw_value = str(value or "").strip()
+        candidate = normalize_mode(raw_value) if raw_value else ""
         if not candidate:
-            candidate = Prompt.ask("Mode", default=config.mode or "reverie", choices=choices).strip().lower()
+            candidate = normalize_mode(Prompt.ask("Mode", default=config.mode or "reverie", choices=choices).strip().lower())
         if candidate not in choices:
             self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid mode: {candidate}[/{self.theme.CORAL_SOFT}]")
             return True
-        config.mode = candidate
+        if not self._apply_mode_selection(config, candidate):
+            return True
         return self._setting_save_and_reinit(config, f"Mode set to {candidate}.")
 
     def _cmd_setting_model(self, value: str) -> bool:

@@ -1,3 +1,28 @@
+## Reverie CLI v2.1.3 - Post-Release Updates (Still v2.1.3) - Reverie-Gamer Production Upgrade + Reverie Engine Lite
+
+**Release Date:** 2026-03-16
+
+### Highlights
+* Rebuilt `reverie-gamer` into a stronger end-to-end game-production workflow: the active Gamer system prompt now pushes blueprint-first planning, engine-aware scaffolding, playable-first delivery, proactive verification loops, and repeated balance/playtest iteration instead of stopping at design docs.
+* Added three major Gamer tools for large-scale game creation: `game_design_orchestrator` for structured blueprints and vertical-slice planning, `game_project_scaffolder` for engine-aware project foundations and content pipelines, and `game_playtest_lab` for telemetry schemas, quality gates, session-log analysis, and feedback synthesis.
+* Added `Reverie Engine Lite` as Reverie's first-party built-in runtime, with a data-driven scene/prefab format, project scaffolding helpers, deterministic smoke testing, and three built-in samples spanning `2D`, `2.5D`, and `3D`.
+* Added a new `/engine` CLI surface for `profile`, `create`, `sample`, `run`, `smoke`, and `test`, so Reverie can create and validate built-in runtime projects without requiring an external engine.
+* Upgraded existing Gamer tools so previously advertised advanced actions now really work: asset dependency/compression/size analysis, narrative consistency and pacing checks, character-arc analysis, NPC placement and spatial analysis, trend/anomaly stats, and custom simulation pipelines.
+* Expanded the CLI game workflow with new `/blueprint`, `/scaffold`, and `/playtest` commands, while upgrading `/gdd` with validation/version/export flows and turning `/assets` into a fuller asset workbench for manifests, dependency graphs, optimization, and diagnostics.
+* Strengthened generic `reverie` mode as well: mode switching is now more proactive in the system prompt, and verification is treated as a required debug-and-retest loop instead of an optional final step.
+
+### Supported Game Creation Coverage
+* **2D games**: platformers, metroidvanias, top-down action games, roguelikes, bullet hell shooters, JRPGs, tactics games, deckbuilders/card games, puzzle games, visual novels, and management/simulation projects.
+* **2.5D games**: isometric ARPGs, tactics/strategy games, Diablo-like loot games, cinematic platformers, survival-horror hybrids, and fixed-camera exploration projects.
+* **3D games**: action-adventure games, RPGs, open-zone/open-world projects, FPS/TPS combat games, survival/crafting games, dungeon crawlers, immersive sims, racing prototypes, and systemic sandbox experiences.
+* **Engine/runtime coverage**: built-in `Reverie Engine Lite`, custom runtime workflows, web stacks (`Phaser`, `PixiJS`, `Three.js`), lightweight Python/Lua stacks (`Pygame`, `Love2D`), and engine-aware project structures for `Godot`, `Unity`, and `Unreal`.
+
+### Notes
+* `reverie-gamer` now has the strongest results when used as a production loop: blueprint -> scaffold -> first playable -> simulation -> playtest -> telemetry-informed iteration.
+* The CLI now exposes the new game-production surfaces directly, including the first-party engine runtime, so Gamer workflows no longer depend only on in-chat tool calling.
+
+---
+
 ## Reverie CLI v2.1.3 - Computer Controller, Mode Switching, and Context Intelligence
 
 **Release Date:** 2026-03-15

@@ -1,25 +1,23 @@
 """
-Task Manager Tool - Organize and track complex work
+Task Manager Tool - Organize and track complex work.
 
-Provides task management capabilities:
-- Add tasks and subtasks
-- Update task status
-- View task list
-- Reorganize tasks
+The canonical human-facing artifact is a checklist-only `Tasks.md` file.
+Structured metadata is persisted separately in `task_list.json`.
 """
 
 from typing import Optional, Dict, List
 from dataclasses import dataclass, field
 from enum import Enum
 import json
-import os
+import re
 import uuid
 from datetime import datetime
-from dataclasses import asdict
 from pathlib import Path
-from rich.markup import escape
 
 from .base import BaseTool, ToolResult
+
+
+CHECKLIST_LINE_RE = re.compile(r"^(?P<indent>\s*)\[(?P<state> |/|x|-)\]\s+(?P<name>.+?)\s*$")
 
 
 class TaskState(Enum):
@@ -27,6 +25,16 @@ class TaskState(Enum):
     IN_PROGRESS = "[/]"
     COMPLETED = "[x]"
     CANCELLED = "[-]"
+
+    @classmethod
+    def from_checklist_marker(cls, marker: str) -> "TaskState":
+        mapping = {
+            " ": cls.NOT_STARTED,
+            "/": cls.IN_PROGRESS,
+            "x": cls.COMPLETED,
+            "-": cls.CANCELLED,
+        }
+        return mapping[marker]
 
 
 @dataclass
@@ -92,52 +100,124 @@ class Task:
 
 
 class TaskStore:
-    """In-memory task storage with JSON persistence"""
+    """In-memory task storage with JSON + checklist persistence."""
     
     def __init__(self):
         self.tasks: Dict[str, Task] = {}
         self.root_tasks: List[str] = []
         self.file_path: Optional[Path] = None
+        self.markdown_path: Optional[Path] = None
     
     def configure(self, project_root: Path):
-        """Configure persistence path and load data"""
-        self.file_path = project_root / 'task_list.json' # Save to project root or .reverie
+        """Configure persistence paths and load data."""
+        self.file_path = project_root / "task_list.json"
+        self.markdown_path = project_root / "Tasks.md"
         self.load()
         
     def save(self):
-        """Save tasks to file"""
-        if not self.file_path:
-            return
-            
+        """Persist tasks to JSON metadata and checklist markdown."""
         data = {
-            'tasks': [t.to_dict() for t in self.tasks.values()],
-            'root_tasks': self.root_tasks
+            "tasks": [task.to_dict() for task in self.tasks.values()],
+            "root_tasks": self.root_tasks,
         }
-        
-        try:
-            with open(self.file_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            print(f"Failed to save tasks: {e}")
+
+        if self.file_path:
+            try:
+                self.file_path.write_text(
+                    json.dumps(data, indent=2, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+            except Exception as e:
+                print(f"Failed to save tasks JSON: {e}")
+
+        if self.markdown_path:
+            try:
+                self.markdown_path.write_text(self.to_checklist_markdown(), encoding="utf-8")
+            except Exception as e:
+                print(f"Failed to save tasks markdown: {e}")
 
     def load(self):
-        """Load tasks from file"""
-        if not self.file_path or not self.file_path.exists():
-            return
-            
-        try:
-            with open(self.file_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                
-            self.tasks = {}
-            self.root_tasks = data.get('root_tasks', [])
-            
-            for task_data in data.get('tasks', []):
-                task = Task.from_dict(task_data)
-                self.tasks[task.id] = task
-                
-        except Exception as e:
-            print(f"Failed to load tasks: {e}")
+        """Load tasks from JSON metadata or fallback checklist markdown."""
+        self.tasks = {}
+        self.root_tasks = []
+
+        if self.file_path and self.file_path.exists():
+            try:
+                data = json.loads(self.file_path.read_text(encoding="utf-8"))
+                for task_data in data.get("tasks", []):
+                    task = Task.from_dict(task_data)
+                    self.tasks[task.id] = task
+                self.root_tasks = [
+                    task_id for task_id in data.get("root_tasks", []) if task_id in self.tasks
+                ]
+                self._repair_relationships()
+                return
+            except Exception as e:
+                print(f"Failed to load tasks JSON: {e}")
+
+        if self.markdown_path and self.markdown_path.exists():
+            try:
+                self._load_from_checklist(self.markdown_path.read_text(encoding="utf-8"))
+            except Exception as e:
+                print(f"Failed to load tasks markdown: {e}")
+
+    def _repair_relationships(self):
+        """Normalize parent/child/root relationships after loading."""
+        for task in self.tasks.values():
+            task.children = [child_id for child_id in task.children if child_id in self.tasks]
+
+        computed_roots: List[str] = []
+        for task_id, task in self.tasks.items():
+            if task.parent_id and task.parent_id not in self.tasks:
+                task.parent_id = None
+
+            if task.parent_id:
+                parent = self.tasks[task.parent_id]
+                if task_id not in parent.children:
+                    parent.children.append(task_id)
+            else:
+                computed_roots.append(task_id)
+
+        ordered_roots = [task_id for task_id in self.root_tasks if task_id in computed_roots]
+        ordered_roots.extend(task_id for task_id in computed_roots if task_id not in ordered_roots)
+        self.root_tasks = ordered_roots
+
+    def _load_from_checklist(self, text: str):
+        """Hydrate tasks from a checklist-only markdown document."""
+        stack: List[str] = []
+
+        for raw_line in text.splitlines():
+            if not raw_line.strip():
+                continue
+
+            match = CHECKLIST_LINE_RE.match(raw_line)
+            if not match:
+                continue
+
+            indent_text = match.group("indent").replace("\t", "  ")
+            indent_level = max(0, len(indent_text) // 2)
+            while len(stack) > indent_level:
+                stack.pop()
+
+            parent_id = stack[-1] if stack else None
+            now = datetime.now().isoformat()
+            task_id = str(uuid.uuid4())[:8]
+            task = Task(
+                id=task_id,
+                name=match.group("name").strip(),
+                state=TaskState.from_checklist_marker(match.group("state")),
+                parent_id=parent_id,
+                created_at=now,
+                updated_at=now,
+            )
+            self.tasks[task_id] = task
+
+            if parent_id and parent_id in self.tasks:
+                self.tasks[parent_id].children.append(task_id)
+            else:
+                self.root_tasks.append(task_id)
+
+            stack.append(task_id)
 
     def find_by_name(self, name: str) -> Optional[Task]:
         """Find a task by name (case-insensitive)"""
@@ -354,112 +434,18 @@ class TaskStore:
             walk(task_id)
 
         return ordered
-    
-    def to_markdown(self) -> str:
-        """Convert task list to markdown with Rich colors"""
-        lines = ["[bold underline cyan]Task List[/bold underline cyan]", ""]
 
+    def to_checklist_markdown(self) -> str:
+        """Render the canonical checklist-only markdown artifact."""
+        lines = []
         for indent, task in self.iter_tasks():
             prefix = "  " * indent
+            lines.append(f"{prefix}{task.state.value} {task.name.strip()}")
+        return "\n".join(lines).strip()
 
-            # State styling
-            if task.state == TaskState.COMPLETED:
-                style = "green"
-                state_icon = "[x]"
-            elif task.state == TaskState.IN_PROGRESS:
-                style = "yellow"
-                state_icon = "[/]"
-            elif task.state == TaskState.CANCELLED:
-                style = "dim red"
-                state_icon = "[-]"
-            else:
-                style = "bold white"
-                state_icon = "[ ]"
-            
-            state_str = f"[{style}]{state_icon}[/{style}]"
-            name_str = f"[{style}]{escape(task.name)}[/{style}]"
-            
-            meta = []
-            if task.priority:
-                meta.append(f"prio:{task.priority}")
-            if task.phase:
-                meta.append(f"phase:{task.phase}")
-            if task.progress:
-                meta.append(f"{int(task.progress * 100)}%")
-            if task.estimate:
-                meta.append(f"est:{task.estimate}")
-            if task.due_date:
-                meta.append(f"due:{task.due_date}")
-            meta_str = f" [dim]({' | '.join(meta)})[/dim]" if meta else ""
-
-            lines.append(f"{prefix}{state_str} {name_str}{meta_str}")
-            if task.description:
-                lines.append(f"{prefix}  [dim]{escape(task.description)}[/dim]")
-            if task.tags:
-                lines.append(f"{prefix}  [dim]tags: {escape(', '.join(task.tags))}[/dim]")
-            if task.dependencies:
-                lines.append(f"{prefix}  [dim]deps: {escape(', '.join(task.dependencies))}[/dim]")
-            if task.blockers:
-                lines.append(f"{prefix}  [dim]blockers: {escape(', '.join(task.blockers))}[/dim]")
-
-        if not self.tasks:
-            lines.append("[dim italic]No tasks yet.[/dim italic]")
-        
-        return '\n'.join(lines)
-
-    def validate_dependencies(self, task_id: str, dependencies: List[str]) -> tuple[bool, str]:
-        """
-        Validate task dependencies.
-
-        Returns:
-            (is_valid, error_message) - True if valid, False with error message if invalid
-        """
-        # Check if all dependency tasks exist
-        for dep_id in dependencies:
-            if dep_id not in self.tasks:
-                return False, f"Dependency task not found: {dep_id}"
-
-        # Check for circular dependencies
-        if self._has_circular_dependency(task_id, dependencies):
-            return False, "Circular dependency detected: task cannot depend on itself directly or indirectly"
-
-        return True, ""
-
-    def _has_circular_dependency(self, task_id: str, new_dependencies: List[str]) -> bool:
-        """
-        Check if adding these dependencies would create a circular dependency.
-
-        Uses depth-first search to detect cycles.
-        """
-        # Build a temporary dependency graph including the new dependencies
-        visited = set()
-        rec_stack = set()
-
-        def has_cycle(current_id: str) -> bool:
-            visited.add(current_id)
-            rec_stack.add(current_id)
-
-            # Get dependencies for current task
-            if current_id == task_id:
-                # Use the new dependencies for the task being updated
-                deps = new_dependencies
-            elif current_id in self.tasks:
-                deps = self.tasks[current_id].dependencies
-            else:
-                deps = []
-
-            for dep_id in deps:
-                if dep_id not in visited:
-                    if has_cycle(dep_id):
-                        return True
-                elif dep_id in rec_stack:
-                    # Found a back edge - cycle detected
-                    return True
-
-            rec_stack.remove(current_id)
-            return False
-
-        return has_cycle(task_id)
+    def to_markdown(self) -> str:
+        """Compatibility wrapper that returns checklist-only markdown."""
+        return self.to_checklist_markdown()
 
 
 # Global task store (shared across tool instances)
@@ -473,38 +459,30 @@ class TaskManagerTool(BaseTool):
     
     name = "task_manager"
     
-    description = """Manage tasks for organizing complex work.
+    description = """Manage project work as a checklist-first task system.
+
+Canonical artifact:
+- Always sync tasks to `Tasks.md`
+- `Tasks.md` must contain checklist lines only, such as `[ ] Implement parser`
+- Do not add headings, prose, IDs, summaries, metadata blocks, or rich formatting to `Tasks.md`
+
+Best use:
+- Break large requests into many small, concrete, verifiable tasks
+- Keep only one task `IN_PROGRESS` when practical
+- Use filters to inspect focused slices of the checklist
+- `task_list.json` stores metadata while `Tasks.md` stays checklist-only
 
 Operations:
-- add_tasks: Add new tasks or subtasks
-- update_tasks: Update task fields or state
-- view_tasklist: View all tasks (supports filtering)
-- reorganize_tasklist: Reorganize multiple tasks at once
+- add_tasks
+- update_tasks
+- view_tasklist
+- reorganize_tasklist
 
 Task states:
-- NOT_STARTED: [ ] - Task not begun
-- IN_PROGRESS: [/] - Currently working on
-- COMPLETED: [x] - Finished
-- CANCELLED: [-] - No longer needed
-
-Task phases:
-- design: Design and planning phase
-- implementation: Implementation phase
-- content: Content creation phase
-- testing: Testing phase
-- release: Release phase
-
-Task priorities:
-- low: Low priority
-- medium: Medium priority (default)
-- high: High priority
-- critical: Critical priority
-
-Examples:
-- Add task: {"operation": "add_tasks", "tasks": [{"name": "Implement feature X", "phase": "implementation", "priority": "high", "estimate": "2h"}]}
-- Update: {"operation": "update_tasks", "task_id": "abc123", "state": "COMPLETED", "progress": 1.0} (You can also use 'name' instead of 'task_id' if unsure of ID)
-- View: {"operation": "view_tasklist"}
-- View with filter: {"operation": "view_tasklist", "filter": {"state": "IN_PROGRESS", "phase": "design"}}"""
+- NOT_STARTED => [ ]
+- IN_PROGRESS => [/]
+- COMPLETED => [x]
+- CANCELLED => [-]"""
     
     parameters = {
         "type": "object",
@@ -583,16 +561,16 @@ Examples:
         if operation == "add_tasks":
             tasks = kwargs.get('tasks', [])
             count = len(tasks)
-            return f"Adding {count} task(s) to the project"
+            return f"Adding {count} task(s) to Tasks.md"
         elif operation == "update_tasks":
             task_id = kwargs.get('task_id')
             name = kwargs.get('name')
             target = task_id or name or "tasks"
-            return f"Updating task: {target}"
+            return f"Updating task checklist: {target}"
         elif operation == "view_tasklist":
-            return "Viewing project task list"
+            return "Viewing Tasks.md checklist"
         elif operation == "reorganize_tasklist":
-            return "Reorganizing project tasks"
+            return "Reorganizing Tasks.md checklist"
         return f"Managing tasks ({operation})"
 
     def execute(self, **kwargs) -> ToolResult:
@@ -686,61 +664,18 @@ Examples:
             "cancelled": sum(1 for task in tasks if task.state == TaskState.CANCELLED),
         }
 
-    def _render_task_entries(self, entries: List[Dict], title: str) -> str:
-        """Render a detailed task list that includes every task state."""
-        lines = [f"[bold underline cyan]{escape(title)}[/bold underline cyan]", ""]
-
-        if not entries:
-            lines.append("[dim italic]No tasks yet.[/dim italic]")
-            return "\n".join(lines)
-
+    def _render_task_entries(self, entries: List[Dict]) -> str:
+        """Render checklist-only task lines."""
+        lines = []
         for entry in entries:
             prefix = "  " * entry["indent"]
-            meta = [
-                f"ID: {entry['id']}",
-                f"State: {entry['state']}",
-                f"Priority: {entry['priority']}",
-                f"Phase: {entry['phase']}",
-            ]
-            if entry.get("progress"):
-                meta.append(f"Progress: {int(float(entry['progress']) * 100)}%")
-            if entry.get("estimate"):
-                meta.append(f"Estimate: {entry['estimate']}")
-            if entry.get("due_date"):
-                meta.append(f"Due: {entry['due_date']}")
-
-            lines.append(
-                f"{prefix}{escape(entry['state_icon'])} [bold]{escape(entry['name'])}[/bold] "
-                f"[dim]({' | '.join(escape(item) for item in meta)})[/dim]"
-            )
-
-            if entry.get("description"):
-                lines.append(f"{prefix}  [dim]{escape(entry['description'])}[/dim]")
-            if entry.get("tags"):
-                lines.append(f"{prefix}  [dim]Tags: {escape(', '.join(entry['tags']))}[/dim]")
-            if entry.get("dependencies"):
-                lines.append(f"{prefix}  [dim]Dependencies: {escape(', '.join(entry['dependencies']))}[/dim]")
-            if entry.get("blockers"):
-                lines.append(f"{prefix}  [dim]Blockers: {escape(', '.join(entry['blockers']))}[/dim]")
-
-        return "\n".join(lines)
-
-    def _render_summary(self, summary: Dict[str, int]) -> str:
-        """Render summary counts for the full task list."""
-        return (
-            "\n\n[dim]" + ("-" * 40) + "[/dim]\n"
-            f"[bold]Total:[/bold] {summary['total']} | "
-            f"[bold]Not Started:[/bold] {summary['not_started']} | "
-            f"[bold]In Progress:[/bold] {summary['in_progress']} | "
-            f"[bold]Completed:[/bold] {summary['completed']} | "
-            f"[bold]Cancelled:[/bold] {summary['cancelled']}"
-        )
+            lines.append(f"{prefix}{entry['state_icon']} {entry['name']}")
+        return "\n".join(lines).strip()
 
     def _build_task_payload(self, filters: Optional[Dict] = None) -> Dict:
-        """Build structured result data with the full task list and task states."""
+        """Build structured result data for checklist views and metadata."""
         all_entries = self._collect_task_entries()
         filtered_entries = self._collect_task_entries(filters) if filters else all_entries
-        summary = self._build_summary_data()
 
         return {
             "tasks": all_entries,
@@ -755,7 +690,11 @@ Examples:
             ],
             "filtered_tasks": filtered_entries,
             "filters": filters or {},
-            "summary": summary,
+            "summary": self._build_summary_data(),
+            "checklist": _task_store.to_checklist_markdown(),
+            "filtered_checklist": self._render_task_entries(filtered_entries),
+            "task_markdown_path": str(_task_store.markdown_path) if _task_store.markdown_path else "",
+            "task_json_path": str(_task_store.file_path) if _task_store.file_path else "",
         }
 
     def _build_task_result(
@@ -765,18 +704,14 @@ Examples:
         filters: Optional[Dict] = None,
         extra_data: Optional[Dict] = None
     ) -> ToolResult:
-        """Create a task-manager result that always includes the full task list."""
+        """Create a task-manager result whose text body stays checklist-only."""
         payload = self._build_task_payload(filters)
+        payload["message"] = message
         if extra_data:
             payload.update(extra_data)
 
-        sections = [message]
-        if filters:
-            sections.append(self._render_task_entries(payload["filtered_tasks"], "Filtered Task List"))
-        sections.append(self._render_task_entries(payload["tasks"], "Full Task List"))
-        sections.append(self._render_summary(payload["summary"]))
-
-        return ToolResult.ok("\n\n".join(section for section in sections if section), data=payload)
+        rendered = payload["filtered_checklist"] if filters else payload["checklist"]
+        return ToolResult.ok(rendered, data=payload)
     
     def _add_tasks(self, tasks: List[Dict]) -> ToolResult:
         """Add new tasks"""
@@ -807,17 +742,9 @@ Examples:
         
         if not added and errors:
             return ToolResult.fail('\n'.join(errors))
-        
-        output_parts = [f"Added {len(added)} task(s):", ""]
-        for task in added:
-            output_parts.append(f"- {escape(task.state.value)} {escape(task.name)}")
-        
-        if errors:
-            output_parts.append("\nErrors:")
-            output_parts.extend(errors)
 
         return self._build_task_result(
-            '\n'.join(output_parts),
+            f"Added {len(added)} task(s)",
             extra_data={
                 "added_tasks": [task.to_dict() for task in added],
                 "errors": errors,
@@ -878,7 +805,7 @@ Examples:
             return ToolResult.fail(f"Task could not be updated: {task_id}")
 
         return self._build_task_result(
-            f"Updated task:\n- {escape(task.state.value)} {escape(task.name)}",
+            "Updated 1 task",
             extra_data={
                 "updated_tasks": [task.to_dict()],
             }
@@ -950,15 +877,8 @@ Examples:
             except ValueError as e:
                 errors.append(f"Update failed for {target_task.name}: {str(e)}")
         
-        output_parts = [f"Updated {len(updated)} task(s)"]
-        for task in updated:
-            output_parts.append(f"- {escape(task.state.value)} {escape(task.name)}")
-        
-        if errors:
-            output_parts.append(f"\nErrors: {', '.join(errors)}")
-
         return self._build_task_result(
-            '\n'.join(output_parts),
+            f"Updated {len(updated)} task(s)",
             extra_data={
                 "updated_tasks": [task.to_dict() for task in updated],
                 "errors": errors,
@@ -967,24 +887,10 @@ Examples:
     
     def _view_tasklist(self, filters: Optional[Dict] = None) -> ToolResult:
         """View all tasks, optionally filtered"""
-        message = "Viewing full project task list"
+        message = "Viewing task checklist"
         if filters:
-            message = f"Viewing task list with filters: {json.dumps(filters, ensure_ascii=False)}"
+            message = f"Viewing task checklist with filters: {json.dumps(filters, ensure_ascii=False)}"
         return self._build_task_result(message, filters=filters)
-
-        if not filters:
-            markdown = _task_store.to_markdown()
-        else:
-            markdown = self._filtered_markdown(filters)
-        
-        # Add summary
-        total = len(_task_store.tasks)
-        completed = sum(1 for t in _task_store.tasks.values() if t.state == TaskState.COMPLETED)
-        in_progress = sum(1 for t in _task_store.tasks.values() if t.state == TaskState.IN_PROGRESS)
-        
-        summary = f"\n\n[dim]{'─' * 40}[/dim]\n[bold]Total:[/bold] {total} | [green]Completed:[/green] {completed} | [yellow]In Progress:[/yellow] {in_progress}"
-        
-        return ToolResult.ok(markdown + summary)
     
     def _reorganize(self, tasks: List[Dict]) -> ToolResult:
         """Reorganize tasks (bulk update for reordering)"""
@@ -993,48 +899,4 @@ Examples:
 
     def _filtered_markdown(self, filters: Dict) -> str:
         """Render task list with filters"""
-        entries = self._collect_task_entries(filters)
-        if not entries:
-            return "[bold underline cyan]Task List (Filtered)[/bold underline cyan]\n\n[dim italic]No tasks match filters.[/dim italic]"
-        return self._render_task_entries(entries, "Task List (Filtered)")
-
-        state_filter = filters.get("state")
-        phase_filter = filters.get("phase")
-        tag_filter = filters.get("tag")
-        priority_filter = filters.get("priority")
-
-        lines = ["[bold underline cyan]Task List (Filtered)[/bold underline cyan]", ""]
-
-        def include(task: Task) -> bool:
-            if state_filter and task.state.name != state_filter:
-                return False
-            if phase_filter and task.phase != phase_filter:
-                return False
-            if tag_filter and tag_filter not in task.tags:
-                return False
-            if priority_filter and task.priority != priority_filter:
-                return False
-            return True
-
-        def render_task(task_id: str, indent: int = 0):
-            if task_id not in _task_store.tasks:
-                return
-            task = _task_store.tasks[task_id]
-            if not include(task):
-                for child_id in task.children:
-                    render_task(child_id, indent + 1)
-                return
-            prefix = "  " * indent
-            state_icon = task.state.value
-            name_str = escape(task.name)
-            lines.append(f"{prefix}{state_icon} {name_str}")
-            for child_id in task.children:
-                render_task(child_id, indent + 1)
-
-        for task_id in _task_store.root_tasks:
-            render_task(task_id)
-
-        if len(lines) <= 2:
-            lines.append("[dim italic]No tasks match filters.[/dim italic]")
-
-        return "\n".join(lines)
+        return self._render_task_entries(self._collect_task_entries(filters))

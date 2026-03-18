@@ -32,6 +32,7 @@ Use Cases:
 
 from typing import Optional, Dict, Any, List, Tuple
 from pathlib import Path
+import csv
 import json
 import statistics
 import math
@@ -41,7 +42,7 @@ from .base import BaseTool, ToolResult
 
 class GameStatsAnalyzerTool(BaseTool):
     name = "game_stats_analyzer"
-    description = "Analyze game statistics: descriptive stats, correlation, distribution, outliers, comparison, visualization data."
+    description = "Analyze game statistics: descriptive stats, correlation, distribution, outliers, comparison, visualization, trend analysis, and anomaly detection."
 
     parameters = {
         "type": "object",
@@ -163,6 +164,25 @@ class GameStatsAnalyzerTool(BaseTool):
                 data_key = kwargs.get("data_key")
                 
                 return self._generate_visualization_data(data_source, column, data_key)
+
+            elif action == "trend_analysis":
+                data_source = kwargs.get("data_source")
+                if not data_source:
+                    return ToolResult.fail("data_source is required for trend_analysis")
+
+                column = kwargs.get("column")
+                data_key = kwargs.get("data_key")
+                return self._trend_analysis(data_source, column, data_key)
+
+            elif action == "anomaly_detect":
+                data_source = kwargs.get("data_source")
+                if not data_source:
+                    return ToolResult.fail("data_source is required for anomaly_detect")
+
+                column = kwargs.get("column")
+                data_key = kwargs.get("data_key")
+                threshold = kwargs.get("outlier_threshold", 2.5)
+                return self._anomaly_detection(data_source, column, data_key, threshold)
             
             else:
                 return ToolResult.fail(f"Unknown action: {action}")
@@ -485,7 +505,140 @@ class GameStatsAnalyzerTool(BaseTool):
 
         return ToolResult.ok(output, viz_data)
 
+    def _trend_analysis(
+        self, data_source: str, column: Optional[str], data_key: Optional[str]
+    ) -> ToolResult:
+        """Analyze progression or power-creep trends across ordered data."""
+        series_map = self._load_series_map(data_source, column, data_key)
+        if not series_map:
+            return ToolResult.fail("No numeric series found for trend analysis")
+
+        trend_report = {}
+        output = "Trend Analysis:\n\n"
+        for series_name, values in series_map.items():
+            if len(values) < 3:
+                continue
+            window = max(1, len(values) // 4)
+            early = statistics.mean(values[:window])
+            late = statistics.mean(values[-window:])
+            drift = late - early
+            drift_pct = (drift / early * 100) if early else 0.0
+            slope = (values[-1] - values[0]) / max(len(values) - 1, 1)
+
+            if drift_pct > 10:
+                direction = "rising"
+            elif drift_pct < -10:
+                direction = "falling"
+            else:
+                direction = "stable"
+
+            trend_report[series_name] = {
+                "early_mean": early,
+                "late_mean": late,
+                "drift": drift,
+                "drift_pct": drift_pct,
+                "slope": slope,
+                "direction": direction,
+            }
+            output += (
+                f"{series_name}: {direction}\n"
+                f"  early mean: {early:.2f}\n"
+                f"  late mean: {late:.2f}\n"
+                f"  drift: {drift:+.2f} ({drift_pct:+.1f}%)\n"
+                f"  slope: {slope:+.3f}\n\n"
+            )
+
+        if not trend_report:
+            return ToolResult.fail("Not enough numeric data points for trend analysis")
+        return ToolResult.ok(output, {"trends": trend_report})
+
+    def _anomaly_detection(
+        self, data_source: str, column: Optional[str], data_key: Optional[str], threshold: float
+    ) -> ToolResult:
+        """Detect anomalies across one or more ordered numeric series."""
+        series_map = self._load_series_map(data_source, column, data_key)
+        if not series_map:
+            return ToolResult.fail("No numeric series found for anomaly detection")
+
+        anomalies = {}
+        output = f"Anomaly Detection (threshold: {threshold} std dev)\n\n"
+        for series_name, values in series_map.items():
+            if len(values) < 3:
+                continue
+            mean = statistics.mean(values)
+            std_dev = statistics.stdev(values)
+            if std_dev == 0:
+                continue
+
+            current = []
+            for index, value in enumerate(values):
+                z_score = (value - mean) / std_dev
+                jump = 0.0
+                if index > 0:
+                    jump = value - values[index - 1]
+                if abs(z_score) >= threshold or abs(jump) >= std_dev * 1.5:
+                    current.append(
+                        {
+                            "index": index,
+                            "value": value,
+                            "z_score": z_score,
+                            "jump": jump,
+                        }
+                    )
+            if current:
+                anomalies[series_name] = current
+                output += f"{series_name}:\n"
+                for item in current[:10]:
+                    output += (
+                        f"  index {item['index']}: value={item['value']:.2f}, "
+                        f"z={item['z_score']:.2f}, jump={item['jump']:+.2f}\n"
+                    )
+                output += "\n"
+
+        if not anomalies:
+            output += "No anomalies detected."
+        return ToolResult.ok(output, {"anomalies": anomalies})
+
     # Helper methods
+    def _load_series_map(
+        self, data_source: str, column: Optional[str], data_key: Optional[str]
+    ) -> Dict[str, List[float]]:
+        if column:
+            data = self._load_data(data_source, column, data_key)
+            return {column: data} if data else {}
+
+        payload = self._load_raw_payload(data_source, data_key)
+        if isinstance(payload, list) and payload and isinstance(payload[0], dict):
+            series_map: Dict[str, List[float]] = {}
+            for row in payload:
+                for key, value in row.items():
+                    if self._is_number(value):
+                        series_map.setdefault(key, []).append(float(value))
+            return {key: values for key, values in series_map.items() if len(values) >= 3}
+
+        if isinstance(payload, list):
+            numeric = [float(value) for value in payload if self._is_number(value)]
+            return {"value": numeric} if len(numeric) >= 3 else {}
+        return {}
+
+    def _load_raw_payload(self, data_source: str, data_key: Optional[str]) -> Any:
+        path = self._resolve_path(data_source)
+        if not path.exists():
+            raise FileNotFoundError(f"Data source not found: {data_source}")
+
+        if path.suffix.lower() == ".json":
+            content = json.loads(path.read_text(encoding="utf-8"))
+            if data_key:
+                for key in data_key.split("."):
+                    content = content[key]
+            return content
+
+        if path.suffix.lower() == ".csv":
+            with path.open("r", encoding="utf-8", newline="") as handle:
+                return [dict(row) for row in csv.DictReader(handle)]
+
+        raise ValueError(f"Unsupported file format: {path.suffix}")
+
     def _load_data(self, data_source: str, column: Optional[str], data_key: Optional[str]) -> List[float]:
         """Load data from file"""
         path = self._resolve_path(data_source)

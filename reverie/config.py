@@ -393,10 +393,11 @@ class Config:
 
     # Gamer mode specific settings
     gamer_mode: Dict[str, Any] = field(default_factory=lambda: {
-        "target_engine": "custom",
-        "supported_engines": ["custom", "web", "pygame", "love2d", "cocos2d"],
+        "target_engine": "reverie_engine",
+        "supported_dimensions": ["2D", "2.5D", "3D"],
+        "supported_engines": ["reverie_engine", "reverie_engine_lite", "custom", "web", "pygame", "love2d", "cocos2d", "godot", "unity", "unreal"],
         "supported_frameworks": [
-            "phaser", "pixijs", "threejs", "pygame", "love2d", "cocos2d"
+            "reverie_engine", "reverie_engine_lite", "phaser", "pixijs", "threejs", "pygame", "love2d", "cocos2d", "godot", "unity", "unreal"
         ],
         "asset_tracking_enabled": True,
         "asset_packaging_enabled": True,
@@ -408,6 +409,9 @@ class Config:
         "rpg_focus_enabled": True,
         "level_design_assistant": True,
         "config_editing_enabled": True,
+        "proactive_mode_switching": True,
+        "mandatory_verification_loop": True,
+        "playtest_iteration_enabled": True,
         "max_asset_context_window": 10,
         "context_compression_enabled": True,
     })
@@ -548,10 +552,11 @@ class Config:
                 "plot_tracking_enabled": True,
             }),
             gamer_mode=data.get('gamer_mode', {
-                "target_engine": "custom",
-                "supported_engines": ["custom", "web", "pygame", "love2d", "cocos2d"],
+                "target_engine": "reverie_engine",
+                "supported_dimensions": ["2D", "2.5D", "3D"],
+                "supported_engines": ["reverie_engine", "reverie_engine_lite", "custom", "web", "pygame", "love2d", "cocos2d", "godot", "unity", "unreal"],
                 "supported_frameworks": [
-                    "phaser", "pixijs", "threejs", "pygame", "love2d", "cocos2d"
+                    "reverie_engine", "reverie_engine_lite", "phaser", "pixijs", "threejs", "pygame", "love2d", "cocos2d", "godot", "unity", "unreal"
                 ],
                 "asset_tracking_enabled": True,
                 "asset_packaging_enabled": True,
@@ -563,6 +568,9 @@ class Config:
                 "rpg_focus_enabled": True,
                 "level_design_assistant": True,
                 "config_editing_enabled": True,
+                "proactive_mode_switching": True,
+                "mandatory_verification_loop": True,
+                "playtest_iteration_enabled": True,
                 "max_asset_context_window": 10,
                 "context_compression_enabled": True,
             }),

@@ -4,6 +4,7 @@ dist/
 search-mcp/
 _embedded_tmp/
 add-on/
+references/
 
 reverie_cli.egg-info/
 *.exe

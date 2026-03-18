@@ -23,6 +23,10 @@ setup(
     long_description_content_type="text/markdown",
     url="https://github.com/raiden/reverie-cli",
     packages=find_packages(),
+    include_package_data=True,
+    package_data={
+        "reverie.engine_lite": ["vendor/live2d/live2dcubismcore.min.js"],
+    },
     python_requires=">=3.10",
     install_requires=[
         # CLI and Display
@@ -43,6 +47,11 @@ setup(
         
         # YAML support (used by story/game tools)
         "PyYAML>=6.0.0",
+
+        # Reverie Engine runtime
+        "pyglet>=2.0.16",
+        "moderngl>=5.10.0",
+        "glcontext>=3.0.0",
     ],
     extras_require={
         "dev": [

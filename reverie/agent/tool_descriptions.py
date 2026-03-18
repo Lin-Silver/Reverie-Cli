@@ -357,10 +357,12 @@ Use this tool for structured planning and progress tracking on multi-step work.
 - `reorganize_tasklist`
 
 **Best usage pattern**:
-1. After initial retrieval, create a concrete task list for substantial work
-2. Mark only one task `IN_PROGRESS` at a time when practical
-3. Batch-update task states when moving from one task to the next
-4. Track deliverables and verification checkpoints, not just coding actions
+1. After initial retrieval, create a detailed task list for substantial work
+2. Break large requests into many small, concrete, verifiable tasks instead of a few broad milestones
+3. Keep the canonical task artifact in `Tasks.md`
+4. `Tasks.md` must be checklist-only: one checklist item per line, no headings, prose, summaries, IDs, or metadata blocks
+5. Mark only one task `IN_PROGRESS` at a time when practical
+6. Batch-update task states when moving from one task to the next
 
 **Common fields**:
 - `name`, `description`
@@ -369,7 +371,7 @@ Use this tool for structured planning and progress tracking on multi-step work.
 - `phase`: `design`, `implementation`, `content`, `testing`, `release`
 
 **Completion standard**:
-- Create tasks around meaningful deliverables, integration milestones, or validation checkpoints
+- Create tasks around concrete edits, validation steps, integration checks, or narrow deliverables
 - Keep a task `IN_PROGRESS` if implementation exists but integration or verification is still pending
 - Mark a task `COMPLETED` only when its promised outcome is actually delivered for the intended scope
 - If later evidence shows regressions, reopen the task by moving it back to `IN_PROGRESS`
@@ -377,7 +379,7 @@ Use this tool for structured planning and progress tracking on multi-step work.
 
 **Example calls**:
 ```
-task_manager(operation="add_tasks", tasks=[{"name":"Wire NVIDIA mode","phase":"implementation","priority":"high"}])
+task_manager(operation="add_tasks", tasks=[{"name":"Add resource remap loader coverage","phase":"testing","priority":"high"}])
 task_manager(operation="update_tasks", task_id="abc123", state="IN_PROGRESS", progress=0.8, description="Feature is wired, but regression checks are still pending")
 task_manager(operation="update_tasks", task_id="abc123", state="COMPLETED", progress=1.0)
 task_manager(operation="view_tasklist")
@@ -454,10 +456,106 @@ Switch between Reverie's non-desktop-control modes when another workflow is clea
 - The task changes from coding to specs, writing, or game design
 - Another mode has a meaningfully better workflow or tool surface
 - A phased mode is better for the current job than generic execution
+- The task would benefit from a specialized planning or verification loop before more implementation work
 
 **Never use this tool**:
 - To switch into Computer Controller mode
 - Repeatedly without a clear reason tied to progress
+"""
+
+
+def get_game_design_orchestrator_description() -> str:
+    """Description for the game design orchestrator tool."""
+    return """
+## Game Design Orchestrator Tool (game_design_orchestrator)
+
+Use this tool to move from game idea to structured production blueprint.
+
+**Actions**:
+- `create_blueprint`
+- `expand_system`
+- `generate_vertical_slice`
+- `analyze_scope`
+- `export_markdown`
+
+**Best uses**:
+- Create a real blueprint before broad game implementation
+- Expand one system into verbs, states, resources, tuning knobs, telemetry, and tests
+- Generate a vertical-slice plan before scaling content scope
+- Analyze scope and risk when the request implies a large or multi-genre game
+"""
+
+
+def get_game_project_scaffolder_description() -> str:
+    """Description for the game project scaffolder tool."""
+    return """
+## Game Project Scaffolder Tool (game_project_scaffolder)
+
+Use this tool to plan or create an engine-aware project foundation.
+
+**Actions**:
+- `plan_structure`
+- `create_foundation`
+- `generate_module_map`
+- `generate_content_pipeline`
+
+**Best uses**:
+- Choose a practical structure for 2D, 2.5D, or 3D projects
+- Create a repeatable foundation for runtime, data, tests, and playtest folders
+- Generate module and content-pipeline docs before major implementation expands
+"""
+
+
+def get_game_playtest_lab_description() -> str:
+    """Description for the game playtest lab tool."""
+    return """
+## Game Playtest Lab Tool (game_playtest_lab)
+
+Use this tool to build the feedback and verification loop for game projects.
+
+**Actions**:
+- `create_test_plan`
+- `generate_telemetry_schema`
+- `create_quality_gates`
+- `analyze_session_log`
+- `synthesize_feedback`
+
+**Best uses**:
+- Define playtest goals before content and balancing work scale up
+- Generate telemetry and quality gates for first playable and vertical-slice milestones
+- Analyze session logs and synthesize tester feedback into clear next actions
+"""
+
+
+def get_reverie_engine_lite_description() -> str:
+    """Description for the built-in Reverie Engine tool."""
+    return """
+## Reverie Engine Tool (`reverie_engine`, compatibility alias `reverie_engine_lite`)
+
+Use this tool when the game should target Reverie's built-in runtime.
+
+**Actions**:
+- `create_project`
+- `inspect_project`
+- `generate_scene`
+- `generate_prefab`
+- `generate_archetype`
+- `author_scene_blueprint`
+- `author_prefab_blueprint`
+- `validate_authoring_payload`
+- `materialize_sample`
+- `run_smoke`
+- `validate_project`
+- `project_health`
+- `package_project`
+- `benchmark_project`
+
+**Best uses**:
+- Create a first-party runtime foundation when no external engine is required
+- Generate or inspect `.relscene.json` and `.relprefab.json` content
+- Materialize built-in 2D, 2.5D, 3D, galgame, and tower-defense samples for fast iteration
+- Run deterministic runtime smoke checks and validate the built-in engine project layout
+- Produce health reports, delivery packages, and baseline performance measurements for engine projects
 """
 
 
@@ -583,9 +681,12 @@ def _get_mode_tool_workflow(mode: str) -> str:
         return """
 ## Reverie-Gamer Mode Tool Workflow
 
-- Use retrieval first, then game-specific planning and asset workflows.
-- Pair content/design tools with code/file/command verification when implementation is involved.
-- Treat balancing, assets, GDD changes, and runtime checks as one connected loop.
+- Start with retrieval, then create or inspect the game blueprint before broad implementation.
+- Use the design orchestrator and project scaffolder to define systems, scope, and runtime structure first.
+- Default to Reverie Engine when the user did not choose another engine and the repo does not already depend on one.
+- Prefer `reverie_engine`; accept `reverie_engine_lite` as a compatibility alias for existing projects.
+- Treat implementation, balance simulation, runtime testing, playtests, telemetry, and content iteration as one loop.
+- Do not stop at documents alone when the user asked to build a game; push through to runnable implementation and verification.
 """
 
     if normalized == "ant":
@@ -615,6 +716,7 @@ def _get_mode_tool_workflow(mode: str) -> str:
 - Edit with the narrowest correct tool.
 - Verify with commands and manage context proactively on long sessions.
 - Use planning tools when the work is large enough to benefit from explicit tracking.
+- If another mode has a better workflow for the current phase, switch proactively instead of forcing generic execution.
 - Judge completion using deliverables, integration state, and verification evidence rather than optimistic progress estimates.
 """
 
@@ -654,6 +756,16 @@ def get_tool_descriptions_for_mode(mode: str) -> str:
 
     if normalized == "reverie":
         descriptions.append(get_reverie_progress_review_description())
+
+    if normalized == "reverie-gamer":
+        descriptions.extend(
+            [
+                get_game_design_orchestrator_description(),
+                get_game_project_scaffolder_description(),
+                get_game_playtest_lab_description(),
+                get_reverie_engine_lite_description(),
+            ]
+        )
 
     if normalized != "computer-controller":
         descriptions.append(get_mode_switch_description())

@@ -113,7 +113,7 @@ if %ERRORLEVEL% neq 0 (
 REM Dependency health check (catches cp311/cp314 mismatch early)
 echo.
 echo [5/8] Running dependency health check...
-python -c "import PIL._imaging, requests, bs4, openai, ddgs, yaml, lxml.etree, pydantic_core._pydantic_core; print('dependency_check_ok')"
+python -c "import PIL._imaging, requests, bs4, openai, ddgs, yaml, lxml.etree, pydantic_core._pydantic_core, pyglet, moderngl, glcontext; print('dependency_check_ok')"
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] Dependency health check failed.
     echo         Try deleting venv and re-running build.bat.

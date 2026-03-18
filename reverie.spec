@@ -6,8 +6,10 @@ import os
 datas = [('README.md', '.')]
 binaries = []
 hiddenimports = ['rich', 'rich.console', 'rich.panel', 'rich.table', 'rich.syntax', 'rich.markdown', 'rich.progress', 'rich.prompt', 'rich.text', 'click', 'requests', 'openai', 'git', 'ddgs', 'bs4', 'yaml', 'tqdm', 
+                 'pyglet', 'moderngl', 'glcontext',
                  'reverie.cli.input_handler', 'reverie.cli.commands', 'reverie.cli.display', 'reverie.cli.theme', 'reverie.cli.markdown_formatter', 'reverie.cli.session_ui',
-                 'reverie.config', 'reverie.rules_manager', 'reverie.session', 'reverie.agent', 'reverie.context_engine']
+                 'reverie.config', 'reverie.rules_manager', 'reverie.session', 'reverie.agent', 'reverie.context_engine',
+                 'reverie.engine_lite', 'reverie.tools.reverie_engine_lite']
 
 
 def add_data_if_exists(source_path: Path, target_dir: str) -> None:
@@ -39,8 +41,9 @@ if resolved_icon is None:
 
 add_data_if_exists(comfy_src / "generate_image.py", "reverie_resources/comfy")
 add_data_if_exists(comfy_src / "embedded_comfy.b64", "reverie_resources/comfy")
+add_data_if_exists(repo_root / "reverie" / "engine_lite" / "vendor" / "live2d" / "live2dcubismcore.min.js", "reverie/engine_lite/vendor/live2d")
 
-for package_name in ('rich', 'bs4'):
+for package_name in ('rich', 'bs4', 'pyglet', 'moderngl', 'glcontext'):
     try:
         tmp_ret = collect_all(package_name)
         datas += tmp_ret[0]

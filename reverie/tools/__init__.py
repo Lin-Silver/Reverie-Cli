@@ -43,6 +43,11 @@ from .game_gdd_manager import GameGDDManagerTool
 from .story_design_tool import StoryDesignTool
 from .game_math_simulator import GameMathSimulatorTool
 from .game_stats_analyzer import GameStatsAnalyzerTool
+from .game_design_orchestrator import GameDesignOrchestratorTool
+from .game_project_scaffolder import GameProjectScaffolderTool
+from .game_playtest_lab import GamePlaytestLabTool
+from .reverie_engine import ReverieEngineTool
+from .reverie_engine_lite import ReverieEngineLiteTool
 from .vision_upload import VisionUploadTool
 from .token_counter import TokenCounterTool
 from .mode_switch import ModeSwitchTool
@@ -80,6 +85,11 @@ __all__ = [
     "StoryDesignTool",
     "GameMathSimulatorTool",
     "GameStatsAnalyzerTool",
+    "GameDesignOrchestratorTool",
+    "GameProjectScaffolderTool",
+    "GamePlaytestLabTool",
+    "ReverieEngineTool",
+    "ReverieEngineLiteTool",
     "ModeSwitchTool",
     "ComputerControlTool",
 ]

@@ -27,7 +27,7 @@ from .base import BaseTool, ToolResult
 
 class GameAssetManagerTool(BaseTool):
     name = "game_asset_manager"
-    description = "Manage game assets: list, check missing, generate manifest, import, analyze, find unused, validate naming, build atlas plan."
+    description = "Manage game assets: inventory, manifest, dependency graph, compression guidance, memory sizing, usage checks, naming validation, and atlas planning."
 
     parameters = {
         "type": "object",
@@ -137,6 +137,16 @@ class GameAssetManagerTool(BaseTool):
             elif action == "build_atlas_plan":
                 atlas_max_size = kwargs.get("atlas_max_size", 2048)
                 return self._build_atlas_plan(asset_dir, atlas_max_size)
+
+            elif action == "dependency_graph":
+                code_dirs = kwargs.get("code_dirs", ["src", "scripts", "data"])
+                return self._build_dependency_graph(asset_dir, code_dirs, asset_type)
+
+            elif action == "compress_recommend":
+                return self._compression_recommendations(asset_dir, asset_type)
+
+            elif action == "total_size":
+                return self._total_size_report(asset_dir, asset_type)
             
             else:
                 return ToolResult.fail(f"Unknown action: {action}")
@@ -570,6 +580,214 @@ class GameAssetManagerTool(BaseTool):
             output += "\n\n"
 
         return ToolResult.ok(output, {"atlases": atlases, "total_sprites": len(sprites)})
+
+    def _build_dependency_graph(self, asset_dir: Path, code_dirs: List[str], asset_type: str) -> ToolResult:
+        assets = self._collect_assets(asset_dir, asset_type)
+        if not assets:
+            return ToolResult.fail("No assets found for dependency analysis")
+
+        graph = {
+            asset["path"]: {
+                "type": asset["type"],
+                "size": asset["size"],
+                "referenced_by": [],
+                "reference_count": 0,
+            }
+            for asset in assets
+        }
+
+        asset_lookup = [(asset["path"].replace("\\", "/"), asset["name"]) for asset in assets]
+        scan_extensions = {".py", ".js", ".ts", ".tsx", ".lua", ".gd", ".json", ".yaml", ".yml", ".md"}
+
+        for code_dir_str in code_dirs:
+            code_dir = self._resolve_path(code_dir_str)
+            if not code_dir.exists():
+                continue
+            for code_file in code_dir.rglob("*"):
+                if not code_file.is_file() or code_file.suffix.lower() not in scan_extensions:
+                    continue
+                try:
+                    content = code_file.read_text(encoding="utf-8", errors="ignore").replace("\\", "/")
+                except Exception:
+                    continue
+
+                rel_code_path = str(code_file.relative_to(self.project_root)).replace("\\", "/")
+                for asset_path, asset_name in asset_lookup:
+                    if asset_path in content or asset_name in content:
+                        refs = graph[asset_path]["referenced_by"]
+                        if rel_code_path not in refs:
+                            refs.append(rel_code_path)
+                            graph[asset_path]["reference_count"] += 1
+
+        orphaned = [path for path, node in graph.items() if not node["referenced_by"]]
+        hottest = sorted(
+            graph.items(),
+            key=lambda item: item[1]["reference_count"],
+            reverse=True,
+        )[:10]
+
+        output = "Asset Dependency Graph:\n\n"
+        output += f"Assets analyzed: {len(graph)}\n"
+        output += f"Orphaned assets: {len(orphaned)}\n\n"
+        output += "Most referenced assets:\n"
+        for path, node in hottest:
+            output += f"  - {path}: {node['reference_count']} references\n"
+        if orphaned:
+            output += "\nOrphaned sample:\n"
+            for path in orphaned[:10]:
+                output += f"  - {path}\n"
+
+        return ToolResult.ok(
+            output,
+            {
+                "graph": graph,
+                "orphaned_assets": orphaned,
+                "most_referenced": hottest,
+            },
+        )
+
+    def _compression_recommendations(self, asset_dir: Path, asset_type: str) -> ToolResult:
+        assets = self._collect_assets(asset_dir, asset_type)
+        if not assets:
+            return ToolResult.fail("No assets found for compression analysis")
+
+        recommendations = []
+        estimated_savings = 0
+        for asset in assets:
+            recommendation = self._recommend_compression(asset)
+            if recommendation:
+                recommendations.append(recommendation)
+                estimated_savings += recommendation["estimated_savings_bytes"]
+
+        recommendations.sort(key=lambda item: item["estimated_savings_bytes"], reverse=True)
+        output = "Compression Recommendations:\n\n"
+        output += f"Assets analyzed: {len(assets)}\n"
+        output += f"Recommendation count: {len(recommendations)}\n"
+        output += f"Estimated savings: {estimated_savings / (1024 * 1024):.2f} MB\n\n"
+        for recommendation in recommendations[:15]:
+            output += (
+                f"  - {recommendation['path']}: {recommendation['recommendation']} "
+                f"(~{recommendation['estimated_savings_bytes'] / 1024:.1f} KB savings)\n"
+            )
+
+        return ToolResult.ok(
+            output,
+            {
+                "recommendations": recommendations,
+                "estimated_savings_bytes": estimated_savings,
+            },
+        )
+
+    def _total_size_report(self, asset_dir: Path, asset_type: str) -> ToolResult:
+        assets = self._collect_assets(asset_dir, asset_type)
+        if not assets:
+            return ToolResult.fail("No assets found for size analysis")
+
+        totals: Dict[str, Dict[str, float]] = {}
+        runtime_total = 0.0
+        file_total = 0
+        for asset in assets:
+            file_total += asset["size"]
+            runtime_estimate = self._estimate_runtime_size(asset)
+            runtime_total += runtime_estimate
+            bucket = totals.setdefault(asset["type"], {"count": 0, "disk_bytes": 0, "runtime_bytes": 0.0})
+            bucket["count"] += 1
+            bucket["disk_bytes"] += asset["size"]
+            bucket["runtime_bytes"] += runtime_estimate
+
+        heaviest = sorted(assets, key=lambda item: item["size"], reverse=True)[:10]
+        output = "Asset Size Report:\n\n"
+        output += f"Total assets: {len(assets)}\n"
+        output += f"Disk footprint: {file_total / (1024 * 1024):.2f} MB\n"
+        output += f"Estimated runtime footprint: {runtime_total / (1024 * 1024):.2f} MB\n\n"
+        output += "By type:\n"
+        for type_name, values in totals.items():
+            output += (
+                f"  - {type_name}: {values['count']} files | "
+                f"disk {values['disk_bytes'] / (1024 * 1024):.2f} MB | "
+                f"runtime {values['runtime_bytes'] / (1024 * 1024):.2f} MB\n"
+            )
+        output += "\nHeaviest assets:\n"
+        for asset in heaviest:
+            output += f"  - {asset['path']} ({asset['size'] / (1024 * 1024):.2f} MB)\n"
+
+        return ToolResult.ok(
+            output,
+            {
+                "totals": totals,
+                "disk_bytes": file_total,
+                "runtime_bytes": runtime_total,
+                "heaviest_assets": heaviest,
+            },
+        )
+
+    def _collect_assets(self, asset_dir: Path, asset_type: str = "all") -> List[Dict[str, Any]]:
+        assets: List[Dict[str, Any]] = []
+        if not asset_dir.exists():
+            return assets
+
+        for file_path in asset_dir.rglob("*"):
+            if not file_path.is_file():
+                continue
+            detected_type = self._get_asset_type(file_path)
+            if not detected_type:
+                continue
+            if asset_type != "all" and detected_type != asset_type:
+                continue
+            assets.append(
+                {
+                    "path": str(file_path.relative_to(self.project_root)).replace("\\", "/"),
+                    "name": file_path.name,
+                    "size": file_path.stat().st_size,
+                    "type": detected_type,
+                    "extension": file_path.suffix.lower(),
+                }
+            )
+        return assets
+
+    def _recommend_compression(self, asset: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        size = int(asset["size"])
+        ext = asset["extension"]
+        asset_type = asset["type"]
+
+        if asset_type == "sprite" and ext == ".png" and size > 512 * 1024:
+            savings = int(size * 0.35)
+            return {
+                "path": asset["path"],
+                "recommendation": "Consider WebP or atlas packing for large sprite textures",
+                "estimated_savings_bytes": savings,
+            }
+        if asset_type == "audio" and ext in {".wav", ".flac"}:
+            savings = int(size * 0.45)
+            return {
+                "path": asset["path"],
+                "recommendation": "Convert source audio to OGG or platform-specific compressed runtime formats",
+                "estimated_savings_bytes": savings,
+            }
+        if asset_type == "model" and ext in {".fbx", ".obj", ".dae"}:
+            savings = int(size * 0.30)
+            return {
+                "path": asset["path"],
+                "recommendation": "Export to GLB/glTF and strip editor-only metadata",
+                "estimated_savings_bytes": savings,
+            }
+        if asset_type == "animation" and size > 256 * 1024:
+            savings = int(size * 0.20)
+            return {
+                "path": asset["path"],
+                "recommendation": "Prune redundant keyframes and split long clips into smaller runtime chunks",
+                "estimated_savings_bytes": savings,
+            }
+        return None
+
+    def _estimate_runtime_size(self, asset: Dict[str, Any]) -> float:
+        multiplier = {
+            "sprite": 4.0,
+            "audio": 1.2,
+            "model": 2.5,
+            "animation": 1.5,
+        }.get(asset["type"], 1.0)
+        return float(asset["size"]) * multiplier
 
     def _get_asset_type(self, file_path: Path) -> Optional[str]:
         """Determine asset type from file extension"""

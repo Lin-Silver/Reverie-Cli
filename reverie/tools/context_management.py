@@ -250,10 +250,19 @@ class ContextManagementTool(BaseTool):
             data = json.loads(path.read_text(encoding="utf-8"))
         except Exception:
             return []
-        assets = data.get("assets", [])
+        assets_data = data.get("assets", [])
+        assets = []
+        if isinstance(assets_data, dict):
+            for asset_list in assets_data.values():
+                if isinstance(asset_list, list):
+                    for asset in asset_list:
+                        if isinstance(asset, dict):
+                            assets.append(asset)
+        elif isinstance(assets_data, list):
+            assets = [asset for asset in assets_data if isinstance(asset, dict)]
         counts: Dict[str, int] = {}
         for asset in assets:
-            asset_type = asset.get("type", "unknown")
+            asset_type = asset.get("type") or asset.get("category") or "unknown"
             counts[asset_type] = counts.get(asset_type, 0) + 1
         parts = [f"{k}: {v}" for k, v in sorted(counts.items())]
         return parts[:8]

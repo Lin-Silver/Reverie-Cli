@@ -8,7 +8,7 @@ from .base import BaseTool, ToolResult
 
 class LevelDesignTool(BaseTool):
     name = "level_design"
-    description = "Advanced level design: generate layouts, validate pathing, analyze difficulty, spatial analysis, export configs."
+    description = "Advanced level design: generate layouts, validate pathing, analyze difficulty, recommend NPC placement, inspect spatial flow, and export configs."
 
     parameters = {
         "type": "object",
@@ -93,6 +93,20 @@ class LevelDesignTool(BaseTool):
                 return ToolResult.fail("layout or config_path is required for analyze_flow")
             report = self._analyze_flow(layout)
             return ToolResult.ok(report)
+
+        if action == "npc_placement":
+            layout = kwargs.get("layout") or self._load_layout_from_config(kwargs.get("config_path"))
+            if not layout:
+                return ToolResult.fail("layout or config_path is required for npc_placement")
+            report, placements = self._recommend_npc_placement(layout, difficulty)
+            return ToolResult.ok(report, {"placements": placements})
+
+        if action == "spatial_analysis":
+            layout = kwargs.get("layout") or self._load_layout_from_config(kwargs.get("config_path"))
+            if not layout:
+                return ToolResult.fail("layout or config_path is required for spatial_analysis")
+            report, analysis = self._spatial_analysis(layout)
+            return ToolResult.ok(report, analysis)
 
         if action == "export_config":
             layout = kwargs.get("layout")
@@ -216,6 +230,90 @@ class LevelDesignTool(BaseTool):
             f"- dead end ratio: {ratio:.2f}"
         )
 
+    def _recommend_npc_placement(self, layout: str, difficulty: int):
+        grid = layout.splitlines()
+        start = self._find_tile(grid, "S")
+        end = self._find_tile(grid, "E")
+        walkable_tiles = [
+            (x, y)
+            for y, row in enumerate(grid)
+            for x, cell in enumerate(row)
+            if cell in [".", "S", "E", "T", "M"]
+        ]
+
+        if not walkable_tiles:
+            return "No walkable space available for NPC placement.", []
+
+        branch_points = [
+            (x, y)
+            for (x, y) in walkable_tiles
+            if self._walkable_neighbors(grid, x, y) >= 3 and (x, y) not in {start, end}
+        ]
+        dead_ends = [
+            (x, y)
+            for (x, y) in walkable_tiles
+            if self._walkable_neighbors(grid, x, y) == 1 and (x, y) not in {start, end}
+        ]
+
+        placements = []
+        if start:
+            placements.append({"role": "guide", "position": start, "reason": "Supports onboarding near the spawn point"})
+        if branch_points:
+            placements.append({"role": "merchant", "position": branch_points[0], "reason": "Placed at a decision hub for repeat visibility"})
+        if dead_ends:
+            placements.append({"role": "lore_keeper", "position": dead_ends[0], "reason": "Rewards exploration in a low-traffic pocket"})
+        if end:
+            placements.append({"role": "gatekeeper", "position": end, "reason": "Frames the end state or boss threshold"})
+        if difficulty >= 7 and len(branch_points) > 1:
+            placements.append({"role": "support_ally", "position": branch_points[-1], "reason": "High difficulty layouts benefit from a relief or upgrade touchpoint"})
+
+        lines = ["NPC Placement Recommendations:", ""]
+        for placement in placements:
+            x, y = placement["position"]
+            lines.append(f"- {placement['role']} at ({x}, {y}): {placement['reason']}")
+
+        return "\n".join(lines), placements
+
+    def _spatial_analysis(self, layout: str):
+        grid = layout.splitlines()
+        walkable_tiles = []
+        choke_points = []
+        hubs = []
+
+        for y, row in enumerate(grid):
+            for x, cell in enumerate(row):
+                if cell not in [".", "S", "E", "T", "M"]:
+                    continue
+                walkable_tiles.append((x, y))
+                neighbor_count = self._walkable_neighbors(grid, x, y)
+                if neighbor_count <= 2:
+                    choke_points.append((x, y))
+                if neighbor_count >= 3:
+                    hubs.append((x, y))
+
+        walkable_count = len(walkable_tiles)
+        total_tiles = sum(len(row) for row in grid)
+        openness = walkable_count / max(total_tiles, 1)
+        path_length = self._path_length(layout)
+
+        analysis = {
+            "walkable_tiles": walkable_count,
+            "openness": openness,
+            "choke_points": choke_points,
+            "hub_tiles": hubs,
+            "critical_path_length": path_length,
+        }
+
+        report = (
+            "Spatial Analysis:\n"
+            f"- walkable tiles: {walkable_count}\n"
+            f"- openness: {openness:.2f}\n"
+            f"- choke points: {len(choke_points)}\n"
+            f"- hub tiles: {len(hubs)}\n"
+            f"- critical path length: {path_length if path_length is not None else 'N/A'}"
+        )
+        return report, analysis
+
     def _layout_to_config(self, layout: str) -> Dict[str, Any]:
         lines = layout.splitlines()
         return {
@@ -273,6 +371,13 @@ class LevelDesignTool(BaseTool):
         for nx, ny in self._neighbors(grid, x, y):
             count += 1
         return count
+
+    def _find_tile(self, grid: List[str], token: str):
+        for y, row in enumerate(grid):
+            for x, cell in enumerate(row):
+                if cell == token:
+                    return (x, y)
+        return None
 
     def _resolve_path(self, raw: str) -> Path:
         return self.resolve_workspace_path(raw, purpose="resolve level path")

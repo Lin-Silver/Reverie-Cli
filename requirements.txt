@@ -38,3 +38,8 @@ tree-sitter-css>=0.20.0
 pyinstaller>=6.0.0
 pillow
 pyyaml
+
+# Reverie Engine runtime
+pyglet>=2.0.16
+moderngl>=5.10.0
+glcontext>=3.0.0

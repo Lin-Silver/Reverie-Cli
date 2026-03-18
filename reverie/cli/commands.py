@@ -6,6 +6,8 @@ Handles all commands starting with / with dreamy pink-purple-blue aesthetics
 
 from typing import Optional, Callable, Dict, Any, List
 from pathlib import Path
+import json
+import shlex
 import time
 
 from rich.console import Console, Group
@@ -68,6 +70,12 @@ class CommandHandler:
             'operations': self.cmd_operations,
             'gdd': self.cmd_gdd,
             'assets': self.cmd_assets,
+            'blueprint': self.cmd_blueprint,
+            'bp': self.cmd_blueprint,
+            'scaffold': self.cmd_scaffold,
+            'engine': self.cmd_engine,
+            'playtest': self.cmd_playtest,
+            'pt': self.cmd_playtest,
             'CE': self.cmd_context_engine,  # Context Engine management (case-sensitive)
         }
     
@@ -2797,60 +2805,153 @@ class CommandHandler:
         self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Mode switched to {mode}[/{self.theme.MINT_VIBRANT}]")
         return True
 
-    def cmd_gdd(self, args: str) -> bool:
-        """Create, view, or summarize GDD (Reverie-Gamer)"""
-        from ..tools.game_gdd_manager import GameGDDManagerTool
-        
-        args = args.strip().lower()
-        action = args if args in ["create", "view", "summary"] else "view"
-        
+    def _get_project_root(self) -> Path:
+        """Resolve the active project root used by local game tools."""
         config_manager = self.app.get('config_manager')
-        project_root = Path(config_manager.project_root) if config_manager else Path.cwd()
-        
-        # Initialize the tool
-        tool = GameGDDManagerTool({"project_root": str(project_root)})
-        
-        # Default GDD path
-        gdd_path = "docs/GDD.md"
-        
-        if action == "create":
-            # Prompt for project details
-            self.console.print()
-            self.console.print(Panel(
-                f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Create Game Design Document {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]",
-                border_style=self.theme.BORDER_PRIMARY,
+        if config_manager and getattr(config_manager, "project_root", None):
+            return Path(config_manager.project_root)
+        return Path.cwd()
+
+    def _split_command_args(self, args: str) -> List[str]:
+        """Split slash-command arguments while respecting simple quoted values."""
+        raw = str(args or "").strip()
+        if not raw:
+            return []
+        try:
+            return [
+                part.strip().strip('"').strip("'")
+                for part in shlex.split(raw, posix=False)
+                if str(part).strip()
+            ]
+        except ValueError:
+            return [part.strip() for part in raw.split() if str(part).strip()]
+
+    def _format_bytes(self, size: Any) -> str:
+        """Render file sizes consistently for game command output."""
+        try:
+            value = float(size)
+        except (TypeError, ValueError):
+            return str(size)
+        if value < 1024:
+            return f"{int(value)} B"
+        if value < 1024 * 1024:
+            return f"{value / 1024:.1f} KB"
+        if value < 1024 * 1024 * 1024:
+            return f"{value / (1024 * 1024):.2f} MB"
+        return f"{value / (1024 * 1024 * 1024):.2f} GB"
+
+    def _print_game_hint(self) -> None:
+        """Show a gentle reminder when game commands are used outside Gamer mode."""
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            return
+        config = config_manager.load()
+        current_mode = normalize_mode(getattr(config, "mode", "reverie"))
+        if current_mode != "reverie-gamer":
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} Tip: /mode reverie-gamer unlocks the strongest in-chat workflow for these game commands.[/{self.theme.TEXT_DIM}]"
+            )
+
+    def _print_game_panel(self, title: str, body: str, accent: Optional[str] = None) -> None:
+        """Render a styled game-command panel."""
+        accent_color = accent or self.theme.BORDER_PRIMARY
+        self.console.print()
+        self.console.print(
+            Panel(
+                body,
+                title=f"[bold {self.theme.PINK_SOFT}]{self.deco.CRYSTAL} {escape(title)}[/bold {self.theme.PINK_SOFT}]",
+                border_style=accent_color,
                 box=box.ROUNDED,
-                padding=(0, 2)
-            ))
-            self.console.print()
-            
+                padding=(1, 2),
+            )
+        )
+        self.console.print()
+
+    def _print_tool_result(self, title: str, result, *, markdown: bool = False) -> None:
+        """Render tool results with consistent success and error styling."""
+        if result.success:
+            if markdown:
+                from rich.markdown import Markdown
+
+                body = Markdown(result.output)
+            else:
+                body = escape(result.output)
+            self._print_game_panel(title, body if isinstance(body, str) else body, self.theme.BORDER_PRIMARY)
+            return
+
+        message = result.error or "Unknown error"
+        self.console.print(
+            f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} {escape(message)}[/{self.theme.CORAL_SOFT}]"
+        )
+        self.console.print()
+
+    def _load_json_file(self, path: Path) -> Optional[Dict[str, Any]]:
+        """Read a JSON file if it exists."""
+        if not path.exists():
+            return None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            return payload if isinstance(payload, dict) else {"value": payload}
+        except Exception:
+            return None
+
+    def cmd_gdd(self, args: str) -> bool:
+        """Create, inspect, validate, and export the game design document."""
+        from ..tools.game_gdd_manager import GameGDDManagerTool
+
+        self._print_game_hint()
+        tokens = self._split_command_args(args)
+        action = tokens[0].lower() if tokens else "view"
+        project_root = self._get_project_root()
+        tool = GameGDDManagerTool({"project_root": str(project_root)})
+        gdd_path = "docs/GDD.md"
+
+        if action in {"help", "?"}:
+            self._print_game_panel(
+                "GDD Commands",
+                "\n".join(
+                    [
+                        "/gdd view",
+                        "/gdd create",
+                        "/gdd summary",
+                        "/gdd validate",
+                        "/gdd append",
+                        "/gdd metadata",
+                        "/gdd version [create|list]",
+                        "/gdd export [html|markdown] [output_path]",
+                    ]
+                ),
+            )
+            return True
+
+        if action == "create":
+            self._print_game_panel("Create Game Design Document", "Fill in the core project details for the initial GDD.")
             project_name = Prompt.ask(
                 f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Project Name",
                 default=project_root.name
             )
-            
             genre = Prompt.ask(
                 f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Genre",
                 default="RPG"
             )
-            
             target_engine = Prompt.ask(
                 f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Target Engine",
-                default="custom",
-                choices=["custom", "phaser", "pygame", "love2d", "godot", "unity", "unreal"]
+                default="reverie_engine",
+                choices=["reverie_engine", "reverie_engine_lite", "custom", "phaser", "pixijs", "threejs", "pygame", "love2d", "godot", "unity", "unreal"]
             )
-            
             target_platform = Prompt.ask(
                 f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Target Platform",
                 default="PC"
             )
-            
             is_rpg = Confirm.ask(
                 f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Is this an RPG game?",
                 default=True
             )
-            
-            # Call the tool
+            template_type = Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Template Type",
+                default="rpg" if is_rpg else "standard",
+                choices=["standard", "rpg", "minimal"],
+            )
             result = tool.execute(
                 action="create",
                 gdd_path=gdd_path,
@@ -2858,159 +2959,207 @@ class CommandHandler:
                 genre=genre,
                 target_engine=target_engine,
                 target_platform=target_platform,
-                is_rpg=is_rpg
+                is_rpg=is_rpg,
+                template_type=template_type,
             )
-            
-            if result.success:
-                self.console.print()
-                self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} {result.output}[/{self.theme.MINT_VIBRANT}]")
-            else:
-                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} {result.error}[/{self.theme.CORAL_SOFT}]")
-            
+            self._print_tool_result("GDD Created", result)
             return True
-        
-        elif action == "view":
-            # Call the tool to view GDD
+
+        if action == "view":
             result = tool.execute(action="view", gdd_path=gdd_path)
-            
             if result.success:
-                from rich.markdown import Markdown
-                self.console.print()
-                self.console.print(Panel(
-                    Markdown(result.output),
-                    title=f"[bold {self.theme.PINK_SOFT}]{self.deco.CRYSTAL} Game Design Document[/bold {self.theme.PINK_SOFT}]",
-                    border_style=self.theme.BORDER_PRIMARY,
-                    box=box.ROUNDED,
-                    padding=(1, 2)
-                ))
+                self._print_tool_result("Game Design Document", result, markdown=True)
             else:
                 self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} {result.error}[/{self.theme.AMBER_GLOW}]")
                 self.console.print(f"[{self.theme.TEXT_DIM}]Use /gdd create to generate a new GDD.[/{self.theme.TEXT_DIM}]")
-            
             return True
-        
-        elif action == "summary":
-            # Call the tool to generate summary
+
+        if action == "summary":
             result = tool.execute(action="summary", gdd_path=gdd_path)
-            
-            if result.success:
-                self.console.print()
-                self.console.print(Panel(
-                    result.output,
-                    title=f"[bold {self.theme.PINK_SOFT}]{self.deco.CRYSTAL} GDD Summary[/bold {self.theme.PINK_SOFT}]",
-                    border_style=self.theme.BORDER_PRIMARY,
-                    box=box.ROUNDED,
-                    padding=(1, 2)
-                ))
-            else:
-                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} {result.error}[/{self.theme.CORAL_SOFT}]")
-            
+            self._print_tool_result("GDD Summary", result)
             return True
-        
+
+        if action == "validate":
+            result = tool.execute(action="validate", gdd_path=gdd_path)
+            self._print_tool_result("GDD Validation", result)
+            return True
+
+        if action == "append":
+            section_name = Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Section Name"
+            ).strip()
+            section_content = Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Section Content"
+            ).strip()
+            result = tool.execute(
+                action="append_section",
+                gdd_path=gdd_path,
+                section_name=section_name,
+                section_content=section_content,
+            )
+            self._print_tool_result("GDD Section Appended", result)
+            return True
+
+        if action == "metadata":
+            metadata: Dict[str, Any] = {}
+            kv_tokens = tokens[1:]
+            if kv_tokens:
+                for token in kv_tokens:
+                    if "=" in token:
+                        key, value = token.split("=", 1)
+                        if key.strip():
+                            metadata[key.strip()] = value.strip()
+            if not metadata:
+                metadata["status"] = Prompt.ask(
+                    f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Status",
+                    default="draft",
+                ).strip()
+                metadata["version"] = Prompt.ask(
+                    f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Version",
+                    default="0.1.0",
+                ).strip()
+                owner = Prompt.ask(
+                    f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Owner",
+                    default="Reverie",
+                ).strip()
+                if owner:
+                    metadata["owner"] = owner
+            result = tool.execute(action="set_metadata", gdd_path=gdd_path, metadata=metadata)
+            self._print_tool_result("GDD Metadata Updated", result)
+            return True
+
+        if action == "version":
+            version_action = tokens[1].lower() if len(tokens) > 1 else "list"
+            if version_action not in {"create", "list"}:
+                version_action = Prompt.ask(
+                    f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Version Action",
+                    default="list",
+                    choices=["create", "list"],
+                ).strip().lower()
+            result = tool.execute(action="version", gdd_path=gdd_path, version_action=version_action)
+            self._print_tool_result("GDD Versions", result)
+            return True
+
+        if action == "export":
+            export_format = tokens[1].lower() if len(tokens) > 1 else Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Export Format",
+                default="html",
+                choices=["html", "markdown"],
+            ).strip().lower()
+            export_path = tokens[2] if len(tokens) > 2 else (
+                "docs/GDD.html" if export_format == "html" else ""
+            )
+            kwargs = {"action": "export", "gdd_path": gdd_path, "export_format": export_format}
+            if export_path:
+                kwargs["export_path"] = export_path
+            result = tool.execute(**kwargs)
+            self._print_tool_result("GDD Export", result)
+            return True
+
+        self.console.print(
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /gdd [view|create|summary|validate|append|metadata|version|export][/{self.theme.AMBER_GLOW}]"
+        )
         return True
 
     def cmd_assets(self, args: str) -> bool:
-        """List assets using the game asset tool with formatted table display"""
+        """Inspect and manage game assets from the CLI."""
         from ..tools.game_asset_manager import GameAssetManagerTool
-        
-        config_manager = self.app.get('config_manager')
-        project_root = config_manager.project_root if config_manager else Path.cwd()
-        tool = GameAssetManagerTool({"project_root": project_root})
-        
-        # Parse arguments - support /assets or /assets <type>
-        asset_type = args.strip().lower() if args.strip() else "all"
-        
-        # Validate asset type
+
+        self._print_game_hint()
+        project_root = self._get_project_root()
+        tool = GameAssetManagerTool({"project_root": str(project_root)})
+        tokens = self._split_command_args(args)
         valid_types = ["all", "sprite", "audio", "model", "animation"]
+
+        if not tokens:
+            subcommand = "list"
+            asset_type = "all"
+        elif tokens[0].lower() in valid_types:
+            subcommand = "list"
+            asset_type = tokens[0].lower()
+        else:
+            subcommand = tokens[0].lower()
+            asset_type = tokens[1].lower() if len(tokens) > 1 and tokens[1].lower() in valid_types else "all"
+
+        if subcommand in {"help", "?"}:
+            self._print_game_panel(
+                "Asset Commands",
+                "\n".join(
+                    [
+                        "/assets [all|sprite|audio|model|animation]",
+                        "/assets analyze [type]",
+                        "/assets manifest [path]",
+                        "/assets missing",
+                        "/assets unused",
+                        "/assets graph [type]",
+                        "/assets compress [type]",
+                        "/assets size [type]",
+                        "/assets naming [regex]",
+                        "/assets atlas [max_size]",
+                    ]
+                ),
+            )
+            return True
+
         if asset_type not in valid_types:
             self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid asset type: {asset_type}[/{self.theme.CORAL_SOFT}]")
             self.console.print(f"[{self.theme.TEXT_DIM}]Valid types: {', '.join(valid_types)}[/{self.theme.TEXT_DIM}]")
             return True
-        
-        # Execute the tool
-        result = tool.execute(action="list", asset_type=asset_type)
-        
-        if not result.success:
-            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} {result.error}[/{self.theme.CORAL_SOFT}]")
-            return True
-        
-        # Display results in formatted table
-        self.console.print()
-        
-        # Get asset data from result
-        data = result.data or {}
-        
-        if asset_type == "all":
-            # Display all assets grouped by type
-            assets_by_type = data.get("assets", {})
-            total_count = data.get("total_count", 0)
-            
-            # Title panel
-            title_panel = Panel(
-                f"[bold {self.theme.PINK_SOFT}]{self.deco.CRYSTAL} Game Assets Overview {self.deco.CRYSTAL}[/bold {self.theme.PINK_SOFT}]\n"
-                f"[{self.theme.TEXT_SECONDARY}]Total: {total_count} asset(s)[/{self.theme.TEXT_SECONDARY}]",
-                border_style=self.theme.BORDER_PRIMARY,
-                box=box.ROUNDED,
-                padding=(0, 2)
-            )
-            self.console.print(title_panel)
+
+        if subcommand == "list":
+            result = tool.execute(action="list", asset_type=asset_type)
+            if not result.success:
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} {result.error}[/{self.theme.CORAL_SOFT}]")
+                return True
+
             self.console.print()
-            
-            # Display each asset type in a table
-            for atype in ["sprite", "audio", "model", "animation"]:
-                assets = assets_by_type.get(atype, [])
-                if not assets:
-                    continue
-                
-                # Create table for this asset type
-                table = Table(
-                    title=f"[bold {self.theme.BLUE_SOFT}]{self.deco.DIAMOND} {atype.upper()}S ({len(assets)})[/bold {self.theme.BLUE_SOFT}]",
-                    box=box.ROUNDED,
+            data = result.data or {}
+
+            if asset_type == "all":
+                assets_by_type = data.get("assets", {})
+                total_count = data.get("total_count", 0)
+                title_panel = Panel(
+                    f"[bold {self.theme.PINK_SOFT}]{self.deco.CRYSTAL} Game Assets Overview {self.deco.CRYSTAL}[/bold {self.theme.PINK_SOFT}]\n"
+                    f"[{self.theme.TEXT_SECONDARY}]Total: {total_count} asset(s)[/{self.theme.TEXT_SECONDARY}]",
                     border_style=self.theme.BORDER_PRIMARY,
-                    show_lines=False,
-                    title_justify="left"
+                    box=box.ROUNDED,
+                    padding=(0, 2)
                 )
-                table.add_column("Name", style=f"bold {self.theme.MINT_SOFT}", width=30)
-                table.add_column("Size", style=self.theme.TEXT_SECONDARY, justify="right", width=12)
-                table.add_column("Path", style=f"dim {self.theme.TEXT_DIM}", no_wrap=False)
-                
-                # Add rows (limit to first 10 for readability)
-                for asset in assets[:10]:
-                    name = asset.get("name", "")
-                    size = asset.get("size", 0)
-                    path = asset.get("path", "")
-                    
-                    # Format size
-                    if size < 1024:
-                        size_str = f"{size} B"
-                    elif size < 1024 * 1024:
-                        size_str = f"{size / 1024:.1f} KB"
-                    else:
-                        size_str = f"{size / (1024 * 1024):.2f} MB"
-                    
-                    table.add_row(
-                        f"{self.deco.DOT_MEDIUM} {name}",
-                        size_str,
-                        path
-                    )
-                
-                # Show "and X more" if there are more assets
-                if len(assets) > 10:
-                    table.add_row(
-                        f"[dim {self.theme.TEXT_DIM}]... and {len(assets) - 10} more[/dim {self.theme.TEXT_DIM}]",
-                        "",
-                        ""
-                    )
-                
-                self.console.print(table)
+                self.console.print(title_panel)
                 self.console.print()
-        
-        else:
-            # Display specific asset type
+
+                for atype in ["sprite", "audio", "model", "animation"]:
+                    assets = assets_by_type.get(atype, [])
+                    if not assets:
+                        continue
+                    table = Table(
+                        title=f"[bold {self.theme.BLUE_SOFT}]{self.deco.DIAMOND} {atype.upper()}S ({len(assets)})[/bold {self.theme.BLUE_SOFT}]",
+                        box=box.ROUNDED,
+                        border_style=self.theme.BORDER_PRIMARY,
+                        show_lines=False,
+                        title_justify="left"
+                    )
+                    table.add_column("Name", style=f"bold {self.theme.MINT_SOFT}", width=30)
+                    table.add_column("Size", style=self.theme.TEXT_SECONDARY, justify="right", width=12)
+                    table.add_column("Path", style=f"dim {self.theme.TEXT_DIM}", no_wrap=False)
+                    for asset in assets[:10]:
+                        table.add_row(
+                            f"{self.deco.DOT_MEDIUM} {asset.get('name', '')}",
+                            self._format_bytes(asset.get("size", 0)),
+                            str(asset.get("path", "")),
+                        )
+                    if len(assets) > 10:
+                        table.add_row(
+                            f"[dim {self.theme.TEXT_DIM}]... and {len(assets) - 10} more[/dim {self.theme.TEXT_DIM}]",
+                            "",
+                            ""
+                        )
+                    self.console.print(table)
+                    self.console.print()
+                return True
+
             assets = data.get("assets", [])
             count = data.get("count", 0)
-            
-            # Title panel
             title_panel = Panel(
                 f"[bold {self.theme.PINK_SOFT}]{self.deco.CRYSTAL} {asset_type.upper()} Assets {self.deco.CRYSTAL}[/bold {self.theme.PINK_SOFT}]\n"
                 f"[{self.theme.TEXT_SECONDARY}]Found: {count} asset(s)[/{self.theme.TEXT_SECONDARY}]",
@@ -3020,47 +3169,617 @@ class CommandHandler:
             )
             self.console.print(title_panel)
             self.console.print()
-            
             if not assets:
                 self.console.print(f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} No {asset_type} assets found.[/{self.theme.TEXT_DIM}]")
                 self.console.print()
                 return True
-            
-            # Create table
-            table = Table(
-                box=box.ROUNDED,
-                border_style=self.theme.BORDER_PRIMARY,
-                show_lines=True
-            )
+
+            table = Table(box=box.ROUNDED, border_style=self.theme.BORDER_PRIMARY, show_lines=True)
             table.add_column("#", style=f"dim {self.theme.TEXT_DIM}", width=5, justify="right")
             table.add_column("Name", style=f"bold {self.theme.MINT_SOFT}", width=35)
             table.add_column("Size", style=self.theme.TEXT_SECONDARY, justify="right", width=12)
             table.add_column("Path", style=self.theme.TEXT_DIM, no_wrap=False)
-            
-            # Add rows
             for idx, asset in enumerate(assets, 1):
-                name = asset.get("name", "")
-                size = asset.get("size", 0)
-                path = asset.get("path", "")
-                
-                # Format size
-                if size < 1024:
-                    size_str = f"{size} B"
-                elif size < 1024 * 1024:
-                    size_str = f"{size / 1024:.1f} KB"
-                else:
-                    size_str = f"{size / (1024 * 1024):.2f} MB"
-                
                 table.add_row(
                     str(idx),
-                    f"{self.deco.DOT_MEDIUM} {name}",
-                    size_str,
-                    path
+                    f"{self.deco.DOT_MEDIUM} {asset.get('name', '')}",
+                    self._format_bytes(asset.get("size", 0)),
+                    str(asset.get("path", "")),
                 )
-            
             self.console.print(table)
             self.console.print()
-        
+            return True
+
+        if subcommand == "manifest":
+            manifest_path = tokens[1] if len(tokens) > 1 else "assets/manifest.json"
+            result = tool.execute(action="generate_manifest", asset_type=asset_type, manifest_path=manifest_path)
+            self._print_tool_result("Asset Manifest", result)
+            return True
+
+        if subcommand == "analyze":
+            result = tool.execute(action="analyze", asset_type=asset_type)
+            self._print_tool_result("Asset Analysis", result)
+            return True
+
+        if subcommand == "missing":
+            result = tool.execute(action="check_missing", asset_type=asset_type, code_dirs=["src", "scripts", "data"])
+            self._print_tool_result("Missing Asset References", result)
+            return True
+
+        if subcommand == "unused":
+            result = tool.execute(action="find_unused", asset_type=asset_type, code_dirs=["src", "scripts", "data"])
+            self._print_tool_result("Unused Assets", result)
+            return True
+
+        if subcommand == "graph":
+            result = tool.execute(action="dependency_graph", asset_type=asset_type, code_dirs=["src", "scripts", "data"])
+            self._print_tool_result("Asset Dependency Graph", result)
+            return True
+
+        if subcommand == "compress":
+            result = tool.execute(action="compress_recommend", asset_type=asset_type)
+            self._print_tool_result("Asset Compression Recommendations", result)
+            return True
+
+        if subcommand == "size":
+            result = tool.execute(action="total_size", asset_type=asset_type)
+            self._print_tool_result("Asset Size Report", result)
+            return True
+
+        if subcommand == "naming":
+            pattern = tokens[1] if len(tokens) > 1 else r"^[a-z0-9_]+$"
+            result = tool.execute(action="validate_naming", asset_type=asset_type, naming_pattern=pattern)
+            self._print_tool_result("Asset Naming Validation", result)
+            return True
+
+        if subcommand == "atlas":
+            atlas_size = 2048
+            if len(tokens) > 1 and tokens[1].isdigit():
+                atlas_size = int(tokens[1])
+            result = tool.execute(action="build_atlas_plan", atlas_max_size=atlas_size)
+            self._print_tool_result("Sprite Atlas Plan", result)
+            return True
+
+        if subcommand == "import":
+            source_path = tokens[1] if len(tokens) > 1 else Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Source Asset Path"
+            ).strip()
+            import_type = tokens[2].lower() if len(tokens) > 2 and tokens[2].lower() in valid_types else Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Asset Type",
+                default="sprite",
+                choices=["sprite", "audio", "model", "animation"],
+            ).strip().lower()
+            target_name = tokens[3] if len(tokens) > 3 else ""
+            kwargs = {"action": "import_asset", "source_path": source_path, "asset_type": import_type}
+            if target_name:
+                kwargs["target_name"] = target_name
+            result = tool.execute(**kwargs)
+            self._print_tool_result("Asset Imported", result)
+            return True
+
+        self.console.print(
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /assets [list|manifest|analyze|missing|unused|graph|compress|size|naming|atlas|import][/{self.theme.AMBER_GLOW}]"
+        )
+        return True
+
+    def cmd_blueprint(self, args: str) -> bool:
+        """Create, inspect, and export game blueprints."""
+        from ..tools.game_design_orchestrator import GameDesignOrchestratorTool
+
+        self._print_game_hint()
+        tokens = self._split_command_args(args)
+        action = tokens[0].lower() if tokens else "view"
+        tool = GameDesignOrchestratorTool({"project_root": str(self._get_project_root())})
+        blueprint_path = "docs/game_blueprint.json"
+
+        if action in {"help", "?"}:
+            self._print_game_panel(
+                "Blueprint Commands",
+                "\n".join(
+                    [
+                        "/blueprint view",
+                        "/blueprint create",
+                        "/blueprint analyze",
+                        "/blueprint slice [output_path]",
+                        "/blueprint export [output_path]",
+                        "/blueprint expand <system_name>",
+                    ]
+                ),
+            )
+            return True
+
+        if action == "view":
+            payload = self._load_json_file(self._get_project_root() / blueprint_path)
+            if not payload:
+                self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Blueprint not found. Use /blueprint create first.[/{self.theme.AMBER_GLOW}]")
+                return True
+
+            meta = payload.get("meta", {})
+            creative = payload.get("creative_direction", {})
+            systems = payload.get("gameplay_blueprint", {}).get("systems", {})
+            body = "\n".join(
+                [
+                    f"Project: {meta.get('project_name', 'Unknown')}",
+                    f"Genre: {meta.get('genre', 'Unknown')}",
+                    f"Dimension: {meta.get('dimension', 'Unknown')}",
+                    f"Engine: {meta.get('target_engine', 'Unknown')}",
+                    f"Camera: {meta.get('camera_model', 'Unknown')}",
+                    f"Scope: {meta.get('scope', 'Unknown')}",
+                    f"Pillars: {', '.join(creative.get('pillars', [])) or 'none'}",
+                    f"Systems: {len(systems)}",
+                ]
+            )
+            self._print_game_panel("Game Blueprint Overview", body)
+            if systems:
+                table = Table(box=box.ROUNDED, border_style=self.theme.BORDER_PRIMARY, show_lines=True)
+                table.add_column("System", style=f"bold {self.theme.MINT_SOFT}")
+                table.add_column("Tuning", style=self.theme.TEXT_SECONDARY, justify="right")
+                table.add_column("Telemetry", style=self.theme.TEXT_SECONDARY, justify="right")
+                for key, spec in systems.items():
+                    table.add_row(
+                        spec.get("name", key),
+                        str(len(spec.get("tuning_knobs", []))),
+                        str(len(spec.get("telemetry", []))),
+                    )
+                self.console.print(table)
+                self.console.print()
+            return True
+
+        if action == "create":
+            project_root = self._get_project_root()
+            project_name = Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Project Name",
+                default=project_root.name,
+            ).strip()
+            genre = Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Genre",
+                default="Action Adventure",
+            ).strip()
+            dimension = Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Dimension",
+                default="2D",
+                choices=["2D", "2.5D", "3D"],
+            ).strip()
+            target_engine = Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Target Engine",
+                default="reverie_engine",
+                choices=["reverie_engine", "reverie_engine_lite", "custom", "phaser", "pixijs", "threejs", "pygame", "love2d", "godot", "unity", "unreal"],
+            ).strip()
+            camera_model = Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Camera Model",
+                default="side_view" if dimension == "2D" else ("isometric" if dimension == "2.5D" else "third_person"),
+            ).strip()
+            scope = Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Scope",
+                default="full_game",
+                choices=["prototype", "vertical_slice", "full_game"],
+            ).strip()
+            pillars_raw = Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Pillars (comma-separated)",
+                default="Immediate player fantasy,Depth from interacting systems,Readable feedback and pacing",
+            ).strip()
+            pillars = [item.strip() for item in pillars_raw.split(",") if item.strip()]
+            result = tool.execute(
+                action="create_blueprint",
+                blueprint_path=blueprint_path,
+                project_name=project_name,
+                genre=genre,
+                dimension=dimension,
+                target_engine=target_engine,
+                camera_model=camera_model,
+                scope=scope,
+                pillars=pillars,
+            )
+            self._print_tool_result("Blueprint Created", result)
+            return True
+
+        if action == "analyze":
+            result = tool.execute(action="analyze_scope", blueprint_path=blueprint_path)
+            self._print_tool_result("Blueprint Scope Analysis", result)
+            return True
+
+        if action == "slice":
+            output_path = tokens[1] if len(tokens) > 1 else "docs/vertical_slice_plan.md"
+            result = tool.execute(
+                action="generate_vertical_slice",
+                blueprint_path=blueprint_path,
+                output_path=output_path,
+            )
+            self._print_tool_result("Vertical Slice Plan", result)
+            return True
+
+        if action == "export":
+            output_path = tokens[1] if len(tokens) > 1 else "docs/game_blueprint.md"
+            result = tool.execute(
+                action="export_markdown",
+                blueprint_path=blueprint_path,
+                output_path=output_path,
+            )
+            self._print_tool_result("Blueprint Export", result)
+            return True
+
+        if action == "expand":
+            system_name = " ".join(tokens[1:]).strip() if len(tokens) > 1 else ""
+            if not system_name:
+                system_name = Prompt.ask(
+                    f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] System Name",
+                    default="Combat",
+                ).strip()
+            result = tool.execute(
+                action="expand_system",
+                blueprint_path=blueprint_path,
+                system_name=system_name,
+            )
+            self._print_tool_result("Blueprint System Expansion", result)
+            return True
+
+        self.console.print(
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /blueprint [view|create|analyze|slice|export|expand][/{self.theme.AMBER_GLOW}]"
+        )
+        return True
+
+    def cmd_scaffold(self, args: str) -> bool:
+        """Plan or create the engine-aware project foundation."""
+        from ..tools.game_project_scaffolder import GameProjectScaffolderTool
+
+        self._print_game_hint()
+        tokens = self._split_command_args(args)
+        action = tokens[0].lower() if tokens else "plan"
+        tool = GameProjectScaffolderTool({"project_root": str(self._get_project_root())})
+        output_dir = "."
+        blueprint_path = "docs/game_blueprint.json"
+
+        if action in {"help", "?"}:
+            self._print_game_panel(
+                "Scaffold Commands",
+                "\n".join(
+                    [
+                        "/scaffold plan",
+                        "/scaffold create",
+                        "/scaffold modules [output_path]",
+                        "/scaffold pipeline [output_path]",
+                    ]
+                ),
+            )
+            return True
+
+        if action == "plan":
+            result = tool.execute(action="plan_structure", output_dir=output_dir, blueprint_path=blueprint_path)
+            self._print_tool_result("Project Structure Plan", result)
+            return True
+
+        if action == "create":
+            include_tests = Confirm.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Include tests?",
+                default=True,
+            )
+            include_tools = Confirm.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Include tooling and playtest folders?",
+                default=True,
+            )
+            overwrite = Confirm.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Overwrite starter files if they exist?",
+                default=False,
+            )
+            result = tool.execute(
+                action="create_foundation",
+                output_dir=output_dir,
+                blueprint_path=blueprint_path,
+                include_tests=include_tests,
+                include_tools=include_tools,
+                overwrite=overwrite,
+            )
+            self._print_tool_result("Project Foundation", result)
+            return True
+
+        if action == "modules":
+            output_path = tokens[1] if len(tokens) > 1 else "docs/module_map.json"
+            result = tool.execute(
+                action="generate_module_map",
+                output_dir=output_dir,
+                blueprint_path=blueprint_path,
+                output_path=output_path,
+            )
+            self._print_tool_result("Module Map", result)
+            return True
+
+        if action == "pipeline":
+            output_path = tokens[1] if len(tokens) > 1 else "docs/content_pipeline.md"
+            result = tool.execute(
+                action="generate_content_pipeline",
+                output_dir=output_dir,
+                blueprint_path=blueprint_path,
+                output_path=output_path,
+            )
+            self._print_tool_result("Content Pipeline", result)
+            return True
+
+        self.console.print(
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /scaffold [plan|create|modules|pipeline][/{self.theme.AMBER_GLOW}]"
+        )
+        return True
+
+    def cmd_playtest(self, args: str) -> bool:
+        """Create playtest plans and analyze playtest artifacts."""
+        from ..tools.game_playtest_lab import GamePlaytestLabTool
+
+        self._print_game_hint()
+        tokens = self._split_command_args(args)
+        action = tokens[0].lower() if tokens else "plan"
+        tool = GamePlaytestLabTool({"project_root": str(self._get_project_root())})
+        blueprint_path = "docs/game_blueprint.json"
+
+        if action in {"help", "?"}:
+            self._print_game_panel(
+                "Playtest Commands",
+                "\n".join(
+                    [
+                        "/playtest plan [focus]",
+                        "/playtest telemetry [focus]",
+                        "/playtest gates [focus]",
+                        "/playtest analyze <session_log_path>",
+                        "/playtest feedback [feedback_path]",
+                    ]
+                ),
+            )
+            return True
+
+        if action == "plan":
+            focus = tokens[1] if len(tokens) > 1 else Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Test Focus",
+                default="full_loop",
+            ).strip()
+            audience = Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Audience",
+                default="new_players",
+            ).strip()
+            session_minutes = int(Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Session Minutes",
+                default="30",
+            ).strip() or "30")
+            result = tool.execute(
+                action="create_test_plan",
+                blueprint_path=blueprint_path,
+                test_focus=focus,
+                audience=audience,
+                session_minutes=session_minutes,
+            )
+            self._print_tool_result("Playtest Plan", result)
+            return True
+
+        if action == "telemetry":
+            focus = tokens[1] if len(tokens) > 1 else "full_loop"
+            result = tool.execute(
+                action="generate_telemetry_schema",
+                blueprint_path=blueprint_path,
+                test_focus=focus,
+            )
+            self._print_tool_result("Telemetry Schema", result)
+            return True
+
+        if action == "gates":
+            focus = tokens[1] if len(tokens) > 1 else "full_loop"
+            result = tool.execute(
+                action="create_quality_gates",
+                blueprint_path=blueprint_path,
+                test_focus=focus,
+            )
+            self._print_tool_result("Quality Gates", result)
+            return True
+
+        if action == "analyze":
+            log_path = tokens[1] if len(tokens) > 1 else Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Session Log Path",
+                default="playtest/logs/session.json",
+            ).strip()
+            result = tool.execute(action="analyze_session_log", session_log_path=log_path)
+            self._print_tool_result("Playtest Session Analysis", result)
+            return True
+
+        if action == "feedback":
+            feedback_path = tokens[1] if len(tokens) > 1 else Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Feedback File Path",
+                default="playtest/feedback.txt",
+            ).strip()
+            result = tool.execute(action="synthesize_feedback", feedback_path=feedback_path)
+            self._print_tool_result("Feedback Synthesis", result)
+            return True
+
+        self.console.print(
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /playtest [plan|telemetry|gates|analyze|feedback][/{self.theme.AMBER_GLOW}]"
+        )
+        return True
+
+    def cmd_engine(self, args: str) -> bool:
+        """Manage the built-in Reverie Engine runtime."""
+        from ..engine import run_project, runtime_capabilities
+        from ..tools.reverie_engine import ReverieEngineTool
+
+        self._print_game_hint()
+        tokens = self._split_command_args(args)
+        action = tokens[0].lower() if tokens else "profile"
+        tool = ReverieEngineTool({"project_root": str(self._get_project_root())})
+        output_dir = "."
+
+        if action in {"help", "?"}:
+            self._print_game_panel(
+                "Engine Commands",
+                "\n".join(
+                    [
+                        "/engine profile",
+                        "/engine create",
+                        "/engine sample [2d_platformer|topdown_action|iso_adventure|3d_arena|galgame_live2d|tower_defense]",
+                        "/engine run [scene_path]",
+                        "/engine validate",
+                        "/engine smoke [scene_path]",
+                        "/engine health",
+                        "/engine benchmark",
+                        "/engine package",
+                        "/engine test",
+                    ]
+                ),
+            )
+            return True
+
+        if action == "profile":
+            result = tool.execute(action="inspect_project", output_dir=output_dir)
+            capability_text = "\n".join(
+                f"- {name}: {'available' if available else 'missing'}"
+                for name, available in runtime_capabilities(self._get_project_root()).items()
+            )
+            if result.success:
+                self._print_game_panel("Reverie Engine Profile", f"{result.output}\n\nCapabilities:\n{capability_text}")
+            else:
+                self._print_tool_result("Reverie Engine Profile", result)
+            return True
+
+        if action == "create":
+            project_root = self._get_project_root()
+            project_name = Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Project Name",
+                default=project_root.name,
+            ).strip()
+            dimension = Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Dimension",
+                default="2D",
+                choices=["2D", "2.5D", "3D"],
+            ).strip()
+            include_sample = Confirm.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Materialize a built-in sample?",
+                default=True,
+            )
+            sample_name = None
+            if include_sample:
+                sample_name = Prompt.ask(
+                    f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Sample",
+                    default="2d_platformer" if dimension == "2D" else ("iso_adventure" if dimension == "2.5D" else "3d_arena"),
+                    choices=["2d_platformer", "topdown_action", "iso_adventure", "3d_arena", "galgame_live2d", "tower_defense"],
+                ).strip()
+            overwrite = Confirm.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Overwrite starter files if they exist?",
+                default=False,
+            )
+            result = tool.execute(
+                action="create_project",
+                output_dir=output_dir,
+                project_name=project_name,
+                dimension=dimension,
+                sample_name=sample_name or "",
+                overwrite=overwrite,
+            )
+            self._print_tool_result("Reverie Engine Project", result)
+            return True
+
+        if action == "sample":
+            sample_name = tokens[1] if len(tokens) > 1 else Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Sample",
+                default="2d_platformer",
+                choices=["2d_platformer", "topdown_action", "iso_adventure", "3d_arena", "galgame_live2d", "tower_defense"],
+            ).strip()
+            overwrite = Confirm.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Overwrite sample files if they exist?",
+                default=True,
+            )
+            result = tool.execute(
+                action="materialize_sample",
+                output_dir=output_dir,
+                sample_name=sample_name,
+                overwrite=overwrite,
+            )
+            self._print_tool_result("Reverie Engine Sample", result)
+            return True
+
+        if action == "run":
+            scene_path = tokens[1] if len(tokens) > 1 else "data/scenes/main.relscene.json"
+            headless = Confirm.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Run headless?",
+                default=False,
+            )
+            result_data = run_project(
+                self._get_project_root(),
+                scene_path=scene_path,
+                headless=headless,
+                output_log=self._get_project_root() / "playtest/logs/manual_run.json",
+            )
+            self._print_game_panel(
+                "Reverie Engine Run",
+                "\n".join(
+                    [
+                        f"Success: {result_data['success']}",
+                        f"Events: {result_data['summary']['event_count']}",
+                        f"Log: {result_data['log_path']}",
+                        f"Capabilities: {result_data['capabilities']}",
+                    ]
+                ),
+            )
+            return True
+
+        if action == "validate":
+            validation = tool.execute(action="validate_project", output_dir=output_dir)
+            self._print_tool_result("Reverie Engine Validation", validation)
+            return True
+
+        if action == "smoke":
+            scene_path = tokens[1] if len(tokens) > 1 else ""
+            result = tool.execute(
+                action="run_smoke",
+                output_dir=output_dir,
+                scene_path=scene_path,
+            )
+            self._print_tool_result("Reverie Engine Smoke", result)
+            return True
+
+        if action == "test":
+            validation = tool.execute(action="validate_project", output_dir=output_dir)
+            self._print_tool_result("Reverie Engine Validation", validation)
+            if not validation.success or not validation.data.get("validation", {}).get("valid", False):
+                return True
+            smoke = tool.execute(action="run_smoke", output_dir=output_dir)
+            self._print_tool_result("Reverie Engine Smoke", smoke)
+            return True
+
+        if action == "health":
+            include_smoke = Confirm.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Include smoke validation?",
+                default=False,
+            )
+            result = tool.execute(action="project_health", output_dir=output_dir, include_smoke=include_smoke)
+            self._print_tool_result("Reverie Engine Health", result)
+            return True
+
+        if action == "benchmark":
+            iterations = int(
+                (tokens[1] if len(tokens) > 1 else Prompt.ask(
+                    f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Iterations",
+                    default="10",
+                ).strip())
+                or "10"
+            )
+            result = tool.execute(
+                action="benchmark_project",
+                output_dir=output_dir,
+                iterations=iterations,
+                output_path="playtest/logs/engine_benchmark.json",
+            )
+            self._print_tool_result("Reverie Engine Benchmark", result)
+            return True
+
+        if action == "package":
+            include_smoke = Confirm.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Run smoke validation before packaging?",
+                default=True,
+            )
+            result = tool.execute(
+                action="package_project",
+                output_dir=output_dir,
+                include_smoke=include_smoke,
+            )
+            self._print_tool_result("Reverie Engine Package", result)
+            return True
+
+        self.console.print(
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /engine [profile|create|sample|run|validate|smoke|health|benchmark|package|test][/{self.theme.AMBER_GLOW}]"
+        )
         return True
     
     def cmd_add_model(self, args: str) -> bool:

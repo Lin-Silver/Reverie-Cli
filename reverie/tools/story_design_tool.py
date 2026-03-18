@@ -33,7 +33,7 @@ from .base import BaseTool, ToolResult
 
 class StoryDesignTool(BaseTool):
     name = "story_design"
-    description = "Create and manage RPG narrative: story bible, questlines, NPC profiles, dialogue trees, faction matrix."
+    description = "Create and analyze RPG narrative: story bible, questlines, NPC profiles, dialogue trees, faction matrix, consistency checks, pacing, and character arcs."
 
     parameters = {
         "type": "object",
@@ -110,6 +110,15 @@ class StoryDesignTool(BaseTool):
             
             elif action == "faction_matrix":
                 return self._handle_faction_matrix(operation, output_dir, file_format, kwargs)
+
+            elif action == "consistency_check":
+                return self._run_consistency_check(output_dir)
+
+            elif action == "story_pacing":
+                return self._analyze_story_pacing(output_dir, kwargs.get("questline_name"))
+
+            elif action == "character_arc":
+                return self._analyze_character_arc(output_dir, kwargs.get("npc_id"))
             
             else:
                 return ToolResult.fail(f"Unknown action: {action}")
@@ -534,6 +543,249 @@ class StoryDesignTool(BaseTool):
         for rel_id, rel_data in data.get("relationships", {}).items():
             output += f"  - {rel_id}: {rel_data.get('status', 'N/A')} ({rel_data.get('value', 0)})\n"
         return output
+
+    def _run_consistency_check(self, output_dir: Path) -> ToolResult:
+        bundle = self._load_story_bundle(output_dir)
+        issues: List[str] = []
+        warnings: List[str] = []
+
+        npcs = bundle["npcs"]
+        dialogues = bundle["dialogues"]
+        questlines = bundle["questlines"]
+        faction_matrix = bundle.get("faction_matrix") or {}
+        story_bible = bundle.get("story_bible") or {}
+
+        quest_ids = {
+            quest.get("id"): quest
+            for questline in questlines.values()
+            for quest in questline.get("quests", [])
+            if isinstance(quest, dict) and quest.get("id")
+        }
+
+        for questline_name, questline in questlines.items():
+            for quest in questline.get("quests", []):
+                quest_name = quest.get("name", quest.get("id", "unnamed_quest"))
+                for dependency in quest.get("dependencies", []):
+                    if dependency not in quest_ids:
+                        issues.append(f"Quest '{quest_name}' depends on missing quest '{dependency}'.")
+                for npc_ref in quest.get("npcs", []):
+                    if npc_ref not in npcs:
+                        issues.append(f"Quest '{quest_name}' references missing NPC '{npc_ref}'.")
+                if not quest.get("objectives"):
+                    warnings.append(f"Quest '{quest_name}' has no objectives defined.")
+
+        for dialogue_id, dialogue in dialogues.items():
+            npc_ref = dialogue.get("npc")
+            if npc_ref and npc_ref not in npcs:
+                issues.append(f"Dialogue '{dialogue_id}' references missing NPC '{npc_ref}'.")
+
+            node_ids = {node.get("id") for node in dialogue.get("nodes", []) if isinstance(node, dict)}
+            start_node = dialogue.get("start_node")
+            if start_node and start_node not in node_ids:
+                issues.append(f"Dialogue '{dialogue_id}' start_node '{start_node}' does not exist.")
+
+            for node in dialogue.get("nodes", []):
+                for choice in node.get("choices", []):
+                    next_node = choice.get("next_node")
+                    if next_node and next_node != "end" and next_node not in node_ids:
+                        issues.append(
+                            f"Dialogue '{dialogue_id}' choice points to missing node '{next_node}'."
+                        )
+
+        for npc_id, npc in npcs.items():
+            for quest_ref in npc.get("quests", []):
+                if quest_ref not in quest_ids:
+                    warnings.append(f"NPC '{npc_id}' links to unknown quest '{quest_ref}'.")
+            if not npc.get("dialogue_samples"):
+                warnings.append(f"NPC '{npc_id}' has no dialogue samples.")
+
+        bible_factions = set()
+        for entry in story_bible.get("factions", []):
+            if isinstance(entry, dict):
+                bible_factions.add(entry.get("id") or entry.get("name"))
+            else:
+                bible_factions.add(str(entry))
+        matrix_factions = {
+            faction.get("id") or faction.get("name")
+            for faction in faction_matrix.get("factions", [])
+            if isinstance(faction, dict)
+        }
+        for faction in sorted(f for f in bible_factions if f):
+            if matrix_factions and faction not in matrix_factions:
+                warnings.append(f"Story bible faction '{faction}' is missing from the faction matrix.")
+
+        output = "Story Consistency Check:\n\n"
+        output += f"Issues: {len(issues)}\n"
+        output += f"Warnings: {len(warnings)}\n"
+        if issues:
+            output += "\nCritical issues:\n"
+            for issue in issues[:20]:
+                output += f"- {issue}\n"
+        if warnings:
+            output += "\nWarnings:\n"
+            for warning in warnings[:20]:
+                output += f"- {warning}\n"
+        if not issues and not warnings:
+            output += "\nNo continuity problems detected across the loaded story bundle.\n"
+
+        if not issues:
+            return ToolResult.ok(output, {"issues": issues, "warnings": warnings})
+        return ToolResult.partial(output, f"{len(issues)} consistency issues found")
+
+    def _analyze_story_pacing(self, output_dir: Path, questline_name: Optional[str]) -> ToolResult:
+        bundle = self._load_story_bundle(output_dir)
+        questlines = bundle["questlines"]
+        if not questlines:
+            return ToolResult.fail("No questlines found for pacing analysis")
+
+        selected = []
+        for name, questline in questlines.items():
+            if questline_name and name != questline_name:
+                continue
+            selected.append((name, questline))
+
+        if not selected:
+            return ToolResult.fail(f"Questline '{questline_name}' not found")
+
+        lines = ["Story Pacing Analysis", ""]
+        analysis = {}
+        for name, questline in selected:
+            intensities = []
+            spikes = []
+            quests = questline.get("quests", [])
+            for index, quest in enumerate(quests):
+                intensity = self._quest_intensity(quest, index, len(quests))
+                intensities.append({
+                    "quest_id": quest.get("id", f"quest_{index + 1}"),
+                    "quest_name": quest.get("name", f"Quest {index + 1}"),
+                    "intensity": intensity,
+                })
+                if index > 0:
+                    delta = intensity - intensities[index - 1]["intensity"]
+                    if abs(delta) >= 2.5:
+                        spikes.append((quest.get("name", quest.get("id", "unknown")), delta))
+
+            curve = [item["intensity"] for item in intensities]
+            rising = sum(1 for idx in range(1, len(curve)) if curve[idx] >= curve[idx - 1])
+            lines.append(f"Questline: {name}")
+            lines.append(f"- quests analyzed: {len(curve)}")
+            lines.append(f"- average intensity: {sum(curve) / max(len(curve), 1):.2f}")
+            lines.append(f"- upward beats: {rising}")
+            if spikes:
+                lines.append("- abrupt shifts:")
+                for quest_name, delta in spikes[:5]:
+                    lines.append(f"  {quest_name}: {delta:+.1f}")
+            lines.append("")
+            analysis[name] = {"curve": curve, "spikes": spikes, "quests": intensities}
+
+        return ToolResult.ok("\n".join(lines), analysis)
+
+    def _analyze_character_arc(self, output_dir: Path, npc_id: Optional[str]) -> ToolResult:
+        bundle = self._load_story_bundle(output_dir)
+        npcs = bundle["npcs"]
+        if not npcs:
+            return ToolResult.fail("No NPC profiles found for character arc analysis")
+
+        selected = {key: value for key, value in npcs.items() if not npc_id or key == npc_id}
+        if not selected:
+            return ToolResult.fail(f"NPC '{npc_id}' not found")
+
+        lines = ["Character Arc Analysis", ""]
+        report = {}
+        for current_npc_id, npc in selected.items():
+            relationships = npc.get("relationships", {}) if isinstance(npc.get("relationships"), dict) else {}
+            quests = npc.get("quests", [])
+            dialogue_samples = npc.get("dialogue_samples", [])
+            maturity_score = 0
+            if npc.get("background"):
+                maturity_score += 1
+            if npc.get("personality"):
+                maturity_score += 1
+            if relationships:
+                maturity_score += 1
+            if quests:
+                maturity_score += 1
+            if dialogue_samples:
+                maturity_score += 1
+
+            missing = []
+            if not relationships:
+                missing.append("relationship stakes")
+            if len(dialogue_samples) < 2:
+                missing.append("dialogue samples")
+            if not quests:
+                missing.append("quest involvement")
+
+            lines.append(f"NPC: {npc.get('name', current_npc_id)}")
+            lines.append(f"- maturity score: {maturity_score}/5")
+            lines.append(f"- relationship links: {len(relationships)}")
+            lines.append(f"- quest hooks: {len(quests)}")
+            lines.append(f"- dialogue samples: {len(dialogue_samples)}")
+            lines.append(f"- missing arc ingredients: {', '.join(missing) if missing else 'none'}")
+            lines.append("")
+
+            report[current_npc_id] = {
+                "maturity_score": maturity_score,
+                "missing": missing,
+                "relationship_count": len(relationships),
+                "quest_count": len(quests),
+                "dialogue_sample_count": len(dialogue_samples),
+            }
+
+        return ToolResult.ok("\n".join(lines), report)
+
+    def _load_story_bundle(self, output_dir: Path) -> Dict[str, Any]:
+        bundle: Dict[str, Any] = {
+            "story_bible": {},
+            "questlines": {},
+            "npcs": {},
+            "dialogues": {},
+            "faction_matrix": {},
+        }
+
+        story_bible = self._find_first_file(output_dir, "story_bible")
+        if story_bible:
+            bundle["story_bible"] = self._load_structured_file(story_bible)
+
+        faction_matrix = self._find_first_file(output_dir, "faction_matrix")
+        if faction_matrix:
+            bundle["faction_matrix"] = self._load_structured_file(faction_matrix)
+
+        for quest_file in (output_dir / "questlines").glob("*.*") if (output_dir / "questlines").exists() else []:
+            bundle["questlines"][quest_file.stem] = self._load_structured_file(quest_file)
+
+        for npc_file in (output_dir / "npcs").glob("*.*") if (output_dir / "npcs").exists() else []:
+            bundle["npcs"][npc_file.stem] = self._load_structured_file(npc_file)
+
+        for dialogue_file in (output_dir / "dialogues").glob("*.*") if (output_dir / "dialogues").exists() else []:
+            bundle["dialogues"][dialogue_file.stem] = self._load_structured_file(dialogue_file)
+
+        return bundle
+
+    def _find_first_file(self, output_dir: Path, base_name: str) -> Optional[Path]:
+        for suffix in [".json", ".yaml", ".yml", ".markdown", ".md"]:
+            candidate = output_dir / f"{base_name}{suffix}"
+            if candidate.exists():
+                return candidate
+        return None
+
+    def _load_structured_file(self, file_path: Path) -> Dict[str, Any]:
+        suffix = file_path.suffix.lower()
+        content = file_path.read_text(encoding="utf-8")
+        if suffix == ".json":
+            return json.loads(content)
+        if suffix in {".yaml", ".yml"}:
+            return yaml.safe_load(content) or {}
+        return {"content": content}
+
+    def _quest_intensity(self, quest: Dict[str, Any], index: int, total: int) -> float:
+        objectives = len(quest.get("objectives", []))
+        dependencies = len(quest.get("dependencies", []))
+        locations = len(quest.get("locations", []))
+        rewards = quest.get("rewards", {})
+        reward_weight = len(rewards.get("items", [])) if isinstance(rewards, dict) else 0
+        act_pressure = 1.0 + (index / max(total - 1, 1))
+        return round(objectives * 1.2 + dependencies * 1.4 + locations * 0.4 + reward_weight * 0.5 + act_pressure, 2)
 
     # File I/O helpers
     def _save_file(self, file_path: Path, data: Dict[str, Any], file_format: str) -> None:

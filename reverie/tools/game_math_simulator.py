@@ -38,7 +38,7 @@ from .base import BaseTool, ToolResult
 
 class GameMathSimulatorTool(BaseTool):
     name = "game_math_simulator"
-    description = "Run Monte Carlo simulations and parameter sweeps for game balance testing."
+    description = "Run Monte Carlo simulations and parameter sweeps for game balance testing, including configurable custom event pipelines."
 
     parameters = {
         "type": "object",
@@ -135,6 +135,8 @@ class GameMathSimulatorTool(BaseTool):
             sim_func = self._simulate_progression
         elif simulation_type == "loot":
             sim_func = self._simulate_loot
+        elif simulation_type == "custom":
+            sim_func = self._simulate_custom
         else:
             return ToolResult.fail(f"Unknown simulation type: {simulation_type}")
 
@@ -196,6 +198,8 @@ class GameMathSimulatorTool(BaseTool):
             sim_func = self._simulate_progression
         elif simulation_type == "loot":
             sim_func = self._simulate_loot
+        elif simulation_type == "custom":
+            sim_func = self._simulate_custom
         else:
             return ToolResult.fail(f"Unknown simulation type: {simulation_type}")
 
@@ -449,6 +453,43 @@ class GameMathSimulatorTool(BaseTool):
                 drops += 1
 
         return drops
+
+    def _simulate_custom(self, params: Dict[str, Any]) -> float:
+        """Simulate a configurable event pipeline without executing arbitrary code."""
+        weighted_outcomes = params.get("weighted_outcomes", [])
+        if weighted_outcomes:
+            total_weight = sum(float(item.get("weight", 0)) for item in weighted_outcomes)
+            if total_weight <= 0:
+                return 0.0
+            roll = random.random() * total_weight
+            cursor = 0.0
+            for item in weighted_outcomes:
+                cursor += float(item.get("weight", 0))
+                if roll <= cursor:
+                    return float(item.get("value", item.get("score", 0)))
+
+        value = float(params.get("starting_value", 0))
+        for event in params.get("events", []):
+            chance = float(event.get("chance", 1.0))
+            success_delta = float(event.get("success", event.get("value", 0)))
+            failure_delta = float(event.get("failure", 0))
+            if random.random() < chance:
+                value += success_delta
+            else:
+                value += failure_delta
+
+        for range_spec in params.get("ranges", {}).values():
+            if not isinstance(range_spec, dict):
+                continue
+            low = float(range_spec.get("min", 0))
+            high = float(range_spec.get("max", low))
+            value += random.uniform(low, high)
+
+        threshold = params.get("success_threshold")
+        if threshold is not None:
+            return 1.0 if value >= float(threshold) else 0.0
+
+        return value
 
     def _calculate_statistics(self, results: List[float]) -> Dict[str, Any]:
         """Calculate statistics from results"""

@@ -91,7 +91,7 @@ class GameGDDManagerTool(BaseTool):
             if action == "create":
                 project_name = kwargs.get("project_name", "Untitled Game")
                 genre = kwargs.get("genre", "Game")
-                target_engine = kwargs.get("target_engine", "Custom")
+                target_engine = kwargs.get("target_engine", "Reverie Engine")
                 target_platform = kwargs.get("target_platform", "PC")
                 is_rpg = kwargs.get("is_rpg", False)
                 template_type = kwargs.get("template_type", "rpg" if is_rpg else "standard")

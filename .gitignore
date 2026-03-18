@@ -5,6 +5,7 @@ search-mcp/
 _embedded_tmp/
 add-on/
 references/
+.pytest_cache/
 
 reverie_cli.egg-info/
 *.exe

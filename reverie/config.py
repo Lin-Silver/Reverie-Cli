@@ -33,6 +33,10 @@ from .codex import (
     default_codex_config,
     normalize_codex_config,
 )
+from .atlas import (
+    default_atlas_mode_config,
+    normalize_atlas_mode_config,
+)
 from .nvidia import (
     build_nvidia_runtime_model_data,
     default_nvidia_config,
@@ -41,7 +45,7 @@ from .nvidia import (
 
 
 # Version info
-__version__ = "2.1.3"
+__version__ = "2.1.4"
 
 EXTERNAL_MODEL_SOURCES = ("iflow", "qwencode", "geminicli", "codex", "nvidia")
 SUPPORTED_ACTIVE_MODEL_SOURCES = ("standard",) + EXTERNAL_MODEL_SOURCES
@@ -229,9 +233,10 @@ def resolve_tti_default_display_name(text_to_image: Dict[str, Any]) -> str:
 def get_app_root() -> Path:
     """
     Get the application root directory.
-    
-    Strictly follows: wherever the physical executable or script entry point is,
-    that is where the .reverie folder must be located.
+
+    Runtime data is stored relative to the physical executable or script entry
+    point so packaged builds keep their cache beside the executable, while
+    development runs keep their cache beside the source checkout / launcher.
     """
     # 1. Check if running as a compiled PyInstaller EXE
     if getattr(sys, 'frozen', False):
@@ -295,12 +300,12 @@ def get_project_data_name(project_path: Path) -> str:
 def get_project_data_dir(project_path: Path) -> Path:
     """
     Get the project-specific data directory.
-    
-    Creates a unique folder under the app's .reverie/project_caches/ directory.
+
+    Creates a unique folder under the app's `.reverie/project_caches/`
+    directory.
     """
     app_root = get_app_root()
-    reverie_dir = app_root / '.reverie'
-    projects_dir = reverie_dir / 'project_caches'
+    projects_dir = app_root / '.reverie' / 'project_caches'
     
     # Create unique folder name for this project
     project_name = get_project_data_name(project_path)
@@ -361,7 +366,7 @@ class Config:
     stream_responses: bool = True
     auto_index: bool = True
     show_status_line: bool = True
-    config_version: str = "2.1.3"  # Config file version for migration
+    config_version: str = "2.1.4"  # Config file version for migration
     
     # Workspace isolation settings
     use_workspace_config: bool = False  # If True, config is stored in workspace directory
@@ -379,6 +384,7 @@ class Config:
     geminicli: Dict[str, Any] = field(default_factory=dict)
     codex: Dict[str, Any] = field(default_factory=dict)
     nvidia: Dict[str, Any] = field(default_factory=default_nvidia_config)
+    atlas_mode: Dict[str, Any] = field(default_factory=default_atlas_mode_config)
     
     # Writer mode specific settings
     writer_mode: Dict[str, Any] = field(default_factory=lambda: {
@@ -466,6 +472,7 @@ class Config:
         geminicli = normalize_geminicli_config(self.geminicli)
         codex = normalize_codex_config(self.codex)
         nvidia = normalize_nvidia_config(self.nvidia)
+        atlas_mode = normalize_atlas_mode_config(self.atlas_mode)
         active_model_source = self.active_model_source.lower()
         if active_model_source not in SUPPORTED_ACTIVE_MODEL_SOURCES:
             active_model_source = "standard"
@@ -495,6 +502,7 @@ class Config:
             'geminicli': geminicli,
             'codex': codex,
             'nvidia': nvidia,
+            'atlas_mode': atlas_mode,
         }
     
     @classmethod
@@ -528,6 +536,8 @@ class Config:
         codex = normalize_codex_config(raw_codex)
         raw_nvidia = data.get('nvidia', {})
         nvidia = normalize_nvidia_config(raw_nvidia)
+        raw_atlas_mode = data.get('atlas_mode', {})
+        atlas_mode = normalize_atlas_mode_config(raw_atlas_mode)
         active_model_source = str(data.get('active_model_source', 'standard')).strip().lower()
         if active_model_source not in SUPPORTED_ACTIVE_MODEL_SOURCES:
             active_model_source = 'standard'
@@ -574,7 +584,7 @@ class Config:
                 "max_asset_context_window": 10,
                 "context_compression_enabled": True,
             }),
-            config_version=data.get('config_version', '2.1.3'),
+            config_version=data.get('config_version', '2.1.4'),
             use_workspace_config=data.get('use_workspace_config', False),
             api_max_retries=data.get('api_max_retries', 3),
             api_initial_backoff=data.get('api_initial_backoff', 1.0),
@@ -586,38 +596,43 @@ class Config:
             geminicli=geminicli,
             codex=codex,
             nvidia=nvidia,
+            atlas_mode=atlas_mode,
         )
 
 
 class ConfigManager:
     """
     Manages configuration persistence with workspace isolation support.
-    
+
     Configuration can be stored in two modes:
-    1. Global mode: config.json in app_root/.reverie/ (shared across workspaces)
-    2. Workspace mode: config.json in project_root/.reverie/ (isolated per workspace)
-    
-    Project-specific data is always stored in .reverie/project_caches/[project_key]/.
+    1. Active/global profile: config.global.json in
+       .reverie/project_caches/[project_key]/
+    2. Workspace profile: config.json in
+       .reverie/project_caches/[project_key]/
+
+    Legacy `.reverie/config.json` files are still read for migration, but new
+    writes stay inside `.reverie/project_caches/[project_key]/`.
     """
     
     def __init__(self, project_root: Path, force_workspace_config: bool = False):
         self.project_root = project_root
-        
-        # Use app root for global config (next to exe file or script directory)
+
+        # Use app root for runtime data (next to exe file or script directory).
         self.app_root = get_app_root()
-        self.reverie_dir = self.app_root / '.reverie'
-        self.global_config_path = self.reverie_dir / 'config.json'
-        
-        # Workspace-specific config directory
-        self.workspace_reverie_dir = self.project_root / '.reverie'
-        self.workspace_config_path = self.workspace_reverie_dir / 'config.json'
-        
-        # Project-specific data directory (for context cache, etc.)
+        self.data_root = self.app_root / '.reverie' / 'project_caches'
         self.project_data_dir = get_project_data_dir(project_root)
-        
+        self.global_config_path = self.project_data_dir / 'config.global.json'
+        self.workspace_config_path = self.project_data_dir / 'config.json'
+
+        # Legacy paths kept for migration from older builds.
+        self.legacy_reverie_dir = self.app_root / '.reverie'
+        self.legacy_global_config_path = self.legacy_reverie_dir / 'config.json'
+        self.legacy_workspace_reverie_dir = self.project_root / '.reverie'
+        self.legacy_workspace_config_path = self.legacy_workspace_reverie_dir / 'config.json'
+
         self._config: Optional[Config] = None
         self._last_mtime: float = 0
-        
+
         # Determine config path based on setting
         self._use_workspace_config = force_workspace_config
         self._update_config_path()
@@ -628,6 +643,34 @@ class ConfigManager:
             self.config_path = self.workspace_config_path
         else:
             self.config_path = self.global_config_path
+
+    def _path_candidates_for_mode(self, workspace_mode: bool) -> List[Path]:
+        """Return new + legacy config paths for one logical mode."""
+        if workspace_mode:
+            return [self.workspace_config_path, self.legacy_workspace_config_path]
+        return [self.global_config_path, self.legacy_global_config_path]
+
+    def _load_path_candidates(self) -> List[Path]:
+        """Return config paths in preferred load order."""
+        candidates = self._path_candidates_for_mode(self._use_workspace_config)
+        candidates.extend(self._path_candidates_for_mode(not self._use_workspace_config))
+
+        unique: List[Path] = []
+        seen = set()
+        for candidate in candidates:
+            key = str(candidate).lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(candidate)
+        return unique
+
+    def _find_existing_path(self, workspace_mode: bool) -> Optional[Path]:
+        """Return the first existing config path for a logical mode."""
+        for candidate in self._path_candidates_for_mode(workspace_mode):
+            if candidate.exists():
+                return candidate
+        return None
     
     def set_workspace_mode(self, enabled: bool) -> None:
         """
@@ -655,23 +698,24 @@ class ConfigManager:
         Returns:
             True if copy was successful, False otherwise
         """
-        if not self.global_config_path.exists():
+        source_path = self._find_existing_path(False)
+        if source_path is None:
             return False
-        
+
         try:
             # Load global config
-            with open(self.global_config_path, 'r', encoding='utf-8') as f:
+            with open(source_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            
+
             # Update to workspace mode
             data['use_workspace_config'] = True
-            
-            # Ensure workspace directory exists
-            self.workspace_reverie_dir.mkdir(parents=True, exist_ok=True)
-            
+
+            # Ensure project cache directory exists
+            self.ensure_dirs()
+
             # Save to workspace config
             write_json_secure(self.workspace_config_path, data)
-            
+
             # Clear cache and switch to workspace mode
             self._config = None
             self._last_mtime = 0
@@ -690,23 +734,24 @@ class ConfigManager:
         Returns:
             True if copy was successful, False otherwise
         """
-        if not self.workspace_config_path.exists():
+        source_path = self._find_existing_path(True)
+        if source_path is None:
             return False
-        
+
         try:
             # Load workspace config
-            with open(self.workspace_config_path, 'r', encoding='utf-8') as f:
+            with open(source_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            
+
             # Update to global mode
             data['use_workspace_config'] = False
-            
-            # Ensure global directory exists
-            self.reverie_dir.mkdir(parents=True, exist_ok=True)
-            
+
+            # Ensure project cache directory exists
+            self.ensure_dirs()
+
             # Save to global config
             write_json_secure(self.global_config_path, data)
-            
+
             # Clear cache and switch to global mode
             self._config = None
             self._last_mtime = 0
@@ -720,49 +765,53 @@ class ConfigManager:
     
     def has_workspace_config(self) -> bool:
         """Check if workspace configuration file exists"""
-        return self.workspace_config_path.exists()
+        return self._find_existing_path(True) is not None
     
     def has_global_config(self) -> bool:
         """Check if global configuration file exists"""
-        return self.global_config_path.exists()
+        return self._find_existing_path(False) is not None
     
     def ensure_dirs(self) -> None:
         """Create necessary directories"""
-        # Global app directories (always needed)
-        self.reverie_dir.mkdir(exist_ok=True)
-        (self.reverie_dir / 'project_caches').mkdir(exist_ok=True)
-        
-        # Workspace-specific directories (if using workspace mode)
-        if self._use_workspace_config:
-            self.workspace_reverie_dir.mkdir(parents=True, exist_ok=True)
-        
+        # Runtime data directories live under the executable's
+        # `.reverie/project_caches` root.
+        self.data_root.mkdir(parents=True, exist_ok=True)
+
         # Project-specific data directories (for context cache, etc.)
         self.project_data_dir.mkdir(parents=True, exist_ok=True)
         (self.project_data_dir / 'context_cache').mkdir(exist_ok=True)
         (self.project_data_dir / 'specs').mkdir(exist_ok=True)
+        (self.project_data_dir / 'steering').mkdir(exist_ok=True)
         (self.project_data_dir / 'sessions').mkdir(exist_ok=True)
         (self.project_data_dir / 'archives').mkdir(exist_ok=True)
         (self.project_data_dir / 'checkpoints').mkdir(exist_ok=True)
     
     def load(self) -> Config:
         """Load configuration from file, reloading if file changed"""
+        source_path = None
+        for candidate in self._load_path_candidates():
+            if candidate.exists():
+                source_path = candidate
+                break
+
         # Check if we need to switch config mode based on loaded config
-        if self.config_path.exists():
-            current_mtime = os.path.getmtime(self.config_path)
+        if source_path is not None:
+            current_mtime = os.path.getmtime(source_path)
             # Reload if file changed or not loaded yet
             if self._config is None or current_mtime > self._last_mtime:
                 try:
-                    with open(self.config_path, 'r', encoding='utf-8') as f:
+                    with open(source_path, 'r', encoding='utf-8') as f:
                         data = json.load(f)
                     self._config = Config.from_dict(data)
                     self._last_mtime = current_mtime
-                    
+
                     # Check if config mode changed
                     if self._config.use_workspace_config != self._use_workspace_config:
                         self.set_workspace_mode(self._config.use_workspace_config)
-                    
-                    # Auto-update config file if it's missing new fields
-                    if self._needs_config_update(data):
+
+                    # Auto-update config file if it's missing new fields or still
+                    # lives in a legacy location.
+                    if source_path != self.config_path or self._needs_config_update(data):
                         self.save(self._config)
                         # Update mtime after saving to avoid infinite loop
                         self._last_mtime = os.path.getmtime(self.config_path)
@@ -781,7 +830,7 @@ class ConfigManager:
         
         # Check if config_version is missing or outdated
         current_version = data.get('config_version', '0.0.0')
-        if current_version != '2.1.3':
+        if current_version != '2.1.4':
             needs_update = True
         
         # Check if any model is missing provider field
@@ -863,6 +912,17 @@ class ConfigManager:
         else:
             for field_name in default_nvidia_config().keys():
                 if field_name not in data.get('nvidia', {}):
+                    needs_update = True
+                    break
+
+        # Check if atlas_mode section is missing
+        if 'atlas_mode' not in data:
+            needs_update = True
+        elif not isinstance(data.get('atlas_mode'), dict):
+            needs_update = True
+        else:
+            for field_name in default_atlas_mode_config().keys():
+                if field_name not in data.get('atlas_mode', {}):
                     needs_update = True
                     break
 

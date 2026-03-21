@@ -16,7 +16,7 @@ class WorkspaceSecurityError(ValueError):
     """Raised when a tool attempts to access a path outside the active workspace."""
 
 
-WORKSPACE_AUDIT_REL_PATH = Path(".reverie") / "security" / "command_audit.jsonl"
+PROJECT_CACHE_AUDIT_REL_PATH = Path("security") / "command_audit.jsonl"
 
 
 def read_first_env(names: Iterable[str]) -> str:
@@ -147,10 +147,10 @@ def ensure_archive_member_path(member_name: str, target_dir: Path, project_root:
     return extracted_path
 
 
-def append_command_audit(project_root: Any, event: Dict[str, Any]) -> None:
-    """Append a command audit event inside the workspace-local .reverie directory."""
-    workspace_root = get_workspace_root(project_root)
-    audit_path = workspace_root / WORKSPACE_AUDIT_REL_PATH
+def append_command_audit(project_cache_dir: Any, event: Dict[str, Any]) -> None:
+    """Append a command audit event inside the current project cache directory."""
+    audit_root = Path(project_cache_dir).resolve(strict=False)
+    audit_path = audit_root / PROJECT_CACHE_AUDIT_REL_PATH
     audit_path.parent.mkdir(parents=True, exist_ok=True)
 
     payload = {

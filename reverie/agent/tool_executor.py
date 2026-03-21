@@ -43,6 +43,7 @@ from ..tools import (
     GameDesignOrchestratorTool,
     GameProjectScaffolderTool,
     GamePlaytestLabTool,
+    AtlasDeliveryOrchestratorTool,
     ReverieEngineTool,
     ReverieEngineLiteTool,
     VisionUploadTool,
@@ -127,6 +128,7 @@ class ToolExecutor:
             GameDesignOrchestratorTool,
             GameProjectScaffolderTool,
             GamePlaytestLabTool,
+            AtlasDeliveryOrchestratorTool,
             ReverieEngineTool,
             ReverieEngineLiteTool,
             VisionUploadTool,
@@ -284,6 +286,8 @@ class ToolExecutor:
         normalized_mode = normalize_mode(mode)
 
         for name, tool in self._tools.items():
+            if name == "context_management":
+                continue
             # Filter task_manager in non-reverie modes
             if name == "task_manager" and normalized_mode not in ["reverie", "reverie-gamer"]:
                 continue

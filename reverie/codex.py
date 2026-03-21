@@ -12,8 +12,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import json
+import sys
 import time
 import uuid
+from urllib.parse import urlparse
 
 from .security_utils import write_json_secure
 
@@ -21,12 +23,20 @@ from .security_utils import write_json_secure
 CODEX_DEFAULT_API_URL = "https://chatgpt.com/backend-api/codex"
 CODEX_DEFAULT_ENDPOINT = ""
 CODEX_DEFAULT_RESPONSE_ENDPOINT = "/responses"
+CODEX_DEFAULT_MODELS_ENDPOINT = "/models"
 CODEX_TOKEN_URL = "https://auth.openai.com/oauth/token"
 CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
-CODEX_CLIENT_VERSION = "0.101.0"
-CODEX_USER_AGENT = "codex_cli_rs/0.101.0 (Windows NT 10.0; Win64; x64) Reverie/2.1.3"
+CODEX_CLIENT_VERSION = "0.115.0"
+CODEX_USER_AGENT = "codex_cli_rs/0.115.0 (Windows NT 10.0; Win64; x64) Reverie/2.1.4"
 CODEX_DEFAULT_REASONING_EFFORT = "medium"
-CODEX_DEFAULT_MAX_CONTEXT_TOKENS = 258_000
+CODEX_DEFAULT_MAX_CONTEXT_TOKENS = 258_400
+_CODEX_CHATGPT_HOSTS = {"chatgpt.com", "chat.openai.com"}
+_CODEX_LOCAL_SOURCE_MODELS_RELATIVE_PATH = ("references", "codex-main", "codex-rs", "core", "models.json")
+_CODEX_LOCAL_SOURCE_CACHE: Dict[str, Any] = {
+    "path": "",
+    "mtime_ns": -1,
+    "catalog": [],
+}
 CODEX_REASONING_PRESETS = (
     {
         "id": "low",
@@ -58,44 +68,115 @@ _CODEX_ALLOWED_MODELS = [
     {
         "id": "gpt-5.3-codex",
         "display_name": "GPT-5.3-Codex",
-        "description": "GPT-5.3 Codex",
-        "context_length": 258_000,
+        "description": "Latest frontier agentic coding model.",
+        "context_length": 258_400,
         "reasoning_levels": ["low", "medium", "high", "xhigh"],
+        "visibility": "list",
     },
     {
         "id": "gpt-5.4",
         "display_name": "GPT-5.4",
-        "description": "GPT-5.4",
-        "context_length": 258_000,
+        "description": "Latest frontier agentic coding model.",
+        "context_length": 258_400,
         "reasoning_levels": ["low", "medium", "high", "xhigh"],
+        "visibility": "list",
+    },
+    {
+        "id": "gpt-5.4-mini",
+        "display_name": "GPT-5.4-Mini",
+        "description": "Smaller frontier agentic coding model.",
+        "context_length": 258_400,
+        "reasoning_levels": ["low", "medium", "high", "xhigh"],
+        "visibility": "list",
+        "insert_after_id": "gpt-5.4",
     },
     {
         "id": "gpt-5.2-codex",
         "display_name": "GPT-5.2-Codex",
-        "description": "GPT-5.2 Codex",
-        "context_length": 258_000,
+        "description": "Frontier agentic coding model.",
+        "context_length": 258_400,
         "reasoning_levels": ["low", "medium", "high", "xhigh"],
+        "visibility": "list",
     },
     {
         "id": "gpt-5.1-codex-max",
         "display_name": "GPT-5.1-Codex-Max",
-        "description": "GPT-5.1 Codex Max",
-        "context_length": 258_000,
+        "description": "Codex-optimized model for deep and fast reasoning.",
+        "context_length": 258_400,
         "reasoning_levels": ["low", "medium", "high", "xhigh"],
+        "visibility": "list",
     },
     {
         "id": "gpt-5.2",
         "display_name": "GPT-5.2",
-        "description": "GPT-5.2",
-        "context_length": 258_000,
+        "description": "Optimized for professional work and long-running agents.",
+        "context_length": 258_400,
         "reasoning_levels": ["low", "medium", "high", "xhigh"],
+        "visibility": "list",
+    },
+    {
+        "id": "gpt-5.1-codex",
+        "display_name": "GPT-5.1-Codex",
+        "description": "Frontier agentic coding model.",
+        "context_length": 258_400,
+        "reasoning_levels": ["low", "medium", "high"],
+        "visibility": "hide",
+    },
+    {
+        "id": "gpt-5.1",
+        "display_name": "GPT-5.1",
+        "description": "General-purpose GPT-5.1 model.",
+        "context_length": 258_400,
+        "reasoning_levels": ["low", "medium", "high"],
+        "visibility": "hide",
+    },
+    {
+        "id": "gpt-5-codex",
+        "display_name": "GPT-5-Codex",
+        "description": "GPT-5 Codex compatibility model.",
+        "context_length": 258_400,
+        "reasoning_levels": ["low", "medium", "high"],
+        "visibility": "hide",
+    },
+    {
+        "id": "gpt-5",
+        "display_name": "GPT-5",
+        "description": "GPT-5 compatibility model.",
+        "context_length": 258_400,
+        "reasoning_levels": ["minimal", "low", "medium", "high"],
+        "visibility": "hide",
+    },
+    {
+        "id": "gpt-oss-120b",
+        "display_name": "GPT-OSS-120B",
+        "description": "Open-weight GPT-OSS 120B model.",
+        "context_length": 128_000,
+        "reasoning_levels": ["low", "medium", "high"],
+        "visibility": "hide",
+    },
+    {
+        "id": "gpt-oss-20b",
+        "display_name": "GPT-OSS-20B",
+        "description": "Open-weight GPT-OSS 20B model.",
+        "context_length": 128_000,
+        "reasoning_levels": ["low", "medium", "high"],
+        "visibility": "hide",
     },
     {
         "id": "gpt-5.1-codex-mini",
         "display_name": "GPT-5.1-Codex-Mini",
-        "description": "GPT-5.1 Codex Mini",
-        "context_length": 258_000,
+        "description": "Optimized for codex. Cheaper, faster, but less capable.",
+        "context_length": 258_400,
         "reasoning_levels": ["medium", "high"],
+        "visibility": "list",
+    },
+    {
+        "id": "gpt-5-codex-mini",
+        "display_name": "GPT-5-Codex-Mini",
+        "description": "GPT-5 Codex mini compatibility model.",
+        "context_length": 258_400,
+        "reasoning_levels": ["medium", "high"],
+        "visibility": "hide",
     },
 ]
 _CODEX_ALLOWED_MODEL_IDS = tuple(item["id"] for item in _CODEX_ALLOWED_MODELS)
@@ -119,6 +200,213 @@ def _safe_string(value: Any) -> str:
     return str(value).strip()
 
 
+def _prettify_codex_display_name(model_id: str) -> str:
+    """Convert Codex slugs into the title-cased labels used by Reverie."""
+    parts = []
+    for token in str(model_id or "").strip().split("-"):
+        normalized = token.strip()
+        if not normalized:
+            continue
+        lowered = normalized.lower()
+        if lowered in {"gpt", "oss"}:
+            parts.append(lowered.upper())
+        elif any(ch.isdigit() for ch in normalized):
+            parts.append(normalized.upper())
+        else:
+            parts.append(normalized.capitalize())
+    return "-".join(parts) or str(model_id or "").strip()
+
+
+def _extract_reasoning_levels(raw_reasoning_levels: Any) -> List[str]:
+    """Normalize Codex reasoning-level definitions into a simple id list."""
+    reasoning_levels: List[str] = []
+    if not isinstance(raw_reasoning_levels, list):
+        return reasoning_levels
+    for level in raw_reasoning_levels:
+        if isinstance(level, dict):
+            effort = _safe_string(level.get("effort", "")).lower()
+        else:
+            effort = _safe_string(level).lower()
+        if effort and effort not in reasoning_levels:
+            reasoning_levels.append(effort)
+    return reasoning_levels
+
+
+def _effective_context_length(raw_context_window: Any, effective_percent: Any) -> int:
+    """Apply effective-context metadata when Codex reports it."""
+    try:
+        context_length = int(raw_context_window or 0)
+    except (TypeError, ValueError):
+        context_length = 0
+    try:
+        percent = int(effective_percent or 0)
+    except (TypeError, ValueError):
+        percent = 0
+    if context_length > 0 and 0 < percent <= 100:
+        return max(1, int(context_length * percent / 100))
+    return context_length
+
+
+def _iter_local_codex_source_model_paths() -> List[Path]:
+    """Search common repo-relative locations for a downloaded Codex source tree."""
+    candidates: List[Path] = []
+    seen = set()
+
+    def add_candidate(root: Optional[Path]) -> None:
+        if root is None:
+            return
+        try:
+            resolved_root = root.resolve(strict=False)
+        except OSError:
+            return
+        candidate = resolved_root.joinpath(*_CODEX_LOCAL_SOURCE_MODELS_RELATIVE_PATH)
+        key = str(candidate).lower()
+        if key in seen:
+            return
+        seen.add(key)
+        candidates.append(candidate)
+
+    module_root = Path(__file__).resolve().parent.parent
+    cwd = Path.cwd()
+    argv_root = Path(sys.argv[0]).resolve(strict=False).parent if sys.argv else None
+    executable_root = Path(sys.executable).resolve(strict=False).parent if sys.executable else None
+
+    add_candidate(module_root)
+    add_candidate(cwd)
+    add_candidate(cwd.parent)
+    add_candidate(argv_root)
+    add_candidate(argv_root.parent if argv_root else None)
+    add_candidate(executable_root)
+    add_candidate(executable_root.parent if executable_root else None)
+    return candidates
+
+
+def _load_local_codex_source_catalog(errors: List[str]) -> List[Dict[str, Any]]:
+    """Load model definitions from the downloaded Codex source tree when available."""
+    path = next((candidate for candidate in _iter_local_codex_source_model_paths() if candidate.exists()), None)
+    if path is None:
+        return []
+
+    try:
+        mtime_ns = path.stat().st_mtime_ns
+    except OSError as exc:
+        errors.append(f"{path}: {exc}")
+        return []
+
+    if (
+        _CODEX_LOCAL_SOURCE_CACHE.get("path") == str(path)
+        and _CODEX_LOCAL_SOURCE_CACHE.get("mtime_ns") == mtime_ns
+        and isinstance(_CODEX_LOCAL_SOURCE_CACHE.get("catalog"), list)
+    ):
+        return [dict(item) for item in _CODEX_LOCAL_SOURCE_CACHE["catalog"]]
+
+    data = _load_json_dict(path, errors)
+    if not isinstance(data, dict):
+        return []
+
+    raw_models = data.get("models")
+    if not isinstance(raw_models, list):
+        errors.append(f"{path}: invalid models list")
+        return []
+
+    ordered_models: List[Tuple[int, int, Dict[str, Any]]] = []
+    for index, item in enumerate(raw_models):
+        if not isinstance(item, dict):
+            continue
+        if not bool(item.get("supported_in_api", True)):
+            continue
+        model_id = _safe_string(item.get("slug", ""))
+        if not model_id:
+            continue
+
+        metadata = _CODEX_MODEL_METADATA.get(model_id.lower(), {})
+        context_length = _effective_context_length(
+            item.get("context_window", 0),
+            item.get("effective_context_window_percent", 0),
+        )
+        if context_length <= 0:
+            context_length = int(metadata.get("context_length", CODEX_DEFAULT_MAX_CONTEXT_TOKENS))
+
+        reasoning_levels = _extract_reasoning_levels(item.get("supported_reasoning_levels", []))
+        if not reasoning_levels:
+            reasoning_levels = list(metadata.get("reasoning_levels", []))
+
+        display_name = _safe_string(metadata.get("display_name", ""))
+        if not display_name:
+            source_display_name = _safe_string(item.get("display_name", ""))
+            display_name = (
+                _prettify_codex_display_name(model_id)
+                if not source_display_name or source_display_name.lower() == model_id.lower()
+                else source_display_name
+            )
+
+        try:
+            priority = int(item.get("priority", index))
+        except (TypeError, ValueError):
+            priority = index
+
+        ordered_models.append(
+            (
+                priority,
+                index,
+                {
+                    "id": model_id,
+                    "display_name": display_name,
+                    "description": _safe_string(item.get("description", metadata.get("description", ""))),
+                    "context_length": context_length,
+                    "visibility": _safe_string(item.get("visibility", metadata.get("visibility", ""))),
+                    "reasoning_levels": reasoning_levels,
+                },
+            )
+        )
+
+    ordered_models.sort(key=lambda entry: (entry[0], entry[1]))
+    catalog = [dict(item) for _, _, item in ordered_models]
+    _CODEX_LOCAL_SOURCE_CACHE["path"] = str(path)
+    _CODEX_LOCAL_SOURCE_CACHE["mtime_ns"] = mtime_ns
+    _CODEX_LOCAL_SOURCE_CACHE["catalog"] = [dict(item) for item in catalog]
+    return catalog
+
+
+def _merge_source_catalog_with_allowed_models(source_catalog: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Keep Codex-source ordering while appending Reverie extension models when needed."""
+    if not source_catalog:
+        return [dict(item) for item in _CODEX_ALLOWED_MODELS]
+
+    merged = [dict(item) for item in source_catalog]
+    seen_ids = {str(item.get("id", "")).strip().lower() for item in merged if str(item.get("id", "")).strip()}
+    anchor_tail_positions = {
+        str(item.get("id", "")).strip().lower(): index
+        for index, item in enumerate(merged)
+        if str(item.get("id", "")).strip()
+    }
+
+    for item in _CODEX_ALLOWED_MODELS:
+        model_id = str(item.get("id", "")).strip()
+        if not model_id:
+            continue
+        lower_id = model_id.lower()
+        if lower_id in seen_ids:
+            continue
+
+        anchor_id = _safe_string(item.get("insert_after_id", "")).lower()
+        insert_index = len(merged)
+        if anchor_id and anchor_id in anchor_tail_positions:
+            insert_index = anchor_tail_positions[anchor_id] + 1
+
+        merged.insert(insert_index, dict(item))
+        seen_ids.add(lower_id)
+
+        for key, value in list(anchor_tail_positions.items()):
+            if value >= insert_index:
+                anchor_tail_positions[key] = value + 1
+        anchor_tail_positions[lower_id] = insert_index
+        if anchor_id:
+            anchor_tail_positions[anchor_id] = insert_index
+
+    return merged
+
+
 def default_codex_config() -> Dict[str, Any]:
     """Default Codex config stored inside Reverie config.json."""
     return {
@@ -132,13 +420,38 @@ def default_codex_config() -> Dict[str, Any]:
     }
 
 
+def _host_without_port(parsed) -> str:
+    host = str(parsed.netloc or "").strip().lower()
+    if ":" in host:
+        host = host.split(":", 1)[0]
+    return host
+
+
+def _is_chatgpt_codex_host(parsed) -> bool:
+    return _host_without_port(parsed) in _CODEX_CHATGPT_HOSTS
+
+
+def _resolve_codex_base_path(path: str, chatgpt_host: bool) -> str:
+    normalized_path = str(path or "").strip().rstrip("/")
+    if not normalized_path:
+        return "/backend-api/codex" if chatgpt_host else ""
+
+    lower_path = normalized_path.lower()
+    if chatgpt_host and lower_path == "/backend-api":
+        return "/backend-api/codex"
+    return normalized_path
+
+
 def _normalize_api_url(value: Any) -> str:
     url = str(value or "").strip()
     if not url:
         return CODEX_DEFAULT_API_URL
     if not url.startswith("http://") and not url.startswith("https://"):
         url = f"https://{url}"
-    return url.rstrip("/")
+    parsed = urlparse(url)
+    normalized_path = _resolve_codex_base_path(parsed.path, _is_chatgpt_codex_host(parsed))
+    rebuilt = parsed._replace(path=normalized_path, fragment="")
+    return rebuilt.geturl().rstrip("/")
 
 
 def _normalize_endpoint(endpoint: Any) -> str:
@@ -218,7 +531,10 @@ def _models_cache_path() -> Path:
     return Path.home() / ".codex" / "models_cache.json"
 
 
-def _parse_codex_model_cache(errors: List[str]) -> List[Dict[str, Any]]:
+def _parse_codex_model_cache(
+    errors: List[str],
+    allowed_model_ids: Optional[set[str]] = None,
+) -> List[Dict[str, Any]]:
     path = _models_cache_path()
     if not path.exists():
         return []
@@ -231,6 +547,7 @@ def _parse_codex_model_cache(errors: List[str]) -> List[Dict[str, Any]]:
     if not isinstance(models, list):
         return []
 
+    normalized_allowed_ids = set(allowed_model_ids) if isinstance(allowed_model_ids, set) else set(_CODEX_ALLOWED_MODEL_SET)
     catalog: List[Dict[str, Any]] = []
     seen_ids = set()
     for item in models:
@@ -239,7 +556,7 @@ def _parse_codex_model_cache(errors: List[str]) -> List[Dict[str, Any]]:
         model_id = _safe_string(item.get("slug", ""))
         if not model_id:
             continue
-        if model_id.lower() not in _CODEX_ALLOWED_MODEL_SET:
+        if model_id.lower() not in normalized_allowed_ids:
             continue
         if not bool(item.get("supported_in_api", True)):
             continue
@@ -249,16 +566,19 @@ def _parse_codex_model_cache(errors: List[str]) -> List[Dict[str, Any]]:
         seen_ids.add(lower_id)
         metadata = _CODEX_MODEL_METADATA.get(lower_id, {})
         context_length = int(metadata.get("context_length", CODEX_DEFAULT_MAX_CONTEXT_TOKENS))
-        raw_reasoning_levels = item.get("supported_reasoning_levels", [])
-        reasoning_levels = []
-        if isinstance(raw_reasoning_levels, list):
-            for level in raw_reasoning_levels:
-                if isinstance(level, dict):
-                    effort = _safe_string(level.get("effort", "")).lower()
-                else:
-                    effort = _safe_string(level).lower()
-                if effort and effort not in reasoning_levels:
-                    reasoning_levels.append(effort)
+        try:
+            raw_context_window = int(item.get("context_window", 0) or 0)
+        except (TypeError, ValueError):
+            raw_context_window = 0
+        try:
+            effective_percent = int(item.get("effective_context_window_percent", 0) or 0)
+        except (TypeError, ValueError):
+            effective_percent = 0
+        if raw_context_window > 0:
+            context_length = raw_context_window
+            if 0 < effective_percent <= 100:
+                context_length = max(1, int(raw_context_window * effective_percent / 100))
+        reasoning_levels = _extract_reasoning_levels(item.get("supported_reasoning_levels", []))
         if not reasoning_levels:
             reasoning_levels = list(metadata.get("reasoning_levels", []))
         catalog.append(
@@ -267,7 +587,7 @@ def _parse_codex_model_cache(errors: List[str]) -> List[Dict[str, Any]]:
                 "display_name": _safe_string(metadata.get("display_name", item.get("display_name", model_id))) or model_id,
                 "description": _safe_string(metadata.get("description", item.get("description", ""))),
                 "context_length": context_length,
-                "visibility": _safe_string(item.get("visibility", "")),
+                "visibility": _safe_string(item.get("visibility", metadata.get("visibility", ""))),
                 "reasoning_levels": reasoning_levels,
             }
         )
@@ -275,9 +595,12 @@ def _parse_codex_model_cache(errors: List[str]) -> List[Dict[str, Any]]:
 
 
 def get_codex_model_catalog() -> List[Dict[str, Any]]:
-    """Return Codex model catalog, preferring the local Codex CLI cache."""
+    """Return Codex model catalog, preferring downloaded Codex source, then CLI cache."""
     errors: List[str] = []
-    cached = _parse_codex_model_cache(errors)
+    source_catalog = _load_local_codex_source_catalog(errors)
+    base_catalog = _merge_source_catalog_with_allowed_models(source_catalog)
+    allowed_model_ids = {str(item.get("id", "")).strip().lower() for item in base_catalog if str(item.get("id", "")).strip()}
+    cached = _parse_codex_model_cache(errors, allowed_model_ids=allowed_model_ids)
     cached_by_id = {
         str(item.get("id", "")).strip().lower(): item
         for item in cached
@@ -285,7 +608,7 @@ def get_codex_model_catalog() -> List[Dict[str, Any]]:
     }
 
     catalog: List[Dict[str, Any]] = []
-    for item in _CODEX_ALLOWED_MODELS:
+    for item in base_catalog:
         lower_id = item["id"].lower()
         cached_item = cached_by_id.get(lower_id, {})
         metadata_levels = [
@@ -304,14 +627,15 @@ def get_codex_model_catalog() -> List[Dict[str, Any]]:
                 merged_levels.append(level)
 
         metadata_context_length = int(item.get("context_length", CODEX_DEFAULT_MAX_CONTEXT_TOKENS))
+        cached_context_length = int(cached_item.get("context_length", 0) or 0)
 
         catalog.append(
             {
                 "id": item["id"],
                 "display_name": _safe_string(cached_item.get("display_name", item["display_name"])) or item["display_name"],
                 "description": _safe_string(cached_item.get("description", item.get("description", ""))) or item.get("description", ""),
-                "context_length": metadata_context_length,
-                "visibility": _safe_string(cached_item.get("visibility", "")),
+                "context_length": cached_context_length or metadata_context_length,
+                "visibility": _safe_string(cached_item.get("visibility", item.get("visibility", ""))),
                 "reasoning_levels": merged_levels or metadata_levels,
             }
         )
@@ -356,7 +680,10 @@ def normalize_codex_config(raw_codex: Any) -> Dict[str, Any]:
 
     cfg["selected_model_id"] = str(cfg.get("selected_model_id", "")).strip()
     cfg["selected_model_display_name"] = str(cfg.get("selected_model_display_name", "")).strip()
-    cfg["api_url"] = _normalize_api_url(cfg.get("api_url", CODEX_DEFAULT_API_URL))
+    api_url_value = cfg.get("api_url", "")
+    if not _safe_string(api_url_value):
+        api_url_value = cfg.get("base_url", cfg.get("openai_base_url", CODEX_DEFAULT_API_URL))
+    cfg["api_url"] = _normalize_api_url(api_url_value)
     cfg["endpoint"] = _normalize_endpoint(cfg.get("endpoint", ""))
 
     try:
@@ -568,7 +895,39 @@ def resolve_codex_request_url(base_url: str, endpoint: str) -> str:
         return f"{base}/{endpoint_value}"
 
     base = _normalize_api_url(base_url)
+    parsed = urlparse(base)
+    base_path = parsed.path.rstrip("/")
+    lower_path = base_path.lower()
+    if lower_path.endswith(CODEX_DEFAULT_RESPONSE_ENDPOINT):
+        return base
+    if lower_path.endswith(CODEX_DEFAULT_MODELS_ENDPOINT):
+        updated = parsed._replace(
+            path=f"{base_path[:-len(CODEX_DEFAULT_MODELS_ENDPOINT)]}{CODEX_DEFAULT_RESPONSE_ENDPOINT}"
+        )
+        return updated.geturl().rstrip("/")
+    if _is_chatgpt_codex_host(parsed) and lower_path == "/backend-api":
+        updated = parsed._replace(path="/backend-api/codex/responses")
+        return updated.geturl().rstrip("/")
     return f"{base}{CODEX_DEFAULT_RESPONSE_ENDPOINT}"
+
+
+def resolve_codex_models_url(base_url: str) -> str:
+    """Resolve the Codex models catalog URL from a base URL or `/responses` URL."""
+    base = _normalize_api_url(base_url)
+    parsed = urlparse(base)
+    base_path = parsed.path.rstrip("/")
+    lower_path = base_path.lower()
+    if lower_path.endswith(CODEX_DEFAULT_MODELS_ENDPOINT):
+        return base
+    if lower_path.endswith(CODEX_DEFAULT_RESPONSE_ENDPOINT):
+        updated = parsed._replace(
+            path=f"{base_path[:-len(CODEX_DEFAULT_RESPONSE_ENDPOINT)]}{CODEX_DEFAULT_MODELS_ENDPOINT}"
+        )
+        return updated.geturl().rstrip("/")
+    if _is_chatgpt_codex_host(parsed) and lower_path == "/backend-api":
+        updated = parsed._replace(path="/backend-api/codex/models")
+        return updated.geturl().rstrip("/")
+    return f"{base}{CODEX_DEFAULT_MODELS_ENDPOINT}"
 
 
 def get_codex_request_headers(
@@ -818,5 +1177,9 @@ def mask_secret(secret: str) -> str:
 
 def is_codex_api_url(url: str) -> bool:
     """Whether the URL points to the Codex backend."""
-    value = str(url or "").strip().lower()
-    return "chatgpt.com/backend-api/codex" in value or "auth.openai.com" in value
+    value = _normalize_api_url(url).lower()
+    return (
+        "chatgpt.com/backend-api/codex" in value
+        or "chat.openai.com/backend-api/codex" in value
+        or "auth.openai.com" in value
+    )

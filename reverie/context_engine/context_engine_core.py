@@ -25,6 +25,7 @@ from .semantic_indexer import SemanticIndexer, SemanticNode, CodePattern
 from .knowledge_graph import KnowledgeGraph, Entity, Relation, RelationType
 from .commit_history_indexer import CommitHistoryIndexer, CommitPattern
 from .cache import CacheManager
+from ..config import get_project_data_dir
 
 
 @dataclass
@@ -83,7 +84,7 @@ class ContextEngineCore:
         self.commit_history = CommitHistoryIndexer(project_root)
         
         # Cache manager
-        cache_dir = project_root / '.reverie' / 'context_cache'
+        cache_dir = get_project_data_dir(project_root) / 'context_cache'
         self.cache_manager = CacheManager(cache_dir)
         
         # Statistics

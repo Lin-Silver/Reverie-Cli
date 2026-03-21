@@ -18,11 +18,14 @@ import time
 from .security_utils import write_json_secure
 
 
-QWENCODE_DEFAULT_API_URL = "https://portal.qwen.ai/v1"
+QWENCODE_DEFAULT_API_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 QWENCODE_DEFAULT_ENDPOINT = ""
 QWENCODE_TOKEN_URL = "https://chat.qwen.ai/api/v1/oauth2/token"
 QWENCODE_CLIENT_ID = "f0304373b74a44d2b584a3fb70ca9e56"
 QWENCODE_REFRESH_BUFFER_MS = 60 * 60 * 1000
+QWENCODE_DEFAULT_CHANNEL = "reverie-cli"
+
+_QWENCODE_THINKING_SUFFIXES = {"auto", "low", "medium", "high", "xhigh", "minimal"}
 
 _QWENCODE_DEFAULT_HEADERS = {
     "User-Agent": "QwenCode/0.11.1 (win32; x64)",
@@ -135,7 +138,10 @@ def resolve_qwencode_request_url(api_url: str, endpoint: str = "") -> str:
         if endpoint_value.startswith("/"):
             return f"{base}{endpoint_value}"
         return f"{base}/{endpoint_value}"
-    return f"{_normalize_qwencode_api_url(api_url)}/chat/completions"
+    base = _normalize_qwencode_api_url(api_url)
+    if base.lower().endswith("/chat/completions"):
+        return base
+    return f"{base}/chat/completions"
 
 
 def get_qwencode_request_headers(extra_headers: Optional[Dict[str, str]] = None) -> Dict[str, str]:
@@ -148,6 +154,112 @@ def get_qwencode_request_headers(extra_headers: Optional[Dict[str, str]] = None)
             if k and v:
                 headers[k] = v
     return headers
+
+
+def normalize_qwencode_model_for_request(model_name: Any) -> tuple[str, Optional[bool]]:
+    """
+    Normalize model id and extract any user-facing thinking toggle suffix.
+
+    Supported suffix examples:
+    - `coder-model(high)` -> (`coder-model`, True)
+    - `coder-model(none)` -> (`coder-model`, False)
+    """
+    raw_model = str(model_name or "").strip()
+    if not raw_model:
+        return "", None
+
+    base_model = raw_model
+    enable_thinking: Optional[bool] = None
+
+    if "(" in raw_model and ")" in raw_model:
+        base_model = raw_model.split("(", 1)[0].strip()
+        suffix = raw_model.split("(", 1)[1].split(")", 1)[0].strip().lower()
+        if suffix in _QWENCODE_THINKING_SUFFIXES or suffix.isdigit():
+            enable_thinking = True
+        elif suffix in {"none", "0", "off", "false"}:
+            enable_thinking = False
+
+    normalized_model = _canonicalize_qwencode_model_id(base_model or raw_model)
+    return normalized_model, enable_thinking
+
+
+def resolve_qwencode_thinking_enabled(model_name: Any, thinking_mode: Any = None) -> bool:
+    """
+    Resolve whether Qwen thinking should be enabled.
+
+    Qwen Code's DashScope-compatible flow commonly exposes reasoning by default,
+    so Reverie mirrors that unless the user explicitly disables it.
+    """
+    if isinstance(thinking_mode, str):
+        lowered = thinking_mode.strip().lower()
+        if lowered == "true":
+            return True
+        if lowered == "false":
+            return False
+
+    _, suffix_choice = normalize_qwencode_model_for_request(model_name)
+    if suffix_choice is not None:
+        return suffix_choice
+
+    return True
+
+
+def build_qwencode_request_metadata(
+    session_id: str = "",
+    user_prompt_id: str = "",
+    channel: str = QWENCODE_DEFAULT_CHANNEL,
+) -> Dict[str, Any]:
+    """Build Qwen-style request metadata similar to the official CLI."""
+    metadata: Dict[str, Any] = {}
+    if str(session_id or "").strip():
+        metadata["sessionId"] = str(session_id).strip()
+    if str(user_prompt_id or "").strip():
+        metadata["promptId"] = str(user_prompt_id).strip()
+    if str(channel or "").strip():
+        metadata["channel"] = str(channel).strip()
+    return metadata
+
+
+def apply_qwencode_request_defaults(
+    payload: Dict[str, Any],
+    *,
+    session_id: str = "",
+    user_prompt_id: str = "",
+    thinking_mode: Any = None,
+) -> Dict[str, Any]:
+    """Apply Qwen Code request defaults that mirror the official CLI more closely."""
+    prepared = dict(payload or {})
+
+    normalized_model, suffix_choice = normalize_qwencode_model_for_request(prepared.get("model", ""))
+    if normalized_model:
+        prepared["model"] = normalized_model
+
+    if isinstance(prepared.get("stream"), bool) and prepared.get("stream"):
+        stream_options = prepared.get("stream_options")
+        if not isinstance(stream_options, dict):
+            stream_options = {}
+            prepared["stream_options"] = stream_options
+        stream_options["include_usage"] = True
+
+    if not isinstance(prepared.get("enable_thinking"), bool):
+        prepared["enable_thinking"] = (
+            resolve_qwencode_thinking_enabled(normalized_model or prepared.get("model", ""), thinking_mode)
+            if suffix_choice is None
+            else bool(suffix_choice)
+        )
+
+    existing_metadata = prepared.get("metadata")
+    merged_metadata = dict(existing_metadata) if isinstance(existing_metadata, dict) else {}
+    merged_metadata.update(
+        build_qwencode_request_metadata(
+            session_id=session_id,
+            user_prompt_id=user_prompt_id,
+        )
+    )
+    if merged_metadata:
+        prepared["metadata"] = merged_metadata
+
+    return prepared
 
 
 def _load_json_dict(path: Path, errors: List[str]) -> Optional[Dict[str, Any]]:
@@ -465,7 +577,14 @@ def mask_secret(secret: str) -> str:
 def is_qwencode_api_url(url: str) -> bool:
     """Whether the URL points to Qwen Code API endpoint."""
     value = str(url or "").strip().lower()
-    return "dashscope.aliyuncs.com" in value or "portal.qwen.ai" in value
+    return any(
+        host in value
+        for host in (
+            "dashscope.aliyuncs.com",
+            "dashscope-intl.aliyuncs.com",
+            "portal.qwen.ai",
+        )
+    )
 
 
 def qwen_oauth_login(force_refresh: bool = True) -> Dict[str, Any]:

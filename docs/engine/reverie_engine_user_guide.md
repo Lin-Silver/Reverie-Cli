@@ -1,5 +1,7 @@
 # Reverie Engine User Guide
 
+For the general project docs, see [README](../../README.md), the [documentation index](../README.md), and the [CLI command reference](../CLI_COMMANDS.md).
+
 ## Overview
 
 Reverie Engine is the built-in runtime that powers `reverie_engine` and the compatibility alias `reverie_engine_lite`.

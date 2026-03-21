@@ -97,11 +97,11 @@ class GameProjectScaffolderTool(BaseTool):
             if action == "create_foundation":
                 return self._create_foundation(output_dir, kwargs)
             if action == "generate_module_map":
-                output_path = self._resolve_path(kwargs.get("output_path", str(output_dir / "docs/module_map.json")))
+                output_path = self._resolve_path(kwargs.get("output_path", str(output_dir / "artifacts/module_map.json")))
                 return self._generate_module_map(output_dir, output_path, kwargs)
             if action == "generate_content_pipeline":
                 output_path = self._resolve_path(
-                    kwargs.get("output_path", str(output_dir / "docs/content_pipeline.md"))
+                    kwargs.get("output_path", str(output_dir / "artifacts/content_pipeline.md"))
                 )
                 return self._generate_content_pipeline(output_dir, output_path, kwargs)
             return ToolResult.fail(f"Unknown action: {action}")
@@ -270,7 +270,7 @@ class GameProjectScaffolderTool(BaseTool):
 
     def _recommended_structure(self, profile: Dict[str, Any], kwargs: Dict[str, Any]) -> List[str]:
         structure = [
-            "docs",
+            "artifacts",
             "design",
             "assets/raw",
             "assets/processed",
@@ -314,8 +314,8 @@ class GameProjectScaffolderTool(BaseTool):
         engine = canonical_engine_name(profile["engine"])
         project_name = profile["project_name"]
         files: Dict[Path, str] = {
-            output_dir / "docs/engine_profile.md": self._engine_profile_markdown(profile),
-            output_dir / "docs/production_plan.md": self._production_plan_markdown(profile),
+            output_dir / "artifacts/engine_profile.md": self._engine_profile_markdown(profile),
+            output_dir / "artifacts/production_plan.md": self._production_plan_markdown(profile),
             output_dir / "design/README.md": "# Design Workspace\n\nUse this folder for blueprints, loops, and content specs.\n",
         }
 
@@ -348,7 +348,7 @@ class GameProjectScaffolderTool(BaseTool):
             files[output_dir / "engine/README.md"] = (
                 f"# {project_name} Engine Workspace\n\n"
                 "Mirror engine-side scenes, prefabs, levels, or content assets here.\n"
-                "Keep architecture and data contracts aligned with the docs folder.\n"
+                "Keep architecture and data contracts aligned with the artifacts folder.\n"
             )
 
         if profile["include_tests"]:

@@ -36,7 +36,7 @@ class GameGDDManagerTool(BaseTool):
             },
             "gdd_path": {
                 "type": "string",
-                "description": "Path to GDD file (default: docs/GDD.md)"
+                "description": "Path to GDD file (default: artifacts/GDD.md)"
             },
             "project_name": {
                 "type": "string",
@@ -85,7 +85,7 @@ class GameGDDManagerTool(BaseTool):
 
     def execute(self, **kwargs) -> ToolResult:
         action = kwargs.get("action")
-        gdd_path = self._resolve_path(kwargs.get("gdd_path", "docs/GDD.md"))
+        gdd_path = self._resolve_path(kwargs.get("gdd_path", "artifacts/GDD.md"))
 
         try:
             if action == "create":

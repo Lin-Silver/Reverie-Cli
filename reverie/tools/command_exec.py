@@ -18,6 +18,7 @@ import subprocess
 import sys
 import time
 
+from ..config import get_project_data_dir
 from ..security_utils import WorkspaceSecurityError
 from .base import BaseTool, ToolResult
 
@@ -41,7 +42,7 @@ Security rules:
 - Terminal move/delete/rename commands are blocked
 - Inline scripts and script files are scanned for file move/delete APIs
 - Use `delete_file` for file deletion instead of terminal commands
-- Every attempt is logged to `.reverie/security/command_audit.jsonl`
+- Every attempt is logged to the current project cache audit log
 
 Examples:
 - Git status: {"command": "git status"}
@@ -519,7 +520,7 @@ Examples:
 
     def _build_dotnet_sandbox_env(self) -> Dict[str, str]:
         workspace_root = self.get_project_root()
-        sandbox_root = workspace_root / ".reverie" / "runtime_sandbox" / "dotnet"
+        sandbox_root = get_project_data_dir(workspace_root) / "runtime_sandbox" / "dotnet"
         home_dir = sandbox_root / "home"
         temp_dir = sandbox_root / "tmp"
         appdata_dir = sandbox_root / "appdata"

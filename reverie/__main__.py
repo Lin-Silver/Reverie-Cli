@@ -10,7 +10,7 @@ import argparse
 from pathlib import Path
 
 # Version info
-__version__ = "2.1.3"
+__version__ = "2.1.4"
 
 
 def main():
@@ -64,10 +64,11 @@ def main():
     
     # Index only mode
     if args.index_only:
+        from reverie.config import get_project_data_dir
         from reverie.context_engine import CodebaseIndexer
         
         print(f"Indexing: {project_root}")
-        indexer = CodebaseIndexer(project_root)
+        indexer = CodebaseIndexer(project_root, cache_dir=get_project_data_dir(project_root) / "context_cache")
         result = indexer.full_index()
         
         print(f"Files scanned: {result.files_scanned}")

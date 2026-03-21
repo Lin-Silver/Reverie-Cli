@@ -17,6 +17,7 @@ import re
 import shutil
 import time
 import uuid
+from urllib.parse import urlparse
 
 from .security_utils import read_first_env, write_json_secure
 
@@ -128,6 +129,58 @@ def _normalize_endpoint(endpoint: Any) -> str:
 def _normalize_api_url(value: Any) -> str:
     url = _normalize_resource_url(value)
     return url or GEMINICLI_DEFAULT_API_URL
+
+
+def _split_geminicli_target(value: Any) -> Tuple[str, str]:
+    """Split a target path into `(path, query)` with a guaranteed leading slash."""
+    raw = str(value or "").strip()
+    if not raw:
+        return "", ""
+    if "?" in raw:
+        path, query = raw.split("?", 1)
+    else:
+        path, query = raw, ""
+    path = f"/{path.lstrip('/')}" if path else ""
+    return path, query
+
+
+def _resolve_geminicli_url(base_url: str, target: str) -> str:
+    """Resolve a Gemini CLI URL while avoiding double-appending known endpoints."""
+    normalized_base = _normalize_api_url(base_url)
+    parsed = urlparse(normalized_base)
+    base_path = str(parsed.path or "").rstrip("/")
+    lower_base_path = base_path.lower()
+    target_path, target_query = _split_geminicli_target(target)
+    if not target_path:
+        return parsed._replace(fragment="").geturl().rstrip("/")
+
+    known_paths = sorted(
+        {
+            GEMINICLI_DEFAULT_STREAM_ENDPOINT.split("?", 1)[0].lower(),
+            GEMINICLI_DEFAULT_NON_STREAM_ENDPOINT.lower(),
+            GEMINICLI_DEFAULT_COUNT_TOKENS_ENDPOINT.lower(),
+            GEMINICLI_DEFAULT_LOAD_ENDPOINT.lower(),
+            GEMINICLI_DEFAULT_ONBOARD_ENDPOINT.lower(),
+        },
+        key=len,
+        reverse=True,
+    )
+
+    prefix_path = base_path
+    for known_path in known_paths:
+        if lower_base_path.endswith(known_path):
+            prefix_path = base_path[:-len(known_path)]
+            break
+
+    if prefix_path.endswith("/") and target_path.startswith("/"):
+        prefix_path = prefix_path[:-1]
+
+    rebuilt = parsed._replace(
+        path=f"{prefix_path}{target_path}" if prefix_path else target_path,
+        query=target_query,
+        fragment="",
+    )
+    return rebuilt.geturl().rstrip("/")
 
 
 def _parse_expiry_ms(value: Any) -> Optional[int]:
@@ -534,29 +587,25 @@ def resolve_geminicli_request_url(base_url: str, endpoint: str, stream: bool) ->
     if endpoint_value:
         if endpoint_value.startswith("http://") or endpoint_value.startswith("https://"):
             return endpoint_value
-        base = _normalize_api_url(base_url)
-        if endpoint_value.startswith("/"):
-            return f"{base}{endpoint_value}"
-        return f"{base}/{endpoint_value}"
+        return _resolve_geminicli_url(base_url, endpoint_value)
 
-    base = _normalize_api_url(base_url)
     default_endpoint = GEMINICLI_DEFAULT_STREAM_ENDPOINT if stream else GEMINICLI_DEFAULT_NON_STREAM_ENDPOINT
-    return f"{base}{default_endpoint}"
+    return _resolve_geminicli_url(base_url, default_endpoint)
 
 
 def geminicli_count_tokens_url(base_url: str, endpoint: str = "") -> str:
     endpoint_value = str(endpoint or "").strip()
     if endpoint_value:
         return resolve_geminicli_request_url(base_url, endpoint_value, stream=False)
-    return f"{_normalize_api_url(base_url)}{GEMINICLI_DEFAULT_COUNT_TOKENS_ENDPOINT}"
+    return _resolve_geminicli_url(base_url, GEMINICLI_DEFAULT_COUNT_TOKENS_ENDPOINT)
 
 
 def _resolve_geminicli_internal_url(base_url: str, path: str) -> str:
-    return f"{_normalize_api_url(base_url)}{path}"
+    return _resolve_geminicli_url(base_url, path)
 
 
 def _resolve_geminicli_operation_url(base_url: str, operation_name: str) -> str:
-    return f"{_normalize_api_url(base_url)}/v1internal/{str(operation_name or '').lstrip('/')}"
+    return _resolve_geminicli_url(base_url, f"/v1internal/{str(operation_name or '').lstrip('/')}")
 
 
 def _geminicli_core_client_metadata(project_id: str = "") -> Dict[str, str]:

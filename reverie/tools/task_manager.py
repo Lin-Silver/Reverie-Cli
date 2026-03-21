@@ -1,8 +1,8 @@
 """
 Task Manager Tool - Organize and track complex work.
 
-The canonical human-facing artifact is a checklist-only `Tasks.md` file.
-Structured metadata is persisted separately in `task_list.json`.
+The canonical human-facing artifact is a checklist-only `artifacts/Tasks.md` file.
+Structured metadata is persisted separately in `artifacts/task_list.json`.
 """
 
 from typing import Optional, Dict, List
@@ -18,6 +18,7 @@ from .base import BaseTool, ToolResult
 
 
 CHECKLIST_LINE_RE = re.compile(r"^(?P<indent>\s*)\[(?P<state> |/|x|-)\]\s+(?P<name>.+?)\s*$")
+ARTIFACTS_DIR_NAME = "artifacts"
 
 
 class TaskState(Enum):
@@ -110,8 +111,9 @@ class TaskStore:
     
     def configure(self, project_root: Path):
         """Configure persistence paths and load data."""
-        self.file_path = project_root / "task_list.json"
-        self.markdown_path = project_root / "Tasks.md"
+        artifacts_dir = project_root / ARTIFACTS_DIR_NAME
+        self.file_path = artifacts_dir / "task_list.json"
+        self.markdown_path = artifacts_dir / "Tasks.md"
         self.load()
         
     def save(self):
@@ -123,6 +125,7 @@ class TaskStore:
 
         if self.file_path:
             try:
+                self.file_path.parent.mkdir(parents=True, exist_ok=True)
                 self.file_path.write_text(
                     json.dumps(data, indent=2, ensure_ascii=False),
                     encoding="utf-8",
@@ -132,6 +135,7 @@ class TaskStore:
 
         if self.markdown_path:
             try:
+                self.markdown_path.parent.mkdir(parents=True, exist_ok=True)
                 self.markdown_path.write_text(self.to_checklist_markdown(), encoding="utf-8")
             except Exception as e:
                 print(f"Failed to save tasks markdown: {e}")
@@ -462,15 +466,15 @@ class TaskManagerTool(BaseTool):
     description = """Manage project work as a checklist-first task system.
 
 Canonical artifact:
-- Always sync tasks to `Tasks.md`
-- `Tasks.md` must contain checklist lines only, such as `[ ] Implement parser`
-- Do not add headings, prose, IDs, summaries, metadata blocks, or rich formatting to `Tasks.md`
+- Always sync tasks to `artifacts/Tasks.md`
+- `artifacts/Tasks.md` must contain checklist lines only, such as `[ ] Implement parser`
+- Do not add headings, prose, IDs, summaries, metadata blocks, or rich formatting to `artifacts/Tasks.md`
 
 Best use:
 - Break large requests into many small, concrete, verifiable tasks
 - Keep only one task `IN_PROGRESS` when practical
 - Use filters to inspect focused slices of the checklist
-- `task_list.json` stores metadata while `Tasks.md` stays checklist-only
+- `artifacts/task_list.json` stores metadata while `artifacts/Tasks.md` stays checklist-only
 
 Operations:
 - add_tasks
@@ -561,16 +565,16 @@ Task states:
         if operation == "add_tasks":
             tasks = kwargs.get('tasks', [])
             count = len(tasks)
-            return f"Adding {count} task(s) to Tasks.md"
+            return f"Adding {count} task(s) to artifacts/Tasks.md"
         elif operation == "update_tasks":
             task_id = kwargs.get('task_id')
             name = kwargs.get('name')
             target = task_id or name or "tasks"
             return f"Updating task checklist: {target}"
         elif operation == "view_tasklist":
-            return "Viewing Tasks.md checklist"
+            return "Viewing artifacts/Tasks.md checklist"
         elif operation == "reorganize_tasklist":
-            return "Reorganizing Tasks.md checklist"
+            return "Reorganizing artifacts/Tasks.md checklist"
         return f"Managing tasks ({operation})"
 
     def execute(self, **kwargs) -> ToolResult:

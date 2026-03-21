@@ -27,6 +27,7 @@ import time
 import hashlib
 from datetime import datetime
 from collections import deque
+from ..config import get_project_data_dir
 
 
 class NexusPhase(Enum):
@@ -190,7 +191,7 @@ class NexusManager:
     
     def __init__(self, project_root: Path):
         self.project_root = project_root
-        self.nexus_dir = project_root / '.reverie' / 'nexus'
+        self.nexus_dir = get_project_data_dir(project_root) / 'nexus'
         self.nexus_dir.mkdir(parents=True, exist_ok=True)
         
         # Task storage

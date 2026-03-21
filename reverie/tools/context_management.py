@@ -5,6 +5,7 @@ import json
 import re
 from datetime import datetime
 from .base import BaseTool, ToolResult
+from ..config import get_project_data_dir
 
 class ContextManagementTool(BaseTool):
     """
@@ -286,7 +287,7 @@ class ContextManagementTool(BaseTool):
         if not project_root:
             return ToolResult.fail("Project root not available for compression")
         
-        compressor = ContextCompressor(Path(project_root) / '.reverie')
+        compressor = ContextCompressor(get_project_data_dir(Path(project_root)))
         
         # Get session info
         session_manager = self.context.get('session_manager')
@@ -348,7 +349,7 @@ class ContextManagementTool(BaseTool):
         if not project_root:
             return ToolResult.fail("Project root not available for checkpoint")
         
-        compressor = ContextCompressor(Path(project_root) / '.reverie')
+        compressor = ContextCompressor(get_project_data_dir(Path(project_root)))
         
         # Get session info
         session_manager = self.context.get('session_manager')
@@ -386,7 +387,7 @@ class ContextManagementTool(BaseTool):
         if not project_root:
             return ToolResult.fail("Project root not available for restore")
         
-        compressor = ContextCompressor(Path(project_root) / '.reverie')
+        compressor = ContextCompressor(get_project_data_dir(Path(project_root)))
         
         # Find checkpoint file
         checkpoint_path = Path(checkpoint_id)

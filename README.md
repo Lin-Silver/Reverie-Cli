@@ -1,304 +1,188 @@
-# Reverie Cli
+# Reverie CLI
 
-**World-Class Context Engine Coding Assistant**
+Reverie CLI is a context-engine-powered AI coding assistant for large repositories. It combines repository indexing, multi-provider model routing, session memory, checkpoints, rollback tools, and a rich terminal UI so the agent can work against the real codebase instead of guessing.
 
-Reverie is an agentic coding tool that uses a sophisticated Context Engine to understand large codebases and significantly reduce AI model hallucinations.
+## Highlights
 
-## Features
-
-- **Advanced Context Engine**: Deep code understanding with multiple analysis layers
-  - Semantic indexing for intent-based code search
-  - Knowledge graph for relationship tracking and impact analysis
-  - Commit history learning from past implementations
-  - Symbol table with fast lookup
-  - Dependency graph for relationship tracking
-  - Multi-language support (Python, JS/TS, C/C++, C#, Rust, Go, Java, Zig, HTML, CSS)
-  - Incremental updates for large codebases (>5MB)
-
-- **Nexus - Large-Scale Project Development**:
-  - 24+ hour continuous work sessions
-  - External context management to bypass token limits
-  - Phase-based workflow (Planning, Design, Implementation, Testing, Integration, Documentation, Verification)
-  - Automatic checkpoint and recovery
-  - Self-healing and error recovery
-
-- **AI Agent with Tool Calling**: 
-  - OpenAI-compatible API support
-  - Streaming and non-streaming modes
-  - 10+ built-in tools for coding tasks
-  - Nexus tool for large-scale projects
-
-- **Workspace-Locked Security Sandbox**:
-  - AI file and path tools are confined to the active project directory
-  - Command execution is limited to audited workspace diagnostics plus sandboxed workspace-local `dotnet` scaffolding/solution-management flows
-  - Blocked/allowed command attempts are recorded in `.reverie/security/command_audit.jsonl`
-  - `/clean` wipes only the current workspace's cache/memory/audit data and leaves config/rules intact
-  - Archive extraction blocks zip-slip and path traversal attacks
-
-- **Rich CLI Interface**:
-  - Modern TUI with keyboard navigation (arrow keys, Enter, Escape)
-  - Syntax-highlighted code display
-  - Diff visualization
-  - Session management with timestamp-based naming
-  - Real-time progress indicators
-  - Interactive selectors for models, settings, sessions, and checkpoints
-
-- **Enhanced Checkpoint System**:
-  - File-level checkpoints with automatic snapshots
-  - TUI rollback interface for version restoration
-  - Version history tracking
-  - Automatic cleanup of old checkpoints
-
-- **Git Integration**:
-  - Commit history analysis
-  - Blame information
-  - Historical context for code changes
-  - Pattern extraction from past implementations
-
-- **Writer Mode**:
-  - Mandatory outline phase with user approval
-  - Novel memory and consistency systems
-  - Character and location tracking
-  - Plot thread management
-  - Quality analysis and validation
+- Context Engine for symbol lookup, dependency tracking, semantic retrieval, commit-history learning, and workspace memory
+- Multiple operating modes for different workflows: `Reverie`, `Reverie-Atlas`, `Reverie-Gamer`, `Reverie-Ant`, `Spec-Driven`, `Spec-Vibe`, `Writer`, and `Computer Controller`
+- Provider integrations for standard OpenAI-compatible models plus `iFlow`, `Qwen Code`, `Gemini CLI`, `Codex`, and `NVIDIA`
+- Rich CLI/TUI with selectors, streaming output, help browser, status panels, session browsing, checkpoint rollback, and command discovery
+- Workspace-aware safety model for file access, archive extraction, and audited command execution
+- Built-in game-production tooling, `Reverie Engine` runtime workflows, and optional text-to-image generation
 
 ## Installation
 
-Python compatibility: `3.10` to `3.14`. Version `3.10` is recommended.
+Python `3.10` to `3.14` is supported. `3.10` or `3.11` is the safest default for local development.
 
 ```bash
-# Clone the repository
 git clone https://github.com/raiden/reverie-cli.git
 cd reverie-cli
 
-# Create virtual environment
-python -m venv venv
-venv\Scripts\activate  # Windows
-# source venv/bin/activate  # Linux/Mac
+python -m venv .venv
+.venv\Scripts\activate
 
-# Install in development mode
 pip install -e .
+```
+
+Optional extras:
+
+```bash
+pip install -e ".[dev]"
+pip install -e ".[treesitter]"
+pip install -r requirements-tti.txt
 ```
 
 ## Quick Start
 
 ```bash
-# Run in a project directory
 reverie
-
-# Or specify a path
-reverie /path/to/your/project
-
-# Index only (no interactive mode)
+reverie /path/to/project
 reverie --index-only
+reverie --no-index
+reverie --version
 ```
 
-## Configuration
+On first run, configure at least one model source. Reverie can use:
 
-On first run, Reverie will guide you through configuration:
+- Standard OpenAI-compatible endpoints stored in `models`
+- `iFlow`
+- `Qwen Code`
+- `Gemini CLI`
+- `Codex`
+- `NVIDIA` for `Computer Controller`
 
-1. **API Base URL**: Your LLM provider endpoint (e.g., `https://api.openai.com/v1`)
-2. **API Key**: Your authentication key
-3. **Model**: The model to use (e.g., `gpt-4o`)
+## Core Capabilities
 
-### Configuration Modes
+### Context and Retrieval
 
-Reverie supports two configuration modes:
+- Full-project indexing with symbols, dependencies, and semantic retrieval
+- Workspace memory summaries across sessions
+- Git-aware retrieval and commit-history learning
+- Incremental project-aware context selection to reduce hallucinations
 
-**Global Mode (Default)**:
-- Configuration stored in `<app_root>/.reverie/config.json`
-- Shared across all workspaces
-- Quick setup for single workspace use
+### Workflow Modes
 
-**Workspace Mode**:
-- Configuration stored in `<project_root>/.reverie/config.json`
-- Each workspace has independent configuration
-- Perfect for multi-workspace scenarios
+- `Reverie`: general-purpose software delivery
+- `Reverie-Atlas`: research-first, document-driven implementation for complex systems
+- `Reverie-Gamer`: game design, scaffolding, playtest, asset, and balance workflows
+- `Reverie-Ant`: structured planning, execution, and verification
+- `Spec-Driven` / `Spec-Vibe`: spec-heavy or lighter spec workflows
+- `Writer`: writing and long-form documentation
+- `Computer Controller`: NVIDIA-backed desktop control
 
-### Managing Workspace Configuration
+### Operator Experience
 
-```bash
-# View current configuration status
+- Interactive `/help` browser and per-command detail pages
+- Model, settings, session, and checkpoint selectors
+- Session persistence, rollback, undo, redo, and operation history
+- Workspace-local cleanup with `/clean`
+- Optional `/tti` image generation
+
+## Configuration and Storage
+
+Reverie stores runtime state next to the CLI executable. When you run from source, `app_root` is the repository root. In packaged Windows builds, `app_root` is the folder containing `reverie.exe`.
+
+For each workspace Reverie creates a project cache under:
+
+- Project cache root: `<app_root>/.reverie/project_caches/<project-key>/`
+- Default profile: `<app_root>/.reverie/project_caches/<project-key>/config.global.json`
+- Workspace profile: `<app_root>/.reverie/project_caches/<project-key>/config.json`
+- Rules file: `<app_root>/.reverie/project_caches/<project-key>/rules.txt`
+- Common runtime data: `context_cache/`, `sessions/`, `archives/`, `checkpoints/`, `specs/`, `steering/`, `security/`
+
+`<project-key>` is derived from the absolute project path plus a short hash so different workspaces stay isolated.
+
+`config.global.json` is the default profile used when workspace mode is off. `config.json` is the workspace-specific profile used when workspace mode is on.
+
+Legacy `.reverie/config.json` and `rules.txt` files are still read once for migration when present, but new writes stay inside `.reverie/project_caches`.
+
+Useful commands:
+
+```text
 /workspace
-
-# Enable workspace-local configuration
 /workspace enable
-
-# Disable workspace-local configuration (use global)
 /workspace disable
-
-# Copy global config to workspace
 /workspace copy-to-workspace
-
-# Copy workspace config to global
 /workspace copy-to-global
 ```
 
-See [WORKSPACE_CONFIG.md](WORKSPACE_CONFIG.md) for detailed documentation on multi-workspace configuration.
+For the full configuration schema, provider notes, and text-to-image examples, see [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
-### Text-to-Image Configuration (v2.0.2)
+## Command Overview
 
-Reverie now supports a built-in `text_to_image` tool (available in all modes) that calls `Comfy/generate_image.py`.
+Common commands:
 
-Add this section to your `config.json`:
+| Command | Purpose |
+| --- | --- |
+| `/help` | Browse the live command catalog |
+| `/status` | Show active model, source, session, and health |
+| `/model` | Manage standard model presets |
+| `/mode` | Show or switch operating modes |
+| `/codex` | Activate Codex and choose model/reasoning |
+| `/search <query>` | Run a web search |
+| `/index` | Rebuild the workspace index |
+| `/tools` | List tools visible in the current mode |
+| `/sessions` | Browse sessions |
+| `/rollback` | Restore earlier checkpoints or interaction states |
+| `/checkpoints` | Open the checkpoint browser |
+| `/clean` | Clear current-workspace memory, cache, and audit data |
+| `/tti ...` | Manage TTI models or generate an image |
 
-```json
-"tti-models": [
-  {
-    "path": "Comfy/models/t2i/bluePencilXL_v700.safetensors",
-    "display_name": "blue-pencil-xl",
-    "introduction": "General illustration model"
-  },
-  {
-    "path": "D:/AI/models/another_model.safetensors",
-    "display_name": "another-model",
-    "introduction": ""
-  }
-],
-"text_to_image": {
-  "enabled": true,
-  "python_executable": "",
-  "script_path": "Comfy/generate_image.py",
-  "output_dir": ".",
-  "models": [],
-  "default_model_display_name": "blue-pencil-xl",
-  "auto_install_missing_deps": true,
-  "auto_install_max_missing_deps": 6
-}
-```
+For the full reference, see [docs/CLI_COMMANDS.md](docs/CLI_COMMANDS.md).
 
-`tti-models` is the top-level editable model list. On load/save, Reverie automatically syncs `tti-models` and `text_to_image.models`.
-`models[].path` supports both relative paths (relative to project root/config directory) and absolute paths.
-`text_to_image.output_dir` defaults to project root (`"."`).
-When calling `text_to_image(action="generate")`, `output_path` should be a relative path under project root.
-If `python_executable` is empty, Reverie uses the current Python (dev mode) or discovers `python/py` from PATH (packaged exe mode).
-If `auto_install_missing_deps` is `true`, Reverie automatically tries `pip install` for missing Python modules detected during TTI runtime, and retries generation.
-`auto_install_max_missing_deps` controls the maximum chained auto-install attempts per generation run.
+## Documentation Map
 
-When building `reverie.exe` with `build.bat`, required runtime assets for text-to-image (`generate_image.py` and `embedded_comfy.b64`) are embedded into the executable bundle path automatically. You do not need to keep a separate `Comfy` folder next to `reverie.exe` for these two files.
+- [Documentation Index](docs/README.md)
+- [Chinese README](docs/README.zh-CN.md)
+- [Configuration Guide](docs/CONFIGURATION.md)
+- [CLI Command Reference](docs/CLI_COMMANDS.md)
+- [Development Guide](docs/DEVELOPMENT.md)
+- [Reverie Engine User Guide](docs/engine/reverie_engine_user_guide.md)
+- [Change Log](changelog.md)
 
-### Optional TTI Dependencies
+## Architecture Snapshot
 
-If you want to run `/tti` image generation in environments without a prepared Comfy Python environment, install optional dependencies manually:
-
-```bash
-pip install -r requirements-tti.txt
-```
-
-`requirements-tti.txt` now includes `einops`, which is required by embedded ComfyUI modules.
-
-These dependencies are intentionally kept separate from the main project requirements.
-
-## CLI Commands
-
-| Command | Description |
-|---------|-------------|
-| `/help` | Show available commands |
-| `/model` | List and select models |
-| `/status` | Show current status |
-| `/search <query>` | Search the web |
-| `/sessions` | Manage sessions |
-| `/history [limit]` | View conversation history |
-| `/clear` | Clear the screen |
-| `/clean` | Clear only the current workspace's cache, memory, backups, and audit history |
-| `/index` | Re-index the codebase |
-| `/tti models` | Show configured TTI models and interactively select default model |
-| `/tti add` | Add a new TTI model entry (`path`, `display_name`, `introduction`) |
-| `/tti <prompt>` | Generate an image with default TTI model and default parameters |
-| `/exit` | Exit Reverie |
-
-## Build Windows EXE (PyInstaller)
-
-Reverie ships with `build.bat` for generating a standalone Windows executable.
-
-```bat
-.\build.bat
-```
-
-### Python 3.14+ Build Notes
-
-- `build.bat` now reuses the existing `venv` by default. If `venv` does not exist, it is created automatically.
-- If you need a fully clean environment (for example to fix ABI mismatch issues like mixed `cp311`/`cp314` wheels), run:
-
-```bat
-.\build.bat --recreate-venv
-```
-
-- The script upgrades `pip/setuptools/wheel`, performs a dependency health check, prepares bundled resources, and then runs PyInstaller.
-- On Windows, icon packaging prefers `.ico`; if only `reverie.png` exists, the script auto-generates an `.ico` via Pillow.
-- Web search dependency has migrated to `ddgs` (the old `duckduckgo-search` package is no longer required).
-
-## Architecture
-
-```
+```text
 reverie/
-├── context_engine/      # The heart of Reverie
-│   ├── symbol_table.py  # Symbol storage and lookup
-│   ├── dependency_graph.py  # Relationship tracking
-│   ├── indexer.py       # Codebase scanning
-│   ├── retriever.py     # Context selection
-│   ├── cache.py         # Persistent storage
-│   ├── git_integration.py  # Git context
-│   ├── semantic_indexer.py  # Semantic code understanding
-│   ├── knowledge_graph.py   # Advanced relationship tracking
-│   ├── commit_history_indexer.py  # Learn from past changes
-│   ├── context_engine_core.py  # Unified context management
-│   └── parsers/         # Multi-language parsing
-├── agent/               # AI Agent
-│   ├── agent.py         # Main agent class
-│   ├── system_prompt.py # AI instructions
-│   └── tool_executor.py # Tool execution
-├── tools/               # Agent tools
-│   ├── codebase_retrieval.py  # Query codebase
-│   ├── git_commit_retrieval.py  # Git history
-│   ├── str_replace_editor.py  # File editing
-│   ├── file_ops.py      # File operations
-│   ├── command_exec.py  # Shell commands
-│   ├── web_search.py    # Web search
-│   ├── task_manager.py  # Task organization
-│   ├── nexus.py         # Large-scale project development
-│   └── nexus_tool.py    # Nexus workflow management
-├── cli/                 # User interface
-│   ├── interface.py     # Main CLI
-│   ├── commands.py      # Command handler
-│   ├── display.py       # Rich components
-│   └── tui_selector.py  # Interactive TUI selectors
-├── session/             # Session management
-│   ├── manager.py       # Session persistence
-│   ├── checkpoint.py    # File-level checkpoints
-│   └── archive.py       # Long-term storage
-├── config.py            # Configuration
-└── __main__.py          # Entry point
+|-- __main__.py              # CLI entry point
+|-- config.py                # config loading, migration, model source state
+|-- modes.py                 # mode registry and aliases
+|-- atlas.py                 # Atlas mode config and rules
+|-- codex.py                 # Codex provider integration
+|-- agent/                   # agent prompts, tool execution, orchestration
+|-- cli/                     # command handling, TUI, display helpers
+|-- context_engine/          # indexing, retrieval, semantic analysis, graph data
+|-- session/                 # sessions, checkpoints, rollback, archives, memory
+|-- tools/                   # tool implementations exposed to the agent
+|-- engine_lite/             # built-in runtime and engine workflows
+|-- writer/                  # writer mode helpers
+`-- tests/                   # regression coverage
 ```
-
-## Context Engine Principle
-
-The Context Engine follows a "minimal but complete" strategy with advanced capabilities:
-- **Semantic Indexing**: Understand code intent and meaning, not just structure
-- **Knowledge Graph**: Track complex relationships and predict impact of changes
-- **Commit History Learning**: Extract patterns and learn from successful implementations
-- **Symbol Table**: Index all code symbols and their relationships
-- **Dependency Tracking**: Understand dependencies to predict impact of changes
-- **Intelligent Context Selection**: Provide only the context the AI needs - no more, no less
-
-This approach significantly reduces hallucinations by ensuring the AI has accurate, up-to-date information about the codebase.
 
 ## Development
 
 ```bash
-# Install dev dependencies
 pip install -e ".[dev]"
-
-# Run tests
 pytest
-
-# Type checking
 mypy reverie
-
-# Format code
-black reverie
+black reverie tests
 ```
+
+Windows executable packaging is handled by `build.bat`:
+
+```bat
+.\build.bat
+.\build.bat --recreate-venv
+```
+
+## Notes
+
+- `requirements-tti.txt` is intentionally separate because text-to-image has heavier optional dependencies.
+- `docs/engine/reverie_engine_user_guide.md` covers the built-in runtime workflow surfaced through `/engine`.
+- The live command catalog in `reverie/cli/help_catalog.py` is the source of truth for command descriptions and examples.
+- The Chinese companion overview lives in [docs/README.zh-CN.md](docs/README.zh-CN.md).
 
 ## License
 
-MIT License - Developed by Raiden
+This repository is documented as MIT-licensed by the project author. If you distribute the project externally, add the final license file that matches your intended terms.

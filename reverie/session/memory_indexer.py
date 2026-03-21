@@ -223,30 +223,6 @@ class MemoryIndexer:
         if not session_path.exists():
             return 0
 
-    def refresh_session(self, session_id: str) -> int:
-        """
-        Re-index a single session and persist the refreshed project index.
-
-        Returns:
-            Number of fragments indexed for the session.
-        """
-        if not self.index:
-            self.load_index()
-
-        stale_fragment_ids = [
-            fragment_id
-            for fragment_id, fragment in self.fragments.items()
-            if fragment.session_id == session_id
-        ]
-        for fragment_id in stale_fragment_ids:
-            self.fragments.pop(fragment_id, None)
-
-        indexed_count = self.index_session(session_id)
-        self._rebuild_indexes_from_fragments()
-        self._save_index()
-        self._save_fragments()
-        return indexed_count
-        
         try:
             with open(session_path, 'r', encoding='utf-8') as f:
                 session_data = json.load(f)
@@ -283,6 +259,30 @@ class MemoryIndexer:
         except Exception as e:
             print(f"Error indexing session {session_id}: {e}")
             return 0
+
+    def refresh_session(self, session_id: str) -> int:
+        """
+        Re-index a single session and persist the refreshed project index.
+
+        Returns:
+            Number of fragments indexed for the session.
+        """
+        if not self.index:
+            self.load_index()
+
+        stale_fragment_ids = [
+            fragment_id
+            for fragment_id, fragment in self.fragments.items()
+            if fragment.session_id == session_id
+        ]
+        for fragment_id in stale_fragment_ids:
+            self.fragments.pop(fragment_id, None)
+
+        indexed_count = self.index_session(session_id)
+        self._rebuild_indexes_from_fragments()
+        self._save_index()
+        self._save_fragments()
+        return indexed_count
     
     def build_index(self) -> ProjectIndex:
         """
@@ -304,7 +304,7 @@ class MemoryIndexer:
         for session_file in session_files:
             session_id = session_file.stem
             count = self.index_session(session_id)
-            total_messages += count
+            total_messages += int(count or 0)
         
         # Build inverted indexes
         keyword_index = defaultdict(list)

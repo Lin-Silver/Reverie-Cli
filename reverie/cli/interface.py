@@ -12,6 +12,7 @@ import time
 import sys
 import threading
 import _thread
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -37,6 +38,7 @@ from ..config import (
     normalize_tti_models,
     resolve_tti_default_display_name,
 )
+from ..atlas import build_atlas_additional_rules, normalize_atlas_mode_config
 from ..rules_manager import RulesManager
 from ..session import SessionManager
 from ..agent import (
@@ -49,6 +51,44 @@ from ..context_engine import CodebaseIndexer, ContextRetriever, GitIntegration
 from ..context_engine import LSPManager
 from ..modes import normalize_mode
 from ..nvidia import normalize_nvidia_config
+
+
+_THINKING_MARKDOWN_SUBJECT_RE = re.compile(r"^\s*\*\*(.+?)\*\*\s*$")
+_THINKING_INLINE_SUBJECT_RE = re.compile(r"\*\*(.+?)\*\*")
+_THINKING_LIST_PREFIX_RE = re.compile(r"^(?:[-*]|\d+\.)\s+")
+
+
+def split_thinking_fragments(pending: str, fragment: str) -> tuple[list[str], str]:
+    """Split streamed reasoning text into complete lines plus a pending tail."""
+    text = f"{pending}{fragment}".replace("\r\n", "\n").replace("\r", "\n")
+    if "\n" not in text:
+        return [], text
+
+    parts = text.split("\n")
+    return parts[:-1], parts[-1]
+
+
+def parse_thinking_line(raw_line: str) -> tuple[str, str]:
+    """Normalize one reasoning line for terminal-friendly display."""
+    text = str(raw_line or "").replace("\r", "")
+    text = re.sub(r"[ \t]+", " ", text).strip()
+    if not text:
+        return "", ""
+
+    subject_only = _THINKING_MARKDOWN_SUBJECT_RE.fullmatch(text)
+    if subject_only:
+        return subject_only.group(1).strip(), ""
+
+    inline_subject = _THINKING_INLINE_SUBJECT_RE.search(text)
+    if inline_subject:
+        subject = inline_subject.group(1).strip()
+        description = (
+            text[:inline_subject.start()] + text[inline_subject.end():]
+        ).strip(" :-")
+        description = _THINKING_LIST_PREFIX_RE.sub("", description).strip()
+        return subject, description
+
+    return "", _THINKING_LIST_PREFIX_RE.sub("", text).strip()
 
 
 class StatusLine:
@@ -723,7 +763,6 @@ class ReverieInterface:
                     if chunk == THINKING_END_MARKER:
                         # Flush any pending thinking content and exit thinking mode
                         if thinking_content.strip():
-                            # Print remaining thinking content
                             self._print_thinking_content(thinking_content)
                             thinking_content = ""
                         in_thinking_mode = False
@@ -733,18 +772,10 @@ class ReverieInterface:
                     
                     # Handle thinking content
                     if in_thinking_mode:
-                        thinking_content += chunk
-                        # Stream thinking content line by line for better UX
-                        if '\n' in thinking_content:
-                            lines = thinking_content.split('\n')
-                            # Print complete lines, keep the last one in buffer
-                            for line in lines[:-1]:
-                                if line.strip():
-                                    self.console.print(
-                                        f"[{self.theme.THINKING_DIM}]{DECO.LINE_VERTICAL}[/{self.theme.THINKING_DIM}] "
-                                        f"[italic {self.theme.THINKING_SOFT}]{escape(line)}[/italic {self.theme.THINKING_SOFT}]"
-                                    )
-                            thinking_content = lines[-1]
+                        thinking_content = self._stream_thinking_fragment(
+                            thinking_content,
+                            chunk,
+                        )
                         continue
 
                     decoded_event = decode_stream_event(chunk)
@@ -889,11 +920,38 @@ class ReverieInterface:
     def _print_thinking_content(self, content: str) -> None:
         """Helper method to print thinking content with proper formatting"""
         for line in content.strip().split('\n'):
-            if line.strip():
-                self.console.print(
-                    f"[{self.theme.THINKING_DIM}]{DECO.LINE_VERTICAL}[/{self.theme.THINKING_DIM}] "
-                    f"[italic {self.theme.THINKING_SOFT}]{escape(line)}[/italic {self.theme.THINKING_SOFT}]"
-                )
+            self._render_thinking_line(line)
+
+    def _render_thinking_line(self, raw_line: str) -> None:
+        """Render one cleaned reasoning line without leaking raw markdown markers."""
+        subject, description = parse_thinking_line(raw_line)
+        if not subject and not description:
+            return
+
+        prefix = Text(f"{DECO.LINE_VERTICAL} ", style=self.theme.THINKING_DIM)
+        line = Text()
+        line.append_text(prefix)
+
+        if subject:
+            line.append(subject, style=f"italic bold {self.theme.THINKING_MEDIUM}")
+            if description:
+                line.append(": ", style=self.theme.TEXT_DIM)
+                line.append(description, style=f"italic {self.theme.THINKING_SOFT}")
+        else:
+            line.append(description, style=f"italic {self.theme.THINKING_SOFT}")
+
+        self.console.print(line)
+
+    def _stream_thinking_fragment(
+        self,
+        pending: str,
+        fragment: str,
+    ) -> str:
+        """Print only complete reasoning lines and keep the trailing fragment buffered."""
+        lines, remainder = split_thinking_fragments(pending, fragment)
+        for line in lines:
+            self._render_thinking_line(line)
+        return remainder
 
     def _init_context_engine(self) -> None:
         cache_dir = self.config_manager.project_data_dir / 'context_cache'
@@ -988,6 +1046,7 @@ class ReverieInterface:
     def _build_additional_rules_with_tti(self, config: Config) -> str:
         """Append TTI model metadata from config.json into model context."""
         base_rules = (self.rules_manager.get_rules_text() or "").strip()
+        normalized_mode = normalize_mode(getattr(config, "mode", "reverie"))
 
         tti_cfg = config.text_to_image if isinstance(config.text_to_image, dict) else {}
         tti_models = normalize_tti_models(
@@ -1026,7 +1085,21 @@ class ReverieInterface:
         workspace_memory = self.memory_indexer.build_workspace_memory_summary(max_fragments=6, max_chars=2200) if self.memory_indexer else ""
         memory_block = f"{workspace_memory}" if workspace_memory else "## Workspace Global Memory\n- No prior workspace memory has been indexed yet."
 
-        merged_blocks = [tti_block for tti_block in ["\n".join(lines), "\n".join(lsp_lines), memory_block] if tti_block.strip()]
+        atlas_block = ""
+        if normalized_mode == "reverie-atlas":
+            atlas_block = build_atlas_additional_rules(
+                normalize_atlas_mode_config(getattr(config, "atlas_mode", {})),
+                workspace_memory_available=bool(str(workspace_memory).strip()),
+                lsp_available=bool(
+                    self.lsp_manager and self.lsp_manager.build_status_report().get("available")
+                ),
+            )
+
+        merged_blocks = [
+            tti_block
+            for tti_block in ["\n".join(lines), "\n".join(lsp_lines), atlas_block, memory_block]
+            if tti_block.strip()
+        ]
         merged_text = "\n\n".join(merged_blocks)
         if base_rules:
             return f"{base_rules}\n\n{merged_text}"

@@ -22,6 +22,8 @@ from rich.markup import escape as rich_escape
 
 from .system_prompt import build_system_prompt
 from .tool_executor import ToolExecutor
+from ..context_engine.compressor import build_memory_digest
+from ..context_engine.handoff import build_session_handoff_packet
 from ..iflow import build_iflow_request_headers, is_iflow_direct_api_url
 from ..tools.base import ToolResult
 from ..nvidia import build_nvidia_request_defaults
@@ -341,9 +343,9 @@ def validate_and_sanitize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     Validate and sanitize the API request payload to prevent JSON serialization errors.
     
     This function:
-    - Ensures all strings are properly escaped
+    - Ensures all strings can be encoded and serialized safely
     - Validates that all values are JSON-serializable
-    - Removes or fixes problematic characters
+    - Removes or fixes problematic control/unicode characters
     - Logs any issues found
     
     Args:
@@ -355,6 +357,34 @@ def validate_and_sanitize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     Raises:
         ValueError: If the payload cannot be sanitized
     """
+    def sanitize_string(value: str, path: str) -> str:
+        """Keep user/tool text intact while removing only truly unsafe characters."""
+        sanitized = ''.join(
+            char for char in value
+            if ord(char) >= 32 or char in '\n\r\t'
+        )
+
+        if sanitized != value:
+            logger.debug(f"Removed control characters from {path}")
+
+        try:
+            sanitized.encode('utf-8')
+        except UnicodeEncodeError:
+            logger.warning(f"Replaced invalid unicode characters in {path}")
+            sanitized = sanitized.encode('utf-8', errors='replace').decode('utf-8')
+
+        try:
+            json.dumps(sanitized, ensure_ascii=False)
+        except (TypeError, ValueError) as e:
+            logger.error(f"Failed to encode string at {path}: {e}")
+            sanitized = ''.join(
+                char for char in sanitized
+                if ord(char) >= 32 or char in '\n\r\t'
+            )
+            json.dumps(sanitized, ensure_ascii=False)
+
+        return sanitized
+
     def sanitize_value(value: Any, path: str = "") -> Any:
         """Recursively sanitize a value"""
         if value is None:
@@ -362,19 +392,7 @@ def validate_and_sanitize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         
         elif isinstance(value, (str, int, float, bool)):
             if isinstance(value, str):
-                # Check for unescaped quotes that might break JSON
-                # Count quotes to detect potential issues
-                quote_count = value.count('"')
-                if quote_count % 2 != 0:
-                    logger.warning(f"Unbalanced quotes in {path}: {value[:100]}...")
-                # Ensure the string doesn't contain control characters
-                try:
-                    # Test if it can be JSON-encoded
-                    json.dumps(value)
-                except (TypeError, ValueError) as e:
-                    logger.error(f"Failed to encode string at {path}: {e}")
-                    # Try to fix by removing problematic characters
-                    value = ''.join(char for char in value if ord(char) >= 32 or char in '\n\r\t')
+                value = sanitize_string(value, path)
             return value
         
         elif isinstance(value, dict):
@@ -659,10 +677,15 @@ def make_api_request_with_retry(
     for attempt in range(max_retries):
         try:
             logger.debug(f"API request attempt {attempt + 1}/{max_retries}")
-            
+
+            request_headers = dict(headers or {})
+            if stream:
+                request_headers.setdefault("Connection", "keep-alive")
+                request_headers.setdefault("Cache-Control", "no-cache")
+
             response = requests.post(
                 url,
-                headers=headers,
+                headers=request_headers,
                 json=sanitized_payload,
                 stream=stream,
                 timeout=timeout
@@ -844,6 +867,7 @@ class ReverieAgent:
         
         # Conversation history
         self.messages: List[Dict] = []
+        self._auto_context_rotation_active = False
         
         # Operation history and rollback support
         self.operation_history = operation_history
@@ -1040,7 +1064,14 @@ class ReverieAgent:
         base_url = str(self.base_url or "").strip().lower()
         if "/chat/completions" not in base_url:
             return False
-        return "portal.qwen.ai" in base_url or "dashscope.aliyuncs.com" in base_url
+        return any(
+            host in base_url
+            for host in (
+                "portal.qwen.ai",
+                "dashscope.aliyuncs.com",
+                "dashscope-intl.aliyuncs.com",
+            )
+        )
 
     def _is_nvidia_request(self) -> bool:
         """Whether current request-provider config targets the NVIDIA endpoint."""
@@ -1189,7 +1220,7 @@ class ReverieAgent:
 
         return payload
 
-    def _prepare_request_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def _prepare_request_payload(self, payload: Dict[str, Any], session_id: str = "default") -> Dict[str, Any]:
         """Prepare request-provider payload for generic API, Qwen direct API, or iFlow direct API."""
         prepared = dict(payload)
         if isinstance(prepared.get("messages"), list):
@@ -1199,12 +1230,14 @@ class ReverieAgent:
             return prepared
 
         if self._is_qwencode_direct_request():
-            if bool(prepared.get("stream")):
-                stream_options = prepared.get("stream_options")
-                if not isinstance(stream_options, dict):
-                    stream_options = {}
-                    prepared["stream_options"] = stream_options
-                stream_options["include_usage"] = True
+            from ..qwencode import apply_qwencode_request_defaults
+
+            prepared = apply_qwencode_request_defaults(
+                prepared,
+                session_id=session_id,
+                user_prompt_id=f"reverie-{session_id}-{uuid.uuid4().hex[:12]}",
+                thinking_mode=self.thinking_mode,
+            )
 
             tools = prepared.get("tools")
             if not isinstance(tools, list) or not tools:
@@ -1283,34 +1316,49 @@ class ReverieAgent:
 
     def _iter_sse_data_strings(self, response) -> Generator[str, None, None]:
         """Yield decoded SSE data payloads from an HTTP streaming response."""
+        import requests
+
         byte_decoder = codecs.getincrementaldecoder("utf-8")()
         line_buffer = ""
+        saw_payload = False
+        stream_interrupted = False
 
-        for chunk in response.iter_content(chunk_size=1024):
-            if not chunk:
-                continue
-
-            try:
-                text_part = byte_decoder.decode(chunk)
-            except Exception:
-                text_part = chunk.decode("utf-8", errors="replace")
-
-            line_buffer += text_part
-            lines = line_buffer.split("\n")
-            line_buffer = lines[-1]
-
-            for line in lines[:-1]:
-                stripped = line.rstrip()
-                if not stripped:
-                    continue
-                if not stripped.startswith("data:"):
+        try:
+            for chunk in response.iter_content(chunk_size=1024):
+                if not chunk:
                     continue
 
-                data_str = stripped[5:].lstrip()
-                if data_str.strip() == "[DONE]":
-                    return
-                if data_str:
-                    yield data_str
+                try:
+                    text_part = byte_decoder.decode(chunk)
+                except Exception:
+                    text_part = chunk.decode("utf-8", errors="replace")
+
+                line_buffer += text_part
+                lines = line_buffer.split("\n")
+                line_buffer = lines[-1]
+
+                for line in lines[:-1]:
+                    stripped = line.rstrip()
+                    if not stripped:
+                        continue
+                    if not stripped.startswith("data:"):
+                        continue
+
+                    data_str = stripped[5:].lstrip()
+                    if data_str.strip() == "[DONE]":
+                        return
+                    if data_str:
+                        saw_payload = True
+                        yield data_str
+        except requests.exceptions.RequestException as exc:
+            # Some upstream SSE implementations close the socket without a final
+            # chunk terminator. If we already received payload data, treat that
+            # as an incomplete-but-usable stream instead of failing the turn.
+            if saw_payload or line_buffer.strip():
+                stream_interrupted = True
+                logger.warning("Streaming response ended prematurely after partial payload: %s", exc)
+            else:
+                raise
 
         try:
             line_buffer += byte_decoder.decode(b"", final=True)
@@ -1320,7 +1368,11 @@ class ReverieAgent:
         if line_buffer.strip().startswith("data:"):
             data_str = line_buffer.strip()[5:].lstrip()
             if data_str and data_str != "[DONE]":
+                saw_payload = True
                 yield data_str
+
+        if stream_interrupted and not saw_payload:
+            logger.warning("Streaming response ended prematurely before any usable SSE payload was decoded")
 
     def _ensure_stream_tool_call(self, collected_tool_calls: List[Dict[str, Any]], index: int) -> Dict[str, Any]:
         """Ensure a mutable tool-call slot exists for stream assembly."""
@@ -1412,13 +1464,14 @@ class ReverieAgent:
         """Process streaming responses for native Gemini CLI / Codex providers."""
         import requests
 
-        messages = _sanitize_messages_for_relay(self._build_messages())
         tools = self.tool_executor.get_tool_schemas(mode=self.mode)
 
         max_continuations = 3
         continuation_count = 0
 
         while True:
+            self._check_and_compress_context(session_id=session_id)
+            messages = _sanitize_messages_for_relay(self._build_messages())
             parser_state: Dict[str, Any] = {}
 
             if provider_name == "gemini-cli":
@@ -1513,100 +1566,105 @@ class ReverieAgent:
                 raise
 
             collected_content = ""
+            collected_thinking = ""
             collected_tool_calls: List[Dict[str, Any]] = []
             finish_reason = None
             thinking_started = False
             stream_buffer = ""
             token_to_hide = "//END//"
+            try:
+                for data_str in self._iter_sse_data_strings(response):
+                    if provider_name == "codex":
+                        from ..codex import parse_codex_sse_event
 
-            for data_str in self._iter_sse_data_strings(response):
-                if provider_name == "codex":
-                    from ..codex import parse_codex_sse_event
+                        events, parser_state = parse_codex_sse_event(data_str, parser_state)
+                    else:
+                        events = parse_events(data_str)
 
-                    events, parser_state = parse_codex_sse_event(data_str, parser_state)
-                else:
-                    events = parse_events(data_str)
+                    for event in events:
+                        event_type = str(event.get("type", "")).strip().lower()
 
-                for event in events:
-                    event_type = str(event.get("type", "")).strip().lower()
-
-                    if event_type == "reasoning":
-                        reasoning_content = str(event.get("text", "") or "")
-                        if reasoning_content:
-                            if not thinking_started:
-                                yield THINKING_START_MARKER
-                                thinking_started = True
-                            yield reasoning_content
-                        continue
-
-                    if event_type == "content":
-                        content = str(event.get("text", "") or "")
-                        if not content:
+                        if event_type == "reasoning":
+                            reasoning_content = str(event.get("text", "") or "")
+                            if reasoning_content:
+                                collected_thinking += reasoning_content
+                                if not thinking_started:
+                                    yield THINKING_START_MARKER
+                                    thinking_started = True
+                                yield reasoning_content
                             continue
 
-                        if thinking_started:
-                            yield THINKING_END_MARKER
-                            thinking_started = False
+                        if event_type == "content":
+                            content = str(event.get("text", "") or "")
+                            if not content:
+                                continue
 
-                        collected_content += content
-                        stream_buffer += content
+                            if thinking_started:
+                                yield THINKING_END_MARKER
+                                thinking_started = False
 
-                        if token_to_hide in stream_buffer:
-                            parts = stream_buffer.split(token_to_hide)
-                            if parts[0]:
-                                yield parts[0]
-                            stream_buffer = "".join(parts[1:])
+                            collected_content += content
+                            stream_buffer += content
 
-                        partial_match_len = 0
-                        for i in range(1, len(token_to_hide)):
-                            if len(stream_buffer) >= i:
-                                suffix = stream_buffer[-i:]
-                                if token_to_hide.startswith(suffix):
-                                    partial_match_len = i
+                            if token_to_hide in stream_buffer:
+                                parts = stream_buffer.split(token_to_hide)
+                                if parts[0]:
+                                    yield parts[0]
+                                stream_buffer = "".join(parts[1:])
 
-                        if partial_match_len > 0:
-                            to_yield = stream_buffer[:-partial_match_len]
-                            stream_buffer = stream_buffer[-partial_match_len:]
-                            if to_yield:
-                                yield to_yield
-                        else:
-                            if stream_buffer:
-                                yield stream_buffer
-                            stream_buffer = ""
-                        continue
+                            partial_match_len = 0
+                            for i in range(1, len(token_to_hide)):
+                                if len(stream_buffer) >= i:
+                                    suffix = stream_buffer[-i:]
+                                    if token_to_hide.startswith(suffix):
+                                        partial_match_len = i
 
-                    if event_type == "tool_call":
-                        index = int(event.get("index", 0) or 0)
-                        tool_call = self._ensure_stream_tool_call(collected_tool_calls, index)
-                        tool_call["id"] = str(event.get("id", "")).strip() or tool_call["id"]
-                        tool_call["function"]["name"] = str(event.get("name", "")).strip() or tool_call["function"]["name"]
-                        tool_call["function"]["arguments"] = str(event.get("arguments", "") or "")
-                        tool_call["thought_signature"] = str(event.get("thought_signature", "") or "").strip() or tool_call.get("thought_signature", "")
-                        continue
+                            if partial_match_len > 0:
+                                to_yield = stream_buffer[:-partial_match_len]
+                                stream_buffer = stream_buffer[-partial_match_len:]
+                                if to_yield:
+                                    yield to_yield
+                            else:
+                                if stream_buffer:
+                                    yield stream_buffer
+                                stream_buffer = ""
+                            continue
 
-                    if event_type == "tool_call_start":
-                        index = int(event.get("index", 0) or 0)
-                        tool_call = self._ensure_stream_tool_call(collected_tool_calls, index)
-                        tool_call["id"] = str(event.get("id", "")).strip() or tool_call["id"]
-                        tool_call["function"]["name"] = str(event.get("name", "")).strip() or tool_call["function"]["name"]
-                        tool_call["thought_signature"] = str(event.get("thought_signature", "") or "").strip() or tool_call.get("thought_signature", "")
-                        continue
+                        if event_type == "tool_call":
+                            index = int(event.get("index", 0) or 0)
+                            tool_call = self._ensure_stream_tool_call(collected_tool_calls, index)
+                            tool_call["id"] = str(event.get("id", "")).strip() or tool_call["id"]
+                            tool_call["function"]["name"] = str(event.get("name", "")).strip() or tool_call["function"]["name"]
+                            tool_call["function"]["arguments"] = str(event.get("arguments", "") or "")
+                            tool_call["thought_signature"] = str(event.get("thought_signature", "") or "").strip() or tool_call.get("thought_signature", "")
+                            continue
 
-                    if event_type == "tool_call_args":
-                        index = int(event.get("index", 0) or 0)
-                        tool_call = self._ensure_stream_tool_call(collected_tool_calls, index)
-                        tool_call["function"]["arguments"] += str(event.get("arguments", "") or "")
-                        tool_call["thought_signature"] = str(event.get("thought_signature", "") or "").strip() or tool_call.get("thought_signature", "")
-                        continue
+                        if event_type == "tool_call_start":
+                            index = int(event.get("index", 0) or 0)
+                            tool_call = self._ensure_stream_tool_call(collected_tool_calls, index)
+                            tool_call["id"] = str(event.get("id", "")).strip() or tool_call["id"]
+                            tool_call["function"]["name"] = str(event.get("name", "")).strip() or tool_call["function"]["name"]
+                            tool_call["thought_signature"] = str(event.get("thought_signature", "") or "").strip() or tool_call.get("thought_signature", "")
+                            continue
 
-                    if event_type == "finish":
-                        finish_reason = str(event.get("reason", "") or "") or finish_reason
+                        if event_type == "tool_call_args":
+                            index = int(event.get("index", 0) or 0)
+                            tool_call = self._ensure_stream_tool_call(collected_tool_calls, index)
+                            tool_call["function"]["arguments"] += str(event.get("arguments", "") or "")
+                            tool_call["thought_signature"] = str(event.get("thought_signature", "") or "").strip() or tool_call.get("thought_signature", "")
+                            continue
 
-            if thinking_started:
-                yield THINKING_END_MARKER
-
-            if stream_buffer and token_to_hide not in stream_buffer:
-                yield stream_buffer
+                        if event_type == "finish":
+                            finish_reason = str(event.get("reason", "") or "") or finish_reason
+            finally:
+                if thinking_started:
+                    yield THINKING_END_MARKER
+                if stream_buffer and token_to_hide not in stream_buffer:
+                    yield stream_buffer
+                try:
+                    response.close()
+                except Exception:
+                    logger.debug("Failed to close streaming response", exc_info=True)
 
             if collected_tool_calls:
                 _sanitize_tool_calls(collected_tool_calls)
@@ -1761,8 +1819,8 @@ class ReverieAgent:
                 checkpoint_id=self.current_checkpoint_id
             )
         
-        # Check for context threshold (60%) and trigger compression if needed
-        self._check_and_compress_context()
+        # Check for context threshold and auto-rotate if the session is too large
+        self._check_and_compress_context(session_id=session_id)
         
         # Call model with tools
         try:
@@ -1795,13 +1853,14 @@ class ReverieAgent:
     
     def _process_streaming_openai_sdk(self, session_id: str = "default") -> Generator[str, None, None]:
         """Process with streaming response using OpenAI SDK"""
-        messages = self._build_messages()
         tools = self.tool_executor.get_tool_schemas(mode=self.mode)
         
         max_continuations = 3  # Safety limit to prevent infinite loops
         continuation_count = 0
         
         while True:
+            self._check_and_compress_context(session_id=session_id)
+            messages = self._build_messages()
             # For OpenAI-compatible SDK calls, include thinking flags via extra_body when applicable
             extra_body = self._openai_extra_body_for_thinking()
             model_for_sdk = self.model
@@ -2000,13 +2059,14 @@ class ReverieAgent:
         """Process with streaming response using requests library"""
         import requests
         
-        messages = self._build_messages()
         tools = self.tool_executor.get_tool_schemas(mode=self.mode)
         
         max_continuations = 3  # Safety limit to prevent infinite loops
         continuation_count = 0
         
         while True:
+            self._check_and_compress_context(session_id=session_id)
+            messages = self._build_messages()
             # Build payload
             payload = {
                 "model": self.model,
@@ -2017,7 +2077,7 @@ class ReverieAgent:
             # Add tools if available
             if tools:
                 payload["tools"] = tools
-            payload = self._prepare_request_payload(payload)
+            payload = self._prepare_request_payload(payload, session_id=session_id)
             headers = self._build_request_headers(stream=True)
             
             # Make request with retry logic
@@ -2048,95 +2108,120 @@ class ReverieAgent:
             token_to_hide = "//END//"
             provider_label = "iFlow API" if self._is_iflow_direct_request() else "Request provider"
 
-            for data_str in self._iter_sse_data_strings(response):
+            try:
+                for data_str in self._iter_sse_data_strings(response):
+                    try:
+                        chunk_data = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        continue
+
+                    _raise_for_wrapped_api_error(chunk_data, provider_label=provider_label)
+                    normalized_chunk = _unwrap_openai_compatible_payload(chunk_data) or chunk_data
+
+                    choices = normalized_chunk.get("choices", [])
+                    if not choices:
+                        continue
+
+                    choice = choices[0]
+                    finish_reason = choice.get("finish_reason") or finish_reason
+
+                    delta = choice.get("delta") or {}
+                    if not isinstance(delta, dict):
+                        delta = {}
+
+                    reasoning_content = _extract_text_from_candidates(
+                        delta,
+                        "reasoning_content",
+                        "thinking",
+                        "reasoning",
+                    )
+                    if not reasoning_content:
+                        reasoning_content = _extract_text_from_candidates(
+                            choice,
+                            "reasoning_content",
+                            "thinking",
+                            "reasoning",
+                        )
+                    if not reasoning_content:
+                        reasoning_content = _extract_text_from_candidates(
+                            choice.get("message") if isinstance(choice, dict) else None,
+                            "reasoning_content",
+                            "thinking",
+                            "reasoning",
+                        )
+                    if reasoning_content:
+                        collected_thinking += reasoning_content
+                        if not thinking_started:
+                            yield THINKING_START_MARKER
+                            thinking_started = True
+                        yield reasoning_content
+
+                    content = _extract_text_from_candidates(delta, "content")
+                    if not content:
+                        content = _extract_text_from_candidates(
+                            choice.get("message") if isinstance(choice, dict) else None,
+                            "content",
+                        )
+                    if content:
+                        if thinking_started:
+                            yield THINKING_END_MARKER
+                            thinking_started = False
+
+                        collected_content += content
+                        stream_buffer += content
+
+                        if token_to_hide in stream_buffer:
+                            parts = stream_buffer.split(token_to_hide)
+                            if parts[0]:
+                                yield parts[0]
+                            stream_buffer = "".join(parts[1:])
+
+                        partial_match_len = 0
+                        for i in range(1, len(token_to_hide)):
+                            if len(stream_buffer) >= i:
+                                suffix = stream_buffer[-i:]
+                                if token_to_hide.startswith(suffix):
+                                    partial_match_len = i
+
+                        if partial_match_len > 0:
+                            to_yield = stream_buffer[:-partial_match_len]
+                            stream_buffer = stream_buffer[-partial_match_len:]
+                            if to_yield:
+                                yield to_yield
+                        else:
+                            if stream_buffer:
+                                yield stream_buffer
+                            stream_buffer = ""
+
+                    tool_calls_delta = delta.get("tool_calls", [])
+                    if tool_calls_delta:
+                        for tool_call_delta in tool_calls_delta:
+                            index = int(tool_call_delta.get("index", 0) or 0)
+
+                            if index >= len(collected_tool_calls):
+                                collected_tool_calls.append(
+                                    {
+                                        "id": tool_call_delta.get("id", ""),
+                                        "type": "function",
+                                        "function": {
+                                            "name": "",
+                                            "arguments": "",
+                                        },
+                                    }
+                                )
+
+                            function_delta = tool_call_delta.get("function", {})
+                            if "name" in function_delta:
+                                collected_tool_calls[index]["function"]["name"] = function_delta["name"]
+                            if "arguments" in function_delta:
+                                collected_tool_calls[index]["function"]["arguments"] += function_delta["arguments"]
+                            if "id" in tool_call_delta:
+                                collected_tool_calls[index]["id"] = tool_call_delta["id"]
+            finally:
                 try:
-                    chunk_data = json.loads(data_str)
-                except json.JSONDecodeError:
-                    continue
-
-                _raise_for_wrapped_api_error(chunk_data, provider_label=provider_label)
-                normalized_chunk = _unwrap_openai_compatible_payload(chunk_data) or chunk_data
-
-                choices = normalized_chunk.get("choices", [])
-                if not choices:
-                    continue
-
-                choice = choices[0]
-                finish_reason = choice.get("finish_reason") or finish_reason
-
-                delta = choice.get("delta") or {}
-                if not isinstance(delta, dict):
-                    continue
-
-                reasoning_content = _extract_text_from_candidates(
-                    delta,
-                    "reasoning_content",
-                    "thinking",
-                    "reasoning",
-                )
-                if reasoning_content:
-                    collected_thinking += reasoning_content
-                    if not thinking_started:
-                        yield THINKING_START_MARKER
-                        thinking_started = True
-                    yield reasoning_content
-
-                content = _extract_text_from_candidates(delta, "content")
-                if content:
-                    if thinking_started:
-                        yield THINKING_END_MARKER
-                        thinking_started = False
-
-                    collected_content += content
-                    stream_buffer += content
-
-                    if token_to_hide in stream_buffer:
-                        parts = stream_buffer.split(token_to_hide)
-                        if parts[0]:
-                            yield parts[0]
-                        stream_buffer = "".join(parts[1:])
-
-                    partial_match_len = 0
-                    for i in range(1, len(token_to_hide)):
-                        if len(stream_buffer) >= i:
-                            suffix = stream_buffer[-i:]
-                            if token_to_hide.startswith(suffix):
-                                partial_match_len = i
-
-                    if partial_match_len > 0:
-                        to_yield = stream_buffer[:-partial_match_len]
-                        stream_buffer = stream_buffer[-partial_match_len:]
-                        if to_yield:
-                            yield to_yield
-                    else:
-                        if stream_buffer:
-                            yield stream_buffer
-                        stream_buffer = ""
-
-                tool_calls_delta = delta.get("tool_calls", [])
-                if tool_calls_delta:
-                    for tool_call_delta in tool_calls_delta:
-                        index = int(tool_call_delta.get("index", 0) or 0)
-
-                        if index >= len(collected_tool_calls):
-                            collected_tool_calls.append(
-                                {
-                                    "id": tool_call_delta.get("id", ""),
-                                    "type": "function",
-                                    "function": {
-                                        "name": "",
-                                        "arguments": "",
-                                    },
-                                }
-                            )
-
-                        function_delta = tool_call_delta.get("function", {})
-                        if "name" in function_delta:
-                            collected_tool_calls[index]["function"]["name"] = function_delta["name"]
-                        if "arguments" in function_delta:
-                            collected_tool_calls[index]["function"]["arguments"] += function_delta["arguments"]
-                        if "id" in tool_call_delta:
-                            collected_tool_calls[index]["id"] = tool_call_delta["id"]
+                    response.close()
+                except Exception:
+                    logger.debug("Failed to close streaming response", exc_info=True)
             
             # If thinking was streamed, emit end marker
             if thinking_started:
@@ -2193,16 +2278,15 @@ class ReverieAgent:
     
     def _process_streaming_anthropic(self, session_id: str = "default") -> Generator[str, None, None]:
         """Process with streaming response using Anthropic SDK"""
-        messages = self._build_messages()
         tools = self.tool_executor.get_tool_schemas(mode=self.mode)
         
         max_continuations = 3
         continuation_count = 0
         
-        # Convert messages to Anthropic format
-        system_message, anthropic_messages = _convert_messages_to_anthropic_format(messages)
-        
         while True:
+            self._check_and_compress_context(session_id=session_id)
+            messages = self._build_messages()
+            system_message, anthropic_messages = _convert_messages_to_anthropic_format(messages)
             # Build kwargs for Anthropic API
             kwargs = {
                 "model": self.model,
@@ -2399,12 +2483,13 @@ class ReverieAgent:
     
     def _process_non_streaming_openai_sdk(self, session_id: str = "default") -> str:
         """Process without streaming using OpenAI SDK"""
-        messages = self._build_messages()
         tools = self.tool_executor.get_tool_schemas(mode=self.mode)
         
         all_content = []
         
         while True:
+            self._check_and_compress_context(session_id=session_id)
+            messages = self._build_messages()
             # For OpenAI-compatible SDK calls, include thinking flags via extra_body when applicable
             extra_body = self._openai_extra_body_for_thinking()
             model_for_sdk = self.model
@@ -2534,12 +2619,13 @@ class ReverieAgent:
         """Process without streaming using requests library"""
         import requests
         
-        messages = self._build_messages()
         tools = self.tool_executor.get_tool_schemas(mode=self.mode)
         
         all_content = []
         
         while True:
+            self._check_and_compress_context(session_id=session_id)
+            messages = self._build_messages()
             # Build payload
             payload = {
                 "model": self.model,
@@ -2550,7 +2636,7 @@ class ReverieAgent:
             # Add tools if available
             if tools:
                 payload["tools"] = tools
-            payload = self._prepare_request_payload(payload)
+            payload = self._prepare_request_payload(payload, session_id=session_id)
             headers = self._build_request_headers(stream=False)
             
             # Make request with retry logic
@@ -2670,15 +2756,14 @@ class ReverieAgent:
     
     def _process_non_streaming_anthropic(self, session_id: str = "default") -> str:
         """Process without streaming using Anthropic SDK"""
-        messages = self._build_messages()
         tools = self.tool_executor.get_tool_schemas(mode=self.mode)
         
         all_content = []
         
-        # Convert messages to Anthropic format
-        system_message, anthropic_messages = _convert_messages_to_anthropic_format(messages)
-        
         while True:
+            self._check_and_compress_context(session_id=session_id)
+            messages = self._build_messages()
+            system_message, anthropic_messages = _convert_messages_to_anthropic_format(messages)
             # Build kwargs for Anthropic API
             kwargs = {
                 "model": self.model,
@@ -2797,141 +2882,175 @@ class ReverieAgent:
     def set_history(self, messages: List[Dict]) -> None:
         """Set conversation history (for session restore)"""
         self.messages = messages.copy()
-    
-    def _check_and_compress_context(self) -> None:
-        """
-        Check context usage and trigger appropriate action.
-        
-        - At 80% threshold: Trigger session rotation with working memory
-        - At 60% threshold: Trigger in-session compression (optional)
-        """
-        # Get max tokens from config or active model
+
+    def _resolve_max_context_tokens(self) -> int:
+        """Resolve the active model context window from runtime configuration."""
         max_tokens = 128000
         config_manager = self.tool_executor.context.get('config_manager')
-        
+
         if config_manager:
             model_config = config_manager.get_active_model()
             if model_config and model_config.max_context_tokens:
-                max_tokens = model_config.max_context_tokens
-            else:
-                config = config_manager.load()
-                max_tokens = getattr(config, 'max_context_tokens', 128000)
-        elif hasattr(self, 'config'):
-            max_tokens = getattr(self.config, 'max_context_tokens', 128000)
-        
-        # Calculate current token estimate
+                return model_config.max_context_tokens
+            config = config_manager.load()
+            return getattr(config, 'max_context_tokens', max_tokens)
+
+        if hasattr(self, 'config'):
+            return getattr(self.config, 'max_context_tokens', max_tokens)
+
+        return max_tokens
+
+    def _latest_user_message_text(self) -> str:
+        """Return the latest user message text from the live conversation."""
+        for message in reversed(self.messages):
+            if str(message.get("role", "") or "").strip().lower() != "user":
+                continue
+            text = _coerce_text_fragments(message.get("content"))
+            if text:
+                return text
+        return ""
+
+    def _workspace_memory_for_rotation(self, latest_user_message: str) -> str:
+        """Fetch a compact workspace-memory hint for auto-rotation handoff."""
+        memory_indexer = self.tool_executor.context.get("memory_indexer")
+        if not memory_indexer:
+            return ""
+        try:
+            return memory_indexer.build_workspace_memory_summary(
+                query=latest_user_message or None,
+                max_fragments=6,
+                max_chars=2400,
+            )
+        except Exception:
+            logger.debug("Workspace memory fetch failed during auto-rotation", exc_info=True)
+            return ""
+    
+    def _check_and_compress_context(self, session_id: str = "default") -> None:
+        """
+        Automatically rotate to a fresh session when the context is too large.
+
+        The new session is prepared with a model-authored handoff and the active
+        user request is carried forward automatically, so the current turn keeps
+        running without waiting for a manual `continue`.
+        """
+        if self._auto_context_rotation_active:
+            return
+
+        max_tokens = self._resolve_max_context_tokens()
+        if max_tokens <= 0:
+            return
+
         token_estimate = self.get_token_estimate()
-        
-        # Check if we've exceeded 80% threshold - trigger session rotation
         rotation_threshold = max_tokens * 0.8
         if token_estimate >= rotation_threshold:
-            self._handle_session_rotation(token_estimate, max_tokens)
-            return
-        
-        # Check if we've exceeded 60% threshold - trigger in-session compression
-        compression_threshold = max_tokens * 0.6
-        if token_estimate >= compression_threshold:
-            self._handle_in_session_compression(token_estimate, max_tokens)
+            self._handle_session_rotation(token_estimate, max_tokens, session_id=session_id)
     
-    def _handle_session_rotation(self, current_tokens: int, max_tokens: int) -> None:
+    def _handle_session_rotation(self, current_tokens: int, max_tokens: int, session_id: str = "default") -> None:
         """
         Handle session rotation at 80% threshold.
-        
-        Creates a new session with working memory injection.
+
+        Generates a model-authored handoff packet, creates a fresh session, and
+        keeps the active request alive inside the new context automatically.
         """
         session_manager = self.tool_executor.context.get('session_manager')
         
         if not session_manager:
-            # Fallback to in-session compression if no session manager
-            self._handle_in_session_compression(current_tokens, max_tokens)
             return
         
-        # Generate working memory summary
-        working_memory = session_manager.get_working_memory_summary()
-        
-        # Rotate to new session
-        new_session = session_manager.rotate_session(
-            working_memory=working_memory,
-            reason=f"Token usage reached {current_tokens:,} / {max_tokens:,} ({current_tokens/max_tokens*100:.1f}%)"
+        latest_user_message = self._latest_user_message_text()
+        workspace_memory = self._workspace_memory_for_rotation(latest_user_message)
+        rotation_reason = (
+            f"Token usage reached {current_tokens:,} / {max_tokens:,} "
+            f"({current_tokens/max_tokens*100:.1f}%)"
         )
-        
-        # Clear current messages (new session starts fresh with working memory)
-        self.messages.clear()
-        
-        # Add rotation notification
-        rotation_note = {
-            "role": "system",
-            "content": (
-                f"[Context Engine] Session rotated — new session created. "
-                f"Previous context has been summarized and carried over. "
-                f"Session ID: {new_session.id}"
-            )
-        }
-        self.messages.append(rotation_note)
-        
-        print(f"\n[Context Engine] Session rotated — new session created. Previous context has been summarized and carried over.\n")
-    
-    def _handle_in_session_compression(self, current_tokens: int, max_tokens: int) -> None:
-        """
-        Handle in-session compression at 60% threshold.
-        
-        Compresses messages within the same session.
-        """
-        # Import here to avoid circular imports
-        from ..context_engine.compressor import ContextCompressor
-        from ..config import get_project_data_dir
-        
-        # Get session ID for checkpointing
-        session_manager = self.tool_executor.context.get('session_manager')
-        session_id = "default"
-        if session_manager and session_manager.get_current_session():
-            session_id = session_manager.get_current_session().id
-        
-        # Initialize compressor
-        project_data_dir = get_project_data_dir(self.project_root)
-        compressor = ContextCompressor(project_data_dir)
-        
-        # Build full message list including system prompt
-        full_messages = [{"role": "system", "content": self.system_prompt}]
-        full_messages.extend(self.messages)
-        
-        # Compress context
+
+        self._auto_context_rotation_active = True
         try:
-            compressed_messages = compressor.compress(
-                messages=full_messages,
-                client=self._client,
-                model=self.model,
-                session_id=session_id,
-                provider=self.provider,
-                base_url=self.base_url,
-                api_key=self.api_key
+            handoff_packet = None
+            working_memory = ""
+
+            try:
+                handoff = build_session_handoff_packet(
+                    messages=self._build_messages(),
+                    client=self._client,
+                    model=self.model,
+                    provider=self.provider,
+                    session_id=session_id,
+                    current_tokens=current_tokens,
+                    max_tokens=max_tokens,
+                    base_url=self.base_url,
+                    api_key=self.api_key,
+                    custom_headers=self.custom_headers,
+                    workspace_memory=workspace_memory,
+                    latest_user_request=latest_user_message,
+                    reason=rotation_reason,
+                )
+                handoff_packet = handoff.to_dict()
+                working_memory = handoff.carryover_text
+            except Exception:
+                logger.warning(
+                    "Automatic handoff generation failed; falling back to digest-based carryover",
+                    exc_info=True,
+                )
+                working_memory = build_memory_digest(self.messages)
+                handoff_packet = {
+                    "schema_version": 1,
+                    "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                    "provider": self.provider,
+                    "model": self.model,
+                    "session_id": session_id,
+                    "token_estimate": current_tokens,
+                    "max_tokens": max_tokens,
+                    "usage_ratio": (float(current_tokens) / float(max_tokens)) if max_tokens else 0.0,
+                    "latest_user_request": latest_user_message,
+                    "carryover_text": working_memory,
+                    "data": {
+                        "latest_user_request": latest_user_message,
+                        "current_state": [],
+                        "completed_work": [],
+                        "open_problems": [],
+                        "critical_constraints": [],
+                        "important_files": [],
+                        "verification_state": [],
+                        "next_actions": [],
+                        "resume_instructions": [
+                            "Continue the active task immediately without asking for a status recap.",
+                        ],
+                    },
+                }
+
+            new_session = session_manager.rotate_session(
+                working_memory=working_memory,
+                reason=rotation_reason,
+                handoff_packet=handoff_packet,
             )
-            
-            # Update messages (exclude system prompt which is handled separately)
-            self.messages = compressed_messages[1:]  # Skip system prompt
-            
-            # Add a notification about the compression
-            compression_note = {
-                "role": "system",
-                "content": f"[Context Engine: Session compressed from {current_tokens:,} to {self.get_token_estimate():,} tokens to maintain memory persistence]"
-            }
-            self.messages.insert(0, compression_note)
-            
-        except Exception as e:
-            # If compression fails, add a warning but continue
-            warning_note = {
-                "role": "system", 
-                "content": f"[Context Engine Warning: Auto-compression failed - {str(e)}]"
-            }
-            self.messages.insert(0, warning_note)
+
+            self.messages = list(new_session.messages)
+            if latest_user_message:
+                self.messages.append({"role": "user", "content": latest_user_message})
+
+            try:
+                session_manager.update_messages(self.messages)
+            except Exception:
+                logger.debug("Failed to persist rotated session messages", exc_info=True)
+
+            print(
+                "\n[Context Engine] Auto handoff complete - fresh session prepared with model-authored carryover. "
+                "Continuing the active request without waiting for user input.\n"
+            )
+        finally:
+            self._auto_context_rotation_active = False
     
     def get_token_estimate(self) -> int:
         """Estimate tokens in current conversation"""
         total_chars = len(self.system_prompt)
         for msg in self.messages:
-            content = msg.get('content', '')
+            content = _coerce_text_fragments(msg.get('content'))
             if content:
                 total_chars += len(content)
+            reasoning_content = _coerce_text_fragments(msg.get('reasoning_content'))
+            if reasoning_content:
+                total_chars += len(reasoning_content)
         
         # Rough estimate: 1 token ≈ 4 characters
         return total_chars // 4

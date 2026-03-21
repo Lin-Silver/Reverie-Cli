@@ -1,7 +1,7 @@
 
 from pathlib import Path
 from typing import List
-from .config import get_app_root
+from .config import get_app_root, get_project_data_dir
 
 
 class RulesManager:
@@ -10,9 +10,12 @@ class RulesManager:
     def __init__(self, project_root: Path):
         self.project_root = project_root
         self.app_root = get_app_root()
-        self.reverie_dir = self.app_root / '.reverie'
-        self.rules_txt_path = self.reverie_dir / 'rules.txt'
-        self.rules_json_path = self.reverie_dir / 'rules.json'  # For backward compatibility
+        self.project_data_dir = get_project_data_dir(project_root)
+        self.rules_txt_path = self.project_data_dir / 'rules.txt'
+        self.rules_json_path = self.project_data_dir / 'rules.json'  # For backward compatibility
+        self.legacy_reverie_dir = self.app_root / '.reverie'
+        self.legacy_rules_txt_path = self.legacy_reverie_dir / 'rules.txt'
+        self.legacy_rules_json_path = self.legacy_reverie_dir / 'rules.json'
         self._rules: List[str] = []
         self._load()
     
@@ -26,6 +29,13 @@ class RulesManager:
                     self._rules = [line.strip() for line in f.readlines() if line.strip()]
             except Exception:
                 self._rules = []
+        elif self.legacy_rules_txt_path.exists():
+            try:
+                with open(self.legacy_rules_txt_path, 'r', encoding='utf-8') as f:
+                    self._rules = [line.strip() for line in f.readlines() if line.strip()]
+                self.save()
+            except Exception:
+                self._rules = []
         # Fallback to rules.json for backward compatibility
         elif self.rules_json_path.exists():
             try:
@@ -37,6 +47,18 @@ class RulesManager:
                     else:
                         self._rules = []
                 # Migrate to txt format
+                self._migrate_to_txt()
+            except Exception:
+                self._rules = []
+        elif self.legacy_rules_json_path.exists():
+            try:
+                import json
+                with open(self.legacy_rules_json_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        self._rules = [str(r) for r in data]
+                    else:
+                        self._rules = []
                 self._migrate_to_txt()
             except Exception:
                 self._rules = []
@@ -57,7 +79,7 @@ class RulesManager:
     def _create_example_file(self) -> None:
         """Create example rules.txt file with comments"""
         try:
-            self.reverie_dir.mkdir(parents=True, exist_ok=True)
+            self.project_data_dir.mkdir(parents=True, exist_ok=True)
             example_content = """# Reverie Custom Rules
 # Each line is a separate rule that will be added to the system prompt
 # Lines starting with # are comments and will be ignored
@@ -77,7 +99,7 @@ class RulesManager:
             
     def save(self) -> None:
         """Save rules to txt file"""
-        self.reverie_dir.mkdir(parents=True, exist_ok=True)
+        self.project_data_dir.mkdir(parents=True, exist_ok=True)
         with open(self.rules_txt_path, 'w', encoding='utf-8') as f:
             for rule in self._rules:
                 f.write(rule + '\n')

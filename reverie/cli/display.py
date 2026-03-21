@@ -226,7 +226,7 @@ class DisplayComponents:
         content = Text.from_markup(
             f"[italic {self.theme.THINKING_SOFT}]{self.deco.THOUGHT_BUBBLE}[/italic {self.theme.THINKING_SOFT}] "
             f"[italic bold {self.theme.THINKING_MEDIUM}]Reasoning Trace{escape(model_suffix)}[/italic bold {self.theme.THINKING_MEDIUM}]\n"
-            f"[{self.theme.TEXT_DIM}]Live reasoning notes are shown line by line and then flow back into the final answer.[/{self.theme.TEXT_DIM}]"
+            f"[{self.theme.TEXT_DIM}]Reasoning notes are cleaned for terminal display and streamed progressively before the final answer.[/{self.theme.TEXT_DIM}]"
         )
         self.console.print(
             Panel(

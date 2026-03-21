@@ -117,7 +117,12 @@ class BaseTool(ABC):
 
     def audit_command_event(self, event: Dict[str, Any]) -> None:
         """Persist a workspace-local command/security audit event."""
-        append_command_audit(self.get_project_root(), {"tool": self.name, **(event or {})})
+        from ..config import get_project_data_dir
+
+        append_command_audit(
+            get_project_data_dir(self.get_project_root()),
+            {"tool": self.name, **(event or {})},
+        )
 
     def format_workspace_violation(self, action: str, path_value: Any) -> str:
         """Return a consistent workspace-boundary rejection message."""

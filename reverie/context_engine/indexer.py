@@ -30,6 +30,7 @@ from .parsers.simple_script_parser import SimpleScriptParser
 from .parsers.lua_parser import LuaParser
 from .parsers.gdscript_parser import GDScriptParser
 from .parsers.config_parser import ConfigParser
+from ..config import get_project_data_dir
 
 
 @dataclass
@@ -191,7 +192,7 @@ class CodebaseIndexer:
         config: Optional[IndexConfig] = None
     ):
         self.project_root = Path(project_root).resolve()
-        self.cache_dir = cache_dir or (self.project_root / '.reverie' / 'context_cache')
+        self.cache_dir = cache_dir or (get_project_data_dir(self.project_root) / 'context_cache')
         self.config = config or IndexConfig()
         
         # Core data structures

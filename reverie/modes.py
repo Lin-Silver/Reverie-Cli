@@ -16,6 +16,11 @@ MODE_METADATA: Dict[str, Dict[str, object]] = {
         "description": "General-purpose engineering mode for full project delivery, testing, and verification.",
         "switchable": True,
     },
+    "reverie-atlas": {
+        "display_name": "Reverie-Atlas",
+        "description": "Deep research, master-documentation, user-confirmed planning, and slow high-quality implementation mode for complex systems.",
+        "switchable": True,
+    },
     "reverie-gamer": {
         "display_name": "Reverie-Gamer",
         "description": "Game-development mode with design, balance, asset, and level tools.",
@@ -53,6 +58,11 @@ MODE_METADATA: Dict[str, Dict[str, object]] = {
 MODE_ALIASES = {
     "reverie": "reverie",
     "default": "reverie",
+    "reverie-atlas": "reverie-atlas",
+    "atlas": "reverie-atlas",
+    "reverie deeper": "reverie-atlas",
+    "reverie-deeper": "reverie-atlas",
+    "deeper": "reverie-atlas",
     "reverie-gamer": "reverie-gamer",
     "gamer": "reverie-gamer",
     "reverie-spec-driven": "spec-driven",

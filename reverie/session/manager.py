@@ -80,6 +80,7 @@ class SessionManager:
         self.sessions_dir = self.base_dir / 'sessions'
         self.archives_dir = self.base_dir / 'archives'
         self.checkpoints_dir = self.base_dir / 'checkpoints'
+        self.handoffs_dir = self.base_dir / 'session_handoffs'
         self.state_path = self.base_dir / 'session_state.json'
 
         scope_source = self.project_root or self.base_dir
@@ -104,6 +105,7 @@ class SessionManager:
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
         self.archives_dir.mkdir(parents=True, exist_ok=True)
         self.checkpoints_dir.mkdir(parents=True, exist_ok=True)
+        self.handoffs_dir.mkdir(parents=True, exist_ok=True)
 
     def _normalize_path(self, path_value: Any) -> str:
         raw = str(path_value or '').strip()
@@ -380,7 +382,8 @@ class SessionManager:
     def rotate_session(
         self,
         working_memory: str,
-        reason: str = "Token threshold reached"
+        reason: str = "Token threshold reached",
+        handoff_packet: Optional[Dict[str, Any]] = None,
     ) -> Session:
         """
         Rotate to a new session with working memory injection.
@@ -420,10 +423,45 @@ class SessionManager:
                 'content': f"[WORKING MEMORY - Previous Session Context]\n{working_memory}\n[END WORKING MEMORY]"
             })
 
+        if handoff_packet:
+            handoff_path = self._persist_handoff_packet(
+                previous_session_id=self._current_session.id if self._current_session else None,
+                new_session_id=session_id,
+                handoff_packet=handoff_packet,
+            )
+            if handoff_path:
+                new_session.metadata['handoff_path'] = handoff_path
+
         self._current_session = new_session
         self._write_session(new_session, touch_updated_at=False)
         self._save_state(new_session.id)
         return new_session
+
+    def _persist_handoff_packet(
+        self,
+        *,
+        previous_session_id: Optional[str],
+        new_session_id: str,
+        handoff_packet: Dict[str, Any],
+    ) -> str:
+        """Persist an automatic session handoff packet under project cache state."""
+        payload = dict(handoff_packet or {})
+        payload.update(
+            {
+                'previous_session_id': previous_session_id,
+                'new_session_id': new_session_id,
+                'workspace_id': self.workspace_id,
+                'workspace_path': self.workspace_path,
+                'persisted_at': datetime.now().isoformat(),
+            }
+        )
+
+        target_path = self.handoffs_dir / f"handoff_{new_session_id}.json"
+        try:
+            self._write_json_atomic(target_path, payload)
+        except Exception:
+            return ""
+        return str(target_path)
 
     def get_working_memory_summary(self) -> str:
         """

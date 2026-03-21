@@ -1299,7 +1299,20 @@ class CommandHandler:
         selected_id = str(current_selected_id or "").strip().lower()
         for i, item in enumerate(catalog):
             model_id = str(item.get("id", ""))
-            description = f"{model_id} | {item.get('description', '')}"
+            description_parts = [model_id]
+            visibility = str(item.get("visibility", "")).strip().lower()
+            if visibility:
+                description_parts.append("hidden" if visibility == "hide" else visibility)
+            context_length = item.get("context_length")
+            if context_length:
+                try:
+                    description_parts.append(f"{int(context_length):,} ctx")
+                except (TypeError, ValueError):
+                    pass
+            item_description = str(item.get("description", "") or "").strip()
+            if item_description:
+                description_parts.append(item_description)
+            description = " | ".join(description_parts)
             models_data.append(
                 {
                     "id": str(i),
@@ -2904,7 +2917,7 @@ class CommandHandler:
         action = tokens[0].lower() if tokens else "view"
         project_root = self._get_project_root()
         tool = GameGDDManagerTool({"project_root": str(project_root)})
-        gdd_path = "docs/GDD.md"
+        gdd_path = "artifacts/GDD.md"
 
         if action in {"help", "?"}:
             self._print_game_panel(
@@ -3047,7 +3060,7 @@ class CommandHandler:
                 choices=["html", "markdown"],
             ).strip().lower()
             export_path = tokens[2] if len(tokens) > 2 else (
-                "docs/GDD.html" if export_format == "html" else ""
+                "artifacts/GDD.html" if export_format == "html" else ""
             )
             kwargs = {"action": "export", "gdd_path": gdd_path, "export_format": export_format}
             if export_path:
@@ -3270,7 +3283,7 @@ class CommandHandler:
         tokens = self._split_command_args(args)
         action = tokens[0].lower() if tokens else "view"
         tool = GameDesignOrchestratorTool({"project_root": str(self._get_project_root())})
-        blueprint_path = "docs/game_blueprint.json"
+        blueprint_path = "artifacts/game_blueprint.json"
 
         if action in {"help", "?"}:
             self._print_game_panel(
@@ -3379,7 +3392,7 @@ class CommandHandler:
             return True
 
         if action == "slice":
-            output_path = tokens[1] if len(tokens) > 1 else "docs/vertical_slice_plan.md"
+            output_path = tokens[1] if len(tokens) > 1 else "artifacts/vertical_slice_plan.md"
             result = tool.execute(
                 action="generate_vertical_slice",
                 blueprint_path=blueprint_path,
@@ -3389,7 +3402,7 @@ class CommandHandler:
             return True
 
         if action == "export":
-            output_path = tokens[1] if len(tokens) > 1 else "docs/game_blueprint.md"
+            output_path = tokens[1] if len(tokens) > 1 else "artifacts/game_blueprint.md"
             result = tool.execute(
                 action="export_markdown",
                 blueprint_path=blueprint_path,
@@ -3427,7 +3440,7 @@ class CommandHandler:
         action = tokens[0].lower() if tokens else "plan"
         tool = GameProjectScaffolderTool({"project_root": str(self._get_project_root())})
         output_dir = "."
-        blueprint_path = "docs/game_blueprint.json"
+        blueprint_path = "artifacts/game_blueprint.json"
 
         if action in {"help", "?"}:
             self._print_game_panel(
@@ -3473,7 +3486,7 @@ class CommandHandler:
             return True
 
         if action == "modules":
-            output_path = tokens[1] if len(tokens) > 1 else "docs/module_map.json"
+            output_path = tokens[1] if len(tokens) > 1 else "artifacts/module_map.json"
             result = tool.execute(
                 action="generate_module_map",
                 output_dir=output_dir,
@@ -3484,7 +3497,7 @@ class CommandHandler:
             return True
 
         if action == "pipeline":
-            output_path = tokens[1] if len(tokens) > 1 else "docs/content_pipeline.md"
+            output_path = tokens[1] if len(tokens) > 1 else "artifacts/content_pipeline.md"
             result = tool.execute(
                 action="generate_content_pipeline",
                 output_dir=output_dir,
@@ -3507,7 +3520,7 @@ class CommandHandler:
         tokens = self._split_command_args(args)
         action = tokens[0].lower() if tokens else "plan"
         tool = GamePlaytestLabTool({"project_root": str(self._get_project_root())})
-        blueprint_path = "docs/game_blueprint.json"
+        blueprint_path = "artifacts/game_blueprint.json"
 
         if action in {"help", "?"}:
             self._print_game_panel(
@@ -5598,10 +5611,10 @@ class CommandHandler:
                     
                     # Show warning if needed
                     if percentage >= 80:
-                        self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.DOT_MEDIUM} Context usage is high. Consider compression.[/{self.theme.CORAL_SOFT}]")
+                        self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.DOT_MEDIUM} Context usage is high. Automatic rotation may trigger on the next model call.[/{self.theme.CORAL_SOFT}]")
                         self.console.print()
                     elif percentage >= 60:
-                        self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Context usage is moderate. Compression may be needed soon.[/{self.theme.AMBER_GLOW}]")
+                        self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Context usage is moderate. Automatic rotation may be needed soon.[/{self.theme.AMBER_GLOW}]")
                         self.console.print()
                 
             except Exception as e:
@@ -5613,7 +5626,7 @@ class CommandHandler:
             cmd_table.add_column("Description", style=self.theme.TEXT_SECONDARY)
             
             cmd_table.add_row("/CE", "Show this status information")
-            cmd_table.add_row("/CE compress", "Compress conversation context")
+            cmd_table.add_row("/CE compress", "Manually compact conversation context (advanced)")
             cmd_table.add_row("/CE info", "Show detailed context information")
             cmd_table.add_row("/CE stats", "Show context statistics")
             

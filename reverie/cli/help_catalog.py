@@ -56,7 +56,7 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
         "command": "/clean",
         "section": "Core",
         "summary": "Delete current-workspace memory, backups, caches, and command audit history, then start fresh.",
-        "detail": "Only the active workspace is affected. Reverie removes the current workspace's project cache plus workspace-local `.reverie/context_cache` and `.reverie/security`; config and rules remain intact.",
+        "detail": "Only the active workspace is affected. Reverie removes the current workspace's cache under `.reverie/project_caches/<project-key>/` and also cleans legacy workspace-local `.reverie/context_cache` or `.reverie/security` folders when they still exist; config and rules remain intact.",
         "overview": "reset workspace memory, force",
         "subcommands": [
             {"usage": "/clean", "description": "Prompt for confirmation, then delete current-workspace sessions, snapshots, caches, backups, and audit logs."},
@@ -96,10 +96,11 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
         "section": "Models & Modes",
         "summary": "Show or switch Reverie operating modes.",
         "detail": "The mode affects system prompts, tool framing, and how Reverie approaches the task.",
-        "overview": "show, reverie|reverie-gamer|spec-driven|spec-vibe|writer|reverie-ant|computer-controller",
+        "overview": "show, reverie|reverie-atlas|reverie-gamer|spec-driven|spec-vibe|writer|reverie-ant|computer-controller",
         "subcommands": [
             {"usage": "/mode", "description": "Show the current mode and the full mode table."},
             {"usage": "/mode reverie", "description": "Switch to the general-purpose coding assistant mode."},
+            {"usage": "/mode reverie-atlas", "description": "Switch to the deep-research, master-documentation, and document-driven implementation mode."},
             {"usage": "/mode reverie-gamer", "description": "Switch to the game-development oriented mode."},
             {"usage": "/mode spec-driven", "description": "Switch to the structured spec-driven mode."},
             {"usage": "/mode spec-vibe", "description": "Switch to the lighter-weight spec workflow."},
@@ -107,7 +108,7 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
             {"usage": "/mode reverie-ant", "description": "Switch to the advanced planning/execution mode."},
             {"usage": "/mode computer-controller", "description": "Switch to the NVIDIA-backed desktop-control mode."},
         ],
-        "examples": ["/mode", "/mode spec-driven", "/mode computer-controller"],
+        "examples": ["/mode", "/mode reverie-atlas", "/mode computer-controller"],
     },
     "iflow": {
         "command": "/iflow",
@@ -164,7 +165,7 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
         "command": "/codex",
         "section": "Providers",
         "summary": "Switch to Codex, choose a model, and set the matching four-level reasoning depth.",
-        "detail": "Bare `/codex` switches Reverie to the Codex source and uses the stored Codex model. `/codex model` opens the model selector and immediately continues into the reasoning-depth selector.",
+        "detail": "Bare `/codex` switches Reverie to the Codex source and uses the stored Codex model. `/codex model` opens the model selector and immediately continues into the reasoning-depth selector. `/codex endpoint` accepts either a proxy root/base URL or a full `/responses` endpoint.",
         "overview": "activate, login, model [id], thinking [level], endpoint [value], low|medium|high|extra high",
         "subcommands": [
             {"usage": "/codex", "description": "Switch Reverie to the Codex source and show the active Codex configuration."},
@@ -233,7 +234,7 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
         "command": "/CE",
         "section": "Tools & Context",
         "summary": "Inspect or manage the Context Engine state.",
-        "detail": "This command is case-sensitive and is the main control surface for manual context compression and token inspection.",
+        "detail": "This command is case-sensitive. Automatic session rotation now handles large-context continuity by default; `/CE` remains useful for inspection and manual recovery operations.",
         "overview": "status, compress, info, stats",
         "subcommands": [
             {"usage": "/CE", "description": "Show Context Engine status, token usage, and available actions."},

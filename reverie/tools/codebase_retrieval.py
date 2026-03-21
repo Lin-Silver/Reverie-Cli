@@ -287,7 +287,9 @@ Examples:
         symbols = retriever.get_file_outline(file_path)
         
         if not symbols:
-            # Try to find the file
+            fallback = self._query_existing_file_without_symbols(file_path, include_source)
+            if fallback is not None:
+                return fallback
             return ToolResult.fail(
                 f"No symbols found in '{file_path}'. "
                 "The file may not exist or may not be indexed."
@@ -320,6 +322,58 @@ Examples:
             '\n'.join(output_parts),
             data={'file': file_path, 'symbol_count': len(symbols)}
         )
+
+    def _query_existing_file_without_symbols(self, file_path: str, include_source: bool) -> Optional[ToolResult]:
+        """Fallback for docs, configs, and other plain-text files."""
+        try:
+            resolved_path = self.resolve_workspace_path(file_path, purpose="read file")
+        except Exception:
+            return None
+
+        if not resolved_path.exists() or not resolved_path.is_file():
+            return None
+
+        try:
+            raw_text = resolved_path.read_text(encoding="utf-8", errors="ignore")
+        except Exception as exc:
+            return ToolResult.fail(f"Failed to read '{file_path}': {exc}")
+
+        relative_label = str(resolved_path)
+        try:
+            relative_label = str(resolved_path.relative_to(self.get_project_root()))
+        except Exception:
+            pass
+
+        lines = raw_text.splitlines()
+        output_parts = [
+            f"# File: {relative_label}",
+            "Symbols found: 0",
+            "Detected as a plain-text or non-symbol file; returning file content fallback.",
+        ]
+
+        heading_lines = [
+            line.strip()
+            for line in lines
+            if line.strip().startswith(("# ", "## ", "### ", "#### "))
+        ][:12]
+        if heading_lines:
+            output_parts.append("\n## Headings")
+            output_parts.extend(f"- {line}" for line in heading_lines)
+
+        if include_source:
+            excerpt = "\n".join(lines[:200]).strip()
+            if excerpt:
+                output_parts.append("\n## Content")
+                output_parts.append(f"```\n{excerpt}\n```")
+
+        return ToolResult.ok(
+            '\n'.join(output_parts),
+            data={
+                'file': str(resolved_path),
+                'symbol_count': 0,
+                'fallback': 'plain_text',
+            }
+        )
     
     def _search_symbols(
         self,
@@ -333,6 +387,7 @@ Examples:
         
         # Convert filter to SymbolKind list
         kinds = None
+        filter_kind = self._normalize_string(filter_kind, "all").lower()
         if filter_kind != "all":
             kind_map = {
                 "class": [SymbolKind.CLASS],

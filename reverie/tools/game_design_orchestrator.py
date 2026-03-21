@@ -39,7 +39,7 @@ class GameDesignOrchestratorTool(BaseTool):
             },
             "blueprint_path": {
                 "type": "string",
-                "description": "Blueprint JSON path (default: docs/game_blueprint.json)",
+                "description": "Blueprint JSON path (default: artifacts/game_blueprint.json)",
             },
             "output_path": {
                 "type": "string",
@@ -101,7 +101,7 @@ class GameDesignOrchestratorTool(BaseTool):
 
     def execute(self, **kwargs) -> ToolResult:
         action = kwargs.get("action")
-        blueprint_path = self._resolve_path(kwargs.get("blueprint_path", "docs/game_blueprint.json"))
+        blueprint_path = self._resolve_path(kwargs.get("blueprint_path", "artifacts/game_blueprint.json"))
 
         try:
             if action == "create_blueprint":
@@ -113,7 +113,7 @@ class GameDesignOrchestratorTool(BaseTool):
                 return self._expand_system(blueprint_path, system_name, kwargs.get("data") or {})
             if action == "generate_vertical_slice":
                 output_path = self._resolve_path(
-                    kwargs.get("output_path", "docs/vertical_slice_plan.md")
+                    kwargs.get("output_path", "artifacts/vertical_slice_plan.md")
                 )
                 return self._generate_vertical_slice(blueprint_path, output_path, kwargs.get("data") or {})
             if action == "analyze_scope":

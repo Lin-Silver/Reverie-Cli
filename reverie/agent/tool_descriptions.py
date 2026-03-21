@@ -300,7 +300,7 @@ Count tokens in text or the current conversation to manage context limits effect
 - Before large edits or long outputs
 - When the session feels large
 - Before expensive multi-step work
-- To decide whether `context_management` should compress history
+- To estimate whether automatic session rotation is likely soon
 
 **Example calls**:
 ```
@@ -334,6 +334,12 @@ Manage conversation context by compressing, truncating, or checkpointing message
 - You want to preserve progress before a risky operation
 - You need to restore a prior checkpoint
 
+**Atlas-safe compression pattern**:
+1. Call `context_management(action="checkpoint")` before compression
+2. Emit a compact handoff summary in conversation that preserves confirmed scope, doc baseline, completed work, active slice, risks, and next action
+3. Compress only after that handoff summary exists
+4. After compression or resume, retrieve workspace memory and re-anchor on the document baseline before continuing
+
 **Example calls**:
 ```
 context_management(action="compress")
@@ -359,8 +365,8 @@ Use this tool for structured planning and progress tracking on multi-step work.
 **Best usage pattern**:
 1. After initial retrieval, create a detailed task list for substantial work
 2. Break large requests into many small, concrete, verifiable tasks instead of a few broad milestones
-3. Keep the canonical task artifact in `Tasks.md`
-4. `Tasks.md` must be checklist-only: one checklist item per line, no headings, prose, summaries, IDs, or metadata blocks
+3. Keep the canonical task artifact in `artifacts/Tasks.md`
+4. `artifacts/Tasks.md` must be checklist-only: one checklist item per line, no headings, prose, summaries, IDs, or metadata blocks
 5. Mark only one task `IN_PROGRESS` at a time when practical
 6. Batch-update task states when moving from one task to the next
 
@@ -446,6 +452,7 @@ Switch between Reverie's non-desktop-control modes when another workflow is clea
 
 **Available targets**:
 - `reverie`
+- `reverie-atlas`
 - `reverie-gamer`
 - `reverie-ant`
 - `spec-driven`
@@ -461,6 +468,65 @@ Switch between Reverie's non-desktop-control modes when another workflow is clea
 **Never use this tool**:
 - To switch into Computer Controller mode
 - Repeatedly without a clear reason tied to progress
+"""
+
+
+def get_reverie_atlas_documentation_description() -> str:
+    """Prompt-side playbook for Reverie-Atlas."""
+    return """
+## Reverie-Atlas Research And Delivery Playbook
+
+Use this playbook when the task is a complex, interdependent project that benefits from deep research, detailed documents, and document-driven implementation.
+
+**Core pattern**:
+1. Retrieve repository context and workspace memory before outlining the docs
+2. Build an evidence-backed structure for the document set
+3. Author a master document for overview and appendices for subsystem depth
+4. Explain the documents to the user and confirm the document information before broad implementation
+5. Use the confirmed documents as the execution baseline for slow, step-by-step, high-quality implementation
+6. Refresh the docs as code sharpens the design, and preserve continuity with checkpoints, handoff summaries, and memory updates
+
+**Important rules**:
+- Do not use `task_manager` or `artifacts/Tasks.md` in this mode
+- Use `atlas_delivery_orchestrator` as the durable delivery ledger for contract state, slice progress, blockers, checkpoints, and closure readiness
+- Prefer document architecture over checklist management
+- Use `codebase-retrieval(query_type="memory", ...)` when previous sessions may contain relevant findings
+- Keep major claims tied to files, commands, or clearly marked inference
+- If the documentation is broad, split it into `Master Document.md` plus appendix files instead of flattening everything into one file
+- Use `userInput` for the post-document confirmation gate when the implementation scope is significant
+- Do not ask for redundant reconfirmation after every small implementation step; re-confirm only if the baseline scope or architecture materially changes
+- After the confirmation gate, do not stop at documents alone if the user asked for the project to be built
+- Treat user messages like `continue`, `继续`, `开始`, `go on`, or `keep going` as permission to resume the next unfinished slice, not as a cue to emit a project-status recap
+- Before any final-style summary or handoff, run `atlas_delivery_orchestrator(action="assess_completion")`; if the gate is not green, keep implementing or surface a concrete blocker
+- Atlas should compress context only after a checkpoint plus a durable handoff summary that preserves the current delivery state
+"""
+
+
+def get_atlas_delivery_orchestrator_description() -> str:
+    """Description for the Atlas delivery orchestrator tool."""
+    return """
+## Atlas Delivery Orchestrator Tool (atlas_delivery_orchestrator)
+
+Use this tool to turn Atlas's document-driven workflow into a durable delivery state machine under `artifacts/atlas/`.
+
+**Actions**:
+- `bootstrap_delivery`
+- `register_contract`
+- `plan_slices`
+- `record_slice`
+- `record_verification`
+- `record_blocker`
+- `resolve_blocker`
+- `sync_documents`
+- `checkpoint_delivery`
+- `assess_completion`
+- `prepare_final_report`
+
+**Best uses**:
+- Create the Atlas charter, tracker, document manifest, handoff summary, and state ledger before a long implementation loop
+- Record implementation slices so Atlas keeps building instead of drifting into premature status summaries
+- Capture blocker and verification state explicitly so closure is based on facts, not optimism
+- Check completion gates before final reports or major handoffs
 """
 
 
@@ -629,7 +695,6 @@ def get_all_tool_descriptions() -> str:
             get_vision_tool_description(),
             get_text_to_image_description(),
             get_token_counter_description(),
-            get_context_management_description(),
             get_task_manager_description(),
             get_user_input_description(),
             get_mode_switch_description(),
@@ -676,6 +741,25 @@ def _get_mode_tool_workflow(mode: str) -> str:
 - Use file and retrieval tools to keep manuscripts, notes, and lore consistent.
 - Ask for clarification when intent, tone, or canon constraints are ambiguous.
 """
+
+    if normalized == "reverie-atlas":
+        return """
+## Reverie-Atlas Mode Tool Workflow
+
+- Start with retrieval, dependency inspection, history review, and workspace-memory retrieval before drafting.
+- Bootstrap or refresh `atlas_delivery_orchestrator` early on meaningful Atlas work so the contract, slice ledger, blockers, and checkpoints are durable.
+- Treat documentation as an engineering artifact: establish the master document and appendix structure before broad authoring.
+- Do not use task-manager workflows; organize progress around evidence gathering, document architecture, and authored artifacts instead.
+- Prefer master document plus appendices for complex systems so each deep topic gets real specification depth.
+- Use automatic handoff rotation, concise continuity notes, and workspace-memory retrieval to preserve continuity across long Atlas sessions.
+- After the document set is drafted, explain it to the user and explicitly confirm the information before broad implementation when the project scope is non-trivial.
+- Once confirmed, implement from the documents in small, rigorous increments and keep the document set aligned with delivered code and verification results.
+- If the scope has already been confirmed and has not materially changed, continue implementation instead of reopening the confirmation gate.
+- Treat `continue` or similar user follow-ups as a directive to advance the next unfinished slice unless the user explicitly asked for a status update.
+- Before any final-style summary, run `atlas_delivery_orchestrator(action="assess_completion")` and keep going if the contract is still open.
+- Before any risky long-running slice, record the delivery state so Atlas can resume cleanly if automatic rotation occurs.
+- If the task becomes primarily game design, gameplay systems, runtime work, content pipelines, balance work, or playtest iteration, switch to `reverie-gamer` proactively.
+        """
 
     if normalized == "reverie-gamer":
         return """
@@ -743,7 +827,6 @@ def get_tool_descriptions_for_mode(mode: str) -> str:
         get_web_search_description(),
         get_vision_tool_description(),
         get_token_counter_description(),
-        get_context_management_description(),
         get_user_input_description(),
         get_tool_calling_reliability_notes(),
     ]
@@ -756,6 +839,10 @@ def get_tool_descriptions_for_mode(mode: str) -> str:
 
     if normalized == "reverie":
         descriptions.append(get_reverie_progress_review_description())
+
+    if normalized == "reverie-atlas":
+        descriptions.append(get_reverie_atlas_documentation_description())
+        descriptions.append(get_atlas_delivery_orchestrator_description())
 
     if normalized == "reverie-gamer":
         descriptions.extend(

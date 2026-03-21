@@ -1,3 +1,31 @@
+## Reverie CLI v2.1.4 - Automatic Session Handoff, Retrieval Hardening, and Artifact Path Clarification
+
+### Changed
+
+* Replaced the old algorithm-first context compression path with automatic model-authored session handoff rotation. When token usage crosses the rotation threshold, Reverie now generates a structured carryover summary, starts a fresh session, restores the active user request into that new session, and continues the same turn without waiting for a manual `continue`.
+* Added persisted session handoff packets under the project cache state (`.reverie/project_caches/<project>/session_handoffs/`) so automatic rotation has a durable audit trail and future recovery surface.
+* Hid `context_management` from the model-facing tool surface and updated the system prompts so continuity is driven by automatic rotation, workspace memory, and durable artifacts instead of asking the model to self-compress manually.
+* Hardened `codebase-retrieval` so plain-text files such as `README.md`, master documents, and appendix markdown files can be read through a content fallback even when they do not produce code symbols.
+* Normalized `codebase-retrieval` search filters more defensively to avoid avoidable failures from non-string tool arguments.
+* Clarified the runtime storage split across the codebase and prompts:
+  * project documentation and generated docs stay in the project-root `artifacts/`
+  * Reverie CLI runtime/session/cache state stays under the exe-root `.reverie/project_caches/`
+
+## Reverie CLI v2.1.4 - Reverie-Atlas + Codex 0.115.0 Alignment
+
+### Added
+
+* Added persisted `atlas_mode` configuration so `Reverie-Atlas` can keep a real execution profile for research-first delivery, master-document naming, appendix expectations, confirmation flow, and post-document implementation behavior.
+* Added stronger `Reverie-Atlas` guidance so the mode now produces the document bundle, explains it to the user, confirms the document information, and then continues into slow, rigorous, document-driven implementation instead of stopping at docs alone.
+* `Reverie-Atlas` intentionally excludes `task_manager` and `Tasks.md` workflows, replacing them with a research-first, document-architecture-driven prompt and tool playbook.
+* Added mode aliases so legacy phrasing like `reverie-deeper` or `deeper` now resolves cleanly to `Reverie-Atlas`.
+
+### Changed
+
+* Re-aligned the built-in Codex model catalog against the downloaded `references/codex-main` source tree, including the current GPT-5.x lineup plus `gpt-oss-120b` and `gpt-oss-20b`, while preserving hidden-but-supported ids for direct selection.
+* Updated Codex reverse-proxy URL resolution so ChatGPT roots, `/backend-api`, proxy base URLs, full `/responses` URLs, and `/models` URLs normalize more safely without double-appending or misrouting.
+* Updated mode help, prompt routing, config injection, and documentation so `Reverie-Atlas` is described as a document-driven implementation mode rather than a docs-only mode.
+
 ## Reverie CLI v2.1.3 - Post-Release Updates (Still v2.1.3) - Reverie-Gamer Production Upgrade + Reverie Engine Lite
 
 **Release Date:** 2026-03-16

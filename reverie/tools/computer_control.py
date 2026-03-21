@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 from .base import BaseTool, ToolResult
+from ..config import get_project_data_dir
 
 
 user32 = ctypes.windll.user32
@@ -121,7 +122,7 @@ class ComputerControlTool(BaseTool):
     def __init__(self, context: Optional[Dict] = None):
         super().__init__(context)
         self.project_root = self.get_project_root()
-        self.output_dir = self.project_root / ".reverie" / "computer_control" / "observations"
+        self.output_dir = get_project_data_dir(self.project_root) / "computer_control" / "observations"
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def get_execution_message(self, action: str, **kwargs) -> str:

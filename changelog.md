@@ -1,3 +1,14 @@
+## Reverie CLI v2.1.5 - LLM-First Session Rotation, Faster Streaming, and Better Diff Rendering
+
+### Changed
+
+* Refined automatic context rotation so the carryover memory is now LLM-authored from raw transcript windows, workspace memory, and prior handoff memory instead of falling back to an algorithm-first digest as the main carryover source.
+* Added a repair pass for invalid handoff payloads. Reverie now asks the model to re-emit the handoff JSON when the first response is malformed or too empty, rather than silently degrading to a deterministic digest summary.
+* Added automatic rotation backoff when handoff generation fails repeatedly, so the CLI does not spam compaction attempts on every follow-up model call.
+* Enriched fresh sessions with both the readable working-memory summary and a compact structured handoff payload, improving continuity across multi-rotation implementation loops.
+* Optimized streaming output performance by reusing the markdown formatter, switching assistant output to progressive line-level flushing, and replacing the live status token recount path with the agent's lightweight token estimate instead of repeated full re-tokenization.
+* Upgraded diff presentation in tool-result cards so fenced `diff` blocks now render as syntax-highlighted previews with `+/-/hunk` stats, and refreshed the standalone diff panel with a cleaner badge header and folded-preview behavior for large patches.
+
 ## Reverie CLI v2.1.4 - Automatic Session Handoff, Retrieval Hardening, and Artifact Path Clarification
 
 ### Changed

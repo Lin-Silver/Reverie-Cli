@@ -4,23 +4,65 @@ from pathlib import Path
 from datetime import datetime
 import requests
 import logging
+import codecs
 
 logger = logging.getLogger(__name__)
 
 
 def _iter_sse_data_strings(response: requests.Response):
     """Yield SSE `data:` payloads from a streaming HTTP response."""
-    for line in response.iter_lines(decode_unicode=True):
-        if not line:
-            continue
-        if not line.startswith("data:"):
-            continue
-        data_str = line[5:].lstrip()
-        if not data_str or data_str == "[DONE]":
-            if data_str == "[DONE]":
-                break
-            continue
-        yield data_str
+    byte_decoder = codecs.getincrementaldecoder("utf-8")()
+    line_buffer = ""
+    saw_payload = False
+    stream_interrupted = False
+
+    try:
+        for chunk in response.iter_content(chunk_size=1024):
+            if not chunk:
+                continue
+
+            if isinstance(chunk, str):
+                text_part = chunk
+            else:
+                try:
+                    text_part = byte_decoder.decode(chunk)
+                except Exception:
+                    text_part = chunk.decode("utf-8", errors="replace")
+
+            line_buffer += text_part
+            lines = line_buffer.split("\n")
+            line_buffer = lines[-1]
+
+            for line in lines[:-1]:
+                stripped = line.rstrip()
+                if not stripped or not stripped.startswith("data:"):
+                    continue
+                data_str = stripped[5:].lstrip()
+                if data_str.strip() == "[DONE]":
+                    return
+                if data_str:
+                    saw_payload = True
+                    yield data_str
+    except requests.exceptions.RequestException as exc:
+        if saw_payload or line_buffer.strip():
+            stream_interrupted = True
+            logger.warning("Compression SSE stream ended prematurely after partial payload: %s", exc)
+        else:
+            raise
+
+    try:
+        line_buffer += byte_decoder.decode(b"", final=True)
+    except Exception:
+        pass
+
+    if line_buffer.strip().startswith("data:"):
+        data_str = line_buffer.strip()[5:].lstrip()
+        if data_str and data_str != "[DONE]":
+            saw_payload = True
+            yield data_str
+
+    if stream_interrupted and not saw_payload:
+        logger.warning("Compression SSE stream ended before any usable payload was decoded")
 
 
 def _collect_geminicli_summary_text(response: requests.Response) -> str:
@@ -47,6 +89,37 @@ def _collect_codex_summary_text(response: requests.Response) -> str:
             if str(event.get("type", "")).strip().lower() == "content":
                 parts.append(str(event.get("text", "") or ""))
     return "".join(parts).strip()
+
+
+def _record_compression_usage(
+    workspace_stats_manager: Any,
+    *,
+    provider: str,
+    model: str,
+    model_display_name: str,
+    prompt_messages: List[Dict[str, Any]],
+    summary_text: str,
+    usage: Any,
+    session_id: str,
+) -> None:
+    """Persist model usage for compression passes when workspace stats are available."""
+    if not workspace_stats_manager:
+        return
+    try:
+        workspace_stats_manager.record_model_usage(
+            provider=str(provider or "unknown"),
+            source="compression",
+            model=str(model or ""),
+            model_display_name=str(model_display_name or model or ""),
+            request_messages=prompt_messages,
+            assistant_text=str(summary_text or ""),
+            usage=usage,
+            session_id=str(session_id or "default"),
+            session_name="",
+            interaction_type="compression",
+        )
+    except Exception:
+        logger.debug("Failed to record compression model usage", exc_info=True)
 
 
 MEMORY_BLOCK_HEADER = "[MEMORY CONSOLIDATION - Context Engine Cache]"
@@ -399,8 +472,19 @@ class ContextCompressor:
         except Exception as e:
             return ""
 
-    def compress(self, messages: List[Dict], client: Any, model: str, session_id: str = "default", 
-              provider: str = "openai-sdk", base_url: str = "", api_key: str = "") -> List[Dict]:
+    def compress(
+        self,
+        messages: List[Dict],
+        client: Any,
+        model: str,
+        session_id: str = "default",
+        provider: str = "openai-sdk",
+        base_url: str = "",
+        api_key: str = "",
+        custom_headers: Optional[Dict[str, str]] = None,
+        workspace_stats_manager: Any = None,
+        model_display_name: str = "",
+    ) -> List[Dict]:
         """
         Compresses the conversation history using the LLM.
         Retains system prompt and last few messages.
@@ -414,6 +498,9 @@ class ContextCompressor:
             provider: Provider type (openai-sdk, request, anthropic, gemini-cli, codex)
             base_url: Base URL for request provider
             api_key: API key for request provider
+            custom_headers: Optional provider-specific extra headers
+            workspace_stats_manager: Optional stats recorder for model usage
+            model_display_name: Friendly model label for dashboards
         """
         if not messages:
             return []
@@ -482,12 +569,14 @@ class ContextCompressor:
             {
                 "role": "system", 
                 "content": (
-                    "You are Reverie's Context Engine Optimizer. Consolidate the conversation into durable working memory. "
-                    "Keep concrete technical facts, model/provider settings, file paths, decisions, constraints, open bugs, pending tasks, "
-                    "and user preferences. Discard filler. "
+                    "You are Reverie's Context Engine Optimizer. Compress prior conversation into durable working memory for a long-running coding session. "
+                    "Your job is not to summarize everything equally. Act like a selective memory curator: keep only information that will materially help the next model call. "
+                    "Prioritize exact technical facts, confirmed user intent, design decisions, constraints, open bugs, pending implementation work, verification state, model/provider quirks, "
+                    "important files, commands, paths, and artifact/document locations. Drop filler, social language, repeated reasoning, and transient thought process. "
+                    "If older details are superseded, keep only the latest confirmed version. "
                     "Return a concise but high-fidelity summary with these sections: "
-                    "Current Goal, Durable Decisions and Constraints, Implemented Work and Key Facts, Open Problems and Pending Work, "
-                    "Important Files Commands and Model Settings. Use bullets and never invent facts."
+                    "Current Goal, Durable Decisions and Constraints, Implemented Work and Key Facts, Open Problems and Pending Work, Important Files Commands and Model Settings. "
+                    "Use short bullets, do not invent facts, and preserve actionable specificity."
                 )
             },
             {
@@ -502,6 +591,7 @@ class ContextCompressor:
         ]
         
         try:
+            usage_info = None
             # Use the provided client to summarize based on provider
             if provider == "openai-sdk":
                 # If model indicates thinking-capable mode, include chat_template_kwargs
@@ -524,6 +614,7 @@ class ContextCompressor:
                         stream=False
                     )
                 summary = response.choices[0].message.content
+                usage_info = getattr(response, "usage", None)
             elif provider == "request":
                 # Use requests library for request provider
                 payload = {
@@ -535,9 +626,15 @@ class ContextCompressor:
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json"
                 }
+                for key, value in (custom_headers or {}).items():
+                    normalized_key = str(key or "").strip()
+                    normalized_value = str(value or "").strip()
+                    if normalized_key and normalized_value:
+                        headers[normalized_key] = normalized_value
                 response = make_compression_request_with_retry(base_url, headers, payload)
                 response_data = response.json()
                 summary = response_data["choices"][0]["message"]["content"]
+                usage_info = response_data.get("usage") if isinstance(response_data, dict) else None
             elif provider == "anthropic":
                 # Use Anthropic SDK
                 # Convert messages to Anthropic format
@@ -564,6 +661,7 @@ class ContextCompressor:
                 
                 response = client.messages.create(**kwargs)
                 summary = response.content[0].text
+                usage_info = getattr(response, "usage", None)
             elif provider == "gemini-cli":
                 from ..geminicli import (
                     build_geminicli_request_payload,
@@ -595,6 +693,11 @@ class ContextCompressor:
                     access_token=access_token,
                     stream=True,
                 )
+                for key, value in (custom_headers or {}).items():
+                    normalized_key = str(key or "").strip()
+                    normalized_value = str(value or "").strip()
+                    if normalized_key and normalized_value:
+                        headers[normalized_key] = normalized_value
                 response = requests.post(
                     resolve_geminicli_request_url(base_url, "", stream=True),
                     headers=headers,
@@ -629,6 +732,11 @@ class ContextCompressor:
                     auth_mode=str(cred.get("auth_mode", "")).strip(),
                     stream=True,
                 )
+                for key, value in (custom_headers or {}).items():
+                    normalized_key = str(key or "").strip()
+                    normalized_value = str(value or "").strip()
+                    if normalized_key and normalized_value:
+                        headers[normalized_key] = normalized_value
                 response = requests.post(
                     resolve_codex_request_url(base_url, ""),
                     headers=headers,
@@ -643,6 +751,17 @@ class ContextCompressor:
 
             if not str(summary or "").strip():
                 return messages
+
+            _record_compression_usage(
+                workspace_stats_manager,
+                provider=provider,
+                model=model,
+                model_display_name=model_display_name,
+                prompt_messages=prompt,
+                summary_text=str(summary or ""),
+                usage=usage_info,
+                session_id=session_id,
+            )
             
             # Construct new history
             summary_message = {

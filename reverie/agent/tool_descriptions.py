@@ -489,6 +489,9 @@ Use this playbook when the task is a complex, interdependent project that benefi
 **Important rules**:
 - Do not use `task_manager` or `artifacts/Tasks.md` in this mode
 - Use `atlas_delivery_orchestrator` as the durable delivery ledger for contract state, slice progress, blockers, checkpoints, and closure readiness
+- Treat `artifacts/` as Atlas's document system of record and re-open those artifacts first on new or resumed sessions
+- Keep a detailed, user-readable task tree in `artifacts/task.md`, synchronized with the current Atlas slices and completion state
+- Start resumed Atlas sessions from `artifacts/atlas/resume_index.md` when it exists, then expand into the linked docs instead of relying on chat history alone
 - Prefer document architecture over checklist management
 - Use `codebase-retrieval(query_type="memory", ...)` when previous sessions may contain relevant findings
 - Keep major claims tied to files, commands, or clearly marked inference
@@ -507,7 +510,7 @@ def get_atlas_delivery_orchestrator_description() -> str:
     return """
 ## Atlas Delivery Orchestrator Tool (atlas_delivery_orchestrator)
 
-Use this tool to turn Atlas's document-driven workflow into a durable delivery state machine under `artifacts/atlas/`.
+Use this tool to turn Atlas's document-driven workflow into a durable delivery state machine under `artifacts/atlas/`, while keeping the broader `artifacts/` document system synchronized for resume.
 
 **Actions**:
 - `bootstrap_delivery`
@@ -524,6 +527,8 @@ Use this tool to turn Atlas's document-driven workflow into a durable delivery s
 
 **Best uses**:
 - Create the Atlas charter, tracker, document manifest, handoff summary, and state ledger before a long implementation loop
+- Keep `artifacts/task.md` synchronized as a detailed task tree derived from Atlas delivery slices
+- Keep `artifacts/atlas/resume_index.md` synchronized as the first file a fresh Atlas session should read
 - Record implementation slices so Atlas keeps building instead of drifting into premature status summaries
 - Capture blocker and verification state explicitly so closure is based on facts, not optimism
 - Check completion gates before final reports or major handoffs

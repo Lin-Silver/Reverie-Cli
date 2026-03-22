@@ -122,6 +122,14 @@ Examples:
         """Get or create context retriever"""
         if self._retriever is None and self.context:
             self._retriever = self.context.get('retriever')
+            if self._retriever is None:
+                ensure_context_engine = self.context.get("ensure_context_engine")
+                if callable(ensure_context_engine):
+                    try:
+                        ensure_context_engine()
+                    except Exception:
+                        pass
+                    self._retriever = self.context.get('retriever')
         return self._retriever
 
     @staticmethod
@@ -161,12 +169,13 @@ Examples:
         line = self._normalize_int(kwargs.get('line', 0), 0)
         character = self._normalize_int(kwargs.get('character', 0), 0)
         
-        retriever = self._get_retriever()
-        
-        if not retriever:
-            return ToolResult.fail(
-                "Context Engine not initialized. The codebase has not been indexed yet."
-            )
+        retriever = None
+        if query_type in {"symbol", "file", "search", "dependencies", "outline"}:
+            retriever = self._get_retriever()
+            if not retriever:
+                return ToolResult.fail(
+                    "Context Engine not initialized. The codebase has not been indexed yet."
+                )
         
         try:
             if query_type == "symbol":
@@ -485,6 +494,14 @@ Examples:
     def _query_lsp(self, query: str, action: str, line: int, character: int, limit: int) -> ToolResult:
         """Query optional LSP-backed capabilities."""
         lsp_manager = self.context.get("lsp_manager")
+        if not lsp_manager:
+            ensure_lsp_manager = self.context.get("ensure_lsp_manager")
+            if callable(ensure_lsp_manager):
+                try:
+                    ensure_lsp_manager()
+                except Exception:
+                    pass
+                lsp_manager = self.context.get("lsp_manager")
         if not lsp_manager:
             return ToolResult.fail("LSP manager is not available.")
 

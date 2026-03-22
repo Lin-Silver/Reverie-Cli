@@ -13,6 +13,7 @@ import sys
 import threading
 import _thread
 import re
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -21,6 +22,7 @@ from rich.console import Console, Group
 from rich.prompt import Prompt, Confirm
 from rich.live import Live
 from rich.panel import Panel
+from rich.padding import Padding
 from rich.text import Text
 from rich.table import Table
 from rich.markup import escape
@@ -29,7 +31,7 @@ from rich import box
 from .display import DisplayComponents
 from .commands import CommandHandler
 from .input_handler import InputHandler
-from .markdown_formatter import format_markdown
+from .markdown_formatter import MarkdownFormatter, format_markdown
 from .theme import THEME, DECO, DREAM
 from ..config import (
     ConfigManager,
@@ -43,8 +45,10 @@ from ..rules_manager import RulesManager
 from ..session import SessionManager
 from ..agent import (
     ReverieAgent,
+    STREAM_EVENT_MARKER,
     THINKING_START_MARKER,
     THINKING_END_MARKER,
+    build_system_prompt,
     decode_stream_event,
 )
 from ..context_engine import CodebaseIndexer, ContextRetriever, GitIntegration
@@ -56,6 +60,13 @@ from ..nvidia import normalize_nvidia_config
 _THINKING_MARKDOWN_SUBJECT_RE = re.compile(r"^\s*\*\*(.+?)\*\*\s*$")
 _THINKING_INLINE_SUBJECT_RE = re.compile(r"\*\*(.+?)\*\*")
 _THINKING_LIST_PREFIX_RE = re.compile(r"^(?:[-*]|\d+\.)\s+")
+_MARKDOWN_FENCE_RE = re.compile(r"^\s*(```+|~~~+)")
+_TOOL_MARKUP_PREFIXES = (
+    "[bold #ffb8d1]✧",
+    "[bold #ff5252]",
+    "[bold #66bb6a]",
+    "[#ba68c8]   │",
+)
 
 
 def split_thinking_fragments(pending: str, fragment: str) -> tuple[list[str], str]:
@@ -66,6 +77,53 @@ def split_thinking_fragments(pending: str, fragment: str) -> tuple[list[str], st
 
     parts = text.split("\n")
     return parts[:-1], parts[-1]
+
+
+def split_markdown_fragments(pending: str, fragment: str) -> tuple[str, str]:
+    """Split streamed markdown into flushable complete lines plus a trailing remainder."""
+    text = f"{pending}{fragment}".replace("\r\n", "\n").replace("\r", "\n")
+    if "\n" not in text:
+        return "", text
+
+    parts = text.split("\n")
+    completed_lines = parts[:-1]
+    remainder = parts[-1]
+
+    if "```" not in text and "~~~" not in text:
+        completed = "\n".join(completed_lines)
+        if completed:
+            completed += "\n"
+        return completed, remainder
+
+    open_fence = None
+    open_fence_index = -1
+    for index, line in enumerate(completed_lines):
+        if "`" not in line and "~" not in line:
+            continue
+        fence_match = _MARKDOWN_FENCE_RE.match(line)
+        if not fence_match:
+            continue
+        fence_token = fence_match.group(1)
+        if open_fence is None:
+            open_fence = fence_token[0]
+            open_fence_index = index
+        elif fence_token.startswith(open_fence):
+            open_fence = None
+            open_fence_index = -1
+
+    flush_lines = completed_lines
+    if open_fence is not None and open_fence_index >= 0:
+        flush_lines = completed_lines[:open_fence_index]
+        buffered_lines = completed_lines[open_fence_index:]
+        remainder_parts = buffered_lines
+        if remainder:
+            remainder_parts.append(remainder)
+        remainder = "\n".join(remainder_parts)
+
+    completed = "\n".join(flush_lines)
+    if completed:
+        completed += "\n"
+    return completed, remainder
 
 
 def parse_thinking_line(raw_line: str) -> tuple[str, str]:
@@ -89,6 +147,18 @@ def parse_thinking_line(raw_line: str) -> tuple[str, str]:
         return subject, description
 
     return "", _THINKING_LIST_PREFIX_RE.sub("", text).strip()
+
+
+def _configure_stdio_for_terminal_output() -> None:
+    """Avoid UnicodeEncodeError on legacy Windows code pages by falling back to replacement writes."""
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        if stream is None or not hasattr(stream, "reconfigure"):
+            continue
+        try:
+            stream.reconfigure(errors="replace")
+        except Exception:
+            pass
 
 
 class StatusLine:
@@ -170,6 +240,7 @@ class ReverieInterface:
     
     def __init__(self, project_root: Path):
         self.project_root = project_root
+        _configure_stdio_for_terminal_output()
         self.console = Console(width=None, force_terminal=True)  # Auto-detect width and force terminal mode
         self.display = DisplayComponents(self.console)
         self.theme = THEME
@@ -186,10 +257,11 @@ class ReverieInterface:
         self.git_integration: Optional[GitIntegration] = None
         self.lsp_manager: Optional[LSPManager] = None
         self.agent: Optional[ReverieAgent] = None
-        
+
         self.total_active_time = 0.0
         self.current_task_start: Optional[float] = None
         self.start_time = time.time()
+        self._runtime_recorded = False
         self.command_handler: Optional[CommandHandler] = None
         self.input_handler: Optional[InputHandler] = None
         self.status_line = StatusLine(self)
@@ -198,21 +270,28 @@ class ReverieInterface:
         self._stream_input_thread: Optional[threading.Thread] = None
         self._status_live = None
         self._pending_input_draft = ""
-        
-        # Cached tiktoken encoding for status bar token counting (lazy-loaded on first use)
-        self._tiktoken_encoding = None
-        self._tiktoken_available: Optional[bool] = None  # None = not yet checked
+        self._markdown_formatter = MarkdownFormatter(console=self.console)
+        self._status_line_cache_key = None
+        self._status_line_cache_renderable = None
+        self._status_line_cache_time = 0.0
+        self._context_engine_ready = False
+        self._git_integration_ready = False
+        self._lsp_manager_ready = False
 
     def _init_workspace_services(self) -> None:
         """Initialize cache/session/rollback services for the current workspace."""
         self.project_data_dir = self.config_manager.project_data_dir
 
-        from ..session import SnapshotManager, MemoryIndexer
+        from ..session import SnapshotManager, MemoryIndexer, WorkspaceStatsManager
         self.snapshot_manager = SnapshotManager(
             project_root=self.project_root,
             snapshots_dir=self.project_data_dir / 'snapshots'
         )
         self.memory_indexer = MemoryIndexer(self.project_data_dir)
+        self.workspace_stats_manager = WorkspaceStatsManager(
+            self.project_data_dir,
+            project_root=self.project_root,
+        )
 
         self.session_manager = SessionManager(
             self.project_data_dir,
@@ -224,6 +303,7 @@ class ReverieInterface:
         from ..session import OperationHistory, RollbackManager
         self.operation_history = OperationHistory("current")
         self.rollback_manager = RollbackManager(self.project_data_dir, self.operation_history)
+        self.total_active_time = self.workspace_stats_manager.get_total_active_seconds()
 
     def _refresh_command_context(self) -> None:
         """Refresh command handler context after runtime objects are recreated."""
@@ -265,10 +345,12 @@ class ReverieInterface:
         self.retriever = None
         self.git_integration = None
         self.lsp_manager = None
+        self._context_engine_ready = False
+        self._git_integration_ready = False
+        self._lsp_manager_ready = False
 
         self.config_manager.ensure_dirs()
         self._init_workspace_services()
-        self._init_context_engine()
         self._init_agent()
         self._init_session()
         self._refresh_command_context()
@@ -279,6 +361,13 @@ class ReverieInterface:
 
     def _fast_clear_terminal(self) -> None:
         """Clear the visible terminal area without spawning extra shell processes."""
+        try:
+            if os.name == "nt":
+                os.system("cls")
+                return
+        except Exception:
+            pass
+
         try:
             if sys.stdout and hasattr(sys.stdout, "write"):
                 sys.stdout.write("\033[2J\033[H")
@@ -345,7 +434,6 @@ class ReverieInterface:
             config = self.config_manager.load()
             self.display.show_welcome(mode=config.mode)
             
-            self._init_context_engine()
             self._init_agent()
             self.command_handler = CommandHandler(self.console, self._get_app_context())
             self._init_session()
@@ -358,18 +446,21 @@ class ReverieInterface:
             self.console.print(f"\n[bold {self.theme.CORAL_VIBRANT}]{self.deco.CROSS_FANCY} Error: {escape(str(e))}[/bold {self.theme.CORAL_VIBRANT}]")
             import traceback
             traceback.print_exc()
+        finally:
+            self._persist_runtime_stats()
 
     def _get_status_line(self):
         """Generate a responsive live status panel."""
+        cache_now = time.time()
         elapsed = self.total_active_time
         if self.current_task_start:
-            elapsed += (time.time() - self.current_task_start)
+            elapsed += (cache_now - self.current_task_start)
 
         hours, remainder = divmod(int(elapsed), 3600)
         minutes, seconds = divmod(remainder, 60)
         time_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
-        config = self.config_manager.load()
+        config = getattr(self.agent, "config", None) or self.config_manager.load()
         active_model = config.active_model
         mode = config.mode or "reverie"
         provider_label = self._resolve_provider_label(config)
@@ -393,42 +484,9 @@ class ReverieInterface:
         max_tokens = 128000
         percentage = 0.0
         token_color = self.theme.MINT_SOFT
-        if self.agent and hasattr(self.agent, 'messages'):
+        if self.agent:
             try:
-                if self._tiktoken_available is None:
-                    try:
-                        import tiktoken
-                        self._tiktoken_encoding = tiktoken.get_encoding("cl100k_base")
-                        self._tiktoken_available = True
-                    except Exception:
-                        self._tiktoken_available = False
-
-                system_prompt = getattr(self.agent, 'system_prompt', '')
-                messages = self.agent.messages
-
-                if self._tiktoken_available and self._tiktoken_encoding:
-                    enc = self._tiktoken_encoding
-                    total_tokens = len(enc.encode(system_prompt))
-                    for msg in messages:
-                        total_tokens += 4
-                        content = msg.get('content', '')
-                        if isinstance(content, str):
-                            total_tokens += len(enc.encode(content))
-                        elif isinstance(content, list):
-                            for part in content:
-                                if isinstance(part, dict):
-                                    for value in part.values():
-                                        if isinstance(value, str):
-                                            total_tokens += len(enc.encode(value))
-                    total_tokens += 2
-                else:
-                    total_chars = len(system_prompt)
-                    for msg in messages:
-                        content = msg.get('content', '')
-                        if isinstance(content, str):
-                            total_chars += len(content)
-                    total_tokens = total_chars // 4 + 1
-
+                total_tokens = max(int(self.agent.get_token_estimate()), 0)
                 if active_model and active_model.max_context_tokens:
                     max_tokens = active_model.max_context_tokens
 
@@ -440,9 +498,29 @@ class ReverieInterface:
             except Exception:
                 total_tokens = None
 
+        cache_key = (
+            time_str,
+            provider_label,
+            str(mode).upper(),
+            model_label,
+            project_label,
+            reasoning_label,
+            total_tokens,
+            max_tokens,
+            int(percentage),
+            token_color,
+            width < 112,
+            width < 86,
+        )
+        if (
+            self._status_line_cache_key == cache_key
+            and self._status_line_cache_renderable is not None
+            and (cache_now - self._status_line_cache_time) < 0.35
+        ):
+            return self._status_line_cache_renderable
+
         top_left = Text()
-        top_left.append(f"{self.deco.SPARKLE} Reverie", style=f"bold {self.theme.PINK_SOFT}")
-        top_left.append(f" {self.deco.DOT_MEDIUM} ", style=self.theme.TEXT_DIM)
+        top_left.append(f"{self.deco.SPARKLE_FILLED} ", style=self.theme.PINK_SOFT)
         top_left.append(model_label, style=f"bold {self.theme.PURPLE_SOFT}")
 
         top_right = Text()
@@ -491,12 +569,10 @@ class ReverieInterface:
                 )
             body = Group(top_grid, secondary)
 
-        return Panel(
-            body,
-            border_style=self.theme.BORDER_SUBTLE,
-            box=box.ROUNDED,
-            padding=(0, 1),
-        )
+        self._status_line_cache_key = cache_key
+        self._status_line_cache_renderable = body
+        self._status_line_cache_time = cache_now
+        return body
 
     def _snapshot_stream_input_state(self) -> dict:
         """Return a snapshot of the active streaming-input state."""
@@ -687,6 +763,10 @@ class ReverieInterface:
         
         if self.agent:
             self.session_manager.update_messages(self.agent.get_history())
+        try:
+            self.workspace_stats_manager.flush()
+        except Exception:
+            pass
         self.console.print(f"\n[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Session saved. Goodbye! {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]")
     
     def _process_message(self, message: str) -> bool:
@@ -702,7 +782,10 @@ class ReverieInterface:
         response_stream = None
         current_markdown_text = ""
         thinking_content = ""
-        
+        response_model_name = getattr(config.active_model, "model_display_name", "Reverie")
+        response_provider_label = self._resolve_provider_label(config)
+        response_mode = config.mode
+
         # Get current session ID
         session_id = self.session_manager.current_session.id if self.session_manager.current_session else "default"
         
@@ -712,9 +795,14 @@ class ReverieInterface:
                 description=f"Before question: {message[:50]}..."
             )
             if snapshot_info:
-                self.console.print(
-                    f"[{self.theme.MINT_SOFT}]{self.deco.DOT_SMALL} Snapshot created: {snapshot_info.id}[/{self.theme.MINT_SOFT}]"
-                )
+                if getattr(snapshot_info, "reused", False):
+                    self.console.print(
+                        f"[{self.theme.TEXT_DIM}]{self.deco.DOT_SMALL} Snapshot unchanged: {snapshot_info.id}[/{self.theme.TEXT_DIM}]"
+                    )
+                else:
+                    self.console.print(
+                        f"[{self.theme.MINT_SOFT}]{self.deco.DOT_SMALL} Snapshot created: {snapshot_info.id}[/{self.theme.MINT_SOFT}]"
+                    )
         except Exception as e:
             self.console.print(
                 f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Warning: Failed to create snapshot: {e}[/{self.theme.AMBER_GLOW}]"
@@ -739,25 +827,31 @@ class ReverieInterface:
             footer_live.start()
             self._status_live = footer_live
             self._start_stream_input_capture()
+
+            def ensure_response_header() -> None:
+                nonlocal response_header_printed
+                if response_header_printed:
+                    return
+                self.display.show_response_header(
+                    model_name=response_model_name,
+                    provider_label=response_provider_label,
+                    mode=response_mode,
+                )
+                response_header_printed = True
             
             try:
+                self.ensure_context_engine()
                 response_stream = self.agent.process_message(message, stream=config.stream_responses, session_id=session_id)
                 for chunk in response_stream:
                     # Handle thinking markers
                     if chunk == THINKING_START_MARKER:
                         # Flush any pending content before entering thinking mode
                         if current_markdown_text:
-                            self.console.print(format_markdown(current_markdown_text), end="")
+                            self._flush_markdown_content(current_markdown_text, final=True)
                             current_markdown_text = ""
-                        if not response_header_printed:
-                            self.display.show_response_header(
-                                model_name=getattr(config.active_model, "model_display_name", "Reverie"),
-                                provider_label=self._resolve_provider_label(config),
-                                mode=config.mode,
-                            )
-                            response_header_printed = True
+                        ensure_response_header()
                         in_thinking_mode = True
-                        self.display.show_thinking_banner(getattr(config.active_model, "model_display_name", ""))
+                        self.display.show_thinking_banner(response_model_name)
                         continue
                     
                     if chunk == THINKING_END_MARKER:
@@ -778,22 +872,16 @@ class ReverieInterface:
                         )
                         continue
 
-                    decoded_event = decode_stream_event(chunk)
+                    decoded_event = decode_stream_event(chunk) if chunk.startswith(STREAM_EVENT_MARKER) else None
                     if decoded_event:
                         if current_markdown_text:
-                            self.console.print(format_markdown(current_markdown_text), end="")
+                            self._flush_markdown_content(current_markdown_text, final=True)
                             current_markdown_text = ""
                         if thinking_content.strip():
                             self._print_thinking_content(thinking_content)
                             thinking_content = ""
                         in_thinking_mode = False
-                        if not response_header_printed:
-                            self.display.show_response_header(
-                                model_name=getattr(config.active_model, "model_display_name", "Reverie"),
-                                provider_label=self._resolve_provider_label(config),
-                                mode=config.mode,
-                            )
-                            response_header_printed = True
+                        ensure_response_header()
                         if not self.display.show_stream_event(decoded_event):
                             self.console.print(chunk)
                         continue
@@ -802,17 +890,12 @@ class ReverieInterface:
                     # Keep this strict so normal markdown like "[text](url)"
                     # doesn't get sent into Rich markup parsing.
                     stripped_chunk = chunk.lstrip('\n')
-                    is_tool_markup = stripped_chunk.startswith((
-                        "[bold #ffb8d1]✧",
-                        "[bold #ff5252]",
-                        "[bold #66bb6a]",
-                        "[#ba68c8]   │",
-                    ))
+                    is_tool_markup = stripped_chunk.startswith(_TOOL_MARKUP_PREFIXES)
 
                     if is_tool_markup:
                         # Flush pending markdown
                         if current_markdown_text:
-                            self.console.print(format_markdown(current_markdown_text), end="")
+                            self._flush_markdown_content(current_markdown_text, final=True)
                             current_markdown_text = ""
                         # Add tool output directly; if markup is malformed, render as plain text.
                         try:
@@ -821,21 +904,17 @@ class ReverieInterface:
                             self.console.print(escape(chunk))
                     else:
                         if first_non_tool_chunk and chunk.strip():
-                            if not response_header_printed:
-                                self.display.show_response_header(
-                                    model_name=getattr(config.active_model, "model_display_name", "Reverie"),
-                                    provider_label=self._resolve_provider_label(config),
-                                    mode=config.mode,
-                                )
-                                response_header_printed = True
+                            ensure_response_header()
                             first_non_tool_chunk = False
                         
-                        # Accumulate content
-                        current_markdown_text += chunk
+                        # Stream complete lines progressively while keeping the tail buffered.
+                        flushable_text, current_markdown_text = split_markdown_fragments(current_markdown_text, chunk)
+                        if flushable_text:
+                            self._flush_markdown_content(flushable_text)
                 
                 # Final flush - print all accumulated content
                 if current_markdown_text.strip():
-                    self.console.print(format_markdown(current_markdown_text))
+                    self._flush_markdown_content(current_markdown_text, final=True)
                 
                 # Flush any remaining thinking content
                 if thinking_content.strip():
@@ -867,7 +946,7 @@ class ReverieInterface:
                 except Exception:
                     pass
             if current_markdown_text.strip():
-                self.console.print(format_markdown(current_markdown_text))
+                self._flush_markdown_content(current_markdown_text, final=True)
                 current_markdown_text = ""
             if thinking_content.strip():
                 self._print_thinking_content(thinking_content)
@@ -887,7 +966,13 @@ class ReverieInterface:
             self._stream_input_state = None
             self._status_live = None
             if self.current_task_start:
-                self.total_active_time += (time.time() - self.current_task_start)
+                elapsed_active = time.time() - self.current_task_start
+                self.total_active_time += elapsed_active
+                try:
+                    self.workspace_stats_manager.record_active_time(elapsed_active)
+                    self.total_active_time = self.workspace_stats_manager.get_total_active_seconds()
+                except Exception:
+                    pass
                 self.current_task_start = None
             if self.agent:
                 try:
@@ -897,6 +982,16 @@ class ReverieInterface:
                         self.memory_indexer.refresh_session(current_session.id)
                         self._sync_workspace_memory_message(current_session)
                         self.agent.set_history(current_session.messages)
+                    if current_session:
+                        try:
+                            self.workspace_stats_manager.update_session_snapshot(
+                                current_session.id,
+                                session_name=current_session.name,
+                                message_count=len(current_session.messages),
+                            )
+                            self.workspace_stats_manager.flush()
+                        except Exception:
+                            pass
                 except Exception as session_error:
                     self.console.print(f"\n[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Warning: Failed to save session: {session_error}[/{self.theme.AMBER_GLOW}]")
 
@@ -916,6 +1011,31 @@ class ReverieInterface:
             self._print_interjected_message(follow_up_message)
             return self._dispatch_user_input(follow_up_message)
         return True
+
+    def _persist_runtime_stats(self) -> None:
+        """Persist cumulative runtime metrics for the active workspace."""
+        if self._runtime_recorded:
+            return
+        self._runtime_recorded = True
+        try:
+            if hasattr(self, "workspace_stats_manager") and self.workspace_stats_manager:
+                self.workspace_stats_manager.record_runtime(time.time() - self.start_time, force=True)
+                self.workspace_stats_manager.flush()
+        except Exception:
+            pass
+
+    def _flush_markdown_content(self, content: str, *, final: bool = False) -> None:
+        """Render assistant markdown with a shared formatter for lower-latency streaming."""
+        text = str(content or "")
+        if not text:
+            return
+
+        renderable = format_markdown(
+            text,
+            formatter=self._markdown_formatter,
+            max_width=max(int(getattr(self.console, "width", 80) or 80) - 2, 40),
+        )
+        self.console.print(Padding(renderable, (0, 0, 0, 2)), end="" if not final else "\n")
     
     def _print_thinking_content(self, content: str) -> None:
         """Helper method to print thinking content with proper formatting"""
@@ -954,11 +1074,15 @@ class ReverieInterface:
         return remainder
 
     def _init_context_engine(self) -> None:
+        self._init_context_engine_with_options(announce=True)
+
+    def _init_context_engine_with_options(self, *, announce: bool = False) -> None:
+        if self._context_engine_ready and self.indexer and self.retriever:
+            return
         cache_dir = self.config_manager.project_data_dir / 'context_cache'
-        self.console.print(f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} Initializing Context Engine...[/{self.theme.TEXT_DIM}]")
+        if announce:
+            self.console.print(f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} Initializing Context Engine...[/{self.theme.TEXT_DIM}]")
         self.indexer = CodebaseIndexer(project_root=self.project_root, cache_dir=cache_dir)
-        self.git_integration = GitIntegration(self.project_root)
-        self.lsp_manager = LSPManager(self.project_root)
         config = self.config_manager.load()
         from ..context_engine.cache import CacheManager
         cache_manager = CacheManager(cache_dir)
@@ -971,7 +1095,69 @@ class ReverieInterface:
             with self.console.status(f"[{self.theme.PURPLE_SOFT}]{self.deco.SPARKLE} Indexing...[/{self.theme.PURPLE_SOFT}]"):
                 self.indexer.full_index()
         self.retriever = ContextRetriever(self.indexer.symbol_table, self.indexer.dependency_graph, self.project_root)
+        self._context_engine_ready = True
         self._refresh_command_context()
+
+    def _sync_agent_context_engine(self) -> None:
+        """Attach the lazily initialized Context Engine to the active agent and refresh prompt guidance."""
+        if not self.agent or not self.indexer or not self.retriever:
+            return
+
+        self.agent.set_context_engine(self.retriever, self.indexer, self.git_integration)
+        self.agent.tool_executor.update_context('lsp_manager', self.lsp_manager)
+        self.agent.tool_executor.update_context('memory_indexer', self.memory_indexer)
+        self._refresh_agent_prompt_guidance()
+
+    def _refresh_agent_prompt_guidance(self) -> None:
+        """Refresh additional rules/system prompt after lazy services change."""
+        if not self.agent:
+            return
+        config = self.config_manager.load()
+        self.agent.config = config
+        self.agent.additional_rules = self._build_additional_rules_with_tti(config)
+        prompt_phase = "EXECUTION" if getattr(self.agent, "ant_phase", "PLANNING") in {"EXECUTION", "VERIFICATION"} else "PLANNING"
+        self.agent.system_prompt = build_system_prompt(
+            model_name=self.agent.model_display_name,
+            additional_rules=self.agent.additional_rules,
+            mode=self.agent.mode,
+            ant_phase=prompt_phase,
+        )
+
+    def ensure_context_engine(self, *, announce: bool = False) -> bool:
+        """Initialize the Context Engine on demand and synchronize it into the active agent."""
+        if self._context_engine_ready and self.indexer and self.retriever:
+            return False
+        self._init_context_engine_with_options(announce=announce)
+        self._sync_agent_context_engine()
+        self._refresh_command_context()
+        return True
+
+    def ensure_git_integration(self, *, announce: bool = False) -> bool:
+        """Initialize git integration on demand."""
+        if self._git_integration_ready and self.git_integration is not None:
+            return False
+        if announce:
+            self.console.print(f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} Initializing Git integration...[/{self.theme.TEXT_DIM}]")
+        self.git_integration = GitIntegration(self.project_root)
+        self._git_integration_ready = True
+        if self.agent:
+            self.agent.tool_executor.update_context('git_integration', self.git_integration)
+        self._refresh_command_context()
+        return True
+
+    def ensure_lsp_manager(self, *, announce: bool = False) -> bool:
+        """Initialize LSP discovery on demand."""
+        if self._lsp_manager_ready and self.lsp_manager is not None:
+            return False
+        if announce:
+            self.console.print(f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} Initializing LSP bridge...[/{self.theme.TEXT_DIM}]")
+        self.lsp_manager = LSPManager(self.project_root)
+        self._lsp_manager_ready = True
+        if self.agent:
+            self.agent.tool_executor.update_context('lsp_manager', self.lsp_manager)
+            self._refresh_agent_prompt_guidance()
+        self._refresh_command_context()
+        return True
 
     def _init_agent(self) -> None:
         config = self.config_manager.load()
@@ -1032,7 +1218,12 @@ class ReverieInterface:
         # Inject session_manager for context management tool
         self.agent.tool_executor.update_context('session_manager', self.session_manager)
         self.agent.tool_executor.update_context('memory_indexer', self.memory_indexer)
+        self.agent.tool_executor.update_context('workspace_stats_manager', self.workspace_stats_manager)
+        self.agent.tool_executor.update_context('ensure_context_engine', self.ensure_context_engine)
+        self.agent.tool_executor.update_context('ensure_git_integration', self.ensure_git_integration)
+        self.agent.tool_executor.update_context('ensure_lsp_manager', self.ensure_lsp_manager)
         self.agent.tool_executor.update_context('lsp_manager', self.lsp_manager)
+        self.agent.tool_executor.update_context('git_integration', self.git_integration)
         # Inject console into tool context for proper input handling (especially on Windows)
         self.agent.tool_executor.update_context('console', self.console)
         # Inject status_live control for user input (will be set during _process_message)
@@ -1076,7 +1267,7 @@ class ReverieInterface:
         lsp_lines = [
             "## Context Engine Enhancements",
             f"- Workspace global memory: {'enabled' if self.memory_indexer else 'disabled'}",
-            f"- Optional LSP bridge: {'available' if self.lsp_manager and self.lsp_manager.build_status_report().get('available') else 'unavailable'}",
+            f"- Optional LSP bridge: {'available' if self.lsp_manager and self.lsp_manager.build_status_report().get('available') else 'on-demand (initialize only when needed)'}",
             "- If LSP data is available, prefer it for diagnostics, definitions, workspace symbols, and reference-oriented navigation.",
             "- After implementation work, run the relevant build/test/verification commands before concluding.",
             "- After tool use, always produce a user-visible textual response instead of stopping at tool output only.",
@@ -1139,6 +1330,15 @@ class ReverieInterface:
     def _init_session(self) -> None:
         session, resumed = self.session_manager.ensure_session()
         self._sync_workspace_memory_message(session)
+        try:
+            self.workspace_stats_manager.update_session_snapshot(
+                session.id,
+                session_name=session.name,
+                message_count=len(session.messages),
+            )
+            self.workspace_stats_manager.flush()
+        except Exception:
+            pass
 
         if self.agent:
             self.agent.set_history(session.messages)
@@ -1155,11 +1355,15 @@ class ReverieInterface:
             'session_manager': self.session_manager, 'indexer': self.indexer,
             'retriever': self.retriever, 'git_integration': self.git_integration,
             'lsp_manager': self.lsp_manager, 'memory_indexer': self.memory_indexer,
+            'workspace_stats_manager': self.workspace_stats_manager,
             'agent': self.agent, 'start_time': self.start_time, 
             'total_active_time': self.total_active_time,
             'current_task_start': self.current_task_start,
             'project_root': self.project_root,
             'reinit_agent': self._init_agent,
+            'ensure_context_engine': self.ensure_context_engine,
+            'ensure_git_integration': self.ensure_git_integration,
+            'ensure_lsp_manager': self.ensure_lsp_manager,
             'clean_workspace_state': self.clean_workspace_state,
             'operation_history': self.operation_history,
             'rollback_manager': self.rollback_manager
@@ -1231,3 +1435,6 @@ class ReverieInterface:
         except KeyboardInterrupt:
             self.console.print(f"\n[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Setup cancelled.[/{self.theme.AMBER_GLOW}]")
             raise
+        except EOFError:
+            self.console.print(f"\n[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Setup aborted because no interactive input stream is available.[/{self.theme.AMBER_GLOW}]")
+            raise KeyboardInterrupt

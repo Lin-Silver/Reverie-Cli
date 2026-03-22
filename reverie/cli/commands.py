@@ -22,6 +22,7 @@ from rich import box
 from rich.markup import escape
 
 from .help_catalog import HELP_SECTION_ORDER, HELP_TOPICS, normalize_help_topic
+from .markdown_formatter import MarkdownFormatter, format_markdown
 from .theme import THEME, DECO, DREAM
 from ..modes import get_mode_description, list_modes, normalize_mode
 
@@ -38,6 +39,7 @@ class CommandHandler:
         self.app = app_context
         self.theme = THEME
         self.deco = DECO
+        self._markdown_formatter = MarkdownFormatter(console=self.console)
         
         # Command registry
         self.commands = {
@@ -53,6 +55,7 @@ class CommandHandler:
             'search': self.cmd_search,
             'sessions': self.cmd_sessions,
             'history': self.cmd_history,
+            'total': self.cmd_total,
             'clear': self.cmd_clear,
             'clean': self.cmd_clean,
             'index': self.cmd_index,
@@ -1051,6 +1054,11 @@ class CommandHandler:
         config_manager = self.app.get('config_manager')
         config = config_manager.load() if config_manager else None
         indexer = self.app.get('indexer')
+        ensure_context_engine = self.app.get('ensure_context_engine')
+        ensure_git_integration = self.app.get('ensure_git_integration')
+        ensure_lsp_manager = self.app.get('ensure_lsp_manager')
+        git_integration = self.app.get('git_integration')
+        lsp_manager = self.app.get('lsp_manager')
         session_manager = self.app.get('session_manager')
         start_time = self.app.get('start_time')
         agent = self.app.get('agent')
@@ -1092,7 +1100,44 @@ class CommandHandler:
                     f"[bold {self.theme.PURPLE_SOFT}]{session.name}[/bold {self.theme.PURPLE_SOFT}]"
                 )
                 table.add_row(f"{self.deco.DOT_MEDIUM} Messages", str(len(session.messages)))
-        
+
+        if indexer:
+            table.add_row(
+                f"{self.deco.SPARKLE} Context Engine",
+                f"[{self.theme.MINT_SOFT}]Ready[/{self.theme.MINT_SOFT}]",
+            )
+        elif ensure_context_engine:
+            table.add_row(
+                f"{self.deco.SPARKLE} Context Engine",
+                f"[{self.theme.TEXT_DIM}]Lazy load on first message or /index[/{self.theme.TEXT_DIM}]",
+            )
+        if git_integration:
+            git_status = "Ready" if getattr(git_integration, "is_available", False) else "Unavailable"
+            git_color = self.theme.MINT_SOFT if getattr(git_integration, "is_available", False) else self.theme.TEXT_DIM
+            table.add_row(
+                f"{self.deco.DOT_MEDIUM} Git Integration",
+                f"[{git_color}]{git_status}[/{git_color}]",
+            )
+        elif ensure_git_integration:
+            table.add_row(
+                f"{self.deco.DOT_MEDIUM} Git Integration",
+                f"[{self.theme.TEXT_DIM}]Lazy load on first git history query[/{self.theme.TEXT_DIM}]",
+            )
+        if lsp_manager:
+            lsp_status = lsp_manager.build_status_report()
+            lsp_available = bool(lsp_status.get("available"))
+            lsp_label = f"Ready ({len(lsp_status.get('servers', []))} server(s))" if lsp_available else "Ready (no local servers detected)"
+            lsp_color = self.theme.MINT_SOFT if lsp_available else self.theme.TEXT_DIM
+            table.add_row(
+                f"{self.deco.DOT_MEDIUM} LSP Bridge",
+                f"[{lsp_color}]{lsp_label}[/{lsp_color}]",
+            )
+        elif ensure_lsp_manager:
+            table.add_row(
+                f"{self.deco.DOT_MEDIUM} LSP Bridge",
+                f"[{self.theme.TEXT_DIM}]Lazy load on first LSP query[/{self.theme.TEXT_DIM}]",
+            )
+
         # Token info
         if agent:
             tokens = agent.get_token_estimate()
@@ -1604,6 +1649,7 @@ class CommandHandler:
         from ..qwencode import (
             detect_qwencode_cli_credentials,
             normalize_qwencode_config,
+            resolve_qwencode_runtime_request_url,
             resolve_qwencode_selected_model,
         )
 
@@ -1685,6 +1731,14 @@ class CommandHandler:
             if endpoint:
                 self.console.print(
                     f"[{self.theme.TEXT_DIM}]Endpoint override: {endpoint}[/{self.theme.TEXT_DIM}]"
+                )
+            effective_request_url = resolve_qwencode_runtime_request_url(
+                qwencode_cfg,
+                credentials=cred if cred.get("found") else None,
+            )
+            if effective_request_url:
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Effective request URL: {effective_request_url}[/{self.theme.TEXT_DIM}]"
                 )
 
         self.console.print()
@@ -3923,6 +3977,7 @@ class CommandHandler:
     def cmd_sessions(self, args: str) -> bool:
         """Session management with dreamy styling"""
         session_manager = self.app.get('session_manager')
+        workspace_stats_manager = self.app.get('workspace_stats_manager')
         if not session_manager:
             self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Session manager not available[/{self.theme.CORAL_SOFT}]")
             return True
@@ -3972,6 +4027,12 @@ class CommandHandler:
                 session = session_manager.create_session(name or None)
                 if agent:
                     agent.set_history(session.messages)
+                if workspace_stats_manager:
+                    workspace_stats_manager.update_session_snapshot(
+                        session.id,
+                        session_name=session.name,
+                        message_count=len(session.messages),
+                    )
                 self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Created session: {session.name}[/{self.theme.MINT_VIBRANT}]")
 
             elif choice.lower() == 'd':
@@ -3994,6 +4055,12 @@ class CommandHandler:
                                     replacement = session_manager.create_session()
                                 if agent:
                                     agent.set_history(replacement.messages)
+                                if workspace_stats_manager:
+                                    workspace_stats_manager.update_session_snapshot(
+                                        replacement.id,
+                                        session_name=replacement.name,
+                                        message_count=len(replacement.messages),
+                                    )
                                 self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Deleted. Active session: {replacement.name}[/{self.theme.MINT_VIBRANT}]")
                             else:
                                 self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Deleted[/{self.theme.MINT_VIBRANT}]")
@@ -4008,6 +4075,16 @@ class CommandHandler:
                         self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Loaded: {session.name}[/{self.theme.MINT_VIBRANT}]")
                         if agent:
                             agent.set_history(session.messages)
+                        if workspace_stats_manager:
+                            workspace_stats_manager.update_session_snapshot(
+                                session.id,
+                                session_name=session.name,
+                                message_count=len(session.messages),
+                            )
+                        self._show_session_transcript(
+                            session.to_dict(),
+                            title=f"Loaded Session {self.deco.DOT_MEDIUM} {session.name}",
+                        )
         except KeyboardInterrupt:
             self.console.print()
 
@@ -4016,6 +4093,7 @@ class CommandHandler:
     def cmd_history(self, args: str) -> bool:
         """View conversation history with themed styling"""
         agent = self.app.get('agent')
+        session_manager = self.app.get('session_manager')
         if not agent:
             self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Agent not available[/{self.theme.CORAL_SOFT}]")
             return True
@@ -4032,23 +4110,426 @@ class CommandHandler:
         if not history:
             self.console.print(f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} No conversation history yet.[/{self.theme.TEXT_DIM}]")
             return True
-        
+
+        current_session = session_manager.get_current_session() if session_manager else None
+        payload = {
+            "id": current_session.id if current_session else "current",
+            "name": current_session.name if current_session else "Current Conversation",
+            "created_at": current_session.created_at if current_session else "",
+            "updated_at": current_session.updated_at if current_session else "",
+            "messages": history[-limit:] if limit < len(history) else history,
+        }
+        self._show_session_transcript(payload, title="Conversation History")
+        return True
+
+    def _message_text(self, value: Any) -> str:
+        """Flatten persisted message content into readable transcript text."""
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        if isinstance(value, (int, float, bool)):
+            return str(value)
+        if isinstance(value, list):
+            parts: List[str] = []
+            for item in value:
+                if isinstance(item, str):
+                    parts.append(item)
+                elif isinstance(item, dict):
+                    text = (
+                        item.get("text")
+                        or item.get("content")
+                        or item.get("output_text")
+                        or item.get("input_text")
+                        or item.get("value")
+                    )
+                    if text is not None:
+                        parts.append(str(text))
+                    else:
+                        parts.append(json.dumps(item, ensure_ascii=False))
+                else:
+                    parts.append(str(item))
+            return "\n".join(part for part in parts if part).strip()
+        if isinstance(value, dict):
+            text = (
+                value.get("text")
+                or value.get("content")
+                or value.get("output_text")
+                or value.get("input_text")
+                or value.get("value")
+            )
+            if text is not None:
+                return self._message_text(text)
+            return json.dumps(value, ensure_ascii=False, indent=2)
+        return str(value)
+
+    def _format_duration(self, seconds: Any) -> str:
+        try:
+            total_seconds = max(0, int(float(seconds or 0)))
+        except (TypeError, ValueError):
+            total_seconds = 0
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, secs = divmod(remainder, 60)
+        if hours:
+            return f"{hours}h {minutes}m {secs}s"
+        if minutes:
+            return f"{minutes}m {secs}s"
+        return f"{secs}s"
+
+    def _show_session_transcript(self, session_payload: Dict[str, Any], title: str = "Session Transcript") -> None:
+        """Render one session with readable role blocks and full transcript paging."""
+        messages = session_payload.get("messages", []) or []
+        session_name = str(session_payload.get("name", "") or "Session").strip()
+        session_id = str(session_payload.get("id", "") or "").strip()
+        created_at = str(session_payload.get("created_at", "") or "").strip()
+        updated_at = str(session_payload.get("updated_at", "") or "").strip()
+        transcript_width = max(int(getattr(self.console, "width", 80) or 80) - 3, 40)
+
+        header = Panel(
+            Group(
+                Text.from_markup(
+                    f"[bold {self.theme.PINK_SOFT}]{escape(title)}[/{self.theme.PINK_SOFT}]"
+                ),
+                Text.from_markup(
+                    f"[{self.theme.TEXT_SECONDARY}]Name: {escape(session_name)}[/{self.theme.TEXT_SECONDARY}]"
+                ),
+                Text.from_markup(
+                    f"[{self.theme.TEXT_DIM}]ID: {escape(session_id or 'n/a')}  {self.deco.DOT_MEDIUM}  "
+                    f"Created: {escape(created_at or 'n/a')}  {self.deco.DOT_MEDIUM}  "
+                    f"Updated: {escape(updated_at or 'n/a')}  {self.deco.DOT_MEDIUM}  "
+                    f"Messages: {len(messages)}[/{self.theme.TEXT_DIM}]"
+                ),
+            ),
+            border_style=self.theme.BORDER_PRIMARY,
+            box=box.ROUNDED,
+            padding=(0, 1),
+        )
+
+        with self.console.pager(styles=True):
+            self.console.print()
+            self.console.print(header)
+            self.console.print()
+
+            for index, message in enumerate(messages, start=1):
+                role = str(message.get("role", "") or "unknown").strip().lower()
+                reasoning_content = self._message_text(message.get("reasoning_content"))
+                content_text = self._message_text(message.get("content"))
+                accent = {
+                    "user": self.theme.BLUE_SOFT,
+                    "assistant": self.theme.PINK_SOFT,
+                    "system": self.theme.PURPLE_SOFT,
+                    "tool": self.theme.MINT_SOFT,
+                }.get(role, self.theme.TEXT_SECONDARY)
+                label = {
+                    "user": "User",
+                    "assistant": "Assistant",
+                    "system": "System",
+                    "tool": "Tool",
+                }.get(role, "Message")
+                if role == "tool":
+                    tool_name = str(message.get("name") or message.get("tool_name") or "").strip()
+                    if tool_name:
+                        label = f"Tool {self.deco.DOT_MEDIUM} {tool_name}"
+
+                label_line = Text()
+                label_line.append("+- ", style=accent)
+                label_line.append(f"#{index:03d} ", style=self.theme.TEXT_DIM)
+                label_line.append(label, style=f"bold {accent}")
+                self.console.print(label_line)
+
+                if reasoning_content:
+                    self.console.print(
+                        Padding(
+                            Text("Thinking...", style=f"italic {self.theme.THINKING_MEDIUM}"),
+                            (0, 0, 0, 2),
+                        )
+                    )
+                    for thought_line in reasoning_content.splitlines():
+                        if not thought_line.strip():
+                            continue
+                        rendered = Text()
+                        rendered.append("│ ", style=self.theme.THINKING_BORDER)
+                        rendered.append(thought_line.strip(), style=f"italic {self.theme.THINKING_SOFT}")
+                        self.console.print(Padding(rendered, (0, 0, 0, 3)))
+
+                if content_text:
+                    if role in {"assistant", "system"}:
+                        self.console.print(
+                            Padding(
+                                format_markdown(
+                                    content_text,
+                                    formatter=self._markdown_formatter,
+                                    max_width=transcript_width,
+                                ),
+                                (0, 0, 0, 2),
+                            )
+                        )
+                    else:
+                        self.console.print(
+                            Padding(
+                                Text(content_text, style=self.theme.TEXT_PRIMARY),
+                                (0, 0, 0, 2),
+                            )
+                        )
+
+                tool_calls = message.get("tool_calls")
+                if isinstance(tool_calls, list) and tool_calls:
+                    tool_lines: List[str] = []
+                    for tool_call in tool_calls:
+                        if not isinstance(tool_call, dict):
+                            continue
+                        function = tool_call.get("function") if isinstance(tool_call.get("function"), dict) else {}
+                        tool_name = str(function.get("name", "") or tool_call.get("name", "") or "tool").strip()
+                        arguments = function.get("arguments", "")
+                        argument_text = self._message_text(arguments)
+                        tool_lines.append(f"- {tool_name}")
+                        if argument_text:
+                            tool_lines.append(argument_text)
+                    if tool_lines:
+                        self.console.print(
+                            Padding(
+                                Text("\n".join(tool_lines), style=self.theme.TEXT_SECONDARY),
+                                (0, 0, 0, 2),
+                            )
+                        )
+
+                self.console.print(Text("\\-", style=accent))
+                self.console.print()
+
+    def cmd_total(self, args: str) -> bool:
+        """Show persistent workspace totals and let the user inspect another workspace."""
+        from ..config import get_app_root
+        from ..session import WorkspaceStatsManager, get_known_workspaces
+        from .tui_selector import TUISelector, SelectorItem, SelectorAction
+
+        workspaces = get_known_workspaces(get_app_root())
+        if not workspaces:
+            self.console.print(f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} No workspace statistics found yet.[/{self.theme.TEXT_DIM}]")
+            return True
+
+        selected_workspace = None
+        if len(workspaces) == 1 and args.strip().lower() not in {"choose", "select"}:
+            selected_workspace = workspaces[0]
+        else:
+            selector_items = [
+                SelectorItem(
+                    id=str(index),
+                    title=str(item.get("workspace_name") or Path(str(item.get("workspace_path") or item.get("cache_dir"))).name),
+                    description=(
+                        f"{Path(str(item.get('workspace_path') or item.get('cache_dir'))).name}  "
+                        f"{self.deco.DOT_MEDIUM}  {item.get('session_count', 0)} sessions  "
+                        f"{self.deco.DOT_MEDIUM}  active {self._format_duration(item.get('total_active_seconds', 0))}"
+                    ),
+                    metadata=item,
+                )
+                for index, item in enumerate(workspaces, start=1)
+            ]
+            selector = TUISelector(
+                self.console,
+                title="Workspace Totals",
+                items=selector_items,
+                allow_search=True,
+                allow_cancel=True,
+                show_descriptions=True,
+                max_visible=10,
+            )
+            result = selector.run()
+            if result.action != SelectorAction.SELECT or not result.selected_item:
+                return True
+            selected_workspace = result.selected_item.metadata
+
+        cache_dir = Path(str(selected_workspace.get("cache_dir") or ""))
+        active_stats_manager = self.app.get("workspace_stats_manager")
+        if active_stats_manager:
+            try:
+                active_stats_manager.flush()
+            except Exception:
+                pass
+
+        if active_stats_manager and Path(getattr(active_stats_manager, "project_data_dir", cache_dir)).resolve() == cache_dir.resolve():
+            stats_manager = active_stats_manager
+        else:
+            stats_manager = WorkspaceStatsManager.from_cache_dir(cache_dir)
+        dashboard = stats_manager.build_dashboard_data()
+        session_rows = WorkspaceStatsManager.list_session_files(cache_dir)
+        session_usage_map = {
+            str(item.get("session_id")): item
+            for item in dashboard.get("session_usage", [])
+            if isinstance(item, dict) and str(item.get("session_id", "")).strip()
+        }
+
         self.console.print()
-        self.console.print(f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Conversation History[/bold {self.theme.PINK_SOFT}]")
-        self.console.print(f"[{self.theme.PURPLE_MEDIUM}]{self.deco.LINE_HORIZONTAL * 40}[/{self.theme.PURPLE_MEDIUM}]")
-        
-        # Show all messages by default
-        for msg in history[-limit:]:
-            role = msg.get('role', 'unknown')
-            content = msg.get('content', '')
-            
-            if role == 'user':
-                self.console.print(f"\n[bold {self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT} You:[/bold {self.theme.BLUE_SOFT}] {escape(content)}")
-            elif role == 'assistant':
-                self.console.print(f"\n[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Reverie:[/bold {self.theme.PINK_SOFT}] {escape(content)}")
-            elif role == 'tool':
-                self.console.print(f"\n[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} Tool Result: {escape(content[:200])}...[/{self.theme.TEXT_DIM}]")
-        
+        summary = Table(show_header=False, box=box.SIMPLE_HEAVY, border_style=self.theme.BORDER_PRIMARY, expand=True)
+        summary.add_column(style=self.theme.TEXT_SECONDARY, width=22)
+        summary.add_column(style=self.theme.TEXT_PRIMARY)
+        summary.add_row("Workspace", f"[bold {self.theme.PINK_SOFT}]{escape(str(dashboard.get('workspace_name') or cache_dir.name))}[/bold {self.theme.PINK_SOFT}]")
+        summary.add_row("Path", f"[{self.theme.TEXT_DIM}]{escape(str(dashboard.get('workspace_path') or cache_dir))}[/{self.theme.TEXT_DIM}]")
+        summary.add_row("CLI Runtime", f"[{self.theme.BLUE_SOFT}]{self._format_duration(dashboard.get('total_runtime_seconds', 0))}[/{self.theme.BLUE_SOFT}]")
+        summary.add_row("Active Work", f"[{self.theme.MINT_SOFT}]{self._format_duration(dashboard.get('total_active_seconds', 0))}[/{self.theme.MINT_SOFT}]")
+        summary.add_row("Model Calls", f"[{self.theme.PURPLE_SOFT}]{dashboard.get('total_calls', 0):,}[/{self.theme.PURPLE_SOFT}]")
+        summary.add_row("Input Tokens", f"[{self.theme.BLUE_SOFT}]{dashboard.get('total_input_tokens', 0):,}[/{self.theme.BLUE_SOFT}]")
+        summary.add_row("Output Tokens", f"[{self.theme.PINK_SOFT}]{dashboard.get('total_output_tokens', 0):,}[/{self.theme.PINK_SOFT}]")
+        summary.add_row("Sessions", f"[{self.theme.TEXT_SECONDARY}]{len(session_rows)}[/{self.theme.TEXT_SECONDARY}]")
+        self.console.print(
+            Panel(
+                summary,
+                title=f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Workspace Totals[/bold {self.theme.PINK_SOFT}]",
+                border_style=self.theme.BORDER_PRIMARY,
+                box=box.ROUNDED,
+                padding=(0, 1),
+            )
+        )
+
+        source_table = Table(
+            title=f"[bold {self.theme.MINT_SOFT}]{self.deco.CRYSTAL} Source Usage[/bold {self.theme.MINT_SOFT}]",
+            box=box.ROUNDED,
+            border_style=self.theme.BORDER_SECONDARY,
+            expand=True,
+        )
+        source_table.add_column("Source", style=f"bold {self.theme.MINT_VIBRANT}", no_wrap=True)
+        source_table.add_column("Calls", style=self.theme.TEXT_SECONDARY, justify="right")
+        source_table.add_column("Input", style=self.theme.BLUE_SOFT, justify="right")
+        source_table.add_column("Output", style=self.theme.PINK_SOFT, justify="right")
+        source_table.add_column("Models", style=self.theme.TEXT_DIM, justify="right")
+        source_table.add_column("Providers", style=self.theme.TEXT_DIM, justify="right")
+        for row in dashboard.get("source_usage", []) or []:
+            source_table.add_row(
+                str(row.get("source") or "standard"),
+                f"{int(row.get('calls', 0)):,}",
+                f"{int(row.get('input_tokens', 0)):,}",
+                f"{int(row.get('output_tokens', 0)):,}",
+                str(int(row.get("model_count", 0))),
+                str(int(row.get("provider_count", 0))),
+            )
+        if not (dashboard.get("source_usage") or []):
+            source_table.add_row("No source usage recorded yet", "", "", "", "", "")
+        self.console.print(source_table)
+
+        atlas_source_rows = [
+            row
+            for row in (dashboard.get("source_usage") or [])
+            if str(row.get("source") or "").strip().lower() in {"chat", "compression", "handoff"}
+        ]
+        if atlas_source_rows:
+            total_source_calls = sum(int(row.get("calls", 0) or 0) for row in atlas_source_rows) or 1
+            atlas_lines = [
+                "Atlas Context Cost View",
+                "",
+            ]
+            for row in atlas_source_rows:
+                source_name = str(row.get("source") or "unknown").strip().lower()
+                call_ratio = (int(row.get("calls", 0) or 0) / total_source_calls) * 100.0
+                atlas_lines.append(
+                    f"- {source_name}: {int(row.get('calls', 0) or 0):,} calls, "
+                    f"{int(row.get('input_tokens', 0) or 0):,} in, {int(row.get('output_tokens', 0) or 0):,} out "
+                    f"({call_ratio:.1f}% of tracked Atlas calls)"
+                )
+            atlas_lines.extend(
+                [
+                    "",
+                    "- `chat` should usually be the main cost: it means the model is spending budget on real delivery work.",
+                    "- `compression` is maintenance cost: high values mean Atlas is spending too much effort shrinking context.",
+                    "- `handoff` is continuity cost: high values mean session rotation or resume overhead is getting expensive.",
+                ]
+            )
+            self.console.print(
+                Panel(
+                    Text("\n".join(atlas_lines), style=self.theme.TEXT_SECONDARY),
+                    title=f"[bold {self.theme.AMBER_GLOW}]{self.deco.SPARKLE} Atlas Context Cost[/bold {self.theme.AMBER_GLOW}]",
+                    border_style=self.theme.BORDER_SECONDARY,
+                    box=box.ROUNDED,
+                    padding=(0, 1),
+                )
+            )
+
+        model_table = Table(
+            title=f"[bold {self.theme.PURPLE_SOFT}]{self.deco.CRYSTAL} Model Usage[/bold {self.theme.PURPLE_SOFT}]",
+            box=box.ROUNDED,
+            border_style=self.theme.BORDER_SECONDARY,
+            expand=True,
+        )
+        model_table.add_column("Model", style=f"bold {self.theme.BLUE_SOFT}")
+        model_table.add_column("Provider", style=self.theme.TEXT_DIM, no_wrap=True)
+        model_table.add_column("Source", style=self.theme.MINT_SOFT, no_wrap=True)
+        model_table.add_column("Calls", style=self.theme.TEXT_SECONDARY, justify="right")
+        model_table.add_column("Input", style=self.theme.BLUE_SOFT, justify="right")
+        model_table.add_column("Output", style=self.theme.PINK_SOFT, justify="right")
+        for row in dashboard.get("model_usage", []) or []:
+            model_label = str(row.get("model_display_name") or row.get("model") or "unknown")
+            provider_label = str(row.get("provider") or "unknown")
+            source_label = str(row.get("source") or "standard")
+            model_table.add_row(
+                model_label,
+                provider_label,
+                source_label,
+                f"{int(row.get('calls', 0)):,}",
+                f"{int(row.get('input_tokens', 0)):,}",
+                f"{int(row.get('output_tokens', 0)):,}",
+            )
+        if not (dashboard.get("model_usage") or []):
+            model_table.add_row("No model usage recorded yet", "", "", "", "", "")
+        self.console.print(model_table)
+
+        sessions_table = Table(
+            title=f"[bold {self.theme.BLUE_SOFT}]{self.deco.CRYSTAL} Session Summary[/bold {self.theme.BLUE_SOFT}]",
+            box=box.ROUNDED,
+            border_style=self.theme.BORDER_SECONDARY,
+            expand=True,
+        )
+        sessions_table.add_column("#", style=self.theme.TEXT_DIM, width=4, justify="right")
+        sessions_table.add_column("Session", style=f"bold {self.theme.PINK_SOFT}")
+        sessions_table.add_column("Messages", style=self.theme.TEXT_SECONDARY, justify="right")
+        sessions_table.add_column("Input", style=self.theme.BLUE_SOFT, justify="right")
+        sessions_table.add_column("Output", style=self.theme.PINK_SOFT, justify="right")
+        sessions_table.add_column("Updated", style=self.theme.TEXT_DIM, no_wrap=True)
+        for index, row in enumerate(session_rows, start=1):
+            usage_row = session_usage_map.get(str(row.get("id") or ""))
+            sessions_table.add_row(
+                str(index),
+                str(row.get("name") or row.get("id") or ""),
+                str(row.get("message_count", 0)),
+                f"{int((usage_row or {}).get('input_tokens', 0)):,}",
+                f"{int((usage_row or {}).get('output_tokens', 0)):,}",
+                str(row.get("updated_at") or "")[:16].replace("T", " "),
+            )
+        if not session_rows:
+            sessions_table.add_row("", "No sessions recorded", "", "", "", "")
+        self.console.print(sessions_table)
+        self.console.print()
+
+        if not session_rows:
+            return True
+
+        try:
+            choice = Prompt.ask(
+                f"[{self.theme.PURPLE_SOFT}]Open session #[/{self.theme.PURPLE_SOFT}]",
+                default="",
+            ).strip()
+        except KeyboardInterrupt:
+            self.console.print()
+            return True
+
+        if not choice:
+            return True
+
+        if not choice.isdigit():
+            self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Enter a session number from the table to inspect its transcript.[/{self.theme.AMBER_GLOW}]")
+            return True
+
+        selected_index = int(choice) - 1
+        if selected_index < 0 or selected_index >= len(session_rows):
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid session selection.[/{self.theme.CORAL_SOFT}]")
+            return True
+
+        session_payload = WorkspaceStatsManager.load_session_payload(cache_dir, str(session_rows[selected_index].get("id") or ""))
+        if not session_payload:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Failed to load the selected session transcript.[/{self.theme.CORAL_SOFT}]")
+            return True
+
+        self._show_session_transcript(
+            session_payload,
+            title=f"Workspace Session {self.deco.DOT_MEDIUM} {session_payload.get('name', session_payload.get('id', 'session'))}",
+        )
         return True
     
     def cmd_clear(self, args: str) -> bool:
@@ -4151,6 +4632,10 @@ class CommandHandler:
     def cmd_index(self, args: str) -> bool:
         """Re-index the codebase with styled output"""
         indexer = self.app.get('indexer')
+        ensure_context_engine = self.app.get('ensure_context_engine')
+        if not indexer and ensure_context_engine:
+            ensure_context_engine()
+            indexer = self.app.get('indexer')
         if not indexer:
             self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Indexer not available[/{self.theme.CORAL_SOFT}]")
             return True
@@ -5569,7 +6054,7 @@ class CommandHandler:
             # Get token count
             try:
                 from ..tools.token_counter import TokenCounterTool
-                token_counter = TokenCounterTool(self.app.get('project_root'))
+                token_counter = TokenCounterTool({'project_root': self.app.get('project_root')})
                 token_counter.context = {'agent': agent, 'config_manager': config_manager}
                 result = token_counter.execute(check_current_conversation=True)
                 
@@ -5643,7 +6128,7 @@ class CommandHandler:
             
             try:
                 from ..tools.context_management import ContextManagementTool
-                context_tool = ContextManagementTool(self.app.get('project_root'))
+                context_tool = ContextManagementTool({'project_root': self.app.get('project_root')})
                 context_tool.context = {
                     'agent': agent,
                     'config_manager': config_manager,
@@ -5658,7 +6143,7 @@ class CommandHandler:
                     # Show new token count
                     try:
                         from ..tools.token_counter import TokenCounterTool
-                        token_counter = TokenCounterTool(self.app.get('project_root'))
+                        token_counter = TokenCounterTool({'project_root': self.app.get('project_root')})
                         token_counter.context = {'agent': agent, 'config_manager': config_manager}
                         count_result = token_counter.execute(check_current_conversation=True)
                         
@@ -5735,7 +6220,7 @@ class CommandHandler:
             
             try:
                 from ..tools.token_counter import TokenCounterTool
-                token_counter = TokenCounterTool(self.app.get('project_root'))
+                token_counter = TokenCounterTool({'project_root': self.app.get('project_root')})
                 token_counter.context = {'agent': agent, 'config_manager': config_manager}
                 result = token_counter.execute(check_current_conversation=True)
                 

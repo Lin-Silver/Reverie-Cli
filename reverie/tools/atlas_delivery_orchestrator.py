@@ -21,11 +21,13 @@ from .base import BaseTool, ToolResult
 
 ATLAS_ARTIFACTS_DIR = "artifacts/atlas"
 DEFAULT_MASTER_DOCUMENT_PATH = "artifacts/Master Document.md"
+DEFAULT_TASK_PATH = "artifacts/task.md"
 DEFAULT_STATE_PATH = f"{ATLAS_ARTIFACTS_DIR}/atlas_state.json"
 DEFAULT_CHARTER_PATH = f"{ATLAS_ARTIFACTS_DIR}/delivery_charter.md"
 DEFAULT_TRACKER_PATH = f"{ATLAS_ARTIFACTS_DIR}/delivery_tracker.md"
 DEFAULT_DOCUMENT_MANIFEST_JSON_PATH = f"{ATLAS_ARTIFACTS_DIR}/document_manifest.json"
 DEFAULT_DOCUMENT_MANIFEST_MD_PATH = f"{ATLAS_ARTIFACTS_DIR}/document_manifest.md"
+DEFAULT_RESUME_INDEX_PATH = f"{ATLAS_ARTIFACTS_DIR}/resume_index.md"
 DEFAULT_HANDOFF_PATH = f"{ATLAS_ARTIFACTS_DIR}/handoff_summary.md"
 DEFAULT_FINAL_REPORT_PATH = f"{ATLAS_ARTIFACTS_DIR}/final_delivery_report.md"
 
@@ -761,6 +763,8 @@ class AtlasDeliveryOrchestratorTool(BaseTool):
                 "state_path": DEFAULT_STATE_PATH,
                 "charter_path": DEFAULT_CHARTER_PATH,
                 "tracker_path": DEFAULT_TRACKER_PATH,
+                "task_path": DEFAULT_TASK_PATH,
+                "resume_index_path": DEFAULT_RESUME_INDEX_PATH,
                 "master_document_path": state.master_document_path,
                 "appendix_paths": state.appendix_paths,
             },
@@ -1232,6 +1236,8 @@ class AtlasDeliveryOrchestratorTool(BaseTool):
         self._write_state(state)
         self._write_charter(state)
         self._write_tracker(state)
+        self._write_task_file(state)
+        self._write_resume_index_file(state)
         self._write_document_manifest_files(state)
         self._write_handoff_file(state)
 
@@ -1248,6 +1254,16 @@ class AtlasDeliveryOrchestratorTool(BaseTool):
         tracker_path = self.resolve_workspace_path(DEFAULT_TRACKER_PATH, purpose="write tracker")
         _ensure_parent(tracker_path)
         tracker_path.write_text(self._render_tracker(state), encoding="utf-8")
+
+    def _write_task_file(self, state: AtlasDeliveryState) -> None:
+        task_path = self.resolve_workspace_path(DEFAULT_TASK_PATH, purpose="write atlas task file")
+        _ensure_parent(task_path)
+        task_path.write_text(self._render_task_file(state), encoding="utf-8")
+
+    def _write_resume_index_file(self, state: AtlasDeliveryState) -> None:
+        resume_index_path = self.resolve_workspace_path(DEFAULT_RESUME_INDEX_PATH, purpose="write atlas resume index")
+        _ensure_parent(resume_index_path)
+        resume_index_path.write_text(self._render_resume_index(state), encoding="utf-8")
 
     def _write_document_manifest_files(self, state: AtlasDeliveryState) -> None:
         manifest_json_path = self.resolve_workspace_path(
@@ -1306,6 +1322,8 @@ class AtlasDeliveryOrchestratorTool(BaseTool):
     def _scan_documents(self, state: AtlasDeliveryState) -> List[AtlasDocumentSnapshot]:
         manifest: List[AtlasDocumentSnapshot] = []
         document_specs: List[Tuple[str, str]] = [("master", state.master_document_path)]
+        document_specs.append(("task", DEFAULT_TASK_PATH))
+        document_specs.append(("resume", DEFAULT_RESUME_INDEX_PATH))
         document_specs.extend(("appendix", path) for path in state.appendix_paths)
         for role, path_text in document_specs:
             normalized = self._normalize_document_path(path_text)
@@ -1797,6 +1815,121 @@ class AtlasDeliveryOrchestratorTool(BaseTool):
             body.extend([f"## {section}", "Pending appendix details.", ""])
         return "\n".join(body).rstrip() + "\n"
 
+    def _task_items_for_slice(self, item: AtlasSliceRecord) -> List[tuple[bool, str]]:
+        items: List[tuple[bool, str]] = []
+
+        for path in item.document_paths:
+            items.append((item.status == "completed", f"同步相关文档：{path}"))
+        for target in item.implementation_targets:
+            items.append((item.status == "completed", f"实现目标：{target}"))
+        for criterion in item.success_criteria:
+            items.append((item.status == "completed", f"达成标准：{criterion}"))
+        for plan in item.verification_plan:
+            is_done = item.status == "completed" and bool(item.verification_results)
+            items.append((is_done, f"验证项：{plan}"))
+        for change in item.delivered_changes:
+            items.append((True, f"已交付：{change}"))
+        for result in item.verification_results:
+            items.append((True, f"已验证：{result}"))
+        for question in item.open_questions:
+            items.append((False, f"待确认：{question}"))
+        if item.notes:
+            items.append((item.status == "completed", f"备注：{item.notes}"))
+
+        if not items:
+            fallback_text = item.notes or "推进该分目标并同步实现、验证、文档状态"
+            items.append((item.status == "completed", fallback_text))
+
+        deduped: List[tuple[bool, str]] = []
+        seen: set[str] = set()
+        for done, text in items:
+            cleaned = _clean_multiline_text(text)
+            key = cleaned.casefold()
+            if not cleaned or key in seen:
+                continue
+            seen.add(key)
+            deduped.append((done, cleaned))
+        return deduped
+
+    def _render_task_file(self, state: AtlasDeliveryState) -> str:
+        lines = [
+            "主任务目标",
+            state.objective or "待补充主任务目标",
+            "",
+        ]
+
+        if not state.slices:
+            lines.extend(
+                [
+                    "分目标1：建立 Atlas 文档系统与执行切片",
+                    "[ ]梳理主任务目标、主文档、附录文档和交付切片",
+                    "[ ]补充 artifacts/task.md、artifacts/atlas/ 以及文档清单",
+                ]
+            )
+        else:
+            for index, item in enumerate(self._sort_slices(state.slices), start=1):
+                lines.append(f"分目标{index}：{item.title}")
+                for done, text in self._task_items_for_slice(item):
+                    checkbox = "[x]" if done else "[ ]"
+                    lines.append(f"{checkbox}{text}")
+                lines.append("")
+
+        open_blockers = [item for item in state.blockers if item.status == "open"]
+        if open_blockers:
+            lines.append(f"分目标{len(state.slices) + 1}：处理阻塞与风险")
+            for blocker in open_blockers:
+                lines.append(f"[ ]阻塞：{blocker.title} - {blocker.detail}")
+            lines.append("")
+
+        return "\n".join(lines).rstrip() + "\n"
+
+    def _render_resume_index(self, state: AtlasDeliveryState) -> str:
+        active = self._active_slice(state)
+        open_blockers = [item for item in state.blockers if item.status == "open"]
+        latest_checkpoint = state.checkpoints[-1] if state.checkpoints else None
+        lines = [
+            "# Atlas Resume Index",
+            "",
+            "Read this file first when a new Atlas conversation starts or resumes.",
+            "",
+            "## Resume Order",
+            f"1. `{DEFAULT_RESUME_INDEX_PATH}`",
+            f"2. `{DEFAULT_TASK_PATH}`",
+            f"3. `{state.master_document_path}`",
+            f"4. `{DEFAULT_TRACKER_PATH}`",
+            f"5. `{DEFAULT_HANDOFF_PATH}`",
+        ]
+        if state.appendix_paths:
+            lines.append("6. Relevant appendix documents for the active slice:")
+            lines.extend(f"   - `{path}`" for path in state.appendix_paths[:8])
+
+        lines.extend(
+            [
+                "",
+                "## Current Objective",
+                state.objective or "Pending objective.",
+                "",
+                "## Current State",
+                f"- Delivery mode: `{state.delivery_mode}`",
+                f"- Complexity tier: `{state.complexity_tier}`",
+                f"- Contract confirmed: {'yes' if state.contract_confirmed else 'no'}",
+                f"- Active slice: `{active.slice_id}` {active.title}" if active else "- Active slice: None",
+                f"- Open blockers: {len(open_blockers)}",
+                f"- Last action: `{state.last_action or 'none'}`",
+                f"- Updated at: `{state.updated_at or state.created_at}`",
+                "",
+                "## Immediate Next Step",
+                f"- {latest_checkpoint.next_action}" if latest_checkpoint and latest_checkpoint.next_action else f"- {self._recommend_next_action(state)}",
+                "",
+                "## Fast Resume Checklist",
+                "- Reconcile the current repository state with the document system before editing.",
+                f"- Open `{DEFAULT_TASK_PATH}` and continue the next unfinished item instead of writing a status recap.",
+                "- If the active slice changed materially, refresh the Atlas tracker and task tree before broad implementation.",
+                "- If context is tight, prefer document-grounded continuation over replaying old conversation details.",
+            ]
+        )
+        return "\n".join(lines).rstrip() + "\n"
+
     def _render_charter(self, state: AtlasDeliveryState) -> str:
         active = self._active_slice(state)
         lines = [
@@ -1816,6 +1949,8 @@ class AtlasDeliveryOrchestratorTool(BaseTool):
             "",
             "## Document Set",
             f"- Master document: `{state.master_document_path}`",
+            f"- Task tree: `{DEFAULT_TASK_PATH}`",
+            f"- Resume index: `{DEFAULT_RESUME_INDEX_PATH}`",
             f"- Appendices tracked: {len(state.appendix_paths)}",
         ]
         if state.appendix_paths:
@@ -1919,6 +2054,8 @@ class AtlasDeliveryOrchestratorTool(BaseTool):
             "",
             f"- Updated at: `{state.updated_at or _now_iso()}`",
             f"- Master document: `{state.master_document_path}`",
+            f"- Task tree: `{DEFAULT_TASK_PATH}`",
+            f"- Resume index: `{DEFAULT_RESUME_INDEX_PATH}`",
             f"- Appendices tracked: {len(state.appendix_paths)}",
             "",
         ]
@@ -1966,6 +2103,8 @@ class AtlasDeliveryOrchestratorTool(BaseTool):
             "",
             "## Documents",
             f"- Master document: `{state.master_document_path}`",
+            f"- Task tree: `{DEFAULT_TASK_PATH}`",
+            f"- Resume index: `{DEFAULT_RESUME_INDEX_PATH}`",
         ]
         if state.appendix_paths:
             lines.extend(f"- Appendix: `{path}`" for path in state.appendix_paths)

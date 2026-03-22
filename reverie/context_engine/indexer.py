@@ -113,6 +113,9 @@ class CodebaseIndexer:
         'env', '**/env/**',
         'dist', '**/dist/**',
         'build', '**/build/**',
+        'references', 'references/**', '**/references/**',
+        'comfy', 'comfy/**', '**/comfy/**',
+        '*.egg-info', '*.egg-info/**', '**/*.egg-info/**',
         'target', '**/target/**',  # Rust
         '.tox', '**/.tox/**',
         '.pytest_cache', '**/.pytest_cache/**',

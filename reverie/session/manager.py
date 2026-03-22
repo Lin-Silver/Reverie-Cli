@@ -14,6 +14,8 @@ from datetime import datetime
 import hashlib
 import json
 
+SESSION_INDEX_FILENAME = 'session_index.json'
+
 
 @dataclass
 class Session:
@@ -82,6 +84,7 @@ class SessionManager:
         self.checkpoints_dir = self.base_dir / 'checkpoints'
         self.handoffs_dir = self.base_dir / 'session_handoffs'
         self.state_path = self.base_dir / 'session_state.json'
+        self.session_index_path = self.base_dir / SESSION_INDEX_FILENAME
 
         scope_source = self.project_root or self.base_dir
         self.workspace_path = str(scope_source)
@@ -89,6 +92,7 @@ class SessionManager:
 
         self._ensure_dirs()
         self._current_session: Optional[Session] = None
+        self._session_index: Dict[str, Dict[str, Any]] = self._load_session_index()
 
         # Enhanced features
         self.snapshot_manager = snapshot_manager
@@ -157,6 +161,93 @@ class SessionManager:
             json.dump(payload, f, indent=2, ensure_ascii=False)
         temp_path.replace(target_path)
 
+    def _load_session_index(self) -> Dict[str, Dict[str, Any]]:
+        if not self.session_index_path.exists():
+            return {}
+
+        try:
+            with open(self.session_index_path, 'r', encoding='utf-8') as f:
+                payload = json.load(f)
+        except Exception:
+            return {}
+
+        raw_sessions = payload.get('sessions') if isinstance(payload, dict) else {}
+        if not isinstance(raw_sessions, dict):
+            return {}
+
+        index: Dict[str, Dict[str, Any]] = {}
+        for session_id, entry in raw_sessions.items():
+            if not isinstance(entry, dict):
+                continue
+            session_entry = {
+                'id': str(entry.get('id') or session_id),
+                'name': str(entry.get('name') or session_id),
+                'created_at': str(entry.get('created_at') or ''),
+                'updated_at': str(entry.get('updated_at') or ''),
+                'message_count': int(entry.get('message_count') or 0),
+                'workspace_id': str(entry.get('workspace_id') or ''),
+                'workspace_path': str(entry.get('workspace_path') or ''),
+            }
+            if self._belongs_to_workspace({'metadata': session_entry}):
+                index[str(session_entry['id'])] = session_entry
+        return index
+
+    def _save_session_index(self) -> None:
+        payload = {
+            'workspace_id': self.workspace_id,
+            'workspace_path': self.workspace_path,
+            'updated_at': datetime.now().isoformat(),
+            'sessions': self._session_index,
+        }
+        self._write_json_atomic(self.session_index_path, payload)
+
+    def _session_index_entry(self, session: Session) -> Dict[str, Any]:
+        metadata = self._merge_scope_metadata(session.metadata)
+        return {
+            'id': session.id,
+            'name': session.name,
+            'created_at': session.created_at,
+            'updated_at': session.updated_at,
+            'message_count': len(session.messages or []),
+            'workspace_id': str(metadata.get('workspace_id') or ''),
+            'workspace_path': str(metadata.get('workspace_path') or ''),
+        }
+
+    def _rebuild_session_index(self) -> None:
+        rebuilt: Dict[str, Dict[str, Any]] = {}
+        for session_file in self.sessions_dir.glob('*.json'):
+            try:
+                with open(session_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+            except Exception:
+                continue
+
+            if not isinstance(data, dict) or not self._belongs_to_workspace(data):
+                continue
+
+            session_id = str(data.get('id') or session_file.stem)
+            rebuilt[session_id] = {
+                'id': session_id,
+                'name': str(data.get('name') or session_id),
+                'created_at': str(data.get('created_at') or ''),
+                'updated_at': str(data.get('updated_at') or ''),
+                'message_count': len(data.get('messages', []) or []),
+                'workspace_id': str((data.get('metadata') or {}).get('workspace_id') or self.workspace_id),
+                'workspace_path': str((data.get('metadata') or {}).get('workspace_path') or self.workspace_path),
+            }
+
+        self._session_index = rebuilt
+        self._save_session_index()
+
+    def _ensure_session_index(self) -> None:
+        expected_count = sum(1 for _ in self.sessions_dir.glob('*.json'))
+        if self._session_index and len(self._session_index) == expected_count:
+            return
+        if not self.session_index_path.exists() and expected_count == 0:
+            self._session_index = {}
+            return
+        self._rebuild_session_index()
+
     def _write_session(self, session: Session, *, touch_updated_at: bool = True) -> None:
         if touch_updated_at:
             session.updated_at = datetime.now().isoformat()
@@ -164,6 +255,8 @@ class SessionManager:
         session.metadata = self._merge_scope_metadata(session.metadata)
         session_path = self.sessions_dir / f"{session.id}.json"
         self._write_json_atomic(session_path, session.to_dict())
+        self._session_index[session.id] = self._session_index_entry(session)
+        self._save_session_index()
 
     def _save_state(self, session_id: Optional[str]) -> None:
         if not session_id:
@@ -261,9 +354,13 @@ class SessionManager:
             session = Session.from_dict(data)
             original_metadata = dict(session.metadata or {})
             session.metadata = self._merge_scope_metadata(session.metadata)
+            refreshed_index_entry = self._session_index_entry(session)
 
             self._current_session = session
             self._save_state(session.id)
+            if self._session_index.get(session.id) != refreshed_index_entry:
+                self._session_index[session.id] = refreshed_index_entry
+                self._save_session_index()
 
             if session.metadata != original_metadata:
                 self._write_session(session, touch_updated_at=False)
@@ -278,6 +375,8 @@ class SessionManager:
 
         if session_path.exists():
             session_path.unlink()
+            self._session_index.pop(session_id, None)
+            self._save_session_index()
 
             if self._current_session and self._current_session.id == session_id:
                 self._current_session = None
@@ -288,25 +387,16 @@ class SessionManager:
 
     def list_sessions(self) -> List[SessionInfo]:
         """List sessions for the current workspace"""
+        self._ensure_session_index()
         sessions: List[SessionInfo] = []
-
-        for session_file in self.sessions_dir.glob('*.json'):
-            try:
-                with open(session_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-
-                if not isinstance(data, dict) or not self._belongs_to_workspace(data):
-                    continue
-
-                sessions.append(SessionInfo(
-                    id=data['id'],
-                    name=data['name'],
-                    created_at=data['created_at'],
-                    updated_at=data['updated_at'],
-                    message_count=len(data.get('messages', []))
-                ))
-            except Exception:
-                continue
+        for entry in self._session_index.values():
+            sessions.append(SessionInfo(
+                id=str(entry.get('id') or ''),
+                name=str(entry.get('name') or ''),
+                created_at=str(entry.get('created_at') or ''),
+                updated_at=str(entry.get('updated_at') or ''),
+                message_count=int(entry.get('message_count') or 0),
+            ))
 
         sessions.sort(key=lambda s: s.updated_at, reverse=True)
         return sessions
@@ -418,9 +508,21 @@ class SessionManager:
         )
 
         if working_memory:
+            handoff_data = {}
+            if isinstance(handoff_packet, dict):
+                maybe_data = handoff_packet.get('data')
+                if isinstance(maybe_data, dict):
+                    handoff_data = maybe_data
+            working_memory_body = working_memory
+            if handoff_data:
+                serialized_handoff = json.dumps(handoff_data, ensure_ascii=False, separators=(',', ':'))
+                working_memory_body = (
+                    f"{working_memory}\n\n"
+                    f"Structured handoff memory:\n{serialized_handoff}"
+                )
             new_session.messages.append({
                 'role': 'system',
-                'content': f"[WORKING MEMORY - Previous Session Context]\n{working_memory}\n[END WORKING MEMORY]"
+                'content': f"[WORKING MEMORY - Previous Session Context]\n{working_memory_body}\n[END WORKING MEMORY]"
             })
 
         if handoff_packet:

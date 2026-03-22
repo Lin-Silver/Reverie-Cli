@@ -88,6 +88,14 @@ Examples:
         """Get git integration instance"""
         if self._git is None and self.context:
             self._git = self.context.get('git_integration')
+            if self._git is None:
+                ensure_git_integration = self.context.get("ensure_git_integration")
+                if callable(ensure_git_integration):
+                    try:
+                        ensure_git_integration()
+                    except Exception:
+                        pass
+                    self._git = self.context.get('git_integration')
         return self._git
     
     def execute(self, **kwargs) -> ToolResult:

@@ -15,11 +15,9 @@ from .compressor import (
     _get_message_text,
     _message_text_from_value,
     _openai_extra_body_for_model,
-    _select_recent_messages,
     _split_system_memory_messages,
     _tool_call_names,
     _truncate_for_memory,
-    build_memory_digest,
     make_compression_request_with_retry,
 )
 
@@ -27,8 +25,41 @@ from .compressor import (
 logger = logging.getLogger(__name__)
 
 
-SESSION_HANDOFF_SCHEMA_VERSION = 1
+SESSION_HANDOFF_SCHEMA_VERSION = 2
 DEFAULT_RECENT_MESSAGE_LIMIT = 14
+DEFAULT_HANDOFF_TRANSCRIPT_CHAR_BUDGET = 24000
+DEFAULT_HANDOFF_MIN_MESSAGES = 8
+
+
+def _record_handoff_usage(
+    workspace_stats_manager: Any,
+    *,
+    provider: str,
+    model: str,
+    model_display_name: str,
+    prompt_messages: List[Dict[str, Any]],
+    response_text: str,
+    usage: Any,
+    session_id: str,
+) -> None:
+    """Persist model usage for automatic handoff generation."""
+    if not workspace_stats_manager:
+        return
+    try:
+        workspace_stats_manager.record_model_usage(
+            provider=str(provider or "unknown"),
+            source="handoff",
+            model=str(model or ""),
+            model_display_name=str(model_display_name or model or ""),
+            request_messages=prompt_messages,
+            assistant_text=str(response_text or ""),
+            usage=usage,
+            session_id=str(session_id or "default"),
+            session_name="",
+            interaction_type="handoff",
+        )
+    except Exception:
+        logger.debug("Failed to record handoff model usage", exc_info=True)
 
 SESSION_HANDOFF_SYSTEM_PROMPT = """You are Reverie's automatic session-handoff generator.
 
@@ -36,12 +67,14 @@ Your job is to prepare the next model session so it can continue the SAME task w
 
 Rules:
 - Return exactly one JSON object and nothing else.
-- Preserve only durable, implementation-relevant memory.
+- This is not an end-user status report. Write memory for the next model session only.
+- Preserve only the durable memory that a strong coding model would choose to keep.
 - Prefer verified facts over guesses.
 - Focus on the current project goal, the user's latest active request, completed work, unresolved blockers, important files, constraints, and the exact next action.
 - If the conversation contains partial implementation or unfinished verification, preserve that state explicitly.
 - Do not write a status report for the end user.
 - Do not say "continue" or "ask the user" unless a real blocker exists.
+- Do not echo transcript snippets unless they are necessary facts.
 - If information is unknown, use an empty string or empty array instead of inventing.
 
 Use this schema exactly:
@@ -102,11 +135,63 @@ class SessionHandoffPacket:
         }
 
 
-def _collect_recent_transcript(messages: List[Dict[str, Any]], keep_last: int) -> tuple[str, List[str]]:
-    transcript_lines: List[str] = []
-    tool_activity: List[str] = []
+def _message_char_weight(message: Dict[str, Any]) -> int:
+    """Estimate how much room a message should consume in the handoff request."""
+    role = str(message.get("role", "") or "").strip().lower()
+    content = _message_text_from_value(message.get("content"))
+    tool_names = _tool_call_names(message)
+    weight = len(content) + (len(tool_names) * 32) + 48
+    if role == "tool":
+        weight += 256
+    return max(weight, 64)
 
-    for message in _select_recent_messages(messages, keep_last):
+
+def _collect_tool_activity(messages: List[Dict[str, Any]]) -> List[str]:
+    """Collect a stable list of recent tool names for handoff metadata."""
+    tool_activity: List[str] = []
+    for message in messages:
+        role = str(message.get("role", "") or "").strip().lower()
+        if role == "tool":
+            tool_name = str(
+                message.get("name")
+                or message.get("tool_name")
+                or message.get("tool_call_id")
+                or "tool"
+            ).strip()
+            if tool_name and tool_name not in tool_activity:
+                tool_activity.append(tool_name)
+        for tool_name in _tool_call_names(message):
+            if tool_name and tool_name not in tool_activity:
+                tool_activity.append(tool_name)
+    return tool_activity
+
+
+def _select_handoff_source_messages(
+    messages: List[Dict[str, Any]],
+    *,
+    char_budget: int,
+    min_messages: int,
+) -> List[Dict[str, Any]]:
+    """Select a raw transcript window for the LLM-authored handoff request."""
+    if len(messages) <= min_messages:
+        return list(messages)
+
+    selected: List[Dict[str, Any]] = []
+    total_weight = 0
+    for message in reversed(messages):
+        weight = min(_message_char_weight(message), 2600)
+        if selected and total_weight + weight > char_budget and len(selected) >= min_messages:
+            break
+        selected.append(message)
+        total_weight += weight
+
+    return list(reversed(selected))
+
+
+def _render_handoff_source(messages: List[Dict[str, Any]]) -> str:
+    """Render a compact raw transcript window for the handoff model call."""
+    transcript_lines: List[str] = []
+    for message in messages:
         role = str(message.get("role", "") or "").strip().lower() or "unknown"
         content = _message_text_from_value(message.get("content"))
         tool_names = _tool_call_names(message)
@@ -118,25 +203,21 @@ def _collect_recent_transcript(messages: List[Dict[str, Any]], keep_last: int) -
                 or message.get("tool_call_id")
                 or "tool"
             ).strip()
-            text = _truncate_for_memory(content, limit=700)
+            text = _truncate_for_memory(content, limit=1100)
             if text:
-                transcript_lines.append(f"TOOL[{tool_name}]: {text}")
-            if tool_name and tool_name not in tool_activity:
-                tool_activity.append(tool_name)
+                transcript_lines.append(f"TOOL[{tool_name}] OUTPUT:\n{text}")
             continue
 
+        header = role.upper()
         if tool_names:
-            for tool_name in tool_names:
-                if tool_name not in tool_activity:
-                    tool_activity.append(tool_name)
-
-        text = _truncate_for_memory(content, limit=900)
+            header = f"{header} TOOL_CALLS[{', '.join(tool_names)}]"
+        text = _truncate_for_memory(content, limit=1500)
         if not text and tool_names:
             text = f"Tool calls: {', '.join(tool_names)}"
         if text:
-            transcript_lines.append(f"{role.upper()}: {text}")
+            transcript_lines.append(f"{header}:\n{text}")
 
-    return "\n\n".join(transcript_lines).strip(), tool_activity
+    return "\n\n".join(transcript_lines).strip()
 
 
 def _latest_user_request(messages: List[Dict[str, Any]], fallback: str = "") -> str:
@@ -226,6 +307,82 @@ def _normalize_handoff_payload(payload: Dict[str, Any], latest_user_request: str
     }
 
 
+def _handoff_payload_has_substance(payload: Dict[str, Any]) -> bool:
+    """Whether the model returned enough memory to trust the handoff."""
+    if not isinstance(payload, dict):
+        return False
+
+    meaningful_keys = (
+        "project_goal",
+        "current_state",
+        "completed_work",
+        "open_problems",
+        "critical_constraints",
+        "important_files",
+        "verification_state",
+        "next_actions",
+        "resume_instructions",
+    )
+    return any(payload.get(key) for key in meaningful_keys)
+
+
+def _repair_handoff_payload(
+    *,
+    client: Any,
+    model: str,
+    provider: str,
+    base_url: str,
+    api_key: str,
+    session_id: str,
+    custom_headers: Optional[Dict[str, str]],
+    latest_user_request: str,
+    workspace_memory: str,
+    prior_memory: str,
+    source_transcript: str,
+    raw_response_text: str,
+    workspace_stats_manager: Any = None,
+    model_display_name: str = "",
+) -> Dict[str, Any]:
+    """Ask the model to repair an invalid handoff payload without algorithmic fallback."""
+    repair_messages = [
+        {
+            "role": "system",
+            "content": SESSION_HANDOFF_SYSTEM_PROMPT,
+        },
+        {
+            "role": "user",
+            "content": (
+                "The previous handoff response was invalid or too empty. "
+                "Recreate it now as one valid JSON object that follows the schema exactly.\n\n"
+                f"Latest active user request:\n{latest_user_request or '(none)'}\n\n"
+                f"Workspace memory:\n{workspace_memory or '(none)'}\n\n"
+                f"Prior consolidated memory:\n{prior_memory or '(none)'}\n\n"
+                f"Source transcript window:\n{source_transcript or '(none)'}\n\n"
+                f"Invalid previous output:\n{raw_response_text or '(empty)'}"
+            ),
+        },
+    ]
+    repaired_text = _request_handoff_summary_text(
+        client=client,
+        model=model,
+        provider=provider,
+        base_url=base_url,
+        api_key=api_key,
+        session_id=session_id,
+        custom_headers=custom_headers,
+        prompt_messages=repair_messages,
+        workspace_stats_manager=workspace_stats_manager,
+        model_display_name=model_display_name,
+    )
+    repaired_payload = _normalize_handoff_payload(
+        _extract_json_object(repaired_text),
+        latest_user_request,
+    )
+    if _handoff_payload_has_substance(repaired_payload):
+        return repaired_payload
+    raise ValueError("LLM handoff repair returned an empty or invalid payload")
+
+
 def _render_carryover_text(payload: Dict[str, Any], *, reason: str) -> str:
     lines: List[str] = [
         "Auto Session Handoff",
@@ -287,6 +444,8 @@ def _request_handoff_summary_text(
     session_id: str,
     custom_headers: Optional[Dict[str, str]],
     prompt_messages: List[Dict[str, str]],
+    workspace_stats_manager: Any = None,
+    model_display_name: str = "",
 ) -> str:
     if provider == "openai-sdk":
         extra_body = _openai_extra_body_for_model(model)
@@ -306,7 +465,18 @@ def _request_handoff_summary_text(
                 messages=prompt_messages,
                 stream=False,
             )
-        return str(response.choices[0].message.content or "").strip()
+        response_text = str(response.choices[0].message.content or "").strip()
+        _record_handoff_usage(
+            workspace_stats_manager,
+            provider=provider,
+            model=model,
+            model_display_name=model_display_name,
+            prompt_messages=prompt_messages,
+            response_text=response_text,
+            usage=getattr(response, "usage", None),
+            session_id=session_id,
+        )
+        return response_text
 
     if provider == "request":
         payload = {
@@ -325,10 +495,21 @@ def _request_handoff_summary_text(
                 headers[normalized_key] = normalized_value
         response = make_compression_request_with_retry(base_url, headers, payload)
         response_data = response.json()
-        return str(
+        response_text = str(
             (((response_data.get("choices") or [{}])[0]).get("message") or {}).get("content")
             or ""
         ).strip()
+        _record_handoff_usage(
+            workspace_stats_manager,
+            provider=provider,
+            model=model,
+            model_display_name=model_display_name,
+            prompt_messages=prompt_messages,
+            response_text=response_text,
+            usage=response_data.get("usage") if isinstance(response_data, dict) else None,
+            session_id=session_id,
+        )
+        return response_text
 
     if provider == "anthropic":
         anthropic_messages: List[Dict[str, Any]] = []
@@ -351,7 +532,18 @@ def _request_handoff_summary_text(
         response = client.messages.create(**kwargs)
         if not response.content:
             return ""
-        return str(getattr(response.content[0], "text", "") or "").strip()
+        response_text = str(getattr(response.content[0], "text", "") or "").strip()
+        _record_handoff_usage(
+            workspace_stats_manager,
+            provider=provider,
+            model=model,
+            model_display_name=model_display_name,
+            prompt_messages=prompt_messages,
+            response_text=response_text,
+            usage=getattr(response, "usage", None),
+            session_id=session_id,
+        )
+        return response_text
 
     if provider == "gemini-cli":
         from ..geminicli import (
@@ -398,7 +590,18 @@ def _request_handoff_summary_text(
         )
         response.raise_for_status()
         try:
-            return _collect_geminicli_summary_text(response)
+            response_text = _collect_geminicli_summary_text(response)
+            _record_handoff_usage(
+                workspace_stats_manager,
+                provider=provider,
+                model=model,
+                model_display_name=model_display_name,
+                prompt_messages=prompt_messages,
+                response_text=response_text,
+                usage=None,
+                session_id=session_id,
+            )
+            return response_text
         finally:
             response.close()
 
@@ -441,7 +644,18 @@ def _request_handoff_summary_text(
         )
         response.raise_for_status()
         try:
-            return _collect_codex_summary_text(response)
+            response_text = _collect_codex_summary_text(response)
+            _record_handoff_usage(
+                workspace_stats_manager,
+                provider=provider,
+                model=model,
+                model_display_name=model_display_name,
+                prompt_messages=prompt_messages,
+                response_text=response_text,
+                usage=None,
+                session_id=session_id,
+            )
+            return response_text
         finally:
             response.close()
 
@@ -464,6 +678,8 @@ def build_session_handoff_packet(
     latest_user_request: str = "",
     recent_message_limit: int = DEFAULT_RECENT_MESSAGE_LIMIT,
     reason: str = "",
+    workspace_stats_manager: Any = None,
+    model_display_name: str = "",
 ) -> SessionHandoffPacket:
     _, prior_memory_blocks = _split_system_memory_messages(messages)
     non_system_messages = [
@@ -473,11 +689,13 @@ def build_session_handoff_packet(
     ]
 
     latest_user_request = _latest_user_request(non_system_messages, latest_user_request)
-    context_digest = build_memory_digest(non_system_messages)
-    recent_transcript, tool_activity = _collect_recent_transcript(
+    source_messages = _select_handoff_source_messages(
         non_system_messages,
-        keep_last=max(6, recent_message_limit),
+        char_budget=DEFAULT_HANDOFF_TRANSCRIPT_CHAR_BUDGET,
+        min_messages=max(DEFAULT_HANDOFF_MIN_MESSAGES, recent_message_limit // 2),
     )
+    recent_transcript = _render_handoff_source(source_messages)
+    tool_activity = _collect_tool_activity(source_messages)
     prior_memory = "\n\n".join(prior_memory_blocks[-2:]).strip()
 
     prompt_messages = [
@@ -490,8 +708,7 @@ def build_session_handoff_packet(
                 f"Latest active user request:\n{latest_user_request or '(none)'}\n\n"
                 f"Workspace memory:\n{workspace_memory or '(none)'}\n\n"
                 f"Prior consolidated memory:\n{prior_memory or '(none)'}\n\n"
-                f"Whole-session digest:\n{context_digest or '(none)'}\n\n"
-                f"Recent transcript window:\n{recent_transcript or '(none)'}\n\n"
+                f"Source transcript window:\n{recent_transcript or '(none)'}\n\n"
                 f"Active tools seen recently: {', '.join(tool_activity) if tool_activity else '(none)'}"
             ),
         },
@@ -506,26 +723,35 @@ def build_session_handoff_packet(
         session_id=session_id,
         custom_headers=custom_headers,
         prompt_messages=prompt_messages,
+        workspace_stats_manager=workspace_stats_manager,
+        model_display_name=model_display_name,
     )
 
     parsed_payload = _extract_json_object(raw_response_text)
     normalized_payload = _normalize_handoff_payload(parsed_payload, latest_user_request)
 
-    if not any(normalized_payload.values()):
-        normalized_payload = {
-            "project_goal": "",
-            "latest_user_request": latest_user_request,
-            "current_state": _normalize_string_list(context_digest, limit=6),
-            "completed_work": [],
-            "open_problems": [],
-            "critical_constraints": [],
-            "important_files": [],
-            "verification_state": [],
-            "next_actions": [],
-            "resume_instructions": [
-                "Continue the active task without asking the user to restate context.",
-            ],
-        }
+    if not _handoff_payload_has_substance(normalized_payload):
+        normalized_payload = _repair_handoff_payload(
+            client=client,
+            model=model,
+            provider=provider,
+            base_url=base_url,
+            api_key=api_key,
+            session_id=session_id,
+            custom_headers=custom_headers,
+            latest_user_request=latest_user_request,
+            workspace_memory=workspace_memory,
+            prior_memory=prior_memory,
+            source_transcript=recent_transcript,
+            raw_response_text=raw_response_text,
+            workspace_stats_manager=workspace_stats_manager,
+            model_display_name=model_display_name,
+        )
+
+    if not normalized_payload.get("resume_instructions"):
+        normalized_payload["resume_instructions"] = [
+            "Continue the active task immediately without asking the user to restate context.",
+        ]
 
     carryover_text = _render_carryover_text(normalized_payload, reason=reason or "context window threshold reached")
 
@@ -542,7 +768,7 @@ def build_session_handoff_packet(
         raw_response_text=str(raw_response_text or ""),
         data=normalized_payload,
         carryover_text=carryover_text,
-        context_digest=context_digest,
+        context_digest="",
         workspace_memory=str(workspace_memory or ""),
         recent_transcript=recent_transcript,
         prior_memory=prior_memory,

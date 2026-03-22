@@ -25,6 +25,8 @@ class SnapshotInfo:
     description: str
     file_count: int
     total_size_bytes: int
+    manifest_hash: str = ""
+    reused: bool = False
     
     def to_dict(self) -> dict:
         return {
@@ -32,7 +34,8 @@ class SnapshotInfo:
             'created_at': self.created_at,
             'description': self.description,
             'file_count': self.file_count,
-            'total_size_bytes': self.total_size_bytes
+            'total_size_bytes': self.total_size_bytes,
+            'manifest_hash': self.manifest_hash,
         }
     
     @classmethod
@@ -42,7 +45,8 @@ class SnapshotInfo:
             created_at=data['created_at'],
             description=data['description'],
             file_count=data['file_count'],
-            total_size_bytes=data['total_size_bytes']
+            total_size_bytes=data['total_size_bytes'],
+            manifest_hash=data.get('manifest_hash', ''),
         )
 
 
@@ -113,9 +117,31 @@ class SnapshotManager:
                     files.append(item)
         except Exception as e:
             print(f"Warning: Error collecting files: {e}")
-        
+
+        files.sort(key=lambda item: str(item.relative_to(self.project_root)).replace("\\", "/"))
         return files
-    
+
+    def _build_manifest_hash(self, files: List[Path]) -> str:
+        """Fingerprint the current workspace snapshot contents cheaply from stat metadata."""
+        digest = hashlib.sha1()
+        for file_path in files:
+            try:
+                rel_path = str(file_path.relative_to(self.project_root)).replace("\\", "/")
+                stat = file_path.stat()
+            except Exception:
+                continue
+            digest.update(rel_path.encode("utf-8", errors="ignore"))
+            digest.update(b"\0")
+            digest.update(str(int(stat.st_size)).encode("ascii", errors="ignore"))
+            digest.update(b"\0")
+            digest.update(str(int(getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1_000_000_000)))).encode("ascii", errors="ignore"))
+            digest.update(b"\n")
+        return digest.hexdigest()
+
+    def _latest_snapshot(self) -> Optional[SnapshotInfo]:
+        snapshots = self.list_snapshots()
+        return snapshots[0] if snapshots else None
+
     def create_snapshot(self, description: str = "") -> Optional[SnapshotInfo]:
         """
         Create a new project snapshot.
@@ -127,20 +153,26 @@ class SnapshotManager:
             SnapshotInfo if successful, None otherwise
         """
         try:
-            # Generate snapshot ID (timestamp-based)
-            now = datetime.now()
-            snapshot_id = f"snap_{now.strftime('%Y%m%d_%H%M%S')}"
-            
-            # Create snapshot directory
-            snapshot_dir = self.snapshots_dir / snapshot_id
-            snapshot_dir.mkdir(exist_ok=True)
-            
             # Collect files
             files = self._collect_files()
             
             if not files:
                 print("Warning: No files to snapshot")
                 return None
+
+            manifest_hash = self._build_manifest_hash(files)
+            latest_snapshot = self._latest_snapshot()
+            if latest_snapshot and latest_snapshot.manifest_hash and latest_snapshot.manifest_hash == manifest_hash:
+                latest_snapshot.reused = True
+                return latest_snapshot
+
+            # Generate snapshot ID (timestamp-based with microseconds to avoid collisions)
+            now = datetime.now()
+            snapshot_id = f"snap_{now.strftime('%Y%m%d_%H%M%S_%f')}"
+
+            # Create snapshot directory
+            snapshot_dir = self.snapshots_dir / snapshot_id
+            snapshot_dir.mkdir(exist_ok=True)
             
             # Copy files to snapshot directory
             total_size = 0
@@ -167,7 +199,8 @@ class SnapshotManager:
                 created_at=now.isoformat(),
                 description=description or f"Snapshot at {now.strftime('%Y-%m-%d %H:%M:%S')}",
                 file_count=len(files),
-                total_size_bytes=total_size
+                total_size_bytes=total_size,
+                manifest_hash=manifest_hash,
             )
             
             # Save metadata

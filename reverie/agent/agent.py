@@ -22,7 +22,6 @@ from rich.markup import escape as rich_escape
 
 from .system_prompt import build_system_prompt
 from .tool_executor import ToolExecutor
-from ..context_engine.compressor import build_memory_digest
 from ..context_engine.handoff import build_session_handoff_packet
 from ..iflow import build_iflow_request_headers, is_iflow_direct_api_url
 from ..tools.base import ToolResult
@@ -573,6 +572,7 @@ def _sanitize_messages_for_relay(messages: List[Dict[str, Any]]) -> List[Dict[st
             continue
 
         sanitized = dict(message)
+        sanitized.pop("reasoning_content", None)
         role = str(sanitized.get("role", "") or "").strip().lower()
         if role:
             sanitized["role"] = role
@@ -867,7 +867,13 @@ class ReverieAgent:
         
         # Conversation history
         self.messages: List[Dict] = []
+        self._token_estimate_cache_key: Optional[tuple[Any, ...]] = None
+        self._token_estimate_cache_value: int = 0
+        self._token_estimate_cache_time = 0.0
+        self._auto_context_compaction_active = False
+        self._auto_context_compaction_retry_after = 0.0
         self._auto_context_rotation_active = False
+        self._auto_context_rotation_retry_after = 0.0
         
         # Operation history and rollback support
         self.operation_history = operation_history
@@ -1073,6 +1079,20 @@ class ReverieAgent:
             )
         )
 
+    def _is_active_model_source(self, source_name: str) -> bool:
+        """Whether the current config says this agent is using a specific external source."""
+        config = getattr(self, "config", None)
+        if not config:
+            return False
+        active_source = str(getattr(config, "active_model_source", "") or "").strip().lower()
+        return active_source == str(source_name or "").strip().lower()
+
+    def _is_qwencode_request(self) -> bool:
+        """Whether current request-provider config should use Qwen-specific request behavior."""
+        if self.provider != "request":
+            return False
+        return self._is_active_model_source("qwencode") or self._is_qwencode_direct_request()
+
     def _is_nvidia_request(self) -> bool:
         """Whether current request-provider config targets the NVIDIA endpoint."""
         if self.provider != "request":
@@ -1091,7 +1111,7 @@ class ReverieAgent:
         if not config:
             return timeout_value
 
-        if self._is_qwencode_direct_request():
+        if self._is_qwencode_request():
             try:
                 cfg = getattr(config, "qwencode", {})
                 if isinstance(cfg, dict):
@@ -1142,21 +1162,9 @@ class ReverieAgent:
 
     def _build_request_headers(self, stream: bool) -> Dict[str, str]:
         """Build HTTP headers for request provider (generic, Qwen direct, iFlow direct)."""
-        if self._is_qwencode_direct_request():
-            from ..qwencode import detect_qwencode_cli_credentials, get_qwencode_request_headers
-
-            if not self.api_key:
-                cred = detect_qwencode_cli_credentials(refresh_if_needed=True)
-                if cred.get("found"):
-                    self.api_key = str(cred.get("api_key", "")).strip()
-            if not self.api_key:
-                raise ValueError("Qwen Code CLI credentials were not found. Please run /qwencode login first.")
-
-            headers = get_qwencode_request_headers(self.custom_headers)
-            headers["Authorization"] = f"Bearer {self.api_key}"
-            headers["Content-Type"] = "application/json"
-            headers["Accept"] = "text/event-stream" if stream else "application/json"
-            return headers
+        if self._is_qwencode_request():
+            self._sync_qwencode_request_state(force_refresh=False)
+            return self._build_qwencode_request_headers(stream=stream)
 
         if not self._is_iflow_direct_request():
             headers = {
@@ -1229,7 +1237,7 @@ class ReverieAgent:
         if self._openai_request_fallback_active:
             return prepared
 
-        if self._is_qwencode_direct_request():
+        if self._is_qwencode_request():
             from ..qwencode import apply_qwencode_request_defaults
 
             prepared = apply_qwencode_request_defaults(
@@ -1313,6 +1321,111 @@ class ReverieAgent:
             chat_kwargs["thinking"] = self.thinking_mode.lower() == "true"
 
         return prepared
+
+    def _request_provider_label(self) -> str:
+        """Return a user-facing provider label for request-provider errors."""
+        if self._is_iflow_direct_request():
+            return "iFlow API"
+        if self._is_qwencode_request():
+            return "Qwen Code API"
+        if self._is_nvidia_request():
+            return "NVIDIA API"
+        return "Request provider"
+
+    def _build_qwencode_request_headers(self, stream: bool) -> Dict[str, str]:
+        """Build Qwen OAuth request headers from the current in-memory request state."""
+        from ..qwencode import get_qwencode_request_headers
+
+        headers = get_qwencode_request_headers()
+        headers["Authorization"] = f"Bearer {self.api_key}"
+        headers["Content-Type"] = "application/json"
+        headers["Accept"] = "text/event-stream" if stream else "application/json"
+        if self.custom_headers:
+            headers.update(self.custom_headers)
+        return headers
+
+    def _sync_qwencode_request_state(self, force_refresh: bool = False) -> None:
+        """Refresh Qwen OAuth credentials and endpoint pairing before a request."""
+        if not self._is_qwencode_request():
+            return
+
+        from ..qwencode import (
+            detect_qwencode_cli_credentials,
+            resolve_qwencode_runtime_request_url,
+        )
+
+        cred = detect_qwencode_cli_credentials(
+            refresh_if_needed=True,
+            force_refresh=force_refresh,
+        )
+        if cred.get("found"):
+            self.api_key = str(cred.get("api_key", "")).strip()
+
+        if not self.api_key:
+            raise ValueError("Qwen Code CLI credentials were not found. Please run /qwencode login first.")
+
+        config = getattr(self, "config", None)
+        qwencode_cfg = getattr(config, "qwencode", {}) if config else {}
+        self.base_url = resolve_qwencode_runtime_request_url(qwencode_cfg, credentials=cred)
+
+    def _is_qwencode_auth_http_error(self, error: Exception) -> bool:
+        """Whether an HTTP error should trigger one forced Qwen OAuth refresh."""
+        if not self._is_qwencode_request():
+            return False
+
+        try:
+            import requests
+        except Exception:
+            return False
+
+        if not isinstance(error, requests.exceptions.HTTPError):
+            return False
+
+        response = getattr(error, "response", None)
+        status_code = getattr(response, "status_code", None)
+        return status_code in (401, 403)
+
+    def _make_request_with_provider_auth_retry(
+        self,
+        *,
+        headers: Dict[str, str],
+        payload: Dict[str, Any],
+        stream: bool,
+        timeout: int,
+    ):
+        """Execute request-provider calls with one Qwen OAuth forced-refresh retry on auth failure."""
+        import requests
+
+        try:
+            return make_api_request_with_retry(
+                url=self.base_url,
+                headers=headers,
+                payload=payload,
+                max_retries=self.api_max_retries,
+                initial_backoff=self.api_initial_backoff,
+                stream=stream,
+                timeout=timeout,
+            )
+        except requests.RequestException as e:
+            if not self._is_qwencode_auth_http_error(e):
+                raise
+
+            logger.warning("Qwen OAuth request returned %s; forcing credential refresh and retrying once", getattr(getattr(e, "response", None), "status_code", "auth-error"))
+            self._sync_qwencode_request_state(force_refresh=True)
+            refreshed_headers = (
+                self._build_qwencode_request_headers(stream=stream)
+                if self._is_qwencode_request()
+                else self._build_request_headers(stream=stream)
+            )
+            return make_api_request_with_retry(
+                url=self.base_url,
+                headers=refreshed_headers,
+                payload=payload,
+                max_retries=self.api_max_retries,
+                initial_backoff=self.api_initial_backoff,
+                stream=stream,
+                timeout=timeout,
+            )
 
     def _iter_sse_data_strings(self, response) -> Generator[str, None, None]:
         """Yield decoded SSE data payloads from an HTTP streaming response."""
@@ -1472,6 +1585,7 @@ class ReverieAgent:
         while True:
             self._check_and_compress_context(session_id=session_id)
             messages = _sanitize_messages_for_relay(self._build_messages())
+            request_messages = list(messages)
             parser_state: Dict[str, Any] = {}
 
             if provider_name == "gemini-cli":
@@ -1675,6 +1789,13 @@ class ReverieAgent:
                 )
                 self.messages.append(assistant_message)
                 messages.append(assistant_message)
+                self._record_model_usage(
+                    request_messages=request_messages,
+                    assistant_text=collected_content,
+                    reasoning_text=collected_thinking,
+                    tool_calls=collected_tool_calls,
+                    session_id=session_id,
+                )
 
                 for tool_call in collected_tool_calls:
                     yield from self._stream_execute_tool_call(
@@ -1693,6 +1814,12 @@ class ReverieAgent:
                         clean_content,
                         reasoning_content=collected_thinking,
                     )
+                )
+                self._record_model_usage(
+                    request_messages=request_messages,
+                    assistant_text=clean_content,
+                    reasoning_text=collected_thinking,
+                    session_id=session_id,
                 )
 
                 if finish_reason in ("stop", "end_turn", "end", None) or "//END//" in collected_content:
@@ -1774,10 +1901,16 @@ class ReverieAgent:
             self.tool_executor.update_context(key, value)
         self.tool_executor.update_context("agent", self)
     
-    def _build_messages(self) -> List[Dict]:
-        """Build message list for API call"""
+    def _build_messages(self, include_reasoning: bool = False) -> List[Dict]:
+        """Build message list for API calls, optionally keeping local reasoning traces."""
         messages = [{"role": "system", "content": self.system_prompt}]
-        messages.extend(self.messages)
+        for message in self.messages:
+            if not isinstance(message, dict):
+                continue
+            normalized = dict(message)
+            if not include_reasoning:
+                normalized.pop("reasoning_content", None)
+            messages.append(normalized)
         return messages
     
     def process_message(
@@ -1861,6 +1994,7 @@ class ReverieAgent:
         while True:
             self._check_and_compress_context(session_id=session_id)
             messages = self._build_messages()
+            request_messages = list(messages)
             # For OpenAI-compatible SDK calls, include thinking flags via extra_body when applicable
             extra_body = self._openai_extra_body_for_thinking()
             model_for_sdk = self.model
@@ -2012,6 +2146,13 @@ class ReverieAgent:
                 )
                 self.messages.append(assistant_message)
                 messages.append(assistant_message)
+                self._record_model_usage(
+                    request_messages=request_messages,
+                    assistant_text=collected_content,
+                    reasoning_text=collected_thinking,
+                    tool_calls=collected_tool_calls,
+                    session_id=session_id,
+                )
                 
                 # Execute tools
                 for tool_call in collected_tool_calls:
@@ -2036,6 +2177,12 @@ class ReverieAgent:
                         clean_content,
                         reasoning_content=collected_thinking,
                     )
+                )
+                self._record_model_usage(
+                    request_messages=request_messages,
+                    assistant_text=clean_content,
+                    reasoning_text=collected_thinking,
+                    session_id=session_id,
                 )
                 
                 # Check if model finished naturally or needs continuation
@@ -2078,6 +2225,7 @@ class ReverieAgent:
             if tools:
                 payload["tools"] = tools
             payload = self._prepare_request_payload(payload, session_id=session_id)
+            request_messages = list(payload.get("messages", messages)) if isinstance(payload.get("messages"), list) else list(messages)
             headers = self._build_request_headers(stream=True)
             
             # Make request with retry logic
@@ -2086,14 +2234,11 @@ class ReverieAgent:
             # api_timeout but prefer any configured iFlow-specific timeout.
             effective_timeout = self._resolve_provider_timeout()
             try:
-                response = make_api_request_with_retry(
-                    url=self.base_url,
+                response = self._make_request_with_provider_auth_retry(
                     headers=headers,
                     payload=payload,
-                    max_retries=self.api_max_retries,
-                    initial_backoff=self.api_initial_backoff,
                     stream=True,
-                    timeout=effective_timeout
+                    timeout=effective_timeout,
                 )
             except requests.RequestException as e:
                 logger.error(f"Streaming API request failed: {e}")
@@ -2106,7 +2251,7 @@ class ReverieAgent:
             thinking_started = False
             stream_buffer = ""
             token_to_hide = "//END//"
-            provider_label = "iFlow API" if self._is_iflow_direct_request() else "Request provider"
+            provider_label = self._request_provider_label()
 
             try:
                 for data_str in self._iter_sse_data_strings(response):
@@ -2242,6 +2387,13 @@ class ReverieAgent:
                 )
                 self.messages.append(assistant_message)
                 messages.append(assistant_message)
+                self._record_model_usage(
+                    request_messages=request_messages,
+                    assistant_text=collected_content,
+                    reasoning_text=collected_thinking,
+                    tool_calls=collected_tool_calls,
+                    session_id=session_id,
+                )
                 
                 # Execute tools
                 for tool_call in collected_tool_calls:
@@ -2262,6 +2414,12 @@ class ReverieAgent:
                         clean_content,
                         reasoning_content=collected_thinking,
                     )
+                )
+                self._record_model_usage(
+                    request_messages=request_messages,
+                    assistant_text=clean_content,
+                    reasoning_text=collected_thinking,
+                    session_id=session_id,
                 )
                 
                 if finish_reason in ('stop', 'end_turn', 'end', None) or "//END//" in collected_content:
@@ -2286,6 +2444,7 @@ class ReverieAgent:
         while True:
             self._check_and_compress_context(session_id=session_id)
             messages = self._build_messages()
+            request_messages = list(messages)
             system_message, anthropic_messages = _convert_messages_to_anthropic_format(messages)
             # Build kwargs for Anthropic API
             kwargs = {
@@ -2395,6 +2554,14 @@ class ReverieAgent:
                         reasoning_content=collected_thinking,
                     )
                     self.messages.append(assistant_message)
+                    self._record_model_usage(
+                        request_messages=request_messages,
+                        assistant_text=collected_content,
+                        reasoning_text=collected_thinking,
+                        tool_calls=collected_tool_calls,
+                        usage=getattr(final_message, "usage", None),
+                        session_id=session_id,
+                    )
                     anthropic_messages.append(
                         {
                             "role": "assistant",
@@ -2451,6 +2618,13 @@ class ReverieAgent:
                             reasoning_content=collected_thinking,
                         )
                     )
+                    self._record_model_usage(
+                        request_messages=request_messages,
+                        assistant_text=clean_content,
+                        reasoning_text=collected_thinking,
+                        usage=getattr(final_message, "usage", None),
+                        session_id=session_id,
+                    )
                     
                     if "//END//" in collected_content:
                         break
@@ -2490,6 +2664,7 @@ class ReverieAgent:
         while True:
             self._check_and_compress_context(session_id=session_id)
             messages = self._build_messages()
+            request_messages = list(messages)
             # For OpenAI-compatible SDK calls, include thinking flags via extra_body when applicable
             extra_body = self._openai_extra_body_for_thinking()
             model_for_sdk = self.model
@@ -2542,6 +2717,14 @@ class ReverieAgent:
                 )
                 self.messages.append(assistant_message)
                 messages.append(assistant_message)
+                self._record_model_usage(
+                    request_messages=request_messages,
+                    assistant_text=message_content,
+                    reasoning_text=message_reasoning,
+                    tool_calls=assistant_message.get("tool_calls"),
+                    usage=getattr(response, "usage", None),
+                    session_id=session_id,
+                )
                 
                 if message_content:
                     all_content.append(message_content)
@@ -2591,6 +2774,13 @@ class ReverieAgent:
                             reasoning_content=message_reasoning,
                         )
                     )
+                    self._record_model_usage(
+                        request_messages=request_messages,
+                        assistant_text=clean_content,
+                        reasoning_text=message_reasoning,
+                        usage=getattr(response, "usage", None),
+                        session_id=session_id,
+                    )
                     all_content.append(clean_content) # Use clean content for return
                     break
                 
@@ -2604,6 +2794,14 @@ class ReverieAgent:
                             reasoning_content=message_reasoning,
                         )
                     )
+                
+                self._record_model_usage(
+                    request_messages=request_messages,
+                    assistant_text=content,
+                    reasoning_text=message_reasoning,
+                    usage=getattr(response, "usage", None),
+                    session_id=session_id,
+                )
                 
                 all_content.append(content)
                 
@@ -2637,29 +2835,28 @@ class ReverieAgent:
             if tools:
                 payload["tools"] = tools
             payload = self._prepare_request_payload(payload, session_id=session_id)
+            request_messages = list(payload.get("messages", messages)) if isinstance(payload.get("messages"), list) else list(messages)
             headers = self._build_request_headers(stream=False)
             
             # Make request with retry logic
             # Increase timeout for iFlow direct API when necessary (long responses)
             effective_timeout = self._resolve_provider_timeout()
             try:
-                response = make_api_request_with_retry(
-                    url=self.base_url,
+                response = self._make_request_with_provider_auth_retry(
                     headers=headers,
                     payload=payload,
-                    max_retries=self.api_max_retries,
-                    initial_backoff=self.api_initial_backoff,
                     stream=False,
-                    timeout=effective_timeout
+                    timeout=effective_timeout,
                 )
             except requests.RequestException as e:
                 logger.error(f"API request failed: {e}")
                 raise
             
             response_data = response.json()
-            provider_label = "iFlow API" if self._is_iflow_direct_request() else "Request provider"
+            provider_label = self._request_provider_label()
             _raise_for_wrapped_api_error(response_data, provider_label=provider_label)
             normalized_response = _unwrap_openai_compatible_payload(response_data) or response_data
+            usage_payload = normalized_response.get("usage") if isinstance(normalized_response, dict) else None
             
             # Extract choice
             choices = normalized_response.get("choices", [])
@@ -2689,6 +2886,14 @@ class ReverieAgent:
                 )
                 self.messages.append(assistant_message)
                 messages.append(assistant_message)
+                self._record_model_usage(
+                    request_messages=request_messages,
+                    assistant_text=message_content,
+                    reasoning_text=message_reasoning,
+                    tool_calls=tool_calls,
+                    usage=usage_payload,
+                    session_id=session_id,
+                )
                 
                 if message_content:
                     all_content.append(message_content)
@@ -2733,6 +2938,13 @@ class ReverieAgent:
                             reasoning_content=message_reasoning,
                         )
                     )
+                    self._record_model_usage(
+                        request_messages=request_messages,
+                        assistant_text=clean_content,
+                        reasoning_text=message_reasoning,
+                        usage=usage_payload,
+                        session_id=session_id,
+                    )
                     all_content.append(clean_content)
                     break
                 
@@ -2745,6 +2957,14 @@ class ReverieAgent:
                             reasoning_content=message_reasoning,
                         )
                     )
+                
+                self._record_model_usage(
+                    request_messages=request_messages,
+                    assistant_text=content,
+                    reasoning_text=message_reasoning,
+                    usage=usage_payload,
+                    session_id=session_id,
+                )
                 
                 all_content.append(content)
                 messages = self._build_messages()
@@ -2763,6 +2983,7 @@ class ReverieAgent:
         while True:
             self._check_and_compress_context(session_id=session_id)
             messages = self._build_messages()
+            request_messages = list(messages)
             system_message, anthropic_messages = _convert_messages_to_anthropic_format(messages)
             # Build kwargs for Anthropic API
             kwargs = {
@@ -2807,6 +3028,13 @@ class ReverieAgent:
                     tool_calls=collected_tool_calls,
                 )
                 self.messages.append(assistant_message)
+                self._record_model_usage(
+                    request_messages=request_messages,
+                    assistant_text=collected_content,
+                    tool_calls=collected_tool_calls,
+                    usage=getattr(response, "usage", None),
+                    session_id=session_id,
+                )
                 anthropic_messages.append(
                     {
                         "role": "assistant",
@@ -2855,6 +3083,12 @@ class ReverieAgent:
                 if "//END//" in collected_content:
                     clean_content = collected_content.replace("//END//", "").strip()
                     self.messages.append(_build_assistant_history_message(clean_content))
+                    self._record_model_usage(
+                        request_messages=request_messages,
+                        assistant_text=clean_content,
+                        usage=getattr(response, "usage", None),
+                        session_id=session_id,
+                    )
                     all_content.append(clean_content)
                     break
                 
@@ -2862,6 +3096,13 @@ class ReverieAgent:
                     self.messages[-1]["content"] += collected_content
                 else:
                     self.messages.append(_build_assistant_history_message(collected_content))
+                
+                self._record_model_usage(
+                    request_messages=request_messages,
+                    assistant_text=collected_content,
+                    usage=getattr(response, "usage", None),
+                    session_id=session_id,
+                )
                 
                 all_content.append(collected_content)
                 system_message, anthropic_messages = _convert_messages_to_anthropic_format(self._build_messages())
@@ -2882,6 +3123,119 @@ class ReverieAgent:
     def set_history(self, messages: List[Dict]) -> None:
         """Set conversation history (for session restore)"""
         self.messages = messages.copy()
+
+    def _history_from_request_messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Convert request messages back into persisted history without duplicating the base system prompt."""
+        if not isinstance(messages, list):
+            return []
+
+        history = [dict(message) for message in messages if isinstance(message, dict)]
+        if history:
+            first = history[0]
+            if (
+                str(first.get("role", "") or "").strip().lower() == "system"
+                and _coerce_text_fragments(first.get("content")) == self.system_prompt
+            ):
+                history = history[1:]
+        return history
+
+    def _persist_history_to_session(self) -> None:
+        """Persist the current in-memory history to the active session when available."""
+        session_manager = self.tool_executor.context.get("session_manager")
+        if not session_manager:
+            return
+        try:
+            session_manager.update_messages(self.messages)
+        except Exception:
+            logger.debug("Failed to persist session messages", exc_info=True)
+
+    def _token_estimate_signature(self) -> tuple[Any, ...]:
+        """Build a cheap cache key for repeated context-usage checks."""
+        messages = self.messages if isinstance(self.messages, list) else []
+        tail_signature: List[tuple[Any, ...]] = []
+        for message in messages[-3:]:
+            if not isinstance(message, dict):
+                tail_signature.append((type(message).__name__, len(str(message))))
+                continue
+            content_len = len(_coerce_text_fragments(message.get("content")))
+            reasoning_len = len(_coerce_text_fragments(message.get("reasoning_content")))
+            tool_calls = message.get("tool_calls")
+            tool_count = len(tool_calls) if isinstance(tool_calls, list) else 0
+            tool_call_id = str(message.get("tool_call_id", "") or "").strip()
+            name = str(message.get("name", "") or "").strip()
+            tail_signature.append(
+                (
+                    str(message.get("role", "") or "").strip().lower(),
+                    content_len,
+                    reasoning_len,
+                    tool_count,
+                    len(tool_call_id),
+                    len(name),
+                )
+            )
+        return (
+            len(messages),
+            len(self.system_prompt),
+            tuple(tail_signature),
+        )
+
+    def _current_session_details(self, fallback_session_id: str = "default") -> tuple[str, str]:
+        """Return the active session id/name for stats and continuity features."""
+        session_id = str(fallback_session_id or "").strip() or "default"
+        session_name = ""
+
+        session_manager = self.tool_executor.context.get("session_manager")
+        if not session_manager or not hasattr(session_manager, "get_current_session"):
+            return session_id, session_name
+
+        try:
+            current_session = session_manager.get_current_session()
+        except Exception:
+            logger.debug("Failed to fetch current session details", exc_info=True)
+            return session_id, session_name
+
+        if not current_session:
+            return session_id, session_name
+
+        current_session_id = str(getattr(current_session, "id", "") or "").strip()
+        current_session_name = str(getattr(current_session, "name", "") or "").strip()
+        return current_session_id or session_id, current_session_name
+
+    def _record_model_usage(
+        self,
+        *,
+        request_messages: List[Dict[str, Any]],
+        assistant_text: str = "",
+        reasoning_text: str = "",
+        tool_calls: Optional[List[Dict[str, Any]]] = None,
+        usage: Any = None,
+        session_id: str = "default",
+        source: str = "chat",
+        interaction_type: str = "chat",
+    ) -> None:
+        """Record workspace-level token usage for one model call."""
+        workspace_stats_manager = self.tool_executor.context.get("workspace_stats_manager")
+        if not workspace_stats_manager:
+            return
+
+        resolved_session_id, session_name = self._current_session_details(session_id)
+        try:
+            workspace_stats_manager.record_model_usage(
+                provider=self.provider,
+                source=source,
+                model=self.model,
+                model_display_name=self.model_display_name,
+                request_messages=request_messages,
+                assistant_text=assistant_text,
+                reasoning_text=reasoning_text,
+                tool_calls=tool_calls,
+                usage=usage,
+                session_id=resolved_session_id,
+                session_name=session_name,
+                interaction_type=interaction_type,
+            )
+        except Exception:
+            logger.debug("Failed to record workspace model usage", exc_info=True)
 
     def _resolve_max_context_tokens(self) -> int:
         """Resolve the active model context window from runtime configuration."""
@@ -2924,14 +3278,79 @@ class ReverieAgent:
         except Exception:
             logger.debug("Workspace memory fetch failed during auto-rotation", exc_info=True)
             return ""
+
+    def _handle_context_compaction(
+        self,
+        current_tokens: int,
+        max_tokens: int,
+        session_id: str = "default",
+    ) -> int:
+        """Compress the active conversation in-place before a full session rotation becomes necessary."""
+        if self._auto_context_compaction_active:
+            return current_tokens
+        if self._auto_context_compaction_retry_after and time.time() < self._auto_context_compaction_retry_after:
+            return current_tokens
+
+        from ..config import get_project_data_dir
+        from ..context_engine.compressor import ContextCompressor
+
+        project_root = self.tool_executor.context.get("project_root") or self.project_root
+        project_data_dir = self.tool_executor.context.get("project_data_dir")
+        cache_dir = Path(project_data_dir) if project_data_dir else get_project_data_dir(Path(project_root))
+        request_messages = self._build_messages()
+        client = self._client if self.provider in {"openai-sdk", "anthropic"} else None
+
+        self._auto_context_compaction_active = True
+        try:
+            try:
+                compressor = ContextCompressor(cache_dir)
+                compressed_messages = compressor.compress(
+                    messages=request_messages,
+                    client=client,
+                    model=self.model,
+                    session_id=session_id,
+                    provider=self.provider,
+                    base_url=self.base_url,
+                    api_key=self.api_key,
+                    custom_headers=self.custom_headers,
+                    workspace_stats_manager=self.tool_executor.context.get("workspace_stats_manager"),
+                    model_display_name=self.model_display_name,
+                )
+            except Exception as compression_error:
+                logger.warning(
+                    "Automatic context compaction failed; deferring retry window",
+                    exc_info=True,
+                )
+                self._auto_context_compaction_retry_after = time.time() + 30.0
+                print(
+                    "\n[Context Engine] Auto-compaction skipped - the LLM compression pass failed. "
+                    f"Will retry automatically on a later model call. ({compression_error})\n"
+                )
+                return current_tokens
+
+            new_history = self._history_from_request_messages(compressed_messages)
+            if new_history and new_history != self.messages:
+                self.messages = new_history
+                self._persist_history_to_session()
+                self._auto_context_compaction_retry_after = 0.0
+                print(
+                    "\n[Context Engine] Auto-compaction complete - condensed older context into durable working memory. "
+                    "Continuing in the same session.\n"
+                )
+            else:
+                self._auto_context_compaction_retry_after = time.time() + 30.0
+
+            return self.get_token_estimate()
+        finally:
+            self._auto_context_compaction_active = False
     
     def _check_and_compress_context(self, session_id: str = "default") -> None:
         """
-        Automatically rotate to a fresh session when the context is too large.
+        Compact the active session before rotating to a fresh one when the context is too large.
 
-        The new session is prepared with a model-authored handoff and the active
-        user request is carried forward automatically, so the current turn keeps
-        running without waiting for a manual `continue`.
+        First attempt an in-place LLM compression pass. If the prompt still
+        remains too large, prepare a model-authored handoff and rotate into a
+        fresh session while keeping the active request alive.
         """
         if self._auto_context_rotation_active:
             return
@@ -2941,7 +3360,14 @@ class ReverieAgent:
             return
 
         token_estimate = self.get_token_estimate()
-        rotation_threshold = max_tokens * 0.8
+        compaction_threshold = max_tokens * 0.7
+        rotation_threshold = max_tokens * 0.82
+
+        if token_estimate >= compaction_threshold:
+            token_estimate = self._handle_context_compaction(token_estimate, max_tokens, session_id=session_id)
+
+        if self._auto_context_rotation_retry_after and time.time() < self._auto_context_rotation_retry_after:
+            return
         if token_estimate >= rotation_threshold:
             self._handle_session_rotation(token_estimate, max_tokens, session_id=session_id)
     
@@ -2966,9 +3392,6 @@ class ReverieAgent:
 
         self._auto_context_rotation_active = True
         try:
-            handoff_packet = None
-            working_memory = ""
-
             try:
                 handoff = build_session_handoff_packet(
                     messages=self._build_messages(),
@@ -2984,58 +3407,36 @@ class ReverieAgent:
                     workspace_memory=workspace_memory,
                     latest_user_request=latest_user_message,
                     reason=rotation_reason,
+                    workspace_stats_manager=self.tool_executor.context.get("workspace_stats_manager"),
+                    model_display_name=self.model_display_name,
                 )
-                handoff_packet = handoff.to_dict()
-                working_memory = handoff.carryover_text
-            except Exception:
+            except Exception as handoff_error:
                 logger.warning(
-                    "Automatic handoff generation failed; falling back to digest-based carryover",
+                    "Automatic handoff generation failed; skipping session rotation until retry window",
                     exc_info=True,
                 )
-                working_memory = build_memory_digest(self.messages)
-                handoff_packet = {
-                    "schema_version": 1,
-                    "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                    "provider": self.provider,
-                    "model": self.model,
-                    "session_id": session_id,
-                    "token_estimate": current_tokens,
-                    "max_tokens": max_tokens,
-                    "usage_ratio": (float(current_tokens) / float(max_tokens)) if max_tokens else 0.0,
-                    "latest_user_request": latest_user_message,
-                    "carryover_text": working_memory,
-                    "data": {
-                        "latest_user_request": latest_user_message,
-                        "current_state": [],
-                        "completed_work": [],
-                        "open_problems": [],
-                        "critical_constraints": [],
-                        "important_files": [],
-                        "verification_state": [],
-                        "next_actions": [],
-                        "resume_instructions": [
-                            "Continue the active task immediately without asking for a status recap.",
-                        ],
-                    },
-                }
+                self._auto_context_rotation_retry_after = time.time() + 30.0
+                print(
+                    "\n[Context Engine] Auto handoff skipped - the LLM handoff payload could not be generated cleanly. "
+                    f"Will retry automatically on a later model call. ({handoff_error})\n"
+                )
+                return
 
             new_session = session_manager.rotate_session(
-                working_memory=working_memory,
+                working_memory=handoff.carryover_text,
                 reason=rotation_reason,
-                handoff_packet=handoff_packet,
+                handoff_packet=handoff.to_dict(),
             )
 
             self.messages = list(new_session.messages)
             if latest_user_message:
                 self.messages.append({"role": "user", "content": latest_user_message})
 
-            try:
-                session_manager.update_messages(self.messages)
-            except Exception:
-                logger.debug("Failed to persist rotated session messages", exc_info=True)
+            self._persist_history_to_session()
 
+            self._auto_context_rotation_retry_after = 0.0
             print(
-                "\n[Context Engine] Auto handoff complete - fresh session prepared with model-authored carryover. "
+                "\n[Context Engine] Auto handoff complete - fresh session prepared with LLM-authored carryover. "
                 "Continuing the active request without waiting for user input.\n"
             )
         finally:
@@ -3043,14 +3444,63 @@ class ReverieAgent:
     
     def get_token_estimate(self) -> int:
         """Estimate tokens in current conversation"""
-        total_chars = len(self.system_prompt)
-        for msg in self.messages:
-            content = _coerce_text_fragments(msg.get('content'))
+        cache_key = self._token_estimate_signature()
+        cache_now = time.monotonic()
+        if (
+            self._token_estimate_cache_key == cache_key
+            and (cache_now - self._token_estimate_cache_time) < 1.0
+        ):
+            return self._token_estimate_cache_value
+
+        request_messages = self._build_messages()
+        workspace_stats_manager = self.tool_executor.context.get("workspace_stats_manager")
+        if workspace_stats_manager and hasattr(workspace_stats_manager, "count_messages_tokens"):
+            try:
+                estimate = max(int(workspace_stats_manager.count_messages_tokens(request_messages)), 0)
+                self._token_estimate_cache_key = cache_key
+                self._token_estimate_cache_value = estimate
+                self._token_estimate_cache_time = cache_now
+                return estimate
+            except Exception:
+                logger.debug("Workspace token counter failed; falling back to heuristic estimate", exc_info=True)
+
+        total_chars = 0
+        for msg in request_messages:
+            content = _coerce_text_fragments(msg.get("content"))
             if content:
                 total_chars += len(content)
-            reasoning_content = _coerce_text_fragments(msg.get('reasoning_content'))
-            if reasoning_content:
-                total_chars += len(reasoning_content)
+            tool_calls = msg.get("tool_calls")
+            if isinstance(tool_calls, list) and tool_calls:
+                try:
+                    total_chars += len(
+                        json.dumps(
+                            [
+                                {
+                                    key: value
+                                    for key, value in tool_call.items()
+                                    if key not in {"thought_signature", "gemini_thought_signature"}
+                                }
+                                for tool_call in tool_calls
+                                if isinstance(tool_call, dict)
+                            ],
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        )
+                    )
+                except Exception:
+                    total_chars += len(str(tool_calls))
+            tool_call_id = str(msg.get("tool_call_id", "") or "").strip()
+            if tool_call_id:
+                total_chars += len(tool_call_id)
+            name = str(msg.get("name", "") or "").strip()
+            if name:
+                total_chars += len(name)
+
+        estimate = total_chars // 4
+        self._token_estimate_cache_key = cache_key
+        self._token_estimate_cache_value = estimate
+        self._token_estimate_cache_time = cache_now
+        return estimate
         
         # Rough estimate: 1 token ≈ 4 characters
         return total_chars // 4

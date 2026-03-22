@@ -23,6 +23,7 @@ from rich.markdown import Markdown
 from rich.text import Text
 from rich.align import Align
 from rich.columns import Columns
+from rich.padding import Padding
 from rich.markup import escape
 from rich import box
 from rich.pager import Pager
@@ -77,6 +78,19 @@ class DisplayComponents:
         if abs_number >= 1_000:
             return f"{number / 1_000:.1f}K".rstrip("0").rstrip(".")
         return str(number)
+
+    def _safe_symbol(self, preferred: str, fallback: str) -> str:
+        """Prefer Unicode glyphs, but degrade cleanly on legacy console encodings."""
+        encoding = str(getattr(getattr(self.console, "file", None), "encoding", "") or "utf-8")
+        try:
+            preferred.encode(encoding)
+        except Exception:
+            return fallback
+        return preferred
+
+    def _safe_separator(self) -> str:
+        """Compact divider used by lightweight Gemini-style surfaces."""
+        return self._safe_symbol("\u00b7", "|")
 
     def _build_badge_line(
         self,
@@ -182,61 +196,60 @@ class DisplayComponents:
         provider_label: str = "",
         mode: str = "",
     ) -> None:
-        """Render a compact assistant response header."""
-        compact = self._is_compact(96)
-        title = Text()
-        title.append(f"{self.deco.SPARKLE} Reverie", style=f"bold {self.theme.PINK_SOFT}")
-        title.append("  ")
-        title.append(
-            self._truncate_text(model_name or "Assistant", 28 if compact else 44),
+        """Render a lightweight Gemini-inspired response banner."""
+        compact = self._is_compact(100)
+        separator = self._safe_separator()
+        line = Text()
+        line.append(f"{self._safe_symbol(self.deco.SPARKLE_FILLED, '*')} ", style=self.theme.PINK_SOFT)
+        line.append(
+            self._truncate_text(model_name or "Assistant", 28 if compact else 42),
             style=f"bold {self.theme.PURPLE_SOFT}",
         )
-
-        badges = self._build_badge_line(
-            [
-                ("Source", provider_label or "Relay", self.theme.TEXT_DIM, self.theme.BLUE_SOFT),
-                ("Mode", str(mode or "reverie").upper(), self.theme.TEXT_DIM, self.theme.PINK_SOFT),
-            ]
-        )
-
-        if compact:
-            body = Group(title, badges)
-        else:
-            grid = Table.grid(expand=True)
-            grid.add_column(ratio=1)
-            grid.add_column(justify="right", no_wrap=True)
-            grid.add_row(title, badges)
-            body = grid
-
-        self.console.print(
-            Panel(
-                body,
-                border_style=self.theme.BORDER_SUBTLE,
-                box=box.ROUNDED,
-                padding=(0, 1),
-                width=self._fit_panel_width(118),
-            )
-        )
+        if provider_label:
+            line.append(f"  {separator}  ", style=self.theme.TEXT_DIM)
+            line.append(provider_label, style=self.theme.BLUE_SOFT)
+        if mode:
+            line.append(f"  {separator}  ", style=self.theme.TEXT_DIM)
+            line.append(str(mode or "reverie").upper(), style=self.theme.TEXT_DIM)
+        self.console.print(line)
 
     def show_thinking_banner(self, model_name: str = "") -> None:
-        """Render a dedicated banner before streamed reasoning content."""
-        model_suffix = ""
+        """Render a lightweight thinking marker before streamed reasoning."""
+        line = Text()
+        line.append(" ", style=self.theme.TEXT_DIM)
+        line.append("Thinking...", style=f"italic {self.theme.THINKING_MEDIUM}")
         if model_name:
-            model_suffix = f" [{self._truncate_text(model_name, 28)}]"
-        content = Text.from_markup(
-            f"[italic {self.theme.THINKING_SOFT}]{self.deco.THOUGHT_BUBBLE}[/italic {self.theme.THINKING_SOFT}] "
-            f"[italic bold {self.theme.THINKING_MEDIUM}]Reasoning Trace{escape(model_suffix)}[/italic bold {self.theme.THINKING_MEDIUM}]\n"
-            f"[{self.theme.TEXT_DIM}]Reasoning notes are cleaned for terminal display and streamed progressively before the final answer.[/{self.theme.TEXT_DIM}]"
-        )
-        self.console.print(
-            Panel(
-                content,
-                border_style=self.theme.THINKING_BORDER,
-                box=box.ROUNDED,
-                padding=(0, 1),
-                width=self._fit_panel_width(108),
+            line.append("  ", style=self.theme.TEXT_DIM)
+            line.append(
+                self._truncate_text(model_name, 28),
+                style=self.theme.TEXT_DIM,
             )
-        )
+        self.console.print(line)
+
+    def _show_timeline_block(
+        self,
+        *,
+        title: str,
+        accent: str,
+        body: Optional[Any] = None,
+        footer: str = "",
+    ) -> None:
+        """Render a lightweight activity block with Gemini-style framing."""
+        top_prefix = self._safe_symbol("╭─ ", "+- ")
+        bottom_prefix = self._safe_symbol("╰─ ", "\\- ")
+        top = Text()
+        top.append(top_prefix, style=accent)
+        top.append(title, style=f"bold {accent}")
+
+        renderables: List[Any] = [top]
+        if body is not None:
+            renderables.append(Padding(body, (0, 0, 0, 3)))
+        if footer:
+            bottom = Text()
+            bottom.append(bottom_prefix, style=accent)
+            bottom.append(footer, style=self.theme.TEXT_DIM)
+            renderables.append(bottom)
+        self.console.print(Group(*renderables))
 
     def show_status(
         self,
@@ -434,98 +447,66 @@ class DisplayComponents:
             self.console.print(f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} No changes in {filename}[/{self.theme.TEXT_DIM}]")
             return
         
-        # Display file separator (Requirement 7.8)
-        # Use a simple format that preserves the filename for testing
-        separator = f"[bold {self.theme.PINK_SOFT}]{self.deco.DIAMOND * 3} {filename} {self.deco.DIAMOND * 3}[/bold {self.theme.PINK_SOFT}]"
-        self.console.print(separator)
-        
         if side_by_side:
             # Side-by-side display mode (Requirement 7.9)
             self._show_diff_side_by_side(old_lines, new_lines, filename, context_lines)
         else:
             # Standard unified diff display
-            self._show_diff_unified(diff_lines, max_lines)
+            self._show_diff_unified(diff_lines, max_lines, filename)
     
-    def _show_diff_unified(self, diff_lines: List[str], max_lines: int) -> None:
+    def _show_diff_unified(self, diff_lines: List[str], max_lines: int, filename: str) -> None:
         """
         Display unified diff with colored lines and line numbers.
         
         **Validates: Requirements 7.1-7.7, 7.10**
         """
-        output = Text()
-        old_line_num = 0
-        new_line_num = 0
-        displayed_lines = 0
-        folded_sections = []
-        
-        for line in diff_lines:
-            # Skip file headers
-            if line.startswith('---') or line.startswith('+++'):
-                continue
-            
-            # Parse hunk headers to get line numbers (Requirement 7.5)
-            if line.startswith('@@'):
-                # Extract line numbers from hunk header
-                import re
-                match = re.search(r'@@ -(\d+),?\d* \+(\d+),?\d* @@', line)
-                if match:
-                    old_line_num = int(match.group(1))
-                    new_line_num = int(match.group(2))
-                
-                # Display hunk header with theme colors (Requirement 7.10)
-                output.append(f"\n{line}\n", style=self.theme.BLUE_SOFT)
-                continue
-            
-            # Check if we need to fold (Requirement 7.7)
-            if displayed_lines >= max_lines and line.startswith(' '):
-                if not folded_sections or folded_sections[-1][1] != displayed_lines - 1:
-                    folded_sections.append((displayed_lines, displayed_lines))
-                else:
-                    folded_sections[-1] = (folded_sections[-1][0], displayed_lines)
-                displayed_lines += 1
-                continue
-            
-            # Format line with colors and line numbers
-            if line.startswith('+'):
-                # Addition - green background (Requirements 7.1, 7.2)
-                line_nums = f"    {new_line_num:4d} "
-                output.append(line_nums, style=self.theme.TEXT_DIM)
-                output.append(f"{line}\n", style=f"bold {self.theme.MINT_VIBRANT} on #1a3a1a")
-                new_line_num += 1
-            elif line.startswith('-'):
-                # Deletion - red background (Requirements 7.1, 7.3)
-                line_nums = f"{old_line_num:4d}     "
-                output.append(line_nums, style=self.theme.TEXT_DIM)
-                output.append(f"{line}\n", style=f"bold {self.theme.CORAL_VIBRANT} on #3a1a1a")
-                old_line_num += 1
-            elif line.startswith(' '):
-                # Context line - gray (Requirements 7.1, 7.6)
-                line_nums = f"{old_line_num:4d} {new_line_num:4d} "
-                output.append(line_nums, style=self.theme.TEXT_DIM)
-                output.append(f"{line}\n", style=self.theme.TEXT_DIM)
-                old_line_num += 1
-                new_line_num += 1
-            else:
-                # Other lines (shouldn't happen in unified diff)
-                output.append(f"{line}\n", style=self.theme.TEXT_SECONDARY)
-            
-            displayed_lines += 1
-        
-        # Show folded sections info (Requirement 7.7)
-        if folded_sections:
-            total_folded = sum(end - start + 1 for start, end in folded_sections)
-            output.append(
-                f"\n[{self.deco.LOADING_DOTS} {total_folded} context lines folded]\n",
-                style=self.theme.TEXT_DIM
+        additions, deletions, hunks = self._summarize_diff_text("\n".join(diff_lines))
+        visible_lines = list(diff_lines)
+        hidden_count = 0
+        if len(visible_lines) > max_lines:
+            head = max(8, max_lines // 2)
+            tail = max(6, max_lines - head - 1)
+            hidden_count = max(0, len(visible_lines) - head - tail)
+            visible_lines = (
+                visible_lines[:head]
+                + [f"@@ ... {hidden_count} diff lines folded for preview ... @@"]
+                + visible_lines[-tail:]
             )
-        
-        # Display in panel with theme consistency (Requirement 7.10)
-        self.console.print(Panel(
-            output,
-            border_style=self.theme.BORDER_PRIMARY,
-            box=box.ROUNDED,
-            padding=(0, 1)
-        ))
+
+        header = self._build_badge_line(
+            [
+                ("File", self._truncate_text(filename, 42), self.theme.TEXT_DIM, self.theme.PINK_SOFT),
+                ("Add", f"+{additions}", self.theme.TEXT_DIM, self.theme.MINT_VIBRANT),
+                ("Del", f"-{deletions}", self.theme.TEXT_DIM, self.theme.CORAL_VIBRANT),
+                ("Hunks", hunks, self.theme.TEXT_DIM, self.theme.BLUE_SOFT),
+            ]
+        )
+        syntax = Syntax(
+            "\n".join(visible_lines),
+            "diff",
+            theme="ansi_dark",
+            line_numbers=False,
+            word_wrap=True,
+        )
+        parts: List[Any] = [header, syntax]
+        if hidden_count:
+            parts.append(
+                Text(
+                    f"{self.deco.LOADING_DOTS} {hidden_count} diff lines folded for preview",
+                    style=self.theme.TEXT_DIM,
+                )
+            )
+
+        self.console.print(
+            Panel(
+                Group(*parts),
+                title=f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Diff Preview[/bold {self.theme.PINK_SOFT}]",
+                border_style=self.theme.BORDER_PRIMARY,
+                box=box.ROUNDED,
+                padding=(0, 1),
+                width=self._fit_panel_width(118),
+            )
+        )
     
     def _show_diff_side_by_side(
         self,
@@ -854,6 +835,47 @@ class DisplayComponents:
             parts.append(f"+{extra} more")
         return "  |  ".join(parts)
 
+    def _extract_fenced_block(self, raw_text: str) -> Tuple[str, str]:
+        """Return the language and body for a single fenced code block."""
+        match = re.fullmatch(r"\s*```([A-Za-z0-9_+-]*)\n(.*?)\n```\s*", raw_text, flags=re.DOTALL)
+        if not match:
+            return "", ""
+        return match.group(1).strip().lower(), match.group(2)
+
+    def _summarize_diff_text(self, diff_text: str) -> Tuple[int, int, int]:
+        """Return additions, deletions, and hunk counts for unified diff text."""
+        additions = 0
+        deletions = 0
+        hunks = 0
+        for line in str(diff_text or "").splitlines():
+            if line.startswith("@@"):
+                hunks += 1
+            elif line.startswith("+") and not line.startswith("+++"):
+                additions += 1
+            elif line.startswith("-") and not line.startswith("---"):
+                deletions += 1
+        return additions, deletions, hunks
+
+    def _build_diff_renderable(self, diff_text: str, preview_line_limit: int) -> Tuple[Any, str]:
+        """Render diff text with a tighter, syntax-highlighted preview."""
+        lines = str(diff_text or "").splitlines()
+        preview_lines = lines[:preview_line_limit]
+        hidden = max(0, len(lines) - len(preview_lines))
+        additions, deletions, hunks = self._summarize_diff_text(diff_text)
+        renderable = Syntax(
+            "\n".join(preview_lines),
+            "diff",
+            theme="ansi_dark",
+            line_numbers=False,
+            word_wrap=True,
+        )
+        footer_parts = [f"{len(lines)} lines", f"+{additions}", f"-{deletions}"]
+        if hunks:
+            footer_parts.append(f"{hunks} hunks")
+        if hidden:
+            footer_parts.append(f"showing first {len(preview_lines)}")
+        return renderable, "  |  ".join(footer_parts)
+
     def _build_tool_output_renderable(
         self,
         output: Any,
@@ -868,6 +890,23 @@ class DisplayComponents:
         parsed_json = None
         compact = self._is_compact(96)
         preview_line_limit = 10 if compact else 16
+        fenced_language, fenced_body = self._extract_fenced_block(raw_text)
+        if fenced_language == "diff":
+            return self._build_diff_renderable(fenced_body, preview_line_limit=18 if compact else 28)
+        if fenced_language:
+            fenced_lines = fenced_body.splitlines()
+            preview_text = "\n".join(fenced_lines[:preview_line_limit])
+            renderable = Syntax(
+                preview_text,
+                fenced_language,
+                theme="monokai",
+                line_numbers=False,
+                word_wrap=True,
+            )
+            footer_parts = [f"{len(fenced_lines)} lines", f"{len(fenced_body):,} chars"]
+            if len(fenced_lines) > preview_line_limit:
+                footer_parts.append(f"showing first {preview_line_limit}")
+            return renderable, "  |  ".join(footer_parts)
         if raw_text.startswith("{") or raw_text.startswith("["):
             try:
                 parsed_json = json.loads(raw_text)
@@ -954,37 +993,23 @@ class DisplayComponents:
         arguments: Optional[Dict[str, Any]] = None,
         tool_call_id: str = "",
     ) -> None:
-        """Render a compact tool execution card."""
+        """Render a Gemini-inspired lightweight tool execution block."""
         accent = self._resolve_tool_color(tool_name)
         argument_summary = self._format_tool_argument_summary(arguments)
-        header = Table.grid(expand=True)
-        header.add_column(ratio=1)
-        header.add_column(justify="right", no_wrap=True)
-        header.add_row(
-            Text(str(message or f"Executing {tool_name}..."), style=f"bold {self.theme.TEXT_PRIMARY}"),
-            Text(f"call {tool_call_id[-8:]}" if tool_call_id else "running", style=accent),
-        )
-        title_label = "Computer Controller" if str(tool_name or "").strip().lower() == "computer_control" else f"Tool {self.deco.DOT_MEDIUM} {tool_name}"
-        status_line = self._build_badge_line(
-            [
-                ("Status", "Running", self.theme.TEXT_DIM, accent),
-                ("Tool", tool_name, self.theme.TEXT_DIM, self.theme.BLUE_SOFT),
-            ]
-        )
-
-        parts: List[Any] = [header, status_line]
+        separator = self._safe_separator()
+        title_label = "Computer Controller" if str(tool_name or "").strip().lower() == "computer_control" else f"Tool {separator} {tool_name}"
+        title = str(message or f"Executing {tool_name}...").strip() or title_label
+        title_text = f"{title_label}  {separator}  running"
+        parts: List[Any] = [Text(title, style=f"bold {self.theme.TEXT_PRIMARY}")]
         if argument_summary:
             parts.append(Text(argument_summary, style=self.theme.TEXT_DIM))
-
-        self.console.print(
-            Panel(
-                Group(*parts),
-                title=f"[bold {accent}]{self.deco.SPARKLE} {title_label}[/]",
-                border_style=accent,
-                box=box.ROUNDED,
-                padding=(0, 1),
-                width=self._fit_panel_width(118),
-            )
+        if tool_call_id:
+            parts.append(Text(f"call {tool_call_id[-8:]}", style=self.theme.TEXT_DIM))
+        self._show_timeline_block(
+            title=title_text,
+            accent=accent,
+            body=Group(*parts),
+            footer="waiting for result",
         )
 
     def show_tool_result_card(
@@ -996,33 +1021,18 @@ class DisplayComponents:
         arguments: Optional[Dict[str, Any]] = None,
         tool_call_id: str = "",
     ) -> None:
-        """Render a structured tool result card."""
+        """Render a structured tool result block with lower visual noise."""
         accent = self._resolve_tool_color(tool_name) if success else self.theme.CORAL_VIBRANT
-        title_icon = self.deco.CHECK_FANCY if success else self.deco.CROSS_FANCY
         title_body = "Computer Controller" if str(tool_name or "").strip().lower() == "computer_control" else tool_name
-        title_text = f"{title_icon} {title_body}"
         argument_summary = self._format_tool_argument_summary(arguments)
-        header = Table.grid(expand=True)
-        header.add_column(ratio=1)
-        header.add_column(justify="right", no_wrap=True)
-        header.add_row(
-            Text("Completed" if success else "Failed", style=f"bold {accent}"),
-            Text(f"call {tool_call_id[-8:]}" if tool_call_id else ("ok" if success else "error"), style=self.theme.TEXT_DIM),
-        )
-
+        separator = self._safe_separator()
         if success:
             renderable, footer = self._build_tool_output_renderable(output, arguments=arguments)
-            status_line = self._build_badge_line(
-                [
-                    ("Status", "Success", self.theme.TEXT_DIM, accent),
-                    ("Tool", tool_name, self.theme.TEXT_DIM, self.theme.BLUE_SOFT),
-                ]
-            )
-            parts: List[Any] = [header, status_line]
+            parts: List[Any] = []
             if argument_summary:
                 parts.append(Text(argument_summary, style=self.theme.TEXT_DIM))
             if str(output or "").strip():
-                parts.extend([renderable, Text(footer, style=self.theme.TEXT_DIM)])
+                parts.append(renderable)
             else:
                 parts.extend(
                     [
@@ -1030,34 +1040,30 @@ class DisplayComponents:
                         Text("The tool may have completed through file changes, state updates, or side effects.", style=self.theme.TEXT_DIM),
                     ]
                 )
-            group = Group(*parts)
+            if tool_call_id:
+                footer = f"{footer}  {separator}  call {tool_call_id[-8:]}" if footer else f"call {tool_call_id[-8:]}"
+            self._show_timeline_block(
+                title=f"{title_body}  {separator}  done",
+                accent=accent,
+                body=Group(*parts),
+                footer=footer,
+            )
         else:
             message = str(error or "Tool execution failed").strip()
-            status_line = self._build_badge_line(
-                [
-                    ("Status", "Failed", self.theme.TEXT_DIM, accent),
-                    ("Tool", tool_name, self.theme.TEXT_DIM, self.theme.BLUE_SOFT),
-                ]
-            )
-            parts = [header, status_line]
+            parts = []
             if argument_summary:
                 parts.append(Text(argument_summary, style=self.theme.TEXT_DIM))
             parts.extend([
                 Text(message, style=self.theme.CORAL_SOFT),
                 Text("execution error", style=self.theme.TEXT_DIM),
             ])
-            group = Group(*parts)
-
-        self.console.print(
-            Panel(
-                group,
-                title=f"[bold {accent}]{title_text}[/]",
-                border_style=accent,
-                box=box.ROUNDED,
-                padding=(0, 1),
-                width=self._fit_panel_width(118),
+            footer = f"call {tool_call_id[-8:]}" if tool_call_id else "tool failure"
+            self._show_timeline_block(
+                title=f"{title_body}  {separator}  failed",
+                accent=accent,
+                body=Group(*parts),
+                footer=footer,
             )
-        )
 
     def show_stream_event(self, event: Dict[str, Any]) -> bool:
         """Render a structured stream event if supported."""

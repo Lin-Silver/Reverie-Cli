@@ -410,14 +410,20 @@ def find_qwencode_model(model_id: str, catalog: Optional[List[Dict[str, Any]]] =
 def normalize_qwencode_config(raw_qwencode: Any) -> Dict[str, Any]:
     """Normalize Qwen Code config for persistence and runtime usage."""
     cfg = default_qwencode_config()
-    if isinstance(raw_qwencode, dict):
+    raw_cfg = raw_qwencode if isinstance(raw_qwencode, dict) else {}
+    if raw_cfg:
         cfg.update(raw_qwencode)
 
     cfg["selected_model_id"] = _canonicalize_qwencode_model_id(cfg.get("selected_model_id", ""))
     cfg["selected_model_display_name"] = str(cfg.get("selected_model_display_name", "")).strip()
-    cfg["api_url"] = _normalize_qwencode_api_url(cfg.get("api_url", QWENCODE_DEFAULT_API_URL))
+    api_url_value = raw_cfg.get("api_url", "")
+    if not str(api_url_value or "").strip():
+        api_url_value = raw_cfg.get("base_url", raw_cfg.get("openai_base_url", cfg.get("api_url", QWENCODE_DEFAULT_API_URL)))
+    cfg["api_url"] = _normalize_qwencode_api_url(api_url_value)
     cfg["endpoint"] = _normalize_qwencode_endpoint(cfg.get("endpoint", ""))
-    cfg["custom_headers"] = _normalize_custom_headers(cfg.get("custom_headers", {}))
+    cfg["custom_headers"] = _normalize_custom_headers(
+        raw_cfg.get("custom_headers", raw_cfg.get("customHeader", cfg.get("custom_headers", {})))
+    )
 
     try:
         max_tokens = int(cfg.get("max_context_tokens", 1_000_000))
@@ -479,7 +485,7 @@ def build_qwencode_runtime_model_data(qwencode_config: Any) -> Optional[Dict[str
 
     cred = detect_qwencode_cli_credentials(refresh_if_needed=True)
     api_key = cred["api_key"] if cred.get("found") else ""
-    api_url = _normalize_qwencode_api_url(cred.get("resource_url") or cfg["api_url"])
+    api_url = resolve_qwencode_runtime_api_url(cfg, credentials=cred)
     max_context_tokens = selected.get("context_length", cfg["max_context_tokens"])
 
     return {
@@ -493,6 +499,43 @@ def build_qwencode_runtime_model_data(qwencode_config: Any) -> Optional[Dict[str
         "endpoint": "",
         "custom_headers": get_qwencode_request_headers(cfg.get("custom_headers", {})),
     }
+
+
+def resolve_qwencode_runtime_api_url(
+    qwencode_config: Any,
+    credentials: Optional[Dict[str, Any]] = None,
+) -> str:
+    """
+    Resolve the effective Qwen API base URL for runtime requests.
+
+    Priority:
+    1) Explicit custom `api_url`/legacy `base_url` in Reverie config
+    2) OAuth `resource_url` from local Qwen CLI credentials
+    3) Reverie default DashScope-compatible URL
+    """
+    cfg = normalize_qwencode_config(qwencode_config)
+    configured_api_url = _normalize_qwencode_api_url(cfg.get("api_url", QWENCODE_DEFAULT_API_URL))
+
+    credential_resource_url = ""
+    if isinstance(credentials, dict):
+        credential_resource_url = _normalize_qwencode_api_url(credentials.get("resource_url", ""))
+
+    default_api_url = _normalize_qwencode_api_url(QWENCODE_DEFAULT_API_URL)
+    if configured_api_url and configured_api_url != default_api_url:
+        return configured_api_url
+    if credential_resource_url:
+        return credential_resource_url
+    return configured_api_url
+
+
+def resolve_qwencode_runtime_request_url(
+    qwencode_config: Any,
+    credentials: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Resolve the effective Qwen chat-completions request URL for runtime use."""
+    cfg = normalize_qwencode_config(qwencode_config)
+    api_url = resolve_qwencode_runtime_api_url(cfg, credentials=credentials)
+    return resolve_qwencode_request_url(api_url, cfg.get("endpoint", ""))
 
 
 def detect_qwencode_cli_credentials(

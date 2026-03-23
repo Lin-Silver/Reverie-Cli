@@ -61,12 +61,85 @@ _THINKING_MARKDOWN_SUBJECT_RE = re.compile(r"^\s*\*\*(.+?)\*\*\s*$")
 _THINKING_INLINE_SUBJECT_RE = re.compile(r"\*\*(.+?)\*\*")
 _THINKING_LIST_PREFIX_RE = re.compile(r"^(?:[-*]|\d+\.)\s+")
 _MARKDOWN_FENCE_RE = re.compile(r"^\s*(```+|~~~+)")
+_TABLE_ROW_RE = re.compile(r"^\s*\|(.+)\|\s*$")
+_TABLE_SEPARATOR_RE = re.compile(r"^\s*\|?\s*(:?-+:?)\s*(\|\s*(:?-+:?)\s*)+\|?\s*$")
 _TOOL_MARKUP_PREFIXES = (
     "[bold #ffb8d1]✧",
     "[bold #ff5252]",
     "[bold #66bb6a]",
     "[#ba68c8]   │",
 )
+
+
+def _find_trailing_incomplete_markdown_block_start(completed_lines: list[str]) -> int:
+    """Return the index of a trailing block that must stay buffered for correct rendering."""
+    open_fence_token = ""
+    open_fence_index = -1
+    in_table = False
+    table_start_index = -1
+    possible_table_header_index = -1
+    index = 0
+
+    while index < len(completed_lines):
+        line = completed_lines[index]
+
+        if open_fence_token:
+            fence_match = _MARKDOWN_FENCE_RE.match(line) if ("`" in line or "~" in line) else None
+            if (
+                fence_match
+                and fence_match.group(1).startswith(open_fence_token[0])
+                and len(fence_match.group(1)) >= len(open_fence_token)
+            ):
+                open_fence_token = ""
+                open_fence_index = -1
+            index += 1
+            continue
+
+        if in_table:
+            if _TABLE_SEPARATOR_RE.match(line) or _TABLE_ROW_RE.match(line):
+                index += 1
+                continue
+            in_table = False
+            table_start_index = -1
+
+        fence_match = _MARKDOWN_FENCE_RE.match(line) if ("`" in line or "~" in line) else None
+        if fence_match:
+            open_fence_token = fence_match.group(1)
+            open_fence_index = index
+            possible_table_header_index = -1
+            index += 1
+            continue
+
+        if possible_table_header_index >= 0:
+            if _TABLE_SEPARATOR_RE.match(line):
+                in_table = True
+                table_start_index = possible_table_header_index
+                possible_table_header_index = -1
+                index += 1
+                continue
+            possible_table_header_index = -1
+
+        if _TABLE_ROW_RE.match(line):
+            if index + 1 < len(completed_lines) and _TABLE_SEPARATOR_RE.match(completed_lines[index + 1]):
+                in_table = True
+                table_start_index = index
+                possible_table_header_index = -1
+                index += 1
+                continue
+            possible_table_header_index = index
+            index += 1
+            continue
+
+        possible_table_header_index = -1
+        index += 1
+
+    if open_fence_token and open_fence_index >= 0:
+        return open_fence_index
+    if in_table and table_start_index >= 0:
+        return table_start_index
+    if possible_table_header_index >= 0:
+        return possible_table_header_index
+    return -1
 
 
 def split_thinking_fragments(pending: str, fragment: str) -> tuple[list[str], str]:
@@ -89,36 +162,17 @@ def split_markdown_fragments(pending: str, fragment: str) -> tuple[str, str]:
     completed_lines = parts[:-1]
     remainder = parts[-1]
 
-    if "```" not in text and "~~~" not in text:
-        completed = "\n".join(completed_lines)
-        if completed:
-            completed += "\n"
-        return completed, remainder
-
-    open_fence = None
-    open_fence_index = -1
-    for index, line in enumerate(completed_lines):
-        if "`" not in line and "~" not in line:
-            continue
-        fence_match = _MARKDOWN_FENCE_RE.match(line)
-        if not fence_match:
-            continue
-        fence_token = fence_match.group(1)
-        if open_fence is None:
-            open_fence = fence_token[0]
-            open_fence_index = index
-        elif fence_token.startswith(open_fence):
-            open_fence = None
-            open_fence_index = -1
-
+    buffered_start_index = _find_trailing_incomplete_markdown_block_start(completed_lines)
     flush_lines = completed_lines
-    if open_fence is not None and open_fence_index >= 0:
-        flush_lines = completed_lines[:open_fence_index]
-        buffered_lines = completed_lines[open_fence_index:]
-        remainder_parts = buffered_lines
+    if buffered_start_index >= 0:
+        flush_lines = completed_lines[:buffered_start_index]
+        buffered_lines = completed_lines[buffered_start_index:]
+        buffered_text = "\n".join(buffered_lines)
+        if buffered_lines:
+            buffered_text += "\n"
         if remainder:
-            remainder_parts.append(remainder)
-        remainder = "\n".join(remainder_parts)
+            buffered_text += remainder
+        remainder = buffered_text
 
     completed = "\n".join(flush_lines)
     if completed:
@@ -1097,7 +1151,7 @@ class ReverieInterface:
             formatter=self._markdown_formatter,
             max_width=max(int(getattr(self.console, "width", 80) or 80) - 2, 40),
         )
-        self.console.print(Padding(renderable, (0, 0, 0, 2)), end="" if not final else "\n")
+        self.console.print(Padding(renderable, (0, 0, 0, 2)))
     
     def _print_thinking_content(self, content: str) -> None:
         """Helper method to print thinking content with proper formatting"""

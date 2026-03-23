@@ -71,10 +71,10 @@ class DreamscapeTheme:
     # TEXT COLORS
     # ═══════════════════════════════════════════════════════════════════════════
     
-    TEXT_PRIMARY = "#f5f5f5"       # Pure white with slight warmth
-    TEXT_SECONDARY = "#e0e0e0"     # Soft off-white
-    TEXT_DIM = "#9e9e9e"           # Muted gray
-    TEXT_MUTED = "#757575"         # Very muted
+    TEXT_PRIMARY = "#f8fbff"       # Crisp white for main transcript text
+    TEXT_SECONDARY = "#dde7f5"     # Brighter secondary copy
+    TEXT_DIM = "#a7b6cb"           # Muted but readable status text
+    TEXT_MUTED = "#73839b"         # Low-priority metadata
     
     # ═══════════════════════════════════════════════════════════════════════════
     # SEMANTIC COLORS
@@ -114,9 +114,9 @@ class DreamscapeTheme:
     # UI ELEMENT COLORS
     # ═══════════════════════════════════════════════════════════════════════════
     
-    BORDER_PRIMARY = "#ce93d8"      # Primary border (purple)
-    BORDER_SECONDARY = "#ba68c8"    # Secondary border
-    BORDER_SUBTLE = "#9575cd"       # Subtle borders
+    BORDER_PRIMARY = "#8ec5ff"      # Primary border for important panels
+    BORDER_SECONDARY = "#c7a8ff"    # Secondary border
+    BORDER_SUBTLE = "#6f89ad"       # Subtle borders
     
     PANEL_HEADER = "#ffb8d1"        # Panel titles (pink)
     PANEL_SUBTITLE = "#ce93d8"      # Panel subtitles (purple)

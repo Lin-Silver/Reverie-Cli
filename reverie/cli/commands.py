@@ -1590,14 +1590,19 @@ class CommandHandler:
 
     def _ensure_nvidia_configuration(self, config) -> bool:
         """Prompt for NVIDIA API key when needed and bind the source."""
-        from ..nvidia import normalize_nvidia_config
+        from ..nvidia import (
+            NVIDIA_API_KEY_HINT_URL,
+            get_nvidia_default_vision_model,
+            normalize_nvidia_config,
+            resolve_nvidia_selected_model,
+        )
 
         nvidia_cfg = normalize_nvidia_config(getattr(config, "nvidia", {}))
         api_key = str(nvidia_cfg.get("api_key", "") or "").strip()
         if not api_key:
             self.console.print()
             self.console.print(
-                f"[{self.theme.TEXT_DIM}]Computer Controller mode uses NVIDIA-hosted Qwen vision. Enter an API key to continue.[/{self.theme.TEXT_DIM}]"
+                f"[{self.theme.TEXT_DIM}]Computer Controller mode uses a NVIDIA request-based vision model. Get an API key from {NVIDIA_API_KEY_HINT_URL} and paste it here to continue.[/{self.theme.TEXT_DIM}]"
             )
             api_key = Prompt.ask(
                 f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] NVIDIA API Key",
@@ -1609,6 +1614,15 @@ class CommandHandler:
                 )
                 return False
             nvidia_cfg["api_key"] = api_key
+
+        selected = resolve_nvidia_selected_model(nvidia_cfg)
+        if not selected or str(selected.get("transport", "")).strip().lower() != "request" or not bool(selected.get("vision")):
+            fallback = get_nvidia_default_vision_model()
+            nvidia_cfg["selected_model_id"] = fallback["id"]
+            nvidia_cfg["selected_model_display_name"] = fallback["display_name"]
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Computer Controller requires a NVIDIA request-based vision model, so Reverie switched this source to {fallback['display_name']}.[/{self.theme.AMBER_GLOW}]"
+            )
 
         config.nvidia = normalize_nvidia_config(nvidia_cfg)
         config.active_model_source = "nvidia"
@@ -2714,7 +2728,7 @@ class CommandHandler:
         return True
 
     def cmd_nvidia(self, args: str) -> bool:
-        """Manage NVIDIA Computer Controller provider settings."""
+        """Manage NVIDIA source settings."""
         raw = args.strip()
         if not raw:
             return self._cmd_nvidia_status()
@@ -2741,7 +2755,7 @@ class CommandHandler:
         return True
 
     def _cmd_nvidia_status(self) -> bool:
-        from ..nvidia import mask_secret, normalize_nvidia_config, resolve_nvidia_selected_model
+        from ..nvidia import NVIDIA_API_KEY_HINT_URL, mask_secret, normalize_nvidia_config, resolve_nvidia_selected_model
 
         config_manager = self.app.get('config_manager')
         if not config_manager:
@@ -2762,15 +2776,18 @@ class CommandHandler:
             f"[{self.theme.BLUE_SOFT}]Endpoint:[/{self.theme.BLUE_SOFT}] {escape(str(nvidia_cfg.get('endpoint', '')))}",
             f"[{self.theme.BLUE_SOFT}]Thinking:[/{self.theme.BLUE_SOFT}] {'ON' if bool(nvidia_cfg.get('enable_thinking', True)) else 'OFF'}",
             f"[{self.theme.BLUE_SOFT}]Default max tokens:[/{self.theme.BLUE_SOFT}] {nvidia_cfg.get('max_tokens', 16384)}",
+            f"[{self.theme.BLUE_SOFT}]API key help:[/{self.theme.BLUE_SOFT}] {escape(NVIDIA_API_KEY_HINT_URL)}",
         ]
         if selected:
             lines.insert(1, f"[{self.theme.BLUE_SOFT}]Selected model:[/{self.theme.BLUE_SOFT}] {escape(selected['display_name'])} ({escape(selected['id'])})")
+            lines.insert(2, f"[{self.theme.BLUE_SOFT}]Transport:[/{self.theme.BLUE_SOFT}] {escape(str(selected.get('transport', 'unknown')))}")
+            lines.insert(3, f"[{self.theme.BLUE_SOFT}]Vision input:[/{self.theme.BLUE_SOFT}] {'YES' if bool(selected.get('vision')) else 'NO'}")
 
         self.console.print()
         self.console.print(
             Panel(
                 Text.from_markup("\n".join(lines)),
-                title=f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} NVIDIA Computer Controller {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]",
+                title=f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} NVIDIA Source {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]",
                 border_style=self.theme.BORDER_PRIMARY,
                 box=box.ROUNDED,
                 padding=(1, 2),
@@ -2780,7 +2797,7 @@ class CommandHandler:
         return True
 
     def _cmd_nvidia_login(self) -> bool:
-        from ..nvidia import normalize_nvidia_config
+        from ..nvidia import NVIDIA_API_KEY_HINT_URL, normalize_nvidia_config
 
         config_manager = self.app.get('config_manager')
         if not config_manager:
@@ -2791,6 +2808,9 @@ class CommandHandler:
 
         config = config_manager.load()
         nvidia_cfg = normalize_nvidia_config(getattr(config, "nvidia", {}))
+        self.console.print(
+            f"[{self.theme.TEXT_DIM}]Get your NVIDIA API key here: {NVIDIA_API_KEY_HINT_URL}[/{self.theme.TEXT_DIM}]"
+        )
         api_key = Prompt.ask(
             f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] NVIDIA API Key",
             password=True,

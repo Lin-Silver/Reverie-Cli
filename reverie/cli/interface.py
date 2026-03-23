@@ -33,6 +33,11 @@ from .commands import CommandHandler
 from .input_handler import InputHandler
 from .markdown_formatter import MarkdownFormatter, format_markdown
 from .theme import THEME, DECO, DREAM
+from ..inline_images import (
+    build_user_message_content,
+    flatten_multimodal_content_for_display,
+    parse_inline_image_mentions,
+)
 from ..config import (
     ConfigManager,
     ModelConfig,
@@ -54,7 +59,7 @@ from ..agent import (
 from ..context_engine import CodebaseIndexer, ContextRetriever, GitIntegration
 from ..context_engine import LSPManager
 from ..modes import normalize_mode
-from ..nvidia import normalize_nvidia_config
+from ..nvidia import normalize_nvidia_config, resolve_nvidia_selected_model
 
 
 _THINKING_MARKDOWN_SUBJECT_RE = re.compile(r"^\s*\*\*(.+?)\*\*\s*$")
@@ -765,13 +770,12 @@ class ReverieInterface:
         text = str(message or "").strip()
         if not text:
             return
-
-        prompt = Text()
-        prompt.append(f"{self.deco.SPARKLE_FILLED} ", style=self.theme.PINK_SOFT)
-        prompt.append("Reverie", style=f"bold {self.theme.PURPLE_SOFT}")
-        prompt.append(f" {self.deco.CHEVRON_RIGHT} ", style=self.theme.BLUE_SOFT)
-        prompt.append(text, style=f"bold {self.theme.TEXT_PRIMARY}")
-        self.console.print(prompt)
+        self._show_activity_event(
+            "Input",
+            "Queued follow-up submitted",
+            status="info",
+            detail="Dispatching it as the next user turn.",
+        )
 
     def _show_activity_event(
         self,
@@ -802,6 +806,23 @@ class ReverieInterface:
             detail=str(event.get("detail", "") or "").strip(),
             meta=str(event.get("meta", "") or "").strip(),
         )
+
+    def _can_attach_inline_images(self, config: Config) -> tuple[bool, str]:
+        """Whether the current model/source can accept inline `@image` attachments."""
+        active_source = str(getattr(config, "active_model_source", "standard") or "standard").strip().lower()
+        if active_source != "nvidia":
+            return False, "Inline @image attachments currently require the NVIDIA source."
+
+        selected = resolve_nvidia_selected_model(normalize_nvidia_config(getattr(config, "nvidia", {})))
+        if not selected:
+            return False, "No NVIDIA model is currently selected."
+
+        model_name = str(selected.get("display_name") or selected.get("id") or "the current model").strip()
+        if str(selected.get("transport", "") or "").strip().lower() != "request":
+            return False, f"{model_name} uses the OpenAI SDK path and does not accept inline image input."
+        if not bool(selected.get("vision")):
+            return False, f"{model_name} is not marked as vision-capable."
+        return True, ""
 
     def _dispatch_user_input(self, user_input: str) -> bool:
         """Route raw user input through commands or message handling."""
@@ -869,6 +890,44 @@ class ReverieInterface:
         response_model_name = getattr(config.active_model, "model_display_name", "Reverie")
         response_provider_label = self._resolve_provider_label(config)
         response_mode = config.mode
+        parsed_inline = parse_inline_image_mentions(message, self.project_root)
+        inline_attachments = parsed_inline.get("attachments", []) if isinstance(parsed_inline, dict) else []
+        inline_warnings = parsed_inline.get("warnings", []) if isinstance(parsed_inline, dict) else []
+        clean_message = str(parsed_inline.get("clean_text", message) if isinstance(parsed_inline, dict) else message).strip()
+        outbound_message: Any = message
+        transcript_message = str(message or "").strip()
+        agent_display_text = transcript_message
+
+        for warning in inline_warnings:
+            self._show_activity_event(
+                "Attachment",
+                "Inline image skipped",
+                status="warning",
+                detail=str(warning),
+            )
+
+        if inline_attachments:
+            allowed, detail = self._can_attach_inline_images(config)
+            if not allowed:
+                self._show_activity_event(
+                    "Attachment",
+                    "Inline images are unavailable for the current model",
+                    status="warning",
+                    detail=detail,
+                )
+                return True
+
+            outbound_message = build_user_message_content(clean_message, inline_attachments)
+            transcript_message = clean_message or "Attached image input."
+            agent_display_text = flatten_multimodal_content_for_display(outbound_message)
+            self._show_activity_event(
+                "Attachment",
+                "Inline image attached",
+                status="success",
+                detail=f"{len(inline_attachments)} image file(s) added to the LLM context.",
+            )
+
+        self.display.show_user_message(transcript_message, attachments=inline_attachments)
 
         # Get current session ID
         session_id = self.session_manager.current_session.id if self.session_manager.current_session else "default"
@@ -876,7 +935,7 @@ class ReverieInterface:
         # Create project snapshot before processing user question
         try:
             snapshot_info = self.snapshot_manager.create_snapshot(
-                description=f"Before question: {message[:50]}..."
+                description=f"Before question: {transcript_message[:50]}..."
             )
             if snapshot_info:
                 if getattr(snapshot_info, "reused", False):
@@ -937,7 +996,12 @@ class ReverieInterface:
             
             try:
                 self.ensure_context_engine()
-                response_stream = self.agent.process_message(message, stream=config.stream_responses, session_id=session_id)
+                response_stream = self.agent.process_message(
+                    outbound_message,
+                    stream=config.stream_responses,
+                    session_id=session_id,
+                    user_display_text=agent_display_text,
+                )
                 for chunk in response_stream:
                     # Handle thinking markers
                     if chunk == THINKING_START_MARKER:

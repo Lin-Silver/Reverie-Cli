@@ -154,7 +154,9 @@ Reverie normalizes ChatGPT and Codex URLs automatically, so these all work:
 
 ### NVIDIA
 
-The `nvidia` section is used by `Computer Controller` mode and stores the NVIDIA API key, selected model, and endpoint override.
+The `nvidia` section stores the NVIDIA API key, selected model, transport-specific defaults, and optional endpoint override used by the NVIDIA source.
+
+Get the API key from `https://build.nvidia.com/settings/api-keys`.
 
 ## Text-To-Image Configuration
 

@@ -48,7 +48,7 @@ MODE_METADATA: Dict[str, Dict[str, object]] = {
     },
     "computer-controller": {
         "display_name": "Computer Controller",
-        "description": "Desktop-control mode powered by NVIDIA-hosted Qwen vision and computer-control tooling.",
+        "description": "Desktop-control mode powered by a NVIDIA request-based vision model and computer-control tooling.",
         "switchable": False,
         "requires_source": "nvidia",
     },

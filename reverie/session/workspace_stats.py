@@ -18,6 +18,8 @@ import json
 import os
 import time
 
+from ..inline_images import count_multimodal_value_tokens
+
 
 WORKSPACE_STATS_SCHEMA_VERSION = 1
 WORKSPACE_STATS_FILENAME = "workspace_stats.json"
@@ -295,22 +297,7 @@ class WorkspaceStatsManager:
 
     @classmethod
     def _count_value_tokens(cls, value: Any) -> int:
-        if value is None:
-            return 0
-        if isinstance(value, str):
-            return cls.count_text_tokens(value)
-        if isinstance(value, (int, float, bool)):
-            return cls.count_text_tokens(str(value))
-        if isinstance(value, list):
-            return sum(cls._count_value_tokens(item) for item in value)
-        if isinstance(value, dict):
-            total = 0
-            for key, item in value.items():
-                if str(key) in {"reasoning_content", "thought_signature", "gemini_thought_signature"}:
-                    continue
-                total += cls._count_value_tokens(item)
-            return total
-        return cls.count_text_tokens(str(value))
+        return count_multimodal_value_tokens(value, cls.count_text_tokens)
 
     @staticmethod
     def _usage_dict(usage: Any) -> Dict[str, int]:

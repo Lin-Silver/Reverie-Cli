@@ -213,6 +213,37 @@ class DisplayComponents:
             line.append(str(mode or "reverie").upper(), style=self.theme.TEXT_DIM)
         self.console.print(line)
 
+    def show_user_message(
+        self,
+        message: str,
+        attachments: Optional[List[Dict[str, Any]]] = None,
+    ) -> None:
+        """Render the user's prompt as a dedicated high-contrast transcript block."""
+        attachment_items = [item for item in (attachments or []) if isinstance(item, dict)]
+        message_text = str(message or "").strip() or "Attached image input."
+
+        body_parts: List[Any] = [Text(message_text, style=f"bold {self.theme.TEXT_PRIMARY}")]
+
+        if attachment_items:
+            labels: List[str] = []
+            for item in attachment_items[:4]:
+                label = str(item.get("file_name") or item.get("file_path") or "image").strip()
+                if label:
+                    labels.append(label)
+            suffix = ""
+            if len(attachment_items) > len(labels):
+                suffix = f" +{len(attachment_items) - len(labels)} more"
+            attachment_line = ", ".join(labels) + suffix if labels else f"{len(attachment_items)} image(s)"
+            body_parts.append(Text(f"Images: {attachment_line}", style=f"bold {self.theme.BLUE_GLOW}"))
+
+        separator = self._safe_separator()
+        self._show_timeline_block(
+            title=f"You  {separator}  input",
+            accent=self.theme.BLUE_VIBRANT,
+            body=Group(*body_parts),
+            footer="prompt queued",
+        )
+
     def show_thinking_banner(self, model_name: str = "") -> None:
         """Render a lightweight thinking marker before streamed reasoning."""
         line = Text()

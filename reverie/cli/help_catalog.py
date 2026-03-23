@@ -183,12 +183,12 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
     "nvidia": {
         "command": "/nvidia",
         "section": "Providers",
-        "summary": "Configure the NVIDIA API key, model, and endpoint used by Computer Controller mode.",
-        "detail": "Use this to save the NVIDIA API key interactively, inspect the active NVIDIA setup, or override the endpoint for reverse proxies.",
+        "summary": "Configure the NVIDIA source, including mixed-transport models and the API key used by Reverie.",
+        "detail": "Use this to save the NVIDIA API key, inspect the active NVIDIA setup, switch between supported models, or override the endpoint for reverse proxies. Request-based vision models can also accept inline `@image.png` attachments in chat.",
         "overview": "status, login, activate, model [id], endpoint [value]",
         "subcommands": [
-            {"usage": "/nvidia", "description": "Show the current NVIDIA Computer Controller configuration."},
-            {"usage": "/nvidia login", "description": "Prompt for and save the NVIDIA API key."},
+            {"usage": "/nvidia", "description": "Show the current NVIDIA source configuration."},
+            {"usage": "/nvidia login", "description": "Prompt for and save the NVIDIA API key from build.nvidia.com/settings/api-keys."},
             {"usage": "/nvidia activate", "description": "Switch the active model source to NVIDIA."},
             {"usage": "/nvidia model", "description": "Open the NVIDIA model selector."},
             {"usage": "/nvidia model <model-id>", "description": "Switch directly to a supported NVIDIA model."},

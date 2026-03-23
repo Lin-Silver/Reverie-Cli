@@ -295,17 +295,14 @@ class ToolExecutor:
             # Filter ask_clarification in non-writer modes
             if name == "ask_clarification" and normalized_mode != "writer":
                 continue
+
+            if name == "atlas_delivery_orchestrator" and normalized_mode != "reverie-atlas":
+                continue
                 
             # Filter Reverie-ant tools
             if name in ["task_boundary", "notify_user"] and normalized_mode != "reverie-ant":
                 continue
                 
-            # Filter TaskManager in Reverie-ant (optional, but requested in prompt logic)
-            # The prompt for Ant says "task_manager... tool is only for Reverie".
-            # If we strictly follow, we hide it.
-            if name == "task_manager" and normalized_mode == "reverie-ant":
-                continue
-
             if name == "switch_mode" and normalized_mode == "computer-controller":
                 continue
 

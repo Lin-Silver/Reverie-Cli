@@ -8,6 +8,7 @@ from typing import List, Dict, Any, Optional
 from pathlib import Path
 
 from .base import BaseTool, ToolResult
+from ..inline_images import count_multimodal_value_tokens
 
 
 class TokenCounterTool(BaseTool):
@@ -64,15 +65,9 @@ class TokenCounterTool(BaseTool):
             for message in messages:
                 total += 4  # Every message has overhead
                 for key, value in message.items():
-                    if isinstance(value, str):
-                        total += self._estimate_tokens(value)
-                    elif isinstance(value, list):
-                        # Handle tool_calls or other list fields
-                        for item in value:
-                            if isinstance(item, dict):
-                                for k, v in item.items():
-                                    if isinstance(v, str):
-                                        total += self._estimate_tokens(v)
+                    if key == "name":
+                        total -= 1
+                    total += count_multimodal_value_tokens(value, self._estimate_tokens)
             return total
         
         # Accurate counting with tiktoken
@@ -83,21 +78,10 @@ class TokenCounterTool(BaseTool):
             num_tokens += 4
             
             for key, value in message.items():
-                if isinstance(value, str):
-                    num_tokens += len(encoding.encode(value))
-                elif isinstance(value, list):
-                    # Handle tool_calls
-                    for item in value:
-                        if isinstance(item, dict):
-                            for k, v in item.items():
-                                if isinstance(v, str):
-                                    num_tokens += len(encoding.encode(v))
-                                elif isinstance(v, dict):
-                                    # Nested dict (e.g., function in tool_call)
-                                    for kk, vv in v.items():
-                                        if isinstance(vv, str):
-                                            num_tokens += len(encoding.encode(vv))
-                
+                num_tokens += count_multimodal_value_tokens(
+                    value,
+                    lambda text: len(encoding.encode(str(text or ""))),
+                )
                 if key == "name":  # If there's a name, the role is omitted
                     num_tokens -= 1  # Role is always 1 token
         

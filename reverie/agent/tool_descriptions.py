@@ -404,7 +404,7 @@ Use this playbook whenever you need to judge project progress, completion status
 - Evaluate progress against requested outcomes and acceptance criteria, not against effort, code volume, or elapsed time
 
 **Evidence to gather**:
-1. Use `task_manager` to compare intended deliverables against current execution state
+1. Compare intended deliverables against your current implementation and verification evidence
 2. Use `codebase-retrieval` to inspect what is actually implemented and how far it is integrated
 3. Use `command_exec` to collect build, test, lint, type-check, or smoke-check evidence
 4. Use `git-commit-retrieval` when earlier behavior or partial regressions may affect the completion judgment
@@ -413,7 +413,7 @@ Use this playbook whenever you need to judge project progress, completion status
 - Separate `planned`, `implemented`, `integrated`, `verified`, and `done`
 - Call out what is still missing, unverified, blocked, or only partially wired
 - If you give a percentage, anchor it to explicit deliverables or milestone counts
-- If acceptance criteria are ambiguous, use `userInput` instead of guessing
+- If acceptance criteria are ambiguous, state the uncertainty clearly instead of pretending they were met
 """
 
 

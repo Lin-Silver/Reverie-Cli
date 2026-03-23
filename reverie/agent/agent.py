@@ -24,8 +24,9 @@ from .system_prompt import build_system_prompt
 from .tool_executor import ToolExecutor
 from ..context_engine.handoff import build_session_handoff_packet
 from ..iflow import build_iflow_request_headers, is_iflow_direct_api_url
+from ..inline_images import resolve_inline_image_content_for_request
 from ..tools.base import ToolResult
-from ..nvidia import build_nvidia_request_defaults
+from ..nvidia import apply_nvidia_request_defaults, build_nvidia_openai_options
 
 # Special marker for thinking content (used in streaming)
 # This allows the interface to identify and style thinking content differently
@@ -171,6 +172,26 @@ def _normalize_message_content_for_relay(content: Any) -> Any:
     if has_media:
         return normalized_parts
     return "\n".join(piece for piece in text_parts if piece).strip()
+
+
+def _merge_extra_body(base: Optional[Dict[str, Any]], extra: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Merge provider-specific extra_body blocks without losing nested kwargs."""
+    if not base and not extra:
+        return None
+    if not base:
+        return dict(extra or {})
+    if not extra:
+        return dict(base or {})
+
+    merged = dict(base)
+    for key, value in extra.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            nested = dict(merged.get(key, {}))
+            nested.update(value)
+            merged[key] = nested
+        else:
+            merged[key] = value
+    return merged
 
 
 def _extract_text_from_candidates(value: Any, *candidate_keys: str) -> str:
@@ -1137,7 +1158,7 @@ class ReverieAgent:
             except Exception:
                 return timeout_value
 
-        if self._is_nvidia_request():
+        if self._is_nvidia_request() or self._is_active_model_source("nvidia"):
             try:
                 cfg = getattr(config, "nvidia", {})
                 if isinstance(cfg, dict):
@@ -1276,16 +1297,7 @@ class ReverieAgent:
             return self._apply_iflow_model_suffix_logic(prepared)
 
         if self._is_nvidia_request():
-            defaults = build_nvidia_request_defaults(getattr(self.config, "nvidia", {}))
-            for key in ("max_tokens", "temperature", "top_p", "top_k", "presence_penalty", "repetition_penalty"):
-                prepared.setdefault(key, defaults[key])
-            chat_kwargs = prepared.get("chat_template_kwargs")
-            if not isinstance(chat_kwargs, dict):
-                chat_kwargs = {}
-                prepared["chat_template_kwargs"] = chat_kwargs
-            for key, value in defaults.get("chat_template_kwargs", {}).items():
-                chat_kwargs.setdefault(key, value)
-            return prepared
+            return apply_nvidia_request_defaults(prepared, getattr(self.config, "nvidia", {}))
 
         # Non-iFlow `request` provider: accept model(depth) but only convert to
         # a boolean `thinking` flag (do NOT forward thinking depth). Explicit
@@ -1321,6 +1333,55 @@ class ReverieAgent:
             chat_kwargs["thinking"] = self.thinking_mode.lower() == "true"
 
         return prepared
+
+    def _resolve_messages_for_request(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Resolve lightweight local-image markers into actual multimodal request payloads."""
+        resolved_messages: List[Dict[str, Any]] = []
+        for message in messages or []:
+            if not isinstance(message, dict):
+                continue
+            normalized = dict(message)
+            content = normalized.get("content")
+            if isinstance(content, list):
+                normalized["content"] = resolve_inline_image_content_for_request(content, self.project_root)
+            resolved_messages.append(normalized)
+        return resolved_messages
+
+    def _build_openai_chat_completion_kwargs(
+        self,
+        *,
+        messages: List[Dict[str, Any]],
+        tools: List[Dict[str, Any]],
+        stream: bool,
+    ) -> Dict[str, Any]:
+        """Build OpenAI SDK chat-completions kwargs, including NVIDIA-specific adapters."""
+        extra_body = self._openai_extra_body_for_thinking()
+        model_for_sdk = self.model
+        if extra_body is not None and isinstance(model_for_sdk, str) and "(" in model_for_sdk and ")" in model_for_sdk:
+            model_for_sdk = model_for_sdk.split("(", 1)[0].strip()
+
+        kwargs: Dict[str, Any] = {
+            "model": model_for_sdk,
+            "messages": messages,
+            "stream": bool(stream),
+        }
+        if tools:
+            kwargs["tools"] = tools
+
+        if self._is_active_model_source("nvidia"):
+            nvidia_options = build_nvidia_openai_options(getattr(self.config, "nvidia", {}), model_for_sdk)
+            if nvidia_options:
+                option_model = str(nvidia_options.get("model", "") or "").strip()
+                if option_model:
+                    kwargs["model"] = option_model
+                for key in ("temperature", "top_p", "max_tokens"):
+                    if key in nvidia_options:
+                        kwargs[key] = nvidia_options[key]
+                extra_body = _merge_extra_body(extra_body, nvidia_options.get("extra_body"))
+
+        if extra_body is not None:
+            kwargs["extra_body"] = extra_body
+        return kwargs
 
     def _request_provider_label(self) -> str:
         """Return a user-facing provider label for request-provider errors."""
@@ -1939,8 +2000,12 @@ class ReverieAgent:
             self.tool_executor.update_context(key, value)
         self.tool_executor.update_context("agent", self)
     
-    def _build_messages(self, include_reasoning: bool = False) -> List[Dict]:
-        """Build message list for API calls, optionally keeping local reasoning traces."""
+    def _build_messages(
+        self,
+        include_reasoning: bool = False,
+        resolve_local_images: bool = False,
+    ) -> List[Dict]:
+        """Build message list for API calls, optionally resolving local multimodal parts."""
         messages = [{"role": "system", "content": self.system_prompt}]
         for message in self.messages:
             if not isinstance(message, dict):
@@ -1949,13 +2014,16 @@ class ReverieAgent:
             if not include_reasoning:
                 normalized.pop("reasoning_content", None)
             messages.append(normalized)
+        if resolve_local_images:
+            return self._resolve_messages_for_request(messages)
         return messages
     
     def process_message(
         self,
-        user_message: str,
+        user_message: Any,
         stream: bool = True,
-        session_id: str = "default"
+        session_id: str = "default",
+        user_display_text: Optional[str] = None,
     ) -> Generator[str, None, None]:
         """
         Process a user message and yield responses.
@@ -1964,16 +2032,23 @@ class ReverieAgent:
             user_message: The user's input
             stream: Whether to stream the response
             session_id: Current session ID for checkpointing
+            user_display_text: Plain-text version used for checkpoints/history summaries
         
         Yields:
             Response chunks (or full response if not streaming)
         """
+        display_text = str(user_display_text or "").strip()
+        if not display_text:
+            display_text = _coerce_text_fragments(user_message).strip()
+        if not display_text and isinstance(user_message, list):
+            display_text = "[image attachment]"
+
         # Create checkpoint before processing user question
         if self.rollback_manager:
             self.current_checkpoint_id = self.rollback_manager.create_pre_question_checkpoint(
                 session_id=session_id,
                 messages=self.messages,
-                question=user_message
+                question=display_text
             )
         
         # Add user message to history
@@ -1985,7 +2060,7 @@ class ReverieAgent:
         # Record user question in operation history
         if self.operation_history:
             self.operation_history.add_user_question(
-                question=user_message,
+                question=display_text,
                 message_index=len(self.messages) - 1,
                 checkpoint_id=self.current_checkpoint_id
             )
@@ -2031,11 +2106,21 @@ class ReverieAgent:
         
         while True:
             self._check_and_compress_context(session_id=session_id)
-            messages = self._build_messages()
-            request_messages = list(messages)
+            request_messages = self._build_messages()
+            messages = self._build_messages(resolve_local_images=True)
             # For OpenAI-compatible SDK calls, include thinking flags via extra_body when applicable
+            nvidia_options: Dict[str, Any] = {}
             extra_body = self._openai_extra_body_for_thinking()
             model_for_sdk = self.model
+            if self._is_active_model_source("nvidia"):
+                nvidia_options = build_nvidia_openai_options(
+                    getattr(self.config, "nvidia", {}),
+                    model_for_sdk,
+                )
+                option_model = str(nvidia_options.get("model", "") or "").strip()
+                if option_model:
+                    model_for_sdk = option_model
+                extra_body = _merge_extra_body(extra_body, nvidia_options.get("extra_body"))
             if extra_body is not None and isinstance(model_for_sdk, str) and "(" in model_for_sdk and ")" in model_for_sdk:
                 # Strip depth suffix for ordinary SDK calls — only send boolean thinking
                 model_for_sdk = model_for_sdk.split("(", 1)[0].strip()
@@ -2045,14 +2130,32 @@ class ReverieAgent:
                     messages=messages,
                     tools=tools if tools else None,
                     stream=True,
-                    extra_body=extra_body
+                    extra_body=extra_body,
+                    **{
+                        key: value
+                        for key, value in {
+                            "temperature": nvidia_options.get("temperature"),
+                            "top_p": nvidia_options.get("top_p"),
+                            "max_tokens": nvidia_options.get("max_tokens"),
+                        }.items()
+                        if value is not None
+                    },
                 )
             else:
                 response = self._client.chat.completions.create(
                     model=model_for_sdk,
                     messages=messages,
                     tools=tools if tools else None,
-                    stream=True
+                    stream=True,
+                    **{
+                        key: value
+                        for key, value in {
+                            "temperature": nvidia_options.get("temperature"),
+                            "top_p": nvidia_options.get("top_p"),
+                            "max_tokens": nvidia_options.get("max_tokens"),
+                        }.items()
+                        if value is not None
+                    },
                 )
             
             # Collect streamed response
@@ -2234,7 +2337,7 @@ class ReverieAgent:
                     break
                 
                 # Rebuild messages for continuation
-                messages = self._build_messages()
+                messages = self._build_messages(resolve_local_images=True)
                 continue
             
             # No content at all, just break
@@ -2251,7 +2354,8 @@ class ReverieAgent:
         
         while True:
             self._check_and_compress_context(session_id=session_id)
-            messages = self._build_messages()
+            request_messages = self._build_messages()
+            messages = self._build_messages(resolve_local_images=True)
             # Build payload
             payload = {
                 "model": self.model,
@@ -2263,7 +2367,6 @@ class ReverieAgent:
             if tools:
                 payload["tools"] = tools
             payload = self._prepare_request_payload(payload, session_id=session_id)
-            request_messages = list(payload.get("messages", messages)) if isinstance(payload.get("messages"), list) else list(messages)
             headers = self._build_request_headers(stream=True)
             
             # Make request with retry logic
@@ -2467,7 +2570,7 @@ class ReverieAgent:
                 if continuation_count >= max_continuations:
                     break
                 
-                messages = self._build_messages()
+                messages = self._build_messages(resolve_local_images=True)
                 continue
             
             break
@@ -2481,8 +2584,8 @@ class ReverieAgent:
         
         while True:
             self._check_and_compress_context(session_id=session_id)
-            messages = self._build_messages()
-            request_messages = list(messages)
+            request_messages = self._build_messages()
+            messages = self._build_messages(resolve_local_images=True)
             system_message, anthropic_messages = _convert_messages_to_anthropic_format(messages)
             # Build kwargs for Anthropic API
             kwargs = {
@@ -2701,11 +2804,21 @@ class ReverieAgent:
         
         while True:
             self._check_and_compress_context(session_id=session_id)
-            messages = self._build_messages()
-            request_messages = list(messages)
+            request_messages = self._build_messages()
+            messages = self._build_messages(resolve_local_images=True)
             # For OpenAI-compatible SDK calls, include thinking flags via extra_body when applicable
+            nvidia_options: Dict[str, Any] = {}
             extra_body = self._openai_extra_body_for_thinking()
             model_for_sdk = self.model
+            if self._is_active_model_source("nvidia"):
+                nvidia_options = build_nvidia_openai_options(
+                    getattr(self.config, "nvidia", {}),
+                    model_for_sdk,
+                )
+                option_model = str(nvidia_options.get("model", "") or "").strip()
+                if option_model:
+                    model_for_sdk = option_model
+                extra_body = _merge_extra_body(extra_body, nvidia_options.get("extra_body"))
             if extra_body is not None and isinstance(model_for_sdk, str) and "(" in model_for_sdk and ")" in model_for_sdk:
                 # Strip depth suffix for ordinary SDK calls — only send boolean thinking
                 model_for_sdk = model_for_sdk.split("(", 1)[0].strip()
@@ -2715,14 +2828,32 @@ class ReverieAgent:
                     messages=messages,
                     tools=tools if tools else None,
                     stream=False,
-                    extra_body=extra_body
+                    extra_body=extra_body,
+                    **{
+                        key: value
+                        for key, value in {
+                            "temperature": nvidia_options.get("temperature"),
+                            "top_p": nvidia_options.get("top_p"),
+                            "max_tokens": nvidia_options.get("max_tokens"),
+                        }.items()
+                        if value is not None
+                    },
                 )
             else:
                 response = self._client.chat.completions.create(
                     model=model_for_sdk,
                     messages=messages,
                     tools=tools if tools else None,
-                    stream=False
+                    stream=False,
+                    **{
+                        key: value
+                        for key, value in {
+                            "temperature": nvidia_options.get("temperature"),
+                            "top_p": nvidia_options.get("top_p"),
+                            "max_tokens": nvidia_options.get("max_tokens"),
+                        }.items()
+                        if value is not None
+                    },
                 )
             
             choice = response.choices[0]
@@ -2844,7 +2975,7 @@ class ReverieAgent:
                 all_content.append(content)
                 
                 # Rebuild messages for next call
-                messages = self._build_messages()
+                messages = self._build_messages(resolve_local_images=True)
                 continue
             
             break
@@ -2861,7 +2992,8 @@ class ReverieAgent:
         
         while True:
             self._check_and_compress_context(session_id=session_id)
-            messages = self._build_messages()
+            request_messages = self._build_messages()
+            messages = self._build_messages(resolve_local_images=True)
             # Build payload
             payload = {
                 "model": self.model,
@@ -2873,7 +3005,6 @@ class ReverieAgent:
             if tools:
                 payload["tools"] = tools
             payload = self._prepare_request_payload(payload, session_id=session_id)
-            request_messages = list(payload.get("messages", messages)) if isinstance(payload.get("messages"), list) else list(messages)
             headers = self._build_request_headers(stream=False)
             
             # Make request with retry logic
@@ -3005,7 +3136,7 @@ class ReverieAgent:
                 )
                 
                 all_content.append(content)
-                messages = self._build_messages()
+                messages = self._build_messages(resolve_local_images=True)
                 continue
             
             break

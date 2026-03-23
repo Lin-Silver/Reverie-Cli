@@ -1221,6 +1221,16 @@ class CommandHandler:
                     f"{self.deco.DOT_MEDIUM} Source",
                     f"[{self.theme.TEXT_DIM}]{source_label}[/{self.theme.TEXT_DIM}]"
                 )
+            active_config_path = ""
+            try:
+                active_config_path = str(config_manager.get_active_config_path())
+            except Exception:
+                active_config_path = ""
+            if active_config_path:
+                table.add_row(
+                    f"{self.deco.DOT_MEDIUM} Config Path",
+                    f"[{self.theme.TEXT_DIM}]{escape(active_config_path)}[/{self.theme.TEXT_DIM}]"
+                )
         
         # Session info
         if session_manager:

@@ -16,6 +16,7 @@ import sys
 import hashlib
 import re
 import shutil
+import logging
 
 from .security_utils import write_json_secure
 from .iflow import (
@@ -616,6 +617,7 @@ class ConfigManager:
     
     def __init__(self, project_root: Path, force_workspace_config: bool = False):
         self.project_root = project_root
+        self._logger = logging.getLogger(__name__)
 
         # Use app root for runtime data (next to exe file or script directory).
         self.app_root = get_app_root()
@@ -632,6 +634,7 @@ class ConfigManager:
 
         self._config: Optional[Config] = None
         self._last_mtime: float = 0
+        self._loaded_config_path: Optional[Path] = None
 
         # Determine config path based on setting
         self._use_workspace_config = force_workspace_config
@@ -643,6 +646,36 @@ class ConfigManager:
             self.config_path = self.workspace_config_path
         else:
             self.config_path = self.global_config_path
+
+    def _get_legacy_mirror_path(self) -> Path:
+        """Return the compatibility config path for the current storage mode."""
+        if self._use_workspace_config:
+            return self.legacy_workspace_config_path
+        return self.legacy_global_config_path
+
+    def _sync_legacy_mirror(self, serialized: Dict[str, Any]) -> None:
+        """Best-effort compatibility sync for older launchers and visible legacy files."""
+        legacy_path = self._get_legacy_mirror_path()
+        if legacy_path.resolve(strict=False) == self.config_path.resolve(strict=False):
+            return
+        try:
+            write_json_secure(legacy_path, serialized)
+        except Exception as exc:
+            self._logger.warning(
+                "Failed to sync legacy config mirror at %s: %s",
+                legacy_path,
+                exc,
+            )
+
+    def get_active_config_path(self) -> Path:
+        """Return the currently effective config path for this workspace."""
+        if self._loaded_config_path is not None:
+            return self._loaded_config_path
+
+        existing = self._find_existing_path(self._use_workspace_config)
+        if existing is not None:
+            return existing
+        return self.config_path
 
     def _path_candidates_for_mode(self, workspace_mode: bool) -> List[Path]:
         """Return new + legacy config paths for one logical mode."""
@@ -686,6 +719,7 @@ class ConfigManager:
             # Clear cached config to force reload from new location
             self._config = None
             self._last_mtime = 0
+            self._loaded_config_path = None
     
     def is_workspace_mode(self) -> bool:
         """Check if workspace-local configuration mode is enabled"""
@@ -719,6 +753,7 @@ class ConfigManager:
             # Clear cache and switch to workspace mode
             self._config = None
             self._last_mtime = 0
+            self._loaded_config_path = None
             self.set_workspace_mode(True)
             
             return True
@@ -755,6 +790,7 @@ class ConfigManager:
             # Clear cache and switch to global mode
             self._config = None
             self._last_mtime = 0
+            self._loaded_config_path = None
             self.set_workspace_mode(False)
             
             return True
@@ -804,6 +840,7 @@ class ConfigManager:
                         data = json.load(f)
                     self._config = Config.from_dict(data)
                     self._last_mtime = current_mtime
+                    self._loaded_config_path = source_path
 
                     # Check if config mode changed
                     if self._config.use_workspace_config != self._use_workspace_config:
@@ -815,12 +852,16 @@ class ConfigManager:
                         self.save(self._config)
                         # Update mtime after saving to avoid infinite loop
                         self._last_mtime = os.path.getmtime(self.config_path)
+                    else:
+                        self._sync_legacy_mirror(self._config.to_dict())
                 except Exception:
                     # If error reading (e.g., partial write), keep old config if available
                     if self._config is None:
                         self._config = Config()
+                        self._loaded_config_path = self.config_path
         else:
             self._config = Config()
+            self._loaded_config_path = self.config_path
         
         return self._config
     
@@ -999,7 +1040,14 @@ class ConfigManager:
         
         self.ensure_dirs()
 
-        write_json_secure(self.config_path, self._config.to_dict())
+        serialized = self._config.to_dict()
+        write_json_secure(self.config_path, serialized)
+        self._loaded_config_path = self.config_path
+        try:
+            self._last_mtime = os.path.getmtime(self.config_path)
+        except OSError:
+            self._last_mtime = 0
+        self._sync_legacy_mirror(serialized)
     
     def is_configured(self) -> bool:
         """Check if initial configuration is done"""

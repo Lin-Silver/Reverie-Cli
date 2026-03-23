@@ -251,6 +251,51 @@ class DisplayComponents:
             renderables.append(bottom)
         self.console.print(Group(*renderables))
 
+    def show_activity_event(
+        self,
+        category: str,
+        message: str,
+        *,
+        status: str = "info",
+        detail: str = "",
+        meta: str = "",
+    ) -> None:
+        """Render system/session activity as a compact timeline event."""
+        status_key = str(status or "info").strip().lower()
+        styles = {
+            "info": (self.theme.BLUE_SOFT, "info", self.theme.TEXT_PRIMARY, self.theme.TEXT_DIM),
+            "success": (self.theme.MINT_VIBRANT, "done", self.theme.TEXT_PRIMARY, self.theme.TEXT_DIM),
+            "warning": (self.theme.AMBER_GLOW, "warning", self.theme.PEACH_SOFT, self.theme.TEXT_DIM),
+            "error": (self.theme.CORAL_VIBRANT, "failed", self.theme.CORAL_SOFT, self.theme.TEXT_DIM),
+            "working": (self.theme.PURPLE_SOFT, "running", self.theme.TEXT_PRIMARY, self.theme.TEXT_DIM),
+        }
+        accent, status_label, message_color, detail_color = styles.get(
+            status_key,
+            styles["info"],
+        )
+
+        separator = self._safe_separator()
+        compact = self._is_compact(96)
+        category_label = self._truncate_text(category or "Activity", 18 if compact else 26)
+        title = f"{category_label}  {separator}  {status_label}"
+
+        parts: List[Any] = []
+        message_text = str(message or "").strip()
+        detail_text = str(detail or "").strip()
+        meta_text = str(meta or "").strip()
+
+        if message_text:
+            parts.append(Text(message_text, style=f"bold {message_color}"))
+        if detail_text:
+            parts.append(Text(detail_text, style=detail_color))
+
+        self._show_timeline_block(
+            title=title,
+            accent=accent,
+            body=Group(*parts) if parts else None,
+            footer=meta_text,
+        )
+
     def show_status(
         self,
         message: str,

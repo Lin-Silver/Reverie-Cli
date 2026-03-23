@@ -81,6 +81,133 @@ class CommandHandler:
             'pt': self.cmd_playtest,
             'CE': self.cmd_context_engine,  # Context Engine management (case-sensitive)
         }
+
+    def _resolve_activity_style(self, status: str) -> tuple[str, str, str, str]:
+        """Resolve colors and labels for lightweight command activity blocks."""
+        styles = {
+            "info": (self.theme.BLUE_SOFT, "info", self.theme.TEXT_PRIMARY, self.theme.TEXT_DIM),
+            "success": (self.theme.MINT_VIBRANT, "done", self.theme.TEXT_PRIMARY, self.theme.TEXT_DIM),
+            "warning": (self.theme.AMBER_GLOW, "warning", self.theme.PEACH_SOFT, self.theme.TEXT_DIM),
+            "error": (self.theme.CORAL_VIBRANT, "failed", self.theme.CORAL_SOFT, self.theme.TEXT_DIM),
+            "working": (self.theme.PURPLE_SOFT, "running", self.theme.TEXT_PRIMARY, self.theme.TEXT_DIM),
+        }
+        return styles.get(str(status or "info").strip().lower(), styles["info"])
+
+    def _show_activity_event(
+        self,
+        category: str,
+        message: str,
+        *,
+        status: str = "info",
+        detail: str = "",
+        meta: str = "",
+        blank_before: bool = False,
+        blank_after: bool = False,
+    ) -> None:
+        """Render a compact Gemini-style timeline event inside command pages."""
+        if blank_before:
+            self.console.print()
+
+        accent, status_label, message_color, detail_color = self._resolve_activity_style(status)
+        title = Text()
+        title.append("+- ", style=accent)
+        title.append(str(category or "Activity"), style=f"bold {accent}")
+        title.append("  |  ", style=self.theme.TEXT_DIM)
+        title.append(status_label, style=self.theme.TEXT_DIM)
+
+        renderables: List[Any] = [title]
+        message_text = str(message or "").strip()
+        detail_text = str(detail or "").strip()
+        meta_text = str(meta or "").strip()
+
+        body_parts: List[Any] = []
+        if message_text:
+            body_parts.append(Text(message_text, style=f"bold {message_color}"))
+        if detail_text:
+            body_parts.append(Text(detail_text, style=detail_color))
+        if body_parts:
+            renderables.append(Padding(Group(*body_parts), (0, 0, 0, 3)))
+
+        if meta_text:
+            footer = Text()
+            footer.append("\\- ", style=accent)
+            footer.append(meta_text, style=self.theme.TEXT_DIM)
+            renderables.append(footer)
+
+        self.console.print(Group(*renderables))
+
+        if blank_after:
+            self.console.print()
+
+    def _show_command_panel(
+        self,
+        title: str,
+        *,
+        subtitle: str = "",
+        accent: Optional[str] = None,
+        meta: str = "",
+    ) -> None:
+        """Render a shared section banner for command pages."""
+        accent_color = accent or self.theme.BORDER_PRIMARY
+        body: List[Any] = [Text(title, style=f"bold {accent_color}")]
+        if subtitle:
+            body.append(Text(subtitle, style=self.theme.TEXT_SECONDARY))
+        if meta:
+            body.append(Text(meta, style=self.theme.TEXT_DIM))
+
+        self.console.print()
+        self.console.print(
+            Panel(
+                Group(*body),
+                border_style=accent_color,
+                box=box.ROUNDED,
+                padding=(0, 1),
+            )
+        )
+        self.console.print()
+
+    def _build_key_value_table(self, rows: List[tuple[str, Any]], *, value_style: Optional[str] = None) -> Table:
+        """Build a simple two-column detail table."""
+        table = Table(show_header=False, box=box.SIMPLE, padding=(0, 2))
+        table.add_column("Label", style=self.theme.TEXT_SECONDARY, width=24)
+        table.add_column("Value", style=value_style or self.theme.TEXT_PRIMARY)
+        for label, value in rows:
+            table.add_row(str(label), str(value))
+        return table
+
+    def _build_command_table(
+        self,
+        rows: List[tuple[str, str]],
+        *,
+        title: str = "Available Commands",
+        accent: Optional[str] = None,
+    ) -> Table:
+        """Build a consistent command reference table."""
+        accent_color = accent or self.theme.BORDER_SECONDARY
+        table = Table(
+            title=escape(title),
+            title_style=f"bold {accent_color}",
+            show_header=True,
+            box=box.ROUNDED,
+            border_style=accent_color,
+            expand=True,
+        )
+        table.add_column("Command", style=f"bold {self.theme.PINK_SOFT}", width=28)
+        table.add_column("Description", style=self.theme.TEXT_SECONDARY)
+        for command, description in rows:
+            table.add_row(command, description)
+        return table
+
+    def _get_context_usage_snapshot(self, agent: Any, config_manager: Any) -> Optional[Dict[str, Any]]:
+        """Fetch current context usage statistics for the active conversation."""
+        from ..tools.token_counter import TokenCounterTool
+
+        token_counter = TokenCounterTool({'project_root': self.app.get('project_root')})
+        token_counter.context = {'agent': agent, 'config_manager': config_manager}
+        result = token_counter.execute(check_current_conversation=True)
+        if result.success and result.data:
+            return result.data
+        return None
     
     def handle(self, command_line: str) -> bool:
         """
@@ -104,8 +231,12 @@ class CommandHandler:
         if cmd in self.commands:
             return self.commands[cmd](args)
         else:
-            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Unknown command: /{cmd_original}[/{self.theme.CORAL_SOFT}]")
-            self.console.print(f"[{self.theme.TEXT_DIM}]Type /help for available commands.[/{self.theme.TEXT_DIM}]")
+            self._show_activity_event(
+                "Command",
+                f"Unknown command: /{cmd_original}",
+                status="error",
+                detail="Type /help for available commands.",
+            )
             return True
     
     def cmd_help(self, args: str) -> bool:
@@ -3979,7 +4110,7 @@ class CommandHandler:
         session_manager = self.app.get('session_manager')
         workspace_stats_manager = self.app.get('workspace_stats_manager')
         if not session_manager:
-            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Session manager not available[/{self.theme.CORAL_SOFT}]")
+            self._show_activity_event("Sessions", "Session manager not available.", status="error")
             return True
 
         sessions = session_manager.list_sessions()
@@ -3987,9 +4118,15 @@ class CommandHandler:
         agent = self.app.get('agent')
         workspace_path = getattr(session_manager, 'workspace_path', '')
 
+        self._show_command_panel(
+            "Session Browser",
+            subtitle="Load, create, and review saved conversations for this workspace.",
+            accent=self.theme.BORDER_PRIMARY,
+            meta=f"Workspace: {workspace_path}" if workspace_path else "",
+        )
+
         if sessions:
             table = Table(
-                title=f"[bold {self.theme.PINK_SOFT}]{self.deco.CRYSTAL} Sessions[/bold {self.theme.PINK_SOFT}]",
                 box=box.ROUNDED,
                 border_style=self.theme.BORDER_PRIMARY,
                 caption=f"[{self.theme.TEXT_DIM}]Current directory: {escape(str(workspace_path))}[/{self.theme.TEXT_DIM}]" if workspace_path else ""
@@ -4012,12 +4149,21 @@ class CommandHandler:
 
             self.console.print(table)
         else:
-            self.console.print(f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} No sessions in the current directory yet.[/{self.theme.TEXT_DIM}]")
-            if workspace_path:
-                self.console.print(f"[{self.theme.TEXT_DIM}]Current directory: {escape(str(workspace_path))}[/{self.theme.TEXT_DIM}]")
+            self._show_activity_event(
+                "Sessions",
+                "No saved sessions in this workspace yet.",
+                detail="Create one with 'n' to start building transcript history.",
+                meta=str(workspace_path) if workspace_path else "",
+            )
 
         actions_text = "Actions: (n)ew, (number) to load, (d) to delete" if sessions else "Actions: (n)ew"
-        self.console.print(f"\n[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} {actions_text}[/{self.theme.TEXT_DIM}]")
+        self._show_activity_event(
+            "Sessions",
+            "Choose an action to continue.",
+            detail=actions_text,
+            meta="Press Enter to keep the current session.",
+            blank_before=True,
+        )
 
         try:
             choice = Prompt.ask(f"[{self.theme.PURPLE_SOFT}]Action[/{self.theme.PURPLE_SOFT}]", default="")
@@ -4033,11 +4179,16 @@ class CommandHandler:
                         session_name=session.name,
                         message_count=len(session.messages),
                     )
-                self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Created session: {session.name}[/{self.theme.MINT_VIBRANT}]")
+                self._show_activity_event(
+                    "Sessions",
+                    f"Created session: {session.name}",
+                    status="success",
+                    detail="The agent context now points at the new conversation.",
+                )
 
             elif choice.lower() == 'd':
                 if not sessions:
-                    self.console.print(f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} Nothing to delete.[/{self.theme.TEXT_DIM}]")
+                    self._show_activity_event("Sessions", "Nothing to delete.", status="warning")
                     return True
 
                 idx = Prompt.ask(f"[{self.theme.PURPLE_SOFT}]Delete session #[/{self.theme.PURPLE_SOFT}]")
@@ -4061,18 +4212,32 @@ class CommandHandler:
                                         session_name=replacement.name,
                                         message_count=len(replacement.messages),
                                     )
-                                self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Deleted. Active session: {replacement.name}[/{self.theme.MINT_VIBRANT}]")
+                                self._show_activity_event(
+                                    "Sessions",
+                                    f"Deleted session and switched to: {replacement.name}",
+                                    status="success",
+                                )
                             else:
-                                self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Deleted[/{self.theme.MINT_VIBRANT}]")
+                                self._show_activity_event("Sessions", "Deleted session.", status="success")
                 except ValueError:
-                    pass
+                    self._show_activity_event(
+                        "Sessions",
+                        "Invalid session number.",
+                        status="warning",
+                        detail="Use the index shown in the sessions table.",
+                    )
 
             elif choice.isdigit():
                 idx = int(choice) - 1
                 if 0 <= idx < len(sessions):
                     session = session_manager.load_session(sessions[idx].id)
                     if session:
-                        self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Loaded: {session.name}[/{self.theme.MINT_VIBRANT}]")
+                        self._show_activity_event(
+                            "Sessions",
+                            f"Loaded session: {session.name}",
+                            status="success",
+                            detail="Showing the full transcript below.",
+                        )
                         if agent:
                             agent.set_history(session.messages)
                         if workspace_stats_manager:
@@ -4086,7 +4251,7 @@ class CommandHandler:
                             title=f"Loaded Session {self.deco.DOT_MEDIUM} {session.name}",
                         )
         except KeyboardInterrupt:
-            self.console.print()
+            self._show_activity_event("Sessions", "Session browser cancelled.", status="warning")
 
         return True
     
@@ -5883,132 +6048,178 @@ class CommandHandler:
 
     def cmd_workspace(self, args: str) -> bool:
         """Manage workspace configuration mode for multi-workspace support"""
-        from rich.table import Table
-        
         config_manager = self.app.get('config_manager')
         if not config_manager:
-            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]")
+            self._show_activity_event("Workspace", "Config manager not available.", status="error")
             return True
-        
+
         args = args.strip().lower()
-        
+
         # Show current status
         if not args or args == 'status':
             is_workspace = config_manager.is_workspace_mode()
             has_workspace = config_manager.has_workspace_config()
             has_global = config_manager.has_global_config()
-            
-            self.console.print()
-            self.console.print(Panel(
-                f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Workspace Configuration Status {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]",
-                border_style=self.theme.BORDER_PRIMARY,
-                box=box.ROUNDED,
-                padding=(0, 2)
-            ))
-            self.console.print()
-            
-            table = Table(box=box.SIMPLE, show_header=False)
-            table.add_column("Setting", style=f"bold {self.theme.BLUE_SOFT}", width=30)
-            table.add_column("Value", style=self.theme.MINT_SOFT)
-            
-            mode_text = f"[{self.theme.MINT_SOFT}]Workspace Mode[/{self.theme.MINT_SOFT}]" if is_workspace else f"[{self.theme.PURPLE_MEDIUM}]Global Mode[/{self.theme.PURPLE_MEDIUM}]"
-            table.add_row("Current Mode", mode_text)
-            table.add_row("Workspace Config", f"[{self.theme.MINT_SOFT}]Exists[/{self.theme.MINT_SOFT}]" if has_workspace else f"[{self.theme.TEXT_DIM}]Not Found[/{self.theme.TEXT_DIM}]")
-            table.add_row("Global Config", f"[{self.theme.MINT_SOFT}]Exists[/{self.theme.MINT_SOFT}]" if has_global else f"[{self.theme.TEXT_DIM}]Not Found[/{self.theme.TEXT_DIM}]")
-            
+
+            self._show_command_panel(
+                "Workspace Configuration",
+                subtitle="Choose whether this project uses its own local config or the shared global config.",
+                accent=self.theme.BORDER_PRIMARY,
+            )
+
+            mode_text = "Workspace Mode" if is_workspace else "Global Mode"
+            table = self._build_key_value_table(
+                [
+                    ("Current Mode", mode_text),
+                    ("Workspace Config", "Exists" if has_workspace else "Not Found"),
+                    ("Global Config", "Exists" if has_global else "Not Found"),
+                ],
+                value_style=self.theme.MINT_SOFT,
+            )
             self.console.print(table)
             self.console.print()
-            self.console.print(f"[{self.theme.TEXT_DIM}]Available commands:[/{self.theme.TEXT_DIM}]")
-            self.console.print(f"  [{self.theme.BLUE_SOFT}]/workspace enable[/{self.theme.BLUE_SOFT}]  - Enable workspace-local configuration")
-            self.console.print(f"  [{self.theme.BLUE_SOFT}]/workspace disable[/{self.theme.BLUE_SOFT}] - Disable workspace-local configuration (use global)")
-            self.console.print(f"  [{self.theme.BLUE_SOFT}]/workspace copy-to-workspace[/{self.theme.BLUE_SOFT}] - Copy global config to workspace")
-            self.console.print(f"  [{self.theme.BLUE_SOFT}]/workspace copy-to-global[/{self.theme.BLUE_SOFT}] - Copy workspace config to global")
+            self.console.print(
+                self._build_command_table(
+                    [
+                        ("/workspace enable", "Enable workspace-local configuration"),
+                        ("/workspace disable", "Disable workspace-local configuration and use global"),
+                        ("/workspace copy-to-workspace", "Copy the global config into this workspace"),
+                        ("/workspace copy-to-global", "Copy the workspace config back to global"),
+                    ],
+                    title="Workspace Actions",
+                    accent=self.theme.BORDER_SECONDARY,
+                )
+            )
             self.console.print()
             
             return True
-        
+
         # Enable workspace mode
         elif args == 'enable':
             if config_manager.is_workspace_mode():
-                self.console.print(f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} Workspace mode is already enabled.[/{self.theme.TEXT_DIM}]")
+                self._show_activity_event("Workspace", "Workspace mode is already enabled.", status="warning")
                 return True
-            
+
             # Check if workspace config exists
             if not config_manager.has_workspace_config():
                 if not config_manager.has_global_config():
-                    self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} No configuration found. Please configure a model first.[/{self.theme.CORAL_SOFT}]")
+                    self._show_activity_event(
+                        "Workspace",
+                        "No configuration found yet.",
+                        status="error",
+                        detail="Configure a model first before enabling workspace mode.",
+                    )
                     return True
-                
-                self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Workspace config not found. Copying from global config...[/{self.theme.AMBER_GLOW}]")
+
+                self._show_activity_event(
+                    "Workspace",
+                    "Workspace config not found.",
+                    status="working",
+                    detail="Copying the global config into this workspace now.",
+                )
                 if not config_manager.copy_config_to_workspace():
-                    self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Failed to copy config to workspace.[/{self.theme.CORAL_SOFT}]")
+                    self._show_activity_event(
+                        "Workspace",
+                        "Failed to copy config into the workspace.",
+                        status="error",
+                    )
                     return True
-            
+
             config_manager.set_workspace_mode(True)
             config = config_manager.load()
             config.use_workspace_config = True
             config_manager.save(config)
-            
-            self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Workspace mode enabled![/{self.theme.MINT_VIBRANT}]")
-            self.console.print(f"[{self.theme.TEXT_DIM}]Configuration is now stored in: {config_manager.workspace_config_path}[/{self.theme.TEXT_DIM}]")
-            
+
+            self._show_activity_event(
+                "Workspace",
+                "Workspace mode enabled.",
+                status="success",
+                detail="Configuration changes now stay with this project.",
+                meta=str(config_manager.workspace_config_path),
+            )
+
             # Reinit agent if needed
             if self.app.get('reinit_agent'):
                 self.app['reinit_agent']()
-            
+
             return True
-        
+
         # Disable workspace mode
         elif args == 'disable':
             if not config_manager.is_workspace_mode():
-                self.console.print(f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} Workspace mode is already disabled.[/{self.theme.TEXT_DIM}]")
+                self._show_activity_event("Workspace", "Workspace mode is already disabled.", status="warning")
                 return True
-            
+
             config_manager.set_workspace_mode(False)
             config = config_manager.load()
             config.use_workspace_config = False
             config_manager.save(config)
-            
-            self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Workspace mode disabled![/{self.theme.MINT_VIBRANT}]")
-            self.console.print(f"[{self.theme.TEXT_DIM}]Configuration is now stored in: {config_manager.global_config_path}[/{self.theme.TEXT_DIM}]")
-            
+
+            self._show_activity_event(
+                "Workspace",
+                "Workspace mode disabled.",
+                status="success",
+                detail="Configuration changes now go to the shared global profile.",
+                meta=str(config_manager.global_config_path),
+            )
+
             # Reinit agent if needed
             if self.app.get('reinit_agent'):
                 self.app['reinit_agent']()
-            
+
             return True
-        
+
         # Copy global config to workspace
         elif args == 'copy-to-workspace':
             if not config_manager.has_global_config():
-                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} No global configuration found.[/{self.theme.CORAL_SOFT}]")
+                self._show_activity_event("Workspace", "No global configuration found.", status="error")
                 return True
-            
+
             if config_manager.copy_config_to_workspace():
-                self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Configuration copied to workspace![/{self.theme.MINT_VIBRANT}]")
-                self.console.print(f"[{self.theme.TEXT_DIM}]Workspace config: {config_manager.workspace_config_path}[/{self.theme.TEXT_DIM}]")
+                self._show_activity_event(
+                    "Workspace",
+                    "Copied the global configuration into this workspace.",
+                    status="success",
+                    meta=str(config_manager.workspace_config_path),
+                )
             else:
-                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Failed to copy configuration to workspace.[/{self.theme.CORAL_SOFT}]")
-            
+                self._show_activity_event(
+                    "Workspace",
+                    "Failed to copy the configuration into the workspace.",
+                    status="error",
+                )
+
             return True
-        
+
         # Copy workspace config to global
         elif args == 'copy-to-global':
             if not config_manager.has_workspace_config():
-                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} No workspace configuration found.[/{self.theme.CORAL_SOFT}]")
+                self._show_activity_event("Workspace", "No workspace configuration found.", status="error")
                 return True
-            
+
             if config_manager.copy_config_to_global():
-                self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Configuration copied to global![/{self.theme.MINT_VIBRANT}]")
-                self.console.print(f"[{self.theme.TEXT_DIM}]Global config: {config_manager.global_config_path}[/{self.theme.TEXT_DIM}]")
+                self._show_activity_event(
+                    "Workspace",
+                    "Copied the workspace configuration back to global.",
+                    status="success",
+                    meta=str(config_manager.global_config_path),
+                )
             else:
-                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Failed to copy configuration to global.[/{self.theme.CORAL_SOFT}]")
-            
+                self._show_activity_event(
+                    "Workspace",
+                    "Failed to copy the workspace configuration to global.",
+                    status="error",
+                )
+
             return True
-        
+
         else:
-            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Unknown workspace command: {args}[/{self.theme.CORAL_SOFT}]")
-            self.console.print(f"[{self.theme.TEXT_DIM}]Type /workspace for available commands.[/{self.theme.TEXT_DIM}]")
+            self._show_activity_event(
+                "Workspace",
+                f"Unknown workspace command: {args}",
+                status="error",
+                detail="Type /workspace for available commands.",
+            )
             return True
 
     def cmd_exit(self, args: str) -> bool:
@@ -6027,105 +6238,103 @@ class CommandHandler:
             /CE info         - Show detailed context information
             /CE stats        - Show context statistics
         """
-        from rich.table import Table
-        from rich.panel import Panel
-        from rich import box
-        
         agent = self.app.get('agent')
         config_manager = self.app.get('config_manager')
-        
+
         if not agent:
-            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} No active agent session.[/{self.theme.CORAL_SOFT}]")
+            self._show_activity_event("Context Engine", "No active agent session.", status="error")
             return True
-        
+
         args = args.strip().lower()
-        
+
         # No args - show status and help
         if not args:
-            self.console.print()
-            self.console.print(Panel(
-                f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Context Engine {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]",
-                border_style=self.theme.BORDER_PRIMARY,
-                box=box.ROUNDED,
-                padding=(0, 2)
-            ))
-            self.console.print()
-            
+            self._show_command_panel(
+                "Context Engine",
+                subtitle="Inspect context pressure, compression options, and recovery state.",
+                accent=self.theme.BORDER_PRIMARY,
+            )
+
             # Get token count
             try:
-                from ..tools.token_counter import TokenCounterTool
-                token_counter = TokenCounterTool({'project_root': self.app.get('project_root')})
-                token_counter.context = {'agent': agent, 'config_manager': config_manager}
-                result = token_counter.execute(check_current_conversation=True)
-                
-                if result.success and result.data:
-                    total_tokens = result.data.get('total_tokens', 0)
-                    max_tokens = result.data.get('max_tokens', 128000)
-                    percentage = result.data.get('percentage', 0)
-                    system_tokens = result.data.get('system_tokens', 0)
-                    messages_tokens = result.data.get('messages_tokens', 0)
-                    message_count = result.data.get('message_count', 0)
-                    
-                    # Create status table
-                    table = Table(show_header=False, box=box.SIMPLE, padding=(0, 2))
-                    table.add_column(style=self.theme.TEXT_SECONDARY, width=20)
-                    table.add_column(style=self.theme.TEXT_PRIMARY)
-                    
-                    table.add_row("System Prompt", f"[{self.theme.PURPLE_SOFT}]{system_tokens:,} tokens[/{self.theme.PURPLE_SOFT}]")
-                    table.add_row("Messages", f"[{self.theme.BLUE_SOFT}]{messages_tokens:,} tokens ({message_count} messages)[/{self.theme.BLUE_SOFT}]")
-                    table.add_row("Total Usage", f"[bold {self.theme.MINT_VIBRANT}]{total_tokens:,} / {max_tokens:,} tokens[/bold {self.theme.MINT_VIBRANT}]")
-                    
-                    # Color-coded percentage
+                usage = self._get_context_usage_snapshot(agent, config_manager)
+
+                if usage:
+                    total_tokens = usage.get('total_tokens', 0)
+                    max_tokens = usage.get('max_tokens', 128000)
+                    percentage = usage.get('percentage', 0)
+                    system_tokens = usage.get('system_tokens', 0)
+                    messages_tokens = usage.get('messages_tokens', 0)
+                    message_count = usage.get('message_count', 0)
+
                     if percentage >= 80:
-                        perc_color = self.theme.CORAL_VIBRANT
-                        status_icon = "⚠️"
-                        status_text = "HIGH"
+                        usage_label = "High"
                     elif percentage >= 60:
-                        perc_color = self.theme.AMBER_GLOW
-                        status_icon = "ℹ️"
-                        status_text = "MODERATE"
+                        usage_label = "Moderate"
                     else:
-                        perc_color = self.theme.MINT_SOFT
-                        status_icon = "✓"
-                        status_text = "GOOD"
-                    
-                    table.add_row("Usage", f"[{perc_color}]{status_icon} {percentage:.1f}% ({status_text})[/{perc_color}]")
-                    
+                        usage_label = "Good"
+
+                    table = self._build_key_value_table(
+                        [
+                            ("System Prompt", f"{system_tokens:,} tokens"),
+                            ("Messages", f"{messages_tokens:,} tokens ({message_count} messages)"),
+                            ("Total Usage", f"{total_tokens:,} / {max_tokens:,} tokens"),
+                            ("Usage", f"{percentage:.1f}% ({usage_label})"),
+                        ]
+                    )
                     self.console.print(table)
                     self.console.print()
-                    
-                    # Show warning if needed
+
                     if percentage >= 80:
-                        self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.DOT_MEDIUM} Context usage is high. Automatic rotation may trigger on the next model call.[/{self.theme.CORAL_SOFT}]")
-                        self.console.print()
+                        self._show_activity_event(
+                            "Context Engine",
+                            "Context usage is high.",
+                            status="warning",
+                            detail="Automatic rotation may trigger on the next model call.",
+                        )
                     elif percentage >= 60:
-                        self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Context usage is moderate. Automatic rotation may be needed soon.[/{self.theme.AMBER_GLOW}]")
-                        self.console.print()
-                
+                        self._show_activity_event(
+                            "Context Engine",
+                            "Context usage is moderate.",
+                            status="info",
+                            detail="A compression or handoff may be needed soon.",
+                        )
+
             except Exception as e:
-                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Failed to get token count: {str(e)}[/{self.theme.CORAL_SOFT}]")
-            
+                self._show_activity_event(
+                    "Context Engine",
+                    "Failed to inspect current token usage.",
+                    status="error",
+                    detail=str(e),
+                )
+
             # Show available commands
-            cmd_table = Table(show_header=True, box=box.ROUNDED, border_style=self.theme.BORDER_SECONDARY)
-            cmd_table.add_column("Command", style=f"bold {self.theme.PINK_SOFT}", width=20)
-            cmd_table.add_column("Description", style=self.theme.TEXT_SECONDARY)
-            
-            cmd_table.add_row("/CE", "Show this status information")
-            cmd_table.add_row("/CE compress", "Manually compact conversation context (advanced)")
-            cmd_table.add_row("/CE info", "Show detailed context information")
-            cmd_table.add_row("/CE stats", "Show context statistics")
-            
-            self.console.print(cmd_table)
+            self.console.print(
+                self._build_command_table(
+                    [
+                        ("/CE", "Show current context usage and quick actions"),
+                        ("/CE compress", "Manually compact the current conversation context"),
+                        ("/CE info", "Show detailed message and mode information"),
+                        ("/CE stats", "Print the raw context statistics output"),
+                    ],
+                    title="Context Actions",
+                    accent=self.theme.BORDER_SECONDARY,
+                )
+            )
             self.console.print()
-            
+
             return True
-        
+
         # Compress command
         elif args == "compress":
-            self.console.print()
-            self.console.print(f"[{self.theme.PURPLE_SOFT}]{self.deco.SPARKLE} Compressing conversation context...[/{self.theme.PURPLE_SOFT}]")
-            self.console.print()
-            
+            self._show_activity_event(
+                "Context Engine",
+                "Compressing conversation context.",
+                status="working",
+                detail="Summarizing older turns into a smaller working memory.",
+                blank_before=True,
+            )
+
             try:
                 from ..tools.context_management import ContextManagementTool
                 context_tool = ContextManagementTool({'project_root': self.app.get('project_root')})
@@ -6138,104 +6347,124 @@ class CommandHandler:
                 result = context_tool.execute(action="compress")
                 
                 if result.success:
-                    self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} {result.output}[/{self.theme.MINT_VIBRANT}]")
-                    
+                    detail = ""
                     # Show new token count
                     try:
-                        from ..tools.token_counter import TokenCounterTool
-                        token_counter = TokenCounterTool({'project_root': self.app.get('project_root')})
-                        token_counter.context = {'agent': agent, 'config_manager': config_manager}
-                        count_result = token_counter.execute(check_current_conversation=True)
-                        
-                        if count_result.success and count_result.data:
-                            total_tokens = count_result.data.get('total_tokens', 0)
-                            max_tokens = count_result.data.get('max_tokens', 128000)
-                            percentage = count_result.data.get('percentage', 0)
-                            
-                            self.console.print()
-                            self.console.print(f"[{self.theme.TEXT_DIM}]New usage: {total_tokens:,} / {max_tokens:,} tokens ({percentage:.1f}%)[/{self.theme.TEXT_DIM}]")
+                        usage = self._get_context_usage_snapshot(agent, config_manager)
+                        if usage:
+                            detail = (
+                                f"New usage: {usage.get('total_tokens', 0):,} / "
+                                f"{usage.get('max_tokens', 128000):,} tokens "
+                                f"({usage.get('percentage', 0):.1f}%)"
+                            )
                     except Exception:
                         pass
+
+                    self._show_activity_event(
+                        "Context Engine",
+                        str(result.output or "Context compression completed."),
+                        status="success",
+                        detail=detail,
+                    )
                 else:
-                    self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Compression failed: {result.error}[/{self.theme.CORAL_SOFT}]")
-                
+                    self._show_activity_event(
+                        "Context Engine",
+                        "Compression failed.",
+                        status="error",
+                        detail=str(result.error or ""),
+                    )
+
             except Exception as e:
-                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Error: {str(e)}[/{self.theme.CORAL_SOFT}]")
-            
+                self._show_activity_event(
+                    "Context Engine",
+                    "Compression raised an unexpected error.",
+                    status="error",
+                    detail=str(e),
+                )
+
             self.console.print()
             return True
-        
+
         # Info command
         elif args == "info":
-            self.console.print()
-            self.console.print(Panel(
-                f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Context Engine Information {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]",
-                border_style=self.theme.BORDER_PRIMARY,
-                box=box.ROUNDED,
-                padding=(0, 2)
-            ))
-            self.console.print()
-            
+            self._show_command_panel(
+                "Context Engine Information",
+                subtitle="Live breakdown of conversation structure and current operating mode.",
+                accent=self.theme.BORDER_PRIMARY,
+            )
+
             # Show detailed information
-            info_table = Table(show_header=False, box=box.SIMPLE, padding=(0, 2))
-            info_table.add_column(style=f"bold {self.theme.TEXT_SECONDARY}", width=25)
-            info_table.add_column(style=self.theme.TEXT_PRIMARY)
-            
+            info_rows: List[tuple[str, Any]] = []
             # Message breakdown
             if hasattr(agent, 'messages'):
                 messages = agent.messages
                 user_msgs = sum(1 for m in messages if m.get('role') == 'user')
                 assistant_msgs = sum(1 for m in messages if m.get('role') == 'assistant')
                 tool_msgs = sum(1 for m in messages if m.get('role') == 'tool')
-                
-                info_table.add_row("Total Messages", f"{len(messages)}")
-                info_table.add_row("User Messages", f"[{self.theme.BLUE_SOFT}]{user_msgs}[/{self.theme.BLUE_SOFT}]")
-                info_table.add_row("Assistant Messages", f"[{self.theme.PURPLE_SOFT}]{assistant_msgs}[/{self.theme.PURPLE_SOFT}]")
-                info_table.add_row("Tool Messages", f"[{self.theme.MINT_SOFT}]{tool_msgs}[/{self.theme.MINT_SOFT}]")
-            
+
+                info_rows.extend(
+                    [
+                        ("Total Messages", len(messages)),
+                        ("User Messages", user_msgs),
+                        ("Assistant Messages", assistant_msgs),
+                        ("Tool Messages", tool_msgs),
+                    ]
+                )
+
             # System prompt info
             if hasattr(agent, 'system_prompt'):
                 prompt_length = len(agent.system_prompt)
-                info_table.add_row("System Prompt Length", f"{prompt_length:,} characters")
-            
+                info_rows.append(("System Prompt Length", f"{prompt_length:,} characters"))
+
             # Mode info
             if hasattr(agent, 'mode'):
-                info_table.add_row("Current Mode", f"[bold {self.theme.PINK_SOFT}]{agent.mode}[/bold {self.theme.PINK_SOFT}]")
-            
+                info_rows.append(("Current Mode", agent.mode))
+
+            info_table = self._build_key_value_table(info_rows)
             self.console.print(info_table)
             self.console.print()
-            
+
             return True
-        
+
         # Stats command
         elif args == "stats":
-            self.console.print()
-            self.console.print(Panel(
-                f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Context Statistics {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]",
-                border_style=self.theme.BORDER_PRIMARY,
-                box=box.ROUNDED,
-                padding=(0, 2)
-            ))
-            self.console.print()
-            
+            self._show_command_panel(
+                "Context Statistics",
+                subtitle="Raw token and context statistics reported by the context tools.",
+                accent=self.theme.BORDER_PRIMARY,
+            )
+
             try:
                 from ..tools.token_counter import TokenCounterTool
                 token_counter = TokenCounterTool({'project_root': self.app.get('project_root')})
                 token_counter.context = {'agent': agent, 'config_manager': config_manager}
                 result = token_counter.execute(check_current_conversation=True)
-                
+
                 if result.success:
-                    # Display the full output from token counter
                     self.console.print(result.output)
                 else:
-                    self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Failed to get statistics: {result.error}[/{self.theme.CORAL_SOFT}]")
+                    self._show_activity_event(
+                        "Context Engine",
+                        "Failed to get statistics.",
+                        status="error",
+                        detail=str(result.error or ""),
+                    )
             except Exception as e:
-                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Error: {str(e)}[/{self.theme.CORAL_SOFT}]")
-            
+                self._show_activity_event(
+                    "Context Engine",
+                    "Context statistics raised an unexpected error.",
+                    status="error",
+                    detail=str(e),
+                )
+
             self.console.print()
             return True
-        
+
         else:
-            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Unknown Context Engine command: {args}[/{self.theme.CORAL_SOFT}]")
-            self.console.print(f"[{self.theme.TEXT_DIM}]Type /CE for available commands.[/{self.theme.TEXT_DIM}]")
+            self._show_activity_event(
+                "Context Engine",
+                f"Unknown Context Engine command: {args}",
+                status="error",
+                detail="Type /CE for available commands.",
+            )
             return True

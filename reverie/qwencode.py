@@ -14,8 +14,12 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlsplit
 import json
 import time
+import logging
 
 from .security_utils import write_json_secure
+
+
+logger = logging.getLogger(__name__)
 
 
 QWENCODE_DEFAULT_API_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
@@ -671,5 +675,5 @@ def save_qwen_credentials(access_token: str, refresh_token: str, resource_url: s
         _save_oauth_credentials_data(creds_data)
         return True
     except Exception as e:
-        print(f"Error saving credentials: {e}")
+        logger.warning("Error saving Qwen OAuth credentials: %s", e)
         return False

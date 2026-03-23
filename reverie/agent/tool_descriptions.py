@@ -500,6 +500,8 @@ Use this playbook when the task is a complex, interdependent project that benefi
 - Do not ask for redundant reconfirmation after every small implementation step; re-confirm only if the baseline scope or architecture materially changes
 - After the confirmation gate, do not stop at documents alone if the user asked for the project to be built
 - Treat user messages like `continue`, `继续`, `开始`, `go on`, or `keep going` as permission to resume the next unfinished slice, not as a cue to emit a project-status recap
+- If the next safe implementation action is already known, execute it immediately instead of ending with a "next step" summary
+- Treat ordinary compile errors, test failures, missing imports, incomplete insertions, and similar in-flight engineering issues as work to fix inside the active slice, not as blockers to report by default
 - Before any final-style summary or handoff, run `atlas_delivery_orchestrator(action="assess_completion")`; if the gate is not green, keep implementing or surface a concrete blocker
 - Atlas should compress context only after a checkpoint plus a durable handoff summary that preserves the current delivery state
 """
@@ -800,11 +802,12 @@ def _get_mode_tool_workflow(mode: str) -> str:
     return """
 ## Reverie Mode Tool Workflow
 
+- For small, clear tasks, use a lightweight loop: targeted retrieval -> focused edit -> narrow verification -> respond.
 - Retrieve code context first.
 - Use git history when conventions or earlier fixes matter.
 - Edit with the narrowest correct tool.
 - Verify with commands and manage context proactively on long sessions.
-- Use planning tools when the work is large enough to benefit from explicit tracking.
+- Use planning tools when the work is large enough to benefit from explicit tracking; do not default to formal planning for tiny fixes.
 - If another mode has a better workflow for the current phase, switch proactively instead of forcing generic execution.
 - Judge completion using deliverables, integration state, and verification evidence rather than optimistic progress estimates.
 """

@@ -719,6 +719,36 @@ class ReverieInterface:
         prompt.append(text, style=f"bold {self.theme.TEXT_PRIMARY}")
         self.console.print(prompt)
 
+    def _show_activity_event(
+        self,
+        category: str,
+        message: str,
+        *,
+        status: str = "info",
+        detail: str = "",
+        meta: str = "",
+    ) -> None:
+        """Render a system/session activity event with the shared timeline style."""
+        self.display.show_activity_event(
+            category=category,
+            message=message,
+            status=status,
+            detail=detail,
+            meta=meta,
+        )
+
+    def _handle_agent_ui_event(self, event: Dict[str, Any]) -> None:
+        """Receive structured agent events and render them through the display layer."""
+        if not isinstance(event, dict):
+            return
+        self._show_activity_event(
+            str(event.get("category", "") or "Activity"),
+            str(event.get("message", "") or "").strip(),
+            status=str(event.get("status", "") or "info"),
+            detail=str(event.get("detail", "") or "").strip(),
+            meta=str(event.get("meta", "") or "").strip(),
+        )
+
     def _dispatch_user_input(self, user_input: str) -> bool:
         """Route raw user input through commands or message handling."""
         normalized_input = str(user_input or "").strip()
@@ -796,16 +826,28 @@ class ReverieInterface:
             )
             if snapshot_info:
                 if getattr(snapshot_info, "reused", False):
-                    self.console.print(
-                        f"[{self.theme.TEXT_DIM}]{self.deco.DOT_SMALL} Snapshot unchanged: {snapshot_info.id}[/{self.theme.TEXT_DIM}]"
+                    self._show_activity_event(
+                        "Snapshot",
+                        "Workspace snapshot unchanged",
+                        status="info",
+                        detail="Reused the latest snapshot because the workspace has not changed.",
+                        meta=snapshot_info.id,
                     )
                 else:
-                    self.console.print(
-                        f"[{self.theme.MINT_SOFT}]{self.deco.DOT_SMALL} Snapshot created: {snapshot_info.id}[/{self.theme.MINT_SOFT}]"
+                    self._show_activity_event(
+                        "Snapshot",
+                        "Workspace snapshot saved",
+                        status="success",
+                        detail=f"{snapshot_info.file_count} files captured before the next model call.",
+                        meta=snapshot_info.id,
                     )
         except Exception as e:
-            self.console.print(
-                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Warning: Failed to create snapshot: {e}[/{self.theme.AMBER_GLOW}]"
+            self._show_activity_event(
+                "Snapshot",
+                "Snapshot creation failed",
+                status="warning",
+                detail="The turn will continue without a pre-message snapshot.",
+                meta=str(e),
             )
         
         try:
@@ -955,11 +997,25 @@ class ReverieInterface:
                 message_text = "Output stopped. Ready for your next instruction."
                 if follow_up_message:
                     message_text = "Output stopped. Sending your follow-up now."
-                self.console.print(f"\n[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} {message_text}[/{self.theme.AMBER_GLOW}]")
+                self._show_activity_event(
+                    "Session",
+                    message_text,
+                    status="warning",
+                )
             else:
-                self.console.print(f"\n[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} Process interrupted by user[/{self.theme.TEXT_DIM}]")
+                self._show_activity_event(
+                    "Session",
+                    "Process interrupted by user",
+                    status="info",
+                )
         except Exception as e:
-            self.console.print(f"\n[bold {self.theme.CORAL_VIBRANT}]{self.deco.CROSS_FANCY} Error: {escape(str(e))}[/bold {self.theme.CORAL_VIBRANT}]")
+            self._show_activity_event(
+                "Session",
+                "Message processing failed",
+                status="error",
+                detail="The CLI recovered and stayed interactive.",
+                meta=str(e),
+            )
             # Don't re-raise the exception to prevent app from stopping
         finally:
             self._stop_stream_input_capture()
@@ -993,7 +1049,13 @@ class ReverieInterface:
                         except Exception:
                             pass
                 except Exception as session_error:
-                    self.console.print(f"\n[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Warning: Failed to save session: {session_error}[/{self.theme.AMBER_GLOW}]")
+                    self._show_activity_event(
+                        "Session",
+                        "Failed to save session state",
+                        status="warning",
+                        detail="The current response completed, but the transcript could not be persisted cleanly.",
+                        meta=str(session_error),
+                    )
 
         if follow_up_message:
             self._store_pending_input_draft("")
@@ -1081,7 +1143,12 @@ class ReverieInterface:
             return
         cache_dir = self.config_manager.project_data_dir / 'context_cache'
         if announce:
-            self.console.print(f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} Initializing Context Engine...[/{self.theme.TEXT_DIM}]")
+            self._show_activity_event(
+                "Context Engine",
+                "Initializing code index and retriever",
+                status="working",
+                detail="Lazy-loading the core retrieval services for this workspace.",
+            )
         self.indexer = CodebaseIndexer(project_root=self.project_root, cache_dir=cache_dir)
         config = self.config_manager.load()
         from ..context_engine.cache import CacheManager
@@ -1137,7 +1204,12 @@ class ReverieInterface:
         if self._git_integration_ready and self.git_integration is not None:
             return False
         if announce:
-            self.console.print(f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} Initializing Git integration...[/{self.theme.TEXT_DIM}]")
+            self._show_activity_event(
+                "Git",
+                "Initializing repository integration",
+                status="working",
+                detail="Preparing commit and diff metadata on demand.",
+            )
         self.git_integration = GitIntegration(self.project_root)
         self._git_integration_ready = True
         if self.agent:
@@ -1150,7 +1222,12 @@ class ReverieInterface:
         if self._lsp_manager_ready and self.lsp_manager is not None:
             return False
         if announce:
-            self.console.print(f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} Initializing LSP bridge...[/{self.theme.TEXT_DIM}]")
+            self._show_activity_event(
+                "LSP",
+                "Initializing language-service bridge",
+                status="working",
+                detail="Preparing definitions, symbols, and diagnostics on demand.",
+            )
         self.lsp_manager = LSPManager(self.project_root)
         self._lsp_manager_ready = True
         if self.agent:
@@ -1184,7 +1261,12 @@ class ReverieInterface:
             # Save back to config
             config.models[config.active_model_index] = model
             self.config_manager.save(config)
-            self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Config updated.[/{self.theme.MINT_VIBRANT}]")
+            self._show_activity_event(
+                "Config",
+                "Model context window updated",
+                status="success",
+                detail=f"Saved max context tokens for {model.model_display_name}.",
+            )
 
         # Preserve existing messages when reinitializing (e.g., model switch)
         existing_messages = []
@@ -1209,7 +1291,12 @@ class ReverieInterface:
         # Restore messages after agent creation
         if existing_messages:
             self.agent.messages = existing_messages
-            self.console.print(f"[{self.theme.MINT_SOFT}]{self.deco.DOT_MEDIUM} Preserved {len(existing_messages)} messages from previous session[/{self.theme.MINT_SOFT}]")
+            self._show_activity_event(
+                "Session",
+                "Restored prior transcript into the new agent",
+                status="info",
+                detail=f"{len(existing_messages)} messages were preserved across reinitialization.",
+            )
         
         # Ensure the agent picks up values from the loaded Config (e.g. api_timeout)
         self.agent.config = config
@@ -1231,7 +1318,13 @@ class ReverieInterface:
         self.agent.tool_executor.update_context('get_status_live', lambda: self._status_live)
         self.agent.tool_executor.update_context('pause_stream_input_capture', self._pause_stream_input_capture)
         self.agent.tool_executor.update_context('resume_stream_input_capture', self._resume_stream_input_capture)
-        self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY}[/{self.theme.MINT_VIBRANT}] [{self.theme.MINT_SOFT}]Agent ready ({model.model_display_name})[/{self.theme.MINT_SOFT}]")
+        self.agent.tool_executor.update_context('ui_event_handler', self._handle_agent_ui_event)
+        self._show_activity_event(
+            "Agent",
+            f"Agent ready with {model.model_display_name}",
+            status="success",
+            detail=f"Provider: {self._resolve_provider_label(config)}",
+        )
         self._refresh_command_context()
 
     def _build_additional_rules_with_tti(self, config: Config) -> str:
@@ -1344,9 +1437,21 @@ class ReverieInterface:
             self.agent.set_history(session.messages)
 
         if resumed:
-            self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY}[/{self.theme.MINT_VIBRANT}] [{self.theme.MINT_SOFT}]Resumed session: {session.name}[/{self.theme.MINT_SOFT}]")
+            self._show_activity_event(
+                "Session",
+                f"Resumed session {session.name}",
+                status="success",
+                detail="Loaded the previous transcript and workspace memory.",
+                meta=session.id,
+            )
         else:
-            self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY}[/{self.theme.MINT_VIBRANT}] [{self.theme.MINT_SOFT}]New session: {session.name}[/{self.theme.MINT_SOFT}]")
+            self._show_activity_event(
+                "Session",
+                f"Started session {session.name}",
+                status="success",
+                detail="A fresh session is ready for this workspace.",
+                meta=session.id,
+            )
         self._refresh_command_context()
 
     def _get_app_context(self) -> dict:

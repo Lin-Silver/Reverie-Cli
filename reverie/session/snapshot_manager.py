@@ -15,6 +15,10 @@ from datetime import datetime
 import json
 import shutil
 import hashlib
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -116,7 +120,7 @@ class SnapshotManager:
                 if item.is_file() and not self._should_exclude(item):
                     files.append(item)
         except Exception as e:
-            print(f"Warning: Error collecting files: {e}")
+            logger.warning("Error collecting snapshot files: %s", e)
 
         files.sort(key=lambda item: str(item.relative_to(self.project_root)).replace("\\", "/"))
         return files
@@ -157,7 +161,7 @@ class SnapshotManager:
             files = self._collect_files()
             
             if not files:
-                print("Warning: No files to snapshot")
+                logger.info("No files matched the snapshot scope")
                 return None
 
             manifest_hash = self._build_manifest_hash(files)
@@ -190,7 +194,7 @@ class SnapshotManager:
                     total_size += file_path.stat().st_size
                 
                 except Exception as e:
-                    print(f"Warning: Failed to copy {file_path}: {e}")
+                    logger.warning("Failed to copy %s into snapshot: %s", file_path, e)
                     continue
             
             # Create snapshot metadata
@@ -214,7 +218,7 @@ class SnapshotManager:
             return snapshot_info
         
         except Exception as e:
-            print(f"Error creating snapshot: {e}")
+            logger.error("Error creating snapshot: %s", e)
             return None
     
     def list_snapshots(self) -> List[SnapshotInfo]:
@@ -255,7 +259,7 @@ class SnapshotManager:
         snapshot_dir = self.snapshots_dir / snapshot_id
         
         if not snapshot_dir.exists():
-            print(f"Error: Snapshot {snapshot_id} not found")
+            logger.warning("Snapshot %s not found", snapshot_id)
             return False
         
         try:
@@ -263,7 +267,7 @@ class SnapshotManager:
             if backup_current:
                 backup_info = self.create_snapshot("Pre-restore backup")
                 if backup_info:
-                    print(f"Created backup: {backup_info.id}")
+                    logger.info("Created pre-restore backup snapshot %s", backup_info.id)
             
             # Clear current project files (except excluded directories)
             for item in self.project_root.iterdir():
@@ -276,7 +280,7 @@ class SnapshotManager:
                     elif item.is_dir():
                         shutil.rmtree(item)
                 except Exception as e:
-                    print(f"Warning: Failed to remove {item}: {e}")
+                    logger.warning("Failed to remove %s during snapshot restore: %s", item, e)
             
             # Restore files from snapshot
             for item in snapshot_dir.rglob('*'):
@@ -294,11 +298,11 @@ class SnapshotManager:
                     # Copy file
                     shutil.copy2(item, target_path)
             
-            print(f"Successfully restored snapshot: {snapshot_id}")
+            logger.info("Successfully restored snapshot %s", snapshot_id)
             return True
         
         except Exception as e:
-            print(f"Error restoring snapshot: {e}")
+            logger.error("Error restoring snapshot %s: %s", snapshot_id, e)
             return False
     
     def delete_snapshot(self, snapshot_id: str) -> bool:
@@ -312,7 +316,7 @@ class SnapshotManager:
             shutil.rmtree(snapshot_dir)
             return True
         except Exception as e:
-            print(f"Error deleting snapshot: {e}")
+            logger.error("Error deleting snapshot %s: %s", snapshot_id, e)
             return False
     
     def _cleanup_old_snapshots(self) -> int:

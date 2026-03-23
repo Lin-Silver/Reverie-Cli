@@ -18,6 +18,7 @@ from typing import List, Dict, Optional, Set, Tuple, Any
 from dataclasses import dataclass, field
 import json
 import time
+import logging
 
 from .symbol_table import SymbolTable, Symbol
 from .dependency_graph import DependencyGraph
@@ -26,6 +27,9 @@ from .knowledge_graph import KnowledgeGraph, Entity, Relation, RelationType
 from .commit_history_indexer import CommitHistoryIndexer, CommitPattern
 from .cache import CacheManager
 from ..config import get_project_data_dir
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -421,7 +425,7 @@ class ContextEngineCore:
             
             return True
         except Exception as e:
-            print(f"Error saving to cache: {e}")
+            logger.warning("Error saving Context Engine cache: %s", e)
             return False
     
     def load_from_cache(self) -> bool:
@@ -458,7 +462,7 @@ class ContextEngineCore:
             
             return True
         except Exception as e:
-            print(f"Error loading from cache: {e}")
+            logger.warning("Error loading Context Engine cache: %s", e)
             return False
     
     def get_statistics(self) -> Dict[str, Any]:

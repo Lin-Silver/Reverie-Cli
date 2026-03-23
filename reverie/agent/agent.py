@@ -1332,6 +1332,44 @@ class ReverieAgent:
             return "NVIDIA API"
         return "Request provider"
 
+    def _emit_ui_event(
+        self,
+        *,
+        category: str,
+        message: str,
+        status: str = "info",
+        detail: str = "",
+        meta: str = "",
+    ) -> None:
+        """Send a structured UI event to the CLI surface when available."""
+        handler = None
+        try:
+            handler = self.tool_executor.context.get("ui_event_handler")
+        except Exception:
+            handler = None
+
+        payload = {
+            "category": str(category or "").strip() or "Activity",
+            "message": str(message or "").strip(),
+            "status": str(status or "info").strip().lower(),
+            "detail": str(detail or "").strip(),
+            "meta": str(meta or "").strip(),
+        }
+
+        if callable(handler):
+            try:
+                handler(payload)
+                return
+            except Exception:
+                logger.debug("Failed to emit UI event through handler", exc_info=True)
+
+        plain = f"[{payload['category']}] {payload['message']}"
+        if payload["detail"]:
+            plain = f"{plain} ({payload['detail']})"
+        if payload["meta"]:
+            plain = f"{plain} [{payload['meta']}]"
+        print(f"\n{plain}\n")
+
     def _build_qwencode_request_headers(self, stream: bool) -> Dict[str, str]:
         """Build Qwen OAuth request headers from the current in-memory request state."""
         from ..qwencode import get_qwencode_request_headers
@@ -3322,9 +3360,12 @@ class ReverieAgent:
                     exc_info=True,
                 )
                 self._auto_context_compaction_retry_after = time.time() + 30.0
-                print(
-                    "\n[Context Engine] Auto-compaction skipped - the LLM compression pass failed. "
-                    f"Will retry automatically on a later model call. ({compression_error})\n"
+                self._emit_ui_event(
+                    category="Context Engine",
+                    message="Auto-compaction skipped",
+                    status="warning",
+                    detail="The LLM compression pass failed and will retry later.",
+                    meta=str(compression_error),
                 )
                 return current_tokens
 
@@ -3333,9 +3374,12 @@ class ReverieAgent:
                 self.messages = new_history
                 self._persist_history_to_session()
                 self._auto_context_compaction_retry_after = 0.0
-                print(
-                    "\n[Context Engine] Auto-compaction complete - condensed older context into durable working memory. "
-                    "Continuing in the same session.\n"
+                self._emit_ui_event(
+                    category="Context Engine",
+                    message="Auto-compaction complete",
+                    status="success",
+                    detail="Older context was condensed into durable working memory.",
+                    meta="continuing in the same session",
                 )
             else:
                 self._auto_context_compaction_retry_after = time.time() + 30.0
@@ -3416,9 +3460,12 @@ class ReverieAgent:
                     exc_info=True,
                 )
                 self._auto_context_rotation_retry_after = time.time() + 30.0
-                print(
-                    "\n[Context Engine] Auto handoff skipped - the LLM handoff payload could not be generated cleanly. "
-                    f"Will retry automatically on a later model call. ({handoff_error})\n"
+                self._emit_ui_event(
+                    category="Context Engine",
+                    message="Auto handoff skipped",
+                    status="warning",
+                    detail="The LLM handoff payload could not be generated cleanly.",
+                    meta=str(handoff_error),
                 )
                 return
 
@@ -3435,9 +3482,12 @@ class ReverieAgent:
             self._persist_history_to_session()
 
             self._auto_context_rotation_retry_after = 0.0
-            print(
-                "\n[Context Engine] Auto handoff complete - fresh session prepared with LLM-authored carryover. "
-                "Continuing the active request without waiting for user input.\n"
+            self._emit_ui_event(
+                category="Context Engine",
+                message="Auto handoff complete",
+                status="success",
+                detail="A fresh session was prepared with LLM-authored carryover.",
+                meta="continuing automatically",
             )
         finally:
             self._auto_context_rotation_active = False

@@ -15,10 +15,14 @@ from typing import Optional, Dict, Any
 import json
 import time
 import gzip
+import logging
 from dataclasses import asdict
 
 from .symbol_table import SymbolTable
 from .dependency_graph import DependencyGraph
+
+
+logger = logging.getLogger(__name__)
 
 
 class CacheManager:
@@ -110,7 +114,7 @@ class CacheManager:
             return True
             
         except Exception as e:
-            print(f"Error saving cache: {e}")
+            logger.warning("Error saving context cache: %s", e)
             return False
     
     def load(self) -> Optional[Dict]:
@@ -177,7 +181,7 @@ class CacheManager:
             }
             
         except Exception as e:
-            print(f"Error loading cache: {e}")
+            logger.warning("Error loading context cache: %s", e)
             return None
     
     def is_valid(self) -> bool:

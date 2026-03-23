@@ -14,7 +14,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import json
 import re
+import logging
 from collections import defaultdict
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -257,7 +261,7 @@ class MemoryIndexer:
             return indexed_count
         
         except Exception as e:
-            print(f"Error indexing session {session_id}: {e}")
+            logger.warning("Error indexing session %s: %s", session_id, e)
             return 0
 
     def refresh_session(self, session_id: str) -> int:
@@ -291,7 +295,7 @@ class MemoryIndexer:
         Returns:
             ProjectIndex object
         """
-        print("[Memory Indexer] Building project index...")
+        logger.info("[Memory Indexer] Building project index...")
         
         # Clear existing data
         self.fragments.clear()
@@ -338,7 +342,11 @@ class MemoryIndexer:
         self._save_index()
         self._save_fragments()
         
-        print(f"[Memory Indexer] Indexed {total_sessions} sessions, {total_messages} messages")
+        logger.info(
+            "[Memory Indexer] Indexed %s sessions, %s messages",
+            total_sessions,
+            total_messages,
+        )
         
         return self.index
     
@@ -379,7 +387,7 @@ class MemoryIndexer:
             return True
         
         except Exception as e:
-            print(f"Error loading index: {e}")
+            logger.warning("Error loading memory index: %s", e)
             return False
     
     def search(

@@ -12,6 +12,10 @@ from datetime import datetime
 import json
 import shutil
 import hashlib
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -186,7 +190,7 @@ class CheckpointManager:
             return file_checkpoint.content
         
         except Exception as e:
-            print(f"Error restoring file checkpoint: {e}")
+            logger.warning("Error restoring file checkpoint %s: %s", checkpoint_id, e)
             return None
     
     def list_file_checkpoints(

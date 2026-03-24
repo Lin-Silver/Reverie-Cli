@@ -113,7 +113,7 @@ Request-based NVIDIA vision models can also consume inline chat attachments like
 Notes:
 
 - `/rules edit` edits `rules.txt` inside the active project's cache directory.
-- `/workspace enable` switches Reverie from `config.global.json` to `config.json` for the active project cache.
+- `/workspace enable` switches Reverie from the shared `.reverie/config.json` profile to the active project's cache `config.json`.
 
 ## Sessions and Recovery
 

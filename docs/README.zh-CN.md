@@ -66,17 +66,17 @@ Reverie 会把运行时数据保存在 `app_root` 下，而不是保存在你启
 
 每个项目都会在下面生成独立缓存目录：
 
+- 全局配置：`<app_root>/.reverie/config.json`
 - 项目缓存根目录：`<app_root>/.reverie/project_caches/<project-key>/`
-- 默认配置：`<app_root>/.reverie/project_caches/<project-key>/config.global.json`
 - 工作区配置：`<app_root>/.reverie/project_caches/<project-key>/config.json`
 - 规则文件：`<app_root>/.reverie/project_caches/<project-key>/rules.txt`
 - 常见运行数据：`context_cache/`、`sessions/`、`archives/`、`checkpoints/`、`specs/`、`steering/`、`security/`
 
 `<project-key>` 由项目绝对路径和短哈希生成，用来隔离不同工作区。
 
-`config.global.json` 是工作区模式关闭时使用的默认配置；`config.json` 是工作区模式开启时使用的工作区配置。
+`<app_root>/.reverie/config.json` 是工作区模式关闭时使用的默认配置；项目缓存里的 `config.json` 是工作区模式开启时使用的工作区配置。
 
-旧版本里的 `.reverie/config.json`、`rules.txt` 等文件仍会在首次加载时读取并迁移，但新的写入都会留在 `.reverie/project_caches/` 中。
+旧版本里的 `project_caches/<project-key>/config.global.json`、工作区本地 `.reverie/config.json`、`rules.txt` 等文件仍会在首次加载时读取迁移。新的全局写入会落到 `.reverie/config.json`，工作区写入会留在 `.reverie/project_caches/` 中。
 
 常用配置命令：
 

@@ -5407,6 +5407,8 @@ class CommandHandler:
                     return False, "No configuration found. Configure a model before enabling workspace mode."
                 if not config_manager.copy_config_to_workspace():
                     return False, "Failed to copy the global config into the workspace."
+            if not config_manager.set_workspace_config_enabled(True):
+                return False, "Failed to mark the workspace profile as enabled."
             config_manager.set_workspace_mode(True)
             config = config_manager.load()
             config.use_workspace_config = True
@@ -5415,6 +5417,8 @@ class CommandHandler:
 
         if not config_manager.is_workspace_mode():
             return True, "Workspace mode is already disabled."
+        if not config_manager.set_workspace_config_enabled(False):
+            return False, "Failed to mark the workspace profile as disabled."
         config_manager.set_workspace_mode(False)
         config = config_manager.load()
         config.use_workspace_config = False
@@ -6154,6 +6158,13 @@ class CommandHandler:
                         status="error",
                     )
                     return True
+            if not config_manager.set_workspace_config_enabled(True):
+                self._show_activity_event(
+                    "Workspace",
+                    "Failed to mark the workspace profile as enabled.",
+                    status="error",
+                )
+                return True
 
             config_manager.set_workspace_mode(True)
             config = config_manager.load()
@@ -6178,6 +6189,14 @@ class CommandHandler:
         elif args == 'disable':
             if not config_manager.is_workspace_mode():
                 self._show_activity_event("Workspace", "Workspace mode is already disabled.", status="warning")
+                return True
+
+            if not config_manager.set_workspace_config_enabled(False):
+                self._show_activity_event(
+                    "Workspace",
+                    "Failed to mark the workspace profile as disabled.",
+                    status="error",
+                )
                 return True
 
             config_manager.set_workspace_mode(False)

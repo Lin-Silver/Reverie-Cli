@@ -14,9 +14,9 @@ For each project Reverie creates a cache directory:
 ```text
 <app_root>/
 `-- .reverie/
+    |-- config.json
     `-- project_caches/
         `-- <project-key>/
-            |-- config.global.json
             |-- config.json
             |-- rules.txt
             |-- context_cache/
@@ -35,14 +35,12 @@ Additional subdirectories such as `indexes/`, `snapshots/`, `computer_control/`,
 
 ## Profile Selection
 
-Reverie keeps two profile files inside the current project's cache directory:
+Reverie keeps two profile files:
 
-- Default profile: `<app_root>/.reverie/project_caches/<project-key>/config.global.json`
+- Global profile: `<app_root>/.reverie/config.json`
 - Workspace profile: `<app_root>/.reverie/project_caches/<project-key>/config.json`
 
-`config.global.json` is used when workspace mode is off. `config.json` is used when workspace mode is on.
-
-In current builds, both profile files are scoped to the active project cache directory. The word "global" here means "the default profile for this project when workspace mode is off", not a single cross-project file shared by every repository.
+`<app_root>/.reverie/config.json` is used when workspace mode is off. The project-cache `config.json` is used when workspace mode is on for that specific project.
 
 Use the built-in commands to inspect or switch profile mode:
 
@@ -59,9 +57,10 @@ Use the built-in commands to inspect or switch profile mode:
 
 Older builds stored configuration and some workspace state in `.reverie/`.
 
-- Legacy config files such as `<app_root>/.reverie/config.json` and `<project_root>/.reverie/config.json` are still read for migration.
+- Legacy config files such as `<app_root>/.reverie/project_caches/<project-key>/config.global.json` and `<project_root>/.reverie/config.json` are still read for migration.
 - Legacy rules files such as `<app_root>/.reverie/rules.txt` are still read for migration.
-- New writes stay inside `.reverie/project_caches/<project-key>/`.
+- Global writes now go to `<app_root>/.reverie/config.json`.
+- Workspace writes go to `.reverie/project_caches/<project-key>/config.json`.
 - `/clean` removes the active project's cache and also cleans legacy workspace-local `.reverie/context_cache` or `.reverie/security` folders if they still exist.
 
 ## Top-Level Config Structure

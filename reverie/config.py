@@ -606,13 +606,14 @@ class ConfigManager:
     Manages configuration persistence with workspace isolation support.
 
     Configuration can be stored in two modes:
-    1. Active/global profile: config.global.json in
-       .reverie/project_caches/[project_key]/
+    1. Active/global profile: config.json in
+       .reverie/
     2. Workspace profile: config.json in
        .reverie/project_caches/[project_key]/
 
-    Legacy `.reverie/config.json` files are still read for migration, but new
-    writes stay inside `.reverie/project_caches/[project_key]/`.
+    Legacy per-project `config.global.json` files are still read for migration,
+    but default writes now target the shared `.reverie/config.json` profile
+    unless workspace mode is explicitly enabled for the current project.
     """
     
     def __init__(self, project_root: Path, force_workspace_config: bool = False):
@@ -623,12 +624,13 @@ class ConfigManager:
         self.app_root = get_app_root()
         self.data_root = self.app_root / '.reverie' / 'project_caches'
         self.project_data_dir = get_project_data_dir(project_root)
-        self.global_config_path = self.project_data_dir / 'config.global.json'
+        self.global_config_path = self.app_root / '.reverie' / 'config.json'
         self.workspace_config_path = self.project_data_dir / 'config.json'
 
         # Legacy paths kept for migration from older builds.
         self.legacy_reverie_dir = self.app_root / '.reverie'
-        self.legacy_global_config_path = self.legacy_reverie_dir / 'config.json'
+        self.legacy_global_config_path = self.global_config_path
+        self.legacy_project_global_config_path = self.project_data_dir / 'config.global.json'
         self.legacy_workspace_reverie_dir = self.project_root / '.reverie'
         self.legacy_workspace_config_path = self.legacy_workspace_reverie_dir / 'config.json'
 
@@ -636,8 +638,10 @@ class ConfigManager:
         self._last_mtime: float = 0
         self._loaded_config_path: Optional[Path] = None
 
-        # Determine config path based on setting
-        self._use_workspace_config = force_workspace_config
+        # Determine config path based on setting and any persisted workspace state.
+        self._use_workspace_config = bool(
+            force_workspace_config or self._detect_workspace_mode_from_files()
+        )
         self._update_config_path()
     
     def _update_config_path(self) -> None:
@@ -652,6 +656,34 @@ class ConfigManager:
         if self._use_workspace_config:
             return self.legacy_workspace_config_path
         return self.legacy_global_config_path
+
+    def _read_json_dict(self, path: Path) -> Optional[Dict[str, Any]]:
+        """Best-effort JSON object reader used for lightweight mode detection."""
+        if not path.exists():
+            return None
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else None
+        except Exception:
+            return None
+
+    def _detect_workspace_mode_from_files(self) -> bool:
+        """
+        Detect whether this project should default to workspace mode.
+
+        Workspace enable/disable is persisted on the workspace config itself.
+        If that file exists and says `use_workspace_config=true`, we honor it.
+        Older workspace configs that predate the flag are treated as enabled.
+        """
+        for candidate in (self.workspace_config_path, self.legacy_workspace_config_path):
+            if not candidate.exists():
+                continue
+            data = self._read_json_dict(candidate)
+            if data is None:
+                return True
+            return bool(data.get('use_workspace_config', True))
+        return False
 
     def _sync_legacy_mirror(self, serialized: Dict[str, Any]) -> None:
         """Best-effort compatibility sync for older launchers and visible legacy files."""
@@ -681,7 +713,11 @@ class ConfigManager:
         """Return new + legacy config paths for one logical mode."""
         if workspace_mode:
             return [self.workspace_config_path, self.legacy_workspace_config_path]
-        return [self.global_config_path, self.legacy_global_config_path]
+        return [
+            self.global_config_path,
+            self.legacy_global_config_path,
+            self.legacy_project_global_config_path,
+        ]
 
     def _load_path_candidates(self) -> List[Path]:
         """Return config paths in preferred load order."""
@@ -761,6 +797,34 @@ class ConfigManager:
             import logging
             logging.getLogger(__name__).error(f"Failed to copy config to workspace: {e}")
             return False
+
+    def set_workspace_config_enabled(self, enabled: bool) -> bool:
+        """
+        Persist this project's workspace-mode preference on the workspace config.
+
+        This keeps workspace enable/disable state project-local without mutating
+        the shared global config.
+        """
+        source_path = self._find_existing_path(True)
+        if source_path is None:
+            if not enabled:
+                return True
+            return False
+
+        data = self._read_json_dict(source_path)
+        if data is None:
+            try:
+                with open(source_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+            except Exception:
+                data = None
+        if not isinstance(data, dict):
+            data = Config().to_dict()
+
+        data['use_workspace_config'] = bool(enabled)
+        self.ensure_dirs()
+        write_json_secure(self.workspace_config_path, data)
+        return True
     
     def copy_config_to_global(self) -> bool:
         """
@@ -786,6 +850,7 @@ class ConfigManager:
 
             # Save to global config
             write_json_secure(self.global_config_path, data)
+            self.set_workspace_config_enabled(False)
 
             # Clear cache and switch to global mode
             self._config = None
@@ -842,18 +907,15 @@ class ConfigManager:
                     self._last_mtime = current_mtime
                     self._loaded_config_path = source_path
 
-                    # Check if config mode changed
-                    if self._config.use_workspace_config != self._use_workspace_config:
-                        self.set_workspace_mode(self._config.use_workspace_config)
-
                     # Auto-update config file if it's missing new fields or still
-                    # lives in a legacy location.
-                    if source_path != self.config_path or self._needs_config_update(data):
+                    # lives in the active canonical location.
+                    if source_path == self.config_path and self._needs_config_update(data):
                         self.save(self._config)
                         # Update mtime after saving to avoid infinite loop
                         self._last_mtime = os.path.getmtime(self.config_path)
                     else:
-                        self._sync_legacy_mirror(self._config.to_dict())
+                        if source_path == self.config_path:
+                            self._sync_legacy_mirror(self._config.to_dict())
                 except Exception:
                     # If error reading (e.g., partial write), keep old config if available
                     if self._config is None:
@@ -1033,10 +1095,10 @@ class ConfigManager:
         
         if self._config is None:
             return
-        
-        # Update config mode if it changed
-        if self._config.use_workspace_config != self._use_workspace_config:
-            self.set_workspace_mode(self._config.use_workspace_config)
+
+        # The manager decides the active destination. The config flag is stored
+        # as metadata and must not redirect writes on its own.
+        self._config.use_workspace_config = self._use_workspace_config
         
         self.ensure_dirs()
 

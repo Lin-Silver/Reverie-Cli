@@ -20,8 +20,8 @@ This directory contains the maintained reference documentation for Reverie CLI.
 Reverie keeps runtime state under the app root, not in the directory where the command is launched.
 
 - App root: the repository root when running from source, or the folder containing `reverie.exe` in packaged builds
+- Global profile: `<app_root>/.reverie/config.json`
 - Project cache root: `<app_root>/.reverie/project_caches/<project-key>/`
-- Default profile: `<app_root>/.reverie/project_caches/<project-key>/config.global.json`
 - Workspace profile: `<app_root>/.reverie/project_caches/<project-key>/config.json`
 - Common project data: `rules.txt`, `context_cache/`, `sessions/`, `archives/`, `checkpoints/`, `specs/`, `steering/`, `security/`
 

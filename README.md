@@ -85,17 +85,17 @@ Reverie stores runtime state next to the CLI executable. When you run from sourc
 
 For each workspace Reverie creates a project cache under:
 
+- Global profile: `<app_root>/.reverie/config.json`
 - Project cache root: `<app_root>/.reverie/project_caches/<project-key>/`
-- Default profile: `<app_root>/.reverie/project_caches/<project-key>/config.global.json`
 - Workspace profile: `<app_root>/.reverie/project_caches/<project-key>/config.json`
 - Rules file: `<app_root>/.reverie/project_caches/<project-key>/rules.txt`
 - Common runtime data: `context_cache/`, `sessions/`, `archives/`, `checkpoints/`, `specs/`, `steering/`, `security/`
 
 `<project-key>` is derived from the absolute project path plus a short hash so different workspaces stay isolated.
 
-`config.global.json` is the default profile used when workspace mode is off. `config.json` is the workspace-specific profile used when workspace mode is on.
+`<app_root>/.reverie/config.json` is the default profile used when workspace mode is off. The project-cache `config.json` is the workspace-specific profile used when workspace mode is on.
 
-Legacy `.reverie/config.json` and `rules.txt` files are still read once for migration when present, but new writes stay inside `.reverie/project_caches`.
+Legacy project-cache `config.global.json`, workspace-local `.reverie/config.json`, and `rules.txt` files are still read once for migration when present. New global writes go to `.reverie/config.json`, and workspace writes stay inside `.reverie/project_caches`.
 
 Useful commands:
 

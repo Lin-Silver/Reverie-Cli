@@ -16,6 +16,7 @@ NVIDIA_DEFAULT_MODEL_ID = "qwen/qwen3.5-397b-a17b"
 NVIDIA_DEFAULT_MODEL_DISPLAY_NAME = "Qwen3.5-397B-A17B"
 NVIDIA_API_KEY_HINT_URL = "https://build.nvidia.com/settings/api-keys"
 NVIDIA_DEFAULT_IMAGE_TOKEN_ESTIMATE = 1024
+NVIDIA_DEFAULT_CONTEXT_TOKENS = 262_144
 
 
 def _request_model(
@@ -65,6 +66,7 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         "Request transport, reasoning_effort=high.",
         vision=True,
         thinking=True,
+        context_length=NVIDIA_DEFAULT_CONTEXT_TOKENS,
     ),
     _request_model(
         "qwen/qwen3.5-122b-a10b",
@@ -72,17 +74,20 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         "Request transport with enable_thinking.",
         vision=True,
         thinking=True,
+        context_length=NVIDIA_DEFAULT_CONTEXT_TOKENS,
     ),
     _openai_model(
         "nvidia/nemotron-3-super-120b-a12b",
         "Nemotron 3 Super 120B",
-        "OpenAI SDK transport with reasoning_budget.",
+        "OpenAI SDK transport with reasoning_budget. Supports up to 1M context; default serving is 256k.",
         thinking=True,
+        context_length=NVIDIA_DEFAULT_CONTEXT_TOKENS,
     ),
     _openai_model(
         "minimaxai/minimax-m2.5",
         "MiniMax M2.5",
         "OpenAI SDK transport.",
+        context_length=204800,
     ),
     _request_model(
         "qwen/qwen3.5-397b-a17b",
@@ -90,19 +95,21 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         "Request transport with enable_thinking, top_k, and repetition controls.",
         vision=True,
         thinking=True,
-        context_length=131072,
+        context_length=NVIDIA_DEFAULT_CONTEXT_TOKENS,
     ),
     _openai_model(
         "z-ai/glm5",
         "GLM-5",
         "OpenAI SDK transport with clear_thinking=False.",
         thinking=True,
+        context_length=205000,
     ),
     _openai_model(
         "stepfun-ai/step-3.5-flash",
         "Step-3.5-Flash",
         "OpenAI SDK transport.",
         thinking=True,
+        context_length=256000,
     ),
     _request_model(
         "moonshotai/kimi-k2.5",
@@ -110,18 +117,21 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         "Request transport with chat_template_kwargs.thinking.",
         vision=True,
         thinking=True,
+        context_length=NVIDIA_DEFAULT_CONTEXT_TOKENS,
     ),
     _request_model(
         "mistralai/mistral-large-3-675b-instruct-2512",
         "Mistral Large 3 675B",
         "Request transport with instruct defaults.",
         vision=True,
+        context_length=NVIDIA_DEFAULT_CONTEXT_TOKENS,
     ),
     _openai_model(
         "openai/gpt-oss-120b",
         "GPT-OSS-120B",
         "OpenAI SDK transport.",
         thinking=True,
+        context_length=128000,
     ),
 ]
 
@@ -139,7 +149,7 @@ def default_nvidia_config() -> Dict[str, Any]:
         "selected_model_display_name": NVIDIA_DEFAULT_MODEL_DISPLAY_NAME,
         "api_url": NVIDIA_DEFAULT_API_URL,
         "endpoint": NVIDIA_DEFAULT_REQUEST_ENDPOINT,
-        "max_context_tokens": 131072,
+        "max_context_tokens": NVIDIA_DEFAULT_CONTEXT_TOKENS,
         "timeout": 300,
         "max_tokens": 16384,
         "temperature": 0.60,
@@ -192,7 +202,7 @@ def normalize_nvidia_config(raw_nvidia: Any) -> Dict[str, Any]:
     cfg["endpoint"] = endpoint or NVIDIA_DEFAULT_REQUEST_ENDPOINT
 
     for key, default_value in (
-        ("max_context_tokens", 131072),
+        ("max_context_tokens", NVIDIA_DEFAULT_CONTEXT_TOKENS),
         ("timeout", 300),
         ("max_tokens", 16384),
         ("top_k", 20),
@@ -316,7 +326,7 @@ def build_nvidia_runtime_model_data(nvidia_config: Any) -> Optional[Dict[str, An
         "model_display_name": selected["display_name"],
         "base_url": base_url,
         "api_key": cfg.get("api_key", ""),
-        "max_context_tokens": int(selected.get("context_length") or cfg.get("max_context_tokens", 131072)),
+        "max_context_tokens": int(selected.get("context_length") or cfg.get("max_context_tokens", NVIDIA_DEFAULT_CONTEXT_TOKENS)),
         "provider": provider,
         "thinking_mode": "true" if bool(cfg.get("enable_thinking", True)) else "false",
         "endpoint": "" if provider != "request" else "",

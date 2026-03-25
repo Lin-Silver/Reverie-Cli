@@ -1,26 +1,18 @@
-## Reverie CLI v2.1.5 - LLM-First Session Rotation, Faster Streaming, and Better Diff Rendering
-
-### Changed
-
-* Refined automatic context rotation so the carryover memory is now LLM-authored from raw transcript windows, workspace memory, and prior handoff memory instead of falling back to an algorithm-first digest as the main carryover source.
-* Added a repair pass for invalid handoff payloads. Reverie now asks the model to re-emit the handoff JSON when the first response is malformed or too empty, rather than silently degrading to a deterministic digest summary.
-* Added automatic rotation backoff when handoff generation fails repeatedly, so the CLI does not spam compaction attempts on every follow-up model call.
-* Enriched fresh sessions with both the readable working-memory summary and a compact structured handoff payload, improving continuity across multi-rotation implementation loops.
-* Optimized streaming output performance by reusing the markdown formatter, switching assistant output to progressive line-level flushing, and replacing the live status token recount path with the agent's lightweight token estimate instead of repeated full re-tokenization.
-* Upgraded diff presentation in tool-result cards so fenced `diff` blocks now render as syntax-highlighted previews with `+/-/hunk` stats, and refreshed the standalone diff panel with a cleaner badge header and folded-preview behavior for large patches.
-
-## Reverie CLI v2.1.4 - Automatic Session Handoff, Retrieval Hardening, and Artifact Path Clarification
+## Reverie CLI v2.1.4 - LLM-First Session Rotation, Task-Oriented Context Engine, and NVIDIA Request Hardening
 
 ### Changed
 
 * Replaced the old algorithm-first context compression path with automatic model-authored session handoff rotation. When token usage crosses the rotation threshold, Reverie now generates a structured carryover summary, starts a fresh session, restores the active user request into that new session, and continues the same turn without waiting for a manual `continue`.
-* Added persisted session handoff packets under the project cache state (`.reverie/project_caches/<project>/session_handoffs/`) so automatic rotation has a durable audit trail and future recovery surface.
-* Hid `context_management` from the model-facing tool surface and updated the system prompts so continuity is driven by automatic rotation, workspace memory, and durable artifacts instead of asking the model to self-compress manually.
-* Hardened `codebase-retrieval` so plain-text files such as `README.md`, master documents, and appendix markdown files can be read through a content fallback even when they do not produce code symbols.
-* Normalized `codebase-retrieval` search filters more defensively to avoid avoidable failures from non-string tool arguments.
-* Clarified the runtime storage split across the codebase and prompts:
-  * project documentation and generated docs stay in the project-root `artifacts/`
-  * Reverie CLI runtime/session/cache state stays under the exe-root `.reverie/project_caches/`
+* Added a repair pass for invalid handoff payloads, automatic backoff when rotation fails repeatedly, and hid `context_management` from the model-facing tool surface so continuity is driven by automatic rotation, workspace memory, and durable artifacts instead of manual self-compression.
+* Persisted session handoff packets under the project cache state (`.reverie/project_caches/<project>/session_handoffs/`) and enriched fresh sessions with both the readable working-memory summary and a compact structured handoff payload for better recovery across multi-rotation loops.
+* Optimized streaming output performance by reusing the markdown formatter, switching assistant output to progressive line-level flushing, and replacing the live status token recount path with the agent's lightweight token estimate instead of repeated full re-tokenization.
+* Upgraded diff presentation in tool-result cards so fenced `diff` blocks now render as syntax-highlighted previews with `+/-/hunk` stats, and refreshed the standalone diff panel with a cleaner badge header and folded-preview behavior for large patches.
+* Hardened `codebase-retrieval` so plain-text files such as `README.md`, master documents, and appendix markdown files can be read through a content fallback even when they do not produce code symbols, and normalized search filters more defensively to avoid avoidable failures from non-string tool arguments.
+* Expanded the Context Engine into a task-oriented retrieval layer: document parsing now covers `.md`, `.mdx`, `.rst`, and `.txt`; file metadata now carries summaries, keywords, tags, imports, top-level symbols, and dependency targets; active workset files are weighted higher; workspace memory plus git history are fused into ranking; and cache persistence now preserves the richer metadata across reloads.
+* Strengthened the system prompts, tool descriptions, and editor activity tracking so non-trivial, multi-file, or ambiguous work explicitly nudges the model to call `codebase-retrieval(query_type="task")` first.
+* Clarified the runtime storage split across the codebase and prompts: project documentation and generated docs stay in `artifacts/`, while Reverie CLI runtime/session/cache state stays under `.reverie/project_caches/`.
+* Fixed NVIDIA source requests with per-model payload strategies, system-message-first normalization, explicit `Accept` headers, and model-specific template kwargs so provider calls no longer trip the `System message must be at the beginning` error.
+* Added regression coverage for task retrieval, prompt activation, and NVIDIA request normalization.
 
 ## Reverie CLI v2.1.4 - Reverie-Atlas + Codex 0.115.0 Alignment
 

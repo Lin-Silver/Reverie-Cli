@@ -27,9 +27,11 @@ def _request_model(
     vision: bool = False,
     thinking: bool = False,
     context_length: Optional[int] = None,
-    tool_calling: bool = False,
+    tool_calling: bool = True,
     system_message_first: bool = True,
 ) -> Dict[str, Any]:
+    # NVIDIA request-transport models in this catalog are treated as agentic
+    # by default so tool loops stay enabled unless an entry opts out.
     return {
         "id": model_id,
         "display_name": display_name,

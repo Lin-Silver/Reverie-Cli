@@ -25,15 +25,15 @@ Notes:
 | `/model` | Open the standard model selector |
 | `/model add` | Add a standard model preset |
 | `/model delete <number>` | Delete a standard model preset |
-| `/mode` | Show current mode and available modes |
-| `/mode reverie` | Switch to the general engineering mode |
-| `/mode reverie-atlas` | Switch to the deep-research and document-driven mode |
+| `/mode` | Show current mode and available modes. All modes share Context Engine; the selected mode changes the workflow and specialized tools. |
+| `/mode reverie` | Switch to the general-purpose coding mode |
+| `/mode reverie-atlas` | Switch to the document-driven spec development mode |
 | `/mode reverie-gamer` | Switch to the game-development mode |
-| `/mode reverie-ant` | Switch to the planning/execution/verification mode |
-| `/mode spec-driven` | Switch to structured spec-driven workflow |
-| `/mode spec-vibe` | Switch to lighter spec workflow |
-| `/mode writer` | Switch to writing/documentation mode |
-| `/mode computer-controller` | Switch to NVIDIA-backed desktop control mode |
+| `/mode reverie-ant` | Switch to the long-running execution and verification mode |
+| `/mode spec-driven` | Switch to the spec authoring mode |
+| `/mode spec-vibe` | Switch to the lighter spec implementation mode |
+| `/mode writer` | Switch to the writing and narrative continuity mode |
+| `/mode computer-controller` | Switch to the desktop-control mode |
 
 ## Providers
 
@@ -70,7 +70,7 @@ Request-based NVIDIA vision models can also consume inline chat attachments like
 
 | Command | Description |
 | --- | --- |
-| `/tools` | Show tools visible in the current mode |
+| `/tools` | Show tools visible to the active model/provider |
 | `/search <query>` | Run a web search |
 | `/index` | Rebuild the current workspace index |
 | `/CE` | Show Context Engine status |

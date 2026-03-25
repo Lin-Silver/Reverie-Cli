@@ -1500,6 +1500,25 @@ class ReverieAgent:
 
         return prepared
 
+    def get_visible_tool_schemas(self, mode: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Return the tool schemas that the current model/provider can actually receive."""
+        tool_executor = getattr(self, "tool_executor", None)
+        if not tool_executor:
+            return []
+
+        effective_mode = mode or self.mode or "reverie"
+        schemas = tool_executor.get_tool_schemas(mode=effective_mode)
+        if not schemas:
+            return []
+
+        if (
+            self._is_active_model_source("nvidia")
+            or self._is_nvidia_request()
+        ) and not nvidia_model_allows_tools(self.model):
+            return []
+
+        return schemas
+
     def _resolve_messages_for_request(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Resolve lightweight local-image markers into actual multimodal request payloads."""
         resolved_messages: List[Dict[str, Any]] = []
@@ -1827,7 +1846,7 @@ class ReverieAgent:
         """Process streaming responses for native Gemini CLI / Codex providers."""
         import requests
 
-        tools = self.tool_executor.get_tool_schemas(mode=self.mode)
+        tools = self.get_visible_tool_schemas()
 
         max_continuations = 3
         continuation_count = 0
@@ -2250,7 +2269,7 @@ class ReverieAgent:
     
     def _process_streaming_openai_sdk(self, session_id: str = "default") -> Generator[str, None, None]:
         """Process with streaming response using OpenAI SDK"""
-        tools = self.tool_executor.get_tool_schemas(mode=self.mode)
+        tools = self.get_visible_tool_schemas()
         
         max_continuations = 3  # Safety limit to prevent infinite loops
         continuation_count = 0
@@ -2498,7 +2517,7 @@ class ReverieAgent:
         """Process with streaming response using requests library"""
         import requests
         
-        tools = self.tool_executor.get_tool_schemas(mode=self.mode)
+        tools = self.get_visible_tool_schemas()
         
         max_continuations = 3  # Safety limit to prevent infinite loops
         continuation_count = 0
@@ -2728,7 +2747,7 @@ class ReverieAgent:
     
     def _process_streaming_anthropic(self, session_id: str = "default") -> Generator[str, None, None]:
         """Process with streaming response using Anthropic SDK"""
-        tools = self.tool_executor.get_tool_schemas(mode=self.mode)
+        tools = self.get_visible_tool_schemas()
         
         max_continuations = 3
         continuation_count = 0
@@ -2949,7 +2968,7 @@ class ReverieAgent:
     
     def _process_non_streaming_openai_sdk(self, session_id: str = "default") -> str:
         """Process without streaming using OpenAI SDK"""
-        tools = self.tool_executor.get_tool_schemas(mode=self.mode)
+        tools = self.get_visible_tool_schemas()
         
         all_content = []
         
@@ -3137,7 +3156,7 @@ class ReverieAgent:
         """Process without streaming using requests library"""
         import requests
         
-        tools = self.tool_executor.get_tool_schemas(mode=self.mode)
+        tools = self.get_visible_tool_schemas()
         
         all_content = []
         
@@ -3296,7 +3315,7 @@ class ReverieAgent:
     
     def _process_non_streaming_anthropic(self, session_id: str = "default") -> str:
         """Process without streaming using Anthropic SDK"""
-        tools = self.tool_executor.get_tool_schemas(mode=self.mode)
+        tools = self.get_visible_tool_schemas()
         
         all_content = []
         

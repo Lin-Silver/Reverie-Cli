@@ -1,8 +1,8 @@
 """
 Task Manager Tool - Organize and track complex work.
 
-The canonical human-facing artifact is a checklist-only `artifacts/Tasks.md` file.
-Structured metadata is persisted separately in `artifacts/task_list.json`.
+The tool keeps a checklist-style markdown file plus a separate JSON metadata
+store inside the active workspace.
 """
 
 from typing import Optional, Dict, List
@@ -19,6 +19,31 @@ from .base import BaseTool, ToolResult
 
 CHECKLIST_LINE_RE = re.compile(r"^(?P<indent>\s*)\[(?P<state> |/|x|-)\]\s+(?P<name>.+?)\s*$")
 ARTIFACTS_DIR_NAME = "artifacts"
+
+TASK_MANAGER_TOOL_DESCRIPTION = """Manage project work as a checklist-first task system.
+
+Canonical checklist:
+- Always sync tasks to the workspace checklist artifact managed by the tool
+- The checklist must contain checklist lines only, such as `[ ] Implement parser`
+- Do not add headings, prose, IDs, summaries, metadata blocks, or rich formatting to the checklist artifact
+
+Best use:
+- Break large requests into many small, concrete, verifiable tasks
+- Keep only one task `IN_PROGRESS` when practical
+- Use filters to inspect focused slices of the checklist
+- Structured metadata is stored separately from the checklist
+
+Operations:
+- add_tasks
+- update_tasks
+- view_tasklist
+- reorganize_tasklist
+
+Task states:
+- NOT_STARTED => [ ]
+- IN_PROGRESS => [/]
+- COMPLETED => [x]
+- CANCELLED => [-]"""
 
 
 class TaskState(Enum):
@@ -463,30 +488,7 @@ class TaskManagerTool(BaseTool):
     
     name = "task_manager"
     
-    description = """Manage project work as a checklist-first task system.
-
-Canonical artifact:
-- Always sync tasks to `artifacts/Tasks.md`
-- `artifacts/Tasks.md` must contain checklist lines only, such as `[ ] Implement parser`
-- Do not add headings, prose, IDs, summaries, metadata blocks, or rich formatting to `artifacts/Tasks.md`
-
-Best use:
-- Break large requests into many small, concrete, verifiable tasks
-- Keep only one task `IN_PROGRESS` when practical
-- Use filters to inspect focused slices of the checklist
-- `artifacts/task_list.json` stores metadata while `artifacts/Tasks.md` stays checklist-only
-
-Operations:
-- add_tasks
-- update_tasks
-- view_tasklist
-- reorganize_tasklist
-
-Task states:
-- NOT_STARTED => [ ]
-- IN_PROGRESS => [/]
-- COMPLETED => [x]
-- CANCELLED => [-]"""
+    description = TASK_MANAGER_TOOL_DESCRIPTION
     
     parameters = {
         "type": "object",
@@ -565,16 +567,16 @@ Task states:
         if operation == "add_tasks":
             tasks = kwargs.get('tasks', [])
             count = len(tasks)
-            return f"Adding {count} task(s) to artifacts/Tasks.md"
+            return f"Adding {count} task(s) to the task checklist"
         elif operation == "update_tasks":
             task_id = kwargs.get('task_id')
             name = kwargs.get('name')
             target = task_id or name or "tasks"
             return f"Updating task checklist: {target}"
         elif operation == "view_tasklist":
-            return "Viewing artifacts/Tasks.md checklist"
+            return "Viewing the task checklist"
         elif operation == "reorganize_tasklist":
-            return "Reorganizing artifacts/Tasks.md checklist"
+            return "Reorganizing the task checklist"
         return f"Managing tasks ({operation})"
 
     def execute(self, **kwargs) -> ToolResult:

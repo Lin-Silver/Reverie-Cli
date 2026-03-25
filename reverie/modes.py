@@ -13,27 +13,27 @@ from typing import Dict, List
 MODE_METADATA: Dict[str, Dict[str, object]] = {
     "reverie": {
         "display_name": "Reverie",
-        "description": "Fast default engineering mode for small tasks, focused fixes, and full delivery when the scope truly requires it.",
+        "description": "General-purpose coding mode that uses Context Engine plus the smallest useful toolset for focused fixes and end-to-end delivery.",
         "switchable": True,
     },
     "reverie-atlas": {
         "display_name": "Reverie-Atlas",
-        "description": "Deep research, master-documentation, user-confirmed planning, and slow high-quality implementation mode for complex systems.",
+        "description": "Document-driven spec development mode for complex systems, pairing deep research with Context Engine and Atlas delivery artifacts.",
         "switchable": True,
     },
     "reverie-gamer": {
         "display_name": "Reverie-Gamer",
-        "description": "Game-development mode with design, balance, asset, and level tools.",
+        "description": "Game-development mode for GDDs, assets, balancing, playtests, and runtime iteration.",
         "switchable": True,
     },
     "reverie-ant": {
         "display_name": "Reverie-Ant",
-        "description": "Structured planning, execution, and verification mode for long-running tasks.",
+        "description": "Structured long-running execution mode for planning, checkpoints, and verification.",
         "switchable": True,
     },
     "spec-driven": {
         "display_name": "Spec-Driven",
-        "description": "Requirements, design, and implementation-task authoring workflow.",
+        "description": "Spec authoring mode for requirements, design, and implementation task breakdown.",
         "switchable": True,
     },
     "spec-vibe": {
@@ -43,12 +43,12 @@ MODE_METADATA: Dict[str, Dict[str, object]] = {
     },
     "writer": {
         "display_name": "Writer",
-        "description": "Creative writing and documentation mode with narrative memory tools.",
+        "description": "Creative writing mode for narrative drafting, continuity, and long-form documentation.",
         "switchable": True,
     },
     "computer-controller": {
         "display_name": "Computer Controller",
-        "description": "Desktop-control mode powered by a NVIDIA request-based vision model and computer-control tooling.",
+        "description": "Desktop-control mode for operating the Windows UI through computer_control.",
         "switchable": False,
         "requires_source": "nvidia",
     },

@@ -63,8 +63,18 @@ def build_system_prompt(
 
 
 def _append_shared_prompt_guidance(additional_rules: str, normalized_mode: str) -> str:
-    """Inject shared mode-switch and documentation-output guidance."""
+    """Inject shared Context Engine guidance and optional mode-switch guidance."""
     shared_sections = []
+
+    shared_sections.append("""
+## Context Engine
+- Context Engine is available in every mode.
+- When a task depends on repository state, start with `codebase-retrieval` before proposing edits or architecture claims.
+- For multi-file features, bugs, refactors, or ambiguous requests, the default first retrieval is `codebase-retrieval(query_type="task", query="<the active request>")`.
+- After the task-level retrieval, drill down with `symbol`, `file`, `dependencies`, `memory`, or `lsp` as needed before editing.
+- Do not rely on conversational memory alone when the repository can be inspected directly.
+- After resume, rotation, or `continue`-style follow-ups, re-anchor with retrieval before making new claims about the codebase.
+""".strip())
 
     if normalized_mode != "computer-controller":
         shared_sections.append("""
@@ -73,25 +83,6 @@ def _append_shared_prompt_guidance(additional_rules: str, normalized_mode: str) 
 - Switch only with a concrete reason tied to workflow, tools, or deliverables.
 - Do not switch modes repeatedly without progress.
 - After using tools, always return a textual user-facing response instead of stopping at tool output only.
-""".strip())
-
-        shared_sections.append("""
-## Context Engine Activation Protocol
-- For any non-trivial repository task, start by calling `codebase-retrieval` before proposing edits or architecture claims.
-- Default first retrieval for multi-file features, bugs, refactors, or ambiguous requests: `codebase-retrieval(query_type="task", query="<the active request>")`.
-- After the task-level retrieval, drill down with `symbol`, `file`, `dependencies`, `memory`, or `lsp` as needed before editing.
-- Do not rely on conversational memory alone when the repository can be inspected directly.
-- After resume, rotation, or `continue`-style follow-ups, re-anchor with retrieval before making new claims about the codebase.
-""".strip())
-
-    shared_sections.append(f"""
-## Documentation Output Policy
-- Store authored project documents under `{ARTIFACTS_DIR}/` in the current project root.
-- This applies to README-style docs, research notes, design docs, plans, walkthroughs, specs, GDDs, and appendix documents unless the user explicitly requests another path.
-- Prefer organized paths under `{ARTIFACTS_DIR}/`, such as `{TASKS_ARTIFACT_PATH}`, `{IMPLEMENTATION_PLAN_ARTIFACT_PATH}`, `{WALKTHROUGH_ARTIFACT_PATH}`, `{SPECS_ARTIFACTS_DIR}/<feature_name>/`, or `{GDD_ARTIFACT_PATH}`.
-- Create the `{ARTIFACTS_DIR}/` directory before writing documentation if it does not already exist.
-- Do not place user-facing authored documents in the repository root, `docs/`, or runtime cache directories unless the user explicitly asks for that location.
-- Reverie internal runtime files that the product itself manages, such as steering files, may still live in their required internal directories.
 """.strip())
 
     shared_guidance = "\n\n".join(section for section in shared_sections if section.strip())
@@ -509,6 +500,7 @@ Core identity invariants:
 - This mode treats the project-local `{ARTIFACTS_DIR}/` directory as the document system of record and re-anchors on those artifacts before major Atlas decisions.
 - Atlas keeps a detailed task tree in `{ATLAS_TASK_ARTIFACT_PATH}` and keeps it synchronized with delivery progress, using `[x]` for completed items.
 - Atlas maintains a dedicated resume entrypoint at `{ATLAS_RESUME_INDEX_ARTIFACT_PATH}` so fresh sessions know which artifacts to read first.
+- Keep `README.md` and `CHANGELOG.md` current as the user-facing project entry points, and reserve `{ARTIFACTS_DIR}/` for research notes, design docs, plans, appendices, and resume material.
 - The default chain for meaningful work: **research -> documentation -> explanation -> confirmation -> implementation -> verification -> document refresh**.
 - Documents are the engineering contract. Implementation follows the contract. The contract evolves with reality.
 - Atlas is runtime-agnostic and domain-general. It is not the dedicated mode for full game-production execution.

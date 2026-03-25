@@ -1,36 +1,21 @@
 # Reverie CLI Documentation
 
-This directory contains the maintained reference documentation for Reverie CLI.
+## Getting Started
 
-## Bilingual README Pair
+- [English README](../README.md) — project overview, installation, and quick start
+- [Chinese README](README.zh-CN.md) — 中文项目概览与快速上手
 
-- [English README](../README.md): project overview, installation, quick start, and architecture snapshot
-- [Chinese README](README.zh-CN.md): Chinese overview, installation, quick start, and storage notes
+## Core Guides
 
-## Core Documentation
+| Document | Description |
+| --- | --- |
+| [Configuration Guide](CONFIGURATION.md) | Runtime storage layout, profile selection, model sources, TTI config, Atlas settings |
+| [CLI Command Reference](CLI_COMMANDS.md) | Full command catalog: core, models, providers, tools, settings, sessions, game workflow |
+| [Development Guide](DEVELOPMENT.md) | Local setup, testing, packaging, and documentation maintenance rules |
+| [Reverie Engine User Guide](engine/reverie_engine_user_guide.md) | Built-in runtime architecture, content model, CLI workflow, AI authoring |
+| [Changelog](changelog.md) | Release history and version notes |
 
-- [Configuration Guide](CONFIGURATION.md): config profiles, provider sections, project cache layout, rules, and migration notes
-- [CLI Command Reference](CLI_COMMANDS.md): grouped command reference aligned with `reverie/cli/help_catalog.py`
-- [Development Guide](DEVELOPMENT.md): local setup, tests, packaging, runtime storage, and doc maintenance
-- [Reverie Engine User Guide](engine/reverie_engine_user_guide.md): built-in runtime and `/engine` workflows
-- [Change Log](../changelog.md): release-facing summary when maintained
+## Source of Truth
 
-## Storage Layout At A Glance
-
-Reverie keeps runtime state under the app root, not in the directory where the command is launched.
-
-- App root: the repository root when running from source, or the folder containing `reverie.exe` in packaged builds
-- Global profile: `<app_root>/.reverie/config.json`
-- Project cache root: `<app_root>/.reverie/project_caches/<project-key>/`
-- Workspace profile: `<app_root>/.reverie/project_caches/<project-key>/config.json`
-- Common project data: `rules.txt`, `context_cache/`, `sessions/`, `archives/`, `checkpoints/`, `specs/`, `steering/`, `security/`
-
-`<project-key>` is derived from the absolute project path plus a short hash so multiple workspaces remain isolated.
-
-## Maintenance Rules
-
-- Keep command descriptions aligned with `reverie/cli/help_catalog.py`.
-- Keep config details aligned with `reverie/config.py` and provider modules.
-- Update both README files together when onboarding, installation, or storage behavior changes.
-- When command behavior changes, update `README.md`, [CLI Command Reference](CLI_COMMANDS.md), and in-app help text in the same change.
-- When storage paths change, also update `reverie/agent/system_prompt.py` so spec and steering workflows keep writing to the right place.
+- `reverie/cli/help_catalog.py` is the authoritative source for command names, summaries, and examples.
+- `reverie/agent/system_prompt.py` controls runtime storage and spec/steering path references.

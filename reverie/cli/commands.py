@@ -911,18 +911,32 @@ class CommandHandler:
                 # Fall back to agent mode if config loading fails.
                 pass
 
-        tool_schemas = agent.tool_executor.get_tool_schemas(mode=mode)
-        visible_tool_names = {
-            schema.get("function", {}).get("name")
-            for schema in tool_schemas
-            if schema.get("function", {}).get("name")
-        }
-        tools = {
-            name: tool
-            for name, tool in agent.tool_executor._tools.items()
-            if name in visible_tool_names
-        }
-        
+        get_visible_tool_schemas = getattr(agent, "get_visible_tool_schemas", None)
+        if callable(get_visible_tool_schemas):
+            tool_schemas = get_visible_tool_schemas(mode=mode)
+        else:
+            tool_schemas = agent.tool_executor.get_tool_schemas(mode=mode)
+
+        visible_tools = []
+        for schema in tool_schemas:
+            if not isinstance(schema, dict):
+                continue
+            function = schema.get("function", {})
+            name = str(function.get("name", "")).strip()
+            if not name:
+                continue
+            tool = agent.tool_executor.get_tool(name)
+            if tool:
+                visible_tools.append((name, tool))
+
+        if not visible_tools:
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} "
+                "No tools are currently available to the active model/provider."
+                f"[/{self.theme.AMBER_GLOW}]"
+            )
+            return True
+
         table = Table(
             title=f"[bold {self.theme.PINK_SOFT}]{self.deco.CRYSTAL} Available Tools[/bold {self.theme.PINK_SOFT}]",
             box=box.ROUNDED,
@@ -930,12 +944,11 @@ class CommandHandler:
         )
         table.add_column("Name", style=f"bold {self.theme.BLUE_SOFT}")
         table.add_column("Description", style=self.theme.TEXT_SECONDARY)
-        
-        for name, tool in sorted(tools.items()):
-            # Get first line of description
+
+        for name, tool in visible_tools:
             desc = tool.description.strip().split('\n')[0]
             table.add_row(f"{self.deco.DOT_MEDIUM} {name}", desc)
-        
+
         self.console.print(table)
         return True
 

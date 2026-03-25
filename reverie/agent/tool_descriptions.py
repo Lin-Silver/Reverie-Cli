@@ -8,6 +8,7 @@ and mode transitions.
 """
 
 from ..modes import normalize_mode
+from ..tools.task_manager import TASK_MANAGER_TOOL_DESCRIPTION
 
 
 def get_codebase_retrieval_description() -> str:
@@ -354,46 +355,7 @@ context_management(action="checkpoint")
 
 def get_task_manager_description() -> str:
     """Description for task management."""
-    return """
-## Task Manager Tool (task_manager)
-
-Use this tool for structured planning and progress tracking on multi-step work.
-
-**Operations**:
-- `add_tasks`
-- `update_tasks`
-- `view_tasklist`
-- `reorganize_tasklist`
-
-**Best usage pattern**:
-1. After initial retrieval, create a detailed task list for substantial work
-2. Break large requests into many small, concrete, verifiable tasks instead of a few broad milestones
-3. Keep the canonical task artifact in `artifacts/Tasks.md`
-4. `artifacts/Tasks.md` must be checklist-only: one checklist item per line, no headings, prose, summaries, IDs, or metadata blocks
-5. Mark only one task `IN_PROGRESS` at a time when practical
-6. Batch-update task states when moving from one task to the next
-
-**Common fields**:
-- `name`, `description`
-- `state`: `NOT_STARTED`, `IN_PROGRESS`, `COMPLETED`, `CANCELLED`
-- `priority`: `low`, `medium`, `high`, `critical`
-- `phase`: `design`, `implementation`, `content`, `testing`, `release`
-
-**Completion standard**:
-- Create tasks around concrete edits, validation steps, integration checks, or narrow deliverables
-- Keep a task `IN_PROGRESS` if implementation exists but integration or verification is still pending
-- Mark a task `COMPLETED` only when its promised outcome is actually delivered for the intended scope
-- If later evidence shows regressions, reopen the task by moving it back to `IN_PROGRESS`
-- Use `progress` and `description` to capture partial completion, blockers, or verification gaps instead of overstating status
-
-**Example calls**:
-```
-task_manager(operation="add_tasks", tasks=[{"name":"Add resource remap loader coverage","phase":"testing","priority":"high"}])
-task_manager(operation="update_tasks", task_id="abc123", state="IN_PROGRESS", progress=0.8, description="Feature is wired, but regression checks are still pending")
-task_manager(operation="update_tasks", task_id="abc123", state="COMPLETED", progress=1.0)
-task_manager(operation="view_tasklist")
-```
-"""
+    return TASK_MANAGER_TOOL_DESCRIPTION
 
 
 def get_reverie_progress_review_description() -> str:
@@ -454,16 +416,16 @@ def get_mode_switch_description() -> str:
 Switch between Reverie's non-desktop-control modes when another workflow is clearly a better fit.
 
 **Available targets**:
-- `reverie`
-- `reverie-atlas`
-- `reverie-gamer`
-- `reverie-ant`
-- `spec-driven`
-- `spec-vibe`
-- `writer`
+- `reverie`: general-purpose coding and delivery
+- `reverie-atlas`: document-driven spec development for complex systems
+- `reverie-gamer`: game development
+- `reverie-ant`: long-running planning, execution, and verification
+- `spec-driven`: spec authoring for requirements, design, and task breakdown
+- `spec-vibe`: lighter spec implementation for approved plans
+- `writer`: writing and narrative continuity
 
 **When to use**:
-- The task changes from coding to specs, writing, or game design
+- The task changes from coding to specs, writing, game design, or long-running structured execution
 - Another mode has a meaningfully better workflow or tool surface
 - A phased mode is better for the current job than generic execution
 - The task would benefit from a specialized planning or verification loop before more implementation work

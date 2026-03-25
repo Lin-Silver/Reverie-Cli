@@ -36,6 +36,57 @@ from ..config import get_project_data_dir
 
 
 @dataclass
+class IndexProgress:
+    """Live progress snapshot for indexing operations."""
+    stage: str = "idle"
+    message: str = ""
+    completed: int = 0
+    total: int = 0
+    current_file: str = ""
+    files_scanned: int = 0
+    files_parsed: int = 0
+    files_failed: int = 0
+    files_skipped: int = 0
+    chunk_index: int = 0
+    chunk_total: int = 0
+    started_at: float = field(default_factory=time.time)
+    updated_at: float = field(default_factory=time.time)
+
+    @property
+    def percent(self) -> float:
+        if self.total <= 0:
+            return 0.0
+        return min(100.0, max(0.0, (self.completed / self.total) * 100.0))
+
+    @property
+    def display_percent(self) -> float:
+        """A UI-friendly progress percentage that only reaches 100% on completion."""
+        if self.stage == "complete":
+            return 100.0
+        return min(99.0, max(0.0, self.percent))
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'stage': self.stage,
+            'message': self.message,
+            'completed': self.completed,
+            'total': self.total,
+            'percent': self.percent,
+            'display_percent': self.display_percent,
+            'current_file': self.current_file,
+            'files_scanned': self.files_scanned,
+            'files_parsed': self.files_parsed,
+            'files_failed': self.files_failed,
+            'files_skipped': self.files_skipped,
+            'chunk_index': self.chunk_index,
+            'chunk_total': self.chunk_total,
+            'started_at': self.started_at,
+            'updated_at': self.updated_at,
+            'elapsed_ms': max(0.0, (self.updated_at - self.started_at) * 1000.0),
+        }
+
+
+@dataclass
 class IndexResult:
     """Result of indexing operation"""
     files_scanned: int = 0
@@ -49,10 +100,11 @@ class IndexResult:
     total_bytes: int = 0  # Newly added: total bytes
     errors: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)  # Newly added: warnings
+    fatal_errors: List[str] = field(default_factory=list)
     
     @property
     def success(self) -> bool:
-        return self.files_failed == 0
+        return len(self.fatal_errors) == 0
     
     @property
     def total_mb(self) -> float:
@@ -95,7 +147,7 @@ class IndexConfig:
     batch_commit_threshold: int = 100  # Batch commit threshold
     
     # Progress callback
-    progress_callback: Optional[Callable[[int, int, str], None]] = None
+    progress_callback: Optional[Callable[..., None]] = None  # Supports IndexProgress snapshots or legacy tuple callbacks
 
 
 class CodebaseIndexer:
@@ -240,6 +292,8 @@ class CodebaseIndexer:
         
         # Index lock (thread safety)
         self._index_lock = threading.Lock()
+        self._last_index_result: Optional[IndexResult] = None
+        self._index_progress = IndexProgress()
     
     def _load_gitignore(self) -> None:
         """Load patterns from .gitignore if it exists"""
@@ -391,6 +445,196 @@ class CodebaseIndexer:
         """Calculate hash of file content"""
         return hashlib.md5(content.encode('utf-8')).hexdigest()
 
+    def _snapshot_progress(self) -> IndexProgress:
+        """Return a copy of the current indexing progress state."""
+        state = self._index_progress
+        return IndexProgress(
+            stage=state.stage,
+            message=state.message,
+            completed=state.completed,
+            total=state.total,
+            current_file=state.current_file,
+            files_scanned=state.files_scanned,
+            files_parsed=state.files_parsed,
+            files_failed=state.files_failed,
+            files_skipped=state.files_skipped,
+            chunk_index=state.chunk_index,
+            chunk_total=state.chunk_total,
+            started_at=state.started_at,
+            updated_at=state.updated_at,
+        )
+
+    def _emit_progress(
+        self,
+        callback: Optional[Callable[..., None]],
+        *,
+        stage: str,
+        completed: Optional[int] = None,
+        total: Optional[int] = None,
+        message: str = "",
+        current_file: str = "",
+        files_scanned: Optional[int] = None,
+        files_parsed: Optional[int] = None,
+        files_failed: Optional[int] = None,
+        files_skipped: Optional[int] = None,
+        chunk_index: Optional[int] = None,
+        chunk_total: Optional[int] = None,
+    ) -> IndexProgress:
+        """Update and optionally publish a live indexing progress snapshot."""
+        now = time.time()
+        state = self._index_progress
+        state.stage = stage
+        if completed is not None:
+            state.completed = max(0, int(completed))
+        if total is not None:
+            state.total = max(0, int(total))
+        if message:
+            state.message = str(message)
+        if current_file:
+            state.current_file = str(current_file)
+        if files_scanned is not None:
+            state.files_scanned = max(0, int(files_scanned))
+        if files_parsed is not None:
+            state.files_parsed = max(0, int(files_parsed))
+        if files_failed is not None:
+            state.files_failed = max(0, int(files_failed))
+        if files_skipped is not None:
+            state.files_skipped = max(0, int(files_skipped))
+        if chunk_index is not None:
+            state.chunk_index = max(0, int(chunk_index))
+        if chunk_total is not None:
+            state.chunk_total = max(0, int(chunk_total))
+        state.updated_at = now
+
+        snapshot = self._snapshot_progress()
+        self._index_progress = snapshot
+
+        if not callback:
+            return snapshot
+
+        try:
+            callback(snapshot)
+        except TypeError:
+            try:
+                callback(snapshot.completed, snapshot.total, snapshot.message)
+            except Exception as exc:
+                logger.debug("Legacy progress callback rejected snapshot: %s", exc)
+        except Exception as exc:
+            logger.warning("Progress callback failed: %s", exc)
+
+        return snapshot
+
+    def _apply_parse_result(
+        self,
+        symbol_table: SymbolTable,
+        dependency_graph: DependencyGraph,
+        file_info_store: Dict[str, FileInfo],
+        file_path: Path,
+        parse_result: ParseResult,
+        file_info: Optional[FileInfo],
+        *,
+        remove_existing: bool = True,
+    ) -> None:
+        """Merge a parsed file into the provided index state."""
+        file_key = str(file_path)
+        if remove_existing:
+            symbol_table.remove_file(file_key)
+            dependency_graph.remove_file(file_key)
+
+        for symbol in parse_result.symbols:
+            symbol_table.add_symbol(symbol)
+        for dep in parse_result.dependencies:
+            dependency_graph.add_dependency(dep)
+
+        if file_info:
+            file_info.symbol_count = parse_result.symbol_count
+            file_info_store[file_key] = file_info
+
+    def _swap_index_state(
+        self,
+        symbol_table: SymbolTable,
+        dependency_graph: DependencyGraph,
+        file_info: Dict[str, FileInfo],
+        large_files: Set[str],
+    ) -> None:
+        """Atomically replace the live index state while preserving object identity."""
+        with self._index_lock:
+            self.symbol_table.replace_with(symbol_table)
+            self.dependency_graph.replace_with(dependency_graph)
+            self._file_info.clear()
+            self._file_info.update(file_info)
+            self._large_files.clear()
+            self._large_files.update(large_files)
+
+    def _format_index_status_label(self, status: Dict[str, Any]) -> Optional[str]:
+        """Condense the live index snapshot into a short UI-friendly label."""
+        stage = str(status.get("stage", "") or "").strip().lower()
+        if not stage:
+            return None
+
+        try:
+            percent = float(status.get("percent", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            percent = 0.0
+
+        try:
+            display_percent = float(status.get("display_percent", percent) or percent)
+        except (TypeError, ValueError):
+            display_percent = percent
+
+        try:
+            files_indexed = int(status.get("files_indexed", 0) or 0)
+        except (TypeError, ValueError):
+            files_indexed = 0
+
+        if stage in {"scan", "parse", "commit", "incremental"}:
+            return f"Indexing {display_percent:.0f}%"
+        last_result = self._last_index_result
+        last_result_success = bool(getattr(last_result, "success", False)) if last_result is not None else False
+
+        if stage == "complete":
+            if last_result is not None and last_result_success:
+                return "index finished"
+            return None
+        if stage == "idle" and (files_indexed > 0 or last_result_success):
+            return "index finished"
+        return None
+
+    def get_index_status(self) -> Dict[str, Any]:
+        """Return a live snapshot of the indexer's current state."""
+        status = self._index_progress.to_dict()
+        status.update(
+            {
+                'files_indexed': len(self._file_info),
+                'symbols_indexed': len(self.symbol_table),
+                'dependencies_indexed': len(self.dependency_graph),
+                'large_files': len(self._large_files),
+            }
+        )
+        status['display_label'] = self._format_index_status_label(status)
+        status['is_active'] = str(status.get('stage', '') or '').lower() in {
+            'scan',
+            'parse',
+            'commit',
+            'incremental',
+        }
+        status['is_finished'] = status['display_label'] == 'index finished'
+        if self._last_index_result is not None:
+            status['last_result'] = {
+                'files_scanned': self._last_index_result.files_scanned,
+                'files_parsed': self._last_index_result.files_parsed,
+                'files_failed': self._last_index_result.files_failed,
+                'files_skipped': self._last_index_result.files_skipped,
+                'symbols_extracted': self._last_index_result.symbols_extracted,
+                'dependencies_extracted': self._last_index_result.dependencies_extracted,
+                'parse_time_ms': self._last_index_result.parse_time_ms,
+                'total_time_ms': self._last_index_result.total_time_ms,
+                'success': self._last_index_result.success,
+                'errors': len(self._last_index_result.errors),
+                'warnings': len(self._last_index_result.warnings),
+            }
+        return status
+
     def _extract_text_tokens(self, *values: str) -> List[str]:
         """Extract a compact set of retrieval-friendly tokens."""
         import re
@@ -528,8 +772,8 @@ class CodebaseIndexer:
         file_info.summary = summary[:360]
         return file_info
     
-    def scan_files(self) -> List[Path]:
-        """Scan project for all supported files with size filtering"""
+    def scan_files(self, progress_callback: Optional[Callable[..., None]] = None) -> List[Path]:
+        """Scan project for all supported files with size filtering."""
         import logging
         logger = logging.getLogger(__name__)
         
@@ -539,6 +783,13 @@ class CodebaseIndexer:
         logger.info(f"Starting file scan in: {self.project_root}")
         dir_count = 0
         file_count = 0
+        self._emit_progress(
+            progress_callback,
+            stage="scan",
+            completed=0,
+            total=0,
+            message="Scanning workspace files",
+        )
         
         try:
             for root, dirs, filenames in os.walk(self.project_root):
@@ -548,6 +799,14 @@ class CodebaseIndexer:
                 # Log progress every 100 directories
                 if dir_count % 100 == 0:
                     logger.info(f"Scanned {dir_count} directories, found {len(files) + len(large_files)} files so far...")
+                    self._emit_progress(
+                        progress_callback,
+                        stage="scan",
+                        completed=file_count,
+                        total=0,
+                        message=f"Scanning directories ({dir_count} folders)",
+                        files_scanned=len(files) + len(large_files),
+                    )
                 
                 # Filter out ignored directories
                 original_dir_count = len(dirs)
@@ -564,6 +823,14 @@ class CodebaseIndexer:
                     # Log progress every 1000 files
                     if file_count % 1000 == 0:
                         logger.info(f"Processed {file_count} files, accepted {len(files) + len(large_files)} files...")
+                        self._emit_progress(
+                            progress_callback,
+                            stage="scan",
+                            completed=file_count,
+                            total=0,
+                            message=f"Scanning files ({file_count} checked)",
+                            files_scanned=len(files) + len(large_files),
+                        )
                     
                     if self._should_ignore(file_path):
                         continue
@@ -587,11 +854,27 @@ class CodebaseIndexer:
             
             logger.info(f"File scan complete: {dir_count} directories, {file_count} files checked")
             logger.info(f"Found {len(files)} normal files, {len(large_files)} large files")
+            self._emit_progress(
+                progress_callback,
+                stage="scan",
+                completed=file_count,
+                total=0,
+                message=f"Scan complete: {len(files) + len(large_files)} candidate files",
+                files_scanned=len(files) + len(large_files),
+            )
             
         except Exception as e:
             logger.error(f"Error during file scan: {e}")
             import traceback
             traceback.print_exc()
+            self._emit_progress(
+                progress_callback,
+                stage="scan",
+                completed=file_count,
+                total=0,
+                message=f"Scan failed after {file_count} files",
+                files_scanned=len(files) + len(large_files),
+            )
         
         # Append large files at the end (process last)
         files.extend(large_files)
@@ -601,7 +884,7 @@ class CodebaseIndexer:
     def full_index(
         self,
         show_progress: bool = True,
-        progress_callback: Optional[Callable[[int, int, str], None]] = None
+        progress_callback: Optional[Callable[..., None]] = None
     ) -> IndexResult:
         """
         Perform full indexing of the codebase.
@@ -613,157 +896,258 @@ class CodebaseIndexer:
         
         start_time = time.time()
         result = IndexResult()
-        callback = progress_callback or self.config.progress_callback
-        
+        callback = (progress_callback or self.config.progress_callback) if show_progress else None
+
         logger.info("Starting full index...")
-        
-        # Clear existing data
-        with self._index_lock:
-            self.symbol_table = SymbolTable()
-            self.dependency_graph = DependencyGraph()
-            self._file_info.clear()
-            self._large_files.clear()
-        
-        logger.info("Cleared existing data")
-        
-        # Scan for files
-        logger.info("Scanning files...")
+
+        # Keep the previous large-file tracking in case scanning fails.
+        previous_large_files = set(self._large_files)
+        self._large_files = set()
+        self._index_progress = IndexProgress(
+            stage="scan",
+            message="Scanning workspace files",
+            started_at=start_time,
+            updated_at=start_time,
+        )
+
+        self._emit_progress(
+            callback,
+            stage="scan",
+            completed=0,
+            total=0,
+            message="Scanning workspace files",
+        )
+
         scan_start = time.time()
-        
         try:
-            files = self.scan_files()
+            files = self.scan_files(progress_callback=callback)
             scan_time = time.time() - scan_start
-            logger.info(f"File scan completed in {scan_time:.2f}s, found {len(files)} files")
+            logger.info("File scan completed in %.2fs, found %d files", scan_time, len(files))
         except Exception as e:
-            logger.error(f"File scan failed: {e}")
-            result.success = False
+            logger.error("File scan failed: %s", e)
+            result.fatal_errors.append(f"File scan failed: {e}")
             result.errors.append(f"File scan failed: {e}")
+            self._large_files = previous_large_files
+            result.total_time_ms = (time.time() - start_time) * 1000
+            self._last_index_result = result
+            self._emit_progress(
+                callback,
+                stage="complete",
+                completed=0,
+                total=0,
+                message="Indexing aborted during scan",
+            )
             return result
-        
+
         result.files_scanned = len(files)
-        
-        if callback:
-            callback(0, len(files), "Starting indexing...")
-        
-        # Calculate total size
+
+        # Calculate total size.
         logger.info("Calculating total size...")
         for f in files:
             try:
                 result.total_bytes += f.stat().st_size
             except Exception:
                 pass
-        
-        logger.info(f"Total size: {result.total_bytes / (1024*1024):.2f} MB")
-        
-        # Chunked parallel parsing
-        parse_start = time.time()
-        chunk_size = self.config.chunk_size
-        total_chunks = (len(files) + chunk_size - 1) // chunk_size
-        
-        logger.info(f"Processing {len(files)} files in {total_chunks} chunks (chunk_size={chunk_size})")
-        
-        for chunk_idx in range(0, len(files), chunk_size):
-            chunk = files[chunk_idx:chunk_idx + chunk_size]
-            chunk_num = chunk_idx // chunk_size + 1
-            
-            logger.info(f"Processing chunk {chunk_num}/{total_chunks} ({len(chunk)} files)...")
-            
-            if callback:
-                progress = min(chunk_idx + chunk_size, len(files))
-                callback(progress, len(files), f"Processing chunk {chunk_num}/{total_chunks}...")
-            
-            # Process chunk in parallel
-            try:
-                with ThreadPoolExecutor(max_workers=self.config.max_workers) as executor:
-                    # Submit all tasks and track which file each future corresponds to
-                    futures = {}
-                    for f in chunk:
-                        logger.debug(f"Submitting file for parsing: {f}")
-                        future = executor.submit(self._parse_file_safe, f)
-                        futures[future] = f
-                    
-                    # Collect results with timeout
-                    chunk_symbols = []
-                    chunk_deps = []
-                    completed_count = 0
-                    
-                    for future in as_completed(futures, timeout=300):  # 5 minute timeout per chunk
-                        file_path = futures[future]
-                        completed_count += 1
-                        
-                        try:
-                            logger.debug(f"[{completed_count}/{len(chunk)}] Processing result for: {file_path}")
-                            parse_result, file_info = future.result(timeout=10)  # 10s per file
-                            
-                            if parse_result is None:
-                                result.files_skipped += 1
-                                logger.debug(f"  Skipped: {file_path}")
-                                continue
-                            
-                            if parse_result.success:
-                                result.files_parsed += 1
-                                result.symbols_extracted += parse_result.symbol_count
-                                result.dependencies_extracted += len(parse_result.dependencies)
-                                
-                                chunk_symbols.extend(parse_result.symbols)
-                                chunk_deps.extend(parse_result.dependencies)
-                                
-                                logger.debug(f"  Success: {parse_result.symbol_count} symbols, {len(parse_result.dependencies)} deps")
-                                
-                                # Track file info
-                                if file_info:
-                                    file_info.symbol_count = parse_result.symbol_count
-                                    self._file_info[str(file_path)] = file_info
-                            else:
-                                result.files_failed += 1
-                                result.errors.extend(parse_result.errors)
-                                logger.warning(f"  Failed: {parse_result.errors}")
-                        
-                        except TimeoutError:
-                            logger.warning(f"Timeout parsing file (10s): {file_path}")
-                            result.files_failed += 1
-                            result.errors.append(f"{file_path}: Timeout (10s)")
-                        except Exception as e:
-                            logger.warning(f"Error parsing file {file_path}: {e}")
-                            result.files_failed += 1
-                            result.errors.append(f"{file_path}: {str(e)}")
-                    
-                    # Batch commit to symbol table and dependency graph
-                    with self._index_lock:
-                        for symbol in chunk_symbols:
-                            self.symbol_table.add_symbol(symbol)
-                        for dep in chunk_deps:
-                            self.dependency_graph.add_dependency(dep)
-                    
-                    logger.info(f"Chunk {chunk_num} complete: {len(chunk_symbols)} symbols, {len(chunk_deps)} dependencies")
-                    
-            except TimeoutError:
-                logger.error(f"Chunk {chunk_num} timed out (300s)")
-                result.errors.append(f"Chunk {chunk_num} timed out")
-                # Try to identify which files were not completed
-                for future, file_path in futures.items():
-                    if not future.done():
-                        logger.error(f"  Stuck on file: {file_path}")
-                        result.errors.append(f"Timeout on: {file_path}")
-            except Exception as e:
-                logger.error(f"Error processing chunk {chunk_num}: {e}")
-                result.errors.append(f"Chunk {chunk_num}: {str(e)}")
-        
-        result.parse_time_ms = (time.time() - parse_start) * 1000
-        logger.info(f"Parsing completed in {result.parse_time_ms:.0f}ms")
-        result.total_time_ms = (time.time() - start_time) * 1000
-        
-        # Add warning for large files
-        if self._large_files:
-            result.warnings.append(
-                f"Found {len(self._large_files)} large file(s) that may have reduced parsing"
-            )
-        
-        if callback:
-            callback(len(files), len(files), "Indexing complete!")
+        logger.info("Total size: %.2f MB", result.total_bytes / (1024 * 1024))
 
-        self.save_cache()
-        
+        # Build the new index off to the side so the live index only changes on commit.
+        new_symbol_table = SymbolTable()
+        new_dependency_graph = DependencyGraph()
+        new_file_info: Dict[str, FileInfo] = {}
+        new_large_files = set(self._large_files)
+
+        parse_start = time.time()
+        chunk_size = max(1, int(self.config.chunk_size))
+        total_chunks = max(1, (len(files) + chunk_size - 1) // chunk_size)
+        processed_files = 0
+
+        logger.info(
+            "Processing %d files in %d chunks (chunk_size=%d)",
+            len(files),
+            total_chunks,
+            chunk_size,
+        )
+
+        self._emit_progress(
+            callback,
+            stage="parse",
+            completed=0,
+            total=len(files),
+            message="Preparing parser workers",
+            files_scanned=len(files),
+            files_parsed=0,
+            files_failed=0,
+            files_skipped=0,
+            chunk_index=0,
+            chunk_total=total_chunks,
+        )
+
+        with ThreadPoolExecutor(max_workers=self.config.max_workers) as executor:
+            for chunk_idx in range(0, len(files), chunk_size):
+                chunk = files[chunk_idx:chunk_idx + chunk_size]
+                chunk_num = chunk_idx // chunk_size + 1
+
+                logger.info("Processing chunk %d/%d (%d files)...", chunk_num, total_chunks, len(chunk))
+                self._emit_progress(
+                    callback,
+                    stage="parse",
+                    completed=processed_files,
+                    total=len(files),
+                    message=f"Parsing chunk {chunk_num}/{total_chunks}",
+                    files_scanned=len(files),
+                    files_parsed=result.files_parsed,
+                    files_failed=result.files_failed,
+                    files_skipped=result.files_skipped,
+                    chunk_index=chunk_num,
+                    chunk_total=total_chunks,
+                )
+
+                futures = {}
+                for file_path in chunk:
+                    futures[executor.submit(self._parse_file_safe, file_path)] = file_path
+
+                try:
+                    for future in as_completed(futures, timeout=300):
+                        file_path = futures[future]
+
+                        try:
+                            parse_result, file_info = future.result()
+                        except Exception as exc:
+                            logger.warning("Error parsing file %s: %s", file_path, exc)
+                            result.files_failed += 1
+                            result.errors.append(f"{file_path}: {exc}")
+                            processed_files += 1
+                            self._emit_progress(
+                                callback,
+                                stage="parse",
+                                completed=processed_files,
+                                total=len(files),
+                                message=f"Failed: {Path(file_path).name}",
+                                current_file=str(file_path),
+                                files_scanned=len(files),
+                                files_parsed=result.files_parsed,
+                                files_failed=result.files_failed,
+                                files_skipped=result.files_skipped,
+                                chunk_index=chunk_num,
+                                chunk_total=total_chunks,
+                            )
+                            continue
+
+                        if parse_result is None:
+                            result.files_skipped += 1
+                            processed_files += 1
+                            logger.debug("Skipped: %s", file_path)
+                            self._emit_progress(
+                                callback,
+                                stage="parse",
+                                completed=processed_files,
+                                total=len(files),
+                                message=f"Skipped: {Path(file_path).name}",
+                                current_file=str(file_path),
+                                files_scanned=len(files),
+                                files_parsed=result.files_parsed,
+                                files_failed=result.files_failed,
+                                files_skipped=result.files_skipped,
+                                chunk_index=chunk_num,
+                                chunk_total=total_chunks,
+                            )
+                            continue
+
+                        if parse_result.success:
+                            result.files_parsed += 1
+                            result.symbols_extracted += parse_result.symbol_count
+                            result.dependencies_extracted += len(parse_result.dependencies)
+                            self._apply_parse_result(
+                                new_symbol_table,
+                                new_dependency_graph,
+                                new_file_info,
+                                file_path,
+                                parse_result,
+                                file_info,
+                                remove_existing=False,
+                            )
+                            logger.debug(
+                                "Parsed %s: %d symbols, %d deps",
+                                file_path,
+                                parse_result.symbol_count,
+                                len(parse_result.dependencies),
+                            )
+                        else:
+                            result.files_failed += 1
+                            result.errors.extend(parse_result.errors)
+                            logger.warning("Failed: %s", parse_result.errors)
+
+                        processed_files += 1
+                        self._emit_progress(
+                            callback,
+                            stage="parse",
+                            completed=processed_files,
+                            total=len(files),
+                            message=f"Parsed: {Path(file_path).name}",
+                            current_file=str(file_path),
+                            files_scanned=len(files),
+                            files_parsed=result.files_parsed,
+                            files_failed=result.files_failed,
+                            files_skipped=result.files_skipped,
+                            chunk_index=chunk_num,
+                            chunk_total=total_chunks,
+                        )
+
+                except TimeoutError:
+                    logger.error("Chunk %d timed out (300s)", chunk_num)
+                    result.fatal_errors.append(f"Chunk {chunk_num} timed out")
+                    result.errors.append(f"Chunk {chunk_num} timed out")
+                    for future, file_path in futures.items():
+                        if not future.done():
+                            logger.error("  Stuck on file: %s", file_path)
+                            result.errors.append(f"Timeout on: {file_path}")
+                except Exception as e:
+                    logger.error("Error processing chunk %d: %s", chunk_num, e)
+                    result.errors.append(f"Chunk {chunk_num}: {str(e)}")
+
+        result.parse_time_ms = (time.time() - parse_start) * 1000
+        logger.info("Parsing completed in %.0fms", result.parse_time_ms)
+
+        if new_large_files:
+            result.warnings.append(
+                f"Found {len(new_large_files)} large file(s) that may have reduced parsing"
+            )
+
+        self._emit_progress(
+            callback,
+            stage="commit",
+            completed=result.files_parsed,
+            total=max(len(files), 1),
+            message="Swapping in the rebuilt index",
+            files_scanned=len(files),
+            files_parsed=result.files_parsed,
+            files_failed=result.files_failed,
+            files_skipped=result.files_skipped,
+            chunk_index=total_chunks,
+            chunk_total=total_chunks,
+        )
+        self._swap_index_state(new_symbol_table, new_dependency_graph, new_file_info, new_large_files)
+
+        if not self.save_cache():
+            result.warnings.append("Failed to persist the rebuilt context cache")
+
+        result.total_time_ms = (time.time() - start_time) * 1000
+        self._last_index_result = result
+
+        self._emit_progress(
+            callback,
+            stage="complete",
+            completed=result.files_parsed + result.files_failed + result.files_skipped,
+            total=max(len(files), 1),
+            message="index finished",
+            files_scanned=len(files),
+            files_parsed=result.files_parsed,
+            files_failed=result.files_failed,
+            files_skipped=result.files_skipped,
+            chunk_index=total_chunks,
+            chunk_total=total_chunks,
+        )
+
         return result
     
     def incremental_index(self, changed_files: Optional[List[Path]] = None) -> IndexResult:
@@ -775,56 +1159,107 @@ class CodebaseIndexer:
         """
         start_time = time.time()
         result = IndexResult()
-        
+
         if changed_files is None:
             changed_files = self._detect_changes()
-        
+
+        total_files = max(len(changed_files), 1)
+        self._index_progress = IndexProgress(
+            stage="incremental",
+            message="Indexing 0%",
+            total=total_files,
+            started_at=start_time,
+            updated_at=start_time,
+        )
+
         result.files_scanned = len(changed_files)
-        
+
         parse_start = time.time()
-        
-        for file_path in changed_files:
+
+        self._emit_progress(
+            None,
+            stage="incremental",
+            completed=0,
+            total=total_files,
+            message="Indexing 0%",
+            files_scanned=len(changed_files),
+            files_parsed=0,
+            files_failed=0,
+            files_skipped=0,
+        )
+
+        for index, file_path in enumerate(changed_files, start=1):
+            file_key = str(file_path)
             try:
+                # Remove the previous file state before reparsing so stale symbols
+                # do not survive a parse error.
+                with self._index_lock:
+                    self.symbol_table.remove_file(file_key)
+                    self.dependency_graph.remove_file(file_key)
+                    self._file_info.pop(file_key, None)
+
                 parse_result, file_info = self._parse_file_safe(file_path)
-                
+
                 if parse_result is None:
                     result.files_skipped += 1
                     continue
-                
+
                 if parse_result.success:
                     result.files_parsed += 1
                     result.symbols_extracted += parse_result.symbol_count
                     result.dependencies_extracted += len(parse_result.dependencies)
-                    
-                    # Remove old symbols/dependencies from this file
+
                     with self._index_lock:
-                        self.symbol_table.remove_file(str(file_path))
-                        self.dependency_graph.remove_file(str(file_path))
-                        
-                        # Add new symbols/dependencies
-                        for symbol in parse_result.symbols:
-                            self.symbol_table.add_symbol(symbol)
-                        
-                        for dep in parse_result.dependencies:
-                            self.dependency_graph.add_dependency(dep)
-                    
-                    # Update file info
-                    if file_info:
-                        file_info.symbol_count = parse_result.symbol_count
-                        self._file_info[str(file_path)] = file_info
+                        self._apply_parse_result(
+                            self.symbol_table,
+                            self.dependency_graph,
+                            self._file_info,
+                            file_path,
+                            parse_result,
+                            file_info,
+                            remove_existing=False,
+                        )
                 else:
                     result.files_failed += 1
                     result.errors.extend(parse_result.errors)
-            
+
             except Exception as e:
                 result.files_failed += 1
                 result.errors.append(f"{file_path}: {str(e)}")
-        
+            finally:
+                percent = (index / total_files) * 100.0
+                self._emit_progress(
+                    None,
+                    stage="incremental",
+                    completed=index,
+                    total=total_files,
+                    message=f"Indexing {percent:.0f}%",
+                    current_file=str(file_path),
+                    files_scanned=len(changed_files),
+                    files_parsed=result.files_parsed,
+                    files_failed=result.files_failed,
+                    files_skipped=result.files_skipped,
+                )
+
         result.parse_time_ms = (time.time() - parse_start) * 1000
         result.total_time_ms = (time.time() - start_time) * 1000
+        self._last_index_result = result
 
-        self.save_cache()
-        
+        if not self.save_cache():
+            result.warnings.append("Failed to persist incremental cache update")
+
+        self._emit_progress(
+            None,
+            stage="complete",
+            completed=total_files,
+            total=total_files,
+            message="index finished",
+            files_scanned=len(changed_files),
+            files_parsed=result.files_parsed,
+            files_failed=result.files_failed,
+            files_skipped=result.files_skipped,
+        )
+
         return result
     
     def _detect_changes(self) -> List[Path]:
@@ -881,11 +1316,13 @@ class CodebaseIndexer:
             
             # Skip extremely large files
             if size_kb > self.config.max_file_size_kb:
-                return ParseResult(
-                    file_path=str(file_path),
-                    language="unknown",
-                    errors=[f"File too large ({size_kb:.1f}KB > {self.config.max_file_size_kb}KB)"]
-                ), None
+                logger.debug(
+                    "Skipping oversized file %s (%.1fKB > %dKB)",
+                    file_path,
+                    size_kb,
+                    self.config.max_file_size_kb,
+                )
+                return None, None
             
             logger.debug(f"Parsing file: {file_path}")
             result = self._parse_file(file_path)
@@ -965,9 +1402,22 @@ class CodebaseIndexer:
         cached = self._cache_manager.load()
         if not cached:
             return False
-        self.symbol_table = cached['symbol_table']
-        self.dependency_graph = cached['dependency_graph']
-        self._file_info = cached['file_info']
+        self.symbol_table.replace_with(cached['symbol_table'])
+        self.dependency_graph.replace_with(cached['dependency_graph'])
+        self._file_info.clear()
+        self._file_info.update(cached['file_info'])
+        self._large_files.clear()
+        self._large_files.update({
+            path for path, info in self._file_info.items()
+            if getattr(info, "size", 0) / 1024 > self.config.max_file_size_kb
+        })
+        self._index_progress = IndexProgress(
+            stage="idle",
+            message="Loaded cached index",
+            started_at=time.time(),
+            updated_at=time.time(),
+        )
+        self._last_index_result = None
         return True
     
     def get_statistics(self) -> Dict:
@@ -980,7 +1430,9 @@ class CodebaseIndexer:
             'large_files': len(self._large_files),
             'symbols': self.symbol_table.get_statistics(),
             'dependencies': self.dependency_graph.get_statistics(),
-            'project_root': str(self.project_root)
+            'project_root': str(self.project_root),
+            'index_status': self.get_index_status(),
+            'cache_info': self._cache_manager.get_cache_info() or {},
         }
     
     def get_game_assets(self) -> Dict[str, List[Dict]]:

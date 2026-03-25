@@ -21,6 +21,7 @@ from typing import Optional, List, Dict, Any
 from rich.console import Console, Group
 from rich.prompt import Prompt, Confirm
 from rich.live import Live
+from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
 from rich.panel import Panel
 from rich.padding import Padding
 from rich.text import Text
@@ -334,6 +335,7 @@ class ReverieInterface:
         self._status_line_cache_renderable = None
         self._status_line_cache_time = 0.0
         self._context_engine_ready = False
+        self._indexing_in_progress = False
         self._git_integration_ready = False
         self._lsp_manager_ready = False
 
@@ -539,6 +541,9 @@ class ReverieInterface:
             if reasoning_mode:
                 reasoning_label = get_codex_reasoning_label(reasoning_mode)
 
+        index_status_text = self._get_index_status_text()
+        index_status_label = index_status_text.plain if index_status_text else None
+
         total_tokens = None
         max_tokens = 128000
         percentage = 0.0
@@ -564,6 +569,7 @@ class ReverieInterface:
             model_label,
             project_label,
             reasoning_label,
+            index_status_label,
             total_tokens,
             max_tokens,
             int(percentage),
@@ -605,6 +611,9 @@ class ReverieInterface:
             if not tiny:
                 usage += f" ({percentage:.0f}%)"
             summary.append(usage, style=token_color)
+        if index_status_text:
+            summary.append(f" {self.deco.DOT_MEDIUM} ", style=self.theme.TEXT_DIM)
+            summary.append_text(index_status_text)
 
         if compact:
             body = Group(top_grid, summary)
@@ -626,6 +635,9 @@ class ReverieInterface:
                     f"{self._format_compact_quantity(total_tokens)}/{self._format_compact_quantity(max_tokens)} ({percentage:.0f}%)",
                     style=token_color,
                 )
+            if index_status_text:
+                secondary.append(f" {self.deco.DOT_MEDIUM} ", style=self.theme.TEXT_DIM)
+                secondary.append_text(index_status_text)
             body = Group(top_grid, secondary)
 
         self._status_line_cache_key = cache_key
@@ -1254,6 +1266,30 @@ class ReverieInterface:
             self._render_thinking_line(line)
         return remainder
 
+    def _get_index_status_text(self) -> Optional[Text]:
+        """Return the terse context-index status shown in the status bar."""
+        indexer = getattr(self, "indexer", None)
+        if not indexer:
+            if getattr(self, "_indexing_in_progress", False):
+                return Text("Indexing 0%", style=f"bold {self.theme.AMBER_GLOW}")
+            return None
+
+        try:
+            status = indexer.get_index_status()
+        except Exception:
+            if getattr(self, "_indexing_in_progress", False):
+                return Text("Indexing 0%", style=f"bold {self.theme.AMBER_GLOW}")
+            return None
+
+        label = str(status.get("display_label") or "").strip()
+        if not label and getattr(self, "_indexing_in_progress", False):
+            label = "Indexing 0%"
+        if not label:
+            return None
+
+        style = f"bold {self.theme.MINT_VIBRANT}" if status.get("is_finished") else f"bold {self.theme.AMBER_GLOW}"
+        return Text(label, style=style)
+
     def _init_context_engine(self) -> None:
         self._init_context_engine_with_options(announce=True)
 
@@ -1272,8 +1308,13 @@ class ReverieInterface:
         config = self.config_manager.load()
         cached = self.indexer.load_cache()
         if not cached and config.auto_index:
-            with self.console.status(f"[{self.theme.PURPLE_SOFT}]{self.deco.SPARKLE} Indexing...[/{self.theme.PURPLE_SOFT}]"):
-                self.indexer.full_index()
+            self._show_activity_event(
+                "Context Engine",
+                "No warm cache available, building a fresh index.",
+                status="working",
+                detail="The status bar will show index progress as a percentage and switch to index finished when done.",
+            )
+            self._run_context_indexing_with_progress()
         self.retriever = ContextRetriever(
             self.indexer.symbol_table,
             self.indexer.dependency_graph,
@@ -1311,6 +1352,56 @@ class ReverieInterface:
             mode=self.agent.mode,
             ant_phase=prompt_phase,
         )
+
+    def _run_context_indexing_with_progress(self) -> Optional[object]:
+        """Run a full context index while streaming live progress to the terminal."""
+        if not self.indexer:
+            return None
+
+        result_holder: dict[str, object] = {"result": None}
+        self._indexing_in_progress = True
+
+        with Progress(
+            SpinnerColumn(style=self.theme.PURPLE_SOFT),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(bar_width=None),
+            TextColumn("{task.percentage:>3.0f}%"),
+            TimeElapsedColumn(),
+            TimeRemainingColumn(),
+            console=self.console,
+            transient=True,
+        ) as progress:
+            task_id = progress.add_task("Indexing", total=100)
+
+            def _progress_callback(snapshot) -> None:
+                stage = str(getattr(snapshot, "stage", "") or "").lower()
+                percent = float(getattr(snapshot, "display_percent", getattr(snapshot, "percent", 0.0)) or 0.0)
+                is_finished = stage == "complete"
+                progress.update(
+                    task_id,
+                    description="index finished" if is_finished else "Indexing",
+                    completed=min(max(percent, 0.0), 100.0),
+                    total=100,
+                )
+
+            try:
+                result_holder["result"] = self.indexer.full_index(progress_callback=_progress_callback)
+            except Exception as exc:
+                self._show_activity_event(
+                    "Context Engine",
+                    "Indexing failed unexpectedly.",
+                    status="error",
+                    detail=str(exc),
+                )
+                result_holder["result"] = None
+            finally:
+                self._indexing_in_progress = False
+
+        result = result_holder["result"]
+        if result is not None:
+            self._refresh_command_context()
+            self._sync_agent_context_engine()
+        return result
 
     def ensure_context_engine(self, *, announce: bool = False) -> bool:
         """Initialize the Context Engine on demand and synchronize it into the active agent."""
@@ -1591,6 +1682,7 @@ class ReverieInterface:
             'project_root': self.project_root,
             'reinit_agent': self._init_agent,
             'ensure_context_engine': self.ensure_context_engine,
+            'run_full_index': self._run_context_indexing_with_progress,
             'ensure_git_integration': self.ensure_git_integration,
             'ensure_lsp_manager': self.ensure_lsp_manager,
             'clean_workspace_state': self.clean_workspace_state,

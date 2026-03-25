@@ -4845,22 +4845,38 @@ class CommandHandler:
         """Re-index the codebase with styled output"""
         indexer = self.app.get('indexer')
         ensure_context_engine = self.app.get('ensure_context_engine')
+        run_full_index = self.app.get('run_full_index')
         if not indexer and ensure_context_engine:
             ensure_context_engine()
             indexer = self.app.get('indexer')
+            run_full_index = self.app.get('run_full_index')
         if not indexer:
             self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Indexer not available[/{self.theme.CORAL_SOFT}]")
             return True
         
-        with self.console.status(f"[{self.theme.PURPLE_SOFT}]{self.deco.SPARKLE} Indexing codebase...[/{self.theme.PURPLE_SOFT}]"):
+        if callable(run_full_index):
+            result = run_full_index()
+        else:
             result = indexer.full_index()
-        
-        self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Indexing complete![/{self.theme.MINT_VIBRANT}]")
+
+        if not result:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Indexing failed before a result could be produced.[/{self.theme.CORAL_SOFT}]")
+            return True
+
+        status_label = "complete" if result.success else "completed with issues"
+        self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Indexing {status_label}.[/{self.theme.MINT_VIBRANT}]")
         self.console.print(f"  [{self.theme.TEXT_SECONDARY}]{self.deco.DOT_MEDIUM} Files scanned: [{self.theme.BLUE_SOFT}]{result.files_scanned}[/{self.theme.BLUE_SOFT}][/{self.theme.TEXT_SECONDARY}]")
         self.console.print(f"  [{self.theme.TEXT_SECONDARY}]{self.deco.DOT_MEDIUM} Files parsed: [{self.theme.BLUE_SOFT}]{result.files_parsed}[/{self.theme.BLUE_SOFT}][/{self.theme.TEXT_SECONDARY}]")
+        self.console.print(f"  [{self.theme.TEXT_SECONDARY}]{self.deco.DOT_MEDIUM} Files skipped: [{self.theme.BLUE_SOFT}]{result.files_skipped}[/{self.theme.BLUE_SOFT}][/{self.theme.TEXT_SECONDARY}]")
+        self.console.print(f"  [{self.theme.TEXT_SECONDARY}]{self.deco.DOT_MEDIUM} Files failed: [{self.theme.BLUE_SOFT}]{result.files_failed}[/{self.theme.BLUE_SOFT}][/{self.theme.TEXT_SECONDARY}]")
         self.console.print(f"  [{self.theme.TEXT_SECONDARY}]{self.deco.DOT_MEDIUM} Symbols: [{self.theme.BLUE_SOFT}]{result.symbols_extracted}[/{self.theme.BLUE_SOFT}][/{self.theme.TEXT_SECONDARY}]")
         self.console.print(f"  [{self.theme.TEXT_SECONDARY}]{self.deco.DOT_MEDIUM} Time: [{self.theme.PURPLE_SOFT}]{result.total_time_ms:.0f}ms[/{self.theme.PURPLE_SOFT}][/{self.theme.TEXT_SECONDARY}]")
         
+        if result.warnings:
+            self.console.print(f"\n[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Warnings ({len(result.warnings)}):[/{self.theme.AMBER_GLOW}]")
+            for warning in result.warnings[:5]:
+                self.console.print(f"  [{self.theme.TEXT_DIM}]- {warning}[/{self.theme.TEXT_DIM}]")
+
         if result.errors:
             self.console.print(f"\n[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Errors ({len(result.errors)}):[/{self.theme.AMBER_GLOW}]")
             for err in result.errors[:5]:
@@ -6305,6 +6321,7 @@ class CommandHandler:
             /CE stats        - Show context statistics
         """
         agent = self.app.get('agent')
+        indexer = self.app.get('indexer')
         config_manager = self.app.get('config_manager')
 
         if not agent:
@@ -6373,6 +6390,27 @@ class CommandHandler:
                     status="error",
                     detail=str(e),
                 )
+
+            if indexer:
+                try:
+                    index_status = indexer.get_index_status()
+                    status_label = str(index_status.get("display_label") or "").strip() or "idle"
+                    status_rows = [
+                        ("Index Status", status_label),
+                        ("Indexed Files", index_status.get("files_indexed", 0)),
+                        ("Symbols", index_status.get("symbols_indexed", 0)),
+                        ("Large Files", index_status.get("large_files", 0)),
+                    ]
+                    self.console.print(self._build_key_value_table(status_rows))
+                    self.console.print()
+
+                except Exception as e:
+                    self._show_activity_event(
+                        "Context Engine",
+                        "Failed to inspect current index state.",
+                        status="warning",
+                        detail=str(e),
+                    )
 
             # Show available commands
             self.console.print(

@@ -219,6 +219,37 @@ class SymbolTable:
             'by_kind': {kind.name: 0 for kind in SymbolKind},
             'by_language': {}
         }
+
+    def clear(self) -> None:
+        """Reset the table while keeping the object identity stable."""
+        self._symbols.clear()
+        self._file_index.clear()
+        self._kind_index = {kind: set() for kind in SymbolKind}
+        self._name_index.clear()
+        self._stats = {
+            'total_symbols': 0,
+            'total_files': 0,
+            'by_kind': {kind.name: 0 for kind in SymbolKind},
+            'by_language': {}
+        }
+
+    def replace_with(self, other: 'SymbolTable') -> None:
+        """
+        Replace the contents of this table with another table in place.
+
+        This keeps existing references valid, which is important for retrievers
+        and other long-lived objects that hold onto the table instance.
+        """
+        self._symbols = dict(other._symbols)
+        self._file_index = {path: set(qnames) for path, qnames in other._file_index.items()}
+        self._kind_index = {kind: set(qnames) for kind, qnames in other._kind_index.items()}
+        self._name_index = {name: set(qnames) for name, qnames in other._name_index.items()}
+        self._stats = {
+            'total_symbols': other._stats.get('total_symbols', 0),
+            'total_files': other._stats.get('total_files', 0),
+            'by_kind': dict(other._stats.get('by_kind', {})),
+            'by_language': dict(other._stats.get('by_language', {})),
+        }
     
     def add_symbol(self, symbol: Symbol) -> None:
         """Add or update a symbol in the table"""
@@ -319,10 +350,22 @@ class SymbolTable:
     
     def get_all_in_file(self, file_path: str) -> List[Symbol]:
         """Get all symbols defined in a file"""
-        qnames = self._file_index.get(file_path, set())
+        lookup_path = str(file_path or "")
+        qnames = self._file_index.get(lookup_path, set())
+        if not qnames and lookup_path:
+            try:
+                resolved = str(Path(lookup_path).resolve())
+                if resolved != lookup_path:
+                    qnames = self._file_index.get(resolved, set())
+            except Exception:
+                pass
         symbols = [self._symbols[qn] for qn in qnames if qn in self._symbols]
         # Sort by line number
         return sorted(symbols, key=lambda s: s.start_line)
+
+    def get_symbols_in_file(self, file_path: str) -> List[Symbol]:
+        """Compatibility alias used by some Context Engine components."""
+        return self.get_all_in_file(file_path)
     
     def get_children(self, qualified_name: str) -> List[Symbol]:
         """Get all direct children of a symbol"""

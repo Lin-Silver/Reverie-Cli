@@ -21,7 +21,7 @@ Advanced Components:
 
 from .symbol_table import Symbol, SymbolTable, SymbolKind
 from .dependency_graph import Dependency, DependencyGraph, DependencyType
-from .indexer import CodebaseIndexer, IndexResult, FileInfo, IndexConfig
+from .indexer import CodebaseIndexer, IndexResult, IndexProgress, FileInfo, IndexConfig
 from .retriever import (
     ContextRetriever,
     ContextPackage,
@@ -57,6 +57,7 @@ __all__ = [
     # Indexer
     'CodebaseIndexer',
     'IndexResult',
+    'IndexProgress',
     'FileInfo',
     # Retriever
     'ContextRetriever',

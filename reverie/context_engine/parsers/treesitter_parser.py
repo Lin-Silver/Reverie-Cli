@@ -29,7 +29,7 @@ from ..dependency_graph import Dependency, DependencyType
 # Language configurations
 SUPPORTED_LANGUAGES: Dict[str, Dict] = {
     'javascript': {
-        'extensions': ('.js', '.mjs', '.cjs'),
+        'extensions': ('.js', '.jsx', '.mjs', '.cjs'),
         'tree_sitter_lang': 'javascript'
     },
     'typescript': {
@@ -69,7 +69,7 @@ SUPPORTED_LANGUAGES: Dict[str, Dict] = {
         'tree_sitter_lang': 'html'
     },
     'css': {
-        'extensions': ('.css',),
+        'extensions': ('.css', '.scss', '.sass', '.less'),
         'tree_sitter_lang': 'css'
     }
 }

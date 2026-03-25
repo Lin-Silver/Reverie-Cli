@@ -100,6 +100,18 @@ class ContextEngineCore:
             'total_patterns': 0,
             'index_time_ms': 0
         }
+
+    def _resolve_file_path(self, file_path: str) -> str:
+        """Normalize a file path against the workspace root when possible."""
+        try:
+            candidate = Path(file_path)
+            if not candidate.is_absolute():
+                candidate = (self.project_root / candidate).resolve()
+            else:
+                candidate = candidate.resolve()
+            return str(candidate)
+        except Exception:
+            return str(file_path)
     
     def query(self, context_query: ContextQuery) -> ContextResult:
         """
@@ -187,10 +199,10 @@ class ContextEngineCore:
     
     def _query_file(self, query: ContextQuery) -> ContextResult:
         """Query for file information"""
-        file_path = query.query
+        file_path = self._resolve_file_path(query.query)
         
         # Get symbols in file
-        symbols = self.symbol_table.get_symbols_in_file(file_path)
+        symbols = self.symbol_table.get_all_in_file(file_path)
         
         # Get semantic nodes in file
         semantic_nodes = [
@@ -328,7 +340,7 @@ class ContextEngineCore:
     
     def _query_history(self, query: ContextQuery) -> ContextResult:
         """Query commit history"""
-        file_path = query.query
+        file_path = self._resolve_file_path(query.query)
         entity_name = query.options.get('entity_name')
         
         # Get evolution history
@@ -357,6 +369,8 @@ class ContextEngineCore:
         This combines information from all context engine components
         to provide comprehensive context for code editing.
         """
+        file_path = self._resolve_file_path(file_path)
+
         # Get context from semantic indexer
         semantic_context = self.semantic_indexer.get_context_for_edit(
             file_path,
@@ -365,7 +379,7 @@ class ContextEngineCore:
         )
         
         # Get symbols in the file
-        symbols = self.symbol_table.get_symbols_in_file(file_path)
+        symbols = self.symbol_table.get_all_in_file(file_path)
         
         # Find overlapping symbols
         overlapping_symbols = [
@@ -437,8 +451,8 @@ class ContextEngineCore:
                 return False
             
             # Load traditional components
-            self.symbol_table = cached_data['symbol_table']
-            self.dependency_graph = cached_data['dependency_graph']
+            self.symbol_table.replace_with(cached_data['symbol_table'])
+            self.dependency_graph.replace_with(cached_data['dependency_graph'])
             
             # Load advanced components from metadata
             metadata = cached_data.get('metadata', {})

@@ -90,6 +90,26 @@ class DependencyGraph:
             'total_edges': 0,
             'by_type': {t.name: 0 for t in DependencyType}
         }
+
+    def clear(self) -> None:
+        """Reset the graph while keeping the object identity stable."""
+        self._outgoing.clear()
+        self._incoming.clear()
+        self._file_index.clear()
+        self._stats = {
+            'total_edges': 0,
+            'by_type': {t.name: 0 for t in DependencyType}
+        }
+
+    def replace_with(self, other: 'DependencyGraph') -> None:
+        """Replace the graph contents in place."""
+        self._outgoing = defaultdict(list, {key: list(value) for key, value in other._outgoing.items()})
+        self._incoming = defaultdict(list, {key: list(value) for key, value in other._incoming.items()})
+        self._file_index = defaultdict(set, {key: set(value) for key, value in other._file_index.items()})
+        self._stats = {
+            'total_edges': other._stats.get('total_edges', 0),
+            'by_type': dict(other._stats.get('by_type', {}))
+        }
     
     def add_dependency(self, dep: Dependency) -> None:
         """Add a dependency edge to the graph"""

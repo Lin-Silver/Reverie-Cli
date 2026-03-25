@@ -9,6 +9,9 @@ import sys
 import argparse
 from pathlib import Path
 
+from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
+
 # Version info
 __version__ = "2.1.4"
 
@@ -66,16 +69,56 @@ def main():
     if args.index_only:
         from reverie.config import get_project_data_dir
         from reverie.context_engine import CodebaseIndexer
-        
+
+        console = Console()
         print(f"Indexing: {project_root}")
         indexer = CodebaseIndexer(project_root, cache_dir=get_project_data_dir(project_root) / "context_cache")
-        result = indexer.full_index()
-        
+
+        result_holder = {"result": None}
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(bar_width=None),
+            TextColumn("{task.percentage:>3.0f}%"),
+            TimeElapsedColumn(),
+            TimeRemainingColumn(),
+            console=console,
+            transient=True,
+        ) as progress:
+            task_id = progress.add_task("Indexing", total=100)
+
+            def _progress_callback(snapshot) -> None:
+                stage = str(getattr(snapshot, "stage", "") or "").lower()
+                percent = float(getattr(snapshot, "display_percent", getattr(snapshot, "percent", 0.0)) or 0.0)
+                is_finished = stage == "complete"
+                progress.update(
+                    task_id,
+                    description="index finished" if is_finished else "Indexing",
+                    completed=min(max(percent, 0.0), 100.0),
+                    total=100,
+                )
+
+            try:
+                result_holder["result"] = indexer.full_index(progress_callback=_progress_callback)
+            except Exception as exc:
+                console.print(f"[red]Indexing failed unexpectedly:[/red] {exc}")
+                result_holder["result"] = None
+
+        result = result_holder["result"]
+        if result is None:
+            return 1
+
         print(f"Files scanned: {result.files_scanned}")
         print(f"Files parsed: {result.files_parsed}")
+        print(f"Files skipped: {result.files_skipped}")
+        print(f"Files failed: {result.files_failed}")
         print(f"Symbols extracted: {result.symbols_extracted}")
         print(f"Dependencies: {result.dependencies_extracted}")
         print(f"Time: {result.total_time_ms:.0f}ms")
+        if result.warnings:
+            print(f"\nWarnings ({len(result.warnings)}):")
+            for warning in result.warnings[:10]:
+                print(f"  - {warning}")
         
         if result.errors:
             print(f"\nErrors ({len(result.errors)}):")

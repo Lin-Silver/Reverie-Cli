@@ -11,7 +11,7 @@ Optimized for large codebases (>5MB source code).
 """
 
 from pathlib import Path
-from typing import List, Dict, Optional, Set, Tuple, Callable
+from typing import List, Dict, Optional, Set, Tuple, Callable, Any
 from dataclasses import dataclass, field
 import time
 import os
@@ -24,12 +24,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from .symbol_table import Symbol, SymbolTable
 from .dependency_graph import DependencyGraph, Dependency
 from .parsers.base import BaseParser, ParseResult
+from .parsers.document_parser import DocumentParser
 from .parsers.python_parser import PythonParser
 from .parsers.treesitter_parser import TreeSitterParser, SUPPORTED_LANGUAGES
 from .parsers.simple_script_parser import SimpleScriptParser
 from .parsers.lua_parser import LuaParser
 from .parsers.gdscript_parser import GDScriptParser
 from .parsers.config_parser import ConfigParser
+from .cache import CacheManager
 from ..config import get_project_data_dir
 
 
@@ -65,6 +67,16 @@ class FileInfo:
     size: int
     content_hash: str
     symbol_count: int = 0  # Newly added: symbol count
+    language: str = "unknown"
+    line_count: int = 0
+    imports: List[Dict[str, Any]] = field(default_factory=list)
+    import_count: int = 0
+    symbol_names: List[str] = field(default_factory=list)
+    top_level_symbols: List[str] = field(default_factory=list)
+    keywords: List[str] = field(default_factory=list)
+    tags: List[str] = field(default_factory=list)
+    dependency_targets: List[str] = field(default_factory=list)
+    summary: str = ""
 
 
 @dataclass
@@ -161,6 +173,7 @@ class CodebaseIndexer:
         '.html', '.htm',  # HTML
         '.css', '.scss', '.sass', '.less',  # CSS
         '.lua', '.gd',  # Love2D (Lua) and Godot (GDScript)
+        '.md', '.mdx', '.rst', '.txt',  # Docs and repository knowledge
     }
     
     # Game asset file extensions
@@ -197,6 +210,7 @@ class CodebaseIndexer:
         self.project_root = Path(project_root).resolve()
         self.cache_dir = cache_dir or (get_project_data_dir(self.project_root) / 'context_cache')
         self.config = config or IndexConfig()
+        self._cache_manager = CacheManager(self.cache_dir)
         
         # Core data structures
         self.symbol_table = SymbolTable()
@@ -216,6 +230,7 @@ class CodebaseIndexer:
             LuaParser(self.project_root),
             GDScriptParser(self.project_root),
             ConfigParser(self.project_root),
+            DocumentParser(self.project_root),
             TreeSitterParser(self.project_root),
             SimpleScriptParser(self.project_root),
         ]
@@ -375,6 +390,143 @@ class CodebaseIndexer:
     def _calculate_file_hash(self, content: str) -> str:
         """Calculate hash of file content"""
         return hashlib.md5(content.encode('utf-8')).hexdigest()
+
+    def _extract_text_tokens(self, *values: str) -> List[str]:
+        """Extract a compact set of retrieval-friendly tokens."""
+        import re
+
+        stop_words = {
+            'the', 'and', 'for', 'with', 'from', 'into', 'that', 'this', 'these',
+            'those', 'your', 'have', 'will', 'would', 'should', 'could', 'their',
+            'about', 'where', 'when', 'which', 'while', 'true', 'false', 'none',
+            'null', 'then', 'else', 'than', 'return', 'class', 'function', 'module',
+            'config', 'value', 'data', 'item', 'items', 'file', 'files',
+        }
+        tokens: List[str] = []
+        seen: Set[str] = set()
+        for value in values:
+            text = str(value or "")
+            for raw in re.findall(r"[A-Za-z_][A-Za-z0-9_]{2,}", text):
+                parts = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", raw).replace("_", " ").split()
+                for part in parts:
+                    token = part.lower().strip()
+                    if len(token) < 3 or token in stop_words or token in seen:
+                        continue
+                    seen.add(token)
+                    tokens.append(token)
+        return tokens[:48]
+
+    def _infer_file_tags(self, file_path: Path, parse_result: ParseResult) -> List[str]:
+        """Infer coarse roles that help task-level retrieval."""
+        path_text = str(file_path).lower().replace("\\", "/")
+        tags: List[str] = []
+        tag_rules = {
+            'test': ['test', 'tests', 'spec'],
+            'config': ['config', 'settings', '.json', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf'],
+            'docs': ['docs/', '/doc/', '.md', '.mdx', '.rst', '.txt', 'readme'],
+            'api': ['api', 'route', 'routes', 'endpoint', 'handler', 'controller'],
+            'service': ['service', 'services', 'provider'],
+            'model': ['model', 'models', 'schema', 'entity'],
+            'cli': ['cli', 'command', 'commands'],
+            'ui': ['ui', 'view', 'views', 'component', 'components', 'page', 'pages'],
+            'infra': ['deploy', 'infra', 'terraform', 'docker', 'k8s', 'kubernetes'],
+            'engine': ['context_engine', 'engine', 'retriever', 'indexer', 'parser'],
+        }
+        for tag, patterns in tag_rules.items():
+            if any(pattern in path_text for pattern in patterns):
+                tags.append(tag)
+        language = str(parse_result.language or "").lower()
+        if language in {"markdown", "rst", "text"} and 'docs' not in tags:
+            tags.append('docs')
+        return tags[:8]
+
+    def _build_file_summary(
+        self,
+        file_path: Path,
+        parse_result: ParseResult,
+        imports: List[Dict[str, Any]],
+        symbols: List[Symbol],
+        tags: List[str],
+    ) -> str:
+        """Create a compact natural-language summary for a file."""
+        role = "code file"
+        if "docs" in tags:
+            role = "documentation"
+        elif "config" in tags:
+            role = "configuration"
+        elif "test" in tags:
+            role = "test file"
+        elif "api" in tags:
+            role = "API surface"
+        elif "service" in tags:
+            role = "service module"
+        elif "engine" in tags:
+            role = "engine module"
+
+        symbol_names = [symbol.name for symbol in symbols[:5] if symbol.name]
+        import_names: List[str] = []
+        for item in imports[:4]:
+            if not isinstance(item, dict):
+                continue
+            import_name = str(item.get('module') or item.get('name') or item.get('path') or "").strip()
+            if import_name:
+                import_names.append(import_name)
+
+        parts = [f"{role} {file_path.name}"]
+        if symbol_names:
+            parts.append("defines " + ", ".join(symbol_names))
+        if import_names:
+            parts.append("depends on " + ", ".join(import_names))
+        if tags:
+            parts.append("tags: " + ", ".join(tags))
+        return ". ".join(parts).strip()
+
+    def _enrich_file_info(
+        self,
+        file_path: Path,
+        content: str,
+        parse_result: ParseResult,
+        file_info: Optional[FileInfo],
+    ) -> Optional[FileInfo]:
+        """Populate retrieval-oriented metadata for the file cache."""
+        if file_info is None:
+            return None
+
+        imports = [item for item in (parse_result.imports or []) if isinstance(item, dict)]
+        top_level_symbols = [symbol.qualified_name for symbol in parse_result.symbols[:12]]
+        symbol_names = [symbol.name for symbol in parse_result.symbols[:20] if symbol.name]
+        dependency_targets = list({
+            dep.to_symbol
+            for dep in parse_result.dependencies[:40]
+            if getattr(dep, "to_symbol", None)
+        })[:20]
+        tags = self._infer_file_tags(file_path, parse_result)
+        try:
+            relative_path = str(file_path.relative_to(self.project_root))
+        except ValueError:
+            relative_path = str(file_path)
+        keywords = self._extract_text_tokens(
+            relative_path,
+            parse_result.language,
+            " ".join(symbol_names),
+            " ".join(top_level_symbols),
+            " ".join(str(item.get('module') or '') for item in imports),
+            " ".join(tags),
+            content[:3000],
+        )
+        summary = self._build_file_summary(file_path, parse_result, imports, parse_result.symbols, tags)
+
+        file_info.language = parse_result.language
+        file_info.line_count = content.count('\n') + (1 if content and not content.endswith('\n') else 0)
+        file_info.imports = imports[:16]
+        file_info.import_count = len(imports)
+        file_info.symbol_names = symbol_names
+        file_info.top_level_symbols = top_level_symbols
+        file_info.keywords = keywords
+        file_info.tags = tags
+        file_info.dependency_targets = dependency_targets
+        file_info.summary = summary[:360]
+        return file_info
     
     def scan_files(self) -> List[Path]:
         """Scan project for all supported files with size filtering"""
@@ -609,6 +761,8 @@ class CodebaseIndexer:
         
         if callback:
             callback(len(files), len(files), "Indexing complete!")
+
+        self.save_cache()
         
         return result
     
@@ -668,6 +822,8 @@ class CodebaseIndexer:
         
         result.parse_time_ms = (time.time() - parse_start) * 1000
         result.total_time_ms = (time.time() - start_time) * 1000
+
+        self.save_cache()
         
         return result
     
@@ -778,6 +934,7 @@ class CodebaseIndexer:
         
         # Parse
         parse_result = parser.parse_file(file_path, content)
+        file_info = self._enrich_file_info(file_path, content, parse_result, file_info)
         
         # Lazy-load optimization: avoid storing full source for large files
         if self.config.lazy_load_source and file_info:
@@ -794,6 +951,24 @@ class CodebaseIndexer:
     def update_file(self, file_path: Path) -> IndexResult:
         """Update index for a single file (called after edits)"""
         return self.incremental_index([file_path.resolve()])
+
+    def save_cache(self) -> bool:
+        """Persist the latest index state to disk."""
+        return self._cache_manager.save(
+            self.symbol_table,
+            self.dependency_graph,
+            self._file_info,
+        )
+
+    def load_cache(self) -> bool:
+        """Load cached index state when available."""
+        cached = self._cache_manager.load()
+        if not cached:
+            return False
+        self.symbol_table = cached['symbol_table']
+        self.dependency_graph = cached['dependency_graph']
+        self._file_info = cached['file_info']
+        return True
     
     def get_statistics(self) -> Dict:
         """Get detailed indexing statistics"""

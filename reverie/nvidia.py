@@ -2,7 +2,7 @@
 NVIDIA integration helpers.
 
 This source supports a mixed NVIDIA-hosted catalog where each model can require
-its own transport and request defaults.
+its own transport, payload defaults, and transcript normalization policy.
 """
 
 from __future__ import annotations
@@ -27,6 +27,8 @@ def _request_model(
     vision: bool = False,
     thinking: bool = False,
     context_length: Optional[int] = None,
+    tool_calling: bool = False,
+    system_message_first: bool = True,
 ) -> Dict[str, Any]:
     return {
         "id": model_id,
@@ -36,6 +38,8 @@ def _request_model(
         "vision": bool(vision),
         "thinking": bool(thinking),
         "context_length": context_length,
+        "tool_calling": bool(tool_calling),
+        "system_message_first": bool(system_message_first),
     }
 
 
@@ -47,6 +51,8 @@ def _openai_model(
     vision: bool = False,
     thinking: bool = False,
     context_length: Optional[int] = None,
+    tool_calling: bool = True,
+    system_message_first: bool = True,
 ) -> Dict[str, Any]:
     return {
         "id": model_id,
@@ -56,6 +62,8 @@ def _openai_model(
         "vision": bool(vision),
         "thinking": bool(thinking),
         "context_length": context_length,
+        "tool_calling": bool(tool_calling),
+        "system_message_first": bool(system_message_first),
     }
 
 
@@ -138,6 +146,7 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
 _NVIDIA_MODEL_METADATA = {
     str(item["id"]).strip().lower(): dict(item) for item in _NVIDIA_MODEL_CATALOG
 }
+_NVIDIA_API_HOSTS = ("integrate.api.nvidia.com",)
 
 
 def default_nvidia_config() -> Dict[str, Any]:
@@ -173,6 +182,33 @@ def get_nvidia_model_metadata(model_id: Any) -> Optional[Dict[str, Any]]:
         return None
     found = _NVIDIA_MODEL_METADATA.get(wanted)
     return dict(found) if found else None
+
+
+def is_nvidia_model(model_id: Any) -> bool:
+    """Whether the given model id is part of Reverie's NVIDIA catalog."""
+    return get_nvidia_model_metadata(model_id) is not None
+
+
+def nvidia_model_allows_tools(model_id: Any) -> bool:
+    """Whether Reverie should send tool-calling fields for this NVIDIA model."""
+    metadata = get_nvidia_model_metadata(model_id)
+    return bool(metadata and metadata.get("tool_calling"))
+
+
+def nvidia_model_requires_system_message_first(model_id: Any) -> bool:
+    """Whether a NVIDIA-served model requires all system instructions to lead the transcript."""
+    metadata = get_nvidia_model_metadata(model_id)
+    if not metadata:
+        return False
+    return bool(metadata.get("system_message_first", True))
+
+
+def is_nvidia_api_url(api_url: Any) -> bool:
+    """Whether the given URL points at NVIDIA's hosted integrate API."""
+    value = str(api_url or "").strip().lower()
+    if not value:
+        return False
+    return any(host in value for host in _NVIDIA_API_HOSTS)
 
 
 def normalize_nvidia_config(raw_nvidia: Any) -> Dict[str, Any]:

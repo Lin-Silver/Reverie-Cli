@@ -4,62 +4,47 @@ from pathlib import Path
 from datetime import datetime
 import requests
 import logging
-import codecs
+
+from ..nvidia import (
+    apply_nvidia_request_defaults,
+    build_nvidia_openai_options,
+    is_nvidia_api_url,
+    is_nvidia_model,
+)
 
 logger = logging.getLogger(__name__)
 
 
 def _iter_sse_data_strings(response: requests.Response):
     """Yield SSE `data:` payloads from a streaming HTTP response."""
-    byte_decoder = codecs.getincrementaldecoder("utf-8")()
-    line_buffer = ""
     saw_payload = False
     stream_interrupted = False
 
     try:
-        for chunk in response.iter_content(chunk_size=1024):
-            if not chunk:
+        for raw_line in response.iter_lines(decode_unicode=True, chunk_size=1):
+            if raw_line is None:
                 continue
 
-            if isinstance(chunk, str):
-                text_part = chunk
-            else:
-                try:
-                    text_part = byte_decoder.decode(chunk)
-                except Exception:
-                    text_part = chunk.decode("utf-8", errors="replace")
+            stripped = str(raw_line).strip()
+            if not stripped or stripped.startswith(":"):
+                continue
 
-            line_buffer += text_part
-            lines = line_buffer.split("\n")
-            line_buffer = lines[-1]
-
-            for line in lines[:-1]:
-                stripped = line.rstrip()
-                if not stripped or not stripped.startswith("data:"):
-                    continue
+            if stripped.startswith("data:"):
                 data_str = stripped[5:].lstrip()
-                if data_str.strip() == "[DONE]":
-                    return
-                if data_str:
-                    saw_payload = True
-                    yield data_str
+            else:
+                data_str = stripped
+
+            if data_str.strip() == "[DONE]":
+                return
+            if data_str:
+                saw_payload = True
+                yield data_str
     except requests.exceptions.RequestException as exc:
-        if saw_payload or line_buffer.strip():
+        if saw_payload:
             stream_interrupted = True
             logger.warning("Compression SSE stream ended prematurely after partial payload: %s", exc)
         else:
             raise
-
-    try:
-        line_buffer += byte_decoder.decode(b"", final=True)
-    except Exception:
-        pass
-
-    if line_buffer.strip().startswith("data:"):
-        data_str = line_buffer.strip()[5:].lstrip()
-        if data_str and data_str != "[DONE]":
-            saw_payload = True
-            yield data_str
 
     if stream_interrupted and not saw_payload:
         logger.warning("Compression SSE stream ended before any usable payload was decoded")
@@ -388,6 +373,64 @@ def _openai_extra_body_for_model(model: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _merge_extra_body(
+    base: Optional[Dict[str, Any]],
+    extra: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Merge nested OpenAI-compatible extra_body blocks."""
+    if not base and not extra:
+        return None
+    if not base:
+        return dict(extra or {})
+    if not extra:
+        return dict(base or {})
+
+    merged = dict(base)
+    for key, value in extra.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            nested = dict(merged.get(key, {}))
+            nested.update(value)
+            merged[key] = nested
+        else:
+            merged[key] = value
+    return merged
+
+
+def _resolve_nvidia_openai_call_options(
+    model: str,
+    extra_body: Optional[Dict[str, Any]] = None,
+) -> tuple[str, Optional[Dict[str, Any]], Dict[str, Any]]:
+    """Attach NVIDIA model-specific OpenAI SDK options when applicable."""
+    model_for_sdk = model
+    options: Dict[str, Any] = {}
+
+    if is_nvidia_model(model):
+        options = build_nvidia_openai_options({"selected_model_id": model}, model)
+        option_model = str(options.get("model", "") or "").strip()
+        if option_model:
+            model_for_sdk = option_model
+        extra_body = _merge_extra_body(extra_body, options.get("extra_body"))
+
+    if extra_body is not None and isinstance(model_for_sdk, str) and "(" in model_for_sdk and ")" in model_for_sdk:
+        model_for_sdk = model_for_sdk.split("(", 1)[0].strip()
+
+    return model_for_sdk, extra_body, options
+
+
+def _apply_nvidia_request_payload_defaults(
+    base_url: str,
+    payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Apply NVIDIA request-model defaults for hosted integrate API calls."""
+    prepared = dict(payload or {})
+    model = str(prepared.get("model", "") or "").strip()
+    if not model:
+        return prepared
+    if not (is_nvidia_api_url(base_url) or is_nvidia_model(model)):
+        return prepared
+    return apply_nvidia_request_defaults(prepared, {"selected_model_id": model})
+
+
 def make_compression_request_with_retry(
     url: str,
     headers: Dict[str, str],
@@ -429,7 +472,12 @@ def make_compression_request_with_retry(
             
         except requests.exceptions.RequestException as e:
             last_error = e
-            logger.warning(f"Compression request failed on attempt {attempt + 1}: {e}")
+            logger.debug(
+                "Compression request attempt %s/%s failed",
+                attempt + 1,
+                max_retries,
+                exc_info=True,
+            )
             
             if attempt < max_retries - 1:
                 import time
@@ -596,23 +644,21 @@ class ContextCompressor:
             if provider == "openai-sdk":
                 # If model indicates thinking-capable mode, include chat_template_kwargs
                 extra_body = _openai_extra_body_for_model(model)
-                model_for_sdk = model
-                if extra_body is not None and isinstance(model_for_sdk, str) and "(" in model_for_sdk and ")" in model_for_sdk:
-                    model_for_sdk = model_for_sdk.split("(", 1)[0].strip()
-
+                model_for_sdk, extra_body, nvidia_options = _resolve_nvidia_openai_call_options(
+                    model,
+                    extra_body=extra_body,
+                )
+                kwargs: Dict[str, Any] = {
+                    "model": model_for_sdk,
+                    "messages": prompt,
+                    "stream": False,
+                }
+                for key in ("temperature", "top_p", "max_tokens"):
+                    if nvidia_options.get(key) is not None:
+                        kwargs[key] = nvidia_options[key]
                 if extra_body is not None:
-                    response = client.chat.completions.create(
-                        model=model_for_sdk,
-                        messages=prompt,
-                        stream=False,
-                        extra_body=extra_body
-                    )
-                else:
-                    response = client.chat.completions.create(
-                        model=model_for_sdk,
-                        messages=prompt,
-                        stream=False
-                    )
+                    kwargs["extra_body"] = extra_body
+                response = client.chat.completions.create(**kwargs)
                 summary = response.choices[0].message.content
                 usage_info = getattr(response, "usage", None)
             elif provider == "request":
@@ -622,6 +668,7 @@ class ContextCompressor:
                     "messages": prompt,
                     "stream": False
                 }
+                payload = _apply_nvidia_request_payload_defaults(base_url, payload)
                 headers = {
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json"

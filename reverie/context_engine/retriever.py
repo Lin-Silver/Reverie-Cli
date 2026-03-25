@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import List, Dict, Optional, Set, Tuple, Any
 from dataclasses import dataclass, field
 import re
+import time
+from collections import defaultdict
 
 from .symbol_table import Symbol, SymbolTable, SymbolKind
 from .dependency_graph import DependencyGraph, DependencyType
@@ -68,6 +70,32 @@ class EditContext:
     context_string: str
 
 
+@dataclass
+class TaskContextFile:
+    """A ranked file candidate for an intent-driven retrieval request."""
+    file_path: str
+    language: str
+    score: float
+    summary: str
+    reasons: List[str]
+    top_symbols: List[str] = field(default_factory=list)
+    tags: List[str] = field(default_factory=list)
+    excerpt: str = ""
+
+
+@dataclass
+class TaskContextResult:
+    """Curated multi-source context for a task or user request."""
+    query: str
+    relevant_symbols: List[Symbol]
+    relevant_files: List[TaskContextFile]
+    memory_fragments: List[Dict[str, str]]
+    commit_context: List[Dict[str, Any]]
+    context_string: str
+    token_estimate: int
+    metadata: Dict = field(default_factory=dict)
+
+
 class ContextRetriever:
     """
     Intelligent context retriever for the Context Engine.
@@ -87,6 +115,19 @@ class ContextRetriever:
     
     # Default token budget (increased for larger context window)
     DEFAULT_TOKEN_BUDGET = 50000
+
+    TASK_QUERY_SYNONYMS = {
+        'logging': ['log', 'logger', 'telemetry', 'observability', 'trace', 'tracing', 'metrics', 'audit'],
+        'payment': ['billing', 'checkout', 'invoice', 'charge', 'stripe', 'subscription'],
+        'auth': ['authentication', 'authorize', 'authorization', 'login', 'token', 'session', 'identity'],
+        'test': ['tests', 'testing', 'spec', 'assert', 'fixture'],
+        'config': ['configuration', 'settings', 'option', 'flag', 'env', 'environment'],
+        'database': ['db', 'sql', 'query', 'migration', 'model', 'schema', 'repository'],
+        'cache': ['caching', 'redis', 'memo', 'memoize'],
+        'queue': ['job', 'worker', 'task', 'scheduler', 'background'],
+        'error': ['errors', 'exception', 'failure', 'retry', 'fallback'],
+        'docs': ['documentation', 'readme', 'guide', 'runbook', 'spec'],
+    }
     
     # Game-related keywords for prioritization
     GAME_LOGIC_KEYWORDS = {
@@ -119,11 +160,97 @@ class ContextRetriever:
         self,
         symbol_table: SymbolTable,
         dependency_graph: DependencyGraph,
-        project_root: Path
+        project_root: Path,
+        *,
+        file_info: Optional[Dict[str, Any]] = None,
+        git_integration: Any = None,
+        memory_indexer: Any = None,
     ):
         self.symbol_table = symbol_table
         self.dependency_graph = dependency_graph
         self.project_root = project_root
+        self.file_info = file_info if file_info is not None else {}
+        self.git_integration = git_integration
+        self.memory_indexer = memory_indexer
+        self._activity_files: Dict[str, Dict[str, float]] = {}
+        self._activity_symbols: Dict[str, Dict[str, float]] = {}
+
+    def _normalize_file_path(self, file_path: str) -> str:
+        """Normalize file paths so workset scoring is stable across callers."""
+        try:
+            candidate = Path(file_path)
+            if not candidate.is_absolute():
+                candidate = (self.project_root / candidate).resolve()
+            else:
+                candidate = candidate.resolve()
+            return str(candidate)
+        except Exception:
+            return str(file_path)
+
+    def _normalize_symbol_name(self, symbol_name: str) -> str:
+        return str(symbol_name or "").strip()
+
+    def mark_file_activity(self, file_path: str, *, weight: float = 1.0, reason: str = "access") -> None:
+        """Remember files the user or agent touched recently."""
+        key = self._normalize_file_path(file_path)
+        now = time.time()
+        state = self._activity_files.setdefault(key, {"score": 0.0, "timestamp": now})
+        state["score"] = min(8.0, float(state.get("score", 0.0)) + max(0.1, weight))
+        state["timestamp"] = now
+        if reason == "edit":
+            state["score"] = min(10.0, state["score"] + 0.75)
+
+    def mark_symbol_activity(self, symbol_name: str, *, weight: float = 1.0) -> None:
+        """Remember symbol-level activity and tie it back to the containing file."""
+        key = self._normalize_symbol_name(symbol_name)
+        if not key:
+            return
+        now = time.time()
+        state = self._activity_symbols.setdefault(key, {"score": 0.0, "timestamp": now})
+        state["score"] = min(8.0, float(state.get("score", 0.0)) + max(0.1, weight))
+        state["timestamp"] = now
+        symbol = self.symbol_table.get_symbol(key)
+        if symbol and symbol.file_path:
+            self.mark_file_activity(symbol.file_path, weight=weight * 0.7, reason="symbol")
+
+    def _activity_boost(self, state: Optional[Dict[str, float]]) -> float:
+        """Decay recency-based workset boosts over time."""
+        if not state:
+            return 0.0
+        age_seconds = max(0.0, time.time() - float(state.get("timestamp", 0.0)))
+        age_penalty = min(1.0, age_seconds / 1800.0)
+        return max(0.0, float(state.get("score", 0.0)) * (1.0 - age_penalty))
+
+    def _tokenize_query(self, text: str) -> List[str]:
+        raw_tokens = re.findall(r"[A-Za-z_][A-Za-z0-9_]{2,}", str(text or ""))
+        tokens: List[str] = []
+        seen: Set[str] = set()
+        for raw in raw_tokens:
+            expanded = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", raw).replace("_", " ").split()
+            for part in expanded:
+                token = part.lower().strip()
+                if len(token) < 3 or token in seen:
+                    continue
+                seen.add(token)
+                tokens.append(token)
+        return tokens
+
+    def _build_task_term_weights(self, query: str) -> Dict[str, float]:
+        """Expand the user request into weighted retrieval terms."""
+        weights: Dict[str, float] = {}
+        for token in self._tokenize_query(query):
+            weights[token] = max(weights.get(token, 0.0), 1.0)
+            for root, synonyms in self.TASK_QUERY_SYNONYMS.items():
+                if token == root or token in synonyms:
+                    weights[root] = max(weights.get(root, 0.0), 0.9 if token == root else 0.7)
+                    for synonym in synonyms:
+                        weights[synonym] = max(weights.get(synonym, 0.0), 0.55)
+        return weights
+
+    def _get_file_meta(self, info: Any, key: str, default: Any = None) -> Any:
+        if isinstance(info, dict):
+            return info.get(key, default)
+        return getattr(info, key, default)
     
     def retrieve_symbol(
         self,
@@ -196,6 +323,9 @@ class ContextRetriever:
         context_string = self._build_symbol_context_string(
             symbol, parent, children, dependencies, dependents
         )
+        self.mark_symbol_activity(symbol.qualified_name, weight=1.2)
+        if symbol.file_path:
+            self.mark_file_activity(symbol.file_path, weight=0.8, reason="symbol_lookup")
         
         return SymbolContext(
             symbol=symbol,
@@ -269,6 +399,9 @@ class ContextRetriever:
             file_path, start_line, end_line, target_content,
             symbols_in_range, related_symbols, intent
         )
+        self.mark_file_activity(file_path, weight=1.4, reason="edit")
+        for symbol in symbols_in_range[:6]:
+            self.mark_symbol_activity(symbol.qualified_name, weight=1.0)
         
         return EditContext(
             target_file=file_path,
@@ -400,6 +533,414 @@ class ContextRetriever:
                 'game_prioritization': prioritize_game_code
             }
         )
+
+    def retrieve_for_task(
+        self,
+        query: str,
+        *,
+        max_tokens: int = 12000,
+        max_files: int = 6,
+        max_symbols: int = 12,
+        include_history: bool = True,
+        include_memory: bool = True,
+        active_files: Optional[List[str]] = None,
+        changed_files: Optional[List[str]] = None,
+    ) -> TaskContextResult:
+        """
+        Build a task-oriented context bundle.
+
+        This mimics a modern Context Engine workflow: combine lexical signals,
+        file summaries, recent activity, dependency expansion, memory, and git
+        history into a curated context package for the active request.
+        """
+        query_text = str(query or "").strip()
+        max_tokens = max(1000, int(max_tokens or 12000))
+        max_files = max(1, int(max_files or 6))
+        max_symbols = max(1, int(max_symbols or 12))
+        term_weights = self._build_task_term_weights(query_text)
+
+        normalized_active_files = {
+            self._normalize_file_path(path)
+            for path in (active_files or [])
+            if str(path or "").strip()
+        }
+        normalized_changed_files = {
+            self._normalize_file_path(path)
+            for path in (changed_files or [])
+            if str(path or "").strip()
+        }
+        if not normalized_changed_files and self.git_integration and getattr(self.git_integration, "is_available", False):
+            try:
+                dirty = self.git_integration.get_uncommitted_changes()
+            except Exception:
+                dirty = {}
+            for group in ("modified", "added", "deleted", "untracked"):
+                for path in dirty.get(group, []) or []:
+                    normalized_changed_files.add(self._normalize_file_path(path))
+
+        file_candidates: List[TaskContextFile] = []
+        seen_file_candidates: Set[str] = set()
+        for raw_path, info in list((self.file_info or {}).items()):
+            file_path = self._normalize_file_path(raw_path)
+            candidate = self._score_file_for_task(
+                file_path=file_path,
+                info=info,
+                term_weights=term_weights,
+                active_files=normalized_active_files,
+                changed_files=normalized_changed_files,
+            )
+            if candidate and file_path not in seen_file_candidates:
+                file_candidates.append(candidate)
+                seen_file_candidates.add(file_path)
+
+        file_candidates.sort(key=lambda item: item.score, reverse=True)
+        selected_files: Dict[str, TaskContextFile] = {
+            item.file_path: item for item in file_candidates[:max_files]
+        }
+
+        symbol_scores: Dict[str, float] = defaultdict(float)
+        symbol_reasons: Dict[str, Set[str]] = defaultdict(set)
+        for term, weight in term_weights.items():
+            for symbol in self.symbol_table.search(term, limit=max_symbols * 6):
+                symbol_scores[symbol.qualified_name] += self._score_symbol_for_task(symbol, term, weight)
+                symbol_reasons[symbol.qualified_name].add(f"term:{term}")
+
+        for file_candidate in file_candidates[: max_files * 2]:
+            file_symbols = self.symbol_table.get_all_in_file(file_candidate.file_path)
+            for symbol in file_symbols[:8]:
+                boost = max(0.4, file_candidate.score * 0.22)
+                if any(term in symbol.qualified_name.lower() or term in symbol.name.lower() for term in term_weights):
+                    boost += 0.8
+                symbol_scores[symbol.qualified_name] += boost
+                symbol_reasons[symbol.qualified_name].add("matched-file")
+
+        ranked_symbols = sorted(symbol_scores.items(), key=lambda item: item[1], reverse=True)
+        expanded_symbols: Dict[str, float] = dict(symbol_scores)
+        for qualified_name, base_score in ranked_symbols[: max(4, max_symbols // 2)]:
+            for related_name, distance, dep_type in self.dependency_graph.get_related_symbols(
+                qualified_name,
+                max_distance=2,
+                max_results=16,
+            ):
+                if related_name == qualified_name:
+                    continue
+                expanded_symbols[related_name] = max(
+                    expanded_symbols.get(related_name, 0.0),
+                    max(0.35, base_score * (0.55 / max(distance, 1))),
+                )
+                symbol_reasons[related_name].add(f"graph:{dep_type.name.lower()}")
+
+        selected_symbols: List[Symbol] = []
+        for qualified_name, _ in sorted(expanded_symbols.items(), key=lambda item: item[1], reverse=True):
+            symbol = self.symbol_table.get_symbol(qualified_name)
+            if not symbol:
+                continue
+            selected_symbols.append(symbol)
+            normalized_symbol_file = self._normalize_file_path(symbol.file_path) if symbol.file_path else ""
+            if normalized_symbol_file and normalized_symbol_file not in selected_files and len(selected_files) < max_files:
+                info = (self.file_info or {}).get(symbol.file_path) or (self.file_info or {}).get(normalized_symbol_file)
+                selected_files[normalized_symbol_file] = self._score_file_for_task(
+                    file_path=normalized_symbol_file,
+                    info=info,
+                    term_weights=term_weights,
+                    active_files=normalized_active_files,
+                    changed_files=normalized_changed_files,
+                    base_score=max(0.5, expanded_symbols.get(qualified_name, 0.0) * 0.5),
+                    reason_override=f"symbol:{symbol.name}",
+                ) or TaskContextFile(
+                    file_path=normalized_symbol_file,
+                    language=symbol.language,
+                    score=max(0.5, expanded_symbols.get(qualified_name, 0.0)),
+                    summary=f"Relevant symbol {symbol.qualified_name}",
+                    reasons=[f"symbol:{symbol.name}"],
+                    top_symbols=[symbol.qualified_name],
+                    tags=[],
+                )
+            if len(selected_symbols) >= max_symbols:
+                break
+
+        selected_file_list = sorted(selected_files.values(), key=lambda item: item.score, reverse=True)[:max_files]
+        for item in selected_file_list:
+            file_symbols = [symbol for symbol in selected_symbols if symbol.file_path == item.file_path][:3]
+            item.excerpt = self._build_file_excerpt(item.file_path, file_symbols)
+
+        memory_fragments: List[Dict[str, str]] = []
+        if include_memory and self.memory_indexer:
+            try:
+                memory_hits = self.memory_indexer.search(query_text, max_results=4, max_tokens=max_tokens // 5)
+            except Exception:
+                memory_hits = []
+            for fragment in memory_hits:
+                memory_fragments.append({
+                    "session_id": str(getattr(fragment, "session_id", "")),
+                    "role": str(getattr(fragment, "role", "")),
+                    "content": str(getattr(fragment, "content", "")),
+                })
+
+        commit_context: List[Dict[str, Any]] = []
+        if include_history and self.git_integration and getattr(self.git_integration, "is_available", False):
+            seen_commits: Set[str] = set()
+            commit_candidates: List[Any] = []
+            try:
+                commit_candidates.extend(self.git_integration.search_commits(query_text, limit=3))
+            except Exception:
+                pass
+            for file_candidate in selected_file_list[:3]:
+                try:
+                    commit_candidates.extend(self.git_integration.get_file_history(file_candidate.file_path, limit=2))
+                except Exception:
+                    continue
+            for commit in sorted(
+                commit_candidates,
+                key=lambda item: getattr(item, "date", 0),
+                reverse=True,
+            ):
+                commit_hash = str(getattr(commit, "hash", ""))
+                if not commit_hash or commit_hash in seen_commits:
+                    continue
+                seen_commits.add(commit_hash)
+                commit_context.append({
+                    "hash": str(getattr(commit, "short_hash", commit_hash[:7])),
+                    "date": getattr(getattr(commit, "date", None), "isoformat", lambda: "")(),
+                    "message": str(getattr(commit, "message", "")),
+                    "files_changed": list(getattr(commit, "files_changed", [])[:6]),
+                })
+                if len(commit_context) >= 5:
+                    break
+
+        context_string, token_estimate = self._format_task_context(
+            query_text,
+            selected_file_list,
+            selected_symbols,
+            memory_fragments,
+            commit_context,
+            max_tokens=max_tokens,
+        )
+
+        for file_candidate in selected_file_list[:4]:
+            self.mark_file_activity(file_candidate.file_path, weight=1.0, reason="task")
+        for symbol in selected_symbols[:8]:
+            self.mark_symbol_activity(symbol.qualified_name, weight=0.8)
+
+        return TaskContextResult(
+            query=query_text,
+            relevant_symbols=selected_symbols,
+            relevant_files=selected_file_list,
+            memory_fragments=memory_fragments,
+            commit_context=commit_context,
+            context_string=context_string,
+            token_estimate=token_estimate,
+            metadata={
+                "term_weights": term_weights,
+                "active_files": sorted(normalized_active_files),
+                "changed_files": sorted(normalized_changed_files),
+                "selected_file_count": len(selected_file_list),
+                "selected_symbol_count": len(selected_symbols),
+            },
+        )
+
+    def _score_file_for_task(
+        self,
+        *,
+        file_path: str,
+        info: Any,
+        term_weights: Dict[str, float],
+        active_files: Set[str],
+        changed_files: Set[str],
+        base_score: float = 0.0,
+        reason_override: Optional[str] = None,
+    ) -> Optional[TaskContextFile]:
+        """Score a cached file record for a task-oriented retrieval request."""
+        if info is None:
+            return None
+
+        summary = str(self._get_file_meta(info, "summary", "") or "")
+        keywords = [str(value).lower() for value in self._get_file_meta(info, "keywords", [])]
+        tags = [str(value).lower() for value in self._get_file_meta(info, "tags", [])]
+        symbol_names = [str(value).lower() for value in self._get_file_meta(info, "symbol_names", [])]
+        imports = self._get_file_meta(info, "imports", []) or []
+        import_names = []
+        for item in imports:
+            if isinstance(item, dict):
+                import_names.append(str(item.get("module") or item.get("name") or item.get("path") or "").lower())
+        path_lower = file_path.lower().replace("\\", "/")
+        summary_lower = summary.lower()
+
+        score = float(base_score)
+        reasons: List[str] = [reason_override] if reason_override else []
+        for term, weight in term_weights.items():
+            term_lower = term.lower()
+            if term_lower in keywords:
+                score += 2.6 * weight
+                reasons.append(f"keyword:{term_lower}")
+            if term_lower in path_lower:
+                score += 2.2 * weight
+                reasons.append(f"path:{term_lower}")
+            if term_lower in summary_lower:
+                score += 1.8 * weight
+                reasons.append(f"summary:{term_lower}")
+            if any(term_lower in name for name in symbol_names):
+                score += 1.7 * weight
+                reasons.append(f"symbol:{term_lower}")
+            if any(term_lower in name for name in import_names):
+                score += 1.2 * weight
+                reasons.append(f"import:{term_lower}")
+            if any(term_lower == tag or term_lower in tag for tag in tags):
+                score += 1.1 * weight
+                reasons.append(f"tag:{term_lower}")
+
+        activity = self._activity_boost(self._activity_files.get(file_path))
+        if file_path in active_files:
+            activity += 2.2
+        if file_path in changed_files:
+            activity += 1.9
+        if activity > 0:
+            score += activity
+            reasons.append("active-workset")
+
+        if score <= 0.0:
+            return None
+
+        unique_reasons: List[str] = []
+        seen: Set[str] = set()
+        for reason in reasons:
+            text = str(reason or "").strip()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            unique_reasons.append(text)
+
+        return TaskContextFile(
+            file_path=file_path,
+            language=str(self._get_file_meta(info, "language", "unknown")),
+            score=score,
+            summary=summary or f"Relevant file {Path(file_path).name}",
+            reasons=unique_reasons[:6],
+            top_symbols=list(self._get_file_meta(info, "top_level_symbols", [])[:6]),
+            tags=tags[:6],
+        )
+
+    def _score_symbol_for_task(self, symbol: Symbol, term: str, weight: float) -> float:
+        """Score a symbol match for task-level retrieval."""
+        term_lower = term.lower()
+        qname_lower = symbol.qualified_name.lower()
+        name_lower = symbol.name.lower()
+        score = 0.0
+        if name_lower == term_lower:
+            score += 5.0 * weight
+        elif name_lower.startswith(term_lower):
+            score += 3.6 * weight
+        elif term_lower in name_lower:
+            score += 2.8 * weight
+        elif term_lower in qname_lower:
+            score += 2.0 * weight
+        file_boost = self._activity_boost(self._activity_files.get(self._normalize_file_path(symbol.file_path)))
+        symbol_boost = self._activity_boost(self._activity_symbols.get(symbol.qualified_name))
+        kind_boost = {
+            SymbolKind.CLASS: 1.3,
+            SymbolKind.FUNCTION: 1.2,
+            SymbolKind.METHOD: 1.15,
+            SymbolKind.MODULE: 1.1,
+        }.get(symbol.kind, 1.0)
+        return (score + file_boost + symbol_boost) * kind_boost
+
+    def _build_file_excerpt(self, file_path: str, symbols: List[Symbol]) -> str:
+        """Build a compact file excerpt focused on the most relevant symbols."""
+        if symbols:
+            parts: List[str] = []
+            for index, symbol in enumerate(symbols[:2]):
+                include_source = index == 0
+                parts.append(symbol.get_context_string(include_source=include_source))
+            return "\n\n".join(parts).strip()
+
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as handle:
+                lines = handle.readlines()
+        except Exception:
+            return ""
+
+        excerpt = "".join(lines[: min(len(lines), 40)]).strip()
+        return excerpt
+
+    def _format_task_context(
+        self,
+        query: str,
+        relevant_files: List[TaskContextFile],
+        relevant_symbols: List[Symbol],
+        memory_fragments: List[Dict[str, str]],
+        commit_context: List[Dict[str, Any]],
+        *,
+        max_tokens: int,
+    ) -> Tuple[str, int]:
+        """Render the final task context string while respecting a token budget."""
+        parts: List[str] = [
+            "=" * 60,
+            "TASK CONTEXT",
+            f"Request: {query}",
+            f"Files selected: {len(relevant_files)}",
+            f"Symbols selected: {len(relevant_symbols)}",
+            "=" * 60,
+            "",
+            "--- FILE PRIORITIES ---",
+        ]
+        for item in relevant_files:
+            reason_text = ", ".join(item.reasons) if item.reasons else "relevance"
+            parts.append(
+                f"- {item.file_path} [score={item.score:.2f}] ({item.language}) :: {item.summary} :: reasons={reason_text}"
+            )
+
+        if relevant_symbols:
+            parts.append("")
+            parts.append("--- SYMBOL PRIORITIES ---")
+            for symbol in relevant_symbols[:12]:
+                parts.append(f"- {symbol.kind.name}: {symbol.qualified_name} ({symbol.file_path}:{symbol.start_line})")
+
+        if memory_fragments:
+            parts.append("")
+            parts.append("--- WORKSPACE MEMORY ---")
+            for fragment in memory_fragments[:4]:
+                compact = " ".join(str(fragment.get("content", "")).split())
+                compact = compact[:260] + ("..." if len(compact) > 260 else "")
+                parts.append(f"- [{fragment.get('role', '')}] {compact}")
+
+        if commit_context:
+            parts.append("")
+            parts.append("--- RECENT HISTORY ---")
+            for commit in commit_context[:5]:
+                files_changed = ", ".join(commit.get("files_changed", [])[:4])
+                detail = f" | files: {files_changed}" if files_changed else ""
+                parts.append(f"- {commit.get('hash', '')} {commit.get('message', '')}{detail}")
+
+        current_text = "\n".join(parts)
+        current_tokens = int(len(current_text) * self.TOKENS_PER_CHAR)
+        if relevant_files:
+            parts.append("")
+            parts.append("--- CURATED EXCERPTS ---")
+
+        for item in relevant_files:
+            section_lines = [f"### {item.file_path}"]
+            if item.tags:
+                section_lines.append(f"Tags: {', '.join(item.tags)}")
+            if item.summary:
+                section_lines.append(f"Summary: {item.summary}")
+            if item.excerpt:
+                language = item.language or ""
+                section_lines.append(f"```{language}\n{item.excerpt}\n```")
+            section = "\n".join(section_lines)
+            section_tokens = int(len(section) * self.TOKENS_PER_CHAR)
+            if current_tokens + section_tokens > max_tokens:
+                trimmed = "\n".join(section_lines[:3])
+                trimmed_tokens = int(len(trimmed) * self.TOKENS_PER_CHAR)
+                if current_tokens + trimmed_tokens > max_tokens:
+                    break
+                parts.append(trimmed)
+                current_tokens += trimmed_tokens
+            else:
+                parts.append(section)
+                current_tokens += section_tokens
+
+        final_text = "\n".join(parts).strip()
+        return final_text, int(len(final_text) * self.TOKENS_PER_CHAR)
     
     def search(
         self,
@@ -424,6 +965,7 @@ class ContextRetriever:
     
     def get_file_outline(self, file_path: str) -> List[Symbol]:
         """Get outline of a file (all top-level symbols)"""
+        self.mark_file_activity(file_path, weight=0.8, reason="outline")
         return self.symbol_table.get_all_in_file(file_path)
     
     def get_directory_structure(self, path: Optional[str] = None) -> Dict:

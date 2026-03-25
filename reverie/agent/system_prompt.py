@@ -75,6 +75,15 @@ def _append_shared_prompt_guidance(additional_rules: str, normalized_mode: str) 
 - After using tools, always return a textual user-facing response instead of stopping at tool output only.
 """.strip())
 
+        shared_sections.append("""
+## Context Engine Activation Protocol
+- For any non-trivial repository task, start by calling `codebase-retrieval` before proposing edits or architecture claims.
+- Default first retrieval for multi-file features, bugs, refactors, or ambiguous requests: `codebase-retrieval(query_type="task", query="<the active request>")`.
+- After the task-level retrieval, drill down with `symbol`, `file`, `dependencies`, `memory`, or `lsp` as needed before editing.
+- Do not rely on conversational memory alone when the repository can be inspected directly.
+- After resume, rotation, or `continue`-style follow-ups, re-anchor with retrieval before making new claims about the codebase.
+""".strip())
+
     shared_sections.append(f"""
 ## Documentation Output Policy
 - Store authored project documents under `{ARTIFACTS_DIR}/` in the current project root.
@@ -448,7 +457,7 @@ Work from repository evidence, make the change, verify it, and report clearly.
 
 # Core Rules
 1. The repository is the source of truth. Prefer current code over memory.
-2. Before non-trivial edits, inspect the relevant files, symbols, usages, and integration points.
+2. Before non-trivial edits, use `codebase-retrieval`; prefer `query_type="task"` first for multi-file or ambiguous work, then inspect the relevant files, symbols, usages, and integration points.
 3. When changing shared behavior, inspect both the definition and its call sites.
 4. Use `git-commit-retrieval` when history can clarify intent, regressions, or prior patterns.
 5. For small scoped tasks, move directly through retrieve -> edit -> verify. Do not inflate the process.
@@ -539,7 +548,7 @@ These are inviolable. Every decision, document, and line of code must be consist
 
 1. **Evidence Primacy** - The repository, runtime environment, and build artifacts are the source of truth. Base all claims on current evidence, not model memory. When evidence conflicts with assumption, evidence wins.
 
-2. **Research Precedes Action** - Before drafting documents, making architecture claims, or editing shared code, retrieve and inspect the relevant files, symbols, dependencies, usages, and workspace memory. Use `codebase-retrieval` and `git-commit-retrieval` as primary evidence tools.
+2. **Research Precedes Action** - Before drafting documents, making architecture claims, or editing shared code, retrieve and inspect the relevant files, symbols, dependencies, usages, and workspace memory. Start cross-cutting or ambiguous work with `codebase-retrieval(query_type="task", ...)`, then drill down with narrower retrieval. Use `codebase-retrieval` and `git-commit-retrieval` as primary evidence tools.
 
 3. **Documents as Living Contracts** - Documentation produced by Atlas is not a one-time artifact. It is an engineering contract that guides implementation, constrains scope, records decisions, and evolves when reality diverges from the plan.
 

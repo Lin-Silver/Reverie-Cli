@@ -23,19 +23,22 @@ Use this tool before non-trivial edits, design changes, or code explanations.
 - `search`: find matching symbols or names
 - `dependencies`: inspect incoming/outgoing relationships
 - `outline`: get a structural file summary
+- `task`: build a curated multi-file context package for an edit, bug, or feature request
 - `memory`: query workspace-global memory distilled from earlier sessions
 - `lsp`: query diagnostics, definitions, document symbols, workspace symbols, or LSP status
 
 **Best usage pattern**:
-1. Start with `search` or `symbol` to find the implementation.
-2. Inspect the containing file or nearby dependencies.
-3. Check usages before editing shared code.
-4. Use `memory` and `lsp` when session continuity or semantic navigation matters.
+1. If the request is multi-file, ambiguous, or phrased as a task, start with `task`.
+2. Then use `search` or `symbol` to lock onto the exact implementation.
+3. Inspect the containing file or nearby dependencies.
+4. Check usages before editing shared code.
+5. Use `memory` and `lsp` when session continuity or semantic navigation matters.
 
 **Example calls**:
 ```
 codebase-retrieval(query_type="symbol", query="ReverieInterface._init_agent")
 codebase-retrieval(query_type="file", query="reverie/agent/agent.py")
+codebase-retrieval(query_type="task", query="add durable logging around context rotation failures")
 codebase-retrieval(query_type="dependencies", query="process_message", direction="incoming")
 codebase-retrieval(query_type="lsp", query="reverie/agent/agent.py", lsp_action="diagnostics")
 ```

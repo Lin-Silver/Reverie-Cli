@@ -37,7 +37,7 @@ class CacheManager:
     └── files.json          # File tracking info
     """
     
-    CACHE_VERSION = "1.0.0"
+    CACHE_VERSION = "1.1.0"
     
     def __init__(self, cache_dir: Path):
         self.cache_dir = Path(cache_dir)
@@ -98,15 +98,17 @@ class CacheManager:
             self._save_compressed(self.dependencies_path, dep_data)
             
             # Save file info
-            files_data = {
-                path: {
-                    'path': info.path,
-                    'mtime': info.mtime,
-                    'size': info.size,
-                    'content_hash': info.content_hash
-                }
-                for path, info in file_info.items()
-            }
+            files_data = {}
+            for path, info in file_info.items():
+                try:
+                    files_data[path] = asdict(info)
+                except TypeError:
+                    files_data[path] = {
+                        'path': getattr(info, 'path', path),
+                        'mtime': getattr(info, 'mtime', 0.0),
+                        'size': getattr(info, 'size', 0),
+                        'content_hash': getattr(info, 'content_hash', ''),
+                    }
             
             with open(self.files_path, 'w', encoding='utf-8') as f:
                 json.dump(files_data, f)
@@ -167,7 +169,18 @@ class CacheManager:
                     path=data['path'],
                     mtime=data['mtime'],
                     size=data['size'],
-                    content_hash=data['content_hash']
+                    content_hash=data['content_hash'],
+                    symbol_count=data.get('symbol_count', 0),
+                    language=data.get('language', 'unknown'),
+                    line_count=data.get('line_count', 0),
+                    imports=data.get('imports', []),
+                    import_count=data.get('import_count', 0),
+                    symbol_names=data.get('symbol_names', []),
+                    top_level_symbols=data.get('top_level_symbols', []),
+                    keywords=data.get('keywords', []),
+                    tags=data.get('tags', []),
+                    dependency_targets=data.get('dependency_targets', []),
+                    summary=data.get('summary', ''),
                 )
                 for path, data in files_data.items()
             }

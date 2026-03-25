@@ -15,12 +15,14 @@ Supported languages:
 """
 
 from .base import BaseParser, ParseResult
+from .document_parser import DocumentParser
 from .python_parser import PythonParser
 from .treesitter_parser import TreeSitterParser, SUPPORTED_LANGUAGES
 
 __all__ = [
     'BaseParser',
     'ParseResult',
+    'DocumentParser',
     'PythonParser',
     'TreeSitterParser',
     'SUPPORTED_LANGUAGES',

@@ -927,7 +927,8 @@ class ReverieInterface:
                 detail=f"{len(inline_attachments)} image file(s) added to the LLM context.",
             )
 
-        self.display.show_user_message(transcript_message, attachments=inline_attachments)
+        # The interactive shell already shows the typed prompt in-place, so
+        # avoid echoing a second transcript block for every user turn.
 
         # Get current session ID
         session_id = self.session_manager.current_session.id if self.session_manager.current_session else "default"
@@ -1269,17 +1270,18 @@ class ReverieInterface:
             )
         self.indexer = CodebaseIndexer(project_root=self.project_root, cache_dir=cache_dir)
         config = self.config_manager.load()
-        from ..context_engine.cache import CacheManager
-        cache_manager = CacheManager(cache_dir)
-        cached = cache_manager.load()
-        if cached:
-            self.indexer.symbol_table = cached['symbol_table']
-            self.indexer.dependency_graph = cached['dependency_graph']
-            self.indexer._file_info = cached['file_info']
-        elif config.auto_index:
+        cached = self.indexer.load_cache()
+        if not cached and config.auto_index:
             with self.console.status(f"[{self.theme.PURPLE_SOFT}]{self.deco.SPARKLE} Indexing...[/{self.theme.PURPLE_SOFT}]"):
                 self.indexer.full_index()
-        self.retriever = ContextRetriever(self.indexer.symbol_table, self.indexer.dependency_graph, self.project_root)
+        self.retriever = ContextRetriever(
+            self.indexer.symbol_table,
+            self.indexer.dependency_graph,
+            self.project_root,
+            file_info=self.indexer._file_info,
+            git_integration=self.git_integration,
+            memory_indexer=self.memory_indexer,
+        )
         self._context_engine_ready = True
         self._refresh_command_context()
 
@@ -1287,6 +1289,8 @@ class ReverieInterface:
         """Attach the lazily initialized Context Engine to the active agent and refresh prompt guidance."""
         if not self.agent or not self.indexer or not self.retriever:
             return
+        self.retriever.git_integration = self.git_integration
+        self.retriever.memory_indexer = self.memory_indexer
 
         self.agent.set_context_engine(self.retriever, self.indexer, self.git_integration)
         self.agent.tool_executor.update_context('lsp_manager', self.lsp_manager)
@@ -1330,6 +1334,8 @@ class ReverieInterface:
             )
         self.git_integration = GitIntegration(self.project_root)
         self._git_integration_ready = True
+        if self.retriever:
+            self.retriever.git_integration = self.git_integration
         if self.agent:
             self.agent.tool_executor.update_context('git_integration', self.git_integration)
         self._refresh_command_context()

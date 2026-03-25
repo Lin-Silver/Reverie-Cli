@@ -259,6 +259,8 @@ Examples:
         # Trigger context engine update if available
         if self.context and self.context.get('indexer'):
             self.context['indexer'].update_file(file_path)
+        if self.context and self.context.get('retriever'):
+            self.context['retriever'].mark_file_activity(str(file_path), weight=1.5, reason="edit")
         
         return ToolResult.ok(
             f"Successfully replaced text in {file_path}\n\n{diff}",
@@ -288,6 +290,8 @@ Examples:
         # Trigger context engine update
         if self.context and self.context.get('indexer'):
             self.context['indexer'].update_file(file_path)
+        if self.context and self.context.get('retriever'):
+            self.context['retriever'].mark_file_activity(str(file_path), weight=1.5, reason="edit")
         
         return ToolResult.ok(
             f"Created file: {file_path}\n"
@@ -332,6 +336,8 @@ Examples:
         # Trigger context engine update
         if self.context and self.context.get('indexer'):
             self.context['indexer'].update_file(file_path)
+        if self.context and self.context.get('retriever'):
+            self.context['retriever'].mark_file_activity(str(file_path), weight=1.5, reason="edit")
         
         return ToolResult.ok(
             f"Inserted text at line {insert_line} in {file_path}\n\n{diff}",

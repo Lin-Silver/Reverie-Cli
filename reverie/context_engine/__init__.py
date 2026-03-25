@@ -22,7 +22,14 @@ Advanced Components:
 from .symbol_table import Symbol, SymbolTable, SymbolKind
 from .dependency_graph import Dependency, DependencyGraph, DependencyType
 from .indexer import CodebaseIndexer, IndexResult, FileInfo, IndexConfig
-from .retriever import ContextRetriever, ContextPackage, SymbolContext, EditContext
+from .retriever import (
+    ContextRetriever,
+    ContextPackage,
+    SymbolContext,
+    EditContext,
+    TaskContextFile,
+    TaskContextResult,
+)
 from .cache import CacheManager
 from .git_integration import GitIntegration, CommitInfo, BlameInfo, CommitDetails
 from .novel_index import NovelIndex, IndexEntry
@@ -56,6 +63,8 @@ __all__ = [
     'ContextPackage',
     'SymbolContext',
     'EditContext',
+    'TaskContextFile',
+    'TaskContextResult',
     # Cache
     'CacheManager',
     # Git

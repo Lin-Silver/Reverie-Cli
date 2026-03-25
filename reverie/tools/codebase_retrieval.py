@@ -40,6 +40,7 @@ Query types:
 - file: Get the structure and contents of a file
 - search: Search for symbols matching a pattern
 - dependencies: Get what a symbol depends on or what depends on it
+- task: Build a curated multi-file context package for a user request or edit intent
 - memory: Query workspace-global memory distilled from past sessions
 - lsp: Query optional LSP-powered symbols, definitions, or diagnostics
 
@@ -54,7 +55,7 @@ Examples:
         "properties": {
             "query_type": {
                 "type": "string",
-                "enum": ["symbol", "file", "search", "dependencies", "outline", "memory", "lsp"],
+                "enum": ["symbol", "file", "search", "dependencies", "outline", "task", "memory", "lsp"],
                 "description": "Type of query to perform"
             },
             "query": {
@@ -92,6 +93,41 @@ Examples:
                 "type": "integer",
                 "description": "Maximum number of results (default: 20)",
                 "default": 20
+            },
+            "max_files": {
+                "type": "integer",
+                "description": "For task queries: maximum number of files to include",
+                "default": 6
+            },
+            "max_symbols": {
+                "type": "integer",
+                "description": "For task queries: maximum number of symbols to include",
+                "default": 12
+            },
+            "max_tokens": {
+                "type": "integer",
+                "description": "For task queries: token budget for the curated context package",
+                "default": 12000
+            },
+            "include_history": {
+                "type": "boolean",
+                "description": "For task queries: include relevant git history when available",
+                "default": True
+            },
+            "include_memory": {
+                "type": "boolean",
+                "description": "For task queries: include workspace memory when available",
+                "default": True
+            },
+            "active_files": {
+                "type": "array",
+                "description": "For task queries: files currently in focus or actively edited",
+                "items": {"type": "string"}
+            },
+            "changed_files": {
+                "type": "array",
+                "description": "For task queries: known changed files to bias the workset",
+                "items": {"type": "string"}
             },
             "lsp_action": {
                 "type": "string",
@@ -165,12 +201,19 @@ Examples:
         filter_kind = self._normalize_string(kwargs.get('filter_kind', 'all'), 'all').lower()
         direction = self._normalize_string(kwargs.get('direction', 'outgoing'), 'outgoing').lower()
         limit = self._normalize_int(kwargs.get('limit', 20), 20)
+        max_files = self._normalize_int(kwargs.get('max_files', 6), 6)
+        max_symbols = self._normalize_int(kwargs.get('max_symbols', 12), 12)
+        max_tokens = self._normalize_int(kwargs.get('max_tokens', 12000), 12000)
+        include_history = self._normalize_bool(kwargs.get('include_history', True), True)
+        include_memory = self._normalize_bool(kwargs.get('include_memory', True), True)
+        active_files = kwargs.get('active_files') if isinstance(kwargs.get('active_files'), list) else []
+        changed_files = kwargs.get('changed_files') if isinstance(kwargs.get('changed_files'), list) else []
         lsp_action = self._normalize_string(kwargs.get('lsp_action', 'workspace_symbols'), 'workspace_symbols').lower()
         line = self._normalize_int(kwargs.get('line', 0), 0)
         character = self._normalize_int(kwargs.get('character', 0), 0)
         
         retriever = None
-        if query_type in {"symbol", "file", "search", "dependencies", "outline"}:
+        if query_type in {"symbol", "file", "search", "dependencies", "outline", "task"}:
             retriever = self._get_retriever()
             if not retriever:
                 return ToolResult.fail(
@@ -196,6 +239,19 @@ Examples:
             
             elif query_type == "outline":
                 return self._query_outline(retriever, query)
+
+            elif query_type == "task":
+                return self._query_task(
+                    retriever,
+                    query,
+                    max_files=max_files,
+                    max_symbols=max_symbols,
+                    max_tokens=max_tokens,
+                    include_history=include_history,
+                    include_memory=include_memory,
+                    active_files=active_files,
+                    changed_files=changed_files,
+                )
 
             elif query_type == "memory":
                 return self._query_memory(query, limit)
@@ -234,6 +290,7 @@ Examples:
         
         # Main symbol info
         sym = result.symbol
+        retriever.mark_symbol_activity(sym.qualified_name, weight=1.1)
         output_parts.append(f"# {sym.kind.name}: {sym.qualified_name}")
         output_parts.append(f"File: {sym.file_path}:{sym.start_line}-{sym.end_line}")
         output_parts.append(f"Language: {sym.language}")
@@ -294,6 +351,7 @@ Examples:
     ) -> ToolResult:
         """Query file structure and contents"""
         symbols = retriever.get_file_outline(file_path)
+        retriever.mark_file_activity(file_path, weight=0.9, reason="file_query")
         
         if not symbols:
             fallback = self._query_existing_file_without_symbols(file_path, include_source)
@@ -410,6 +468,8 @@ Examples:
             kinds = kind_map.get(filter_kind)
         
         results = retriever.search(pattern, kinds=kinds, limit=limit)
+        for sym in results[: min(5, len(results))]:
+            retriever.mark_symbol_activity(sym.qualified_name, weight=0.4)
         
         if not results:
             return ToolResult.ok(
@@ -479,6 +539,40 @@ Examples:
     def _query_outline(self, retriever, file_path: str) -> ToolResult:
         """Get outline/structure of a file"""
         return self._query_file(retriever, file_path, include_source=False)
+
+    def _query_task(
+        self,
+        retriever,
+        query: str,
+        *,
+        max_files: int,
+        max_symbols: int,
+        max_tokens: int,
+        include_history: bool,
+        include_memory: bool,
+        active_files: List[str],
+        changed_files: List[str],
+    ) -> ToolResult:
+        """Build an intent-oriented curated context bundle."""
+        result = retriever.retrieve_for_task(
+            query,
+            max_files=max_files,
+            max_symbols=max_symbols,
+            max_tokens=max_tokens,
+            include_history=include_history,
+            include_memory=include_memory,
+            active_files=active_files,
+            changed_files=changed_files,
+        )
+        return ToolResult.ok(
+            result.context_string,
+            data={
+                'query': query,
+                'files': [item.file_path for item in result.relevant_files],
+                'symbols': [item.qualified_name for item in result.relevant_symbols],
+                'token_estimate': result.token_estimate,
+            }
+        )
 
     def _query_memory(self, query: str, limit: int) -> ToolResult:
         """Query workspace-global memory."""

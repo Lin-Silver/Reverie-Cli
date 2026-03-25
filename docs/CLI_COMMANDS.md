@@ -59,7 +59,7 @@ Notes:
 | `/codex low\|medium\|high\|extra high` | Shortcut for reasoning depth |
 | `/codex endpoint <value>` | Set or clear Codex endpoint override |
 | `/nvidia` | Show NVIDIA configuration |
-| `/nvidia login` | Save the NVIDIA API key from build.nvidia.com/settings/api-keys |
+| `/nvidia key` | Save the NVIDIA API key from build.nvidia.com/settings/api-keys |
 | `/nvidia activate` | Switch active source to NVIDIA |
 | `/nvidia model <model-id>` | Set the NVIDIA model |
 | `/nvidia endpoint <value>` | Set or clear NVIDIA endpoint override |

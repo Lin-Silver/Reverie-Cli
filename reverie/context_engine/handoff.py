@@ -10,11 +10,13 @@ from typing import Any, Dict, List, Optional
 import requests
 
 from .compressor import (
+    _apply_nvidia_request_payload_defaults,
     _collect_codex_summary_text,
     _collect_geminicli_summary_text,
     _get_message_text,
     _message_text_from_value,
     _openai_extra_body_for_model,
+    _resolve_nvidia_openai_call_options,
     _split_system_memory_messages,
     _tool_call_names,
     _truncate_for_memory,
@@ -449,22 +451,21 @@ def _request_handoff_summary_text(
 ) -> str:
     if provider == "openai-sdk":
         extra_body = _openai_extra_body_for_model(model)
-        model_for_sdk = model
-        if extra_body is not None and isinstance(model_for_sdk, str) and "(" in model_for_sdk and ")" in model_for_sdk:
-            model_for_sdk = model_for_sdk.split("(", 1)[0].strip()
+        model_for_sdk, extra_body, nvidia_options = _resolve_nvidia_openai_call_options(
+            model,
+            extra_body=extra_body,
+        )
+        kwargs: Dict[str, Any] = {
+            "model": model_for_sdk,
+            "messages": prompt_messages,
+            "stream": False,
+        }
+        for key in ("temperature", "top_p", "max_tokens"):
+            if nvidia_options.get(key) is not None:
+                kwargs[key] = nvidia_options[key]
         if extra_body is not None:
-            response = client.chat.completions.create(
-                model=model_for_sdk,
-                messages=prompt_messages,
-                stream=False,
-                extra_body=extra_body,
-            )
-        else:
-            response = client.chat.completions.create(
-                model=model_for_sdk,
-                messages=prompt_messages,
-                stream=False,
-            )
+            kwargs["extra_body"] = extra_body
+        response = client.chat.completions.create(**kwargs)
         response_text = str(response.choices[0].message.content or "").strip()
         _record_handoff_usage(
             workspace_stats_manager,
@@ -484,6 +485,7 @@ def _request_handoff_summary_text(
             "messages": prompt_messages,
             "stream": False,
         }
+        payload = _apply_nvidia_request_payload_defaults(base_url, payload)
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",

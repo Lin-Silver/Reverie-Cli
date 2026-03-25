@@ -16,7 +16,6 @@ import time
 import re
 import logging
 import uuid
-import codecs
 
 from rich.markup import escape as rich_escape
 
@@ -26,7 +25,13 @@ from ..context_engine.handoff import build_session_handoff_packet
 from ..iflow import build_iflow_request_headers, is_iflow_direct_api_url
 from ..inline_images import resolve_inline_image_content_for_request
 from ..tools.base import ToolResult
-from ..nvidia import apply_nvidia_request_defaults, build_nvidia_openai_options
+from ..nvidia import (
+    apply_nvidia_request_defaults,
+    build_nvidia_openai_options,
+    is_nvidia_api_url,
+    nvidia_model_allows_tools,
+    nvidia_model_requires_system_message_first,
+)
 
 # Special marker for thinking content (used in streaming)
 # This allows the interface to identify and style thinking content differently
@@ -658,6 +663,128 @@ def _sanitize_messages_for_relay(messages: List[Dict[str, Any]]) -> List[Dict[st
     return sanitized_messages
 
 
+def _coalesce_system_messages_to_front(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Merge all system-role messages into the first transcript slot.
+
+    NVIDIA's hosted chat-completions endpoint is strict about system messages
+    being positioned at the beginning. Reverie can accumulate additional
+    system notes during compression, resume, and manual context operations, so
+    we normalize only the outbound provider payload and keep the in-memory
+    conversation history unchanged.
+    """
+    if not isinstance(messages, list):
+        return []
+
+    system_texts: List[str] = []
+    non_system_messages: List[Dict[str, Any]] = []
+
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role", "") or "").strip().lower()
+        if role == "system":
+            text = _coerce_text_fragments(message.get("content")).strip()
+            if text:
+                system_texts.append(text)
+            continue
+        non_system_messages.append(dict(message))
+
+    if not system_texts:
+        return [dict(message) for message in messages if isinstance(message, dict)]
+
+    deduped_texts: List[str] = []
+    seen: set[str] = set()
+    for index, text in enumerate(system_texts):
+        if text in seen:
+            continue
+        seen.add(text)
+        if index == 0:
+            deduped_texts.append(text)
+        else:
+            deduped_texts.append(f"[Merged System Note]\n{text}")
+
+    merged_system = {
+        "role": "system",
+        "content": "\n\n".join(deduped_texts).strip(),
+    }
+    return [merged_system] + non_system_messages
+
+
+def _strip_tooling_from_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Remove OpenAI tool-call transcript artifacts for providers that reject them."""
+    sanitized_messages: List[Dict[str, Any]] = []
+
+    for message in messages or []:
+        if not isinstance(message, dict):
+            continue
+
+        role = str(message.get("role", "") or "").strip().lower()
+        if role == "tool":
+            continue
+
+        sanitized = dict(message)
+        had_tool_calls = isinstance(sanitized.get("tool_calls"), list) and bool(sanitized.get("tool_calls"))
+        sanitized.pop("tool_calls", None)
+
+        content_text = _coerce_text_fragments(sanitized.get("content", "")).strip()
+        if role == "assistant" and had_tool_calls and not content_text:
+            continue
+
+        sanitized_messages.append(sanitized)
+
+    return sanitized_messages
+
+
+def _strip_tooling_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Remove tool-calling request fields and related transcript artifacts."""
+    compatibility_payload = dict(payload or {})
+    compatibility_payload.pop("tools", None)
+    compatibility_payload.pop("tool_choice", None)
+    compatibility_payload.pop("parallel_tool_calls", None)
+    compatibility_payload.pop("stream_options", None)
+
+    messages = compatibility_payload.get("messages")
+    if isinstance(messages, list):
+        compatibility_payload["messages"] = _strip_tooling_from_messages(messages)
+
+    return compatibility_payload
+
+
+def _extract_safe_http_error_message(response: Any) -> str:
+    """Extract a concise provider error message without dumping full payloads."""
+    if response is None:
+        return ""
+
+    try:
+        payload = response.json()
+    except Exception:
+        payload = None
+
+    candidates: List[str] = []
+    if isinstance(payload, dict):
+        error_block = payload.get("error")
+        if isinstance(error_block, dict):
+            for key in ("message", "msg", "detail", "type", "code"):
+                value = error_block.get(key)
+                if value is not None:
+                    text = str(value).strip()
+                    if text:
+                        candidates.append(text)
+        for key in ("message", "msg", "detail", "title", "status"):
+            value = payload.get(key)
+            if value is not None:
+                text = str(value).strip()
+                if text:
+                    candidates.append(text)
+
+    for candidate in candidates:
+        compact = " ".join(candidate.split())
+        if compact:
+            return compact[:300]
+    return ""
+
+
 def make_api_request_with_retry(
     url: str,
     headers: Dict[str, str],
@@ -722,6 +849,7 @@ def make_api_request_with_retry(
         except requests.exceptions.HTTPError as e:
             last_error = e
             status_code = e.response.status_code if e.response is not None else "unknown"
+            safe_error_message = _extract_safe_http_error_message(getattr(e, "response", None))
 
             if (
                 status_code == 406
@@ -729,11 +857,7 @@ def make_api_request_with_retry(
                 and isinstance(sanitized_payload, dict)
                 and sanitized_payload.get("tools")
             ):
-                compatibility_payload = dict(sanitized_payload)
-                compatibility_payload.pop("tools", None)
-                compatibility_payload.pop("tool_choice", None)
-                compatibility_payload.pop("parallel_tool_calls", None)
-                compatibility_payload.pop("stream_options", None)
+                compatibility_payload = _strip_tooling_from_payload(sanitized_payload)
                 logger.warning("iFlow returned 406; retrying once with compatibility payload (tools removed)")
                 try:
                     fallback_response = requests.post(
@@ -749,10 +873,39 @@ def make_api_request_with_retry(
                 except requests.exceptions.RequestException as fallback_error:
                     last_error = fallback_error
                     logger.error("iFlow compatibility fallback failed: %s", fallback_error)
+
+            if (
+                status_code == 400
+                and is_nvidia_api_url(url)
+                and isinstance(sanitized_payload, dict)
+                and sanitized_payload.get("tools")
+            ):
+                compatibility_payload = _strip_tooling_from_payload(sanitized_payload)
+                logger.warning("NVIDIA returned 400; retrying once with compatibility payload matching the hosted example shape")
+                try:
+                    fallback_response = requests.post(
+                        url,
+                        headers=request_headers,
+                        json=compatibility_payload,
+                        stream=stream,
+                        timeout=timeout,
+                    )
+                    fallback_response.raise_for_status()
+                    logger.debug("NVIDIA compatibility fallback succeeded")
+                    return fallback_response
+                except requests.exceptions.RequestException as fallback_error:
+                    last_error = fallback_error
+                    fallback_message = _extract_safe_http_error_message(getattr(fallback_error, "response", None))
+                    if fallback_message:
+                        logger.error("NVIDIA compatibility fallback failed: %s", fallback_message)
+                    else:
+                        logger.error("NVIDIA compatibility fallback failed: %s", fallback_error)
             
             # Don't retry on client errors (4xx) except 429 (rate limit)
             if isinstance(status_code, int) and 400 <= status_code < 500 and status_code != 429:
                 logger.error(f"Client error {status_code}, not retrying: {e}")
+                if safe_error_message:
+                    logger.error("Provider returned: %s", safe_error_message)
                 # Avoid dumping raw response bodies because they may contain prompts or credentials.
                 if e.response is not None:
                     try:
@@ -767,6 +920,12 @@ def make_api_request_with_retry(
                             logger.error("Error response body omitted for safety")
                     except Exception:
                         logger.error("Error response body omitted for safety")
+                if safe_error_message:
+                    raise requests.exceptions.HTTPError(
+                        f"{e} | Provider said: {safe_error_message}",
+                        response=e.response,
+                        request=e.request,
+                    ) from e
                 raise
             
             # Retry on server errors (5xx) and rate limit (429)
@@ -1194,8 +1353,8 @@ class ReverieAgent:
             }
             if self.custom_headers:
                 headers.update(self.custom_headers)
-            if stream and "Accept" not in headers:
-                headers["Accept"] = "text/event-stream"
+            if "Accept" not in headers:
+                headers["Accept"] = "text/event-stream" if stream else "application/json"
             return headers
 
         self._refresh_iflow_api_key_from_local_cache()
@@ -1297,7 +1456,14 @@ class ReverieAgent:
             return self._apply_iflow_model_suffix_logic(prepared)
 
         if self._is_nvidia_request():
-            return apply_nvidia_request_defaults(prepared, getattr(self.config, "nvidia", {}))
+            prepared = apply_nvidia_request_defaults(prepared, getattr(self.config, "nvidia", {}))
+            if nvidia_model_requires_system_message_first(prepared.get("model")):
+                prepared["messages"] = _coalesce_system_messages_to_front(prepared.get("messages", []))
+            if not nvidia_model_allows_tools(prepared.get("model")):
+                prepared = _strip_tooling_from_payload(prepared)
+                if nvidia_model_requires_system_message_first(prepared.get("model")):
+                    prepared["messages"] = _coalesce_system_messages_to_front(prepared.get("messages", []))
+            return prepared
 
         # Non-iFlow `request` provider: accept model(depth) but only convert to
         # a boolean `thinking` flag (do NOT forward thinking depth). Explicit
@@ -1357,12 +1523,16 @@ class ReverieAgent:
         """Build OpenAI SDK chat-completions kwargs, including NVIDIA-specific adapters."""
         extra_body = self._openai_extra_body_for_thinking()
         model_for_sdk = self.model
+        prepared_messages = list(messages or [])
         if extra_body is not None and isinstance(model_for_sdk, str) and "(" in model_for_sdk and ")" in model_for_sdk:
             model_for_sdk = model_for_sdk.split("(", 1)[0].strip()
 
+        if self._is_active_model_source("nvidia") and nvidia_model_requires_system_message_first(model_for_sdk):
+            prepared_messages = _coalesce_system_messages_to_front(prepared_messages)
+
         kwargs: Dict[str, Any] = {
             "model": model_for_sdk,
-            "messages": messages,
+            "messages": prepared_messages,
             "stream": bool(stream),
         }
         if tools:
@@ -1530,58 +1700,39 @@ class ReverieAgent:
         """Yield decoded SSE data payloads from an HTTP streaming response."""
         import requests
 
-        byte_decoder = codecs.getincrementaldecoder("utf-8")()
-        line_buffer = ""
         saw_payload = False
         stream_interrupted = False
 
         try:
-            for chunk in response.iter_content(chunk_size=1024):
-                if not chunk:
+            for raw_line in response.iter_lines(decode_unicode=True, chunk_size=1):
+                if raw_line is None:
                     continue
 
-                try:
-                    text_part = byte_decoder.decode(chunk)
-                except Exception:
-                    text_part = chunk.decode("utf-8", errors="replace")
+                stripped = str(raw_line).strip()
+                if not stripped or stripped.startswith(":"):
+                    continue
 
-                line_buffer += text_part
-                lines = line_buffer.split("\n")
-                line_buffer = lines[-1]
-
-                for line in lines[:-1]:
-                    stripped = line.rstrip()
-                    if not stripped:
-                        continue
-                    if not stripped.startswith("data:"):
-                        continue
-
+                if stripped.startswith("data:"):
                     data_str = stripped[5:].lstrip()
-                    if data_str.strip() == "[DONE]":
-                        return
-                    if data_str:
-                        saw_payload = True
-                        yield data_str
+                else:
+                    # NVIDIA-hosted examples consume iter_lines() directly, so
+                    # also accept raw JSON lines that are not prefixed with data:.
+                    data_str = stripped
+
+                if data_str.strip() == "[DONE]":
+                    return
+                if data_str:
+                    saw_payload = True
+                    yield data_str
         except requests.exceptions.RequestException as exc:
             # Some upstream SSE implementations close the socket without a final
             # chunk terminator. If we already received payload data, treat that
             # as an incomplete-but-usable stream instead of failing the turn.
-            if saw_payload or line_buffer.strip():
+            if saw_payload:
                 stream_interrupted = True
                 logger.warning("Streaming response ended prematurely after partial payload: %s", exc)
             else:
                 raise
-
-        try:
-            line_buffer += byte_decoder.decode(b"", final=True)
-        except Exception:
-            pass
-
-        if line_buffer.strip().startswith("data:"):
-            data_str = line_buffer.strip()[5:].lstrip()
-            if data_str and data_str != "[DONE]":
-                saw_payload = True
-                yield data_str
 
         if stream_interrupted and not saw_payload:
             logger.warning("Streaming response ended prematurely before any usable SSE payload was decoded")
@@ -3485,19 +3636,12 @@ class ReverieAgent:
                     workspace_stats_manager=self.tool_executor.context.get("workspace_stats_manager"),
                     model_display_name=self.model_display_name,
                 )
-            except Exception as compression_error:
-                logger.warning(
+            except Exception:
+                logger.debug(
                     "Automatic context compaction failed; deferring retry window",
                     exc_info=True,
                 )
                 self._auto_context_compaction_retry_after = time.time() + 30.0
-                self._emit_ui_event(
-                    category="Context Engine",
-                    message="Auto-compaction skipped",
-                    status="warning",
-                    detail="The LLM compression pass failed and will retry later.",
-                    meta=str(compression_error),
-                )
                 return current_tokens
 
             new_history = self._history_from_request_messages(compressed_messages)
@@ -3505,13 +3649,6 @@ class ReverieAgent:
                 self.messages = new_history
                 self._persist_history_to_session()
                 self._auto_context_compaction_retry_after = 0.0
-                self._emit_ui_event(
-                    category="Context Engine",
-                    message="Auto-compaction complete",
-                    status="success",
-                    detail="Older context was condensed into durable working memory.",
-                    meta="continuing in the same session",
-                )
             else:
                 self._auto_context_compaction_retry_after = time.time() + 30.0
 
@@ -3585,19 +3722,12 @@ class ReverieAgent:
                     workspace_stats_manager=self.tool_executor.context.get("workspace_stats_manager"),
                     model_display_name=self.model_display_name,
                 )
-            except Exception as handoff_error:
-                logger.warning(
+            except Exception:
+                logger.debug(
                     "Automatic handoff generation failed; skipping session rotation until retry window",
                     exc_info=True,
                 )
                 self._auto_context_rotation_retry_after = time.time() + 30.0
-                self._emit_ui_event(
-                    category="Context Engine",
-                    message="Auto handoff skipped",
-                    status="warning",
-                    detail="The LLM handoff payload could not be generated cleanly.",
-                    meta=str(handoff_error),
-                )
                 return
 
             new_session = session_manager.rotate_session(
@@ -3613,13 +3743,6 @@ class ReverieAgent:
             self._persist_history_to_session()
 
             self._auto_context_rotation_retry_after = 0.0
-            self._emit_ui_event(
-                category="Context Engine",
-                message="Auto handoff complete",
-                status="success",
-                detail="A fresh session was prepared with LLM-authored carryover.",
-                meta="continuing automatically",
-            )
         finally:
             self._auto_context_rotation_active = False
     

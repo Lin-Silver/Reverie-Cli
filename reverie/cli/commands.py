@@ -2736,8 +2736,8 @@ class CommandHandler:
         lowered = raw.lower()
         if lowered in ("status", "check"):
             return self._cmd_nvidia_status()
-        if lowered in ("login", "key", "apikey", "api-key"):
-            return self._cmd_nvidia_login()
+        if lowered in ("key", "apikey", "api-key", "login"):
+            return self._cmd_nvidia_key()
         if lowered in ("activate", "use"):
             return self._cmd_nvidia_activate()
         if lowered == "model":
@@ -2750,7 +2750,7 @@ class CommandHandler:
             return self._cmd_nvidia_endpoint(raw[9:].strip())
 
         self.console.print(
-            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /nvidia [status|login|activate|model|endpoint][/{self.theme.AMBER_GLOW}]"
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /nvidia [status|key|activate|model|endpoint][/{self.theme.AMBER_GLOW}]"
         )
         return True
 
@@ -2796,7 +2796,7 @@ class CommandHandler:
         self.console.print()
         return True
 
-    def _cmd_nvidia_login(self) -> bool:
+    def _cmd_nvidia_key(self) -> bool:
         from ..nvidia import NVIDIA_API_KEY_HINT_URL, normalize_nvidia_config
 
         config_manager = self.app.get('config_manager')
@@ -2834,6 +2834,10 @@ class CommandHandler:
             f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} NVIDIA API key saved.[/{self.theme.MINT_VIBRANT}]"
         )
         return True
+
+    def _cmd_nvidia_login(self) -> bool:
+        """Backward-compatible alias for the older `/nvidia login` command."""
+        return self._cmd_nvidia_key()
 
     def _cmd_nvidia_activate(self) -> bool:
         config_manager = self.app.get('config_manager')

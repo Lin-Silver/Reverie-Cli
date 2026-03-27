@@ -11,6 +11,7 @@ Handles:
 from typing import Dict, Any, Optional, List
 from pathlib import Path
 import json
+import logging
 
 from ..modes import normalize_mode
 from ..tools import (
@@ -50,7 +51,11 @@ from ..tools import (
     TokenCounterTool,
     ModeSwitchTool,
     ComputerControlTool,
+    MCPDynamicTool,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class ToolExecutor:
@@ -93,9 +98,12 @@ class ToolExecutor:
             'lsp_manager': lsp_manager,
             'memory_indexer': memory_indexer,
         }
-        
+
         # Initialize tools
         self._tools: Dict[str, BaseTool] = {}
+        self._dynamic_tool_names: set[str] = set()
+        self._mcp_generation: int = -1
+        self._schema_cache: Dict[tuple[str, int], List[Dict[str, Any]]] = {}
         self._init_tools()
     
     def _init_tools(self) -> None:
@@ -140,13 +148,61 @@ class ToolExecutor:
         for tool_class in tool_classes:
             tool = tool_class(self.context)
             self._tools[tool.name] = tool
+
+    def _invalidate_schema_cache(self) -> None:
+        self._schema_cache = {}
+
+    def _sync_mcp_tools(self) -> None:
+        """Refresh dynamic MCP-backed tools when the MCP catalog changes."""
+        runtime = self.context.get("mcp_runtime")
+        if runtime is None:
+            if self._dynamic_tool_names:
+                for name in list(self._dynamic_tool_names):
+                    self._tools.pop(name, None)
+                self._dynamic_tool_names = set()
+                self._mcp_generation = -1
+                self._invalidate_schema_cache()
+            return
+
+        try:
+            definitions = runtime.get_tool_definitions(force_refresh=False)
+            generation = int(runtime.get_generation())
+        except Exception as exc:
+            logger.debug("Failed to sync MCP tools: %s", exc, exc_info=True)
+            return
+
+        definition_names = {
+            str(item.get("name", "")).strip()
+            for item in definitions
+            if isinstance(item, dict) and str(item.get("name", "")).strip()
+        }
+
+        if generation == self._mcp_generation and definition_names == self._dynamic_tool_names:
+            return
+
+        for name in list(self._dynamic_tool_names):
+            self._tools.pop(name, None)
+
+        new_dynamic_names: set[str] = set()
+        for metadata in definitions:
+            if not isinstance(metadata, dict):
+                continue
+            tool = MCPDynamicTool(self.context, metadata)
+            self._tools[tool.name] = tool
+            new_dynamic_names.add(tool.name)
+
+        self._dynamic_tool_names = new_dynamic_names
+        self._mcp_generation = generation
+        self._invalidate_schema_cache()
     
     def get_tool(self, name: str) -> Optional[BaseTool]:
         """Get a tool by name"""
+        self._sync_mcp_tools()
         return self._tools.get(name)
     
     def list_tools(self) -> List[str]:
         """List all available tool names"""
+        self._sync_mcp_tools()
         return list(self._tools.keys())
 
     def _unwrap_arguments(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -254,6 +310,7 @@ class ToolExecutor:
         Returns:
             ToolResult with success status and output
         """
+        self._sync_mcp_tools()
         tool = self.get_tool(tool_name)
         
         if not tool:
@@ -282,8 +339,14 @@ class ToolExecutor:
         This method ensures that all tool schemas are properly validated
         and safe for JSON serialization before returning them.
         """
-        schemas = []
         normalized_mode = normalize_mode(mode)
+        self._sync_mcp_tools()
+        cache_key = (normalized_mode, self._mcp_generation)
+        cached = self._schema_cache.get(cache_key)
+        if cached is not None:
+            return list(cached)
+
+        schemas: List[Dict[str, Any]] = []
 
         for name, tool in self._tools.items():
             if name == "context_management":
@@ -331,17 +394,14 @@ class ToolExecutor:
             # Get schema and validate it
             try:
                 schema = tool.get_schema()
-                # Validate that the schema can be serialized
-                import json
                 json.dumps(schema, ensure_ascii=False)
                 schemas.append(schema)
             except Exception as e:
-                import logging
-                logger = logging.getLogger(__name__)
                 logger.error(f"Failed to get schema for tool {name}: {e}")
                 # Skip this tool rather than breaking the entire request
                 continue
-        
+
+        self._schema_cache[cache_key] = list(schemas)
         return schemas
     
     def update_context(self, key: str, value: Any) -> None:
@@ -351,3 +411,7 @@ class ToolExecutor:
         # Update all tool contexts
         for tool in self._tools.values():
             tool.context = self.context
+        if key == "mcp_runtime":
+            self._mcp_generation = -1
+            self._sync_mcp_tools()
+        self._invalidate_schema_cache()

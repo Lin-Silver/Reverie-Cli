@@ -45,7 +45,6 @@ class CommandHandler:
         self.commands = {
             'help': self.cmd_help,
             'model': self.cmd_model,
-            'iflow': self.cmd_iflow,
             'qwencode': self.cmd_qwencode,
             'geminicli': self.cmd_geminicli,
             'codex': self.cmd_codex,
@@ -60,6 +59,7 @@ class CommandHandler:
             'clean': self.cmd_clean,
             'index': self.cmd_index,
             'tools': self.cmd_tools,
+            'mcp': self.cmd_mcp,
             'setting': self.cmd_setting,
             'rules': self.cmd_rules,
             'workspace': self.cmd_workspace,
@@ -81,6 +81,10 @@ class CommandHandler:
             'pt': self.cmd_playtest,
             'CE': self.cmd_context_engine,  # Context Engine management (case-sensitive)
         }
+        self._help_topic_items_cache: tuple[Dict[str, object], ...] = tuple()
+        self._help_preview_cache: Dict[str, str] = {}
+        self._help_search_cache: Dict[str, str] = {}
+        self._prime_help_catalog_cache()
 
     def _resolve_activity_style(self, status: str) -> tuple[str, str, str, str]:
         """Resolve colors and labels for lightweight command activity blocks."""
@@ -104,13 +108,13 @@ class CommandHandler:
         blank_before: bool = False,
         blank_after: bool = False,
     ) -> None:
-        """Render a compact Gemini-style timeline event inside command pages."""
+        """Render a compact Codex-like timeline event inside command pages."""
         if blank_before:
             self.console.print()
 
         accent, status_label, message_color, detail_color = self._resolve_activity_style(status)
         title = Text()
-        title.append("+- ", style=accent)
+        title.append("│ ", style=accent)
         title.append(str(category or "Activity"), style=f"bold {accent}")
         title.append("  |  ", style=self.theme.TEXT_DIM)
         title.append(status_label, style=self.theme.TEXT_DIM)
@@ -130,7 +134,7 @@ class CommandHandler:
 
         if meta_text:
             footer = Text()
-            footer.append("\\- ", style=accent)
+            footer.append("└ ", style=accent)
             footer.append(meta_text, style=self.theme.TEXT_DIM)
             renderables.append(footer)
 
@@ -496,8 +500,44 @@ class CommandHandler:
             )
         )
 
-    def _get_help_topic_items(self) -> List[Dict[str, object]]:
-        """Flatten help topics into UI-friendly items while preserving catalog order."""
+    def _help_topic_cache_key(self, topic: Dict[str, object]) -> str:
+        return str(topic.get("_topic_key", "") or topic.get("command", "")).strip().lower()
+
+    def _compute_help_topic_preview(self, topic: Dict[str, object], limit: int = 3) -> str:
+        forms = [
+            str(item.get("usage", "")).strip()
+            for item in (topic.get("subcommands", []) or [])
+            if str(item.get("usage", "")).strip()
+        ]
+        if not forms:
+            fallback = str(topic.get("overview", "")).strip()
+            return fallback or str(topic.get("summary", "")).strip()
+
+        preview = "  |  ".join(forms[:limit])
+        if len(forms) > limit:
+            preview = f"{preview}  |  +{len(forms) - limit} more"
+        return preview
+
+    def _build_help_topic_search_document(self, topic: Dict[str, object]) -> str:
+        search_parts = [
+            str(topic.get("command", "")),
+            str(topic.get("section", "")),
+            str(topic.get("summary", "")),
+            str(topic.get("detail", "")),
+            str(topic.get("overview", "")),
+            " ".join(str(alias) for alias in (topic.get("aliases", []) or [])),
+        ]
+        for subcommand in topic.get("subcommands", []) or []:
+            search_parts.extend(
+                [
+                    str(subcommand.get("usage", "")),
+                    str(subcommand.get("description", "")),
+                    self._resolve_help_example(subcommand),
+                ]
+            )
+        return " ".join(part.lower() for part in search_parts if part)
+
+    def _prime_help_catalog_cache(self) -> None:
         items: List[Dict[str, object]] = []
         seen: set[str] = set()
 
@@ -517,23 +557,29 @@ class CommandHandler:
             item["_topic_key"] = key
             items.append(item)
 
-        return items
+        self._help_topic_items_cache = tuple(items)
+        self._help_preview_cache = {
+            self._help_topic_cache_key(item): self._compute_help_topic_preview(item)
+            for item in items
+        }
+        self._help_search_cache = {
+            self._help_topic_cache_key(item): self._build_help_topic_search_document(item)
+            for item in items
+        }
+
+    def _get_help_topic_items(self) -> List[Dict[str, object]]:
+        """Flatten help topics into UI-friendly items while preserving catalog order."""
+        if not self._help_topic_items_cache:
+            self._prime_help_catalog_cache()
+        return list(self._help_topic_items_cache)
 
     def _build_help_topic_preview(self, topic: Dict[str, object], limit: int = 3) -> str:
         """Build a compact preview of full command forms for the help browser list."""
-        forms = [
-            str(item.get("usage", "")).strip()
-            for item in (topic.get("subcommands", []) or [])
-            if str(item.get("usage", "")).strip()
-        ]
-        if not forms:
-            fallback = str(topic.get("overview", "")).strip()
-            return fallback or str(topic.get("summary", "")).strip()
-
-        preview = "  |  ".join(forms[:limit])
-        if len(forms) > limit:
-            preview = f"{preview}  |  +{len(forms) - limit} more"
-        return preview
+        cache_key = self._help_topic_cache_key(topic)
+        cached = self._help_preview_cache.get(cache_key)
+        if cached is not None and limit == 3:
+            return cached
+        return self._compute_help_topic_preview(topic, limit=limit)
 
     def _filter_help_topic_items(self, items: List[Dict[str, object]], query: str) -> List[Dict[str, object]]:
         """Filter help topics by command, aliases, summaries, and full subcommand forms."""
@@ -545,24 +591,11 @@ class CommandHandler:
         filtered: List[Dict[str, object]] = []
 
         for item in items:
-            search_parts = [
-                str(item.get("command", "")),
-                str(item.get("section", "")),
-                str(item.get("summary", "")),
-                str(item.get("detail", "")),
-                str(item.get("overview", "")),
-                " ".join(str(alias) for alias in (item.get("aliases", []) or [])),
-            ]
-            for subcommand in item.get("subcommands", []) or []:
-                search_parts.extend(
-                    [
-                        str(subcommand.get("usage", "")),
-                        str(subcommand.get("description", "")),
-                        self._resolve_help_example(subcommand),
-                    ]
-                )
-
-            haystack = " ".join(part.lower() for part in search_parts if part)
+            cache_key = self._help_topic_cache_key(item)
+            haystack = self._help_search_cache.get(cache_key)
+            if haystack is None:
+                haystack = self._build_help_topic_search_document(item)
+                self._help_search_cache[cache_key] = haystack
             if all(term in haystack for term in terms):
                 filtered.append(item)
 
@@ -597,6 +630,7 @@ class CommandHandler:
         """Build the top summary panel for the interactive help browser."""
         command = str(selected_topic.get("command", "")).strip()
         section = str(selected_topic.get("section", "")).strip()
+        summary = str(selected_topic.get("summary", "")).strip()
         accent = self._help_section_accent(section)
         count_text = f"{filtered_count}/{total_count} commands" if filtered_count != total_count else f"{total_count} commands"
 
@@ -613,9 +647,11 @@ class CommandHandler:
 
         search_display = search_query + ("_" if is_searching else "")
         body_lines = [
-            f"[{self.theme.TEXT_SECONDARY}]Browse commands, full child forms, and runnable examples. Press [bold {self.theme.BLUE_SOFT}]Enter[/bold {self.theme.BLUE_SOFT}] or [bold {self.theme.BLUE_SOFT}]Esc[/bold {self.theme.BLUE_SOFT}] to pin the current page into the transcript.[/{self.theme.TEXT_SECONDARY}]",
+            f"[{self.theme.TEXT_SECONDARY}]Browse commands, runnable forms, and examples. Press [bold {self.theme.BLUE_SOFT}]Enter[/bold {self.theme.BLUE_SOFT}] or [bold {self.theme.BLUE_SOFT}]Esc[/bold {self.theme.BLUE_SOFT}] to pin the focused page into the transcript.[/{self.theme.TEXT_SECONDARY}]",
             f"[{self.theme.TEXT_DIM}]Focused:[/{self.theme.TEXT_DIM}] [bold {accent}]{escape(command)}[/bold {accent}] [{self.theme.TEXT_DIM}]· {escape(section)}[/{self.theme.TEXT_DIM}]",
         ]
+        if summary:
+            body_lines.append(f"[{self.theme.TEXT_PRIMARY}]{escape(summary)}[/{self.theme.TEXT_PRIMARY}]")
         if search_query or is_searching:
             body_lines.append(
                 f"[bold {self.theme.PURPLE_SOFT}]{self.deco.SEARCH} Filter[/bold {self.theme.PURPLE_SOFT}] "
@@ -661,9 +697,9 @@ class CommandHandler:
             show_lines=False,
         )
         table.add_column("", width=2, no_wrap=True)
+        table.add_column("#", style=self.theme.TEXT_DIM, width=4, justify="right", no_wrap=True)
         table.add_column("Command", style=f"bold {self.theme.BLUE_SOFT}", width=16, no_wrap=True)
-        table.add_column("Section", style=self.theme.TEXT_DIM, width=18, no_wrap=True)
-        table.add_column("Forms Preview", style=self.theme.TEXT_SECONDARY, ratio=3)
+        table.add_column("Preview", style=self.theme.TEXT_SECONDARY, ratio=3)
 
         end_idx = min(scroll_offset + max_visible, len(filtered_items))
         visible_items = filtered_items[scroll_offset:end_idx]
@@ -672,13 +708,14 @@ class CommandHandler:
             is_selected = actual_idx == selected_idx
             indicator = Text("›" if is_selected else "", style=f"bold {self.theme.PINK_SOFT}")
             command_style = f"bold {self.theme.TEXT_PRIMARY} on {self.theme.PURPLE_DEEP}" if is_selected else f"bold {self.theme.BLUE_SOFT}"
-            section_style = self.theme.TEXT_SECONDARY if is_selected else self.theme.TEXT_DIM
             preview_style = self.theme.TEXT_PRIMARY if is_selected else self.theme.TEXT_SECONDARY
+            section = str(topic.get("section", "")).strip()
+            preview = f"[{section}] {self._build_help_topic_preview(topic)}" if section else self._build_help_topic_preview(topic)
             table.add_row(
                 indicator,
+                Text(str(actual_idx + 1), style=self.theme.TEXT_DIM),
                 Text(str(topic.get("command", "")).strip(), style=command_style),
-                Text(str(topic.get("section", "")).strip(), style=section_style),
-                Text(self._build_help_topic_preview(topic), style=preview_style, overflow="fold"),
+                Text(preview, style=preview_style, overflow="fold"),
             )
 
         visible_range = (
@@ -713,6 +750,8 @@ class CommandHandler:
         footer_text.append("/", style=self.theme.BLUE_SOFT)
         footer_text.append("  Edit ", style=self.theme.TEXT_DIM)
         footer_text.append("Backspace", style=self.theme.BLUE_SOFT)
+        footer_text.append("  Jump ", style=self.theme.TEXT_DIM)
+        footer_text.append("Home/End", style=self.theme.BLUE_SOFT)
 
         status_text = "Typing filter" if is_searching else ("Filter active" if search_query else "Live browser")
         status_color = self.theme.PURPLE_SOFT if (is_searching or search_query) else self.theme.TEXT_DIM
@@ -951,6 +990,951 @@ class CommandHandler:
 
         self.console.print(table)
         return True
+
+    def _get_mcp_services(self):
+        manager = self.app.get('mcp_config_manager')
+        runtime = self.app.get('mcp_runtime')
+        if not manager or not runtime:
+            self._show_activity_event(
+                "MCP",
+                "MCP runtime is not available.",
+                status="error",
+                detail="Restart Reverie after updating to a build that includes MCP support.",
+            )
+            return None, None
+        return manager, runtime
+
+    def _refresh_mcp_runtime(self, *, force_reload: bool = False) -> tuple[Any, Any] | tuple[None, None]:
+        manager, runtime = self._get_mcp_services()
+        if not manager or not runtime:
+            return None, None
+
+        runtime.reload(force=force_reload)
+        refresh_prompt = self.app.get('refresh_agent_prompt_guidance')
+        if callable(refresh_prompt):
+            try:
+                refresh_prompt()
+            except Exception:
+                pass
+        return manager, runtime
+
+    def _resolve_mcp_server_name(self, server_name: str, config: Dict[str, Any]) -> str:
+        wanted = str(server_name or "").strip()
+        if not wanted:
+            return ""
+        for existing in (config.get("mcpServers", {}) or {}).keys():
+            if str(existing).strip().lower() == wanted.lower():
+                return str(existing)
+        return wanted
+
+    def _shorten_mcp_text(self, value: Any, max_length: int = 72) -> str:
+        text = str(value or "").strip()
+        if len(text) <= max_length:
+            return text
+        if max_length <= 3:
+            return text[:max_length]
+        return f"{text[:max_length - 3]}..."
+
+    def _summarize_mcp_target(self, server_cfg: Dict[str, Any]) -> str:
+        server_type = str(server_cfg.get("type", "stdio") or "stdio").strip().lower()
+        if server_type == "stdio":
+            command = str(server_cfg.get("command", "") or "").strip()
+            args = [str(arg).strip() for arg in (server_cfg.get("args", []) or []) if str(arg).strip()]
+            command_line = " ".join([command, *args]).strip()
+            return command_line or "(command not set)"
+        if server_type == "http":
+            return str(server_cfg.get("httpUrl", "") or server_cfg.get("url", "") or "").strip() or "(URL not set)"
+        return str(server_cfg.get("url", "") or server_cfg.get("httpUrl", "") or "").strip() or "(URL not set)"
+
+    def _load_mcp_ui_state(self, manager, runtime, *, force_refresh: bool = False) -> tuple[Dict[str, Any], List[Dict[str, Any]]]:
+        config = manager.load()
+        rows = runtime.list_server_status(force_refresh=force_refresh)
+        return config, rows
+
+    def _save_mcp_ui_config(
+        self,
+        manager,
+        runtime,
+        config: Dict[str, Any],
+        *,
+        force_refresh: bool = False,
+    ) -> tuple[Dict[str, Any], List[Dict[str, Any]]]:
+        manager.save(config)
+        runtime.reload(force=True)
+        refresh_prompt = self.app.get('refresh_agent_prompt_guidance')
+        if callable(refresh_prompt):
+            try:
+                refresh_prompt()
+            except Exception:
+                pass
+        return self._load_mcp_ui_state(manager, runtime, force_refresh=force_refresh)
+
+    def _get_mcp_ui_items(self, config: Dict[str, Any], rows: List[Dict[str, Any]], manager) -> List[Dict[str, Any]]:
+        from ..mcp import normalize_mcp_server_config
+
+        mcp_cfg = dict(config.get("mcp", {}) or {})
+        items: List[Dict[str, Any]] = [
+            {
+                "name": "MCP Enabled",
+                "kind": "global-bool",
+                "description": "Master switch for all configured MCP servers and dynamic MCP tools.",
+                "command": "/mcp",
+                "value": bool(mcp_cfg.get("enabled", True)),
+            },
+            {
+                "name": "Discovery Timeout",
+                "kind": "global-int",
+                "description": "Timeout used while discovering tools, resources, and prompts from each server.",
+                "command": "Edit in panel or .Reverie/MCP.json",
+                "value": int(mcp_cfg.get("discovery_timeout_ms", 15000) or 15000),
+                "min": 1000,
+                "max": 600000,
+                "step": 5000,
+            },
+            {
+                "name": "Refresh Discovery",
+                "kind": "action",
+                "action": "refresh",
+                "description": "Re-run MCP discovery for enabled servers and refresh tool counts/errors.",
+                "command": "/mcp reload",
+            },
+            {
+                "name": "Add Server",
+                "kind": "action",
+                "action": "add",
+                "description": "Create a new stdio, streamable HTTP, or legacy SSE MCP server entry.",
+                "command": "/mcp add ...",
+            },
+            {
+                "name": "Config Path",
+                "kind": "readonly",
+                "description": "Persisted MCP configuration file used by Reverie.",
+                "command": "/mcp path",
+                "value": str(manager.get_config_path()),
+            },
+        ]
+
+        server_entries = config.get("mcpServers", {}) or {}
+        for row in rows:
+            server_name = str(row.get("name", "") or "").strip()
+            if not server_name:
+                continue
+            raw_server_cfg = server_entries.get(server_name, {})
+            server_cfg = normalize_mcp_server_config(server_name, raw_server_cfg)
+            items.append(
+                {
+                    "name": server_name,
+                    "kind": "server",
+                    "description": "Configured MCP server. Use quick actions to enable, trust, refresh, or remove it.",
+                    "command": "/mcp enable|disable|trust|remove",
+                    "server_name": server_name,
+                    "state": str(row.get("state", "unknown") or "unknown"),
+                    "transport": str(row.get("type", server_cfg.get("type", "stdio")) or "stdio"),
+                    "trust": bool(row.get("trust", server_cfg.get("trust", False))),
+                    "enabled": bool(server_cfg.get("enabled", True)),
+                    "tools": row.get("tools"),
+                    "resources": row.get("resources"),
+                    "prompts": row.get("prompts"),
+                    "notes": str(row.get("error", "") or "").strip(),
+                    "target": self._summarize_mcp_target(server_cfg),
+                }
+            )
+
+        return items
+
+    def _mcp_display_value(self, item: Dict[str, Any]) -> str:
+        kind = str(item.get("kind", "")).strip()
+        if kind == "global-bool":
+            return f"[{self.theme.MINT_SOFT}]ON[/{self.theme.MINT_SOFT}]" if bool(item.get("value")) else f"[{self.theme.TEXT_DIM}]OFF[/{self.theme.TEXT_DIM}]"
+        if kind == "global-int":
+            return f"{int(item.get('value', 0) or 0):,} ms"
+        if kind == "readonly":
+            return escape(self._shorten_mcp_text(item.get("value", ""), max_length=60))
+        if kind == "action":
+            action = str(item.get("action", "")).strip().lower()
+            label = "Run now" if action == "refresh" else "Open prompt"
+            return f"[{self.theme.BLUE_SOFT}]{label}[/{self.theme.BLUE_SOFT}]"
+        if kind == "server":
+            state = str(item.get("state", "unknown") or "unknown")
+            enabled_label = "ON" if bool(item.get("enabled", True)) else "OFF"
+            enabled_style = self.theme.MINT_SOFT if bool(item.get("enabled", True)) else self.theme.TEXT_DIM
+            trust_label = "trusted" if bool(item.get("trust")) else "confirm"
+            transport = str(item.get("transport", "stdio") or "stdio")
+            tools = item.get("tools")
+            tools_label = "-" if tools is None else str(tools)
+            state_style = self.theme.MINT_VIBRANT if state == "enabled" else (self.theme.TEXT_DIM if state == "disabled" else self.theme.AMBER_GLOW)
+            return (
+                f"[{enabled_style}]{enabled_label}[/{enabled_style}] · "
+                f"[{self.theme.TEXT_PRIMARY}]{escape(transport)}[/{self.theme.TEXT_PRIMARY}] · "
+                f"[{self.theme.PURPLE_SOFT}]{escape(trust_label)}[/{self.theme.PURPLE_SOFT}] · "
+                f"[{self.theme.BLUE_SOFT}]{escape(tools_label)} tools[/{self.theme.BLUE_SOFT}] · "
+                f"[{state_style}]{escape(state)}[/{state_style}]"
+            )
+        return f"[{self.theme.TEXT_DIM}](n/a)[/{self.theme.TEXT_DIM}]"
+
+    def _build_mcp_summary_panel(self, config: Dict[str, Any], rows: List[Dict[str, Any]], manager, *, selected_item: Optional[Dict[str, Any]] = None, changed: bool = False) -> Panel:
+        total_servers = len(rows)
+        enabled_servers = sum(1 for row in rows if str(row.get("state", "")).strip().lower() == "enabled")
+        trusted_servers = sum(1 for row in rows if bool(row.get("trust", False)))
+        total_tools = sum(int(row.get("tools") or 0) for row in rows if row.get("tools") is not None)
+        focus_label = str((selected_item or {}).get("name", "") or "MCP Enabled").strip()
+        state_label = "Updated this session" if changed else "Live view"
+        state_style = self.theme.AMBER_GLOW if changed else self.theme.MINT_SOFT
+        global_enabled = bool((config.get("mcp", {}) or {}).get("enabled", True))
+
+        summary = Table(box=box.SIMPLE, show_header=False, pad_edge=False)
+        summary.add_column(style=self.theme.TEXT_DIM, width=14)
+        summary.add_column(style=f"bold {self.theme.TEXT_PRIMARY}")
+        summary.add_column(style=self.theme.TEXT_DIM, width=14)
+        summary.add_column(style=f"bold {self.theme.TEXT_PRIMARY}")
+        summary.add_row("Global MCP", "ON" if global_enabled else "OFF", "Config", str(manager.get_config_path()))
+        summary.add_row("Servers", str(total_servers), "Enabled", str(enabled_servers))
+        summary.add_row("Trusted", str(trusted_servers), "Tools", str(total_tools))
+        summary.add_row("Focus", escape(focus_label), "State", f"[{state_style}]{state_label}[/{state_style}]")
+
+        return Panel(
+            summary,
+            title=f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Reverie MCP {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]",
+            subtitle=f"[{self.theme.TEXT_DIM}]Interactive control panel for MCP servers, discovery, and dynamic tool exposure.[/{self.theme.TEXT_DIM}]",
+            border_style=self.theme.BORDER_PRIMARY,
+            padding=(0, 2),
+            box=box.ROUNDED,
+        )
+
+    def _build_mcp_list_panel(self, items: List[Dict[str, Any]], selected_idx: int) -> Panel:
+        table = Table(box=box.SIMPLE, show_header=True, pad_edge=False)
+        table.add_column("#", style=self.theme.TEXT_DIM, width=4, justify="right")
+        table.add_column("Item", style=f"bold {self.theme.BLUE_SOFT}", width=24)
+        table.add_column("Value", style=self.theme.TEXT_PRIMARY)
+
+        for index, item in enumerate(items):
+            is_selected = index == selected_idx
+            marker = f"{self.deco.CHEVRON_RIGHT}" if is_selected else " "
+            item_name = f"{marker} {item['name']}"
+            value_text = self._mcp_display_value(item)
+            if is_selected:
+                table.add_row(
+                    f"[{self.theme.TEXT_DIM}]{index + 1}[/{self.theme.TEXT_DIM}]",
+                    f"[bold {self.theme.PINK_SOFT}]{escape(item_name)}[/bold {self.theme.PINK_SOFT}]",
+                    f"[reverse]{value_text}[/reverse]",
+                )
+            else:
+                table.add_row(str(index + 1), escape(item_name), value_text)
+
+        return Panel(
+            table,
+            title=f"[bold {self.theme.BLUE_SOFT}]{self.deco.DIAMOND} MCP Items[/bold {self.theme.BLUE_SOFT}]",
+            border_style=self.theme.BORDER_SUBTLE,
+            padding=(0, 1),
+            box=box.ROUNDED,
+        )
+
+    def _build_mcp_detail_panel(self, item: Dict[str, Any]) -> Panel:
+        kind = str(item.get("kind", "")).strip()
+        description = str(item.get("description", "")).strip()
+        command = str(item.get("command", "")).strip()
+
+        detail_lines = [
+            f"[bold {self.theme.PURPLE_SOFT}]{escape(str(item.get('name', 'MCP')))}[/bold {self.theme.PURPLE_SOFT}]",
+            f"[{self.theme.TEXT_SECONDARY}]{escape(description)}[/{self.theme.TEXT_SECONDARY}]",
+            "",
+            f"[{self.theme.TEXT_DIM}]Current[/{self.theme.TEXT_DIM}] {self._mcp_display_value(item)}",
+        ]
+
+        if kind == "global-int":
+            detail_lines.append(f"[{self.theme.TEXT_DIM}]Range[/{self.theme.TEXT_DIM}] {item.get('min', 1000)} - {item.get('max', 600000)} ms")
+            detail_lines.append(f"[{self.theme.TEXT_DIM}]Step[/{self.theme.TEXT_DIM}] {item.get('step', 5000)} ms")
+        elif kind == "readonly":
+            detail_lines.append(f"[{self.theme.TEXT_DIM}]Path[/{self.theme.TEXT_DIM}] {escape(str(item.get('value', '')))}")
+        elif kind == "action":
+            if str(item.get("action", "")).strip().lower() == "refresh":
+                detail_lines.append(f"[{self.theme.TEXT_DIM}]Behavior[/{self.theme.TEXT_DIM}] Re-runs discovery for enabled servers and updates notes/counts.")
+            else:
+                detail_lines.append(f"[{self.theme.TEXT_DIM}]Behavior[/{self.theme.TEXT_DIM}] Prompts for transport, name, and target, then saves the server into MCP.json.")
+        elif kind == "server":
+            notes = str(item.get("notes", "") or "").strip() or "ready"
+            detail_lines.extend(
+                [
+                    f"[{self.theme.TEXT_DIM}]Transport[/{self.theme.TEXT_DIM}] {escape(str(item.get('transport', 'stdio')))}",
+                    f"[{self.theme.TEXT_DIM}]State[/{self.theme.TEXT_DIM}] {escape(str(item.get('state', 'unknown')))}",
+                    f"[{self.theme.TEXT_DIM}]Trust[/{self.theme.TEXT_DIM}] {'trusted' if bool(item.get('trust')) else 'confirmation-required'}",
+                    f"[{self.theme.TEXT_DIM}]Target[/{self.theme.TEXT_DIM}] {escape(str(item.get('target', '')))}",
+                    f"[{self.theme.TEXT_DIM}]Discovery[/{self.theme.TEXT_DIM}] tools={item.get('tools', '-')}, resources={item.get('resources', '-')}, prompts={item.get('prompts', '-')}",
+                    f"[{self.theme.TEXT_DIM}]Notes[/{self.theme.TEXT_DIM}] {escape(notes)}",
+                ]
+            )
+
+        detail_lines.extend(
+            [
+                "",
+                f"[{self.theme.TEXT_DIM}]Quick adjust[/{self.theme.TEXT_DIM}] h/l toggles enabled rows or adjusts numeric values.",
+                f"[{self.theme.TEXT_DIM}]Fast actions[/{self.theme.TEXT_DIM}] t toggles trust, a adds a server, r refreshes discovery, x removes the selected server.",
+                f"[{self.theme.TEXT_DIM}]Command equivalent[/{self.theme.TEXT_DIM}] {escape(command)}",
+            ]
+        )
+
+        return Panel(
+            Text.from_markup("\n".join(detail_lines)),
+            title=f"[bold {self.theme.PURPLE_SOFT}]{self.deco.DIAMOND} Details[/bold {self.theme.PURPLE_SOFT}]",
+            border_style=self.theme.BORDER_SUBTLE,
+            padding=(1, 2),
+            box=box.ROUNDED,
+        )
+
+    def _build_mcp_footer_panel(self, *, changed: bool, selected_idx: int, total_items: int) -> Panel:
+        footer_grid = Table.grid(expand=True)
+        footer_grid.add_column(ratio=1)
+        footer_grid.add_column(justify="right", no_wrap=True)
+        footer_grid.add_row(
+            Text.from_markup(
+                f"[{self.theme.TEXT_DIM}]"
+                f"{self.deco.DOT_MEDIUM} ↑/↓ or j/k: Navigate  "
+                f"{self.deco.DOT_MEDIUM} ←/→ or h/l: Quick change  "
+                f"{self.deco.DOT_MEDIUM} t: Trust  "
+                f"{self.deco.DOT_MEDIUM} a: Add  "
+                f"{self.deco.DOT_MEDIUM} r: Refresh  "
+                f"{self.deco.DOT_MEDIUM} x: Remove  "
+                f"{self.deco.DOT_MEDIUM} Enter: Edit  "
+                f"{self.deco.DOT_MEDIUM} Esc: Exit"
+                f"[/{self.theme.TEXT_DIM}]"
+            ),
+            Text(
+                f"{selected_idx + 1}/{max(1, total_items)} · {'updated' if changed else 'ready'}",
+                style=self.theme.AMBER_GLOW if changed else self.theme.TEXT_DIM,
+            ),
+        )
+        return Panel(
+            footer_grid,
+            border_style=self.theme.BORDER_SUBTLE,
+            padding=(0, 1),
+            box=box.ROUNDED,
+        )
+
+    def _render_mcp_ui(self, config: Dict[str, Any], rows: List[Dict[str, Any]], manager, selected_idx: int, *, changed: bool = False) -> Group:
+        items = self._get_mcp_ui_items(config, rows, manager)
+        selected_idx = max(0, min(selected_idx, max(0, len(items) - 1)))
+        selected_item = items[selected_idx]
+        summary_panel = self._build_mcp_summary_panel(config, rows, manager, selected_item=selected_item, changed=changed)
+        list_panel = self._build_mcp_list_panel(items, selected_idx)
+        detail_panel = self._build_mcp_detail_panel(selected_item)
+        footer_panel = self._build_mcp_footer_panel(changed=changed, selected_idx=selected_idx, total_items=len(items))
+
+        width = int(getattr(self.console.size, "width", 0) or self.console.width or 0)
+        if width >= 92:
+            body = Columns([list_panel, detail_panel], expand=True, equal=False)
+        else:
+            body = Group(list_panel, detail_panel)
+        return Group(summary_panel, body, footer_panel)
+
+    def _mcp_step_item(self, item: Dict[str, Any], config: Dict[str, Any], manager, runtime, direction: int) -> tuple[bool, Dict[str, Any], List[Dict[str, Any]]]:
+        from ..mcp import normalize_mcp_config
+
+        working = normalize_mcp_config(config)
+        kind = str(item.get("kind", "")).strip()
+        if kind == "global-bool":
+            working.setdefault("mcp", {})["enabled"] = not bool(working.get("mcp", {}).get("enabled", True))
+            new_config, new_rows = self._save_mcp_ui_config(manager, runtime, working, force_refresh=False)
+            return True, new_config, new_rows
+        if kind == "global-int":
+            step = int(item.get("step", 5000))
+            min_value = int(item.get("min", 1000))
+            max_value = int(item.get("max", 600000))
+            current = int((working.get("mcp", {}) or {}).get("discovery_timeout_ms", 15000) or 15000)
+            updated = max(min_value, min(max_value, current + (step * direction)))
+            working.setdefault("mcp", {})["discovery_timeout_ms"] = updated
+            new_config, new_rows = self._save_mcp_ui_config(manager, runtime, working, force_refresh=False)
+            return True, new_config, new_rows
+        if kind == "server":
+            resolved = self._resolve_mcp_server_name(str(item.get("server_name", "")), working)
+            entry = (working.get("mcpServers", {}) or {}).get(resolved)
+            if not isinstance(entry, dict):
+                return False, config, self._load_mcp_ui_state(manager, runtime, force_refresh=False)[1]
+            entry["enabled"] = not bool(entry.get("enabled", True))
+            working["mcpServers"][resolved] = entry
+            new_config, new_rows = self._save_mcp_ui_config(manager, runtime, working, force_refresh=False)
+            return True, new_config, new_rows
+        return False, config, self._load_mcp_ui_state(manager, runtime, force_refresh=False)[1]
+
+    def _mcp_toggle_selected_trust(self, item: Dict[str, Any], config: Dict[str, Any], manager, runtime) -> tuple[bool, Dict[str, Any], List[Dict[str, Any]]]:
+        from ..mcp import normalize_mcp_config
+
+        if str(item.get("kind", "")).strip() != "server":
+            return False, config, self._load_mcp_ui_state(manager, runtime, force_refresh=False)[1]
+
+        working = normalize_mcp_config(config)
+        resolved = self._resolve_mcp_server_name(str(item.get("server_name", "")), working)
+        entry = (working.get("mcpServers", {}) or {}).get(resolved)
+        if not isinstance(entry, dict):
+            return False, config, self._load_mcp_ui_state(manager, runtime, force_refresh=False)[1]
+
+        entry["trust"] = not bool(entry.get("trust", False))
+        working["mcpServers"][resolved] = entry
+        new_config, new_rows = self._save_mcp_ui_config(manager, runtime, working, force_refresh=False)
+        return True, new_config, new_rows
+
+    def _mcp_remove_selected_server(self, item: Dict[str, Any], config: Dict[str, Any], manager, runtime) -> tuple[bool, Dict[str, Any], List[Dict[str, Any]]]:
+        from ..mcp import normalize_mcp_config
+
+        if str(item.get("kind", "")).strip() != "server":
+            return False, config, self._load_mcp_ui_state(manager, runtime, force_refresh=False)[1]
+
+        server_name = str(item.get("server_name", "")).strip()
+        if not server_name:
+            return False, config, self._load_mcp_ui_state(manager, runtime, force_refresh=False)[1]
+        if not Confirm.ask(f"Remove MCP server '{server_name}'?", default=False):
+            return False, config, self._load_mcp_ui_state(manager, runtime, force_refresh=False)[1]
+
+        working = normalize_mcp_config(config)
+        resolved = self._resolve_mcp_server_name(server_name, working)
+        if resolved not in (working.get("mcpServers", {}) or {}):
+            return False, config, self._load_mcp_ui_state(manager, runtime, force_refresh=False)[1]
+
+        working["mcpServers"].pop(resolved, None)
+        new_config, new_rows = self._save_mcp_ui_config(manager, runtime, working, force_refresh=True)
+        return True, new_config, new_rows
+
+    def _mcp_add_server_interactive(self, config: Dict[str, Any], manager, runtime) -> tuple[bool, Dict[str, Any], List[Dict[str, Any]]]:
+        from ..mcp import normalize_mcp_config, normalize_mcp_server_config
+
+        working = normalize_mcp_config(config)
+        transport = Prompt.ask("Transport", choices=["stdio", "http", "sse"], default="stdio").strip().lower()
+        name = Prompt.ask("Server name", default="").strip()
+        if not name:
+            self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Server name cannot be empty.[/{self.theme.AMBER_GLOW}]")
+            return False, config, self._load_mcp_ui_state(manager, runtime, force_refresh=False)[1]
+
+        resolved = self._resolve_mcp_server_name(name, working)
+        if resolved in (working.get("mcpServers", {}) or {}) and not Confirm.ask(f"Replace existing MCP server '{resolved}'?", default=False):
+            return False, config, self._load_mcp_ui_state(manager, runtime, force_refresh=False)[1]
+
+        server_payload: Dict[str, Any]
+        if transport == "stdio":
+            command_line = Prompt.ask("Command line", default="").strip()
+            try:
+                parsed = shlex.split(command_line, posix=False)
+            except ValueError as exc:
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Failed to parse command: {escape(str(exc))}[/{self.theme.CORAL_SOFT}]")
+                return False, config, self._load_mcp_ui_state(manager, runtime, force_refresh=False)[1]
+            command_parts = [str(part).strip().strip('"').strip("'") for part in parsed if str(part).strip()]
+            if not command_parts:
+                self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Command line cannot be empty.[/{self.theme.AMBER_GLOW}]")
+                return False, config, self._load_mcp_ui_state(manager, runtime, force_refresh=False)[1]
+            server_payload = {
+                "enabled": True,
+                "type": "stdio",
+                "command": command_parts[0],
+                "args": command_parts[1:],
+            }
+        else:
+            prompt_label = "Streamable HTTP URL" if transport == "http" else "Legacy SSE URL"
+            url = Prompt.ask(prompt_label, default="").strip()
+            if not url:
+                self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} URL cannot be empty.[/{self.theme.AMBER_GLOW}]")
+                return False, config, self._load_mcp_ui_state(manager, runtime, force_refresh=False)[1]
+            server_payload = {
+                "enabled": True,
+                "type": transport,
+                "httpUrl": url if transport == "http" else "",
+                "url": url if transport == "sse" else "",
+            }
+
+        working.setdefault("mcpServers", {})[resolved] = normalize_mcp_server_config(resolved, server_payload)
+        new_config, new_rows = self._save_mcp_ui_config(manager, runtime, working, force_refresh=True)
+        return True, new_config, new_rows
+
+    def _mcp_edit_item(self, item: Dict[str, Any], config: Dict[str, Any], manager, runtime) -> tuple[bool, Dict[str, Any], List[Dict[str, Any]]]:
+        from ..mcp import normalize_mcp_config
+
+        kind = str(item.get("kind", "")).strip()
+        if kind == "global-bool":
+            return self._mcp_step_item(item, config, manager, runtime, 1)
+        if kind == "global-int":
+            working = normalize_mcp_config(config)
+            current = int((working.get("mcp", {}) or {}).get("discovery_timeout_ms", 15000) or 15000)
+            raw = Prompt.ask("Discovery timeout (ms)", default=str(current)).strip()
+            try:
+                parsed = int(raw)
+            except ValueError:
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Discovery timeout must be an integer.[/{self.theme.CORAL_SOFT}]")
+                return False, config, self._load_mcp_ui_state(manager, runtime, force_refresh=False)[1]
+            parsed = max(int(item.get("min", 1000)), min(int(item.get("max", 600000)), parsed))
+            working.setdefault("mcp", {})["discovery_timeout_ms"] = parsed
+            new_config, new_rows = self._save_mcp_ui_config(manager, runtime, working, force_refresh=False)
+            return True, new_config, new_rows
+        if kind == "action":
+            action = str(item.get("action", "")).strip().lower()
+            if action == "refresh":
+                return False, *self._load_mcp_ui_state(manager, runtime, force_refresh=True)
+            if action == "add":
+                return self._mcp_add_server_interactive(config, manager, runtime)
+            return False, config, self._load_mcp_ui_state(manager, runtime, force_refresh=False)[1]
+        if kind == "server":
+            action = Prompt.ask(
+                "Server action",
+                choices=["toggle-enabled", "toggle-trust", "remove", "refresh", "cancel"],
+                default="toggle-enabled",
+            ).strip().lower()
+            if action == "toggle-enabled":
+                return self._mcp_step_item(item, config, manager, runtime, 1)
+            if action == "toggle-trust":
+                return self._mcp_toggle_selected_trust(item, config, manager, runtime)
+            if action == "remove":
+                return self._mcp_remove_selected_server(item, config, manager, runtime)
+            if action == "refresh":
+                return False, *self._load_mcp_ui_state(manager, runtime, force_refresh=True)
+            return False, config, self._load_mcp_ui_state(manager, runtime, force_refresh=False)[1]
+        return False, config, self._load_mcp_ui_state(manager, runtime, force_refresh=False)[1]
+
+    def _cmd_mcp_ui(self) -> bool:
+        try:
+            import msvcrt
+        except ImportError:
+            return self._cmd_mcp_status(force_refresh=False)
+
+        manager, runtime = self._get_mcp_services()
+        if not manager or not runtime:
+            return True
+
+        config, rows = self._load_mcp_ui_state(manager, runtime, force_refresh=False)
+        selected_idx = 0
+        changed = False
+
+        from rich.live import Live
+
+        with Live(
+            self._render_mcp_ui(config, rows, manager, selected_idx, changed=changed),
+            auto_refresh=False,
+            vertical_overflow="visible",
+            console=self.console,
+        ) as live:
+            while True:
+                if msvcrt.kbhit():
+                    key = msvcrt.getch()
+                    items = self._get_mcp_ui_items(config, rows, manager)
+                    if not items:
+                        break
+                    selected_idx = max(0, min(selected_idx, len(items) - 1))
+                    selected_item = items[selected_idx]
+
+                    if key == b"\x1b":
+                        break
+                    if key in (b"k", b"K"):
+                        selected_idx = (selected_idx - 1) % len(items)
+                    elif key in (b"j", b"J"):
+                        selected_idx = (selected_idx + 1) % len(items)
+                    elif key in (b"h", b"H"):
+                        did_change, config, rows = self._mcp_step_item(selected_item, config, manager, runtime, -1)
+                        changed = changed or did_change
+                    elif key in (b"l", b"L", b" "):
+                        did_change, config, rows = self._mcp_step_item(selected_item, config, manager, runtime, 1)
+                        changed = changed or did_change
+                    elif key in (b"a", b"A"):
+                        live.stop()
+                        did_change, config, rows = self._mcp_add_server_interactive(config, manager, runtime)
+                        changed = changed or did_change
+                        live.start()
+                    elif key in (b"t", b"T"):
+                        live.stop()
+                        did_change, config, rows = self._mcp_toggle_selected_trust(selected_item, config, manager, runtime)
+                        changed = changed or did_change
+                        live.start()
+                    elif key in (b"x", b"X"):
+                        live.stop()
+                        did_change, config, rows = self._mcp_remove_selected_server(selected_item, config, manager, runtime)
+                        changed = changed or did_change
+                        live.start()
+                    elif key in (b"r", b"R"):
+                        config, rows = self._load_mcp_ui_state(manager, runtime, force_refresh=True)
+                    elif key == b"\r":
+                        live.stop()
+                        did_change, config, rows = self._mcp_edit_item(selected_item, config, manager, runtime)
+                        changed = changed or did_change
+                        live.start()
+                    elif key in (b"\x00", b"\xe0"):
+                        key = msvcrt.getch()
+                        if key == b"H":
+                            selected_idx = (selected_idx - 1) % len(items)
+                        elif key == b"P":
+                            selected_idx = (selected_idx + 1) % len(items)
+                        elif key == b"K":
+                            did_change, config, rows = self._mcp_step_item(selected_item, config, manager, runtime, -1)
+                            changed = changed or did_change
+                        elif key == b"M":
+                            did_change, config, rows = self._mcp_step_item(selected_item, config, manager, runtime, 1)
+                            changed = changed or did_change
+                    else:
+                        time.sleep(0.025)
+                        continue
+
+                    items = self._get_mcp_ui_items(config, rows, manager)
+                    selected_idx = max(0, min(selected_idx, max(0, len(items) - 1)))
+                    live.update(self._render_mcp_ui(config, rows, manager, selected_idx, changed=changed), refresh=True)
+                time.sleep(0.025)
+
+        self.console.print()
+        if changed:
+            self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} MCP updated and applied.[/{self.theme.MINT_VIBRANT}]")
+        else:
+            self.console.print(f"[{self.theme.TEXT_SECONDARY}]{self.deco.DOT_MEDIUM} MCP reviewed.[/{self.theme.TEXT_SECONDARY}]")
+        self.console.print()
+        return True
+
+    def cmd_mcp(self, args: str) -> bool:
+        """Inspect and manage MCP servers."""
+        raw = args.strip()
+        lowered = raw.lower()
+
+        if not raw or lowered in ("ui", "open", "menu", "panel"):
+            return self._cmd_mcp_ui()
+        if lowered in ("status", "list", "show"):
+            return self._cmd_mcp_status(force_refresh=True)
+        if lowered == "reload":
+            return self._cmd_mcp_reload()
+        if lowered == "path":
+            return self._cmd_mcp_path()
+        if lowered.startswith("add "):
+            return self._cmd_mcp_add(raw[4:].strip())
+        if lowered.startswith("remove "):
+            return self._cmd_mcp_remove(raw[7:].strip())
+        if lowered.startswith("enable "):
+            return self._cmd_mcp_toggle(raw[7:].strip(), enabled=True)
+        if lowered.startswith("disable "):
+            return self._cmd_mcp_toggle(raw[8:].strip(), enabled=False)
+        if lowered.startswith("trust "):
+            return self._cmd_mcp_trust(raw[6:].strip())
+
+        self._show_activity_event(
+            "MCP",
+            "Usage: /mcp [status|reload|path|add|remove|enable|disable|trust]",
+            status="warning",
+            detail="Examples: /mcp add filesystem npx -y @modelcontextprotocol/server-filesystem .  |  /mcp add http myserver http://127.0.0.1:8080/mcp  |  /mcp add sse legacy http://127.0.0.1:8081/sse",
+        )
+        return True
+
+    def _cmd_mcp_status(self, *, force_refresh: bool = False) -> bool:
+        manager, runtime = self._refresh_mcp_runtime(force_reload=False)
+        if not manager or not runtime:
+            return True
+
+        self._show_command_panel(
+            "MCP Servers",
+            subtitle="Codex/Gemini-style MCP integration for dynamic external tools.",
+            accent=self.theme.BLUE_SOFT,
+            meta=str(manager.get_config_path()),
+        )
+
+        rows = runtime.list_server_status(force_refresh=force_refresh)
+        if not rows:
+            self._show_activity_event(
+                "MCP",
+                "No MCP servers are configured yet.",
+                status="info",
+                detail="Use /mcp add <name> <command...> for stdio, /mcp add http <name> <url> for streamable HTTP, or /mcp add sse <name> <url> for legacy SSE.",
+            )
+            return True
+
+        table = Table(
+            title=f"[bold {self.theme.BLUE_SOFT}]Configured MCP Servers[/bold {self.theme.BLUE_SOFT}]",
+            box=box.ROUNDED,
+            border_style=self.theme.BORDER_SECONDARY,
+            expand=True,
+        )
+        table.add_column("Name", style=f"bold {self.theme.BLUE_SOFT}", min_width=14)
+        table.add_column("Transport", style=self.theme.TEXT_SECONDARY, min_width=8)
+        table.add_column("State", style=self.theme.TEXT_SECONDARY, min_width=10)
+        table.add_column("Trust", style=self.theme.TEXT_SECONDARY, min_width=8)
+        table.add_column("Tools", style=self.theme.TEXT_PRIMARY, justify="right", min_width=5)
+        table.add_column("Res", style=self.theme.TEXT_PRIMARY, justify="right", min_width=3)
+        table.add_column("Prompts", style=self.theme.TEXT_PRIMARY, justify="right", min_width=7)
+        table.add_column("Notes", style=self.theme.TEXT_DIM)
+
+        for row in rows:
+            state = str(row.get("state", "unknown"))
+            if state == "enabled":
+                state_style = self.theme.MINT_VIBRANT
+            elif state in {"disabled", "globally-disabled"}:
+                state_style = self.theme.TEXT_DIM
+            else:
+                state_style = self.theme.AMBER_GLOW
+
+            trust_text = "trusted" if row.get("trust") else "confirm"
+            tools_text = "-" if row.get("tools") is None else str(row.get("tools"))
+            resources_text = "-" if row.get("resources") is None else str(row.get("resources"))
+            prompts_text = "-" if row.get("prompts") is None else str(row.get("prompts"))
+            notes = str(row.get("error", "") or "").strip()
+            if not notes:
+                notes = "ready" if state == "enabled" else state
+
+            table.add_row(
+                str(row.get("name", "")),
+                str(row.get("type", "")),
+                f"[{state_style}]{state}[/{state_style}]",
+                trust_text,
+                tools_text,
+                resources_text,
+                prompts_text,
+                notes,
+            )
+
+        self.console.print(table)
+        self.console.print()
+        self.console.print(
+            f"[{self.theme.TEXT_DIM}]Dynamic tool names are exposed as `mcp_<server>_<tool>`. Use /tools to see the tools currently visible to the model.[/{self.theme.TEXT_DIM}]"
+        )
+        return True
+
+    def _cmd_mcp_path(self) -> bool:
+        manager, _runtime = self._get_mcp_services()
+        if not manager:
+            return True
+        self._show_activity_event(
+            "MCP",
+            "MCP configuration path",
+            status="info",
+            detail=str(manager.get_config_path()),
+        )
+        return True
+
+    def _cmd_mcp_reload(self) -> bool:
+        _manager, runtime = self._refresh_mcp_runtime(force_reload=True)
+        if not runtime:
+            return True
+        self._show_activity_event(
+            "MCP",
+            "Reloaded MCP configuration and refreshed server discovery.",
+            status="success",
+        )
+        return self._cmd_mcp_status(force_refresh=True)
+
+    def _cmd_mcp_add(self, spec: str) -> bool:
+        raw = spec.strip()
+        lowered = raw.lower()
+        if not raw:
+            self._show_activity_event(
+                "MCP",
+                "Usage: /mcp add [stdio] <name> <command...> | /mcp add http <name> <url> | /mcp add sse <name> <url>",
+                status="warning",
+            )
+            return True
+        if lowered.startswith("http "):
+            return self._cmd_mcp_add_http(raw[5:].strip())
+        if lowered.startswith("sse "):
+            return self._cmd_mcp_add_sse(raw[4:].strip())
+        if lowered.startswith("stdio "):
+            return self._cmd_mcp_add_stdio(raw[6:].strip())
+        return self._cmd_mcp_add_stdio(raw)
+
+    def _cmd_mcp_add_stdio(self, spec: str) -> bool:
+        manager, runtime = self._get_mcp_services()
+        if not manager or not runtime:
+            return True
+
+        parts = spec.split(maxsplit=1)
+        if len(parts) < 2:
+            self._show_activity_event(
+                "MCP",
+                "Usage: /mcp add [stdio] <name> <command...>",
+                status="warning",
+                detail="Example: /mcp add filesystem npx -y @modelcontextprotocol/server-filesystem .",
+            )
+            return True
+
+        name = parts[0].strip()
+        command_line = parts[1].strip()
+        try:
+            parsed = shlex.split(command_line, posix=False)
+        except ValueError as exc:
+            self._show_activity_event("MCP", "Failed to parse MCP stdio command.", status="error", detail=str(exc))
+            return True
+
+        command_parts = [str(item).strip().strip('"').strip("'") for item in parsed if str(item).strip()]
+        if not name or not command_parts:
+            self._show_activity_event("MCP", "An MCP server name and command are required.", status="error")
+            return True
+
+        manager.upsert_server(
+            name,
+            {
+                "enabled": True,
+                "type": "stdio",
+                "command": command_parts[0],
+                "args": command_parts[1:],
+            },
+        )
+        runtime.reload(force=True)
+        refresh_prompt = self.app.get('refresh_agent_prompt_guidance')
+        if callable(refresh_prompt):
+            refresh_prompt()
+
+        self._show_activity_event(
+            "MCP",
+            f"Added MCP stdio server: {name}",
+            status="success",
+            detail=command_line,
+        )
+        return self._cmd_mcp_status(force_refresh=True)
+
+    def _cmd_mcp_add_http(self, spec: str) -> bool:
+        manager, runtime = self._get_mcp_services()
+        if not manager or not runtime:
+            return True
+
+        parts = spec.split(maxsplit=1)
+        if len(parts) < 2:
+            self._show_activity_event(
+                "MCP",
+                "Usage: /mcp add http <name> <url>",
+                status="warning",
+                detail="Example: /mcp add http internal-api http://127.0.0.1:8080/mcp",
+            )
+            return True
+
+        name = parts[0].strip()
+        url = parts[1].strip()
+        if not name or not url:
+            self._show_activity_event("MCP", "An MCP server name and URL are required.", status="error")
+            return True
+
+        manager.upsert_server(
+            name,
+            {
+                "enabled": True,
+                "type": "http",
+                "httpUrl": url,
+            },
+        )
+        runtime.reload(force=True)
+        refresh_prompt = self.app.get('refresh_agent_prompt_guidance')
+        if callable(refresh_prompt):
+            refresh_prompt()
+
+        self._show_activity_event(
+            "MCP",
+            f"Added MCP HTTP server: {name}",
+            status="success",
+            detail=url,
+        )
+        return self._cmd_mcp_status(force_refresh=True)
+
+    def _cmd_mcp_add_sse(self, spec: str) -> bool:
+        manager, runtime = self._get_mcp_services()
+        if not manager or not runtime:
+            return True
+
+        parts = spec.split(maxsplit=1)
+        if len(parts) < 2:
+            self._show_activity_event(
+                "MCP",
+                "Usage: /mcp add sse <name> <url>",
+                status="warning",
+                detail="Example: /mcp add sse legacy-api http://127.0.0.1:8081/sse",
+            )
+            return True
+
+        name = parts[0].strip()
+        url = parts[1].strip()
+        if not name or not url:
+            self._show_activity_event("MCP", "An MCP server name and URL are required.", status="error")
+            return True
+
+        manager.upsert_server(
+            name,
+            {
+                "enabled": True,
+                "type": "sse",
+                "url": url,
+            },
+        )
+        runtime.reload(force=True)
+        refresh_prompt = self.app.get('refresh_agent_prompt_guidance')
+        if callable(refresh_prompt):
+            refresh_prompt()
+
+        self._show_activity_event(
+            "MCP",
+            f"Added MCP SSE server: {name}",
+            status="success",
+            detail=url,
+        )
+        return self._cmd_mcp_status(force_refresh=True)
+
+    def _cmd_mcp_remove(self, server_name: str) -> bool:
+        manager, runtime = self._get_mcp_services()
+        if not manager or not runtime:
+            return True
+
+        name = server_name.strip()
+        if not name:
+            self._show_activity_event("MCP", "Usage: /mcp remove <name>", status="warning")
+            return True
+
+        if not manager.remove_server(name):
+            self._show_activity_event("MCP", f"MCP server not found: {name}", status="error")
+            return True
+
+        runtime.reload(force=True)
+        refresh_prompt = self.app.get('refresh_agent_prompt_guidance')
+        if callable(refresh_prompt):
+            refresh_prompt()
+        self._show_activity_event("MCP", f"Removed MCP server: {name}", status="success")
+        return self._cmd_mcp_status(force_refresh=True)
+
+    def _cmd_mcp_toggle(self, server_name: str, *, enabled: bool) -> bool:
+        manager, runtime = self._get_mcp_services()
+        if not manager or not runtime:
+            return True
+
+        name = server_name.strip()
+        if not name:
+            self._show_activity_event("MCP", f"Usage: /mcp {'enable' if enabled else 'disable'} <name>", status="warning")
+            return True
+
+        if not manager.set_server_enabled(name, enabled):
+            self._show_activity_event("MCP", f"MCP server not found: {name}", status="error")
+            return True
+
+        runtime.reload(force=True)
+        refresh_prompt = self.app.get('refresh_agent_prompt_guidance')
+        if callable(refresh_prompt):
+            refresh_prompt()
+        self._show_activity_event(
+            "MCP",
+            f"{'Enabled' if enabled else 'Disabled'} MCP server: {name}",
+            status="success",
+        )
+        return self._cmd_mcp_status(force_refresh=True)
+
+    def _cmd_mcp_trust(self, spec: str) -> bool:
+        manager, runtime = self._get_mcp_services()
+        if not manager or not runtime:
+            return True
+
+        parts = spec.split(maxsplit=1)
+        name = parts[0].strip() if parts else ""
+        mode = parts[1].strip().lower() if len(parts) > 1 else "on"
+        if not name:
+            self._show_activity_event("MCP", "Usage: /mcp trust <name> [on|off]", status="warning")
+            return True
+
+        if mode not in {"on", "off", "true", "false"}:
+            self._show_activity_event("MCP", "Trust value must be on or off.", status="error")
+            return True
+
+        trusted = mode in {"on", "true"}
+        if not manager.set_server_trust(name, trusted):
+            self._show_activity_event("MCP", f"MCP server not found: {name}", status="error")
+            return True
+
+        runtime.reload(force=True)
+        refresh_prompt = self.app.get('refresh_agent_prompt_guidance')
+        if callable(refresh_prompt):
+            refresh_prompt()
+        self._show_activity_event(
+            "MCP",
+            f"Marked MCP server {name} as {'trusted' if trusted else 'confirmation-required'}.",
+            status="success",
+        )
+        return self._cmd_mcp_status(force_refresh=True)
 
     def _load_tti_config(self):
         """Load normalized TTI configuration from config manager."""
@@ -1363,7 +2347,6 @@ class CommandHandler:
         """Return a readable model source label."""
         mapping = {
             "standard": "config.json",
-            "iflow": "iFlow",
             "qwencode": "Qwen Code",
             "geminicli": "Gemini CLI",
             "codex": "Codex",
@@ -1608,10 +2591,11 @@ class CommandHandler:
             get_nvidia_default_vision_model,
             normalize_nvidia_config,
             resolve_nvidia_selected_model,
+            resolve_nvidia_api_key,
         )
 
         nvidia_cfg = normalize_nvidia_config(getattr(config, "nvidia", {}))
-        api_key = str(nvidia_cfg.get("api_key", "") or "").strip()
+        api_key = resolve_nvidia_api_key(nvidia_cfg)
         if not api_key:
             self.console.print()
             self.console.print(
@@ -1626,7 +2610,7 @@ class CommandHandler:
                     f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} NVIDIA API key is required for Computer Controller mode.[/{self.theme.CORAL_SOFT}]"
                 )
                 return False
-            nvidia_cfg["api_key"] = api_key
+        nvidia_cfg["api_key"] = api_key
 
         selected = resolve_nvidia_selected_model(nvidia_cfg)
         if not selected or str(selected.get("transport", "")).strip().lower() != "request" or not bool(selected.get("vision")):
@@ -1641,151 +2625,43 @@ class CommandHandler:
         config.active_model_source = "nvidia"
         return True
 
+    def _prepare_computer_controller_nvidia_configuration(self, config) -> bool:
+        """Pin Computer Controller mode to the fixed NVIDIA request model."""
+        from ..nvidia import (
+            NVIDIA_COMPUTER_CONTROLLER_MODEL_ID,
+            NVIDIA_COMPUTER_CONTROLLER_MODEL_DISPLAY_NAME,
+            build_nvidia_computer_controller_runtime_model_data,
+            normalize_nvidia_config,
+        )
+
+        if not self._ensure_nvidia_configuration(config):
+            return False
+
+        nvidia_cfg = normalize_nvidia_config(getattr(config, "nvidia", {}))
+        runtime_nvidia = build_nvidia_computer_controller_runtime_model_data(nvidia_cfg)
+        if not runtime_nvidia:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Computer Controller mode requires a NVIDIA API key in config or NVIDIA_API_KEY before it can start.[/{self.theme.CORAL_SOFT}]"
+            )
+            return False
+
+        nvidia_cfg["enabled"] = True
+        nvidia_cfg["api_key"] = runtime_nvidia.get("api_key", "")
+        nvidia_cfg["selected_model_id"] = str(runtime_nvidia.get("model", NVIDIA_COMPUTER_CONTROLLER_MODEL_ID))
+        nvidia_cfg["selected_model_display_name"] = str(
+            runtime_nvidia.get("model_display_name", NVIDIA_COMPUTER_CONTROLLER_MODEL_DISPLAY_NAME)
+        )
+        config.nvidia = normalize_nvidia_config(nvidia_cfg)
+        config.active_model_source = "nvidia"
+        return True
+
     def _apply_mode_selection(self, config, candidate: str) -> bool:
         """Apply normalized mode changes with any mode-specific provider setup."""
         normalized_mode = normalize_mode(candidate)
         config.mode = normalized_mode
         if normalized_mode == "computer-controller":
-            return self._ensure_nvidia_configuration(config)
+            return self._prepare_computer_controller_nvidia_configuration(config)
         return True
-
-    def cmd_iflow(self, args: str) -> bool:
-        """iFlow integration command."""
-        raw = args.strip()
-        if not raw:
-            return self._cmd_iflow_status()
-
-        lowered = raw.lower()
-        if lowered in ("status", "check"):
-            return self._cmd_iflow_status()
-        if lowered == "model":
-            return self._cmd_iflow_model("")
-        if lowered.startswith("model "):
-            return self._cmd_iflow_model(raw[6:].strip())
-        if lowered == "endpoint":
-            return self._cmd_iflow_endpoint("")
-        if lowered.startswith("endpoint "):
-            return self._cmd_iflow_endpoint(raw[9:].strip())
-
-        self.console.print(
-            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /iflow [status|model|endpoint][/{self.theme.AMBER_GLOW}]"
-        )
-        return True
-
-    def _cmd_iflow_status(self) -> bool:
-        """Detect local iFlow CLI credentials and show current iFlow selection."""
-        from ..iflow import (
-            detect_iflow_cli_credentials,
-            normalize_iflow_config,
-            resolve_iflow_selected_model,
-        )
-
-        config_manager = self.app.get('config_manager')
-        config = config_manager.load() if config_manager else None
-
-        cred = detect_iflow_cli_credentials()
-        self.console.print()
-
-        if cred.get("found"):
-            self.console.print(
-                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} iFlow CLI credentials detected.[/{self.theme.MINT_VIBRANT}]"
-            )
-            self.console.print(
-                f"[{self.theme.MINT_SOFT}]iFlow CLI is installed and logged in. Use /iflow model to select a model.[/{self.theme.MINT_SOFT}]"
-            )
-            source_file = cred.get("source_file", "")
-            if source_file:
-                self.console.print(
-                    f"[{self.theme.TEXT_DIM}]Credential source: {source_file}[/{self.theme.TEXT_DIM}]"
-                )
-        else:
-            self.console.print(
-                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} iFlow CLI credentials were not found under ~/.iflow.[/{self.theme.CORAL_SOFT}]"
-            )
-            self.console.print(
-                f"[{self.theme.AMBER_GLOW}]Please install and login to iFlow CLI first, then run /iflow again.[/{self.theme.AMBER_GLOW}]"
-            )
-
-        if config_manager and config:
-            iflow_cfg = normalize_iflow_config(getattr(config, "iflow", {}))
-            selected = resolve_iflow_selected_model(iflow_cfg)
-            if selected:
-                self.console.print(
-                    f"[{self.theme.BLUE_SOFT}]Current iFlow model:[/{self.theme.BLUE_SOFT}] {selected['display_name']} ({selected['id']})"
-                )
-                context_length = selected.get('context_length', 0)
-                if context_length:
-                    self.console.print(
-                        f"[{self.theme.TEXT_DIM}]Context length: {context_length:,} tokens[/{self.theme.TEXT_DIM}]"
-                    )
-            else:
-                self.console.print(
-                    f"[{self.theme.TEXT_DIM}]Current iFlow model: (none)[/{self.theme.TEXT_DIM}]"
-                )
-
-            model_source = str(getattr(config, "active_model_source", "standard")).lower()
-            self.console.print(
-                f"[{self.theme.BLUE_SOFT}]Active model source:[/{self.theme.BLUE_SOFT}] {self._format_model_source_label(model_source)}"
-            )
-            api_url = str(iflow_cfg.get("api_url", "")).strip()
-            if api_url:
-                self.console.print(
-                    f"[{self.theme.TEXT_DIM}]iFlow API endpoint: {api_url}[/{self.theme.TEXT_DIM}]"
-                )
-            endpoint = str(iflow_cfg.get("endpoint", "")).strip()
-            if endpoint:
-                self.console.print(
-                    f"[{self.theme.TEXT_DIM}]Endpoint override: {endpoint}[/{self.theme.TEXT_DIM}]"
-                )
-
-        self.console.print()
-        return True
-
-    def _cmd_iflow_endpoint(self, endpoint_value: str) -> bool:
-        """Configure custom endpoint override for iFlow reverse proxy requests."""
-        from ..iflow import normalize_iflow_config
-
-        return self._configure_provider_endpoint(
-            config_attr="iflow",
-            normalize_config=normalize_iflow_config,
-            provider_label="iFlow",
-            endpoint_value=endpoint_value,
-        )
-
-    def _cmd_iflow_model(self, model_query: str) -> bool:
-        """Select iFlow model from dedicated catalog."""
-        from ..iflow import (
-            detect_iflow_cli_credentials,
-            get_iflow_model_catalog,
-            normalize_iflow_config,
-        )
-
-        config_manager = self.app.get('config_manager')
-        if not config_manager:
-            self.console.print(
-                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
-            )
-            return True
-
-        cred = detect_iflow_cli_credentials()
-        if not cred.get("found"):
-            self.console.print(
-                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} iFlow CLI credentials were not found under ~/.iflow.[/{self.theme.CORAL_SOFT}]"
-            )
-            self.console.print(
-                f"[{self.theme.AMBER_GLOW}]Run /iflow first after logging into iFlow CLI.[/{self.theme.AMBER_GLOW}]"
-            )
-            return True
-
-        catalog = get_iflow_model_catalog()
-        return self._select_external_provider_model(
-            config_attr="iflow",
-            normalize_config=normalize_iflow_config,
-            catalog=catalog,
-            provider_label="iFlow",
-            active_source="iflow",
-            model_query=model_query,
-        )
 
     def cmd_qwencode(self, args: str) -> bool:
         """Qwen Code integration command."""
@@ -2768,7 +3644,13 @@ class CommandHandler:
         return True
 
     def _cmd_nvidia_status(self) -> bool:
-        from ..nvidia import NVIDIA_API_KEY_HINT_URL, mask_secret, normalize_nvidia_config, resolve_nvidia_selected_model
+        from ..nvidia import (
+            NVIDIA_API_KEY_HINT_URL,
+            mask_secret,
+            normalize_nvidia_config,
+            resolve_nvidia_api_key,
+            resolve_nvidia_selected_model,
+        )
 
         config_manager = self.app.get('config_manager')
         if not config_manager:
@@ -2780,11 +3662,13 @@ class CommandHandler:
         config = config_manager.load()
         nvidia_cfg = normalize_nvidia_config(getattr(config, "nvidia", {}))
         selected = resolve_nvidia_selected_model(nvidia_cfg)
+        effective_api_key = resolve_nvidia_api_key(nvidia_cfg)
+        key_origin = " (from NVIDIA_API_KEY)" if effective_api_key and not str(nvidia_cfg.get("api_key", "") or "").strip() else ""
         model_source = str(getattr(config, "active_model_source", "standard") or "standard").strip().lower()
 
         lines = [
             f"[{self.theme.BLUE_SOFT}]Active model source:[/{self.theme.BLUE_SOFT}] {self._format_model_source_label(model_source)}",
-            f"[{self.theme.BLUE_SOFT}]Configured key:[/{self.theme.BLUE_SOFT}] {mask_secret(str(nvidia_cfg.get('api_key', '') or '')) if nvidia_cfg.get('api_key') else '(not set)'}",
+            f"[{self.theme.BLUE_SOFT}]Configured key:[/{self.theme.BLUE_SOFT}] {mask_secret(effective_api_key) if effective_api_key else '(not set)'}{key_origin}",
             f"[{self.theme.BLUE_SOFT}]API URL:[/{self.theme.BLUE_SOFT}] {escape(str(nvidia_cfg.get('api_url', '')))}",
             f"[{self.theme.BLUE_SOFT}]Endpoint:[/{self.theme.BLUE_SOFT}] {escape(str(nvidia_cfg.get('endpoint', '')))}",
             f"[{self.theme.BLUE_SOFT}]Thinking:[/{self.theme.BLUE_SOFT}] {'ON' if bool(nvidia_cfg.get('enable_thinking', True)) else 'OFF'}",
@@ -5084,11 +5968,14 @@ class CommandHandler:
         source_label = self._format_model_source_label(source)
         return f"{source_label} provider selection"
 
-    def _build_setting_summary_panel(self, config, config_manager, rules_manager) -> Panel:
+    def _build_setting_summary_panel(self, config, config_manager, rules_manager, *, selected_item: Optional[Dict[str, Any]] = None, changed: bool = False, item_count: int = 0) -> Panel:
         """Top summary panel for the settings UI."""
         active_model_name = self._resolve_setting_active_model_label(config)
         source_label = self._format_model_source_label(str(getattr(config, "active_model_source", "standard")).lower())
         storage_label = "Workspace" if config_manager.is_workspace_mode() else "Global"
+        focus_label = str((selected_item or {}).get("name", "") or "Mode").strip()
+        pending_label = "Unsaved changes" if changed else "Live view"
+        pending_style = self.theme.AMBER_GLOW if changed else self.theme.MINT_SOFT
 
         summary = Table(box=box.SIMPLE, show_header=False, pad_edge=False)
         summary.add_column(style=self.theme.TEXT_DIM, width=14)
@@ -5103,11 +5990,14 @@ class CommandHandler:
             "Rules",
             str(len(rules_manager.get_rules())) if rules_manager else "0",
         )
+        summary.add_row("Focus", escape(focus_label), "State", f"[{pending_style}]{pending_label}[/{pending_style}]")
+        if item_count:
+            summary.add_row("Items", str(item_count), "Scope", "Runtime & persistence")
 
         return Panel(
             summary,
             title=f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Reverie Settings {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]",
-            subtitle=f"[{self.theme.TEXT_DIM}]Fast controls for runtime behavior, persistence, and API defaults.[/{self.theme.TEXT_DIM}]",
+            subtitle=f"[{self.theme.TEXT_DIM}]Fast controls for runtime behavior, persistence, model routing, and API defaults.[/{self.theme.TEXT_DIM}]",
             border_style=self.theme.BORDER_PRIMARY,
             padding=(0, 2),
             box=box.ROUNDED,
@@ -5115,8 +6005,9 @@ class CommandHandler:
 
     def _build_setting_list_panel(self, items: List[Dict[str, Any]], selected_idx: int, config, config_manager, rules_manager) -> Panel:
         """Settings list panel for the TUI."""
-        table = Table(box=box.SIMPLE, show_header=False, pad_edge=False)
-        table.add_column("Item", style=f"bold {self.theme.BLUE_SOFT}", width=24)
+        table = Table(box=box.SIMPLE, show_header=True, pad_edge=False)
+        table.add_column("#", style=self.theme.TEXT_DIM, width=4, justify="right")
+        table.add_column("Setting", style=f"bold {self.theme.BLUE_SOFT}", width=24)
         table.add_column("Value", style=self.theme.TEXT_PRIMARY)
 
         for index, item in enumerate(items):
@@ -5126,11 +6017,12 @@ class CommandHandler:
             value_text = self._setting_display_value(item, config, config_manager, rules_manager)
             if is_selected:
                 table.add_row(
+                    f"[{self.theme.TEXT_DIM}]{index + 1}[/{self.theme.TEXT_DIM}]",
                     f"[bold {self.theme.PINK_SOFT}]{escape(item_name)}[/bold {self.theme.PINK_SOFT}]",
                     f"[reverse]{value_text}[/reverse]",
                 )
             else:
-                table.add_row(escape(item_name), value_text)
+                table.add_row(str(index + 1), escape(item_name), value_text)
 
         return Panel(
             table,
@@ -5189,6 +6081,8 @@ class CommandHandler:
         detail_lines.extend(
             [
                 "",
+                f"[{self.theme.TEXT_DIM}]Quick adjust[/{self.theme.TEXT_DIM}] Use h/l or left/right for one-step edits when available.",
+                f"[{self.theme.TEXT_DIM}]Precise edit[/{self.theme.TEXT_DIM}] Press Enter for prompts, selectors, or rule editing.",
                 f"[{self.theme.TEXT_DIM}]Command equivalent[/{self.theme.TEXT_DIM}] {escape(command)}",
             ]
         )
@@ -5201,33 +6095,50 @@ class CommandHandler:
             box=box.ROUNDED,
         )
 
-    def _build_setting_footer_panel(self) -> Panel:
+    def _build_setting_footer_panel(self, *, changed: bool, selected_idx: int, total_items: int) -> Panel:
         """Footer panel with setting TUI controls."""
-        footer = (
-            f"[{self.theme.TEXT_DIM}]"
-            f"{self.deco.DOT_MEDIUM} ↑/↓ or j/k: Navigate  "
-            f"{self.deco.DOT_MEDIUM} ←/→ or h/l: Quick change  "
-            f"{self.deco.DOT_MEDIUM} Enter: Edit precisely  "
-            f"{self.deco.DOT_MEDIUM} Esc: Save & exit"
-            f"[/{self.theme.TEXT_DIM}]"
+        footer_grid = Table.grid(expand=True)
+        footer_grid.add_column(ratio=1)
+        footer_grid.add_column(justify="right", no_wrap=True)
+        footer_grid.add_row(
+            Text.from_markup(
+                f"[{self.theme.TEXT_DIM}]"
+                f"{self.deco.DOT_MEDIUM} ↑/↓ or j/k: Navigate  "
+                f"{self.deco.DOT_MEDIUM} ←/→ or h/l: Quick change  "
+                f"{self.deco.DOT_MEDIUM} Enter: Edit precisely  "
+                f"{self.deco.DOT_MEDIUM} Esc: Save & exit"
+                f"[/{self.theme.TEXT_DIM}]"
+            ),
+            Text(
+                f"{selected_idx + 1}/{max(1, total_items)} · {'pending save' if changed else 'ready'}",
+                style=self.theme.AMBER_GLOW if changed else self.theme.TEXT_DIM,
+            ),
         )
         return Panel(
-            Text.from_markup(footer),
+            footer_grid,
             border_style=self.theme.BORDER_SUBTLE,
             padding=(0, 1),
             box=box.ROUNDED,
         )
 
-    def _render_setting_ui(self, selected_idx: int, config, config_manager, rules_manager) -> Group:
+    def _render_setting_ui(self, selected_idx: int, config, config_manager, rules_manager, *, changed: bool = False) -> Group:
         """Compose the full settings TUI renderable."""
         items = self._get_setting_items(config, config_manager, rules_manager)
-        summary_panel = self._build_setting_summary_panel(config, config_manager, rules_manager)
+        selected_item = items[selected_idx]
+        summary_panel = self._build_setting_summary_panel(
+            config,
+            config_manager,
+            rules_manager,
+            selected_item=selected_item,
+            changed=changed,
+            item_count=len(items),
+        )
         list_panel = self._build_setting_list_panel(items, selected_idx, config, config_manager, rules_manager)
-        detail_panel = self._build_setting_detail_panel(items[selected_idx], config, config_manager, rules_manager)
-        footer_panel = self._build_setting_footer_panel()
+        detail_panel = self._build_setting_detail_panel(selected_item, config, config_manager, rules_manager)
+        footer_panel = self._build_setting_footer_panel(changed=changed, selected_idx=selected_idx, total_items=len(items))
 
         width = int(getattr(self.console.size, "width", 0) or self.console.width or 0)
-        if width >= 84:
+        if width >= 92:
             body = Columns([list_panel, detail_panel], expand=True, equal=False)
         else:
             body = Group(list_panel, detail_panel)
@@ -5264,9 +6175,19 @@ class CommandHandler:
         rules_manager = self.app.get('rules_manager')
         config = config_manager.load()
         self.console.print()
-        self.console.print(self._build_setting_summary_panel(config, config_manager, rules_manager))
+        items = self._get_setting_items(config, config_manager, rules_manager)
+        self.console.print(
+            self._build_setting_summary_panel(
+                config,
+                config_manager,
+                rules_manager,
+                selected_item=items[0] if items else None,
+                changed=False,
+                item_count=len(items),
+            )
+        )
         self.console.print()
-        self.console.print(self._build_setting_list_panel(self._get_setting_items(config, config_manager, rules_manager), 0, config, config_manager, rules_manager))
+        self.console.print(self._build_setting_list_panel(items, 0, config, config_manager, rules_manager))
         self.console.print()
         self.console.print(
             Panel(
@@ -5537,7 +6458,6 @@ class CommandHandler:
             return success
         if kind == "bool":
             setattr(config, key, not bool(getattr(config, key)))
-            config_manager.save(config)
             return True
         if kind == "int":
             step = int(item.get("step", 1))
@@ -5547,7 +6467,6 @@ class CommandHandler:
             current += step * direction
             current = max(min_value, min(max_value, current))
             setattr(config, key, current)
-            config_manager.save(config)
             return True
         if kind == "choice":
             choices = item.get("choices", []) or []
@@ -5563,7 +6482,6 @@ class CommandHandler:
             setattr(config, key, new_value)
             if key == "active_model_index":
                 config.active_model_source = "standard"
-            config_manager.save(config)
             return True
         return False
 
@@ -5582,7 +6500,6 @@ class CommandHandler:
             return success
         if kind == "bool":
             setattr(config, key, not bool(getattr(config, key)))
-            config_manager.save(config)
             return True
         if kind == "int":
             raw = Prompt.ask(item["name"], default=str(getattr(config, key))).strip()
@@ -5595,7 +6512,6 @@ class CommandHandler:
             if parsed < min_value or parsed > max_value:
                 return False
             setattr(config, key, parsed)
-            config_manager.save(config)
             return True
         if kind == "choice":
             if key == "active_model_index":
@@ -5604,13 +6520,11 @@ class CommandHandler:
                     return False
                 config.active_model_index = selected_idx
                 config.active_model_source = "standard"
-                config_manager.save(config)
                 return True
             choices = [str(choice) for choice in (item.get("choices", []) or [])]
             current = str(getattr(config, key) or "")
             picked = Prompt.ask(item["name"], default=current, choices=choices).strip()
             setattr(config, key, picked)
-            config_manager.save(config)
             return True
         return False
 
@@ -5635,7 +6549,7 @@ class CommandHandler:
         from rich.live import Live
 
         with Live(
-            self._render_setting_ui(selected_idx, config, config_manager, rules_manager),
+            self._render_setting_ui(selected_idx, config, config_manager, rules_manager, changed=changed),
             auto_refresh=False,
             vertical_overflow="visible",
             console=self.console,
@@ -5684,9 +6598,14 @@ class CommandHandler:
 
                     if should_reload_config:
                         config = config_manager.load()
-                    live.update(self._render_setting_ui(selected_idx, config, config_manager, rules_manager), refresh=True)
+                    live.update(
+                        self._render_setting_ui(selected_idx, config, config_manager, rules_manager, changed=changed),
+                        refresh=True,
+                    )
                 time.sleep(0.025)
 
+        if changed:
+            config_manager.save(config)
         if changed and self.app.get('reinit_agent'):
             self.app['reinit_agent']()
 

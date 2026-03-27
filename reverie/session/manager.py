@@ -75,7 +75,9 @@ class SessionManager:
         base_dir: Path,
         project_root: Optional[Path] = None,
         snapshot_manager=None,
-        memory_indexer=None
+        memory_indexer=None,
+        always_new_session: bool = False,
+        refresh_memory_index_on_save: bool = False,
     ):
         self.base_dir = Path(base_dir).resolve()
         self.project_root = Path(project_root).resolve() if project_root else None
@@ -97,6 +99,8 @@ class SessionManager:
         # Enhanced features
         self.snapshot_manager = snapshot_manager
         self.memory_indexer = memory_indexer
+        self.always_new_session = bool(always_new_session)
+        self.refresh_memory_index_on_save = bool(refresh_memory_index_on_save)
         self.rotation_threshold = 0.8  # 80% token usage triggers rotation
 
     @property
@@ -258,6 +262,15 @@ class SessionManager:
         self._session_index[session.id] = self._session_index_entry(session)
         self._save_session_index()
 
+    def _refresh_memory_index_for_session(self, session_id: str) -> None:
+        """Refresh the memory index for one session when the mode opts into live indexing."""
+        if not self.refresh_memory_index_on_save or not self.memory_indexer:
+            return
+        try:
+            self.memory_indexer.refresh_session(session_id)
+        except Exception:
+            pass
+
     def _save_state(self, session_id: Optional[str]) -> None:
         if not session_id:
             if self.state_path.exists():
@@ -324,6 +337,7 @@ class SessionManager:
         self._current_session = session
         self._write_session(session, touch_updated_at=False)
         self._save_state(session.id)
+        self._refresh_memory_index_for_session(session.id)
         return session
 
     def save_session(self, session: Optional[Session] = None) -> None:
@@ -333,6 +347,7 @@ class SessionManager:
             return
 
         self._write_session(session, touch_updated_at=True)
+        self._refresh_memory_index_for_session(session.id)
 
         if self._current_session and self._current_session.id == session.id:
             self._save_state(session.id)
@@ -377,6 +392,7 @@ class SessionManager:
             session_path.unlink()
             self._session_index.pop(session_id, None)
             self._save_session_index()
+            self._refresh_memory_index_for_session(session_id)
 
             if self._current_session and self._current_session.id == session_id:
                 self._current_session = None
@@ -406,6 +422,9 @@ class SessionManager:
         if self._current_session:
             return self._current_session
 
+        if self.always_new_session:
+            return None
+
         state = self._load_state()
         session_id = str(state.get('current_session_id') or '').strip()
         if session_id:
@@ -421,6 +440,12 @@ class SessionManager:
 
     def ensure_session(self, name: Optional[str] = None) -> Tuple[Session, bool]:
         """Restore the last active session or create a new one."""
+        if self._current_session:
+            return self._current_session, True
+
+        if self.always_new_session:
+            return self.create_session(name), False
+
         session = self.restore_last_session()
         if session:
             return session, True
@@ -537,6 +562,7 @@ class SessionManager:
         self._current_session = new_session
         self._write_session(new_session, touch_updated_at=False)
         self._save_state(new_session.id)
+        self._refresh_memory_index_for_session(new_session.id)
         return new_session
 
     def _persist_handoff_packet(

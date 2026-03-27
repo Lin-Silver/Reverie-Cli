@@ -22,8 +22,8 @@ from rich.markup import escape as rich_escape
 from .system_prompt import build_system_prompt
 from .tool_executor import ToolExecutor
 from ..context_engine.handoff import build_session_handoff_packet
-from ..iflow import build_iflow_request_headers, is_iflow_direct_api_url
 from ..inline_images import resolve_inline_image_content_for_request
+from ..modes import normalize_mode
 from ..tools.base import ToolResult
 from ..nvidia import (
     apply_nvidia_request_defaults,
@@ -852,29 +852,6 @@ def make_api_request_with_retry(
             safe_error_message = _extract_safe_http_error_message(getattr(e, "response", None))
 
             if (
-                status_code == 406
-                and "apis.iflow.cn" in str(url or "").lower()
-                and isinstance(sanitized_payload, dict)
-                and sanitized_payload.get("tools")
-            ):
-                compatibility_payload = _strip_tooling_from_payload(sanitized_payload)
-                logger.warning("iFlow returned 406; retrying once with compatibility payload (tools removed)")
-                try:
-                    fallback_response = requests.post(
-                        url,
-                        headers=headers,
-                        json=compatibility_payload,
-                        stream=stream,
-                        timeout=timeout,
-                    )
-                    fallback_response.raise_for_status()
-                    logger.debug("iFlow compatibility fallback succeeded")
-                    return fallback_response
-                except requests.exceptions.RequestException as fallback_error:
-                    last_error = fallback_error
-                    logger.error("iFlow compatibility fallback failed: %s", fallback_error)
-
-            if (
                 status_code == 400
                 and is_nvidia_api_url(url)
                 and isinstance(sanitized_payload, dict)
@@ -1003,27 +980,12 @@ class ReverieAgent:
         self.api_initial_backoff = 1.0
         self.api_timeout = 60
         self.api_enable_debug_logging = False
-        # iFlow-specific timeout (seconds). Default is 20 minutes.
-        self.iflow_timeout = 1200
 
         if config:
             self.api_max_retries = getattr(config, 'api_max_retries', 3)
             self.api_initial_backoff = getattr(config, 'api_initial_backoff', 1.0)
             self.api_timeout = getattr(config, 'api_timeout', 60)
             self.api_enable_debug_logging = getattr(config, 'api_enable_debug_logging', False)
-
-            # Read iFlow timeout from config.iflow.timeout (or legacy iflow_timeout)
-            try:
-                cfg_iflow = getattr(config, 'iflow', None)
-                if isinstance(cfg_iflow, dict):
-                    self.iflow_timeout = int(cfg_iflow.get('timeout', cfg_iflow.get('iflow_timeout', self.iflow_timeout)))
-                else:
-                    # Allow Config-like objects with attribute iflow_timeout
-                    self.iflow_timeout = int(getattr(config, 'iflow_timeout', self.iflow_timeout))
-                if self.iflow_timeout <= 0:
-                    self.iflow_timeout = 1200
-            except Exception:
-                self.iflow_timeout = 1200
         
         # Configure logging level based on config
         if self.api_enable_debug_logging:
@@ -1237,12 +1199,6 @@ class ReverieAgent:
             self.endpoint = original_endpoint
             self._openai_request_fallback_active = original_flag
 
-    def _is_iflow_direct_request(self) -> bool:
-        """Whether current request-provider config targets iFlow direct API."""
-        if self.provider != "request":
-            return False
-        return is_iflow_direct_api_url(str(self.base_url or "").strip())
-
     def _is_qwencode_direct_request(self) -> bool:
         """Whether current request-provider config targets Qwen Code direct API."""
         if self.provider != "request":
@@ -1284,9 +1240,6 @@ class ReverieAgent:
         """Resolve effective timeout with provider-specific overrides."""
         timeout_value = int(self.api_timeout or 60)
 
-        if self._is_iflow_direct_request():
-            return max(timeout_value, getattr(self, "iflow_timeout", 1200))
-
         config = getattr(self, "config", None)
         if not config:
             return timeout_value
@@ -1327,89 +1280,24 @@ class ReverieAgent:
 
         return timeout_value
 
-    def _refresh_iflow_api_key_from_local_cache(self) -> None:
-        """Refresh iFlow API key from local CLI cache when needed."""
-        if self.api_key:
-            return
-        try:
-            from ..iflow import detect_iflow_cli_credentials
-
-            cred = detect_iflow_cli_credentials()
-            if cred.get("found"):
-                self.api_key = str(cred.get("api_key", "")).strip()
-        except Exception:
-            logger.debug("Failed to refresh iFlow credentials from local cache", exc_info=True)
-
     def _build_request_headers(self, stream: bool) -> Dict[str, str]:
-        """Build HTTP headers for request provider (generic, Qwen direct, iFlow direct)."""
+        """Build HTTP headers for request provider (generic, Qwen direct)."""
         if self._is_qwencode_request():
             self._sync_qwencode_request_state(force_refresh=False)
             return self._build_qwencode_request_headers(stream=stream)
 
-        if not self._is_iflow_direct_request():
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
-            if self.custom_headers:
-                headers.update(self.custom_headers)
-            if "Accept" not in headers:
-                headers["Accept"] = "text/event-stream" if stream else "application/json"
-            return headers
-
-        self._refresh_iflow_api_key_from_local_cache()
-        if not self.api_key:
-            raise ValueError(
-                "iFlow CLI credentials were not found. Please login with iFlow CLI and run /iflow."
-            )
-
-        return build_iflow_request_headers(
-            self.api_key,
-            stream=stream,
-            custom_headers=self.custom_headers,
-        )
-
-    def _apply_iflow_model_suffix_logic(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Mirror iflow-proxy model suffix logic:
-        - model(depth) -> model + thinking toggles
-        - minimax family uses reasoning_split
-        """
-        model_name = str(payload.get("model", "")).strip()
-        if "(" not in model_name or ")" not in model_name:
-            return payload
-
-        base_model = model_name.split("(", 1)[0].strip()
-        suffix = model_name.split("(", 1)[1].split(")", 1)[0].strip().lower()
-        if not base_model:
-            return payload
-
-        thinking_suffixes = {"auto", "low", "medium", "high", "xhigh", "minimal"}
-        if suffix in thinking_suffixes or suffix.isdigit():
-            payload["model"] = base_model
-            is_glm = "glm" in base_model.lower()
-            is_minimax = "minimax" in base_model.lower()
-
-            if is_minimax:
-                payload["reasoning_split"] = True
-            else:
-                chat_kwargs = payload.get("chat_template_kwargs")
-                if not isinstance(chat_kwargs, dict):
-                    chat_kwargs = {}
-                    payload["chat_template_kwargs"] = chat_kwargs
-                chat_kwargs["enable_thinking"] = True
-                if is_glm:
-                    chat_kwargs["clear_thinking"] = False
-        elif suffix in {"none", "0"}:
-            payload["model"] = base_model
-            chat_kwargs = payload.get("chat_template_kwargs")
-            if isinstance(chat_kwargs, dict):
-                chat_kwargs["enable_thinking"] = False
-
-        return payload
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        if self.custom_headers:
+            headers.update(self.custom_headers)
+        if "Accept" not in headers:
+            headers["Accept"] = "text/event-stream" if stream else "application/json"
+        return headers
 
     def _prepare_request_payload(self, payload: Dict[str, Any], session_id: str = "default") -> Dict[str, Any]:
-        """Prepare request-provider payload for generic API, Qwen direct API, or iFlow direct API."""
+        """Prepare request-provider payload for generic API, Qwen direct API, or NVIDIA direct API."""
         prepared = dict(payload)
         if isinstance(prepared.get("messages"), list):
             prepared["messages"] = _sanitize_messages_for_relay(prepared["messages"])
@@ -1452,9 +1340,6 @@ class ReverieAgent:
                 ]
             return prepared
 
-        if self._is_iflow_direct_request():
-            return self._apply_iflow_model_suffix_logic(prepared)
-
         if self._is_nvidia_request():
             prepared = apply_nvidia_request_defaults(prepared, getattr(self.config, "nvidia", {}))
             if nvidia_model_requires_system_message_first(prepared.get("model")):
@@ -1465,10 +1350,10 @@ class ReverieAgent:
                     prepared["messages"] = _coalesce_system_messages_to_front(prepared.get("messages", []))
             return prepared
 
-        # Non-iFlow `request` provider: accept model(depth) but only convert to
+        # Non-Qwen `request` provider: accept model(depth) but only convert to
         # a boolean `thinking` flag (do NOT forward thinking depth). Explicit
         # `self.thinking_mode` (config) takes precedence over model suffix.
-        if self.provider == "request" and not self._is_iflow_direct_request():
+        if self.provider == "request":
             if not (isinstance(self.thinking_mode, str) and self.thinking_mode.lower() in ["true", "false"]):
                 model_name = str(prepared.get("model", "")).strip()
                 if "(" in model_name and ")" in model_name:
@@ -1574,13 +1459,30 @@ class ReverieAgent:
 
     def _request_provider_label(self) -> str:
         """Return a user-facing provider label for request-provider errors."""
-        if self._is_iflow_direct_request():
-            return "iFlow API"
         if self._is_qwencode_request():
             return "Qwen Code API"
         if self._is_nvidia_request():
             return "NVIDIA API"
         return "Request provider"
+
+    def _completion_continuation_limit(self) -> int:
+        """Return the continuation budget for a turn."""
+        if normalize_mode(self.mode) == "computer-controller":
+            return 24
+        return 3
+
+    def _should_stop_on_finish_reason(self) -> bool:
+        """Whether a natural provider stop reason should end the turn."""
+        return normalize_mode(self.mode) != "computer-controller"
+
+    def _should_end_generation(self, collected_content: str, finish_reason: Optional[str]) -> bool:
+        """Decide whether the current assistant turn is complete."""
+        content = str(collected_content or "")
+        if "//END//" in content:
+            return True
+        if not self._should_stop_on_finish_reason():
+            return False
+        return finish_reason in ("stop", "end_turn", "end", None)
 
     def _emit_ui_event(
         self,
@@ -1848,7 +1750,7 @@ class ReverieAgent:
 
         tools = self.get_visible_tool_schemas()
 
-        max_continuations = 3
+        max_continuations = self._completion_continuation_limit()
         continuation_count = 0
 
         while True:
@@ -2148,7 +2050,7 @@ class ReverieAgent:
 
         chat_kwargs: Dict[str, Any] = {"enable_thinking": True, "thinking": True}
         if "glm" in (self.model or "").lower():
-            # GLM variants prefer clear_thinking=False per proxy/iFlow logic
+            # GLM variants prefer clear_thinking=False per hosted-provider logic
             chat_kwargs["clear_thinking"] = False
 
         return {"chat_template_kwargs": chat_kwargs}
@@ -2271,7 +2173,7 @@ class ReverieAgent:
         """Process with streaming response using OpenAI SDK"""
         tools = self.get_visible_tool_schemas()
         
-        max_continuations = 3  # Safety limit to prevent infinite loops
+        max_continuations = self._completion_continuation_limit()
         continuation_count = 0
         
         while True:
@@ -2497,8 +2399,7 @@ class ReverieAgent:
                 )
                 
                 # Check if model finished naturally or needs continuation
-                if finish_reason in ('stop', 'end_turn', 'end', None) or "//END//" in collected_content:
-                    # Model finished - exit loop
+                if self._should_end_generation(collected_content, finish_reason):
                     break
                 
                 # Model stopped for other reason (length limit) - try to continue
@@ -2519,7 +2420,7 @@ class ReverieAgent:
         
         tools = self.get_visible_tool_schemas()
         
-        max_continuations = 3  # Safety limit to prevent infinite loops
+        max_continuations = self._completion_continuation_limit()
         continuation_count = 0
         
         while True:
@@ -2539,10 +2440,9 @@ class ReverieAgent:
             payload = self._prepare_request_payload(payload, session_id=session_id)
             headers = self._build_request_headers(stream=True)
             
-            # Make request with retry logic
-            # For iFlow direct API streaming we increase the read timeout because responses
-            # can be long-running (large content / SSE). Respect user-configured
-            # api_timeout but prefer any configured iFlow-specific timeout.
+            # Make request with retry logic.
+            # Streaming request-provider calls can take longer for large outputs,
+            # so we respect the provider timeout resolution here.
             effective_timeout = self._resolve_provider_timeout()
             try:
                 response = self._make_request_with_provider_auth_retry(
@@ -2733,7 +2633,7 @@ class ReverieAgent:
                     session_id=session_id,
                 )
                 
-                if finish_reason in ('stop', 'end_turn', 'end', None) or "//END//" in collected_content:
+                if self._should_end_generation(collected_content, finish_reason):
                     break
                 
                 continuation_count += 1
@@ -2749,7 +2649,7 @@ class ReverieAgent:
         """Process with streaming response using Anthropic SDK"""
         tools = self.get_visible_tool_schemas()
         
-        max_continuations = 3
+        max_continuations = self._completion_continuation_limit()
         continuation_count = 0
         
         while True:
@@ -2937,7 +2837,7 @@ class ReverieAgent:
                         session_id=session_id,
                     )
                     
-                    if "//END//" in collected_content:
+                    if self._should_end_generation(collected_content, finish_reason):
                         break
                     
                     continuation_count += 1
@@ -3105,7 +3005,7 @@ class ReverieAgent:
             if message_content:
                 content = message_content
                 
-                if "//END//" in content:
+                if self._should_end_generation(content, None):
                     clean_content = content.replace("//END//", "").strip()
                     self.messages.append(
                         _build_assistant_history_message(
@@ -3177,8 +3077,8 @@ class ReverieAgent:
             payload = self._prepare_request_payload(payload, session_id=session_id)
             headers = self._build_request_headers(stream=False)
             
-            # Make request with retry logic
-            # Increase timeout for iFlow direct API when necessary (long responses)
+            # Make request with retry logic.
+            # Long request-provider responses may need the provider timeout.
             effective_timeout = self._resolve_provider_timeout()
             try:
                 response = self._make_request_with_provider_auth_retry(
@@ -3269,7 +3169,7 @@ class ReverieAgent:
             # No tool calls, final response check
             content = message_content
             if content:
-                if "//END//" in content:
+                if self._should_end_generation(content, None):
                     clean_content = content.replace("//END//", "").strip()
                     self.messages.append(
                         _build_assistant_history_message(
@@ -3419,7 +3319,7 @@ class ReverieAgent:
             
             # No tool calls, final response check
             if collected_content:
-                if "//END//" in collected_content:
+                if self._should_end_generation(collected_content, None):
                     clean_content = collected_content.replace("//END//", "").strip()
                     self.messages.append(_build_assistant_history_message(clean_content))
                     self._record_model_usage(
@@ -3605,6 +3505,8 @@ class ReverieAgent:
 
     def _workspace_memory_for_rotation(self, latest_user_message: str) -> str:
         """Fetch a compact workspace-memory hint for auto-rotation handoff."""
+        if normalize_mode(self.mode) == "computer-controller":
+            return ""
         memory_indexer = self.tool_executor.context.get("memory_indexer")
         if not memory_indexer:
             return ""

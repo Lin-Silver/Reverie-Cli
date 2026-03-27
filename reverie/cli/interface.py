@@ -43,10 +43,12 @@ from ..config import (
     ConfigManager,
     ModelConfig,
     Config,
+    get_computer_controller_data_dir,
     normalize_tti_models,
     resolve_tti_default_display_name,
 )
 from ..atlas import build_atlas_additional_rules, normalize_atlas_mode_config
+from ..mcp import MCPConfigManager, MCPRuntime
 from ..rules_manager import RulesManager
 from ..session import SessionManager
 from ..agent import (
@@ -60,7 +62,11 @@ from ..agent import (
 from ..context_engine import CodebaseIndexer, ContextRetriever, GitIntegration
 from ..context_engine import LSPManager
 from ..modes import normalize_mode
-from ..nvidia import normalize_nvidia_config, resolve_nvidia_selected_model
+from ..nvidia import (
+    build_nvidia_computer_controller_runtime_model_data,
+    normalize_nvidia_config,
+    resolve_nvidia_selected_model,
+)
 
 
 _THINKING_MARKDOWN_SUBJECT_RE = re.compile(r"^\s*\*\*(.+?)\*\*\s*$")
@@ -309,6 +315,9 @@ class ReverieInterface:
         # Initialize managers
         self.config_manager = ConfigManager(project_root)
         self.config_manager.ensure_dirs()
+        self.mcp_config_manager = MCPConfigManager(self.config_manager.app_root)
+        self.mcp_config_manager.ensure_dirs()
+        self.mcp_runtime = MCPRuntime(self.mcp_config_manager, project_root=self.project_root)
         self.rules_manager = RulesManager(project_root)
         self._init_workspace_services()
         
@@ -338,10 +347,24 @@ class ReverieInterface:
         self._indexing_in_progress = False
         self._git_integration_ready = False
         self._lsp_manager_ready = False
+        self._runtime_scope = ""
 
     def _init_workspace_services(self) -> None:
-        """Initialize cache/session/rollback services for the current workspace."""
-        self.project_data_dir = self.config_manager.project_data_dir
+        """Initialize cache/session/rollback services for the active runtime scope."""
+        config = self.config_manager.load()
+        runtime_scope = "computer-controller" if normalize_mode(getattr(config, "mode", "reverie")) == "computer-controller" else "workspace"
+        self._runtime_scope = runtime_scope
+        self.project_data_dir = (
+            get_computer_controller_data_dir(self.config_manager.app_root)
+            if runtime_scope == "computer-controller"
+            else self.config_manager.project_data_dir
+        )
+        self.project_data_dir.mkdir(parents=True, exist_ok=True)
+
+        self.indexer = None
+        self.retriever = None
+        self._context_engine_ready = False
+        self._indexing_in_progress = False
 
         from ..session import SnapshotManager, MemoryIndexer, WorkspaceStatsManager
         self.snapshot_manager = SnapshotManager(
@@ -351,20 +374,36 @@ class ReverieInterface:
         self.memory_indexer = MemoryIndexer(self.project_data_dir)
         self.workspace_stats_manager = WorkspaceStatsManager(
             self.project_data_dir,
-            project_root=self.project_root,
+            project_root=None if runtime_scope == "computer-controller" else self.project_root,
         )
 
         self.session_manager = SessionManager(
             self.project_data_dir,
-            project_root=self.project_root,
+            project_root=None if runtime_scope == "computer-controller" else self.project_root,
             snapshot_manager=self.snapshot_manager,
-            memory_indexer=self.memory_indexer
+            memory_indexer=self.memory_indexer,
+            always_new_session=runtime_scope == "computer-controller",
+            refresh_memory_index_on_save=runtime_scope == "computer-controller",
         )
 
         from ..session import OperationHistory, RollbackManager
-        self.operation_history = OperationHistory("current")
+        self.operation_history = OperationHistory(runtime_scope)
         self.rollback_manager = RollbackManager(self.project_data_dir, self.operation_history)
         self.total_active_time = self.workspace_stats_manager.get_total_active_seconds()
+
+    def _runtime_scope_for_config(self, config: Optional[Config] = None) -> str:
+        """Return the active runtime scope for the supplied config."""
+        active_config = config or self.config_manager.load()
+        return "computer-controller" if normalize_mode(getattr(active_config, "mode", "reverie")) == "computer-controller" else "workspace"
+
+    def _ensure_runtime_services_for_config(self, config: Config) -> bool:
+        """Rebuild mode-scoped runtime services when the active scope changes."""
+        desired_scope = self._runtime_scope_for_config(config)
+        if desired_scope == self._runtime_scope and getattr(self, "session_manager", None) and getattr(self, "memory_indexer", None):
+            return False
+
+        self._init_workspace_services()
+        return True
 
     def _refresh_command_context(self) -> None:
         """Refresh command handler context after runtime objects are recreated."""
@@ -381,17 +420,17 @@ class ReverieInterface:
 
         cleanup_targets = collect_workspace_cleanup_targets(
             self.project_root,
-            self.config_manager.project_data_dir,
+            self.project_data_dir,
         )
         cleanup_result = purge_workspace_state(
             self.project_root,
-            self.config_manager.project_data_dir,
+            self.project_data_dir,
         )
 
         result: Dict[str, Any] = {
             "success": not cleanup_result["errors"],
             "workspace_root": str(self.project_root),
-            "project_data_dir": str(self.config_manager.project_data_dir),
+            "project_data_dir": str(self.project_data_dir),
             "targets": [str(path) for path in cleanup_targets],
             **cleanup_result,
         }
@@ -476,7 +515,6 @@ class ReverieInterface:
         }
         source_labels = {
             "standard": "config.json",
-            "iflow": "iFlow",
             "qwencode": "Qwen Code",
             "geminicli": "Gemini CLI",
             "codex": "Codex",
@@ -1296,7 +1334,7 @@ class ReverieInterface:
     def _init_context_engine_with_options(self, *, announce: bool = False) -> None:
         if self._context_engine_ready and self.indexer and self.retriever:
             return
-        cache_dir = self.config_manager.project_data_dir / 'context_cache'
+        cache_dir = self.project_data_dir / 'context_cache'
         if announce:
             self._show_activity_event(
                 "Context Engine",
@@ -1453,11 +1491,29 @@ class ReverieInterface:
 
     def _init_agent(self) -> None:
         config = self.config_manager.load()
+        self.mcp_runtime.set_project_root(self.project_root)
+        scope_changed = self._ensure_runtime_services_for_config(config)
         if normalize_mode(config.mode) == "computer-controller":
+            runtime_nvidia = build_nvidia_computer_controller_runtime_model_data(getattr(config, "nvidia", {}))
+            if not runtime_nvidia:
+                self.console.print(
+                    f"\n[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Computer Controller mode needs a NVIDIA API key in config or NVIDIA_API_KEY before it can start.[/{self.theme.CORAL_SOFT}]"
+                )
+                self.agent = None
+                self._refresh_command_context()
+                return
+
             nvidia_cfg = normalize_nvidia_config(getattr(config, "nvidia", {}))
-            if nvidia_cfg.get("api_key") and str(getattr(config, "active_model_source", "standard")).lower() != "nvidia":
+            nvidia_cfg["enabled"] = True
+            nvidia_cfg["api_key"] = runtime_nvidia.get("api_key", "")
+            nvidia_cfg["selected_model_id"] = str(runtime_nvidia.get("model", nvidia_cfg.get("selected_model_id", "")))
+            nvidia_cfg["selected_model_display_name"] = str(
+                runtime_nvidia.get("model_display_name", nvidia_cfg.get("selected_model_display_name", ""))
+            )
+            config.nvidia = normalize_nvidia_config(nvidia_cfg)
+            if str(getattr(config, "active_model_source", "standard")).lower() != "nvidia":
                 config.active_model_source = "nvidia"
-                self.config_manager.save(config)
+            self.config_manager.save(config)
         model = config.active_model
         if not model:
             self.agent = None
@@ -1483,9 +1539,9 @@ class ReverieInterface:
                 detail=f"Saved max context tokens for {model.model_display_name}.",
             )
 
-        # Preserve existing messages when reinitializing (e.g., model switch)
+        # Preserve existing messages when reinitializing within the same runtime scope.
         existing_messages = []
-        if hasattr(self, 'agent') and self.agent is not None:
+        if not scope_changed and hasattr(self, 'agent') and self.agent is not None:
             existing_messages = self.agent.messages.copy()
 
         self.agent = ReverieAgent(
@@ -1503,7 +1559,7 @@ class ReverieInterface:
             config=config
         )
         
-        # Restore messages after agent creation
+        # Restore messages after agent creation when the runtime scope stayed the same.
         if existing_messages:
             self.agent.messages = existing_messages
             self._show_activity_event(
@@ -1517,8 +1573,11 @@ class ReverieInterface:
         self.agent.config = config
         # Also inject config_manager into tool context for context threshold check
         self.agent.tool_executor.update_context('config_manager', self.config_manager)
+        self.agent.tool_executor.update_context('mcp_config_manager', self.mcp_config_manager)
+        self.agent.tool_executor.update_context('mcp_runtime', self.mcp_runtime)
         # Inject session_manager for context management tool
         self.agent.tool_executor.update_context('session_manager', self.session_manager)
+        self.agent.tool_executor.update_context('project_data_dir', self.project_data_dir)
         self.agent.tool_executor.update_context('memory_indexer', self.memory_indexer)
         self.agent.tool_executor.update_context('workspace_stats_manager', self.workspace_stats_manager)
         self.agent.tool_executor.update_context('ensure_context_engine', self.ensure_context_engine)
@@ -1541,6 +1600,8 @@ class ReverieInterface:
             detail=f"Provider: {self._resolve_provider_label(config)}",
         )
         self._refresh_command_context()
+        if scope_changed:
+            self._init_session()
 
     def _build_additional_rules_with_tti(self, config: Config) -> str:
         """Append TTI model metadata from config.json into model context."""
@@ -1572,17 +1633,27 @@ class ReverieInterface:
                     f"  [{idx}] display_name={item['display_name']}; path={item['path']}; introduction={intro_text}"
                 )
 
+        memory_title = "Computer Controller History" if normalized_mode == "computer-controller" else "Workspace Global Memory"
+        memory_label = "computer-control history archive" if normalized_mode == "computer-controller" else "workspace global memory"
+
         lsp_lines = [
             "## Context Engine Enhancements",
-            f"- Workspace global memory: {'enabled' if self.memory_indexer else 'disabled'}",
+            f"- {memory_title}: {'enabled' if self.memory_indexer else 'disabled'}",
             f"- Optional LSP bridge: {'available' if self.lsp_manager and self.lsp_manager.build_status_report().get('available') else 'on-demand (initialize only when needed)'}",
             "- If LSP data is available, prefer it for diagnostics, definitions, workspace symbols, and reference-oriented navigation.",
             "- After implementation work, run the relevant build/test/verification commands before concluding.",
             "- After tool use, always produce a user-visible textual response instead of stopping at tool output only.",
         ]
 
-        workspace_memory = self.memory_indexer.build_workspace_memory_summary(max_fragments=6, max_chars=2200) if self.memory_indexer else ""
-        memory_block = f"{workspace_memory}" if workspace_memory else "## Workspace Global Memory\n- No prior workspace memory has been indexed yet."
+        workspace_memory = (
+            self.memory_indexer.build_memory_summary(max_fragments=6, max_chars=2200, title=memory_title)
+            if self.memory_indexer else ""
+        )
+        memory_block = (
+            f"{workspace_memory}"
+            if workspace_memory
+            else f"## {memory_title}\n- No prior {memory_label} has been indexed yet."
+        )
 
         atlas_block = ""
         if normalized_mode == "reverie-atlas":
@@ -1596,7 +1667,13 @@ class ReverieInterface:
 
         merged_blocks = [
             tti_block
-            for tti_block in ["\n".join(lines), "\n".join(lsp_lines), atlas_block, memory_block]
+            for tti_block in [
+                "\n".join(lines),
+                "\n".join(lsp_lines),
+                self.mcp_runtime.describe_for_prompt(),
+                atlas_block,
+                memory_block,
+            ]
             if tti_block.strip()
         ]
         merged_text = "\n\n".join(merged_blocks)
@@ -1607,6 +1684,13 @@ class ReverieInterface:
     def _sync_workspace_memory_message(self, session) -> None:
         """Inject a fresh workspace-memory note into the active session."""
         if not session or not self.memory_indexer:
+            return
+
+        if self._runtime_scope == "computer-controller":
+            try:
+                self.memory_indexer.refresh_session(session.id)
+            except Exception:
+                pass
             return
 
         try:
@@ -1652,19 +1736,25 @@ class ReverieInterface:
             self.agent.set_history(session.messages)
 
         if resumed:
+            detail_text = "Loaded the previous transcript and workspace memory."
+            if self._runtime_scope == "computer-controller":
+                detail_text = "Loaded the previous computer-control transcript and history index."
             self._show_activity_event(
                 "Session",
                 f"Resumed session {session.name}",
                 status="success",
-                detail="Loaded the previous transcript and workspace memory.",
+                detail=detail_text,
                 meta=session.id,
             )
         else:
+            detail_text = "A fresh session is ready for this workspace."
+            if self._runtime_scope == "computer-controller":
+                detail_text = "A fresh session is ready in the dedicated computer-control archive."
             self._show_activity_event(
                 "Session",
                 f"Started session {session.name}",
                 status="success",
-                detail="A fresh session is ready for this workspace.",
+                detail=detail_text,
                 meta=session.id,
             )
         self._refresh_command_context()
@@ -1672,15 +1762,18 @@ class ReverieInterface:
     def _get_app_context(self) -> dict:
         return {
             'config_manager': self.config_manager, 'rules_manager': self.rules_manager,
+            'mcp_config_manager': self.mcp_config_manager, 'mcp_runtime': self.mcp_runtime,
             'session_manager': self.session_manager, 'indexer': self.indexer,
             'retriever': self.retriever, 'git_integration': self.git_integration,
             'lsp_manager': self.lsp_manager, 'memory_indexer': self.memory_indexer,
             'workspace_stats_manager': self.workspace_stats_manager,
+            'project_data_dir': self.project_data_dir,
             'agent': self.agent, 'start_time': self.start_time, 
             'total_active_time': self.total_active_time,
             'current_task_start': self.current_task_start,
             'project_root': self.project_root,
             'reinit_agent': self._init_agent,
+            'refresh_agent_prompt_guidance': self._refresh_agent_prompt_guidance,
             'ensure_context_engine': self.ensure_context_engine,
             'run_full_index': self._run_context_indexing_with_progress,
             'ensure_git_integration': self.ensure_git_integration,

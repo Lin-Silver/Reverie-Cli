@@ -6,7 +6,7 @@ Reverie CLI is a context-engine-powered AI coding assistant for large repositori
 
 - **Context Engine** — shared by every mode for symbol lookup, dependency tracking, semantic retrieval, commit-history learning, and workspace memory
 - **Multiple Workflow Modes** — `Reverie`, `Reverie-Atlas`, `Reverie-Gamer`, `Reverie-Ant`, `Spec-Driven`, `Spec-Vibe`, `Writer`, `Computer Controller`
-- **Multi-Provider** — standard OpenAI-compatible models plus `iFlow`, `Qwen Code`, `Gemini CLI`, `Codex`, and `NVIDIA`
+- **Multi-Provider** — standard OpenAI-compatible models plus `Qwen Code`, `Gemini CLI`, `Codex`, and `NVIDIA`
 - **Rich TUI** — selectors, streaming output, help browser, status panels, session browsing, checkpoint rollback, command discovery
 - **Workspace Safety** — file-access sandboxing, audited command execution, archive extraction hardening
 - **Game Tooling** — built-in `Reverie Engine` runtime, game-design workflows, optional text-to-image generation
@@ -46,9 +46,9 @@ reverie --version            # print version
 On first run, configure at least one model source. Reverie supports:
 
 - Standard OpenAI-compatible endpoints (stored in `models`)
-- `iFlow`, `Qwen Code`, `Gemini CLI`, `Codex`, `NVIDIA`
+- `Qwen Code`, `Gemini CLI`, `Codex`, `NVIDIA`
 
-Use `/model` to add presets or `/iflow`, `/qwencode`, `/Geminicli`, `/codex`, `/nvidia` for provider-specific setup.
+Use `/model` to add presets or `/qwencode`, `/Geminicli`, `/codex`, `/nvidia` for provider-specific setup.
 
 ## Common Commands
 
@@ -79,7 +79,7 @@ For the full reference, see [docs/CLI_COMMANDS.md](docs/CLI_COMMANDS.md).
 | `Spec-Driven` | Spec authoring for requirements, design, and task breakdown |
 | `Spec-Vibe` | Lighter spec implementation for approved plans |
 | `Writer` | Creative writing and narrative continuity |
-| `Computer Controller` | Desktop control through `computer_control` |
+| `Computer Controller` | Pinned NVIDIA desktop autopilot through `computer_control` |
 
 ## Architecture
 

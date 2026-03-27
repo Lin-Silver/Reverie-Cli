@@ -115,6 +115,13 @@ class MemoryIndexer:
         
         self.index: Optional[ProjectIndex] = None
         self.fragments: Dict[str, MemoryFragment] = {}
+
+    def get_scope_label(self) -> str:
+        """Return a human-readable label for the current memory archive."""
+        scope_name = str(self.project_data_dir.name or "").strip().lower()
+        if scope_name in {"computer-controller", "computer_controller"}:
+            return "Computer Controller History"
+        return "Workspace Global Memory"
     
     def _extract_keywords(self, text: str) -> List[str]:
         """Extract keywords from text using simple heuristics"""
@@ -409,7 +416,9 @@ class MemoryIndexer:
         """
         if not self.index:
             self.load_index()
-        
+        if not self.index and self.sessions_dir.exists():
+            self.build_index()
+
         if not self.index:
             return []
         
@@ -494,18 +503,15 @@ class MemoryIndexer:
         )
         return items[: max(1, int(limit or 8))]
 
-    def build_workspace_memory_summary(
+    def build_memory_summary(
         self,
         query: str = "",
         max_fragments: int = 8,
         max_chars: int = 3200,
+        *,
+        title: Optional[str] = None,
     ) -> str:
-        """
-        Build a compact global-memory block for the current workspace.
-
-        When a query is provided, relevant fragments are preferred. Otherwise,
-        the summary uses the most recent fragments plus top entities and tools.
-        """
+        """Build a compact memory block for the current archive."""
         if not self.index:
             self.load_index()
         if not self.index and self.sessions_dir.exists():
@@ -515,7 +521,7 @@ class MemoryIndexer:
             return ""
 
         lines: List[str] = [
-            "## Workspace Global Memory",
+            f"## {title or self.get_scope_label()}",
             f"- Indexed sessions: {self.index.total_sessions}",
             f"- Indexed message fragments: {self.index.total_messages}",
         ]
@@ -558,3 +564,12 @@ class MemoryIndexer:
         if len(summary) > max_chars:
             summary = summary[: max_chars - 3].rstrip() + "..."
         return summary
+
+    def build_workspace_memory_summary(
+        self,
+        query: str = "",
+        max_fragments: int = 8,
+        max_chars: int = 3200,
+    ) -> str:
+        """Backward-compatible wrapper for workspace-labeled summaries."""
+        return self.build_memory_summary(query=query, max_fragments=max_fragments, max_chars=max_chars)

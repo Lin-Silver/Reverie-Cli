@@ -70,7 +70,7 @@ Use this tool when history is likely to improve the current change.
 
 **Example calls**:
 ```
-git-commit-retrieval(query_type="file_history", target="reverie/iflow.py", limit=8)
+git-commit-retrieval(query_type="file_history", target="reverie/config.py", limit=8)
 git-commit-retrieval(query_type="search", target="context compression", limit=10)
 git-commit-retrieval(query_type="blame", target="reverie/agent/agent.py", start_line=1000, end_line=1100)
 ```
@@ -228,6 +228,32 @@ web_search(query="python contextvars tutorial")
 1. Start with just `query`
 2. Add domain filters only when needed
 3. Use it for unstable external facts, APIs, products, providers, docs, or exact references
+"""
+
+
+def get_mcp_tool_description() -> str:
+    """Description for dynamic MCP tools."""
+    return """
+## MCP Tools (dynamic `mcp_<server>_<tool>` functions)
+
+Reverie can expose tools discovered from configured MCP servers.
+
+**How they appear**:
+- Tool names are generated as `mcp_<server>_<tool>`
+- Each tool schema comes directly from the connected MCP server
+- Tool visibility can change when MCP config is reloaded
+
+**How to use them well**:
+- Prefer built-in workspace tools for repository-local file edits, reads, and commands
+- Prefer MCP tools when the capability clearly belongs to an external system or MCP server
+- Read the discovered tool description and parameter schema before calling it
+- When two tools overlap, choose the narrowest one with the clearest ownership
+
+**Examples**:
+```
+mcp_filesystem_read_file(path="/workspace/README.md")
+mcp_jira_create_issue(project="CLI", summary="Add MCP onboarding docs")
+```
 """
 
 
@@ -613,7 +639,7 @@ Observe and control the Windows desktop from one unified tool.
 **Interaction actions**:
 - `move_mouse`, `click`, `double_click`, `right_click`
 - `drag`, `scroll`
-- `type_text`, `key_press`, `hotkey`
+- `type_text` for native keyboard text entry, `key_press`, `hotkey`
 - `wait`
 
 **High-value parameters for observation**:
@@ -761,6 +787,9 @@ def _get_mode_tool_workflow(mode: str) -> str:
 - Start with `computer_control(action="observe")` or `observe_window`.
 - If targeting is uncertain, recapture with `grid_cols` and `grid_rows`.
 - Prefer one UI action at a time, then re-observe.
+- Keep the loop alive until the desktop task is actually complete.
+- Treat browsers and desktop apps as normal targets, including Blockbench workflows.
+- Historical computer-control sessions live in a dedicated `.reverie/computer-controller` archive and are retrieved on demand, not injected automatically.
 - Keep non-desktop tools secondary to the visual desktop-control loop.
 """
 
@@ -798,6 +827,7 @@ def get_tool_descriptions_for_mode(mode: str) -> str:
         get_delete_file_description(),
         get_workspace_command_description(),
         get_web_search_description(),
+        get_mcp_tool_description(),
         get_vision_tool_description(),
         get_token_counter_description(),
         get_user_input_description(),

@@ -21,11 +21,12 @@ from typing import List, Dict, Optional, Callable, Any
 from dataclasses import dataclass
 from enum import Enum, auto
 
-from rich.console import Console
+from rich.console import Console, Group
 from rich.table import Table
 from rich.panel import Panel
 from rich.text import Text
 from rich.align import Align
+from rich.columns import Columns
 from rich import box
 
 from .theme import THEME, DECO
@@ -100,6 +101,9 @@ class TUISelector:
         self.search_query = ""
         self.is_searching = False
         self.filtered_items = items.copy()
+        self._search_index = [self._build_search_blob(item) for item in self.items]
+        self._render_cache_key = None
+        self._render_cache = None
 
     def _console_width(self) -> int:
         """Best-effort terminal width."""
@@ -109,6 +113,14 @@ class TUISelector:
             width = 0
         return max(width, 60)
 
+    def _console_height(self) -> int:
+        """Best-effort terminal height."""
+        try:
+            height = int(getattr(self.console.size, "height", 0) or 0)
+        except Exception:
+            height = 0
+        return max(height, 20)
+
     def _truncate(self, value: str, max_length: int) -> str:
         """Trim long selector fields for narrow terminals."""
         text = str(value or "").strip()
@@ -117,6 +129,80 @@ class TUISelector:
         if max_length <= 3:
             return text[:max_length]
         return f"{text[:max_length - 3]}..."
+
+    def _build_search_blob(self, item: SelectorItem) -> str:
+        parts = [item.id, item.title, item.description]
+        metadata = item.metadata or {}
+        for key, value in metadata.items():
+            if isinstance(value, dict):
+                parts.extend(str(inner) for inner in value.values() if inner not in (None, ""))
+            elif isinstance(value, list):
+                parts.extend(str(inner) for inner in value if inner not in (None, ""))
+            elif value not in (None, ""):
+                parts.append(str(value))
+            if key not in ("id", "title", "description"):
+                parts.append(str(key))
+        return " ".join(part.lower() for part in parts if str(part).strip())
+
+    def _visible_rows(self) -> int:
+        reserve = 15 if self._console_width() >= 110 else 18
+        return max(6, min(18, self._console_height() - reserve))
+
+    def _selected_item(self) -> Optional[SelectorItem]:
+        if not self.filtered_items:
+            return None
+        if self.selected_index < 0:
+            self.selected_index = 0
+        if self.selected_index >= len(self.filtered_items):
+            self.selected_index = len(self.filtered_items) - 1
+        return self.filtered_items[self.selected_index]
+
+    def _selected_detail_lines(self, item: Optional[SelectorItem]) -> List[Text]:
+        if item is None:
+            return [Text("No item selected.", style=self.theme.TEXT_DIM)]
+
+        lines = [Text(item.title, style=f"bold {self.theme.PURPLE_SOFT}")]
+        description = str(item.description or "").strip()
+        if description:
+            lines.append(Text(description, style=self.theme.TEXT_SECONDARY))
+
+        metadata = item.metadata or {}
+        detail_rows: List[tuple[str, str]] = []
+        model_info = metadata.get("model")
+        if isinstance(model_info, dict):
+            model_id = str(model_info.get("id", "") or "").strip()
+            if model_id:
+                detail_rows.append(("ID", model_id))
+            context_length = model_info.get("context_length")
+            if context_length not in (None, ""):
+                try:
+                    detail_rows.append(("Context", f"{int(context_length):,}"))
+                except (TypeError, ValueError):
+                    detail_rows.append(("Context", str(context_length)))
+            visibility = str(model_info.get("visibility", "") or "").strip()
+            if visibility:
+                detail_rows.append(("Visibility", visibility))
+        elif item.id:
+            detail_rows.append(("ID", item.id))
+
+        for label, value in detail_rows[:3]:
+            line = Text()
+            line.append(f"{label}: ", style=self.theme.TEXT_DIM)
+            line.append(self._truncate(value, 64), style=self.theme.TEXT_PRIMARY)
+            lines.append(line)
+
+        if not detail_rows and not description:
+            lines.append(Text("Press Enter to confirm this selection.", style=self.theme.TEXT_DIM))
+        return lines
+
+    def _build_detail_panel(self, item: Optional[SelectorItem], *, compact: bool) -> Panel:
+        return Panel(
+            Group(*self._selected_detail_lines(item)),
+            title=f"[bold {self.theme.BLUE_SOFT}]Focused Item[/bold {self.theme.BLUE_SOFT}]",
+            border_style=self.theme.BORDER_SUBTLE,
+            box=box.ROUNDED,
+            padding=(0, 1 if compact else 2),
+        )
     
     def run(self) -> SelectorResult:
         """
@@ -125,10 +211,8 @@ class TUISelector:
         This method blocks until the user makes a selection or cancels.
         """
         import msvcrt
-        import sys
         import time
         from rich.live import Live
-        from rich.align import Align
         
         # Initial render
         content = self._build_content()
@@ -143,6 +227,7 @@ class TUISelector:
                 # Wait for key press
                 if msvcrt.kbhit():
                     key = msvcrt.getch()
+                    state_changed = False
                     
                     # Handle special keys
                     if key == b'\x00' or key == b'\xe0':  # Function key
@@ -150,16 +235,22 @@ class TUISelector:
                         
                         if key == b'H':  # Up arrow
                             self._navigate_up()
+                            state_changed = True
                         elif key == b'P':  # Down arrow
                             self._navigate_down()
+                            state_changed = True
                         elif key == b'I':  # Page Up
                             self._page_up()
+                            state_changed = True
                         elif key == b'Q':  # Page Down
                             self._page_down()
+                            state_changed = True
                         elif key == b'G':  # Home
                             self._go_home()
+                            state_changed = True
                         elif key == b'O':  # End
                             self._go_end()
+                            state_changed = True
                         else:
                             # Unknown function key, skip
                             continue
@@ -183,27 +274,49 @@ class TUISelector:
                                 self.filtered_items = self.items.copy()
                                 self.selected_index = 0
                                 self.scroll_offset = 0
+                                state_changed = True
                     
                     elif key == b'/':  # Slash to start search
                         if self.allow_search and not self.is_searching:
                             self.is_searching = True
                             self.search_query = ""
+                            state_changed = True
                     
                     elif self.is_searching:
                         # Handle search input
                         if key == b'\x08':  # Backspace
-                            self.search_query = self.search_query[:-1]
-                            self._apply_search()
+                            if self.search_query:
+                                self.search_query = self.search_query[:-1]
+                                self._apply_search()
+                                state_changed = True
+                            else:
+                                self.is_searching = False
+                                state_changed = True
                         elif 32 <= key[0] <= 126:  # Printable characters
                             self.search_query += key.decode('ascii')
                             self._apply_search()
+                            state_changed = True
+                    
+                    elif key in (b'k', b'K'):
+                        self._navigate_up()
+                        state_changed = True
+                    elif key in (b'j', b'J'):
+                        self._navigate_down()
+                        state_changed = True
+                    elif key in (b'g',):
+                        self._go_home()
+                        state_changed = True
+                    elif key in (b'G',):
+                        self._go_end()
+                        state_changed = True
                     
                     else:
                         # Other keys, skip
                         continue
                     
                     # Update only when state changes so the terminal keeps normal scroll behavior.
-                    live.update(self._build_content(), refresh=True)
+                    if state_changed:
+                        live.update(self._build_content(), refresh=True)
 
                 # Small sleep to prevent CPU spinning
                 time.sleep(0.025)
@@ -221,16 +334,17 @@ class TUISelector:
         """Navigate down in the list"""
         if not self.filtered_items:
             return
+        visible_rows = self._visible_rows()
         if self.selected_index < len(self.filtered_items) - 1:
             self.selected_index += 1
-            if self.selected_index >= self.scroll_offset + self.max_visible:
-                self.scroll_offset = self.selected_index - self.max_visible + 1
+            if self.selected_index >= self.scroll_offset + visible_rows:
+                self.scroll_offset = self.selected_index - visible_rows + 1
     
     def _page_up(self) -> None:
         """Page up"""
         if not self.filtered_items:
             return
-        page_size = self.max_visible - 1
+        page_size = max(1, self._visible_rows() - 1)
         self.selected_index = max(0, self.selected_index - page_size)
         self.scroll_offset = max(0, self.scroll_offset - page_size)
     
@@ -238,13 +352,14 @@ class TUISelector:
         """Page down"""
         if not self.filtered_items:
             return
-        page_size = self.max_visible - 1
+        visible_rows = self._visible_rows()
+        page_size = max(1, visible_rows - 1)
         self.selected_index = min(
             len(self.filtered_items) - 1,
             self.selected_index + page_size
         )
         self.scroll_offset = min(
-            max(0, len(self.filtered_items) - self.max_visible),
+            max(0, len(self.filtered_items) - visible_rows),
             self.scroll_offset + page_size
         )
     
@@ -260,9 +375,10 @@ class TUISelector:
         if not self.filtered_items:
             return
         self.selected_index = len(self.filtered_items) - 1
+        visible_rows = self._visible_rows()
         self.scroll_offset = max(
             0,
-            len(self.filtered_items) - self.max_visible
+            len(self.filtered_items) - visible_rows
         )
     
     def _apply_search(self) -> None:
@@ -272,21 +388,37 @@ class TUISelector:
         else:
             query = self.search_query.lower()
             self.filtered_items = [
-                item for item in self.items
-                if query in item.title.lower() or
-                   query in item.description.lower()
+                item for item, search_blob in zip(self.items, self._search_index)
+                if query in search_blob
             ]
         
         self.selected_index = 0
         self.scroll_offset = 0
+        self._render_cache_key = None
+        self._render_cache = None
     
     def _build_content(self) -> Align:
         """Build the complete content for display."""
-        from rich.console import Group
-
         width = self._console_width()
+        height = self._console_height()
         compact = width < 96
-        show_description = self.show_descriptions and width >= 90
+        wide = width >= 116
+        show_description = self.show_descriptions and width >= 92
+        self.max_visible = self._visible_rows()
+        selected_item = self._selected_item()
+        cache_key = (
+            width,
+            height,
+            self.selected_index,
+            self.scroll_offset,
+            self.search_query,
+            self.is_searching,
+            len(self.filtered_items),
+            self.max_visible,
+            selected_item.id if selected_item else "",
+        )
+        if cache_key == self._render_cache_key and self._render_cache is not None:
+            return self._render_cache
 
         title_grid = Table.grid(expand=True)
         title_grid.add_column(ratio=1)
@@ -301,17 +433,27 @@ class TUISelector:
                 style=self.theme.TEXT_DIM,
             ),
         )
-
-        title_panel = Panel(
-            title_grid,
-            border_style=self.theme.BORDER_PRIMARY,
-            padding=(0, 1),
-            box=box.ROUNDED,
-        )
+        if selected_item is not None:
+            subtitle = Text()
+            subtitle.append("Focused ", style=self.theme.TEXT_DIM)
+            subtitle.append(self._truncate(selected_item.title, 72 if wide else 48), style=self.theme.TEXT_PRIMARY)
+            title_panel = Panel(
+                Group(title_grid, subtitle),
+                border_style=self.theme.BORDER_PRIMARY,
+                padding=(0, 1),
+                box=box.ROUNDED,
+            )
+        else:
+            title_panel = Panel(
+                title_grid,
+                border_style=self.theme.BORDER_PRIMARY,
+                padding=(0, 1),
+                box=box.ROUNDED,
+            )
 
         table = Table(
             show_header=False,
-            box=box.ROUNDED,
+            box=box.SIMPLE_HEAVY,
             border_style=self.theme.BORDER_SECONDARY,
             padding=(0, 1),
             show_lines=False,
@@ -343,7 +485,17 @@ class TUISelector:
 
         content_parts = [title_panel]
         if visible_items:
-            content_parts.extend(["", table])
+            list_panel = Panel(
+                table,
+                title=f"[bold {self.theme.BLUE_SOFT}]Options[/bold {self.theme.BLUE_SOFT}]",
+                subtitle=f"[{self.theme.TEXT_DIM}]Visible {self.scroll_offset + 1}-{end_index} / {len(self.filtered_items)}[/{self.theme.TEXT_DIM}]",
+                border_style=self.theme.BORDER_SUBTLE,
+                box=box.ROUNDED,
+                padding=(0, 1),
+            )
+            detail_panel = self._build_detail_panel(selected_item, compact=compact)
+            body = Columns([list_panel, detail_panel], expand=True, equal=False) if wide else Group(list_panel, detail_panel)
+            content_parts.extend(["", body])
         else:
             content_parts.extend([
                 "",
@@ -354,20 +506,6 @@ class TUISelector:
                     padding=(0, 1),
                 ),
             ])
-
-        if compact and visible_items and self.show_descriptions:
-            selected_item = self.filtered_items[self.selected_index]
-            if selected_item.description:
-                content_parts.extend([
-                    "",
-                    Panel(
-                        Text(selected_item.description, style=self.theme.TEXT_SECONDARY),
-                        title=f"[bold {self.theme.BLUE_SOFT}]Details[/bold {self.theme.BLUE_SOFT}]",
-                        border_style=self.theme.BORDER_SUBTLE,
-                        box=box.ROUNDED,
-                        padding=(0, 1),
-                    ),
-                ])
 
         if self.is_searching:
             search_text = Text()
@@ -398,7 +536,10 @@ class TUISelector:
             Panel(footer_grid, border_style=self.theme.BORDER_SUBTLE, box=box.ROUNDED, padding=(0, 1)),
         ])
 
-        return Align(Group(*content_parts), vertical="top")
+        renderable = Align(Group(*content_parts), vertical="top")
+        self._render_cache_key = cache_key
+        self._render_cache = renderable
+        return renderable
 
     def _render(self) -> None:
         """Render the selector UI (deprecated, use _build_content with Live)"""
@@ -411,7 +552,7 @@ class TUISelector:
         """Get help text for navigation."""
         help_text = Text()
         help_text.append("Navigation: ", style=self.theme.TEXT_DIM)
-        help_text.append("Up/Down", style=self.theme.BLUE_SOFT)
+        help_text.append("Up/Down or j/k", style=self.theme.BLUE_SOFT)
         help_text.append(" Navigate ", style=self.theme.TEXT_DIM)
         help_text.append("Enter", style=self.theme.BLUE_SOFT)
         help_text.append(" Select ", style=self.theme.TEXT_DIM)
@@ -423,7 +564,8 @@ class TUISelector:
             help_text.append(" Search ", style=self.theme.TEXT_DIM)
         if not compact:
             help_text.append("PgUp/PgDn", style=self.theme.BLUE_SOFT)
-            help_text.append(" Page", style=self.theme.TEXT_DIM)
+            help_text.append(" Page ", style=self.theme.TEXT_DIM)
+            help_text.append("Home/End", style=self.theme.BLUE_SOFT)
         return help_text
 
 

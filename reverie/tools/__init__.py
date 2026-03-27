@@ -53,6 +53,7 @@ from .vision_upload import VisionUploadTool
 from .token_counter import TokenCounterTool
 from .mode_switch import ModeSwitchTool
 from .computer_control import ComputerControlTool
+from .mcp_dynamic import MCPDynamicTool
 
 __all__ = [
     'BaseTool',
@@ -94,4 +95,5 @@ __all__ = [
     "ReverieEngineLiteTool",
     "ModeSwitchTool",
     "ComputerControlTool",
+    "MCPDynamicTool",
 ]

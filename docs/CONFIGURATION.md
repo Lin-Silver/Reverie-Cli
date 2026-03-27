@@ -80,7 +80,6 @@ Common top-level keys:
   "show_status_line": true,
   "use_workspace_config": false,
   "text_to_image": {},
-  "iflow": {},
   "qwencode": {},
   "geminicli": {},
   "codex": {},
@@ -112,15 +111,10 @@ When `active_model_source` is `standard`, Reverie uses `active_model_index` to c
 Supported values for `active_model_source`:
 
 - `standard`
-- `iflow`
 - `qwencode`
 - `geminicli`
 - `codex`
 - `nvidia`
-
-### iFlow
-
-The `iflow` section stores the selected model, endpoint override, and runtime defaults used by `/iflow`.
 
 ### Qwen Code
 
@@ -156,6 +150,7 @@ Reverie normalizes ChatGPT and Codex URLs automatically, so these all work:
 The `nvidia` section stores the NVIDIA API key, selected model, transport-specific defaults, and optional endpoint override used by the NVIDIA source.
 
 Get the API key from `https://build.nvidia.com/settings/api-keys`.
+Reverie also reads `NVIDIA_API_KEY` from the environment when it is present, and Computer Controller mode pins the runtime to `qwen/qwen3.5-397b-a17b`.
 
 ## Text-To-Image Configuration
 

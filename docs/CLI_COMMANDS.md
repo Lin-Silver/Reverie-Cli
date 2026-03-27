@@ -33,15 +33,12 @@ Notes:
 | `/mode spec-driven` | Switch to the spec authoring mode |
 | `/mode spec-vibe` | Switch to the lighter spec implementation mode |
 | `/mode writer` | Switch to the writing and narrative continuity mode |
-| `/mode computer-controller` | Switch to the desktop-control mode |
+| `/mode computer-controller` | Switch to the pinned NVIDIA desktop-autopilot mode |
 
 ## Providers
 
 | Command | Description |
 | --- | --- |
-| `/iflow` | Show iFlow status |
-| `/iflow model` | Select an iFlow model |
-| `/iflow endpoint <value>` | Set or clear iFlow endpoint override |
 | `/qwencode` | Show Qwen Code status |
 | `/qwencode login` | Validate or refresh Qwen Code credentials |
 | `/qwencode model <model-id>` | Set the Qwen Code model |
@@ -65,6 +62,7 @@ Notes:
 | `/nvidia endpoint <value>` | Set or clear NVIDIA endpoint override |
 
 Request-based NVIDIA vision models can also consume inline chat attachments like `@image.png`.
+Reverie also reads `NVIDIA_API_KEY` automatically when it is present, and Computer Controller mode pins the runtime to `qwen/qwen3.5-397b-a17b`.
 
 ## Tools and Context
 

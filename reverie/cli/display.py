@@ -196,14 +196,15 @@ class DisplayComponents:
         provider_label: str = "",
         mode: str = "",
     ) -> None:
-        """Render a lightweight Gemini-inspired response banner."""
+        """Render a compact Codex-like response banner."""
         compact = self._is_compact(100)
         separator = self._safe_separator()
+        bullet = self._safe_symbol("\u25cf", "*")
         line = Text()
-        line.append(f"{self._safe_symbol(self.deco.SPARKLE_FILLED, '*')} ", style=self.theme.PINK_SOFT)
+        line.append(f"{bullet} ", style=self.theme.BLUE_SOFT)
         line.append(
             self._truncate_text(model_name or "Assistant", 28 if compact else 42),
-            style=f"bold {self.theme.PURPLE_SOFT}",
+            style=f"bold {self.theme.TEXT_PRIMARY}",
         )
         if provider_label:
             line.append(f"  {separator}  ", style=self.theme.TEXT_DIM)
@@ -246,8 +247,9 @@ class DisplayComponents:
 
     def show_thinking_banner(self, model_name: str = "") -> None:
         """Render a lightweight thinking marker before streamed reasoning."""
+        prefix = self._safe_symbol("\u2502", "|")
         line = Text()
-        line.append(" ", style=self.theme.TEXT_DIM)
+        line.append(f"{prefix} ", style=self.theme.TEXT_DIM)
         line.append("Thinking...", style=f"italic {self.theme.THINKING_MEDIUM}")
         if model_name:
             line.append("  ", style=self.theme.TEXT_DIM)
@@ -265,16 +267,16 @@ class DisplayComponents:
         body: Optional[Any] = None,
         footer: str = "",
     ) -> None:
-        """Render a lightweight activity block with Gemini-style framing."""
-        top_prefix = self._safe_symbol("╭─ ", "+- ")
-        bottom_prefix = self._safe_symbol("╰─ ", "\\- ")
+        """Render a compact timeline block closer to Codex's transcript rhythm."""
+        top_prefix = self._safe_symbol("│ ", "| ")
+        bottom_prefix = self._safe_symbol("└ ", "\\- ")
         top = Text()
         top.append(top_prefix, style=accent)
         top.append(title, style=f"bold {accent}")
 
         renderables: List[Any] = [top]
         if body is not None:
-            renderables.append(Padding(body, (0, 0, 0, 3)))
+            renderables.append(Padding(body, (0, 0, 0, 2)))
         if footer:
             bottom = Text()
             bottom.append(bottom_prefix, style=accent)

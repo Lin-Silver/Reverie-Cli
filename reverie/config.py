@@ -19,11 +19,6 @@ import shutil
 import logging
 
 from .security_utils import write_json_secure
-from .iflow import (
-    build_iflow_runtime_model_data,
-    default_iflow_config,
-    normalize_iflow_config,
-)
 from .geminicli import (
     build_geminicli_runtime_model_data,
     default_geminicli_config,
@@ -39,16 +34,18 @@ from .atlas import (
     normalize_atlas_mode_config,
 )
 from .nvidia import (
+    build_nvidia_computer_controller_runtime_model_data,
     build_nvidia_runtime_model_data,
     default_nvidia_config,
     normalize_nvidia_config,
 )
+from .modes import normalize_mode
 
 
 # Version info
 __version__ = "2.1.4"
 
-EXTERNAL_MODEL_SOURCES = ("iflow", "qwencode", "geminicli", "codex", "nvidia")
+EXTERNAL_MODEL_SOURCES = ("qwencode", "geminicli", "codex", "nvidia")
 SUPPORTED_ACTIVE_MODEL_SOURCES = ("standard",) + EXTERNAL_MODEL_SOURCES
 
 
@@ -272,6 +269,12 @@ def get_app_root() -> Path:
     return Path.cwd()
 
 
+def get_computer_controller_data_dir(app_root: Optional[Path] = None) -> Path:
+    """Return the dedicated runtime data root for Computer Controller mode."""
+    root = Path(app_root).resolve() if app_root is not None else get_app_root()
+    return root / ".reverie" / "computer-controller"
+
+
 def get_legacy_project_data_name(project_path: Path) -> str:
     """
     Generate the legacy project cache folder name.
@@ -360,7 +363,7 @@ class Config:
     """Main configuration"""
     models: List[ModelConfig] = field(default_factory=list)
     active_model_index: int = 0
-    active_model_source: str = "standard"  # standard | iflow | qwencode | geminicli | codex | nvidia
+    active_model_source: str = "standard"  # standard | qwencode | geminicli | codex | nvidia
     mode: str = "reverie"
     theme: str = "default"
     max_context_tokens: int = 128000
@@ -380,7 +383,6 @@ class Config:
     
     # Text-to-image settings
     text_to_image: Dict[str, Any] = field(default_factory=default_text_to_image_config)
-    iflow: Dict[str, Any] = field(default_factory=default_iflow_config)
     qwencode: Dict[str, Any] = field(default_factory=dict)
     geminicli: Dict[str, Any] = field(default_factory=dict)
     codex: Dict[str, Any] = field(default_factory=dict)
@@ -427,10 +429,11 @@ class Config:
     def active_model(self) -> Optional[ModelConfig]:
         source = str(self.active_model_source).lower()
 
-        if source == "iflow":
-            runtime_iflow_model = build_iflow_runtime_model_data(self.iflow)
-            if runtime_iflow_model:
-                return ModelConfig.from_dict(runtime_iflow_model)
+        if normalize_mode(self.mode) == "computer-controller":
+            runtime_nvidia_model = build_nvidia_computer_controller_runtime_model_data(self.nvidia)
+            if runtime_nvidia_model:
+                return ModelConfig.from_dict(runtime_nvidia_model)
+            return None
 
         if source == "qwencode":
             from .qwencode import build_qwencode_runtime_model_data
@@ -467,7 +470,6 @@ class Config:
         text_to_image.pop('model_paths', None)
         text_to_image.pop('default_model_index', None)
         tti_models = text_to_image['models']
-        iflow = normalize_iflow_config(self.iflow)
         from .qwencode import normalize_qwencode_config
         qwencode = normalize_qwencode_config(self.qwencode)
         geminicli = normalize_geminicli_config(self.geminicli)
@@ -498,7 +500,6 @@ class Config:
             'api_timeout': self.api_timeout,
             'api_enable_debug_logging': self.api_enable_debug_logging,
             'text_to_image': text_to_image,
-            'iflow': iflow,
             'qwencode': qwencode,
             'geminicli': geminicli,
             'codex': codex,
@@ -526,8 +527,6 @@ class Config:
         text_to_image['default_model_display_name'] = resolve_tti_default_display_name(text_to_image)
         text_to_image.pop('model_paths', None)
         text_to_image.pop('default_model_index', None)
-        raw_iflow = data.get('iflow', {})
-        iflow = normalize_iflow_config(raw_iflow)
         raw_qwencode = data.get('qwencode', {})
         from .qwencode import normalize_qwencode_config
         qwencode = normalize_qwencode_config(raw_qwencode)
@@ -592,7 +591,6 @@ class Config:
             api_timeout=data.get('api_timeout', 60),
             api_enable_debug_logging=data.get('api_enable_debug_logging', False),
             text_to_image=text_to_image,
-            iflow=iflow,
             qwencode=qwencode,
             geminicli=geminicli,
             codex=codex,
@@ -969,18 +967,6 @@ class ConfigManager:
         if active_model_source not in SUPPORTED_ACTIVE_MODEL_SOURCES:
             needs_update = True
 
-        # Check if iflow section is missing or incomplete
-        raw_iflow = data.get('iflow', None)
-        if raw_iflow is None:
-            needs_update = True
-        elif not isinstance(raw_iflow, dict):
-            needs_update = True
-        else:
-            for field_name in default_iflow_config().keys():
-                if field_name not in raw_iflow:
-                    needs_update = True
-                    break
-
         # Check if qwencode section is missing
         if 'qwencode' not in data:
             needs_update = True
@@ -1119,10 +1105,6 @@ class ConfigManager:
         if len(config.models) > 0:
             return True
 
-        iflow = normalize_iflow_config(getattr(config, "iflow", {}))
-        if iflow.get("selected_model_id"):
-            return True
-
         from .qwencode import normalize_qwencode_config
         if normalize_qwencode_config(getattr(config, "qwencode", {})).get("selected_model_id"):
             return True
@@ -1131,7 +1113,10 @@ class ConfigManager:
         if normalize_codex_config(getattr(config, "codex", {})).get("selected_model_id"):
             return True
         nvidia = normalize_nvidia_config(getattr(config, "nvidia", {}))
-        if nvidia.get("api_key") and nvidia.get("selected_model_id"):
+        if normalize_mode(getattr(config, "mode", "reverie")) == "computer-controller":
+            if build_nvidia_computer_controller_runtime_model_data(nvidia):
+                return True
+        elif build_nvidia_runtime_model_data(nvidia):
             return True
         return False
     
@@ -1149,22 +1134,18 @@ class ConfigManager:
             # Adjust active index if needed
             if config.active_model_index >= len(config.models):
                 config.active_model_index = max(0, len(config.models) - 1)
-            # If standard models are empty but iFlow has a selection, switch to iFlow source.
+            # If standard models are empty but another external source is selected, keep that source active.
             if not config.models and config.active_model_source == "standard":
-                iflow = normalize_iflow_config(getattr(config, "iflow", {}))
-                if iflow.get("selected_model_id"):
-                    config.active_model_source = "iflow"
-                else:
-                    from .qwencode import normalize_qwencode_config
+                from .qwencode import normalize_qwencode_config
 
-                    if normalize_qwencode_config(getattr(config, "qwencode", {})).get("selected_model_id"):
-                        config.active_model_source = "qwencode"
-                    elif normalize_geminicli_config(getattr(config, "geminicli", {})).get("selected_model_id"):
-                        config.active_model_source = "geminicli"
-                    elif normalize_codex_config(getattr(config, "codex", {})).get("selected_model_id"):
-                        config.active_model_source = "codex"
-                    elif normalize_nvidia_config(getattr(config, "nvidia", {})).get("api_key"):
-                        config.active_model_source = "nvidia"
+                if normalize_qwencode_config(getattr(config, "qwencode", {})).get("selected_model_id"):
+                    config.active_model_source = "qwencode"
+                elif normalize_geminicli_config(getattr(config, "geminicli", {})).get("selected_model_id"):
+                    config.active_model_source = "geminicli"
+                elif normalize_codex_config(getattr(config, "codex", {})).get("selected_model_id"):
+                    config.active_model_source = "codex"
+                elif build_nvidia_runtime_model_data(getattr(config, "nvidia", {})):
+                    config.active_model_source = "nvidia"
             self.save(config)
             return True
         return False

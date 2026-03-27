@@ -7,13 +7,16 @@ its own transport, payload defaults, and transcript normalization policy.
 
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, List, Optional
 
 
 NVIDIA_DEFAULT_API_URL = "https://integrate.api.nvidia.com/v1"
 NVIDIA_DEFAULT_REQUEST_ENDPOINT = "/chat/completions"
 NVIDIA_DEFAULT_MODEL_ID = "qwen/qwen3.5-397b-a17b"
-NVIDIA_DEFAULT_MODEL_DISPLAY_NAME = "Qwen3.5-397B-A17B"
+NVIDIA_DEFAULT_MODEL_DISPLAY_NAME = "Qwen3.5 397B A17B"
+NVIDIA_COMPUTER_CONTROLLER_MODEL_ID = NVIDIA_DEFAULT_MODEL_ID
+NVIDIA_COMPUTER_CONTROLLER_MODEL_DISPLAY_NAME = NVIDIA_DEFAULT_MODEL_DISPLAY_NAME
 NVIDIA_API_KEY_HINT_URL = "https://build.nvidia.com/settings/api-keys"
 NVIDIA_DEFAULT_IMAGE_TOKEN_ESTIMATE = 1024
 NVIDIA_DEFAULT_CONTEXT_TOKENS = 262_144
@@ -312,12 +315,25 @@ def resolve_nvidia_sdk_base_url(api_url: Any) -> str:
     return base
 
 
-def resolve_nvidia_selected_model(nvidia_config: Any) -> Optional[Dict[str, Any]]:
-    """Resolve selected NVIDIA model metadata from config."""
+def resolve_nvidia_api_key(nvidia_config: Any) -> str:
+    """Resolve the effective NVIDIA API key from config or environment."""
     cfg = default_nvidia_config()
     if isinstance(nvidia_config, dict):
         cfg.update(nvidia_config)
-    wanted = str(cfg.get("selected_model_id", NVIDIA_DEFAULT_MODEL_ID) or "").strip().lower()
+
+    key = str(cfg.get("api_key", "") or "").strip()
+    if key:
+        return key
+    return str(os.getenv("NVIDIA_API_KEY", "") or "").strip()
+
+
+def resolve_nvidia_selected_model(nvidia_config: Any, model_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Resolve selected NVIDIA model metadata from config or an explicit override."""
+    cfg = default_nvidia_config()
+    if isinstance(nvidia_config, dict):
+        cfg.update(nvidia_config)
+
+    wanted = str(model_id or cfg.get("selected_model_id", NVIDIA_DEFAULT_MODEL_ID) or "").strip().lower()
     matched = get_nvidia_model_metadata(wanted)
     if matched:
         return matched
@@ -341,13 +357,17 @@ def is_nvidia_model_vision_capable(model_id: Any) -> bool:
     return bool(metadata and metadata.get("vision"))
 
 
-def build_nvidia_runtime_model_data(nvidia_config: Any) -> Optional[Dict[str, Any]]:
+def build_nvidia_runtime_model_data(nvidia_config: Any, model_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Build runtime model config dict for agent initialization."""
     cfg = normalize_nvidia_config(nvidia_config)
     if not cfg.get("enabled", True):
         return None
 
-    selected = resolve_nvidia_selected_model(cfg)
+    api_key = resolve_nvidia_api_key(cfg)
+    if not api_key:
+        return None
+
+    selected = resolve_nvidia_selected_model(cfg, model_id=model_id)
     if not selected:
         return None
 
@@ -363,7 +383,7 @@ def build_nvidia_runtime_model_data(nvidia_config: Any) -> Optional[Dict[str, An
         "model": selected["id"],
         "model_display_name": selected["display_name"],
         "base_url": base_url,
-        "api_key": cfg.get("api_key", ""),
+        "api_key": api_key,
         "max_context_tokens": int(selected.get("context_length") or cfg.get("max_context_tokens", NVIDIA_DEFAULT_CONTEXT_TOKENS)),
         "provider": provider,
         "thinking_mode": "true" if bool(cfg.get("enable_thinking", True)) else "false",
@@ -371,6 +391,13 @@ def build_nvidia_runtime_model_data(nvidia_config: Any) -> Optional[Dict[str, An
         "custom_headers": {},
         "vision": bool(selected.get("vision", False)),
     }
+
+
+def build_nvidia_computer_controller_runtime_model_data(nvidia_config: Any) -> Optional[Dict[str, Any]]:
+    """Build runtime model data for Computer Controller mode's pinned NVIDIA model."""
+    cfg = normalize_nvidia_config(nvidia_config)
+    cfg["enabled"] = True
+    return build_nvidia_runtime_model_data(cfg, model_id=NVIDIA_COMPUTER_CONTROLLER_MODEL_ID)
 
 
 def _build_request_mistral_small_options() -> Dict[str, Any]:

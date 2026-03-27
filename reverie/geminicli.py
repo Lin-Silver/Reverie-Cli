@@ -58,13 +58,6 @@ _GEMINICLI_DEFAULT_SAFETY_SETTINGS = [
 
 _GEMINICLI_MODELS = [
     {
-        "id": "gemini-3-pro-preview",
-        "display_name": "Gemini 3 Pro Preview",
-        "description": "Gemini 3 Pro Preview",
-        "context_length": 1_048_576,
-        "max_output_tokens": 65_536,
-    },
-    {
         "id": "gemini-3-flash-preview",
         "display_name": "Gemini 3 Flash Preview",
         "description": "Gemini 3 Flash Preview",
@@ -72,9 +65,9 @@ _GEMINICLI_MODELS = [
         "max_output_tokens": 65_536,
     },
     {
-        "id": "gemini-2.5-pro",
-        "display_name": "Gemini 2.5 Pro",
-        "description": "Gemini 2.5 Pro",
+        "id": "gemini-3.1-flash-lite-preview",
+        "display_name": "Gemini 3.1 Flash Lite Preview",
+        "description": "Gemini 3.1 Flash Lite Preview",
         "context_length": 1_048_576,
         "max_output_tokens": 65_536,
     },

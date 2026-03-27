@@ -13,6 +13,7 @@ import json
 import subprocess
 import time
 from pathlib import Path
+from ctypes import wintypes
 from typing import Any, Dict, List, Optional, Sequence
 
 from .base import BaseTool, ToolResult
@@ -42,6 +43,9 @@ VK_DOWN = 0x28
 VK_LEFT = 0x25
 VK_RIGHT = 0x27
 VK_F_KEYS = {f"f{index}": 0x6F + index for index in range(1, 13)}
+KEYEVENTF_KEYUP = 0x0002
+KEYEVENTF_UNICODE = 0x0004
+INPUT_KEYBOARD = 1
 
 
 class POINT(ctypes.Structure):
@@ -57,13 +61,42 @@ class RECT(ctypes.Structure):
     ]
 
 
+class KEYBDINPUT(ctypes.Structure):
+    _fields_ = [
+        ("wVk", wintypes.WORD),
+        ("wScan", wintypes.WORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ctypes.c_size_t),
+    ]
+
+
+class _INPUTUNION(ctypes.Union):
+    _fields_ = [("ki", KEYBDINPUT)]
+
+
+class INPUT(ctypes.Structure):
+    _anonymous_ = ("union",)
+    _fields_ = [
+        ("type", wintypes.DWORD),
+        ("union", _INPUTUNION),
+    ]
+
+
+try:
+    user32.SendInput.argtypes = (wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int)
+    user32.SendInput.restype = wintypes.UINT
+except Exception:
+    pass
+
+
 class ComputerControlTool(BaseTool):
     """Observe and control the local computer from a single tool."""
 
     name = "computer_control"
     description = (
         "Observe and control the Windows desktop in Computer Controller mode. "
-        "Supports screenshot observation, mouse actions, typing, hotkeys, drag, scroll, and wait steps."
+        "Supports screenshot observation, mouse actions, native keyboard text entry, hotkeys, drag, scroll, and wait steps."
     )
     parameters = {
         "type": "object",
@@ -387,6 +420,49 @@ class ComputerControlTool(BaseTool):
             stderr = (result.stderr or result.stdout or "").strip()
             raise RuntimeError(stderr or "Set-Clipboard failed")
 
+    def _build_keyboard_input(self, *, vk_code: int = 0, scan_code: int = 0, flags: int = 0) -> INPUT:
+        input_item = INPUT()
+        input_item.type = INPUT_KEYBOARD
+        input_item.ki = KEYBDINPUT(
+            wVk=int(vk_code),
+            wScan=int(scan_code),
+            dwFlags=int(flags),
+            time=0,
+            dwExtraInfo=0,
+        )
+        return input_item
+
+    def _send_input_events(self, inputs: Sequence[INPUT]) -> None:
+        if not inputs:
+            return
+
+        input_array = (INPUT * len(inputs))(*inputs)
+        sent = int(user32.SendInput(len(inputs), input_array, ctypes.sizeof(INPUT)))
+        if sent != len(inputs):
+            raise RuntimeError(f"SendInput injected {sent}/{len(inputs)} events")
+
+    def _send_unicode_text(self, text: str) -> None:
+        normalized = str(text or "").replace("\r\n", "\n").replace("\r", "\n")
+        inputs: List[INPUT] = []
+
+        for char in normalized:
+            if char == "\n":
+                inputs.append(self._build_keyboard_input(vk_code=VK_RETURN))
+                inputs.append(self._build_keyboard_input(vk_code=VK_RETURN, flags=KEYEVENTF_KEYUP))
+                continue
+            if char == "\t":
+                inputs.append(self._build_keyboard_input(vk_code=VK_TAB))
+                inputs.append(self._build_keyboard_input(vk_code=VK_TAB, flags=KEYEVENTF_KEYUP))
+                continue
+
+            encoded = char.encode("utf-16-le")
+            for index in range(0, len(encoded), 2):
+                code_unit = int.from_bytes(encoded[index:index + 2], "little")
+                inputs.append(self._build_keyboard_input(scan_code=code_unit, flags=KEYEVENTF_UNICODE))
+                inputs.append(self._build_keyboard_input(scan_code=code_unit, flags=KEYEVENTF_UNICODE | KEYEVENTF_KEYUP))
+
+        self._send_input_events(inputs)
+
     def _normalize_key(self, key: str) -> int:
         lowered = str(key or "").strip().lower()
         aliases = {
@@ -452,17 +528,30 @@ class ComputerControlTool(BaseTool):
         if not content:
             return ToolResult.fail("Text is required for type_text")
 
-        self._set_clipboard_text(content)
-        self._hotkey(["ctrl", "v"])
+        used_native_keyboard = False
+        fallback_reason = ""
+        if "\n" not in content and "\r" not in content and "\t" not in content:
+            try:
+                self._send_unicode_text(content)
+                used_native_keyboard = True
+            except Exception as exc:
+                fallback_reason = str(exc)
+
+        if not used_native_keyboard:
+            self._set_clipboard_text(content)
+            self._hotkey(["ctrl", "v"])
+
         if press_enter:
             self._key_press("enter")
         return ToolResult.ok(
-            f"Typed {len(content)} characters via clipboard paste."
+            f"Typed {len(content)} characters via {'native keyboard input' if used_native_keyboard else 'clipboard paste'}."
             + (" Pressed Enter afterwards." if press_enter else ""),
             data={
                 "computer_control_action": "type_text",
                 "characters": len(content),
                 "press_enter": bool(press_enter),
+                "input_method": "keyboard" if used_native_keyboard else "clipboard",
+                **({"fallback_reason": fallback_reason} if fallback_reason and not used_native_keyboard else {}),
             },
         )
 

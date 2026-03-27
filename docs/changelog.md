@@ -1,33 +1,46 @@
-## Reverie CLI v2.1.4 - LLM-First Session Rotation, Task-Oriented Context Engine, and NVIDIA Request Hardening
+## Reverie CLI v2.1.4 - LLM-First Rotation, Context Intelligence, MCP, and Provider Refresh
 
-### Changed
-
-* Replaced the old algorithm-first context compression path with automatic model-authored session handoff rotation. When token usage crosses the rotation threshold, Reverie now generates a structured carryover summary, starts a fresh session, restores the active user request into that new session, and continues the same turn without waiting for a manual `continue`.
-* Added a repair pass for invalid handoff payloads, automatic backoff when rotation fails repeatedly, and hid `context_management` from the model-facing tool surface so continuity is driven by automatic rotation, workspace memory, and durable artifacts instead of manual self-compression.
-* Persisted session handoff packets under the project cache state (`.reverie/project_caches/<project>/session_handoffs/`) and enriched fresh sessions with both the readable working-memory summary and a compact structured handoff payload for better recovery across multi-rotation loops.
-* Optimized streaming output performance by reusing the markdown formatter, switching assistant output to progressive line-level flushing, and replacing the live status token recount path with the agent's lightweight token estimate instead of repeated full re-tokenization.
-* Upgraded diff presentation in tool-result cards so fenced `diff` blocks now render as syntax-highlighted previews with `+/-/hunk` stats, and refreshed the standalone diff panel with a cleaner badge header and folded-preview behavior for large patches.
-* Hardened `codebase-retrieval` so plain-text files such as `README.md`, master documents, and appendix markdown files can be read through a content fallback even when they do not produce code symbols, and normalized search filters more defensively to avoid avoidable failures from non-string tool arguments.
-* Expanded the Context Engine into a task-oriented retrieval layer: document parsing now covers `.md`, `.mdx`, `.rst`, and `.txt`; file metadata now carries summaries, keywords, tags, imports, top-level symbols, and dependency targets; active workset files are weighted higher; workspace memory plus git history are fused into ranking; and cache persistence now preserves the richer metadata across reloads.
-* Strengthened the system prompts, tool descriptions, and editor activity tracking so non-trivial, multi-file, or ambiguous work explicitly nudges the model to call `codebase-retrieval(query_type="task")` first.
-* Clarified the runtime storage split across the codebase and prompts: project documentation and generated docs stay in `artifacts/`, while Reverie CLI runtime/session/cache state stays under `.reverie/project_caches/`.
-* Fixed NVIDIA source requests with per-model payload strategies, system-message-first normalization, explicit `Accept` headers, and model-specific template kwargs so provider calls no longer trip the `System message must be at the beginning` error.
-* Added regression coverage for task retrieval, prompt activation, and NVIDIA request normalization.
-
-## Reverie CLI v2.1.4 - Reverie-Atlas + Codex 0.115.0 Alignment
+**Release Date:** 2026-03-27
 
 ### Added
 
-* Added persisted `atlas_mode` configuration so `Reverie-Atlas` can keep a real execution profile for research-first delivery, master-document naming, appendix expectations, confirmation flow, and post-document implementation behavior.
-* Added stronger `Reverie-Atlas` guidance so the mode now produces the document bundle, explains it to the user, confirms the document information, and then continues into slow, rigorous, document-driven implementation instead of stopping at docs alone.
-* `Reverie-Atlas` intentionally excludes `task_manager` and `Tasks.md` workflows, replacing them with a research-first, document-architecture-driven prompt and tool playbook.
-* Added mode aliases so legacy phrasing like `reverie-deeper` or `deeper` now resolves cleanly to `Reverie-Atlas`.
+* Added persisted `atlas_mode` configuration so `Reverie-Atlas` can keep a stable research-first execution profile, including master-document naming, appendix expectations, confirmation flow, and post-document implementation behavior.
+* Added stronger `Reverie-Atlas` guidance so the mode now completes the document bundle, explains it, confirms key information with the user, and then continues into rigorous document-driven implementation instead of stopping at docs alone.
+* Added mode aliases so legacy names like `reverie-deeper` and `deeper` resolve cleanly to `Reverie-Atlas`.
+* Added Codex/Gemini-style MCP support with configuration stored in `.Reverie/MCP.json`.
+* Added MCP transport support for `stdio`, streamable HTTP, and legacy SSE servers.
+* Added dynamic MCP tool exposure so discovered server tools can be called through `mcp_<server>_<tool>` style entries.
+* Added direct `/mcp` command management plus an interactive `/mcp` control panel for server status, enable/disable, trust, reload, add, edit, and remove flows.
+* Added broader regression coverage for task retrieval, prompt activation, NVIDIA request normalization, MCP integration, and Gemini relay updates.
 
 ### Changed
 
-* Re-aligned the built-in Codex model catalog against the downloaded `references/codex-main` source tree, including the current GPT-5.x lineup plus `gpt-oss-120b` and `gpt-oss-20b`, while preserving hidden-but-supported ids for direct selection.
-* Updated Codex reverse-proxy URL resolution so ChatGPT roots, `/backend-api`, proxy base URLs, full `/responses` URLs, and `/models` URLs normalize more safely without double-appending or misrouting.
-* Updated mode help, prompt routing, config injection, and documentation so `Reverie-Atlas` is described as a document-driven implementation mode rather than a docs-only mode.
+* Replaced the old algorithm-first context compression flow with automatic model-authored session handoff rotation, so Reverie can continue long turns in a fresh session without waiting for a manual `continue`.
+* Added handoff repair, retry backoff, and model-surface cleanup so continuity now relies on automatic rotation, workspace memory, and persisted artifacts instead of manual self-compression.
+* Persisted session handoff packets under `.reverie/project_caches/<project>/session_handoffs/` and enriched fresh sessions with both readable memory summaries and compact structured carryover payloads.
+* Expanded the Context Engine into a more task-oriented retrieval layer with richer file metadata, better document parsing, stronger workset weighting, and ranking that blends workspace memory with git history.
+* Hardened `codebase-retrieval` so plain-text project files like `README.md`, master docs, and appendices can still be recovered even when symbol extraction is unavailable.
+* Strengthened system prompts, tool descriptions, and editor activity guidance so multi-file or ambiguous work more strongly nudges task-oriented `codebase-retrieval`.
+* Clarified runtime storage boundaries so generated project docs stay in `artifacts/`, while Reverie runtime, cache, and session state remain under `.reverie/project_caches/`.
+* Re-aligned the built-in Codex model catalog against the local `references/codex-main` source tree, including the current GPT-5.x lineup plus `gpt-oss-120b` and `gpt-oss-20b`, while keeping hidden-but-supported ids selectable.
+* Updated Codex reverse-proxy URL normalization so ChatGPT roots, `/backend-api`, proxy base URLs, `/responses`, and `/models` endpoints resolve more safely.
+* Refined the CLI transcript into a tighter Codex-style activity flow while preserving Reverie's original large banner.
+* Improved high-frequency CLI UX and performance across `/help`, `/setting`, model selectors, and MCP management with denser layouts, cached help data, richer selector focus panels, and lower redraw overhead.
+* Updated Gemini CLI relay support so the proxy model catalog now only keeps `gemini-3-flash-preview`, `gemini-3.1-flash-lite-preview`, `gemini-2.5-flash`, and `gemini-2.5-flash-lite`.
+* Updated mode help, prompt routing, config injection, and related documentation so `Reverie-Atlas` is consistently described as a document-driven implementation mode rather than a docs-only mode.
+* Simplified provider configuration flows so Computer Controller now reuses the saved NVIDIA API key and no longer asks for it again when it is already configured.
+
+### Fixed
+
+* Fixed NVIDIA source requests with per-model payload strategies, system-message-first normalization, explicit `Accept` headers, and model-specific template kwargs, eliminating the `System message must be at the beginning` request error.
+* Optimized streaming output by reusing the markdown formatter, switching assistant output to progressive line-level flushing, and replacing repeated full token recounting with lightweight token estimates.
+* Upgraded diff rendering in tool-result cards so fenced `diff` blocks show cleaner previews with `+/-/hunk` stats and better folded behavior for large patches.
+* Improved MCP refresh and state-application paths so provider and server changes apply more consistently.
+* Optimized selector, settings, help, and MCP panel rendering to reduce repeated work and improve responsiveness in day-to-day CLI use.
+
+### Removed
+
+* Removed all `Iflow` source code, commands, proxy logic, configuration surfaces, and documentation references from Reverie CLI.
 
 ## Reverie CLI v2.1.3 - Post-Release Updates (Still v2.1.3) - Reverie-Gamer Production Upgrade + Reverie Engine Lite
 
@@ -64,11 +77,10 @@
 * Added `switch_mode` so non-desktop modes can proactively move between Reverie, Reverie-Gamer, Reverie-Ant, Spec-Driven, Spec-Vibe, and Writer while updating tool availability and system prompts in-session.
 * Reworked the main Reverie system prompt for generic LLMs with stronger repository-first retrieval, spec-style planning discipline, full-project delivery expectations, and a stricter test/build/verification standard.
 * Upgraded workspace memory and Context Engine flow: session-level memory is now refreshed back into the active conversation, workspace-global memory summaries are injected automatically, `codebase-retrieval` can query memory/LSP data, and an optional LSP bridge exposes diagnostics, definitions, symbols, and status.
-* Improved provider transport reliability: Codex models are standardized to `258K`, iFlow now reads the current CLI settings/remote model catalog more accurately, direct iFlow requests use CLI-style signed headers, and request-provider response parsing is more robust across wrapped text/reasoning payloads.
+* Improved provider transport reliability: Codex models are standardized to `258K`, and request-provider response parsing is more robust across wrapped text/reasoning payloads.
 
 ### Notes
 * Computer Controller mode is intentionally isolated from `switch_mode`; it is entered explicitly and stays focused on desktop control instead of general coding workflows.
-* iFlow direct requests now include a compatibility fallback when the upstream rejects tool-related OpenAI fields, reducing `406` failures on stricter accounts or models.
 
 ---
 
@@ -96,7 +108,7 @@
 
 ### Highlights
 * Refined the TUI without changing the Dreamscape palette: denser help/settings dashboards, richer tool cards and response headers, better selector layouts, stronger narrow-terminal fit, persistent stream-time input, `Esc` interruption, and the restored original banner.
-* Reworked iFlow, Qwen Code, Gemini CLI, and Codex relay integration with cleaner model catalogs, endpoint overrides, safer request formatting, and Codex four-level reasoning mapped onto the supported GPT-5.x Codex lineup.
+* Reworked Qwen Code, Gemini CLI, and Codex relay integration with cleaner model catalogs, endpoint overrides, safer request formatting, and Codex four-level reasoning mapped onto the supported GPT-5.x Codex lineup.
 * Simplified command flow: `/help` is now a focused browser-plus-detail system, `/setting` is faster and more structured, `/codex` directly switches Reverie onto Codex, `/codex model` continues into reasoning selection, and redundant command surfaces were trimmed.
 * Strengthened session continuity: context compression now consolidates prior memory blocks, preserves stronger memory anchors and a larger recent interaction window, and session rotation carries a richer working-memory digest forward.
 * Hardened local secret handling and config persistence, including environment-based Gemini OAuth credentials and safer writes for local auth/config JSON.
@@ -122,8 +134,8 @@
 * Tightened prompt/tool-calling reliability and packaging checks
 
 ### Post-Release Updates (Still v2.1.0) - 2026-03-09
-* Reworked iFlow, Qwen, Gemini CLI, and Codex relay integration with native commands and endpoint overrides
-* Fixed provider catalogs: Qwen now uses `coder-model` at 1M context, iFlow aligns to the current CLI list, and Codex is limited to the supported GPT-5.x Codex models
+* Reworked Qwen, Gemini CLI, and Codex relay integration with native commands and endpoint overrides
+* Fixed provider catalogs: Qwen now uses `coder-model` at 1M context, and Codex is limited to the supported GPT-5.x Codex models
 * Added Codex reasoning-depth selection and extra message/tool-call sanitization to reduce relay format errors
 
 ### Post-Release Updates (Still v2.1.0) - 2026-03-10
@@ -214,15 +226,15 @@
 
 ---
 
-## 🚀 Reverie CLI v2.0.2 — iFlow CLI Integration
+## Reverie CLI v2.0.2 - Provider Integration
 
 **Release Date:** 2026-02-15
 
-### ✨ iFlow CLI Integration
-* **Direct API Integration**: Built-in iFlow CLI credential support for direct API access
-* **Model Access**: Free access to powerful iFlow models including GLM-5-thinking
-* **Credential Auto-Detection**: Automatically reads iFlow credentials from `~/.iflow/`
-* **Proxy Compatibility**: Seamless integration with existing iFlow proxy servers
+### Provider Integration
+* **Direct API Integration**: Built-in provider support for direct API access
+* **Model Access**: Expanded model access across supported provider integrations
+* **Credential Auto-Detection**: Automatically reads supported provider credentials from local caches
+* **Proxy Compatibility**: Seamless integration with existing reverse-proxy servers
 
 ### 🎯 Key Improvements
 * **Simplified Setup**: No need for external proxy server configuration

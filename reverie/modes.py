@@ -48,7 +48,7 @@ MODE_METADATA: Dict[str, Dict[str, object]] = {
     },
     "computer-controller": {
         "display_name": "Computer Controller",
-        "description": "Desktop-control mode for operating the Windows UI through computer_control.",
+        "description": "Pinned NVIDIA desktop-autopilot mode for operating the Windows UI through computer_control.",
         "switchable": False,
         "requires_source": "nvidia",
     },

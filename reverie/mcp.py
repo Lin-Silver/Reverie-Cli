@@ -172,6 +172,8 @@ def normalize_mcp_server_config(server_name: str, raw_server: Any) -> Dict[str, 
         "trust": bool(data.get("trust", False)),
         "includeTools": _normalize_string_list(data.get("includeTools", [])),
         "excludeTools": _normalize_string_list(data.get("excludeTools", [])),
+        "includeModes": _normalize_string_list(data.get("includeModes", [])),
+        "excludeModes": _normalize_string_list(data.get("excludeModes", [])),
         "name": str(server_name or "").strip(),
     }
 
@@ -1403,6 +1405,8 @@ class MCPRuntime:
                     "qualified_name": f"{server_name}.{actual_name}",
                     "transport": str(server_cfg.get("type", "") or "stdio"),
                     "trust": bool(server_cfg.get("trust", False)),
+                    "include_modes": _normalize_string_list(server_cfg.get("includeModes", [])),
+                    "exclude_modes": _normalize_string_list(server_cfg.get("excludeModes", [])),
                 }
                 catalog.append(metadata)
                 lookup[synthetic_name] = metadata

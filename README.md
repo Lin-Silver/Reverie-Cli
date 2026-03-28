@@ -9,7 +9,7 @@ Reverie CLI is a context-engine-powered AI coding assistant for large repositori
 - **Multi-Provider** — standard OpenAI-compatible models plus `Qwen Code`, `Gemini CLI`, `Codex`, and `NVIDIA`
 - **Rich TUI** — selectors, streaming output, help browser, status panels, session browsing, checkpoint rollback, command discovery
 - **Workspace Safety** — file-access sandboxing, audited command execution, archive extraction hardening
-- **Game Tooling** — built-in `Reverie Engine` runtime, game-design workflows, optional text-to-image generation
+- **Game Tooling** — built-in `Reverie Engine` runtime, Reverie-Gamer design/playtest workflows, and a built-in Ashfox MCP modeling flow that works with manual Blockbench + Ashfox plugin installs
 
 ## Installation
 
@@ -95,7 +95,8 @@ reverie/
 ├── context_engine/          # indexing, retrieval, semantic analysis, graph data
 ├── session/                 # sessions, checkpoints, rollback, archives, memory
 ├── tools/                   # tool implementations exposed to the agent
-├── engine_lite/             # built-in runtime and engine workflows
+├── engine/                  # canonical public built-in engine API
+├── engine_lite/             # shared runtime, project, and modeling implementation
 ├── writer/                  # writer mode helpers
 └── reverie/tests/           # regression coverage
 ```
@@ -124,6 +125,7 @@ Windows executable packaging:
 - [CLI Command Reference](docs/CLI_COMMANDS.md)
 - [Development Guide](docs/DEVELOPMENT.md)
 - [Reverie Engine User Guide](docs/engine/reverie_engine_user_guide.md)
+- [Reverie-Gamer Modeling Guide](docs/engine/reverie_gamer_modeling_pipeline.md)
 - [Changelog](docs/changelog.md)
 
 ## License

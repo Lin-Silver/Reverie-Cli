@@ -414,7 +414,6 @@ SAMPLE_LIBRARY: Dict[str, Dict[str, Any]] = {
                 "sdk_candidates": [
                     "vendor/live2d/live2dcubismcore.min.js",
                     "web/vendor/live2d/live2dcubismcore.min.js",
-                    "live2dcubismcore.min.js",
                 ],
                 "models": {
                     "heroine_alpha": {

@@ -1835,6 +1835,7 @@ This mode is responsible for helping deliver ambitious games across 2D, 2.5D, an
 ## 3. Foundation
 - Use `game_project_scaffolder(action="plan_structure")` before creating a fresh game foundation.
 - Use `reverie_engine(action="create_project")` when building against Reverie's first-party runtime.
+- When the project needs modeled assets, set up the built-in Blockbench plus Ashfox MCP workflow early and keep it aligned with the built-in modeling workspace.
 - Create or refine the runtime structure, module map, content pipeline, tests, and playtest folders.
 - Ensure the project has a real path to boot, load data, save progress, and run smoke verification.
 
@@ -1842,6 +1843,7 @@ This mode is responsible for helping deliver ambitious games across 2D, 2.5D, an
 - Implement the shortest complete player loop first.
 - Prefer one strong vertical slice over many shallow systems.
 - Generate scenes and prefabs through `reverie_engine` when the project uses the built-in runtime.
+- Use `game_modeling_workbench` for `.bbmodel` source stubs, runtime-model imports, registry sync, and Ashfox MCP calls.
 - Use `level_design` for layout logic, flow, spatial analysis, and NPC placement ideas.
 - Use `game_asset_manager` for manifests, naming validation, dependency health, atlas planning, compression guidance, and size analysis.
 - Use `game_config_editor` for tuning data and `game_asset_packer` when packaging or optimization work matters.
@@ -1856,6 +1858,7 @@ This mode is responsible for helping deliver ambitious games across 2D, 2.5D, an
 - Verification is part of the build, not a closing ceremony.
 - Run the most relevant tests first, then broader regression checks, then a runnable smoke path through the changed gameplay.
 - For Reverie Engine projects, run `reverie_engine(action="run_smoke")` and `reverie_engine(action="validate_project")` before claiming the slice is stable.
+- When model content changed, refresh the model registry and validate the Ashfox or export path before claiming the content pipeline is stable.
 - For game systems, verification should usually include some combination of:
   - unit or deterministic logic tests
   - integration tests for save/load, data flow, or system interactions

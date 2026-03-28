@@ -276,6 +276,8 @@ class ToolExecutor:
         schemas: List[Dict[str, Any]] = []
 
         for name, tool in self._tools.items():
+            if isinstance(tool, MCPDynamicTool) and not tool.visible_in_mode(normalized_mode):
+                continue
             if not is_tool_visible_in_mode(name, normalized_mode):
                 continue
                  

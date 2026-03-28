@@ -154,6 +154,7 @@ class _BaseReverieEngineTool(BaseTool):
             f"Dimension: {dimension}\n"
             f"Engine: {ENGINE_NAME}\n"
             f"Genre: {result.get('genre', kwargs.get('genre', 'sandbox'))}\n"
+            f"Modeling workspace: {'enabled' if result.get('modeling_enabled') else 'disabled'}\n"
             f"Directories created: {len(result['directories'])}\n"
             f"Files written: {len(result['files'])}"
         )
@@ -170,6 +171,7 @@ class _BaseReverieEngineTool(BaseTool):
             f"Scenes: {info['scene_count']} | Prefabs: {info['prefab_count']} | Content files: {info['content_count']}\n"
             f"Bootstrap present: {info['has_bootstrap']}\n"
             f"Genre: {info.get('genre', 'sandbox')} | Dimension: {info.get('dimension', '2D')}\n"
+            f"Models: {info.get('modeling', {}).get('runtime_model_count', 0)} runtime | {info.get('modeling', {}).get('source_model_count', 0)} source\n"
             f"Runtime capabilities: {runtime_capabilities(output_dir)}\n"
             f"Validation: {'ok' if validation['valid'] else 'issues found'}"
         )

@@ -48,6 +48,7 @@ from ..config import (
 )
 from ..atlas import build_atlas_additional_rules, normalize_atlas_mode_config
 from ..mcp import MCPConfigManager, MCPRuntime
+from ..engine_lite.modeling import ASHFOX_DEFAULT_ENDPOINT, ASHFOX_MCP_SERVER_NAME
 from ..rules_manager import RulesManager
 from ..session import SessionManager
 from ..agent import (
@@ -316,6 +317,7 @@ class ReverieInterface:
         self.config_manager.ensure_dirs()
         self.mcp_config_manager = MCPConfigManager(self.config_manager.app_root)
         self.mcp_config_manager.ensure_dirs()
+        self._ensure_builtin_mcp_servers()
         self.mcp_runtime = MCPRuntime(self.mcp_config_manager, project_root=self.project_root)
         self.rules_manager = RulesManager(project_root)
         self._init_workspace_services()
@@ -347,6 +349,39 @@ class ReverieInterface:
         self._git_integration_ready = False
         self._lsp_manager_ready = False
         self._runtime_scope = ""
+
+    def _ensure_builtin_mcp_servers(self) -> None:
+        """Ensure Reverie's built-in Ashfox MCP server entry exists."""
+        try:
+            config = self.mcp_config_manager.load()
+            servers = dict(config.get("mcpServers", {}) or {})
+            existing = dict(servers.get(ASHFOX_MCP_SERVER_NAME, {}) or {})
+
+            desired = {
+                "enabled": True,
+                "type": "http",
+                "httpUrl": ASHFOX_DEFAULT_ENDPOINT,
+                "trust": True,
+                "includeModes": ["reverie-gamer"],
+            }
+
+            updated = dict(existing)
+            changed = False
+            for key, value in desired.items():
+                current_value = updated.get(key)
+                if key == "includeModes":
+                    if not current_value:
+                        updated[key] = list(value)
+                        changed = True
+                    continue
+                if current_value is None or current_value == "" or current_value == []:
+                    updated[key] = value
+                    changed = True
+
+            if not existing or changed:
+                self.mcp_config_manager.upsert_server(ASHFOX_MCP_SERVER_NAME, updated or desired)
+        except Exception:
+            pass
 
     def _init_workspace_services(self) -> None:
         """Initialize cache/session/rollback services for the active runtime scope."""

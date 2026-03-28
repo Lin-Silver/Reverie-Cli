@@ -91,7 +91,7 @@ class GameAssetManagerTool(BaseTool):
     ASSET_EXTENSIONS = {
         "sprite": {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg"},
         "audio": {".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac"},
-        "model": {".obj", ".fbx", ".gltf", ".glb", ".dae", ".blend"},
+        "model": {".bbmodel", ".obj", ".fbx", ".gltf", ".glb", ".dae", ".blend", ".mtl"},
         "animation": {".anim", ".animation", ".fbx", ".gltf"}
     }
 
@@ -233,7 +233,7 @@ class GameAssetManagerTool(BaseTool):
                         # Look for potential missing references
                         import re
                         asset_patterns = [
-                            r'["\']([^"\']*\.(png|jpg|jpeg|gif|mp3|wav|ogg|obj|fbx))["\']',
+                            r'["\']([^"\']*\.(png|jpg|jpeg|gif|mp3|wav|ogg|obj|fbx|gltf|glb|bbmodel))["\']',
                             r'load\(["\']([^"\']+)["\']',
                             r'asset\(["\']([^"\']+)["\']'
                         ]
@@ -771,6 +771,13 @@ class GameAssetManagerTool(BaseTool):
                 "recommendation": "Export to GLB/glTF and strip editor-only metadata",
                 "estimated_savings_bytes": savings,
             }
+        if asset_type == "model" and ext == ".bbmodel":
+            savings = int(size * 0.15)
+            return {
+                "path": asset["path"],
+                "recommendation": "Keep `.bbmodel` as source-of-truth and export GLB/glTF into assets/models/runtime for runtime use",
+                "estimated_savings_bytes": savings,
+            }
         if asset_type == "animation" and size > 256 * 1024:
             savings = int(size * 0.20)
             return {
@@ -787,6 +794,8 @@ class GameAssetManagerTool(BaseTool):
             "model": 2.5,
             "animation": 1.5,
         }.get(asset["type"], 1.0)
+        if asset["type"] == "model" and asset.get("extension") == ".bbmodel":
+            multiplier = 0.25
         return float(asset["size"]) * multiplier
 
     def _get_asset_type(self, file_path: Path) -> Optional[str]:

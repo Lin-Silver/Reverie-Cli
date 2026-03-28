@@ -1,3 +1,25 @@
+## Reverie CLI v2.1.5 - Reverie-Gamer Modeling Pipeline, Engine Cleanup, and Blockbench/Ashfox Integration
+
+**Release Date:** 2026-03-28
+
+### Added
+
+* Added a new `game_modeling_workbench` tool plus `/modeling` CLI command for `Reverie-Gamer`, covering modeling-stack inspection, workspace setup, registry sync, `.bbmodel` starter creation, runtime-model import, and Ashfox MCP calls through Reverie's built-in MCP runtime.
+* Added a built-in modeling pipeline for Reverie Engine projects: `assets/models/source`, `assets/models/runtime`, `playtest/renders/models`, `data/models/pipeline.yaml`, and `data/models/model_registry.yaml`.
+* Added a built-in `ashfox` MCP server entry that is seeded automatically and exposed only in `reverie-gamer` mode.
+* Added first-party engine documentation for the built-in runtime and a dedicated Reverie-Gamer modeling guide.
+
+### Changed
+
+* Clarified the internal engine structure so `reverie_engine` remains the canonical built-in runtime surface while `reverie_engine_lite` stays as a compatibility alias over the same implementation.
+* Reworked the modeling flow so Reverie no longer depends on checked-out `references/blockbench-master`, `references/ashfox-main`, or root-level helper scripts; only Blockbench desktop plus the Ashfox plugin remain manual installs.
+* Expanded engine inspection, health, validation, packaging, and resource-loading flows to account for model-pipeline state, model registries, `.bbmodel`, `.gltf`, and `.glb` assets.
+* Updated Gamer-mode prompts, help catalog entries, and CLI command documentation to reflect the built-in Ashfox MCP workflow and its Gamer-only boundary.
+
+### Removed
+
+* Removed the external-reference modeling bridge approach and the related root-level helper-script workflow.
+
 ## Reverie CLI v2.1.4 - LLM-First Rotation, Context Intelligence, MCP, and Provider Refresh
 
 **Release Date:** 2026-03-27

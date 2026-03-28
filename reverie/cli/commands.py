@@ -77,6 +77,7 @@ class CommandHandler:
             'bp': self.cmd_blueprint,
             'scaffold': self.cmd_scaffold,
             'engine': self.cmd_engine,
+            'modeling': self.cmd_modeling,
             'playtest': self.cmd_playtest,
             'pt': self.cmd_playtest,
             'CE': self.cmd_context_engine,  # Context Engine management (case-sensitive)
@@ -3971,15 +3972,34 @@ class CommandHandler:
 
     def _print_game_hint(self) -> None:
         """Show a gentle reminder when game commands are used outside Gamer mode."""
-        config_manager = self.app.get('config_manager')
-        if not config_manager:
-            return
-        config = config_manager.load()
-        current_mode = normalize_mode(getattr(config, "mode", "reverie"))
+        current_mode = self._current_mode_name()
         if current_mode != "reverie-gamer":
             self.console.print(
                 f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} Tip: /mode reverie-gamer unlocks the strongest in-chat workflow for these game commands.[/{self.theme.TEXT_DIM}]"
             )
+
+    def _current_mode_name(self) -> str:
+        """Return the normalized active mode."""
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            return "reverie"
+        config = config_manager.load()
+        return normalize_mode(getattr(config, "mode", "reverie"))
+
+    def _require_gamer_mode(self, feature_name: str) -> bool:
+        """Render a friendly guardrail for Gamer-only command surfaces."""
+        if self._current_mode_name() == "reverie-gamer":
+            return True
+        self._print_game_panel(
+            "Reverie-Gamer Required",
+            "\n".join(
+                [
+                    f"`{feature_name}` is a Reverie-Gamer-only workflow.",
+                    "Switch with `/mode reverie-gamer` and run the command again.",
+                ]
+            ),
+        )
+        return False
 
     def _print_game_panel(self, title: str, body: str, accent: Optional[str] = None) -> None:
         """Render a styled game-command panel."""
@@ -4908,6 +4928,187 @@ class CommandHandler:
 
         self.console.print(
             f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /engine [profile|create|sample|run|validate|smoke|health|benchmark|package|test][/{self.theme.AMBER_GLOW}]"
+        )
+        return True
+
+    def cmd_modeling(self, args: str) -> bool:
+        """Manage the Reverie-Gamer modeling pipeline."""
+        from ..tools.game_modeling_workbench import GameModelingWorkbenchTool
+
+        self._print_game_hint()
+        if not self._require_gamer_mode("/modeling"):
+            return True
+
+        tokens = self._split_command_args(args)
+        action = tokens[0].lower() if tokens else "status"
+        tool = GameModelingWorkbenchTool(
+            {
+                "project_root": str(self._get_project_root()),
+                "mcp_runtime": self.app.get("mcp_runtime"),
+                "config_manager": self.app.get("config_manager"),
+            }
+        )
+        output_dir = "."
+
+        if action in {"help", "?"}:
+            self._print_game_panel(
+                "Modeling Commands",
+                "\n".join(
+                    [
+                        "/modeling status",
+                        "/modeling setup",
+                        "/modeling sync",
+                        "/modeling stub [model_name]",
+                        "/modeling import <runtime_export> [source_bbmodel] [preview_image] [dest_name]",
+                        "/tools  # shows built-in Ashfox MCP tools when Blockbench + plugin are running",
+                        "/modeling ashfox tools",
+                        "/modeling ashfox capabilities",
+                        "/modeling ashfox state [summary|full]",
+                        "/modeling ashfox validate",
+                        "/modeling ashfox export <format> <dest_path>",
+                        "/modeling ashfox call <tool_name> <json_arguments>",
+                    ]
+                ),
+            )
+            return True
+
+        if action in {"status", "inspect"}:
+            result = tool.execute(action="inspect_stack", output_dir=output_dir)
+            self._print_tool_result("Modeling Stack", result)
+            return True
+
+        if action == "setup":
+            overwrite = Confirm.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Overwrite existing modeling manifest and README files?",
+                default=False,
+            )
+            result = tool.execute(action="setup_workspace", output_dir=output_dir, overwrite=overwrite)
+            self._print_tool_result("Modeling Workspace", result)
+            return True
+
+        if action in {"sync", "registry"}:
+            result = tool.execute(action="sync_registry", output_dir=output_dir)
+            self._print_tool_result("Model Registry", result)
+            return True
+
+        if action in {"stub", "new"}:
+            model_name = tokens[1] if len(tokens) > 1 else Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Model Name",
+                default="starter_prop",
+            ).strip()
+            overwrite = Confirm.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Overwrite the stub if it already exists?",
+                default=False,
+            )
+            result = tool.execute(
+                action="create_model_stub",
+                output_dir=output_dir,
+                model_name=model_name,
+                overwrite=overwrite,
+            )
+            self._print_tool_result("Model Stub", result)
+            return True
+
+        if action == "import":
+            runtime_export = tokens[1] if len(tokens) > 1 else Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Runtime Export Path"
+            ).strip()
+            source_model = tokens[2] if len(tokens) > 2 else Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Source `.bbmodel` Path (optional)",
+                default="",
+            ).strip()
+            preview_image = tokens[3] if len(tokens) > 3 else Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Preview Image Path (optional)",
+                default="",
+            ).strip()
+            dest_name = tokens[4] if len(tokens) > 4 else Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Target Name (optional)",
+                default="",
+            ).strip()
+            overwrite = Confirm.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Overwrite existing imported files?",
+                default=False,
+            )
+            kwargs = {
+                "action": "import_export",
+                "output_dir": output_dir,
+                "source_path": runtime_export,
+                "overwrite": overwrite,
+            }
+            if source_model:
+                kwargs["source_model_path"] = source_model
+            if preview_image:
+                kwargs["preview_path"] = preview_image
+            if dest_name:
+                kwargs["dest_name"] = dest_name
+            result = tool.execute(**kwargs)
+            self._print_tool_result("Model Import", result)
+            return True
+
+        if action == "ashfox":
+            subcommand = tokens[1].lower() if len(tokens) > 1 else "tools"
+            if subcommand in {"tools", "list"}:
+                result = tool.execute(action="list_ashfox_tools")
+                self._print_tool_result("Ashfox Tool List", result)
+                return True
+
+            if subcommand == "capabilities":
+                result = tool.execute(action="ashfox_call", tool_name="list_capabilities", arguments={})
+                self._print_tool_result("Ashfox Capabilities", result)
+                return True
+
+            if subcommand == "state":
+                detail = tokens[2] if len(tokens) > 2 else "summary"
+                result = tool.execute(
+                    action="ashfox_call",
+                    tool_name="get_project_state",
+                    arguments={"detail": detail},
+                )
+                self._print_tool_result("Ashfox Project State", result)
+                return True
+
+            if subcommand == "validate":
+                result = tool.execute(action="ashfox_call", tool_name="validate", arguments={})
+                self._print_tool_result("Ashfox Validation", result)
+                return True
+
+            if subcommand == "export":
+                export_format = tokens[2] if len(tokens) > 2 else "gltf"
+                dest_path = tokens[3] if len(tokens) > 3 else "assets/models/runtime/export.glb"
+                result = tool.execute(
+                    action="ashfox_call",
+                    tool_name="export",
+                    arguments={"format": export_format, "destPath": dest_path},
+                )
+                self._print_tool_result("Ashfox Export", result)
+                return True
+
+            if subcommand == "call":
+                raw_command = args.strip()
+                parts = raw_command.split(None, 3)
+                tool_name = parts[2] if len(parts) > 2 else ""
+                if not tool_name:
+                    tool_name = Prompt.ask(
+                        f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Ashfox Tool Name"
+                    ).strip()
+                raw_json = parts[3] if len(parts) > 3 else "{}"
+                try:
+                    arguments = json.loads(raw_json) if raw_json.strip() else {}
+                except json.JSONDecodeError:
+                    self.console.print(
+                        f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid JSON arguments for `/modeling ashfox call`[/{self.theme.CORAL_SOFT}]"
+                    )
+                    return True
+                result = tool.execute(
+                    action="ashfox_call",
+                    tool_name=tool_name,
+                    arguments=arguments,
+                )
+                self._print_tool_result("Ashfox Tool Call", result)
+                return True
+
+        self.console.print(
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /modeling [status|setup|sync|stub|import|ashfox][/{self.theme.AMBER_GLOW}]"
         )
         return True
     

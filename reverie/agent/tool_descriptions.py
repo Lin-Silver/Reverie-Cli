@@ -591,6 +591,30 @@ Use this tool to build the feedback and verification loop for game projects.
 """
 
 
+def get_game_modeling_workbench_description() -> str:
+    """Description for the game modeling workbench tool."""
+    return """
+## Game Modeling Workbench Tool (game_modeling_workbench)
+
+Use this tool to run Reverie-Gamer's built-in Blockbench and Ashfox MCP content workflow.
+
+**Actions**:
+- `inspect_stack`
+- `setup_workspace`
+- `sync_registry`
+- `create_model_stub`
+- `import_export`
+- `list_ashfox_tools`
+- `ashfox_call`
+
+**Best uses**:
+- Standardize source `.bbmodel` files under `assets/models/source`
+- Import runtime `.glb` or `.gltf` exports into `assets/models/runtime`
+- Regenerate `data/models/model_registry.yaml` after authoring changes
+- Validate, inspect, preview, or export active Blockbench projects through the built-in Ashfox MCP integration
+"""
+
+
 def get_reverie_engine_lite_description() -> str:
     """Description for the built-in Reverie Engine tool."""
     return """
@@ -767,6 +791,7 @@ def _get_mode_tool_workflow(mode: str) -> str:
 - Use the design orchestrator and project scaffolder to define systems, scope, and runtime structure first.
 - Default to Reverie Engine when the user did not choose another engine and the repo does not already depend on one.
 - Prefer `reverie_engine`; accept `reverie_engine_lite` as a compatibility alias for existing projects.
+- Treat the built-in Blockbench plus Ashfox MCP flow as the preferred Reverie-Gamer modeling path when the project needs authored models.
 - Treat implementation, balance simulation, runtime testing, playtests, telemetry, and content iteration as one loop.
 - Do not stop at documents alone when the user asked to build a game; push through to runnable implementation and verification.
 """
@@ -853,6 +878,7 @@ def get_tool_descriptions_for_mode(mode: str) -> str:
                 get_game_design_orchestrator_description(),
                 get_game_project_scaffolder_description(),
                 get_game_playtest_lab_description(),
+                get_game_modeling_workbench_description(),
                 get_reverie_engine_lite_description(),
             ]
         )

@@ -27,6 +27,7 @@ from .components import ColliderComponent, RigidBodyComponent
 from .config import load_engine_config, discover_live2d_sdk
 from .live2d import Live2DManager
 from .math3d import Vector2, Vector3
+from .modeling import detect_modeling_stack
 from .physics import collect_overlaps, move_kinematic, raycast, PhysicsWorld
 from .resources import ResourceManager
 from .scene import SceneTree
@@ -54,11 +55,19 @@ class RuntimeProfile:
 
 def runtime_capabilities(project_root: str | Path | None = None) -> Dict[str, Any]:
     sdk_path = discover_live2d_sdk(project_root or Path.cwd())
+    modeling_stack = detect_modeling_stack(project_root or Path.cwd())
+    ashfox = modeling_stack["ashfox"]
+    blockbench = modeling_stack["blockbench"]
     return {
         "pyglet": pyglet is not None,
         "moderngl": moderngl is not None,
         "glcontext": glcontext is not None,
         "live2d_sdk": sdk_path is not None,
+        "blockbench_installed": bool(blockbench.get("installed", False)),
+        "blockbench_available": bool(blockbench.get("available", False)),
+        "ashfox_available": bool(ashfox.get("available", False)),
+        "ashfox_connected": bool(ashfox.get("reachable", False)),
+        "ashfox_tool_count": int(ashfox.get("tool_count", 0)),
     }
 
 

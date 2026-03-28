@@ -81,6 +81,8 @@ ENGINE_CONFIG_SCHEMA: Dict[str, Any] = {
                 "supports_save_data": {"type": "boolean"},
                 "supports_ai_agents": {"type": "boolean"},
                 "supports_ui": {"type": "boolean"},
+                "supports_model_pipeline": {"type": "boolean"},
+                "supports_ashfox_mcp": {"type": "boolean"},
             },
         },
         "live2d": {
@@ -96,6 +98,21 @@ ENGINE_CONFIG_SCHEMA: Dict[str, Any] = {
                 },
                 "manifest_path": {"type": "string", "min_length": 1},
                 "models_dir": {"type": "string", "min_length": 1},
+            },
+        },
+        "modeling": {
+            "type": "object",
+            "properties": {
+                "enabled": {"type": "boolean"},
+                "source_models_dir": {"type": "string", "min_length": 1},
+                "runtime_models_dir": {"type": "string", "min_length": 1},
+                "preview_dir": {"type": "string", "min_length": 1},
+                "registry_path": {"type": "string", "min_length": 1},
+                "pipeline_manifest_path": {"type": "string", "min_length": 1},
+                "blockbench_executable": {"type": "string"},
+                "ashfox_server_name": {"type": "string", "min_length": 1},
+                "ashfox_endpoint": {"type": "string", "min_length": 1},
+                "preferred_runtime_format": {"type": "string", "min_length": 1},
             },
         },
         "content": {

@@ -8,6 +8,8 @@ from typing import Any, Dict, Iterable, Optional
 
 import yaml
 
+from .modeling import ASHFOX_DEFAULT_ENDPOINT, ASHFOX_MCP_SERVER_NAME
+
 
 ENGINE_BRAND = "Reverie Engine"
 ENGINE_NAME = "reverie_engine"
@@ -149,7 +151,6 @@ class Live2DSettings:
     sdk_candidates: list[str] = field(default_factory=lambda: [
         "vendor/live2d/live2dcubismcore.min.js",
         "web/vendor/live2d/live2dcubismcore.min.js",
-        "live2dcubismcore.min.js",
     ])
     manifest_path: str = "data/live2d/models.yaml"
     models_dir: str = "assets/live2d"
@@ -176,6 +177,50 @@ class Live2DSettings:
 
 
 @dataclass
+class ModelingSettings:
+    enabled: bool = False
+    source_models_dir: str = "assets/models/source"
+    runtime_models_dir: str = "assets/models/runtime"
+    preview_dir: str = "playtest/renders/models"
+    registry_path: str = "data/models/model_registry.yaml"
+    pipeline_manifest_path: str = "data/models/pipeline.yaml"
+    blockbench_executable: str = ""
+    ashfox_server_name: str = ASHFOX_MCP_SERVER_NAME
+    ashfox_endpoint: str = ASHFOX_DEFAULT_ENDPOINT
+    preferred_runtime_format: str = "glb"
+
+    @classmethod
+    def from_dict(cls, payload: Dict[str, Any]) -> "ModelingSettings":
+        data = dict(payload or {})
+        return cls(
+            enabled=bool(data.get("enabled", cls.enabled)),
+            source_models_dir=str(data.get("source_models_dir") or cls.source_models_dir),
+            runtime_models_dir=str(data.get("runtime_models_dir") or cls.runtime_models_dir),
+            preview_dir=str(data.get("preview_dir") or cls.preview_dir),
+            registry_path=str(data.get("registry_path") or cls.registry_path),
+            pipeline_manifest_path=str(data.get("pipeline_manifest_path") or cls.pipeline_manifest_path),
+            blockbench_executable=str(data.get("blockbench_executable") or cls.blockbench_executable),
+            ashfox_server_name=str(data.get("ashfox_server_name") or cls.ashfox_server_name),
+            ashfox_endpoint=str(data.get("ashfox_endpoint") or cls.ashfox_endpoint),
+            preferred_runtime_format=str(data.get("preferred_runtime_format") or cls.preferred_runtime_format),
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "source_models_dir": self.source_models_dir,
+            "runtime_models_dir": self.runtime_models_dir,
+            "preview_dir": self.preview_dir,
+            "registry_path": self.registry_path,
+            "pipeline_manifest_path": self.pipeline_manifest_path,
+            "blockbench_executable": self.blockbench_executable,
+            "ashfox_server_name": self.ashfox_server_name,
+            "ashfox_endpoint": self.ashfox_endpoint,
+            "preferred_runtime_format": self.preferred_runtime_format,
+        }
+
+
+@dataclass
 class EngineConfig:
     project_name: str
     dimension: str
@@ -184,6 +229,7 @@ class EngineConfig:
     modules: list[str] = field(default_factory=list)
     runtime: RuntimeSettings = field(default_factory=RuntimeSettings)
     live2d: Live2DSettings = field(default_factory=Live2DSettings)
+    modeling: ModelingSettings = field(default_factory=ModelingSettings)
     capabilities: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -192,6 +238,7 @@ class EngineConfig:
         project = dict(data.get("project") or {})
         runtime = RuntimeSettings.from_dict(data.get("runtime") or {})
         live2d = Live2DSettings.from_dict(data.get("live2d") or {})
+        modeling = ModelingSettings.from_dict(data.get("modeling") or {})
         capabilities = dict(data.get("capabilities") or {})
         modules = _as_list(data.get("modules") or capabilities.get("modules"))
         genre = normalize_genre(project.get("genre") or runtime.genre)
@@ -203,7 +250,13 @@ class EngineConfig:
             modules=modules or default_modules_for_genre(genre),
             runtime=runtime,
             live2d=live2d,
-            capabilities=capabilities or build_capabilities(genre, normalize_dimension(project.get("dimension")), live2d.enabled),
+            modeling=modeling,
+            capabilities=capabilities or build_capabilities(
+                genre,
+                normalize_dimension(project.get("dimension")),
+                live2d.enabled,
+                modeling.enabled,
+            ),
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -219,6 +272,7 @@ class EngineConfig:
             "modules": list(self.modules),
             "capabilities": dict(self.capabilities),
             "live2d": self.live2d.to_dict(),
+            "modeling": self.modeling.to_dict(),
         }
 
 
@@ -227,7 +281,7 @@ def default_modules_for_genre(genre: str) -> list[str]:
     return list(profile["modules"])
 
 
-def build_capabilities(genre: str, dimension: str, live2d_enabled: bool) -> Dict[str, Any]:
+def build_capabilities(genre: str, dimension: str, live2d_enabled: bool, modeling_enabled: bool = False) -> Dict[str, Any]:
     dimension = normalize_dimension(dimension)
     genre_key = normalize_genre(genre)
     profile = GENRE_LIBRARY.get(genre_key, GENRE_LIBRARY["sandbox"])
@@ -245,6 +299,8 @@ def build_capabilities(genre: str, dimension: str, live2d_enabled: bool) -> Dict
         "supports_save_data": "save_data" in profile["modules"],
         "supports_ai_agents": "ai" in profile["modules"],
         "supports_ui": "ui" in profile["modules"],
+        "supports_model_pipeline": bool(modeling_enabled),
+        "supports_ashfox_mcp": bool(modeling_enabled),
     }
 
 
@@ -261,11 +317,6 @@ def discover_live2d_sdk(project_root: str | Path, sdk_candidates: Optional[Itera
     bundled = Path(__file__).resolve().parent / "vendor/live2d/live2dcubismcore.min.js"
     if bundled.exists():
         return bundled.resolve()
-
-    for parent in [root, *root.parents[:3]]:
-        candidate = parent / "live2dcubismcore.min.js"
-        if candidate.exists():
-            return candidate.resolve()
     return None
 
 
@@ -280,6 +331,7 @@ def build_engine_config(
     genre_key = normalize_genre(genre or SAMPLE_TO_GENRE.get(str(sample_name or "").strip(), "sandbox"))
     modules = default_modules_for_genre(genre_key)
     live2d_enabled = "live2d" in modules
+    modeling = ModelingSettings(enabled=True)
     runtime = RuntimeSettings(
         window_title=project_name,
         sample_name=str(sample_name or ""),
@@ -293,7 +345,8 @@ def build_engine_config(
         modules=modules,
         runtime=runtime,
         live2d=live2d,
-        capabilities=build_capabilities(genre_key, dimension_key, live2d_enabled),
+        modeling=modeling,
+        capabilities=build_capabilities(genre_key, dimension_key, live2d_enabled, modeling.enabled),
     )
     return config.to_dict()
 

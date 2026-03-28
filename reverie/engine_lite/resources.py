@@ -176,14 +176,14 @@ class ResourceManager:
 
     def load_content_bundle(self) -> Dict[str, Any]:
         bundle: Dict[str, Any] = {}
-        for relative in ["data/content", "data/live2d"]:
+        for relative in ["data/content", "data/live2d", "data/models"]:
             root = self.project_root / relative
             if not root.exists():
                 continue
             for path in sorted(root.rglob("*")):
                 if not path.is_file():
                     continue
-                if path.suffix.lower() not in {".json", ".yaml", ".yml"}:
+                if path.suffix.lower() not in {".json", ".yaml", ".yml", ".bbmodel", ".gltf"}:
                     continue
                 key = str(path.relative_to(self.project_root)).replace("\\", "/")
                 bundle[key] = self.load(path, owner=f"bundle:{relative}")
@@ -202,9 +202,10 @@ class ResourceManager:
         return payload
 
     def _register_builtin_loaders(self) -> None:
-        self.register_loader("json", [".json"], self._load_json)
+        self.register_loader("json", [".json", ".bbmodel", ".gltf"], self._load_json)
         self.register_loader("yaml", [".yaml", ".yml"], self._load_yaml)
-        self.register_loader("text", [".txt", ".md", ".glsl", ".vert", ".frag"], self._load_text)
+        self.register_loader("text", [".txt", ".md", ".glsl", ".vert", ".frag", ".obj", ".mtl"], self._load_text)
+        self.register_loader("binary", [".glb"], self._load_binary_metadata)
 
     def _select_loader(self, path: Path) -> tuple[Callable[[Path], Any], str]:
         suffix = path.suffix.lower()
@@ -220,6 +221,24 @@ class ResourceManager:
 
     def _load_text(self, path: Path) -> str:
         return path.read_text(encoding="utf-8")
+
+    def _load_binary_metadata(self, path: Path) -> Dict[str, Any]:
+        payload = {
+            "path": str(path),
+            "suffix": path.suffix.lower(),
+            "exists": path.exists(),
+            "size": path.stat().st_size if path.exists() and path.is_file() else 0,
+        }
+        if path.suffix.lower() == ".glb":
+            try:
+                with path.open("rb") as handle:
+                    header = handle.read(12)
+                if len(header) == 12:
+                    payload["glb_magic"] = header[:4].decode("ascii", errors="ignore")
+                    payload["glb_version"] = int.from_bytes(header[4:8], byteorder="little", signed=False)
+            except Exception:
+                return payload
+        return payload
 
     def _load_metadata(self, path: Path) -> Dict[str, Any]:
         return {

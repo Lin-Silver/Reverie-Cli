@@ -12,6 +12,7 @@ import yaml
 from .config import ENGINE_BRAND, ENGINE_NAME, build_engine_config as build_engine_profile, load_engine_config
 from .live2d import Live2DManager
 from .localization import LocalizationManager
+from .modeling import inspect_modeling_workspace, materialize_modeling_workspace
 from .samples import get_sample_definition, list_samples
 from .schemas import (
     ENGINE_CONFIG_SCHEMA,
@@ -27,17 +28,21 @@ DEFAULT_STRUCTURE = [
     "assets/audio",
     "assets/live2d",
     "assets/models",
+    "assets/models/source",
+    "assets/models/runtime",
     "assets/shaders",
     "assets/textures",
     "assets/ui",
     "data/config",
     "data/content",
     "data/live2d",
+    "data/models",
     "data/localization",
     "data/prefabs",
     "data/scenes",
     "docs",
     "playtest/logs",
+    "playtest/renders/models",
     "save_data",
     "src/game",
     "src/game/behaviours",
@@ -96,6 +101,7 @@ def build_engine_config(project_name: str, dimension: str, sample_name: str | No
         "content_bundle_paths": [
             "data/content",
             "data/live2d",
+            "data/models",
         ],
     }
     return profile
@@ -128,7 +134,6 @@ def build_live2d_manifest(enabled: bool) -> Dict[str, Any]:
         "sdk_candidates": [
             "vendor/live2d/live2dcubismcore.min.js",
             "web/vendor/live2d/live2dcubismcore.min.js",
-            "live2dcubismcore.min.js",
         ],
         "models": {},
     }
@@ -194,7 +199,7 @@ def create_project_skeleton(
         written_files.append(str(output_dir / "data/live2d/models.yaml"))
     if _safe_write(
         output_dir / "assets/live2d/README.md",
-        "# Live2D Assets\n\nPlace `.model3.json`, textures, motions, and expressions here. The engine vendors `live2dcubismcore.min.js` into `web/vendor/live2d/` when building the bridge and also supports project-local overrides from the configured sdk candidates.\n",
+        "# Live2D Assets\n\nPlace `.model3.json`, textures, motions, and expressions here. Reverie bundles `live2dcubismcore.min.js` in the CLI runtime and mirrors it into `web/vendor/live2d/` when building the browser bridge.\n",
         overwrite,
     ):
         written_files.append(str(output_dir / "assets/live2d/README.md"))
@@ -276,6 +281,11 @@ def create_project_skeleton(
     ):
         written_files.append(str(output_dir / "data/localization/en.yaml"))
 
+    modeling_seed = None
+    if bool(engine_config.get("modeling", {}).get("enabled", False)):
+        modeling_seed = materialize_modeling_workspace(output_dir, overwrite=overwrite)
+        written_files.extend(modeling_seed["files"])
+
     materialized_sample = None
     if sample_name:
         materialized = materialize_sample(output_dir, sample_name, overwrite=overwrite)
@@ -288,6 +298,8 @@ def create_project_skeleton(
         "sample_name": materialized_sample,
         "genre": genre_name,
         "live2d_enabled": live2d_enabled,
+        "modeling_enabled": bool(engine_config.get("modeling", {}).get("enabled", False)),
+        "modeling": modeling_seed or {},
     }
 
 
@@ -343,6 +355,7 @@ def inspect_project(project_root: Path) -> Dict[str, Any]:
     scene_files = sorted(project_root.glob("data/scenes/*.relscene.json"))
     prefab_files = sorted(project_root.glob("data/prefabs/*.relprefab.json"))
     content_files = sorted(project_root.glob("data/content/*"))
+    modeling = inspect_modeling_workspace(project_root)
     return {
         "project_root": str(project_root.resolve()),
         "scene_count": len(scene_files),
@@ -357,6 +370,7 @@ def inspect_project(project_root: Path) -> Dict[str, Any]:
         "config": config.to_dict(),
         "live2d": live2d.summary(),
         "localization": localization.summary(),
+        "modeling": modeling,
     }
 
 
@@ -401,6 +415,17 @@ def validate_project(project_root: Path) -> Dict[str, Any]:
         errors.extend(live2d_errors)
     elif live2d_errors:
         warnings.extend(live2d_errors)
+
+    modeling = inspect_modeling_workspace(project_root)
+    if config.modeling.enabled:
+        if not modeling.get("pipeline_exists", False):
+            warnings.append("missing modeling pipeline manifest: data/models/pipeline.yaml")
+        if not modeling.get("registry_exists", False):
+            warnings.append("missing model registry: data/models/model_registry.yaml")
+        if not modeling.get("stack", {}).get("blockbench", {}).get("installed", False):
+            warnings.append("Blockbench desktop was not detected. Install Blockbench for built-in model authoring workflows.")
+        if not modeling.get("stack", {}).get("ashfox", {}).get("reachable", False):
+            warnings.append("Ashfox MCP endpoint is not reachable. Launch Blockbench with the Ashfox plugin enabled.")
     return {
         "valid": not errors,
         "errors": errors,
@@ -444,6 +469,17 @@ def build_project_health_report(project_root: Path, *, include_smoke: bool = Fal
     if capabilities.get("supports_ui") and not info["content_count"]:
         score -= 4
         recommendations.append("add gameplay/content data for UI-facing systems")
+    if capabilities.get("supports_model_pipeline"):
+        modeling = info.get("modeling", {})
+        if not modeling.get("stack", {}).get("blockbench", {}).get("installed", False):
+            score -= 3
+            recommendations.append("install Blockbench desktop for the built-in modeling workflow")
+        if not modeling.get("stack", {}).get("ashfox", {}).get("reachable", False):
+            score -= 5
+            recommendations.append("launch Blockbench with the Ashfox plugin so Reverie-Gamer can discover live Ashfox MCP tools")
+        if info.get("dimension") in {"2.5D", "3D"} and not modeling.get("runtime_model_count", 0):
+            score -= 6
+            recommendations.append("import at least one runtime model into assets/models/runtime for the built-in modeling flow")
 
     smoke: Dict[str, Any] = {"executed": False}
     if include_smoke and validation["valid"]:

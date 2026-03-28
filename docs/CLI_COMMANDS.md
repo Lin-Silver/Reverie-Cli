@@ -172,6 +172,17 @@ Notes:
 | `/engine benchmark` | Record coarse baseline measurements |
 | `/engine package` | Create a portable runtime bundle |
 | `/engine test` | Validate then smoke-test |
+| `/modeling` | Inspect the Reverie-Gamer modeling stack and workspace |
+| `/modeling setup` | Create modeling folders, manifests, docs, and pipeline files |
+| `/modeling sync` | Regenerate the model registry from source/runtime folders |
+| `/modeling stub <model_name>` | Create a starter `.bbmodel` in `assets/models/source/` |
+| `/modeling import <runtime_export> [source_bbmodel] [preview_image] [dest_name]` | Import a runtime model plus optional source model and preview |
+| `/modeling ashfox tools` | List available Ashfox MCP tools |
+| `/modeling ashfox capabilities` | Show Ashfox capability metadata |
+| `/modeling ashfox state [summary\|full]` | Read the active Blockbench project state through Ashfox |
+| `/modeling ashfox validate` | Run Ashfox validation against the active model project |
+| `/modeling ashfox export <format> <dest_path>` | Ask Ashfox to export the active model |
+| `/modeling ashfox call <tool_name> <json_arguments>` | Call any Ashfox tool directly |
 | `/playtest` or `/pt` | Create a playtest plan |
 | `/playtest telemetry` | Generate telemetry schema |
 | `/playtest gates` | Generate milestone quality gates |

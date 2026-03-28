@@ -118,6 +118,7 @@ Windows 打包：
 - [CLI 命令参考](CLI_COMMANDS.md)
 - [开发维护指南](DEVELOPMENT.md)
 - [Reverie Engine 使用指南](engine/reverie_engine_user_guide.md)
+- [Reverie-Gamer 建模流程指南](engine/reverie_gamer_modeling_pipeline.md)
 - [更新日志](changelog.md)
 
 ## 维护约定

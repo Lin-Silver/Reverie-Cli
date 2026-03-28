@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 
 from .base import BaseTool, ToolResult
 from ..mcp import MCPClientError
+from ..modes import normalize_mode
 
 
 class MCPDynamicTool(BaseTool):
@@ -29,6 +30,16 @@ class MCPDynamicTool(BaseTool):
             "type": "object",
             "properties": {},
             "required": [],
+        }
+        self.include_modes = {
+            normalize_mode(mode)
+            for mode in (self.metadata.get("include_modes", []) or [])
+            if str(mode or "").strip()
+        }
+        self.exclude_modes = {
+            normalize_mode(mode)
+            for mode in (self.metadata.get("exclude_modes", []) or [])
+            if str(mode or "").strip()
         }
 
     def _runtime(self):
@@ -57,3 +68,11 @@ class MCPDynamicTool(BaseTool):
     def get_execution_message(self, **kwargs) -> str:
         qualified_name = str(self.metadata.get("qualified_name", "") or self.name).strip()
         return f"Calling {qualified_name}..."
+
+    def visible_in_mode(self, mode: object) -> bool:
+        normalized = normalize_mode(mode)
+        if self.include_modes and normalized not in self.include_modes:
+            return False
+        if normalized in self.exclude_modes:
+            return False
+        return True

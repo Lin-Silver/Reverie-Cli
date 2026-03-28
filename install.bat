@@ -26,7 +26,7 @@ call venv\Scripts\activate.bat
 
 :: Install dependencies
 echo Installing dependencies from requirements.txt...
-py -m pip install -r requirements.txt
+python -m pip install -r requirements.txt
 if errorlevel 1 (
     echo Error: Failed to install dependencies
     pause
@@ -35,5 +35,5 @@ if errorlevel 1 (
 
 echo.
 echo Installation completed successfully!
-echo To run the application, execute: run.bat
+echo To run the application, execute: python -m reverie
 pause

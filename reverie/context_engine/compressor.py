@@ -844,7 +844,7 @@ class ContextCompressor:
                         'note': data.get('note'),
                         'message_count': data.get('message_count')
                     })
-            except:
+            except Exception:
                 continue
         
         return sorted(checkpoints, key=lambda x: x['timestamp'], reverse=True)

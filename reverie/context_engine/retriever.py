@@ -251,6 +251,78 @@ class ContextRetriever:
         if isinstance(info, dict):
             return info.get(key, default)
         return getattr(info, key, default)
+
+    def _get_file_info_record(self, file_path: str) -> Any:
+        """Look up cached file metadata using raw or normalized path forms."""
+        if not isinstance(self.file_info, dict):
+            return None
+
+        raw_path = str(file_path or "").strip()
+        if not raw_path:
+            return None
+
+        candidates: List[str] = []
+        seen: Set[str] = set()
+
+        def add_candidate(value: Any) -> None:
+            text = str(value or "").strip()
+            if not text or text in seen:
+                return
+            seen.add(text)
+            candidates.append(text)
+
+        add_candidate(raw_path)
+        try:
+            path = Path(raw_path)
+            add_candidate(str(path))
+            if path.is_absolute():
+                resolved = path.resolve()
+                add_candidate(str(resolved))
+                try:
+                    add_candidate(str(resolved.relative_to(self.project_root)))
+                except Exception:
+                    pass
+            else:
+                project_path = self.project_root / path
+                add_candidate(str(project_path))
+                add_candidate(str(project_path.resolve()))
+        except Exception:
+            pass
+
+        for candidate in candidates:
+            info = self.file_info.get(candidate)
+            if info is not None:
+                return info
+        return None
+
+    def _collect_imports_for_files(self, file_paths: List[str]) -> List[Dict[str, Any]]:
+        """Collect parsed imports for a set of files from cached index metadata."""
+        imports: List[Dict[str, Any]] = []
+        seen: Set[Any] = set()
+
+        def freeze(value: Any) -> Any:
+            if isinstance(value, dict):
+                return tuple(sorted((str(k), freeze(v)) for k, v in value.items()))
+            if isinstance(value, (list, tuple, set)):
+                return tuple(freeze(item) for item in value)
+            return value
+
+        for file_path in file_paths:
+            info = self._get_file_info_record(file_path)
+            if not info:
+                continue
+            for item in self._get_file_meta(info, "imports", []) or []:
+                if not isinstance(item, dict):
+                    continue
+                key = tuple(sorted((str(k), freeze(v)) for k, v in item.items()))
+                if key in seen:
+                    continue
+                seen.add(key)
+                imports.append(dict(item))
+                if len(imports) >= 32:
+                    return imports
+
+        return imports
     
     def retrieve_symbol(
         self,
@@ -387,9 +459,8 @@ class ContextRetriever:
                     seen.add(parent.qualified_name)
                     related_symbols.append(parent)
         
-        # Get imports from file
-        # This would need to be tracked during parsing
-        imports = []  # TODO: Get from parse results
+        # Get imports from the cached parse results for the target file.
+        imports = self._collect_imports_for_files([file_path])
         
         # Read target content
         target_content = self._read_file_range(file_path, start_line, end_line)
@@ -518,11 +589,15 @@ class ContextRetriever:
             included_symbols, dependencies, context_parts
         )
         
+        imports = self._collect_imports_for_files(
+            [sym.file_path for sym in included_symbols if sym.file_path]
+        )
+
         return ContextPackage(
             symbols=included_symbols,
             dependencies=dependencies,
             file_contents=file_contents,
-            imports=[],
+            imports=imports,
             context_string=context_string,
             token_estimate=current_tokens,
             metadata={

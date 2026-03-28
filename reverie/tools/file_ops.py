@@ -114,8 +114,6 @@ Examples:
                 return self._info(file_path)
             elif operation == "mkdir":
                 return self._mkdir(file_path)
-            elif operation == "delete":
-                return ToolResult.fail("File deletion moved to the delete_file tool. Use delete_file with confirm_delete=true.")
             else:
                 return ToolResult.fail(f"Unknown operation: {operation}")
         except Exception as e:

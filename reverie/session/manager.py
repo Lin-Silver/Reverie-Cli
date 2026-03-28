@@ -7,12 +7,14 @@ Provides:
 - History management
 """
 
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
-from dataclasses import dataclass, field
 from datetime import datetime
 import hashlib
 import json
+import os
+import tempfile
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 SESSION_INDEX_FILENAME = 'session_index.json'
 
@@ -160,10 +162,42 @@ class SessionManager:
         return True
 
     def _write_json_atomic(self, target_path: Path, payload: Dict) -> None:
-        temp_path = target_path.with_name(f"{target_path.name}.tmp")
-        with open(temp_path, 'w', encoding='utf-8') as f:
-            json.dump(payload, f, indent=2, ensure_ascii=False)
-        temp_path.replace(target_path)
+        target_path = Path(target_path)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+
+        temp_path: Optional[Path] = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode='w',
+                encoding='utf-8',
+                dir=str(target_path.parent),
+                prefix=f".{target_path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as f:
+                temp_path = Path(f.name)
+                json.dump(payload, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+
+            temp_path.replace(target_path)
+
+            # Best-effort directory sync so the rename is durable on POSIX filesystems.
+            try:
+                dir_fd = os.open(str(target_path.parent), os.O_RDONLY)
+            except OSError:
+                return
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except Exception:
+            if temp_path is not None:
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            raise
 
     def _load_session_index(self) -> Dict[str, Dict[str, Any]]:
         if not self.session_index_path.exists():

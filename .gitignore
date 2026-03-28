@@ -8,18 +8,23 @@ references/
 .pytest_cache/
 
 reverie_cli.egg-info/
+*.egg
 *.exe
 *.spec
+!reverie.spec
 *.0
 
 # 忽略 Python 缓存
 __pycache__/
 *.pyo
 *.pyc
+.mypy_cache/
+.ruff_cache/
 
 # 忽略虚拟环境
 venv/
 env/
+.venv/
 
 # 忽略日志和临时文件
 *.log

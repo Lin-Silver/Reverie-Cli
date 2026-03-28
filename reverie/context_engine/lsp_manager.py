@@ -43,11 +43,25 @@ SERVER_DEFINITIONS: Tuple[LSPServerDefinition, ...] = (
 class LSPClient:
     """Minimal blocking JSON-RPC client for one language server."""
 
+    @staticmethod
+    def _resolve_launch_command(command: Tuple[str, ...]) -> List[str]:
+        executable = str(command[0]).strip()
+        resolved = shutil.which(executable)
+        if resolved:
+            return [resolved, *command[1:]]
+
+        executable_path = Path(executable)
+        if executable_path.exists():
+            return [str(executable_path), *command[1:]]
+
+        raise FileNotFoundError(f"LSP server binary not found: {executable}")
+
     def __init__(self, project_root: Path, definition: LSPServerDefinition):
         self.project_root = Path(project_root).resolve()
         self.definition = definition
+        launch_command = self._resolve_launch_command(definition.command)
         self._process = subprocess.Popen(
-            list(definition.command),
+            launch_command,
             cwd=str(self.project_root),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -59,6 +73,7 @@ class LSPClient:
         self._diagnostics: Dict[str, List[Dict[str, Any]]] = {}
         self._request_id = 0
         self._write_lock = threading.Lock()
+        self._pending_lock = threading.Lock()
         self._reader = threading.Thread(target=self._reader_loop, daemon=True)
         self._reader.start()
         self._opened_versions: Dict[str, int] = {}
@@ -148,8 +163,12 @@ class LSPClient:
 
             if "id" in message:
                 try:
-                    pending_queue = self._pending.pop(int(message["id"]))
-                except Exception:
+                    request_id = int(message["id"])
+                except (TypeError, ValueError):
+                    continue
+                with self._pending_lock:
+                    pending_queue = self._pending.pop(request_id, None)
+                if pending_queue is None:
                     continue
                 pending_queue.put(message)
 
@@ -163,15 +182,22 @@ class LSPClient:
             self._process.stdin.flush()
 
     def request(self, method: str, params: Any, timeout: float = 5.0) -> Any:
-        self._request_id += 1
-        request_id = self._request_id
         waiter: "queue.Queue[Dict[str, Any]]" = queue.Queue(maxsize=1)
-        self._pending[request_id] = waiter
-        self._send({"jsonrpc": "2.0", "id": request_id, "method": method, "params": params})
+        with self._pending_lock:
+            self._request_id += 1
+            request_id = self._request_id
+            self._pending[request_id] = waiter
+        try:
+            self._send({"jsonrpc": "2.0", "id": request_id, "method": method, "params": params})
+        except Exception:
+            with self._pending_lock:
+                self._pending.pop(request_id, None)
+            raise
         try:
             response = waiter.get(timeout=timeout)
         except queue.Empty as exc:
-            self._pending.pop(request_id, None)
+            with self._pending_lock:
+                self._pending.pop(request_id, None)
             raise TimeoutError(f"LSP request timed out: {method}") from exc
         if "error" in response:
             raise RuntimeError(f"LSP error for {method}: {response['error']}")
@@ -255,6 +281,17 @@ class LSPManager:
         self._definitions = self._discover_definitions()
         self._clients: Dict[str, LSPClient] = {}
 
+    def _create_client(self, definition: LSPServerDefinition) -> Optional[LSPClient]:
+        client = self._clients.get(definition.key)
+        if client is not None:
+            return client
+        try:
+            client = LSPClient(self.project_root, definition)
+        except FileNotFoundError:
+            return None
+        self._clients[definition.key] = client
+        return client
+
     def _discover_definitions(self) -> Dict[str, LSPServerDefinition]:
         discovered: Dict[str, LSPServerDefinition] = {}
         covered_extensions: set[str] = set()
@@ -293,20 +330,15 @@ class LSPManager:
         definition = self._definition_for_path(file_path)
         if not definition:
             return None
-        client = self._clients.get(definition.key)
-        if client is None:
-            client = LSPClient(self.project_root, definition)
-            self._clients[definition.key] = client
-        return client
+        return self._create_client(definition)
 
     def workspace_symbols(self, query: str, limit: int = 20) -> List[Dict[str, Any]]:
         results: List[Dict[str, Any]] = []
         for definition in self._definitions.values():
+            client = self._create_client(definition)
+            if client is None:
+                continue
             try:
-                client = self._clients.get(definition.key)
-                if client is None:
-                    client = LSPClient(self.project_root, definition)
-                    self._clients[definition.key] = client
                 symbols = client.workspace_symbols(query)
             except Exception:
                 continue
@@ -354,4 +386,3 @@ class LSPManager:
             "available": bool(self._definitions),
             "servers": self.available_servers(),
         }
-

@@ -247,9 +247,54 @@ class Matrix4:
         return Matrix4(result)
 
     def inverse(self) -> "Matrix4":
-        """Calculate matrix inverse (simplified for transforms)."""
-        # Simplified inverse for affine transforms
-        return Matrix4.identity()  # TODO: Implement full inverse
+        """Calculate the inverse of this 4x4 matrix."""
+        if len(self.m) != 16:
+            raise ValueError("Matrix4 requires exactly 16 values")
+
+        matrix = [float(value) for value in self.m]
+        inverse = [
+            1.0 if index % 5 == 0 else 0.0
+            for index in range(16)
+        ]
+
+        def swap_rows(values: list[float], row_a: int, row_b: int) -> None:
+            if row_a == row_b:
+                return
+            for column in range(4):
+                left = row_a * 4 + column
+                right = row_b * 4 + column
+                values[left], values[right] = values[right], values[left]
+
+        for pivot_col in range(4):
+            pivot_row = max(
+                range(pivot_col, 4),
+                key=lambda row: abs(matrix[row * 4 + pivot_col]),
+            )
+            pivot_value = matrix[pivot_row * 4 + pivot_col]
+            if abs(pivot_value) < 1e-12:
+                raise ValueError("Matrix4 is not invertible")
+
+            if pivot_row != pivot_col:
+                swap_rows(matrix, pivot_col, pivot_row)
+                swap_rows(inverse, pivot_col, pivot_row)
+
+            pivot_value = matrix[pivot_col * 4 + pivot_col]
+            inv_pivot = 1.0 / pivot_value
+            for column in range(4):
+                matrix[pivot_col * 4 + column] *= inv_pivot
+                inverse[pivot_col * 4 + column] *= inv_pivot
+
+            for row in range(4):
+                if row == pivot_col:
+                    continue
+                factor = matrix[row * 4 + pivot_col]
+                if abs(factor) < 1e-12:
+                    continue
+                for column in range(4):
+                    matrix[row * 4 + column] -= factor * matrix[pivot_col * 4 + column]
+                    inverse[row * 4 + column] -= factor * inverse[pivot_col * 4 + column]
+
+        return Matrix4(inverse)
 
     def to_list(self) -> list[float]:
         return list(self.m)

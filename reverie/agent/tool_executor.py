@@ -14,45 +14,9 @@ import json
 import logging
 
 from ..modes import normalize_mode
-from ..tools import (
-    BaseTool,
-    ToolResult,
-    CodebaseRetrievalTool,
-    GitCommitRetrievalTool,
-    StrReplaceEditorTool,
-    FileOpsTool,
-    DeleteFileTool,
-    CommandExecTool,
-    WebSearchTool,
-    TaskManagerTool,
-    ContextManagementTool,
-    CreateFileTool,
-    UserInputTool,
-    ClarificationTool,
-    TextToImageTool,
-    TaskBoundaryTool,
-    NotifyUserTool,
-    GameAssetManagerTool,
-    GameBalanceAnalyzerTool,
-    LevelDesignTool,
-    GameConfigEditorTool,
-    GameAssetPackerTool,
-    GameGDDManagerTool,
-    StoryDesignTool,
-    GameMathSimulatorTool,
-    GameStatsAnalyzerTool,
-    GameDesignOrchestratorTool,
-    GameProjectScaffolderTool,
-    GamePlaytestLabTool,
-    AtlasDeliveryOrchestratorTool,
-    ReverieEngineTool,
-    ReverieEngineLiteTool,
-    VisionUploadTool,
-    TokenCounterTool,
-    ModeSwitchTool,
-    ComputerControlTool,
-    MCPDynamicTool,
-)
+from ..tools.base import BaseTool, ToolResult
+from ..tools.mcp_dynamic import MCPDynamicTool
+from ..tools.registry import get_registered_tool_classes, is_tool_visible_in_mode
 
 
 logger = logging.getLogger(__name__)
@@ -108,44 +72,7 @@ class ToolExecutor:
     
     def _init_tools(self) -> None:
         """Initialize all available tools with context"""
-        tool_classes = [
-            CodebaseRetrievalTool,
-            GitCommitRetrievalTool,
-            StrReplaceEditorTool,
-            FileOpsTool,
-            DeleteFileTool,
-            CommandExecTool,
-            WebSearchTool,
-            TaskManagerTool,
-            ContextManagementTool,
-            CreateFileTool,
-            UserInputTool,
-            ClarificationTool,
-            TextToImageTool,
-            TaskBoundaryTool,
-            NotifyUserTool,
-            GameAssetManagerTool,
-            GameBalanceAnalyzerTool,
-            LevelDesignTool,
-            GameConfigEditorTool,
-            GameAssetPackerTool,
-            GameGDDManagerTool,
-            StoryDesignTool,
-            GameMathSimulatorTool,
-            GameStatsAnalyzerTool,
-            GameDesignOrchestratorTool,
-            GameProjectScaffolderTool,
-            GamePlaytestLabTool,
-            AtlasDeliveryOrchestratorTool,
-            ReverieEngineTool,
-            ReverieEngineLiteTool,
-            VisionUploadTool,
-            TokenCounterTool,
-            ModeSwitchTool,
-            ComputerControlTool,
-        ]
-        
-        for tool_class in tool_classes:
+        for tool_class in get_registered_tool_classes(include_hidden=True):
             tool = tool_class(self.context)
             self._tools[tool.name] = tool
 
@@ -349,48 +276,9 @@ class ToolExecutor:
         schemas: List[Dict[str, Any]] = []
 
         for name, tool in self._tools.items():
-            if name == "context_management":
+            if not is_tool_visible_in_mode(name, normalized_mode):
                 continue
-            # Filter task_manager in non-reverie modes
-            if name == "task_manager" and normalized_mode not in ["reverie", "reverie-gamer"]:
-                continue
-            
-            # Filter ask_clarification in non-writer modes
-            if name == "ask_clarification" and normalized_mode != "writer":
-                continue
-
-            if name == "atlas_delivery_orchestrator" and normalized_mode != "reverie-atlas":
-                continue
-                
-            # Filter Reverie-ant tools
-            if name in ["task_boundary", "notify_user"] and normalized_mode != "reverie-ant":
-                continue
-                
-            if name == "switch_mode" and normalized_mode == "computer-controller":
-                continue
-
-            if name == "computer_control" and normalized_mode != "computer-controller":
-                continue
-
-            gamer_tools = {
-                "game_asset_manager",
-                "game_balance_analyzer",
-                "level_design",
-                "game_config_editor",
-                "game_asset_packer",
-                "game_gdd_manager",
-                "story_design",
-                "game_math_simulator",
-                "game_stats_analyzer",
-                "game_design_orchestrator",
-                "game_project_scaffolder",
-                "game_playtest_lab",
-                "reverie_engine",
-                "reverie_engine_lite",
-            }
-            if name in gamer_tools and normalized_mode != "reverie-gamer":
-                continue
-                
+                 
             # Get schema and validate it
             try:
                 schema = tool.get_schema()

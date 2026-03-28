@@ -13,7 +13,6 @@ import sys
 import threading
 import _thread
 import re
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -460,11 +459,10 @@ class ReverieInterface:
         return result
 
     def _fast_clear_terminal(self) -> None:
-        """Clear the visible terminal area without spawning extra shell processes."""
+        """Clear the terminal without going through a shell command."""
         try:
-            if os.name == "nt":
-                os.system("cls")
-                return
+            self.console.clear()
+            return
         except Exception:
             pass
 

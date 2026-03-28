@@ -100,7 +100,7 @@ Reverie 会把运行时数据保存在 `app_root` 下，而不是保存在你启
 pip install -e ".[dev]"
 pytest
 mypy reverie
-black reverie tests
+black reverie
 ```
 
 Windows 打包：

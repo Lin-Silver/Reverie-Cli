@@ -50,7 +50,7 @@ Recommended checks:
 ```bash
 pytest
 mypy reverie
-black reverie tests
+black reverie
 ```
 
 Current regression coverage includes:
@@ -92,7 +92,7 @@ When you change user-facing behavior, update the docs in the same change:
 
 If the change affects command wording, also update `reverie/cli/help_catalog.py`.
 
-If the change affects runtime storage or spec/steering paths, also update `reverie/agent/system_prompt.py` and the regression tests in `tests/test_runtime_storage_and_streaming.py`.
+If the change affects runtime storage or spec/steering paths, also update `reverie/agent/system_prompt.py` and the relevant regression tests under `reverie/tests/`.
 
 The command catalog in `reverie/cli/help_catalog.py` is the authoritative source for command descriptions.
 

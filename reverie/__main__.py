@@ -12,8 +12,14 @@ from pathlib import Path
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
 
-# Version info
-__version__ = "2.1.4"
+try:
+    from .version import __version__
+except ImportError:  # PyInstaller may execute this file as a top-level script.
+    package_root = Path(__file__).resolve().parent.parent
+    package_root_text = str(package_root)
+    if package_root_text not in sys.path:
+        sys.path.insert(0, package_root_text)
+    from reverie.version import __version__
 
 
 def main():

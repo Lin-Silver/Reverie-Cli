@@ -40,10 +40,7 @@ from .nvidia import (
     normalize_nvidia_config,
 )
 from .modes import normalize_mode
-
-
-# Version info
-__version__ = "2.1.4"
+from .version import CONFIG_VERSION, __version__
 
 EXTERNAL_MODEL_SOURCES = ("qwencode", "geminicli", "codex", "nvidia")
 SUPPORTED_ACTIVE_MODEL_SOURCES = ("standard",) + EXTERNAL_MODEL_SOURCES
@@ -69,6 +66,64 @@ def default_text_to_image_config() -> Dict[str, Any]:
         "auto_install_missing_deps": False,
         "auto_install_max_missing_deps": 6,
     }
+
+
+def default_writer_mode_config() -> Dict[str, Any]:
+    """Default configuration for writer mode."""
+    return {
+        "memory_system_enabled": True,
+        "auto_consistency_check": True,
+        "auto_character_tracking": True,
+        "max_chapter_context_window": 5,
+        "narrative_analysis_enabled": True,
+        "emotion_tracking_enabled": True,
+        "plot_tracking_enabled": True,
+    }
+
+
+def default_gamer_mode_config() -> Dict[str, Any]:
+    """Default configuration for gamer mode."""
+    return {
+        "target_engine": "reverie_engine",
+        "supported_dimensions": ["2D", "2.5D", "3D"],
+        "supported_engines": ["reverie_engine", "reverie_engine_lite", "custom", "web", "pygame", "love2d", "cocos2d", "godot", "unity", "unreal"],
+        "supported_frameworks": [
+            "reverie_engine", "reverie_engine_lite", "phaser", "pixijs", "threejs", "pygame", "love2d", "cocos2d", "godot", "unity", "unreal"
+        ],
+        "asset_tracking_enabled": True,
+        "asset_packaging_enabled": True,
+        "game_balance_analysis": True,
+        "math_simulation_enabled": True,
+        "statistics_tools_enabled": True,
+        "gdd_required": True,
+        "story_design_enabled": True,
+        "rpg_focus_enabled": True,
+        "level_design_assistant": True,
+        "config_editing_enabled": True,
+        "proactive_mode_switching": True,
+        "mandatory_verification_loop": True,
+        "playtest_iteration_enabled": True,
+        "max_asset_context_window": 10,
+        "context_compression_enabled": True,
+    }
+
+
+def _merge_dict_defaults(raw: Any, defaults: Dict[str, Any]) -> Dict[str, Any]:
+    """Merge a partially-populated config section onto its canonical defaults."""
+    merged = dict(defaults)
+    if isinstance(raw, dict):
+        merged.update(raw)
+    return merged
+
+
+def normalize_writer_mode_config(raw: Any) -> Dict[str, Any]:
+    """Normalize writer-mode config into the canonical shape."""
+    return _merge_dict_defaults(raw, default_writer_mode_config())
+
+
+def normalize_gamer_mode_config(raw: Any) -> Dict[str, Any]:
+    """Normalize gamer-mode config into the canonical shape."""
+    return _merge_dict_defaults(raw, default_gamer_mode_config())
 
 
 def sanitize_tti_path(path_value: Any) -> str:
@@ -370,7 +425,7 @@ class Config:
     stream_responses: bool = True
     auto_index: bool = True
     show_status_line: bool = True
-    config_version: str = "2.1.4"  # Config file version for migration
+    config_version: str = CONFIG_VERSION  # Config file version for migration
     
     # Workspace isolation settings
     use_workspace_config: bool = False  # If True, config is stored in workspace directory
@@ -390,40 +445,10 @@ class Config:
     atlas_mode: Dict[str, Any] = field(default_factory=default_atlas_mode_config)
     
     # Writer mode specific settings
-    writer_mode: Dict[str, Any] = field(default_factory=lambda: {
-        "memory_system_enabled": True,
-        "auto_consistency_check": True,
-        "auto_character_tracking": True,
-        "max_chapter_context_window": 5,
-        "narrative_analysis_enabled": True,
-        "emotion_tracking_enabled": True,
-        "plot_tracking_enabled": True,
-    })
+    writer_mode: Dict[str, Any] = field(default_factory=default_writer_mode_config)
 
     # Gamer mode specific settings
-    gamer_mode: Dict[str, Any] = field(default_factory=lambda: {
-        "target_engine": "reverie_engine",
-        "supported_dimensions": ["2D", "2.5D", "3D"],
-        "supported_engines": ["reverie_engine", "reverie_engine_lite", "custom", "web", "pygame", "love2d", "cocos2d", "godot", "unity", "unreal"],
-        "supported_frameworks": [
-            "reverie_engine", "reverie_engine_lite", "phaser", "pixijs", "threejs", "pygame", "love2d", "cocos2d", "godot", "unity", "unreal"
-        ],
-        "asset_tracking_enabled": True,
-        "asset_packaging_enabled": True,
-        "game_balance_analysis": True,
-        "math_simulation_enabled": True,
-        "statistics_tools_enabled": True,
-        "gdd_required": True,
-        "story_design_enabled": True,
-        "rpg_focus_enabled": True,
-        "level_design_assistant": True,
-        "config_editing_enabled": True,
-        "proactive_mode_switching": True,
-        "mandatory_verification_loop": True,
-        "playtest_iteration_enabled": True,
-        "max_asset_context_window": 10,
-        "context_compression_enabled": True,
-    })
+    gamer_mode: Dict[str, Any] = field(default_factory=default_gamer_mode_config)
     
     @property
     def active_model(self) -> Optional[ModelConfig]:
@@ -482,7 +507,6 @@ class Config:
 
         return {
             'models': [m.to_dict() for m in self.models],
-            'tti-models': tti_models,
             'active_model_index': self.active_model_index,
             'active_model_source': active_model_source,
             'mode': self.mode,
@@ -491,8 +515,8 @@ class Config:
             'stream_responses': self.stream_responses,
             'auto_index': self.auto_index,
             'show_status_line': self.show_status_line,
-            'writer_mode': self.writer_mode,
-            'gamer_mode': self.gamer_mode,
+            'writer_mode': normalize_writer_mode_config(self.writer_mode),
+            'gamer_mode': normalize_gamer_mode_config(self.gamer_mode),
             'config_version': self.config_version,
             'use_workspace_config': self.use_workspace_config,
             'api_max_retries': self.api_max_retries,
@@ -552,39 +576,9 @@ class Config:
             stream_responses=data.get('stream_responses', True),
             auto_index=data.get('auto_index', True),
             show_status_line=data.get('show_status_line', True),
-            writer_mode=data.get('writer_mode', {
-                "memory_system_enabled": True,
-                "auto_consistency_check": True,
-                "auto_character_tracking": True,
-                "max_chapter_context_window": 5,
-                "narrative_analysis_enabled": True,
-                "emotion_tracking_enabled": True,
-                "plot_tracking_enabled": True,
-            }),
-            gamer_mode=data.get('gamer_mode', {
-                "target_engine": "reverie_engine",
-                "supported_dimensions": ["2D", "2.5D", "3D"],
-                "supported_engines": ["reverie_engine", "reverie_engine_lite", "custom", "web", "pygame", "love2d", "cocos2d", "godot", "unity", "unreal"],
-                "supported_frameworks": [
-                    "reverie_engine", "reverie_engine_lite", "phaser", "pixijs", "threejs", "pygame", "love2d", "cocos2d", "godot", "unity", "unreal"
-                ],
-                "asset_tracking_enabled": True,
-                "asset_packaging_enabled": True,
-                "game_balance_analysis": True,
-                "math_simulation_enabled": True,
-                "statistics_tools_enabled": True,
-                "gdd_required": True,
-                "story_design_enabled": True,
-                "rpg_focus_enabled": True,
-                "level_design_assistant": True,
-                "config_editing_enabled": True,
-                "proactive_mode_switching": True,
-                "mandatory_verification_loop": True,
-                "playtest_iteration_enabled": True,
-                "max_asset_context_window": 10,
-                "context_compression_enabled": True,
-            }),
-            config_version=data.get('config_version', '2.1.4'),
+            writer_mode=normalize_writer_mode_config(data.get('writer_mode', {})),
+            gamer_mode=normalize_gamer_mode_config(data.get('gamer_mode', {})),
+            config_version=data.get('config_version', CONFIG_VERSION),
             use_workspace_config=data.get('use_workspace_config', False),
             api_max_retries=data.get('api_max_retries', 3),
             api_initial_backoff=data.get('api_initial_backoff', 1.0),
@@ -663,7 +657,8 @@ class ConfigManager:
             with open(path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             return data if isinstance(data, dict) else None
-        except Exception:
+        except Exception as exc:
+            self._logger.debug("Failed to read JSON config candidate %s", path, exc_info=True)
             return None
 
     def _detect_workspace_mode_from_files(self) -> bool:
@@ -914,7 +909,12 @@ class ConfigManager:
                     else:
                         if source_path == self.config_path:
                             self._sync_legacy_mirror(self._config.to_dict())
-                except Exception:
+                except Exception as exc:
+                    self._logger.warning(
+                        "Failed to load config from %s; using cached/default config",
+                        source_path,
+                        exc_info=True,
+                    )
                     # If error reading (e.g., partial write), keep old config if available
                     if self._config is None:
                         self._config = Config()
@@ -931,7 +931,7 @@ class ConfigManager:
         
         # Check if config_version is missing or outdated
         current_version = data.get('config_version', '0.0.0')
-        if current_version != '2.1.4':
+        if current_version != CONFIG_VERSION:
             needs_update = True
         
         # Check if any model is missing provider field
@@ -1018,6 +1018,23 @@ class ConfigManager:
         # Check if gamer_mode field is missing
         if 'gamer_mode' not in data:
             needs_update = True
+        elif not isinstance(data.get('gamer_mode'), dict):
+            needs_update = True
+        else:
+            for field_name in default_gamer_mode_config().keys():
+                if field_name not in data.get('gamer_mode', {}):
+                    needs_update = True
+                    break
+
+        if 'writer_mode' not in data:
+            needs_update = True
+        elif not isinstance(data.get('writer_mode'), dict):
+            needs_update = True
+        else:
+            for field_name in default_writer_mode_config().keys():
+                if field_name not in data.get('writer_mode', {}):
+                    needs_update = True
+                    break
         
         # Check if text_to_image section is missing or incomplete
         if 'text_to_image' not in data:
@@ -1046,31 +1063,9 @@ class ConfigManager:
                 if 'model_paths' in text_to_image or 'default_model_index' in text_to_image:
                     needs_update = True
 
-        # Check if top-level tti-models exists and is valid
-        raw_tti_models = data.get('tti-models', None)
-        if raw_tti_models is None:
+        # Canonical config now stores TTI models only under text_to_image.models.
+        if 'tti-models' in data:
             needs_update = True
-        elif not isinstance(raw_tti_models, list):
-            needs_update = True
-        else:
-            for model_item in raw_tti_models:
-                if not isinstance(model_item, dict):
-                    needs_update = True
-                    break
-                if 'path' not in model_item or 'display_name' not in model_item or 'introduction' not in model_item:
-                    needs_update = True
-                    break
-
-        # Check sync between text_to_image.models and top-level tti-models
-        if isinstance(data.get('text_to_image'), dict) and isinstance(raw_tti_models, list):
-            text_to_image = data.get('text_to_image', {})
-            nested_models = normalize_tti_models(
-                text_to_image.get('models', []),
-                legacy_model_paths=text_to_image.get('model_paths', [])
-            )
-            top_models = normalize_tti_models(raw_tti_models)
-            if nested_models != top_models:
-                needs_update = True
 
         return needs_update
     

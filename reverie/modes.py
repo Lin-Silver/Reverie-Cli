@@ -77,10 +77,16 @@ MODE_ALIASES = {
     "computer controller": "computer-controller",
     "computer-control": "computer-controller",
     "computer control": "computer-controller",
-    "computer-controler": "computer-controller",
-    "computer controler": "computer-controller",
     "computer": "computer-controller",
 }
+
+LEGACY_MODE_ALIASES = {
+    # Backward compatibility for historical typo variants.
+    "computer-controler": "computer-controller",
+    "computer controler": "computer-controller",
+}
+
+MODE_ALIASES.update(LEGACY_MODE_ALIASES)
 
 
 def normalize_mode(value: object, default: str = "reverie") -> str:

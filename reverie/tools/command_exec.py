@@ -11,11 +11,13 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Iterable, Tuple
+import locale
 import os
 import re
 import shlex
 import subprocess
 import sys
+import tempfile
 import time
 
 from ..config import get_project_data_dir
@@ -228,14 +230,17 @@ Examples:
 
         start_time = time.monotonic()
         try:
-            result = subprocess.run(
-                invocation["argv"],
-                cwd=str(work_dir),
-                env=self._build_process_env(invocation),
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
+            with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
+                result = subprocess.run(
+                    invocation["argv"],
+                    cwd=str(work_dir),
+                    env=self._build_process_env(invocation),
+                    stdout=stdout_file,
+                    stderr=stderr_file,
+                    timeout=timeout,
+                )
+                stdout = self._read_truncated_capture(stdout_file)
+                stderr = self._read_truncated_capture(stderr_file)
         except subprocess.TimeoutExpired:
             duration_ms = int((time.monotonic() - start_time) * 1000)
             self.audit_command_event(
@@ -260,8 +265,6 @@ Examples:
             return ToolResult.fail(f"Error executing command: {str(exc)}")
 
         duration_ms = int((time.monotonic() - start_time) * 1000)
-        stdout = self._truncate_output(result.stdout)
-        stderr = self._truncate_output(result.stderr)
 
         self.audit_command_event(
             {
@@ -725,6 +728,30 @@ Examples:
         if len(raw) <= limit:
             return raw
         return raw[:limit] + f"\n...[truncated {len(raw) - limit} characters]"
+
+    @staticmethod
+    def _decode_capture_bytes(data: bytes) -> str:
+        encoding = locale.getpreferredencoding(False) or "utf-8"
+        try:
+            return data.decode(encoding, errors="replace")
+        except LookupError:
+            return data.decode("utf-8", errors="replace")
+
+    @classmethod
+    def _read_truncated_capture(cls, handle: Any, limit: int = 50_000) -> str:
+        handle.flush()
+        handle.seek(0, os.SEEK_END)
+        byte_count = int(handle.tell() or 0)
+        handle.seek(0)
+        data = handle.read(limit + 1)
+
+        if isinstance(data, str):
+            return cls._truncate_output(data, limit=limit)
+
+        preview = cls._decode_capture_bytes(bytes(data[:limit]))
+        if byte_count <= limit:
+            return preview
+        return preview + f"\n...[truncated {max(byte_count - limit, 0)} bytes]"
 
     def _blocked_result(self, *, command: str, cwd_value: str, reason: str) -> ToolResult:
         self.audit_command_event(

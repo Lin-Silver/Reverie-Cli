@@ -7,6 +7,10 @@ Install with: pip install -e .
 from setuptools import setup, find_packages
 from pathlib import Path
 
+# Read canonical package version without importing the package.
+about = {}
+exec((Path(__file__).parent / "reverie" / "version.py").read_text(encoding="utf-8"), about)
+
 # Read README if exists
 readme_path = Path(__file__).parent / "README.md"
 long_description = ""
@@ -15,7 +19,7 @@ if readme_path.exists():
 
 setup(
     name="reverie-cli",
-    version="2.1.4",
+    version=about["__version__"],
     author="Raiden",
     author_email="raiden@reverie.dev",
     description="World-Class Context Engine Coding Assistant",
@@ -35,18 +39,21 @@ setup(
         "tqdm>=4.65.0",
         
         # HTTP and API
-        "requests>=2.28.0",
-        "openai>=1.0.0",
-        
+        "requests>=2.31.0",
+        "openai>=1.20.0",
+        "anthropic>=0.40.0",
+
         # Git integration
         "GitPython>=3.1.0",
         
         # Web search
         "ddgs>=9.11.1",
         "beautifulsoup4>=4.12.0",
-        
-        # YAML support (used by story/game tools)
+
+        # Runtime support used by story/game/token tooling
         "PyYAML>=6.0.0",
+        "tiktoken>=0.5.0",
+        "Pillow>=10.0.0",
 
         # Reverie Engine runtime
         "pyglet>=2.0.16",
@@ -67,7 +74,7 @@ setup(
             "tree-sitter-typescript>=0.20.0",
         ],
         "build": [
-            "pyinstaller>=5.0.0",
+            "pyinstaller>=6.0.0",
         ],
     },
     entry_points={

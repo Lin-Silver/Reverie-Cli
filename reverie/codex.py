@@ -18,6 +18,7 @@ import uuid
 from urllib.parse import urlparse
 
 from .security_utils import write_json_secure
+from .version import __version__
 
 
 CODEX_DEFAULT_API_URL = "https://chatgpt.com/backend-api/codex"
@@ -27,7 +28,7 @@ CODEX_DEFAULT_MODELS_ENDPOINT = "/models"
 CODEX_TOKEN_URL = "https://auth.openai.com/oauth/token"
 CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 CODEX_CLIENT_VERSION = "0.115.0"
-CODEX_USER_AGENT = "codex_cli_rs/0.115.0 (Windows NT 10.0; Win64; x64) Reverie/2.1.4"
+CODEX_USER_AGENT = f"codex_cli_rs/{CODEX_CLIENT_VERSION} (Windows NT 10.0; Win64; x64) Reverie/{__version__}"
 CODEX_DEFAULT_REASONING_EFFORT = "medium"
 CODEX_DEFAULT_MAX_CONTEXT_TOKENS = 258_400
 _CODEX_CHATGPT_HOSTS = {"chatgpt.com", "chat.openai.com"}

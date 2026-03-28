@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Optional
 from .tool_descriptions import get_tool_descriptions_for_mode
 from ..modes import normalize_mode
+from ..tools.registry import get_tool_classes_for_mode
 
 
 ARTIFACTS_DIR = "artifacts"
@@ -1257,103 +1258,8 @@ def get_tool_definitions(mode: str = "reverie") -> list:
     Get OpenAI-format tool definitions for all available tools.
     Filters tools based on the active mode.
     """
-    from ..tools import (
-        CodebaseRetrievalTool,
-        GitCommitRetrievalTool,
-        StrReplaceEditorTool,
-        FileOpsTool,
-        DeleteFileTool,
-        CommandExecTool,
-        WebSearchTool,
-        CreateFileTool,
-        UserInputTool,
-        TextToImageTool,
-        TaskManagerTool,
-        ClarificationTool,
-        TaskBoundaryTool,
-        NotifyUserTool,
-        ModeSwitchTool,
-        ComputerControlTool,
-        NovelContextManagerTool,
-        ConsistencyCheckerTool,
-        PlotAnalyzerTool,
-        GameAssetManagerTool,
-        GameBalanceAnalyzerTool,
-        LevelDesignTool,
-        GameConfigEditorTool,
-        GameAssetPackerTool,
-        GameGDDManagerTool,
-        StoryDesignTool,
-        GameMathSimulatorTool,
-        GameStatsAnalyzerTool,
-        GameDesignOrchestratorTool,
-        GameProjectScaffolderTool,
-        GamePlaytestLabTool,
-        AtlasDeliveryOrchestratorTool,
-        ReverieEngineTool,
-        ReverieEngineLiteTool,
-    )
-    
     normalized_mode = normalize_mode(mode)
-
-    tools = [
-        CodebaseRetrievalTool(),
-        GitCommitRetrievalTool(),
-        StrReplaceEditorTool(),
-        FileOpsTool(),
-        DeleteFileTool(),
-        CommandExecTool(),
-        WebSearchTool(),
-        CreateFileTool(),
-        UserInputTool(),
-        TextToImageTool()
-    ]
-
-    if normalized_mode != "computer-controller":
-        tools.append(ModeSwitchTool())
-    else:
-        tools.append(ComputerControlTool())
-    
-    # Antigravity Tools
-    if normalized_mode == "reverie-ant":
-        tools.append(TaskBoundaryTool())
-        tools.append(NotifyUserTool())
-        # Disable TaskManagerTool for Ant mode as it uses TaskBoundary
-        # But maybe keep it available? The prompt implies task.md usage.
-        # The prompt for Ant defines task_boundary tool separately.
-        # Let's keep core tools.
-    
-    # TaskManagerTool is for Reverie and Reverie-Gamer modes
-    if normalized_mode in ["reverie", "reverie-gamer"]:
-        tools.append(TaskManagerTool())
-
-    # Writer Mode tools
-    if normalized_mode == "writer":
-        tools.append(ClarificationTool())
-        tools.append(NovelContextManagerTool())
-        tools.append(ConsistencyCheckerTool())
-        tools.append(PlotAnalyzerTool())
-
-    # Gamer Mode tools
-    if normalized_mode == "reverie-gamer":
-        tools.append(GameAssetManagerTool())
-        tools.append(GameBalanceAnalyzerTool())
-        tools.append(LevelDesignTool())
-        tools.append(GameConfigEditorTool())
-        tools.append(GameAssetPackerTool())
-        tools.append(GameGDDManagerTool())
-        tools.append(StoryDesignTool())
-        tools.append(GameMathSimulatorTool())
-        tools.append(GameStatsAnalyzerTool())
-        tools.append(GameDesignOrchestratorTool())
-        tools.append(GameProjectScaffolderTool())
-        tools.append(GamePlaytestLabTool())
-        tools.append(ReverieEngineTool())
-        tools.append(ReverieEngineLiteTool())
-
-    if normalized_mode == "reverie-atlas":
-        tools.append(AtlasDeliveryOrchestratorTool())
-    
+    tools = [tool_class() for tool_class in get_tool_classes_for_mode(normalized_mode, include_hidden=False)]
     return [tool.get_schema() for tool in tools]
 
 

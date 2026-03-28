@@ -93,6 +93,8 @@ __all__ = [
     "AtlasDeliveryOrchestratorTool",
     "ReverieEngineTool",
     "ReverieEngineLiteTool",
+    "VisionUploadTool",
+    "TokenCounterTool",
     "ModeSwitchTool",
     "ComputerControlTool",
     "MCPDynamicTool",

@@ -72,9 +72,6 @@ Examples:
     
     def __init__(self, context: Optional[Dict] = None):
         super().__init__(context)
-        self._project_root = None
-        if context:
-            self._project_root = context.get('project_root')
     
     def get_execution_message(self, **kwargs) -> str:
         operation = kwargs.get('operation')

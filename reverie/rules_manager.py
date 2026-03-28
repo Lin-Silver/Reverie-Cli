@@ -1,7 +1,15 @@
 
+"""Rule persistence helpers for workspace and legacy Reverie profiles."""
+
 from pathlib import Path
 from typing import List
+import json
+import logging
+
 from .config import get_app_root, get_project_data_dir
+
+
+logger = logging.getLogger(__name__)
 
 
 class RulesManager:
@@ -18,49 +26,51 @@ class RulesManager:
         self.legacy_rules_json_path = self.legacy_reverie_dir / 'rules.json'
         self._rules: List[str] = []
         self._load()
+
+    def _load_rules_text_file(self, path: Path) -> List[str]:
+        """Read newline-delimited rules from a text file."""
+        with open(path, 'r', encoding='utf-8') as handle:
+            return [line.strip() for line in handle if line.strip()]
+
+    def _load_rules_json_file(self, path: Path) -> List[str]:
+        """Read the legacy JSON rule list format."""
+        with open(path, 'r', encoding='utf-8') as handle:
+            data = json.load(handle)
+        if not isinstance(data, list):
+            return []
+        return [str(rule) for rule in data if str(rule).strip()]
     
     def _load(self) -> None:
         """Load rules from file"""
         # Try to load from rules.txt first
         if self.rules_txt_path.exists():
             try:
-                with open(self.rules_txt_path, 'r', encoding='utf-8') as f:
-                    # Read all lines, strip whitespace, filter out empty lines
-                    self._rules = [line.strip() for line in f.readlines() if line.strip()]
+                self._rules = self._load_rules_text_file(self.rules_txt_path)
             except Exception:
+                logger.warning("Failed to load rules from %s", self.rules_txt_path, exc_info=True)
                 self._rules = []
         elif self.legacy_rules_txt_path.exists():
             try:
-                with open(self.legacy_rules_txt_path, 'r', encoding='utf-8') as f:
-                    self._rules = [line.strip() for line in f.readlines() if line.strip()]
+                self._rules = self._load_rules_text_file(self.legacy_rules_txt_path)
                 self.save()
             except Exception:
+                logger.warning("Failed to migrate legacy rules from %s", self.legacy_rules_txt_path, exc_info=True)
                 self._rules = []
         # Fallback to rules.json for backward compatibility
         elif self.rules_json_path.exists():
             try:
-                import json
-                with open(self.rules_json_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    if isinstance(data, list):
-                        self._rules = [str(r) for r in data]
-                    else:
-                        self._rules = []
+                self._rules = self._load_rules_json_file(self.rules_json_path)
                 # Migrate to txt format
                 self._migrate_to_txt()
             except Exception:
+                logger.warning("Failed to load rules from %s", self.rules_json_path, exc_info=True)
                 self._rules = []
         elif self.legacy_rules_json_path.exists():
             try:
-                import json
-                with open(self.legacy_rules_json_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    if isinstance(data, list):
-                        self._rules = [str(r) for r in data]
-                    else:
-                        self._rules = []
+                self._rules = self._load_rules_json_file(self.legacy_rules_json_path)
                 self._migrate_to_txt()
             except Exception:
+                logger.warning("Failed to migrate legacy rules from %s", self.legacy_rules_json_path, exc_info=True)
                 self._rules = []
         else:
             self._rules = []
@@ -74,7 +84,7 @@ class RulesManager:
             # Optionally remove the old json file
             # self.rules_json_path.unlink(missing_ok=True)
         except Exception:
-            pass
+            logger.warning("Failed to migrate rules into %s", self.rules_txt_path, exc_info=True)
     
     def _create_example_file(self) -> None:
         """Create example rules.txt file with comments"""
@@ -95,7 +105,7 @@ class RulesManager:
             with open(self.rules_txt_path, 'w', encoding='utf-8') as f:
                 f.write(example_content)
         except Exception:
-            pass
+            logger.warning("Failed to create example rules file at %s", self.rules_txt_path, exc_info=True)
             
     def save(self) -> None:
         """Save rules to txt file"""
@@ -131,10 +141,10 @@ class RulesManager:
     def load_from_file(self, file_path: Path) -> None:
         """Load rules from an external txt file"""
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                external_rules = [line.strip() for line in f.readlines() if line.strip()]
-                if external_rules:
-                    self._rules = external_rules
-                    self.save()
-        except Exception as e:
-            raise Exception(f"Failed to load rules from {file_path}: {str(e)}")
+            external_rules = self._load_rules_text_file(file_path)
+            if external_rules:
+                self._rules = external_rules
+                self.save()
+        except Exception as exc:
+            logger.warning("Failed to load external rules from %s", file_path, exc_info=True)
+            raise RuntimeError(f"Failed to load rules from {file_path}: {exc}") from exc

@@ -8,8 +8,8 @@ AI model hallucinations.
 
 # Convenient imports
 from .config import Config, ConfigManager, ModelConfig
+from .version import __version__
 
-__version__ = "2.1.4"
 __author__ = "Raiden"
 __description__ = "World-Class Context Engine Coding Assistant"
 

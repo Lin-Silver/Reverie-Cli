@@ -89,9 +89,6 @@ Examples:
     
     def __init__(self, context: Optional[Dict] = None):
         super().__init__(context)
-        self._project_root = None
-        if context:
-            self._project_root = context.get('project_root')
     
     def get_execution_message(self, **kwargs) -> str:
         command = kwargs.get('command')
@@ -110,6 +107,37 @@ Examples:
     def _resolve_path(self, path: str) -> Path:
         """Resolve path relative to project root if needed"""
         return self.resolve_workspace_path(path, purpose="access editor path")
+
+    def _read_lines_for_view(
+        self,
+        file_path: Path,
+        *,
+        start_line: int,
+        end_line: int,
+        capture_first_n_lines: Optional[int] = None,
+    ) -> tuple[list[str], int]:
+        """Stream a text file and capture only the lines required for view output."""
+        last_error: Optional[Exception] = None
+        capture_limit = max(0, int(capture_first_n_lines or 0))
+
+        for encoding in ("utf-8", "latin-1"):
+            selected_lines: list[str] = []
+            total_lines = 0
+            try:
+                with open(file_path, 'r', encoding=encoding) as handle:
+                    for total_lines, line in enumerate(handle, start=1):
+                        if capture_limit:
+                            if total_lines <= capture_limit:
+                                selected_lines.append(line)
+                            continue
+                        if start_line <= total_lines <= end_line:
+                            selected_lines.append(line)
+                return selected_lines, total_lines
+            except UnicodeDecodeError as exc:
+                last_error = exc
+                continue
+
+        raise last_error or UnicodeDecodeError("utf-8", b"", 0, 1, "Could not decode file")
     
     def execute(self, **kwargs) -> ToolResult:
         command = kwargs.get('command')
@@ -158,52 +186,62 @@ Examples:
         """View file contents with line numbers"""
         if not file_path.exists():
             return ToolResult.fail(f"File not found: {file_path}")
-        
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-        except UnicodeDecodeError:
-            # Try with different encoding
-            try:
-                with open(file_path, 'r', encoding='latin-1') as f:
-                    lines = f.readlines()
-            except Exception as e:
-                return ToolResult.fail(f"Could not read file: {e}")
-        
-        total_lines = len(lines)
-        
+
         # Handle view range
         if view_range and len(view_range) >= 2:
             start = max(1, view_range[0])
-            end = min(total_lines, view_range[1])
+            end = max(start, int(view_range[1]))
             # For explicit view ranges, don't apply the 20-line limit
             is_range_view = True
         else:
             start = 1
-            end = total_lines
+            end = 200
             is_range_view = False
-        
-        # Apply 20-line limit for single file views (not range views) when file has > 200 lines
-        if not is_range_view and total_lines > 200:
-            end = start + 19  # Show exactly 20 lines
+
+        try:
+            if is_range_view:
+                captured_lines, total_lines = self._read_lines_for_view(
+                    file_path,
+                    start_line=start,
+                    end_line=end,
+                )
+            else:
+                captured_lines, total_lines = self._read_lines_for_view(
+                    file_path,
+                    start_line=1,
+                    end_line=200,
+                    capture_first_n_lines=200,
+                )
+        except Exception as e:
+            return ToolResult.fail(f"Could not read file: {e}")
+
+        if is_range_view:
+            shown_lines = captured_lines
+            shown_end = min(total_lines, end)
+            should_skip_message = False
+        elif total_lines > 200:
+            shown_lines = captured_lines[:20]
+            shown_end = min(total_lines, 20)
             should_skip_message = True
         else:
+            shown_lines = captured_lines
+            shown_end = total_lines
             should_skip_message = False
         
         output_parts = []
         output_parts.append(f"File: {file_path}")
         output_parts.append(f"Total lines: {total_lines}")
-        output_parts.append(f"Showing lines {start}-{end}")
+        output_parts.append(f"Showing lines {start}-{shown_end}")
         output_parts.append("")
-        
-        for i in range(start - 1, min(end, total_lines)):
-            line_num = i + 1
-            line_content = lines[i].rstrip('\n\r')
+
+        for offset, line in enumerate(shown_lines, start=start):
+            line_num = offset
+            line_content = line.rstrip('\n\r')
             output_parts.append(f"{line_num:4d} | {line_content}")
-        
+
         # Add skip message if content was truncated
-        if should_skip_message and end < total_lines:
-            skipped_lines = total_lines - 200
+        if should_skip_message and shown_end < total_lines:
+            skipped_lines = total_lines - shown_end
             output_parts.append(f"Skip {skipped_lines} lines of code")
         
         return ToolResult.ok(
@@ -212,7 +250,7 @@ Examples:
                 'file': str(file_path),
                 'total_lines': total_lines,
                 'shown_start': start,
-                'shown_end': end
+                'shown_end': shown_end
             }
         )
     

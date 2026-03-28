@@ -19,6 +19,7 @@ import requests
 
 from .config import get_app_root
 from .security_utils import write_json_secure
+from .version import __version__
 
 
 logger = logging.getLogger(__name__)
@@ -30,7 +31,7 @@ MCP_DEFAULT_SSE_ENDPOINT_TIMEOUT_MS = 15_000
 MCP_CONFIG_DIRNAME = ".Reverie"
 MCP_CONFIG_FILENAME = "MCP.json"
 MCP_SESSION_HEADER = "Mcp-Session-Id"
-MCP_CLIENT_INFO = {"name": "Reverie CLI", "version": "2.1.4"}
+MCP_CLIENT_INFO = {"name": "Reverie CLI", "version": __version__}
 
 _ENV_VAR_PATTERN = re.compile(r"\$(\w+)|\$\{([^}]+)\}|%([^%]+)%")
 _SAFE_IDENTIFIER_PATTERN = re.compile(r"[^a-zA-Z0-9_]+")

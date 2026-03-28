@@ -10,7 +10,6 @@ This is the main agent class that:
 
 from typing import List, Dict, Any, Optional, Generator, AsyncGenerator
 from pathlib import Path
-import ast
 import json
 import time
 import re
@@ -482,19 +481,19 @@ def parse_tool_arguments(raw: str) -> Dict[str, Any]:
         # continue to heuristics
         pass
 
-    # Python-literal fallback (handles single quotes / True / False / trailing commas)
-    try:
-        literal_parsed = ast.literal_eval(raw.strip())
-        if isinstance(literal_parsed, dict):
-            return literal_parsed
-    except Exception:
-        pass
-
     # Generic key/value fallback for simple primitive payloads.
     # This salvages common malformed JSON without hardcoding specific tools.
     generic_args: Dict[str, Any] = {}
+
+    def _decode_quoted_value(token: str) -> str:
+        body = token[1:-1]
+        try:
+            return bytes(body, "utf-8").decode("unicode_escape")
+        except Exception:
+            return body
+
     for m in re.finditer(
-        r'"([^"]+)"\s*:\s*("([^"\\]*(?:\\.[^"\\]*)*)"|true|false|null|-?\d+(?:\.\d+)?)',
+        r'["\']([^"\']+)["\']\s*:\s*("([^"\\]*(?:\\.[^"\\]*)*)"|\'([^\'\\]*(?:\\.[^\'\\]*)*)\'|true|false|null|-?\d+(?:\.\d+)?)',
         raw,
         re.I,
     ):
@@ -506,13 +505,8 @@ def parse_tool_arguments(raw: str) -> Dict[str, Any]:
             generic_args[key] = False
         elif token.lower() == "null":
             generic_args[key] = None
-        elif token.startswith('"') and token.endswith('"'):
-            val = token[1:-1]
-            try:
-                val = bytes(val, "utf-8").decode("unicode_escape")
-            except Exception:
-                pass
-            generic_args[key] = val
+        elif (token.startswith('"') and token.endswith('"')) or (token.startswith("'") and token.endswith("'")):
+            generic_args[key] = _decode_quoted_value(token)
         else:
             try:
                 generic_args[key] = int(token)
@@ -554,7 +548,7 @@ def parse_tool_arguments(raw: str) -> Dict[str, Any]:
         args.setdefault(key, value)
 
     if not args:
-        logger.debug(f"Could not parse tool arguments; returning empty dict (preview: {raw[:200]})")
+        logger.debug("Tool arguments were not valid strict JSON; returning empty dict (preview: %s)", raw[:200])
 
     return args
 
@@ -956,7 +950,6 @@ class ReverieAgent:
         self.model = model
         self.model_display_name = model_display_name or model
         self.project_root = project_root or Path.cwd()
-        self.additional_rules = additional_rules
         self.additional_rules = additional_rules
         self.mode = mode
         self.ant_phase = "PLANNING"

@@ -1,3 +1,5 @@
+"""Tool for creating new workspace files from complete content."""
+
 from typing import Optional, Dict
 from pathlib import Path
 from .base import BaseTool, ToolResult
@@ -33,9 +35,6 @@ Do NOT use this for editing existing files.
 
     def __init__(self, context: Optional[Dict] = None):
         super().__init__(context)
-        self._project_root = None
-        if context:
-            self._project_root = context.get('project_root')
 
     def execute(self, **kwargs) -> ToolResult:
         path = kwargs.get('path')
@@ -51,13 +50,18 @@ Do NOT use this for editing existing files.
             return ToolResult.fail(str(e))
             
         if file_path.exists() and not overwrite:
-             return ToolResult.fail(f"File already exists: {file_path}. Set overwrite=True to replace it.")
+            return ToolResult.fail(f"File already exists: {file_path}. Set overwrite=True to replace it.")
              
         try:
             file_path.parent.mkdir(parents=True, exist_ok=True)
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(content)
-            
+
+            if self.context and self.context.get('indexer'):
+                self.context['indexer'].update_file(file_path)
+            if self.context and self.context.get('retriever'):
+                self.context['retriever'].mark_file_activity(str(file_path), weight=1.5, reason="edit")
+
             line_count = len(content.splitlines())
             return ToolResult.ok(f"Created file: {file_path} ({line_count} lines)")
         except Exception as e:

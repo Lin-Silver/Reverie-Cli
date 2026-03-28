@@ -97,7 +97,7 @@ reverie/
 ├── tools/                   # tool implementations exposed to the agent
 ├── engine_lite/             # built-in runtime and engine workflows
 ├── writer/                  # writer mode helpers
-└── tests/                   # regression coverage
+└── reverie/tests/           # regression coverage
 ```
 
 ## Development
@@ -106,7 +106,7 @@ reverie/
 pip install -e ".[dev]"
 pytest
 mypy reverie
-black reverie tests
+black reverie
 ```
 
 Windows executable packaging:

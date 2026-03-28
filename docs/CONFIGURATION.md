@@ -70,7 +70,6 @@ Common top-level keys:
 ```json
 {
   "models": [],
-  "tti-models": [],
   "active_model_index": 0,
   "active_model_source": "standard",
   "mode": "reverie",
@@ -154,25 +153,25 @@ Reverie also reads `NVIDIA_API_KEY` from the environment when it is present, and
 
 ## Text-To-Image Configuration
 
-Reverie keeps the editable TTI model list in `tti-models` and syncs it with `text_to_image.models`.
+Reverie stores the editable TTI model list directly in `text_to_image.models`.
+Older top-level `tti-models` entries are still read for migration, then rewritten into the nested canonical shape.
 
 Minimal example:
 
 ```json
 {
-  "tti-models": [
-    {
-      "path": "Comfy/models/t2i/bluePencilXL_v700.safetensors",
-      "display_name": "blue-pencil-xl",
-      "introduction": "General illustration model"
-    }
-  ],
   "text_to_image": {
     "enabled": true,
     "python_executable": "",
     "script_path": "Comfy/generate_image.py",
     "output_dir": ".",
-    "models": [],
+    "models": [
+      {
+        "path": "Comfy/models/t2i/bluePencilXL_v700.safetensors",
+        "display_name": "blue-pencil-xl",
+        "introduction": "General illustration model"
+      }
+    ],
     "default_model_display_name": "blue-pencil-xl",
     "default_width": 512,
     "default_height": 512,

@@ -54,7 +54,7 @@ for package_name in ('rich', 'bs4', 'pyglet', 'moderngl', 'glcontext'):
 
 
 a = Analysis(
-    ['reverie\\__main__.py'],
+    ['run_reverie.py'],
     pathex=[],
     binaries=binaries,
     datas=datas,

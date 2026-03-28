@@ -21,6 +21,9 @@ def add_data_if_exists(source_path: Path, target_dir: str) -> None:
 # PyInstaller executes .spec via exec(), where __file__ is not guaranteed.
 # Use current working directory as fallback project root.
 repo_root = Path(os.getcwd()).resolve()
+legacy_entry = repo_root / "run_reverie.py"
+package_entry = repo_root / "reverie" / "__main__.py"
+entry_script = legacy_entry if legacy_entry.exists() else package_entry
 resource_root = os.environ.get("REVERIE_BUNDLE_RES_DIR", "").strip()
 if resource_root:
     comfy_src = Path(resource_root) / "comfy"
@@ -54,8 +57,8 @@ for package_name in ('rich', 'bs4', 'pyglet', 'moderngl', 'glcontext'):
 
 
 a = Analysis(
-    ['run_reverie.py'],
-    pathex=[],
+    [str(entry_script)],
+    pathex=[str(repo_root)],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,

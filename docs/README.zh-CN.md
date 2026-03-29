@@ -108,7 +108,10 @@ Windows 打包：
 ```bat
 .\build.bat
 .\build.bat --recreate-venv
+.\build.bat --test-exe
 ```
+
+生成的 `dist/reverie.exe` 现在会把 Reverie-Gamer 的内置运行时能力一起打进单文件里，包括 `/engine video`、`/engine renpy` 和 `/modeling primitive`。如果构建时能找到 `ffmpeg`，`build.bat` 会把它一起打包进 exe，这样 `mp4/gif` 导出不需要额外安装编码器；如果找不到，帧序列导出仍然可用，视频编码则会在运行时回退到外部 `ffmpeg`。
 
 ## 文档导航
 

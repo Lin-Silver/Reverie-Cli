@@ -9,8 +9,10 @@ from .base import BaseTool, ToolResult
 from ..engine import (
     ASHFOX_DEFAULT_ENDPOINT,
     ASHFOX_MCP_SERVER_NAME,
+    PRIMITIVE_MODEL_TYPES,
     copy_imported_model,
     create_model_stub,
+    create_primitive_model,
     inspect_modeling_workspace,
     materialize_modeling_workspace,
     sync_model_registry,
@@ -35,6 +37,7 @@ class GameModelingWorkbenchTool(BaseTool):
                     "setup_workspace",
                     "sync_registry",
                     "create_model_stub",
+                    "generate_primitive",
                     "import_export",
                     "list_ashfox_tools",
                     "ashfox_call",
@@ -51,6 +54,18 @@ class GameModelingWorkbenchTool(BaseTool):
             "endpoint": {"type": "string", "description": "Ashfox MCP endpoint override for status text"},
             "tool_name": {"type": "string", "description": "Ashfox tool name for `ashfox_call`"},
             "arguments": {"type": "object", "description": "Arguments passed to the Ashfox tool"},
+            "primitive": {
+                "type": "string",
+                "enum": list(PRIMITIVE_MODEL_TYPES),
+                "description": "Built-in primitive mesh type for `generate_primitive`",
+            },
+            "size": {"type": "number", "description": "Fallback size for the generated primitive"},
+            "width": {"type": "number", "description": "Optional width override for the primitive"},
+            "height": {"type": "number", "description": "Optional height override for the primitive"},
+            "depth": {"type": "number", "description": "Optional depth override for the primitive"},
+            "radius": {"type": "number", "description": "Optional radius override for sphere generation"},
+            "segments": {"type": "integer", "description": "Optional segment count for sphere generation"},
+            "create_preview": {"type": "boolean", "description": "Whether to generate a preview image for the primitive"},
             "overwrite": {"type": "boolean", "description": "Overwrite generated or imported files"},
         },
         "required": ["action"],
@@ -73,6 +88,8 @@ class GameModelingWorkbenchTool(BaseTool):
                 return self._sync_registry(project_root)
             if action == "create_model_stub":
                 return self._create_stub(project_root, kwargs)
+            if action == "generate_primitive":
+                return self._generate_primitive(project_root, kwargs)
             if action == "import_export":
                 return self._import_export(project_root, kwargs)
             if action == "list_ashfox_tools":
@@ -195,6 +212,37 @@ class GameModelingWorkbenchTool(BaseTool):
             f"Registry synced: {registry['registry_path']}"
         )
         return ToolResult.ok(output, {"stub_path": str(target), "registry": registry})
+
+    def _generate_primitive(self, project_root: Path, kwargs: Dict[str, Any]) -> ToolResult:
+        model_name = str(kwargs.get("model_name") or "").strip()
+        if not model_name:
+            return ToolResult.fail("model_name is required for generate_primitive")
+        primitive = str(kwargs.get("primitive") or "box").strip().lower()
+        if primitive not in PRIMITIVE_MODEL_TYPES:
+            return ToolResult.fail(f"primitive must be one of: {', '.join(PRIMITIVE_MODEL_TYPES)}")
+        generated = create_primitive_model(
+            project_root,
+            model_name,
+            primitive=primitive,
+            size=float(kwargs.get("size", 1.0) or 1.0),
+            width=kwargs.get("width"),
+            height=kwargs.get("height"),
+            depth=kwargs.get("depth"),
+            radius=kwargs.get("radius"),
+            segments=int(kwargs.get("segments", 12) or 12),
+            overwrite=bool(kwargs.get("overwrite", False)),
+            create_preview=bool(kwargs.get("create_preview", True)),
+        )
+        output = (
+            f"Generated primitive runtime model '{model_name}'\n"
+            f"Primitive: {primitive}\n"
+            f"Runtime target: {generated['runtime_path']}\n"
+            f"Triangles: {generated['mesh_summary']['triangle_count']} | Vertices: {generated['mesh_summary']['vertex_count']}\n"
+            f"Registry synced: {generated['registry']['registry_path']}"
+        )
+        if generated.get("preview_path"):
+            output += f"\nPreview image: {generated['preview_path']}"
+        return ToolResult.ok(output, generated)
 
     def _import_export(self, project_root: Path, kwargs: Dict[str, Any]) -> ToolResult:
         source_path = str(kwargs.get("source_path") or "").strip()

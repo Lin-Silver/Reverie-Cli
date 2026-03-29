@@ -73,6 +73,14 @@ from .modeling import (
     project_modeling_paths,
     sync_model_registry,
 )
+from .procedural_assets import (
+    PRIMITIVE_MODEL_TYPES,
+    PrimitiveMesh,
+    build_gltf_document,
+    build_primitive_mesh,
+    create_primitive_model,
+)
+from .renpy_import import ParsedRenPyScript, compile_renpy_script, import_renpy_script, parse_renpy_script
 from .navigation import GridNavigationMap, NavigationPath, NavigationServer, TowerDefenseLane
 from .project import (
     build_project_health_report,
@@ -171,6 +179,7 @@ from .benchmarking import benchmark_ai_command_latency, benchmark_project, bench
 from .save_data import SAVE_DATA_VERSION, SaveDataManager
 from .samples import get_sample_definition, list_samples
 from .ui import UIRect, UISystem
+from .video import PlayblastFrameRenderer, VideoExportSettings, discover_ffmpeg, export_project_video
 
 __all__ = [
     "ASHFOX_DEFAULT_ENDPOINT",
@@ -250,13 +259,17 @@ __all__ = [
     "ParticleSystemComponent",
     "PackedSceneDocument",
     "ParallaxLayerComponent",
+    "ParsedRenPyScript",
     "PhysicsMotionResult",
     "PhysicsRayQueryParameters",
     "PhysicsShapeQueryParameters",
     "PhysicsSpaceState",
     "PhysicsWorld",
     "PointLight",
+    "PlayblastFrameRenderer",
+    "PRIMITIVE_MODEL_TYPES",
     "ProgressBarComponent",
+    "PrimitiveMesh",
     "Quaternion",
     "RaycastResult",
     "RenderBackend",
@@ -297,6 +310,7 @@ __all__ = [
     "UIControlComponent",
     "UIRect",
     "UISystem",
+    "VideoExportSettings",
     "Vector2",
     "Vector3",
     "Vector4",
@@ -305,17 +319,23 @@ __all__ = [
     "SpotLight",
     "build_blockbench_model_stub",
     "build_engine_config",
+    "build_gltf_document",
     "build_model_pipeline_manifest",
     "build_model_registry",
+    "build_primitive_mesh",
     "build_project_health_report",
+    "compile_renpy_script",
     "canonical_engine_name",
     "component_from_dict",
     "copy_imported_model",
     "create_model_stub",
+    "create_primitive_model",
     "create_project_skeleton",
     "detect_modeling_stack",
     "discover_live2d_sdk",
+    "discover_ffmpeg",
     "get_sample_definition",
+    "import_renpy_script",
     "list_samples",
     "inspect_project",
     "inspect_modeling_workspace",
@@ -331,12 +351,14 @@ __all__ = [
     "normalize_genre",
     "pack_scene",
     "pack_archetype",
+    "parse_renpy_script",
     "overlap_shape",
     "project_modeling_paths",
     "raycast",
     "materialize_sample",
     "materialize_modeling_workspace",
     "move_and_slide",
+    "export_project_video",
     "package_project",
     "run_project",
     "run_project_smoke",

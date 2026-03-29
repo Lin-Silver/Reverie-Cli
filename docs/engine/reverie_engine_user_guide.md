@@ -34,10 +34,13 @@ Use the CLI or in-chat tools around these core flows:
 - `/engine profile`
 - `/engine validate`
 - `/engine smoke`
+- `/engine video`
+- `/engine renpy`
 - `/engine health`
 - `/engine package`
 - `/modeling setup`
 - `/modeling sync`
+- `/modeling primitive`
 - `/modeling ashfox validate`
 
 ## Runtime Authoring Model
@@ -63,6 +66,18 @@ In short:
 3. Sync the generated registry
 4. Validate the pipeline before playtest or packaging
 
+For quick internal placeholders, `/modeling primitive` can generate a built-in runtime `.gltf` plus preview image directly into the standard project layout.
+
+## Ren'Py And Video Integration
+
+The same built-in engine surface now also supports:
+
+- importing a practical Ren'Py subset through `/engine renpy`
+- exporting frame sequences, `gif`, or `mp4` playblasts through `/engine video`
+- packaging those capabilities into the Windows one-file `reverie.exe`
+
+When `ffmpeg` is available at build time, the packaged executable embeds it so encoded video export works out of the box. If `ffmpeg` is not bundled, frame-sequence export still works and encoded video falls back to an external runtime install.
+
 ## Verification Expectations
 
 When content changes in a Reverie Engine project, the preferred baseline is:
@@ -70,6 +85,7 @@ When content changes in a Reverie Engine project, the preferred baseline is:
 1. `/engine validate`
 2. `/engine smoke`
 3. `/modeling sync` if model content changed
-4. `/modeling ashfox validate` when using the live Ashfox MCP workflow
+4. `/engine renpy` if dialogue content came from a `.rpy` source
+5. `/modeling ashfox validate` when using the live Ashfox MCP workflow
 
 That keeps the engine layout, content registry, and active model-authoring workflow in sync.

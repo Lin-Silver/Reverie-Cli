@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
+import re
 
 from .components import (
     ColliderComponent,
     DialogueComponent,
     HealthComponent,
+    ImageComponent,
     Live2DComponent,
     NavigationAgentComponent,
     ScriptBehaviourComponent,
     TowerDefenseComponent,
+    UIControlComponent,
 )
 from .live2d import Live2DManager
 from .localization import LocalizationManager
@@ -110,6 +114,7 @@ class EngineWorldState:
             "resources": dict(self.resources),
             "inventory": dict(self.inventory),
             "quests": dict(self.quests),
+            "notes": dict(self.notes),
             "active_dialogue": self.active_dialogue.conversation_id if self.active_dialogue else "",
             "active_waves": sorted(self.active_waves.keys()),
             "live2d_models": sorted(self.live2d_state.keys()),
@@ -128,6 +133,7 @@ class GameplayDirector:
         config: Optional[Dict[str, Any]] = None,
         live2d: Optional[Live2DManager] = None,
         localization: Optional[LocalizationManager] = None,
+        audio_manager: Any = None,
     ) -> None:
         self.scene_tree = scene_tree
         self.resource_manager = resource_manager
@@ -135,6 +141,7 @@ class GameplayDirector:
         self.config = dict(config or {})
         self.live2d = live2d or Live2DManager(resource_manager.project_root)
         self.localization = localization
+        self.audio_manager = audio_manager
         self.state = EngineWorldState()
         self.dialogues: Dict[str, Dict[str, Any]] = {}
         self.quests: Dict[str, Dict[str, Any]] = {}
@@ -217,6 +224,29 @@ class GameplayDirector:
 
     def _conditions_met(self, payload: Dict[str, Any]) -> bool:
         conditions = dict(payload or {})
+        nested = conditions.get("conditions")
+        if isinstance(nested, dict):
+            merged = dict(nested)
+            for key, value in conditions.items():
+                if key != "conditions":
+                    merged[key] = value
+            conditions = merged
+
+        if _coerce_bool(conditions.get("always_false", False)):
+            return False
+
+        all_conditions = list(conditions.get("all_conditions") or [])
+        if any(not self._conditions_met(item) for item in all_conditions if isinstance(item, dict)):
+            return False
+
+        any_conditions = [item for item in list(conditions.get("any_conditions") or []) if isinstance(item, dict)]
+        if any_conditions and not any(self._conditions_met(item) for item in any_conditions):
+            return False
+
+        not_conditions = [item for item in list(conditions.get("not_conditions") or []) if isinstance(item, dict)]
+        if any(self._conditions_met(item) for item in not_conditions):
+            return False
+
         requires_flags = _string_list(conditions.get("requires_flags"))
         blocked_flags = _string_list(conditions.get("blocked_flags"))
         requires_any_flags = _string_list(conditions.get("requires_any_flags"))
@@ -232,6 +262,33 @@ class GameplayDirector:
                 return False
         for key, value in dict(conditions.get("requires_notes") or {}).items():
             if self.state.notes.get(str(key)) != value:
+                return False
+        for key, value in dict(conditions.get("requires_notes_not") or {}).items():
+            if self.state.notes.get(str(key)) == value:
+                return False
+        for key in _string_list(conditions.get("requires_truthy_notes")):
+            if not _coerce_bool(self.state.notes.get(str(key), False)):
+                return False
+        for key in _string_list(conditions.get("blocked_truthy_notes")):
+            if _coerce_bool(self.state.notes.get(str(key), False)):
+                return False
+        for key, value in dict(conditions.get("requires_notes_min") or {}).items():
+            if _coerce_float(self.state.notes.get(str(key), 0.0), 0.0) < _coerce_float(value, 0.0):
+                return False
+        for key, value in dict(conditions.get("requires_notes_max") or {}).items():
+            if _coerce_float(self.state.notes.get(str(key), 0.0), 0.0) > _coerce_float(value, 0.0):
+                return False
+        for key, value in dict(conditions.get("requires_note_greater_than") or {}).items():
+            if _coerce_float(self.state.notes.get(str(key), 0.0), 0.0) <= _coerce_float(value, 0.0):
+                return False
+        for key, value in dict(conditions.get("requires_note_less_than") or {}).items():
+            if _coerce_float(self.state.notes.get(str(key), 0.0), 0.0) >= _coerce_float(value, 0.0):
+                return False
+        for key, values in dict(conditions.get("requires_notes_in") or {}).items():
+            if self.state.notes.get(str(key)) not in list(values or []):
+                return False
+        for key, values in dict(conditions.get("blocked_notes_in") or {}).items():
+            if self.state.notes.get(str(key)) in list(values or []):
                 return False
         for quest_id, expected_state in dict(conditions.get("requires_quests") or {}).items():
             if self.state.quests.get(str(quest_id)) != str(expected_state):
@@ -567,6 +624,7 @@ class GameplayDirector:
             current_node_id=start_node,
             source=source,
         )
+        self._apply_effects(conversation.get("effects_on_start") or {})
         self.telemetry.log_event("dialogue_started", conversation_id=conversation_id, source=source)
         self._present_dialogue_node()
         return True
@@ -615,40 +673,66 @@ class GameplayDirector:
         session = self.state.active_dialogue
         if session is None:
             return
-        resolved_node_id, node = self._resolve_dialogue_node(session.conversation_id, session.current_node_id)
-        if resolved_node_id is None or node is None:
-            self.state.active_dialogue = None
-            return
-        session.current_node_id = resolved_node_id
-        if session.history and session.history[-1] == resolved_node_id:
-            return
+        visited: set[str] = set()
 
-        speaker = str(node.get("speaker") or "")
-        session.speaker = speaker
-        session.history.append(resolved_node_id)
-        self._apply_effects(node.get("effects_on_enter") or {})
-        self.telemetry.log_event(
-            "dialogue_line_presented",
-            conversation_id=session.conversation_id,
-            node_id=resolved_node_id,
-            speaker=speaker,
-            text=self._localized_text(
+        while session is not None:
+            resolved_node_id, node = self._resolve_dialogue_node(session.conversation_id, session.current_node_id)
+            if resolved_node_id is None or node is None:
+                self.state.active_dialogue = None
+                return
+            if resolved_node_id in visited:
+                return
+            visited.add(resolved_node_id)
+            session.current_node_id = resolved_node_id
+            if session.history and session.history[-1] == resolved_node_id:
+                return
+
+            speaker = str(node.get("speaker") or "")
+            session.speaker = speaker
+            session.history.append(resolved_node_id)
+            self._apply_effects(node.get("effects_on_enter") or {})
+            text = self._localized_text(
                 node.get("text"),
                 text_key=node.get("text_key"),
                 default=str(node.get("text") or ""),
                 params=self.state.notes,
-            ),
-            choice_count=len(self._filtered_choices(node)),
-        )
+            )
+            choices = self._filtered_choices(node)
+            auto_advance = _coerce_bool(node.get("auto_advance", False))
+            if auto_advance and not text.strip() and not speaker.strip() and not choices:
+                next_node_id = str(node.get("next") or "")
+                self.telemetry.log_event(
+                    "dialogue_auto_advanced",
+                    conversation_id=session.conversation_id,
+                    node_id=resolved_node_id,
+                    renpy_statement=str(node.get("renpy_statement") or ""),
+                )
+                if not next_node_id:
+                    session.completed = True
+                    self.telemetry.log_event("dialogue_completed", conversation_id=session.conversation_id)
+                    self.state.active_dialogue = None
+                    return
+                session.current_node_id = next_node_id
+                continue
 
-        live2d_motion = str(node.get("live2d_motion") or "")
-        expression = str(node.get("expression") or "")
-        conversation = dict(self.dialogues.get(session.conversation_id) or {})
-        cast = dict(conversation.get("cast") or {})
-        cast_entry = dict(cast.get(speaker) or {})
-        model_id = str(node.get("model_id") or cast_entry.get("live2d_model") or "")
-        if model_id and live2d_motion:
-            self._emit_live2d_motion(model_id, live2d_motion, expression=expression, source=f"dialogue:{speaker}")
+            self.telemetry.log_event(
+                "dialogue_line_presented",
+                conversation_id=session.conversation_id,
+                node_id=resolved_node_id,
+                speaker=speaker,
+                text=text,
+                choice_count=len(choices),
+            )
+
+            live2d_motion = str(node.get("live2d_motion") or "")
+            expression = str(node.get("expression") or "")
+            conversation = dict(self.dialogues.get(session.conversation_id) or {})
+            cast = dict(conversation.get("cast") or {})
+            cast_entry = dict(cast.get(speaker) or {})
+            model_id = str(node.get("model_id") or cast_entry.get("live2d_model") or "")
+            if model_id and live2d_motion:
+                self._emit_live2d_motion(model_id, live2d_motion, expression=expression, source=f"dialogue:{speaker}")
+            return
 
     def _update_dialogue_idle(self, frame_index: int) -> None:
         session = self.state.active_dialogue
@@ -679,6 +763,15 @@ class GameplayDirector:
         for key, value in dict(effects.get("set_notes") or {}).items():
             self.state.notes[str(key)] = value
             self.telemetry.log_event("note_updated", key=str(key), value=value, source="effect")
+        for key, value in dict(effects.get("add_notes") or {}).items():
+            note_key = str(key)
+            current = self.state.notes.get(note_key, 0)
+            if isinstance(current, (int, float)) and isinstance(value, (int, float)):
+                updated = current + value
+            else:
+                updated = _coerce_float(current, 0.0) + _coerce_float(value, 0.0)
+            self.state.notes[note_key] = updated
+            self.telemetry.log_event("note_updated", key=note_key, value=updated, source="effect")
         for key, value in dict(effects.get("add_counters") or {}).items():
             amount = _coerce_float(value, 0.0)
             self.state.add_counter(str(key), amount)
@@ -694,6 +787,244 @@ class GameplayDirector:
             expression = str(live2d.get("expression") or "")
             if model_id and motion:
                 self._emit_live2d_motion(model_id, motion, expression=expression, source="effect")
+
+        for command in list(effects.get("renpy_commands") or []):
+            if isinstance(command, dict):
+                self._apply_renpy_command(command)
+
+    def _renpy_stage_state(self) -> Dict[str, Any]:
+        state = self.state.notes.get("_renpy_stage")
+        if not isinstance(state, dict):
+            state = {"background": {}, "slots": {}, "audio": {}}
+            self.state.notes["_renpy_stage"] = state
+        state.setdefault("background", {})
+        state.setdefault("slots", {})
+        state.setdefault("audio", {})
+        return state
+
+    def _renpy_stage_node(self, slot: str) -> Optional[Node]:
+        names = {
+            "background": "RenPyBackground",
+            "left": "RenPyCharacterLeft",
+            "center": "RenPyCharacterCenter",
+            "right": "RenPyCharacterRight",
+        }
+        return self.scene_tree.find(names.get(str(slot), ""))
+
+    def _set_renpy_stage_visibility(self, slot: str, *, visible: bool, texture: str = "", metadata: Optional[Dict[str, Any]] = None) -> bool:
+        node = self._renpy_stage_node(slot)
+        if node is None:
+            return False
+        node.active = bool(visible)
+        ui = node.get_component("UIControl")
+        if isinstance(ui, UIControlComponent):
+            ui.visible = bool(visible)
+        image = node.get_component("Image")
+        if isinstance(image, ImageComponent) and texture:
+            image.texture = texture
+        if isinstance(metadata, dict):
+            node.metadata.update(metadata)
+        return True
+
+    def _clear_renpy_stage_slot(self, slot: str) -> None:
+        node = self._renpy_stage_node(slot)
+        if node is None:
+            return
+        image = node.get_component("Image")
+        if isinstance(image, ImageComponent):
+            image.texture = ""
+        ui = node.get_component("UIControl")
+        if isinstance(ui, UIControlComponent):
+            ui.visible = False
+        node.active = False
+        for key in ["renpy_tag", "renpy_alias", "renpy_image", "renpy_expression", "renpy_texture"]:
+            node.metadata.pop(key, None)
+
+    def _find_renpy_stage_slot(self, target: str) -> str:
+        normalized = str(target or "").strip().lower()
+        if normalized in {"background", "bg"}:
+            return "background"
+        stage = self._renpy_stage_state()
+        for slot, payload in dict(stage.get("slots") or {}).items():
+            candidates = {
+                str(payload.get("tag") or "").lower(),
+                str(payload.get("alias") or "").lower(),
+                str(payload.get("image") or "").lower(),
+                str(payload.get("expression") or "").lower(),
+            }
+            if normalized and normalized in candidates:
+                return str(slot)
+        return ""
+
+    def _resolve_renpy_texture(self, image_name: str, *, background: bool) -> str:
+        raw = str(image_name or "").strip()
+        if not raw:
+            return ""
+
+        normalized = re.sub(r"[^\w/.-]+", "_", raw.replace("\\", "/")).strip("_")
+        candidates: list[str] = []
+        if "." in Path(raw).name:
+            candidates.extend([raw, f"assets/{raw}"])
+        else:
+            base_dir = "backgrounds" if background else "characters"
+            for ext in [".png", ".webp", ".jpg", ".jpeg"]:
+                candidates.extend(
+                    [
+                        f"assets/renpy/{base_dir}/{normalized}{ext}",
+                        f"assets/images/{base_dir}/{normalized}{ext}",
+                        f"assets/images/{normalized}{ext}",
+                        f"assets/{normalized}{ext}",
+                    ]
+                )
+        for candidate in candidates:
+            try:
+                if self.resource_manager.exists(candidate):
+                    return str(candidate).replace("\\", "/")
+            except Exception:
+                continue
+        return raw
+
+    def _resolve_renpy_audio(self, asset_name: str, *, channel: str) -> str:
+        raw = str(asset_name or "").strip()
+        if not raw:
+            return ""
+        normalized = re.sub(r"[^\w/.-]+", "_", raw.replace("\\", "/")).strip("_")
+        candidates: list[str] = []
+        if "." in Path(raw).name:
+            candidates.extend([raw, f"assets/audio/{raw}", f"assets/{raw}"])
+        else:
+            folder = "music" if channel == "music" else ("voice" if channel == "voice" else "audio")
+            for ext in [".ogg", ".opus", ".wav", ".mp3"]:
+                candidates.extend(
+                    [
+                        f"assets/{folder}/{normalized}{ext}",
+                        f"assets/audio/{normalized}{ext}",
+                        f"assets/{normalized}{ext}",
+                    ]
+                )
+        for candidate in candidates:
+            try:
+                if self.resource_manager.exists(candidate):
+                    return str(candidate).replace("\\", "/")
+            except Exception:
+                continue
+        return raw
+
+    def _select_renpy_stage_slot(self, position: str, tag: str, alias: str) -> str:
+        normalized_position = str(position or "").strip().lower()
+        if normalized_position in {"left", "center", "right"}:
+            return normalized_position
+        existing = self._find_renpy_stage_slot(alias or tag)
+        if existing in {"left", "center", "right"}:
+            return existing
+        stage = self._renpy_stage_state()
+        occupied = {str(slot) for slot in dict(stage.get("slots") or {}).keys()}
+        for slot in ["center", "left", "right"]:
+            if slot not in occupied:
+                return slot
+        return "center"
+
+    def _apply_renpy_command(self, command: Dict[str, Any]) -> None:
+        kind = str(command.get("kind") or "").strip().lower()
+        if not kind:
+            return
+
+        stage = self._renpy_stage_state()
+        if kind == "scene":
+            image_name = str(command.get("image") or "").strip()
+            texture = self._resolve_renpy_texture(image_name, background=True)
+            if image_name:
+                self._set_renpy_stage_visibility(
+                    "background",
+                    visible=True,
+                    texture=texture or image_name,
+                    metadata={"renpy_image": image_name, "renpy_texture": texture or image_name},
+                )
+                stage["background"] = {"image": image_name, "texture": texture or image_name}
+            else:
+                self._clear_renpy_stage_slot("background")
+                stage["background"] = {}
+            if _coerce_bool(command.get("clear_characters", True)):
+                for slot in ["left", "center", "right"]:
+                    self._clear_renpy_stage_slot(slot)
+                stage["slots"] = {}
+            self.telemetry.log_event("renpy_scene", image=image_name, texture=texture or image_name)
+            return
+
+        if kind == "show":
+            image_name = str(command.get("image") or "").strip()
+            tag = str(command.get("tag") or _image_tag(image_name)).strip()
+            alias = str(command.get("alias") or "").strip()
+            slot = self._select_renpy_stage_slot(str(command.get("position") or ""), tag, alias)
+            texture = self._resolve_renpy_texture(image_name, background=False)
+            previous_slot = self._find_renpy_stage_slot(alias or tag)
+            if previous_slot and previous_slot != slot:
+                self._clear_renpy_stage_slot(previous_slot)
+                dict(stage.get("slots") or {}).pop(previous_slot, None)
+            self._set_renpy_stage_visibility(
+                slot,
+                visible=True,
+                texture=texture or image_name,
+                metadata={
+                    "renpy_tag": tag,
+                    "renpy_alias": alias,
+                    "renpy_image": image_name,
+                    "renpy_expression": image_name,
+                    "renpy_texture": texture or image_name,
+                },
+            )
+            stage.setdefault("slots", {})[slot] = {
+                "tag": tag,
+                "alias": alias,
+                "image": image_name,
+                "expression": image_name,
+                "texture": texture or image_name,
+            }
+            self.telemetry.log_event("renpy_show", slot=slot, tag=tag, image=image_name, texture=texture or image_name)
+            return
+
+        if kind == "hide":
+            slot = self._find_renpy_stage_slot(str(command.get("target") or command.get("tag") or ""))
+            if slot:
+                self._clear_renpy_stage_slot(slot)
+                dict(stage.get("slots") or {}).pop(slot, None)
+                self.telemetry.log_event("renpy_hide", slot=slot, target=str(command.get("target") or ""))
+            return
+
+        if kind in {"play", "stop"}:
+            channel = str(command.get("channel") or "sfx").strip().lower() or "sfx"
+            player_id = f"renpy_{channel}"
+            if kind == "stop":
+                if self.audio_manager is not None:
+                    self.audio_manager.stop(player_id)
+                stage.setdefault("audio", {}).pop(channel, None)
+                self.telemetry.log_event("renpy_audio_stop", channel=channel)
+                return
+
+            asset_name = str(command.get("asset") or "").strip()
+            resolved_asset = self._resolve_renpy_audio(asset_name, channel=channel)
+            loop = _coerce_bool(command.get("loop", channel == "music"))
+            stage.setdefault("audio", {})[channel] = {"asset": resolved_asset or asset_name, "loop": loop}
+            playback_started = False
+            if self.audio_manager is not None and resolved_asset:
+                audio_id = f"{player_id}_stream"
+                self.audio_manager.stop(player_id)
+                if self.audio_manager.load_stream(audio_id, resolved_asset):
+                    player = self.audio_manager.create_player(
+                        player_id,
+                        audio_id,
+                        loop=loop,
+                        category=channel,
+                    )
+                    if player is not None:
+                        playback_started = self.audio_manager.play(player_id)
+            self.telemetry.log_event(
+                "renpy_audio_play",
+                channel=channel,
+                asset=resolved_asset or asset_name,
+                loop=loop,
+                playback_started=playback_started,
+            )
 
     def start_wave(self, wave_id: str, *, frame_index: int) -> bool:
         self._ensure_content_loaded()

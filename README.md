@@ -115,7 +115,10 @@ Windows executable packaging:
 ```bat
 .\build.bat
 .\build.bat --recreate-venv
+.\build.bat --test-exe
 ```
+
+The packaged `dist/reverie.exe` now includes the built-in Reverie-Gamer runtime flows in one file, including `/engine video`, `/engine renpy`, and `/modeling primitive`. If `ffmpeg` is available during build, `build.bat` bundles it into the executable so `mp4` and `gif` export work without a separate system install. If not, frame-sequence export still works and encoded video falls back to an external `ffmpeg` at runtime.
 
 ## Documentation
 

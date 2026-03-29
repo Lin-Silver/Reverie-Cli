@@ -4761,6 +4761,8 @@ class CommandHandler:
                         "/engine run [scene_path]",
                         "/engine validate",
                         "/engine smoke [scene_path]",
+                        "/engine video [mp4|gif|frames] [scene_path]",
+                        "/engine renpy <script_path> [conversation_id] [entry_label]",
                         "/engine health",
                         "/engine benchmark",
                         "/engine package",
@@ -4878,6 +4880,59 @@ class CommandHandler:
             self._print_tool_result("Reverie Engine Smoke", result)
             return True
 
+        if action == "video":
+            export_format = tokens[1] if len(tokens) > 1 else Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Export Format",
+                default="mp4",
+                choices=["mp4", "gif", "frames"],
+            ).strip()
+            scene_path = tokens[2] if len(tokens) > 2 else "data/scenes/main.relscene.json"
+            frame_count = int(
+                (tokens[3] if len(tokens) > 3 else Prompt.ask(
+                    f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Runtime Frames",
+                    default="180",
+                ).strip())
+                or "180"
+            )
+            result = tool.execute(
+                action="export_video",
+                output_dir=output_dir,
+                scene_path=scene_path,
+                format=export_format,
+                frames=frame_count,
+            )
+            self._print_tool_result("Reverie Engine Video", result)
+            return True
+
+        if action in {"renpy", "import-renpy"}:
+            script_path = tokens[1] if len(tokens) > 1 else Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Ren'Py Script Path",
+                default="references/renpy-master/testcases/game/tests/test_game_flow.rpy",
+            ).strip()
+            conversation_id = tokens[2] if len(tokens) > 2 else Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Conversation ID (optional)",
+                default="",
+            ).strip()
+            entry_label = tokens[3] if len(tokens) > 3 else Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Entry Label (optional)",
+                default="",
+            ).strip()
+            autostart = Confirm.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Update the main scene to autostart this conversation?",
+                default=True,
+            )
+            result = tool.execute(
+                action="import_renpy",
+                output_dir=output_dir,
+                script_path=script_path,
+                conversation_id=conversation_id,
+                entry_label=entry_label,
+                autostart=autostart,
+                overwrite=True,
+            )
+            self._print_tool_result("Reverie Engine Ren'Py Import", result)
+            return True
+
         if action == "test":
             validation = tool.execute(action="validate_project", output_dir=output_dir)
             self._print_tool_result("Reverie Engine Validation", validation)
@@ -4927,7 +4982,7 @@ class CommandHandler:
             return True
 
         self.console.print(
-            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /engine [profile|create|sample|run|validate|smoke|health|benchmark|package|test][/{self.theme.AMBER_GLOW}]"
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /engine [profile|create|sample|run|validate|smoke|video|renpy|health|benchmark|package|test][/{self.theme.AMBER_GLOW}]"
         )
         return True
 
@@ -4959,6 +5014,7 @@ class CommandHandler:
                         "/modeling setup",
                         "/modeling sync",
                         "/modeling stub [model_name]",
+                        "/modeling primitive [box|plane|pyramid|sphere] [model_name]",
                         "/modeling import <runtime_export> [source_bbmodel] [preview_image] [dest_name]",
                         "/tools  # shows built-in Ashfox MCP tools when Blockbench + plugin are running",
                         "/modeling ashfox tools",
@@ -5007,6 +5063,43 @@ class CommandHandler:
                 overwrite=overwrite,
             )
             self._print_tool_result("Model Stub", result)
+            return True
+
+        if action == "primitive":
+            primitive = tokens[1] if len(tokens) > 1 else Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Primitive",
+                default="box",
+                choices=["box", "plane", "pyramid", "sphere"],
+            ).strip()
+            model_name = tokens[2] if len(tokens) > 2 else Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Model Name",
+                default=f"{primitive}_asset",
+            ).strip()
+            size = float(
+                (tokens[3] if len(tokens) > 3 else Prompt.ask(
+                    f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Base Size",
+                    default="1.0",
+                ).strip())
+                or "1.0"
+            )
+            create_preview = Confirm.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Generate a preview image?",
+                default=True,
+            )
+            overwrite = Confirm.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Overwrite generated files if they exist?",
+                default=False,
+            )
+            result = tool.execute(
+                action="generate_primitive",
+                output_dir=output_dir,
+                primitive=primitive,
+                model_name=model_name,
+                size=size,
+                create_preview=create_preview,
+                overwrite=overwrite,
+            )
+            self._print_tool_result("Primitive Model", result)
             return True
 
         if action == "import":
@@ -5108,7 +5201,7 @@ class CommandHandler:
                 return True
 
         self.console.print(
-            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /modeling [status|setup|sync|stub|import|ashfox][/{self.theme.AMBER_GLOW}]"
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /modeling [status|setup|sync|stub|primitive|import|ashfox][/{self.theme.AMBER_GLOW}]"
         )
         return True
     

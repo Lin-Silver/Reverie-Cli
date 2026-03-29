@@ -1,3 +1,21 @@
+## Reverie CLI v2.1.6 - Single-File Gamer Runtime Integration, Ren'Py Runtime Support, and Video Packaging
+
+**Release Date:** 2026-03-29
+
+### Added
+
+* Added built-in primitive 3D asset generation so Reverie-Gamer can create runtime `.gltf` placeholders and preview renders directly through `/modeling primitive`.
+* Added built-in playblast and encoded video export through `/engine video`, including frame-sequence export that works even when no external encoder is installed.
+* Added a practical Ren'Py import pipeline through `/engine renpy`, including stage-command support for `scene`, `show`, `hide`, `play`, `voice`, and `stop`.
+* Added build-time support for bundling `ffmpeg` into the Windows one-file `reverie.exe` when it is available.
+
+### Changed
+
+* Promoted Ren'Py menu conditions into Reverie's executable `choices.conditions`, so imported conditional branches now run instead of staying as metadata-only hints.
+* Expanded the runtime dialogue/effects system so imported Ren'Py stage and audio commands execute during playtest rather than appearing as inert content.
+* Updated the PyInstaller spec and Windows build flow so the packaged executable explicitly collects the new Reverie-Gamer engine, modeling, Ren'Py, and video modules.
+* Updated `build.bat` to run `tests\engine_lite` before packaging and to support a non-interactive `--test-exe` sanity-check flow.
+
 ## Reverie CLI v2.1.5 - Reverie-Gamer Modeling Pipeline, Engine Cleanup, and Blockbench/Ashfox Integration
 
 **Release Date:** 2026-03-28

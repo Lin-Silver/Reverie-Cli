@@ -68,6 +68,7 @@ Windows packaging is handled by `build.bat`.
 ```bat
 .\build.bat
 .\build.bat --recreate-venv
+.\build.bat --test-exe
 ```
 
 `build.bat` currently:
@@ -76,8 +77,12 @@ Windows packaging is handled by `build.bat`.
 - Upgrades packaging tools
 - Installs the project in editable mode
 - Validates dependency health
+- Runs `tests\engine_lite` before packaging
 - Bundles required Comfy assets
+- Bundles `ffmpeg` into the one-file executable when it is available at build time
 - Builds `dist/reverie.exe` with PyInstaller
+
+That packaged executable is intended to carry the built-in Reverie-Gamer flows in one file, including the integrated runtime, procedural 3D asset generation, Ren'Py import, and playblast/video export commands.
 
 ## Documentation Maintenance
 

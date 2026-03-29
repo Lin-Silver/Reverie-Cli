@@ -2,6 +2,7 @@
 from PyInstaller.utils.hooks import collect_all
 from pathlib import Path
 import os
+import shutil
 
 datas = [('README.md', '.')]
 binaries = []
@@ -9,12 +10,44 @@ hiddenimports = ['rich', 'rich.console', 'rich.panel', 'rich.table', 'rich.synta
                  'pyglet', 'moderngl', 'glcontext',
                  'reverie.cli.input_handler', 'reverie.cli.commands', 'reverie.cli.display', 'reverie.cli.theme', 'reverie.cli.markdown_formatter', 'reverie.cli.session_ui',
                  'reverie.config', 'reverie.rules_manager', 'reverie.session', 'reverie.agent', 'reverie.context_engine',
-                 'reverie.engine_lite', 'reverie.tools.reverie_engine_lite']
+                 'reverie.engine_lite', 'reverie.engine_lite.video', 'reverie.engine_lite.renpy_import', 'reverie.engine_lite.procedural_assets',
+                 'reverie.tools.registry', 'reverie.tools.reverie_engine', 'reverie.tools.reverie_engine_lite', 'reverie.tools.game_modeling_workbench']
 
 
 def add_data_if_exists(source_path: Path, target_dir: str) -> None:
     if source_path.exists() and source_path.is_file():
         datas.append((str(source_path), target_dir))
+
+
+def add_binary_if_exists(source_path: Path, target_dir: str) -> None:
+    if source_path.exists() and source_path.is_file():
+        binaries.append((str(source_path), target_dir))
+
+
+def resolve_ffmpeg_binary() -> Path | None:
+    candidates = []
+    ffmpeg_env = os.environ.get("REVERIE_FFMPEG_PATH", "").strip()
+    if ffmpeg_env:
+        env_path = Path(ffmpeg_env)
+        if env_path.is_dir():
+            candidates.extend([env_path / "ffmpeg.exe", env_path / "ffmpeg"])
+        else:
+            candidates.append(env_path)
+
+    which_ffmpeg = shutil.which("ffmpeg")
+    if which_ffmpeg:
+        candidates.append(Path(which_ffmpeg))
+
+    candidates.extend(
+        [
+            Path("D:/Program Files/Environment/ffmpeg/bin/ffmpeg.exe"),
+            Path("C:/Program Files/ffmpeg/bin/ffmpeg.exe"),
+        ]
+    )
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_file():
+            return candidate.resolve()
+    return None
 
 
 # NOTE:
@@ -45,6 +78,10 @@ if resolved_icon is None:
 add_data_if_exists(comfy_src / "generate_image.py", "reverie_resources/comfy")
 add_data_if_exists(comfy_src / "embedded_comfy.b64", "reverie_resources/comfy")
 add_data_if_exists(repo_root / "reverie" / "engine_lite" / "vendor" / "live2d" / "live2dcubismcore.min.js", "reverie/engine_lite/vendor/live2d")
+
+ffmpeg_binary = resolve_ffmpeg_binary()
+if ffmpeg_binary is not None:
+    add_binary_if_exists(ffmpeg_binary, "reverie_resources/ffmpeg")
 
 for package_name in ('rich', 'bs4', 'pyglet', 'moderngl', 'glcontext'):
     try:

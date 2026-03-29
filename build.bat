@@ -26,13 +26,19 @@ set "TMP_BUILD_BASE=%TEMP%\reverie_pyi"
 set "PYI_WORK_DIR=%TMP_BUILD_BASE%\work_%RANDOM%_%RANDOM%"
 set "PYI_DIST_DIR=%TMP_BUILD_BASE%\dist_%RANDOM%_%RANDOM%"
 set "RECREATE_VENV=0"
+set "RUN_EXE_TEST=0"
+set "USER_FFMPEG_PATH=%REVERIE_FFMPEG_PATH%"
+set "REVERIE_FFMPEG_PATH="
 
-if /I "%~1"=="--recreate-venv" (
-    set "RECREATE_VENV=1"
-)
-if /I "%~1"=="--reuse-venv" (
-    set "RECREATE_VENV=0"
-)
+:parse_args
+if "%~1"=="" goto args_done
+if /I "%~1"=="--recreate-venv" set "RECREATE_VENV=1"
+if /I "%~1"=="--reuse-venv" set "RECREATE_VENV=0"
+if /I "%~1"=="--test-exe" set "RUN_EXE_TEST=1"
+shift
+goto parse_args
+
+:args_done
 
 REM Check Python availability
 where %PYTHON_EXE% >nul 2>&1
@@ -42,11 +48,11 @@ if %ERRORLEVEL% neq 0 (
 )
 
 for /f %%V in ('%PYTHON_EXE% -c "import platform; print(platform.python_version())"') do set "PY_VERSION=%%V"
-echo [1/8] Python detected: %PY_VERSION%
+echo [1/10] Python detected: %PY_VERSION%
 
 REM Prepare virtual environment
 echo.
-echo [2/8] Preparing virtual environment...
+echo [2/10] Preparing virtual environment...
 if exist "%VENV_DIR%\Scripts\activate.bat" (
     if "%RECREATE_VENV%"=="1" (
         echo       Recreating clean venv...
@@ -82,7 +88,7 @@ if %ERRORLEVEL% neq 0 (
 
 REM Upgrade packaging stack
 echo.
-echo [3/8] Upgrading build tooling...
+echo [3/10] Upgrading build tooling...
 python -m pip install --upgrade pip setuptools wheel
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] Failed to upgrade pip/setuptools/wheel.
@@ -91,10 +97,10 @@ if %ERRORLEVEL% neq 0 (
 
 REM Install PyInstaller and project dependencies
 echo.
-echo [4/8] Installing PyInstaller and project dependencies...
-python -m pip install --upgrade pyinstaller pillow
+echo [4/10] Installing PyInstaller and project dependencies...
+python -m pip install --upgrade pyinstaller pillow pytest
 if %ERRORLEVEL% neq 0 (
-    echo [ERROR] Failed to install PyInstaller/Pillow.
+    echo [ERROR] Failed to install build/test dependencies.
     exit /b 1
 )
 
@@ -112,7 +118,7 @@ if %ERRORLEVEL% neq 0 (
 
 REM Dependency health check (catches cp311/cp314 mismatch early)
 echo.
-echo [5/8] Running dependency health check...
+echo [5/10] Running dependency health check...
 python -c "import PIL._imaging, requests, bs4, openai, ddgs, yaml, pydantic_core._pydantic_core, pyglet, moderngl, glcontext; print('dependency_check_ok')"
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] Dependency health check failed.
@@ -120,11 +126,20 @@ if %ERRORLEVEL% neq 0 (
     exit /b 1
 )
 
+REM Engine-lite regression suite
+echo.
+echo [6/10] Running engine-lite regression suite...
+python -m pytest tests\engine_lite -q
+if %ERRORLEVEL% neq 0 (
+    echo [ERROR] Engine-lite tests failed. Build aborted.
+    exit /b 1
+)
+
 if not exist "%TMP_BUILD_BASE%" mkdir "%TMP_BUILD_BASE%" >nul 2>&1
 
 REM Prepare bundled Comfy resources
 echo.
-echo [6/8] Preparing bundled Comfy resources...
+echo [7/10] Preparing bundled Comfy resources...
 if not exist "Comfy\generate_image.py" (
     echo [ERROR] Missing required file: Comfy\generate_image.py
     exit /b 1
@@ -139,6 +154,30 @@ copy /Y "Comfy\generate_image.py" "%BUNDLE_RES_DIR%\comfy\generate_image.py" >nu
 copy /Y "Comfy\embedded_comfy.b64" "%BUNDLE_RES_DIR%\comfy\embedded_comfy.b64" >nul
 set "REVERIE_BUNDLE_RES_DIR=%cd%\%BUNDLE_RES_DIR%"
 echo       Bundled resources: %REVERIE_BUNDLE_RES_DIR%\comfy
+
+REM Detect optional ffmpeg for one-file video export
+echo.
+echo [8/10] Detecting optional ffmpeg encoder...
+if defined USER_FFMPEG_PATH (
+    if exist "%USER_FFMPEG_PATH%" set "REVERIE_FFMPEG_PATH=%USER_FFMPEG_PATH%"
+)
+if not defined REVERIE_FFMPEG_PATH (
+    for /f "delims=" %%F in ('where ffmpeg 2^>nul') do if not defined REVERIE_FFMPEG_PATH set "REVERIE_FFMPEG_PATH=%%F"
+)
+if not defined REVERIE_FFMPEG_PATH (
+    if exist "D:\Program Files\Environment\ffmpeg\bin\ffmpeg.exe" set "REVERIE_FFMPEG_PATH=D:\Program Files\Environment\ffmpeg\bin\ffmpeg.exe"
+)
+if not defined REVERIE_FFMPEG_PATH (
+    if exist "C:\Program Files\ffmpeg\bin\ffmpeg.exe" set "REVERIE_FFMPEG_PATH=C:\Program Files\ffmpeg\bin\ffmpeg.exe"
+)
+
+if defined REVERIE_FFMPEG_PATH (
+    echo       ffmpeg will be bundled into the one-file executable:
+    echo       %REVERIE_FFMPEG_PATH%
+) else (
+    echo [WARNING] ffmpeg was not found. Frames export will still work,
+    echo           but mp4/gif encoding will rely on an external ffmpeg at runtime.
+)
 
 REM Prepare icon path for PyInstaller (prefer ico for Windows)
 set "ICON_ICO=%cd%\reverie.ico"
@@ -167,7 +206,7 @@ if defined REVERIE_ICON_PATH (
 
 REM Build with PyInstaller
 echo.
-echo [7/8] Building executable with PyInstaller...
+echo [9/10] Building executable with PyInstaller...
 echo       This may take a few minutes...
 echo       Work path: %PYI_WORK_DIR%
 echo       Temp dist: %PYI_DIST_DIR%
@@ -201,7 +240,7 @@ if %ERRORLEVEL% neq 0 (
 )
 
 echo.
-echo [8/8] Build artifact validation...
+echo [10/10] Build artifact validation...
 echo       Executable found: %OUTPUT_DIR%\%EXE_NAME%.exe
 
 for %%A in ("%OUTPUT_DIR%\%EXE_NAME%.exe") do set "SIZE=%%~zA"
@@ -218,11 +257,14 @@ echo.
 echo   To run: %OUTPUT_DIR%\%EXE_NAME%.exe
 echo.
 
-set /p "TEST=Test the executable now? (y/n): "
-if /i "%TEST%"=="y" (
-    echo.
-    echo Testing executable...
+if "%RUN_EXE_TEST%"=="1" (
+    echo Running executable sanity check...
     "%OUTPUT_DIR%\%EXE_NAME%.exe" --version
+    if %ERRORLEVEL% neq 0 (
+        echo [WARNING] Executable sanity check returned a non-zero exit code.
+    )
+) else (
+    echo Tip: run .\build.bat --test-exe to execute a quick post-build version check.
 )
 
 echo.

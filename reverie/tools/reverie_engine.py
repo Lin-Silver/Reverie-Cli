@@ -16,6 +16,8 @@ from ..engine import (
     build_engine_config,
     build_project_health_report,
     create_project_skeleton,
+    export_project_video,
+    import_renpy_script,
     inspect_project,
     materialize_sample,
     package_project,
@@ -61,6 +63,8 @@ class _BaseReverieEngineTool(BaseTool):
                     "project_health",
                     "package_project",
                     "benchmark_project",
+                    "export_video",
+                    "import_renpy",
                 ],
                 "description": "Reverie Engine action",
             },
@@ -80,6 +84,14 @@ class _BaseReverieEngineTool(BaseTool):
             "overwrite": {"type": "boolean", "description": "Overwrite starter files if they exist"},
             "iterations": {"type": "integer", "description": "Benchmark iteration count"},
             "include_smoke": {"type": "boolean", "description": "Run smoke validation as part of the action"},
+            "format": {"type": "string", "description": "Video export format: mp4, gif, or frames"},
+            "fps": {"type": "integer", "description": "Video export framerate"},
+            "frames": {"type": "integer", "description": "Number of runtime frames to simulate during export"},
+            "frame_stride": {"type": "integer", "description": "Capture every Nth runtime frame when exporting video"},
+            "script_path": {"type": "string", "description": "Ren'Py .rpy script path for dialogue import"},
+            "conversation_id": {"type": "string", "description": "Optional target conversation id for dialogue import"},
+            "entry_label": {"type": "string", "description": "Optional Ren'Py entry label override"},
+            "autostart": {"type": "boolean", "description": "Update the main scene to autostart the imported conversation"},
             "data": {"type": "object", "description": "Inline scene or prefab data"},
             "payload_type": {
                 "type": "string",
@@ -124,6 +136,10 @@ class _BaseReverieEngineTool(BaseTool):
                 return self._package_project(kwargs)
             if action == "benchmark_project":
                 return self._benchmark_project(kwargs)
+            if action == "export_video":
+                return self._export_video(kwargs)
+            if action == "import_renpy":
+                return self._import_renpy(kwargs)
             return ToolResult.fail(f"Unknown action: {action}")
         except Exception as exc:
             return ToolResult.fail(f"Error executing {action}: {str(exc)}")
@@ -438,6 +454,60 @@ class _BaseReverieEngineTool(BaseTool):
         )
         if result.get("output_path"):
             output += f"\nSaved: {result['output_path']}"
+        return ToolResult.ok(output, result)
+
+    def _export_video(self, kwargs: Dict[str, Any]) -> ToolResult:
+        output_dir = self._resolve_output_dir(kwargs)
+        result = export_project_video(
+            output_dir,
+            scene_path=kwargs.get("scene_path"),
+            format_name=str(kwargs.get("format") or "mp4"),
+            output_path=kwargs.get("output_path"),
+            fps=int(kwargs.get("fps", 30) or 30),
+            frames=int(kwargs.get("frames", 180) or 180),
+            frame_stride=int(kwargs.get("frame_stride", 1) or 1),
+        )
+        output = (
+            f"Exported {ENGINE_BRAND} playblast\n"
+            f"Format: {result['format']}\n"
+            f"Captured frames: {result['frame_count']}\n"
+            f"Frames dir: {result['frames_dir']}"
+        )
+        if result.get("output_path"):
+            output += f"\nVideo: {result['output_path']}"
+        if result.get("telemetry_path"):
+            output += f"\nTelemetry: {result['telemetry_path']}"
+        if result.get("manifest_path"):
+            output += f"\nManifest: {result['manifest_path']}"
+        if result.get("ffmpeg_error"):
+            output += f"\nEncoder status: {result['ffmpeg_error']}"
+        return ToolResult.ok(output, result)
+
+    def _import_renpy(self, kwargs: Dict[str, Any]) -> ToolResult:
+        output_dir = self._resolve_output_dir(kwargs)
+        script_path = str(kwargs.get("script_path") or "").strip()
+        if not script_path:
+            return ToolResult.fail("script_path is required for import_renpy")
+        result = import_renpy_script(
+            output_dir,
+            script_path,
+            conversation_id=str(kwargs.get("conversation_id") or "").strip(),
+            entry_label=str(kwargs.get("entry_label") or "").strip(),
+            autostart=bool(kwargs.get("autostart", False)),
+            overwrite=bool(kwargs.get("overwrite", True)),
+        )
+        output = (
+            f"Imported Ren'Py dialogue script\n"
+            f"Source: {result['source_path']}\n"
+            f"Conversation: {result['conversation_id']}\n"
+            f"Start node: {result['start_node']}\n"
+            f"Nodes: {result['node_count']}\n"
+            f"Dialogue file: {result['dialogue_path']}"
+        )
+        if result.get("autostart_updated"):
+            output += "\nMain scene autostart_conversation updated."
+        if result.get("warning_count"):
+            output += f"\nWarnings: {result['warning_count']}"
         return ToolResult.ok(output, result)
 
     def get_execution_message(self, **kwargs) -> str:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Callable, Dict, Iterable, Optional
 import json
 import uuid
 
@@ -54,10 +54,13 @@ class RuntimeProfile:
 
 
 def runtime_capabilities(project_root: str | Path | None = None) -> Dict[str, Any]:
+    from .video import discover_ffmpeg
+
     sdk_path = discover_live2d_sdk(project_root or Path.cwd())
     modeling_stack = detect_modeling_stack(project_root or Path.cwd())
     ashfox = modeling_stack["ashfox"]
     blockbench = modeling_stack["blockbench"]
+    ffmpeg_path = discover_ffmpeg()
     return {
         "pyglet": pyglet is not None,
         "moderngl": moderngl is not None,
@@ -68,6 +71,8 @@ def runtime_capabilities(project_root: str | Path | None = None) -> Dict[str, An
         "ashfox_available": bool(ashfox.get("available", False)),
         "ashfox_connected": bool(ashfox.get("reachable", False)),
         "ashfox_tool_count": int(ashfox.get("tool_count", 0)),
+        "ffmpeg_available": bool(ffmpeg_path),
+        "ffmpeg_path": ffmpeg_path,
     }
 
 
@@ -111,6 +116,7 @@ class EngineLiteApp:
                 config=self.config or {},
                 live2d=self.live2d_manager,
                 localization=self.localization_manager,
+                audio_manager=self.audio_manager,
             )
         self.sequence_director = SequenceDirector(self.scene_tree, self.telemetry, gameplay=self.gameplay)
         self.ui_system = UISystem(self.scene_tree, gameplay=self.gameplay)
@@ -137,6 +143,15 @@ class EngineLiteApp:
                 self.physics_world.add_body(node)
 
     def run(self, *, frames: int = 180, input_script: Optional[list[dict]] = None) -> Dict[str, Any]:
+        return self.run_with_observer(frames=frames, input_script=input_script, frame_observer=None)
+
+    def run_with_observer(
+        self,
+        *,
+        frames: int = 180,
+        input_script: Optional[list[dict]] = None,
+        frame_observer: Optional[Callable[[int, Any, Dict[str, Any]], None]] = None,
+    ) -> Dict[str, Any]:
         renderer = self.renderer.backend.value if self.renderer else ("native" if (not self.profile.headless and pyglet is not None) else "headless")
         self.telemetry.log_event(
             "session_start",
@@ -190,7 +205,14 @@ class EngineLiteApp:
 
             # Render frame
             if self.renderer:
-                self.renderer.render_frame(self.scene_tree, frame_index=frame_index)
+                frame_snapshot = self.renderer.render_frame(self.scene_tree, frame_index=frame_index)
+                if frame_observer is not None:
+                    payload = {
+                        "dialogue": self.gameplay.get_active_dialogue_view() if self.gameplay else {},
+                        "world_state": self.gameplay.state.summary() if self.gameplay else {},
+                        "telemetry_events": len(self.telemetry.events),
+                    }
+                    frame_observer(frame_index, frame_snapshot, payload)
 
             # Checkpoints
             if frame_index in {0, frames // 2, frames - 1}:
@@ -309,6 +331,7 @@ def run_project(
     frames: int = 180,
     input_script: Optional[list[dict]] = None,
     output_log: str | Path | None = None,
+    frame_observer: Optional[Callable[[int, Any, Dict[str, Any]], None]] = None,
 ) -> Dict[str, Any]:
     tree, resources, config = load_project_scene(project_root, scene_path)
     runtime = dict(config.get("runtime") or {})
@@ -319,7 +342,7 @@ def run_project(
         fixed_step=float(runtime.get("fixed_step", 1.0 / 60.0)),
     )
     app = EngineLiteApp(tree, profile=profile, config=config)
-    summary = app.run(frames=frames, input_script=input_script)
+    summary = app.run_with_observer(frames=frames, input_script=input_script, frame_observer=frame_observer)
     log_path = None
     if output_log:
         log_path = app.telemetry.flush(output_log)

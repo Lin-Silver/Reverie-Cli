@@ -168,6 +168,8 @@ Notes:
 | `/engine run` | Run the entry scene |
 | `/engine validate` | Validate project layout and schemas |
 | `/engine smoke` | Run deterministic smoke flow |
+| `/engine video` | Export a playblast-style frame sequence or encoded video |
+| `/engine renpy <script_path> [conversation_id] [entry_label]` | Import a Ren'Py `.rpy` dialogue script into Reverie's `dialogue.yaml` |
 | `/engine health` | Create a health report |
 | `/engine benchmark` | Record coarse baseline measurements |
 | `/engine package` | Create a portable runtime bundle |
@@ -176,6 +178,7 @@ Notes:
 | `/modeling setup` | Create modeling folders, manifests, docs, and pipeline files |
 | `/modeling sync` | Regenerate the model registry from source/runtime folders |
 | `/modeling stub <model_name>` | Create a starter `.bbmodel` in `assets/models/source/` |
+| `/modeling primitive <type> <model_name>` | Generate a built-in primitive `.gltf` plus preview image |
 | `/modeling import <runtime_export> [source_bbmodel] [preview_image] [dest_name]` | Import a runtime model plus optional source model and preview |
 | `/modeling ashfox tools` | List available Ashfox MCP tools |
 | `/modeling ashfox capabilities` | Show Ashfox capability metadata |

@@ -59,6 +59,7 @@ class CommandHandler:
             'clean': self.cmd_clean,
             'index': self.cmd_index,
             'tools': self.cmd_tools,
+            'plugins': self.cmd_plugins,
             'mcp': self.cmd_mcp,
             'setting': self.cmd_setting,
             'rules': self.cmd_rules,
@@ -2182,6 +2183,7 @@ class CommandHandler:
         """Show current status with dreamy styling"""
         config_manager = self.app.get('config_manager')
         config = config_manager.load() if config_manager else None
+        runtime_plugin_manager = self.app.get('runtime_plugin_manager')
         indexer = self.app.get('indexer')
         ensure_context_engine = self.app.get('ensure_context_engine')
         ensure_git_integration = self.app.get('ensure_git_integration')
@@ -2229,6 +2231,30 @@ class CommandHandler:
                     f"{self.deco.DOT_MEDIUM} Config Path",
                     f"[{self.theme.TEXT_DIM}]{escape(active_config_path)}[/{self.theme.TEXT_DIM}]"
                 )
+
+        if runtime_plugin_manager:
+            plugin_summary = runtime_plugin_manager.get_status_summary()
+            plugin_label = plugin_summary.get("summary_label", "0 detected | 0 ready | 0 rc | 0 tools")
+            ready_names = str(plugin_summary.get("ready_names", "") or "").strip()
+            protocol_names = str(plugin_summary.get("protocol_names", "") or "").strip()
+            table.add_row(
+                f"{self.deco.SPARKLE} Runtime Plugins",
+                f"[{self.theme.BLUE_SOFT}]{escape(plugin_label)}[/{self.theme.BLUE_SOFT}]",
+            )
+            if ready_names:
+                table.add_row(
+                    f"{self.deco.DOT_MEDIUM} Ready Plugins",
+                    f"[{self.theme.MINT_SOFT}]{escape(ready_names)}[/{self.theme.MINT_SOFT}]",
+                )
+            if protocol_names:
+                table.add_row(
+                    f"{self.deco.DOT_MEDIUM} RC Plugins",
+                    f"[{self.theme.MINT_SOFT}]{escape(protocol_names)}[/{self.theme.MINT_SOFT}]",
+                )
+            table.add_row(
+                f"{self.deco.DOT_MEDIUM} Plugin Root",
+                f"[{self.theme.TEXT_DIM}]{escape(str(plugin_summary.get('install_root', '')))}[/{self.theme.TEXT_DIM}]",
+            )
         
         # Session info
         if session_manager:
@@ -2340,6 +2366,233 @@ class CommandHandler:
                 f"[{self.theme.MINT_SOFT}]{a_hours}h {a_minutes}m {a_seconds}s[/{self.theme.MINT_SOFT}]"
             )
         
+        self.console.print(table)
+        self.console.print()
+        return True
+
+    def cmd_plugins(self, args: str) -> bool:
+        """Inspect plugin-style runtime discovery and install locations."""
+        runtime_plugin_manager = self.app.get('runtime_plugin_manager')
+        if not runtime_plugin_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Runtime plugin manager is not available.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        query = str(args or "").strip().lower()
+        if query in ("", "status", "list"):
+            force_refresh = False
+        elif query in ("rescan", "reload", "refresh"):
+            force_refresh = True
+        elif query.startswith("inspect "):
+            return self._cmd_plugins_inspect(args.strip()[8:].strip())
+        elif query == "path":
+            summary = runtime_plugin_manager.get_status_summary()
+            self._show_command_panel(
+                "Runtime Plugin Paths",
+                subtitle="Plugin-delivered external runtimes live beside the executable.",
+                accent=self.theme.BLUE_SOFT,
+            )
+            self.console.print(
+                self._build_key_value_table(
+                    [
+                        ("Install Root", summary.get("install_root", "")),
+                        ("Catalog Code", summary.get("catalog_root", "")),
+                    ]
+                )
+            )
+            self.console.print()
+            return True
+        else:
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /plugins [status|rescan|path|inspect <plugin-id>][/{self.theme.AMBER_GLOW}]"
+            )
+            return True
+
+        summary = runtime_plugin_manager.get_status_summary(force_refresh=force_refresh)
+        rows = runtime_plugin_manager.list_display_rows(force_refresh=False)
+        if force_refresh and self.app.get('refresh_agent_prompt_guidance'):
+            self.app['refresh_agent_prompt_guidance']()
+
+        self._show_command_panel(
+            "Runtime Plugins",
+            subtitle="Only currently detected plugin directories are shown, with Reverie CLI `-RC` protocol probing when possible.",
+            accent=self.theme.BLUE_SOFT,
+            meta=str(summary.get("install_root", "")),
+        )
+
+        overview = self._build_key_value_table(
+            [
+                ("Summary", summary.get("summary_label", "0 detected | 0 ready | 0 rc | 0 tools")),
+                ("Detected", str(summary.get("detected_count", 0))),
+                ("Ready", str(summary.get("ready_count", 0))),
+                ("Invalid Manifests", str(summary.get("invalid_count", 0))),
+                ("RC Ready", str(summary.get("protocol_ready_count", 0))),
+                ("Noncompliant", str(summary.get("noncompliant_count", 0))),
+                ("RC Tools", str(summary.get("tool_count", 0))),
+                ("Ready Plugins", summary.get("ready_names", "") or "(none)"),
+                ("RC Plugins", summary.get("protocol_names", "") or "(none)"),
+            ]
+        )
+        self.console.print(overview)
+        self.console.print()
+
+        if not rows:
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} No plugin directories are currently present under `.reverie/plugins`.[/{self.theme.TEXT_DIM}]"
+            )
+            self.console.print()
+            return True
+
+        table = Table(
+            title=f"[bold {self.theme.PINK_SOFT}]{self.deco.CRYSTAL} Detected Runtime Plugins[/bold {self.theme.PINK_SOFT}]",
+            box=box.ROUNDED,
+            border_style=self.theme.BORDER_PRIMARY,
+            expand=True,
+        )
+        table.add_column("Runtime", style=f"bold {self.theme.BLUE_SOFT}", width=20)
+        table.add_column("Type", style=self.theme.TEXT_SECONDARY, width=12)
+        table.add_column("Status", style=self.theme.TEXT_SECONDARY, width=16)
+        table.add_column("Protocol", style=self.theme.TEXT_SECONDARY, width=14)
+        table.add_column("Tools", style=self.theme.TEXT_SECONDARY, width=6)
+        table.add_column("Source", style=self.theme.TEXT_DIM, width=16)
+        table.add_column("Entry", style=self.theme.TEXT_PRIMARY, ratio=2)
+        table.add_column("Notes", style=self.theme.TEXT_DIM, ratio=3)
+
+        for row in rows:
+            status = row.get("status", "")
+            protocol_status = row.get("protocol_status", "")
+            if status == "ready":
+                status_color = self.theme.MINT_SOFT
+            elif status == "entry-missing":
+                status_color = self.theme.AMBER_GLOW
+            elif status == "invalid-manifest":
+                status_color = self.theme.CORAL_SOFT
+            else:
+                status_color = self.theme.TEXT_DIM
+
+            if protocol_status == "supported":
+                protocol_color = self.theme.MINT_SOFT
+            elif protocol_status in ("timeout", "invalid-json", "error"):
+                protocol_color = self.theme.CORAL_SOFT
+            elif protocol_status == "unsupported":
+                protocol_color = self.theme.AMBER_GLOW
+            else:
+                protocol_color = self.theme.TEXT_DIM
+
+            table.add_row(
+                row.get("name", ""),
+                row.get("family", ""),
+                f"[{status_color}]{escape(row.get('status_label', ''))}[/{status_color}]",
+                f"[{protocol_color}]{escape(row.get('protocol_label', ''))}[/{protocol_color}]",
+                row.get("tool_count", "0"),
+                row.get("source", ""),
+                escape(row.get("entry", "-")),
+                escape(row.get("notes", "")),
+            )
+
+        self.console.print(table)
+        self.console.print()
+        return True
+
+    def _cmd_plugins_inspect(self, plugin_id: str) -> bool:
+        """Inspect one runtime plugin and its RC protocol metadata."""
+        runtime_plugin_manager = self.app.get('runtime_plugin_manager')
+        if not runtime_plugin_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Runtime plugin manager is not available.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        wanted = str(plugin_id or "").strip()
+        if not wanted:
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /plugins inspect <plugin-id>[/{self.theme.AMBER_GLOW}]"
+            )
+            return True
+
+        record = runtime_plugin_manager.get_record(wanted, force_refresh=False)
+        if record is None:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Runtime plugin not found: {escape(wanted)}[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        self._show_command_panel(
+            f"Plugin {record.display_name}",
+            subtitle="Reverie CLI runtime plugin protocol details.",
+            accent=self.theme.BLUE_SOFT,
+            meta=record.install_display,
+        )
+
+        overview = self._build_key_value_table(
+            [
+                ("Plugin ID", record.plugin_id),
+                ("Runtime Type", record.runtime_family),
+                ("Entry Status", record.status_label),
+                ("Protocol", record.protocol_label),
+                ("Entry", record.entry_display),
+                ("Version", record.version or "(none)"),
+                ("Install Dir", record.install_display),
+            ]
+        )
+        self.console.print(overview)
+        self.console.print()
+
+        if record.protocol is None:
+            message = record.protocol_error or "This runtime has not responded to the Reverie CLI `-RC` handshake yet."
+            self.console.print(
+                Panel(
+                    escape(message),
+                    title=f"[bold {self.theme.AMBER_GLOW}]RC Status[/bold {self.theme.AMBER_GLOW}]",
+                    border_style=self.theme.AMBER_GLOW,
+                    box=box.ROUNDED,
+                )
+            )
+            self.console.print()
+            return True
+
+        protocol = record.protocol
+        protocol_rows = [
+            ("Protocol Version", protocol.protocol_version),
+            ("Display Name", protocol.display_name),
+            ("Tool Call Hint", protocol.tool_call_hint or "(none)"),
+            ("System Prompt", protocol.system_prompt or "(none)"),
+            ("Commands", str(len(protocol.commands))),
+            ("Exposed Tools", str(len(protocol.tool_commands))),
+        ]
+        self.console.print(self._build_key_value_table(protocol_rows))
+        self.console.print()
+
+        table = Table(
+            title=f"[bold {self.theme.PINK_SOFT}]{self.deco.CRYSTAL} RC Commands[/bold {self.theme.PINK_SOFT}]",
+            box=box.ROUNDED,
+            border_style=self.theme.BORDER_PRIMARY,
+            expand=True,
+        )
+        table.add_column("Command", style=f"bold {self.theme.BLUE_SOFT}", width=20)
+        table.add_column("Tool", style=self.theme.TEXT_SECONDARY, width=28)
+        table.add_column("As Tool", style=self.theme.TEXT_SECONDARY, width=8)
+        table.add_column("Modes", style=self.theme.TEXT_DIM, width=20)
+        table.add_column("Description", style=self.theme.TEXT_PRIMARY, ratio=3)
+
+        plugin_tool_map = {
+            (str(item.get("plugin_id", "")), str(item.get("command_name", ""))): str(item.get("name", ""))
+            for item in runtime_plugin_manager.get_tool_definitions(force_refresh=False)
+        }
+
+        for command in protocol.commands:
+            include_modes = ", ".join(command.include_modes) if command.include_modes else "reverie-gamer"
+            if command.exclude_modes:
+                include_modes = f"{include_modes} / !{', '.join(command.exclude_modes)}"
+            table.add_row(
+                command.name,
+                plugin_tool_map.get((record.plugin_id, command.name), "(not exposed)"),
+                "yes" if command.expose_as_tool else "no",
+                include_modes,
+                command.description,
+            )
+
         self.console.print(table)
         self.console.print()
         return True

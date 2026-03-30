@@ -192,6 +192,21 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
         ],
         "examples": ["/tools"],
     },
+    "plugins": {
+        "command": "/plugins",
+        "section": "Tools & Context",
+        "summary": "Inspect plugin-style external runtimes installed under `.reverie/plugins`.",
+        "detail": "This is the runtime-plugin surface for Reverie-Gamer. Reverie scans only the plugin directories that actually exist under `.reverie/plugins`, reads `plugin.json` when present, probes runnable entries with the fixed Reverie CLI handshake `<plugin-name>.exe -RC`, and shows whether each detected plugin is compliant. Plugins that answer with valid JSON can expose `rc_*` dynamic tools directly to the model.",
+        "overview": "status, rescan, path, inspect <plugin-id>",
+        "subcommands": [
+            {"usage": "/plugins", "description": "Show the runtime plugin summary and detected runtime table."},
+            {"usage": "/plugins status", "description": "Explicit status view."},
+            {"usage": "/plugins rescan", "description": "Rescan `.reverie/plugins` and refresh runtime detection."},
+            {"usage": "/plugins path", "description": "Show the plugin install root and bundled runtime catalog code path."},
+            {"usage": "/plugins inspect <plugin-id>", "description": "Show the detected `-RC` protocol metadata, command list, and tool exposure for one plugin."},
+        ],
+        "examples": ["/plugins", "/plugins rescan", "/plugins path", "/plugins inspect godot"],
+    },
     "mcp": {
         "command": "/mcp",
         "section": "Tools & Context",

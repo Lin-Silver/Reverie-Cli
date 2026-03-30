@@ -67,6 +67,7 @@ from ..nvidia import (
     normalize_nvidia_config,
     resolve_nvidia_selected_model,
 )
+from ..plugin.runtime_manager import RuntimePluginManager
 
 
 _THINKING_MARKDOWN_SUBJECT_RE = re.compile(r"^\s*\*\*(.+?)\*\*\s*$")
@@ -317,6 +318,8 @@ class ReverieInterface:
         self.config_manager.ensure_dirs()
         self.mcp_config_manager = MCPConfigManager(self.config_manager.app_root)
         self.mcp_config_manager.ensure_dirs()
+        self.runtime_plugin_manager = RuntimePluginManager(self.config_manager.app_root)
+        self.runtime_plugin_manager.scan()
         self._ensure_builtin_mcp_servers()
         self.mcp_runtime = MCPRuntime(self.mcp_config_manager, project_root=self.project_root)
         self.rules_manager = RulesManager(project_root)
@@ -1525,6 +1528,7 @@ class ReverieInterface:
     def _init_agent(self) -> None:
         config = self.config_manager.load()
         self.mcp_runtime.set_project_root(self.project_root)
+        self.runtime_plugin_manager.scan()
         scope_changed = self._ensure_runtime_services_for_config(config)
         if normalize_mode(config.mode) == "computer-controller":
             runtime_nvidia = build_nvidia_computer_controller_runtime_model_data(getattr(config, "nvidia", {}))
@@ -1608,6 +1612,7 @@ class ReverieInterface:
         self.agent.tool_executor.update_context('config_manager', self.config_manager)
         self.agent.tool_executor.update_context('mcp_config_manager', self.mcp_config_manager)
         self.agent.tool_executor.update_context('mcp_runtime', self.mcp_runtime)
+        self.agent.tool_executor.update_context('runtime_plugin_manager', self.runtime_plugin_manager)
         # Inject session_manager for context management tool
         self.agent.tool_executor.update_context('session_manager', self.session_manager)
         self.agent.tool_executor.update_context('project_data_dir', self.project_data_dir)
@@ -1704,6 +1709,7 @@ class ReverieInterface:
                 "\n".join(lines),
                 "\n".join(lsp_lines),
                 self.mcp_runtime.describe_for_prompt(),
+                self.runtime_plugin_manager.describe_for_prompt(),
                 atlas_block,
                 memory_block,
             ]
@@ -1796,6 +1802,7 @@ class ReverieInterface:
         return {
             'config_manager': self.config_manager, 'rules_manager': self.rules_manager,
             'mcp_config_manager': self.mcp_config_manager, 'mcp_runtime': self.mcp_runtime,
+            'runtime_plugin_manager': self.runtime_plugin_manager,
             'session_manager': self.session_manager, 'indexer': self.indexer,
             'retriever': self.retriever, 'git_integration': self.git_integration,
             'lsp_manager': self.lsp_manager, 'memory_indexer': self.memory_indexer,

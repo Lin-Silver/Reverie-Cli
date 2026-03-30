@@ -1,0 +1,31 @@
+"""Plugin-style runtime infrastructure for Reverie."""
+
+from .dynamic_tool import RuntimePluginDynamicTool
+from .protocol import (
+    RC_PROTOCOL_VERSION,
+    RuntimePluginCommandSpec,
+    RuntimePluginHandshake,
+    build_runtime_tool_name,
+    normalize_runtime_handshake,
+)
+from .runtime_manager import (
+    DEFAULT_RUNTIME_PLUGIN_CATALOG,
+    RuntimePluginManager,
+    RuntimePluginRecord,
+    RuntimePluginSnapshot,
+    RuntimePluginSpec,
+)
+
+__all__ = [
+    "RC_PROTOCOL_VERSION",
+    "DEFAULT_RUNTIME_PLUGIN_CATALOG",
+    "RuntimePluginCommandSpec",
+    "RuntimePluginDynamicTool",
+    "RuntimePluginHandshake",
+    "RuntimePluginManager",
+    "RuntimePluginRecord",
+    "RuntimePluginSnapshot",
+    "RuntimePluginSpec",
+    "build_runtime_tool_name",
+    "normalize_runtime_handshake",
+]

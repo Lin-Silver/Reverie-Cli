@@ -822,11 +822,18 @@ def _get_mode_tool_workflow(mode: str) -> str:
 ## Reverie Mode Tool Workflow
 
 - For small, clear tasks, use a lightweight loop: targeted retrieval -> focused edit -> narrow verification -> respond.
+- Treat user-specified libraries, SDK choices, endpoints, payload fields, config knobs, and requested file layouts as acceptance criteria, not suggestions.
 - Retrieve code context first.
 - Use git history when conventions or earlier fixes matter.
 - Edit with the narrowest correct tool.
 - Verify with commands and manage context proactively on long sessions.
 - Use planning tools when the work is large enough to benefit from explicit tracking; do not default to formal planning for tiny fixes.
+- Do not default to `task_manager` for small deliverables or isolated greenfield scaffolds, even if they span several files.
+- For automation, desktop, or agent-style requests, implement the full runtime loop the user described: observe or screenshot -> decide -> act -> verify -> repeat, with explicit stop conditions.
+- Feed action results and the latest observation back into later iterations; do not reset the loop into stateless one-shot calls after each action.
+- When a model returns normalized coordinates or model-space coordinates, implement a dedicated coordinate-mapping layer into the real runtime space before invoking actions.
+- If the user asked for safe or conservative behavior, surface that in runtime defaults such as dry-run, confirmation, bounded retries, or similarly cautious controls.
+- Prefer encoding-safe terminal output and verification paths for generated Windows-facing CLIs and scripts.
 - If another mode has a better workflow for the current phase, switch proactively instead of forcing generic execution.
 - Judge completion using deliverables, integration state, and verification evidence rather than optimistic progress estimates.
 """

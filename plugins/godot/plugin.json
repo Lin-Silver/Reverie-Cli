@@ -1,0 +1,13 @@
+{
+  "id": "godot",
+  "display_name": "Godot Runtime Plugin",
+  "runtime_family": "engine",
+  "version": "0.2.0",
+  "description": "Reverie CLI plugin wrapper for Godot runtime detection, installation, and project operations.",
+  "entry": {
+    "windows": "plugin.py",
+    "linux": "plugin.py",
+    "darwin": "plugin.py",
+    "default": "plugin.py"
+  }
+}

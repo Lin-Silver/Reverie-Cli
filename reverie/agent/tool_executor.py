@@ -17,6 +17,7 @@ from ..modes import normalize_mode
 from ..tools.base import BaseTool, ToolResult
 from ..tools.mcp_dynamic import MCPDynamicTool
 from ..tools.registry import get_registered_tool_classes, is_tool_visible_in_mode
+from ..plugin.dynamic_tool import RuntimePluginDynamicTool
 
 
 logger = logging.getLogger(__name__)
@@ -67,7 +68,9 @@ class ToolExecutor:
         self._tools: Dict[str, BaseTool] = {}
         self._dynamic_tool_names: set[str] = set()
         self._mcp_generation: int = -1
-        self._schema_cache: Dict[tuple[str, int], List[Dict[str, Any]]] = {}
+        self._runtime_plugin_tool_names: set[str] = set()
+        self._runtime_plugin_generation: int = -1
+        self._schema_cache: Dict[tuple[Any, ...], List[Dict[str, Any]]] = {}
         self._init_tools()
     
     def _init_tools(self) -> None:
@@ -121,15 +124,63 @@ class ToolExecutor:
         self._dynamic_tool_names = new_dynamic_names
         self._mcp_generation = generation
         self._invalidate_schema_cache()
+
+    def _sync_runtime_plugin_tools(self) -> None:
+        """Refresh dynamic Reverie runtime-plugin tools when the catalog changes."""
+        manager = self.context.get("runtime_plugin_manager")
+        if manager is None:
+            if self._runtime_plugin_tool_names:
+                for name in list(self._runtime_plugin_tool_names):
+                    self._tools.pop(name, None)
+                self._runtime_plugin_tool_names = set()
+                self._runtime_plugin_generation = -1
+                self._invalidate_schema_cache()
+            return
+
+        try:
+            definitions = manager.get_tool_definitions(force_refresh=False)
+            generation = int(manager.get_generation())
+        except Exception as exc:
+            logger.debug("Failed to sync runtime plugin tools: %s", exc, exc_info=True)
+            return
+
+        definition_names = {
+            str(item.get("name", "")).strip()
+            for item in definitions
+            if isinstance(item, dict) and str(item.get("name", "")).strip()
+        }
+
+        if generation == self._runtime_plugin_generation and definition_names == self._runtime_plugin_tool_names:
+            return
+
+        for name in list(self._runtime_plugin_tool_names):
+            self._tools.pop(name, None)
+
+        new_dynamic_names: set[str] = set()
+        for metadata in definitions:
+            if not isinstance(metadata, dict):
+                continue
+            tool = RuntimePluginDynamicTool(self.context, metadata)
+            self._tools[tool.name] = tool
+            new_dynamic_names.add(tool.name)
+
+        self._runtime_plugin_tool_names = new_dynamic_names
+        self._runtime_plugin_generation = generation
+        self._invalidate_schema_cache()
+
+    def _sync_dynamic_tools(self) -> None:
+        """Refresh all non-built-in dynamic tool surfaces."""
+        self._sync_mcp_tools()
+        self._sync_runtime_plugin_tools()
     
     def get_tool(self, name: str) -> Optional[BaseTool]:
         """Get a tool by name"""
-        self._sync_mcp_tools()
+        self._sync_dynamic_tools()
         return self._tools.get(name)
     
     def list_tools(self) -> List[str]:
         """List all available tool names"""
-        self._sync_mcp_tools()
+        self._sync_dynamic_tools()
         return list(self._tools.keys())
 
     def _unwrap_arguments(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -237,7 +288,7 @@ class ToolExecutor:
         Returns:
             ToolResult with success status and output
         """
-        self._sync_mcp_tools()
+        self._sync_dynamic_tools()
         tool = self.get_tool(tool_name)
         
         if not tool:
@@ -267,8 +318,8 @@ class ToolExecutor:
         and safe for JSON serialization before returning them.
         """
         normalized_mode = normalize_mode(mode)
-        self._sync_mcp_tools()
-        cache_key = (normalized_mode, self._mcp_generation)
+        self._sync_dynamic_tools()
+        cache_key = (normalized_mode, self._mcp_generation, self._runtime_plugin_generation)
         cached = self._schema_cache.get(cache_key)
         if cached is not None:
             return list(cached)
@@ -277,6 +328,8 @@ class ToolExecutor:
 
         for name, tool in self._tools.items():
             if isinstance(tool, MCPDynamicTool) and not tool.visible_in_mode(normalized_mode):
+                continue
+            if isinstance(tool, RuntimePluginDynamicTool) and not tool.visible_in_mode(normalized_mode):
                 continue
             if not is_tool_visible_in_mode(name, normalized_mode):
                 continue
@@ -304,4 +357,7 @@ class ToolExecutor:
         if key == "mcp_runtime":
             self._mcp_generation = -1
             self._sync_mcp_tools()
+        if key == "runtime_plugin_manager":
+            self._runtime_plugin_generation = -1
+            self._sync_runtime_plugin_tools()
         self._invalidate_schema_cache()

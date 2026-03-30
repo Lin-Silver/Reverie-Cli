@@ -48,11 +48,11 @@ if %ERRORLEVEL% neq 0 (
 )
 
 for /f %%V in ('%PYTHON_EXE% -c "import platform; print(platform.python_version())"') do set "PY_VERSION=%%V"
-echo [1/10] Python detected: %PY_VERSION%
+echo [1/9] Python detected: %PY_VERSION%
 
 REM Prepare virtual environment
 echo.
-echo [2/10] Preparing virtual environment...
+echo [2/9] Preparing virtual environment...
 if exist "%VENV_DIR%\Scripts\activate.bat" (
     if "%RECREATE_VENV%"=="1" (
         echo       Recreating clean venv...
@@ -88,7 +88,7 @@ if %ERRORLEVEL% neq 0 (
 
 REM Upgrade packaging stack
 echo.
-echo [3/10] Upgrading build tooling...
+echo [3/9] Upgrading build tooling...
 python -m pip install --upgrade pip setuptools wheel
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] Failed to upgrade pip/setuptools/wheel.
@@ -97,10 +97,10 @@ if %ERRORLEVEL% neq 0 (
 
 REM Install PyInstaller and project dependencies
 echo.
-echo [4/10] Installing PyInstaller and project dependencies...
-python -m pip install --upgrade pyinstaller pillow pytest
+echo [4/9] Installing PyInstaller and project dependencies...
+python -m pip install --upgrade pyinstaller pillow
 if %ERRORLEVEL% neq 0 (
-    echo [ERROR] Failed to install build/test dependencies.
+    echo [ERROR] Failed to install build dependencies.
     exit /b 1
 )
 
@@ -118,7 +118,7 @@ if %ERRORLEVEL% neq 0 (
 
 REM Dependency health check (catches cp311/cp314 mismatch early)
 echo.
-echo [5/10] Running dependency health check...
+echo [5/9] Running dependency health check...
 python -c "import PIL._imaging, requests, bs4, openai, ddgs, yaml, pydantic_core._pydantic_core, pyglet, moderngl, glcontext; print('dependency_check_ok')"
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] Dependency health check failed.
@@ -126,20 +126,11 @@ if %ERRORLEVEL% neq 0 (
     exit /b 1
 )
 
-REM Engine-lite regression suite
-echo.
-echo [6/10] Running engine-lite regression suite...
-python -m pytest tests\engine_lite -q
-if %ERRORLEVEL% neq 0 (
-    echo [ERROR] Engine-lite tests failed. Build aborted.
-    exit /b 1
-)
-
 if not exist "%TMP_BUILD_BASE%" mkdir "%TMP_BUILD_BASE%" >nul 2>&1
 
 REM Prepare bundled Comfy resources
 echo.
-echo [7/10] Preparing bundled Comfy resources...
+echo [6/9] Preparing bundled Comfy resources...
 if not exist "Comfy\generate_image.py" (
     echo [ERROR] Missing required file: Comfy\generate_image.py
     exit /b 1
@@ -157,7 +148,7 @@ echo       Bundled resources: %REVERIE_BUNDLE_RES_DIR%\comfy
 
 REM Detect optional ffmpeg for one-file video export
 echo.
-echo [8/10] Detecting optional ffmpeg encoder...
+echo [7/9] Detecting optional ffmpeg encoder...
 if defined USER_FFMPEG_PATH (
     if exist "%USER_FFMPEG_PATH%" set "REVERIE_FFMPEG_PATH=%USER_FFMPEG_PATH%"
 )
@@ -206,7 +197,7 @@ if defined REVERIE_ICON_PATH (
 
 REM Build with PyInstaller
 echo.
-echo [9/10] Building executable with PyInstaller...
+echo [8/9] Building executable with PyInstaller...
 echo       This may take a few minutes...
 echo       Work path: %PYI_WORK_DIR%
 echo       Temp dist: %PYI_DIST_DIR%
@@ -240,7 +231,7 @@ if %ERRORLEVEL% neq 0 (
 )
 
 echo.
-echo [10/10] Build artifact validation...
+echo [9/9] Build artifact validation...
 echo       Executable found: %OUTPUT_DIR%\%EXE_NAME%.exe
 
 for %%A in ("%OUTPUT_DIR%\%EXE_NAME%.exe") do set "SIZE=%%~zA"

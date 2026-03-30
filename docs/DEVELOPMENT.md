@@ -77,7 +77,7 @@ Windows packaging is handled by `build.bat`.
 - Upgrades packaging tools
 - Installs the project in editable mode
 - Validates dependency health
-- Runs `tests\engine_lite` before packaging
+- Does not run packaging-time regression tests automatically
 - Bundles required Comfy assets
 - Bundles `ffmpeg` into the one-file executable when it is available at build time
 - Builds `dist/reverie.exe` with PyInstaller

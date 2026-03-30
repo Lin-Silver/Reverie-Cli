@@ -261,3 +261,4 @@ if "%RUN_EXE_TEST%"=="1" (
 echo.
 echo Done!
 endlocal
+pause

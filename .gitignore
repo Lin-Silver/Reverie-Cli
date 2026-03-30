@@ -6,6 +6,7 @@ _embedded_tmp/
 add-on/
 references/
 .pytest_cache/
+tests/
 
 reverie_cli.egg-info/
 *.egg

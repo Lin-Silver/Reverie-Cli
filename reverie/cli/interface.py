@@ -50,6 +50,7 @@ from ..atlas import build_atlas_additional_rules, normalize_atlas_mode_config
 from ..mcp import MCPConfigManager, MCPRuntime
 from ..engine_lite.modeling import ASHFOX_DEFAULT_ENDPOINT, ASHFOX_MCP_SERVER_NAME
 from ..rules_manager import RulesManager
+from ..skills_manager import SkillsManager
 from ..session import SessionManager
 from ..agent import (
     ReverieAgent,
@@ -318,6 +319,8 @@ class ReverieInterface:
         self.config_manager.ensure_dirs()
         self.mcp_config_manager = MCPConfigManager(self.config_manager.app_root)
         self.mcp_config_manager.ensure_dirs()
+        self.skills_manager = SkillsManager(self.project_root, self.config_manager.app_root)
+        self.skills_manager.scan()
         self.runtime_plugin_manager = RuntimePluginManager(self.config_manager.app_root)
         self.runtime_plugin_manager.scan()
         self._ensure_builtin_mcp_servers()
@@ -983,6 +986,43 @@ class ReverieInterface:
         outbound_message: Any = message
         transcript_message = str(message or "").strip()
         agent_display_text = transcript_message
+        skill_context_text = ""
+
+        skill_mentions = self.skills_manager.resolve_explicit_mentions(clean_message, force_refresh=False)
+        resolved_skill_records = list(skill_mentions.get("records", []) or [])
+        missing_skill_names = list(skill_mentions.get("missing", []) or [])
+        if not resolved_skill_records:
+            resolved_skill_records = list(
+                self.skills_manager.resolve_automatic_matches(clean_message, force_refresh=False, top_n=2)
+            )
+            if resolved_skill_records:
+                auto_names = ", ".join(record.name for record in resolved_skill_records[:4])
+                if len(resolved_skill_records) > 4:
+                    auto_names = f"{auto_names}, +{len(resolved_skill_records) - 4} more"
+                self._show_activity_event(
+                    "Skills",
+                    "Auto-selected matching skills",
+                    status="info",
+                    detail=auto_names,
+                )
+        if resolved_skill_records:
+            skill_context_text = self.skills_manager.build_explicit_skill_injection(resolved_skill_records)
+            resolved_names = ", ".join(record.name for record in resolved_skill_records[:4])
+            if len(resolved_skill_records) > 4:
+                resolved_names = f"{resolved_names}, +{len(resolved_skill_records) - 4} more"
+            self._show_activity_event(
+                "Skills",
+                "Injected skill instructions",
+                status="success",
+                detail=resolved_names,
+            )
+        for missing_name in missing_skill_names:
+            self._show_activity_event(
+                "Skills",
+                "Requested skill was not found",
+                status="warning",
+                detail=missing_name,
+            )
 
         for warning in inline_warnings:
             self._show_activity_event(
@@ -1012,6 +1052,14 @@ class ReverieInterface:
                 status="success",
                 detail=f"{len(inline_attachments)} image file(s) added to the LLM context.",
             )
+        else:
+            outbound_message = clean_message or transcript_message
+
+        if skill_context_text:
+            if isinstance(outbound_message, list):
+                outbound_message = [{"type": "text", "text": skill_context_text}] + list(outbound_message)
+            else:
+                outbound_message = f"{skill_context_text}\n\n{str(outbound_message or '').strip()}".strip()
 
         # The interactive shell already shows the typed prompt in-place, so
         # avoid echoing a second transcript block for every user turn.
@@ -1613,6 +1661,7 @@ class ReverieInterface:
         self.agent.tool_executor.update_context('mcp_config_manager', self.mcp_config_manager)
         self.agent.tool_executor.update_context('mcp_runtime', self.mcp_runtime)
         self.agent.tool_executor.update_context('runtime_plugin_manager', self.runtime_plugin_manager)
+        self.agent.tool_executor.update_context('skills_manager', self.skills_manager)
         # Inject session_manager for context management tool
         self.agent.tool_executor.update_context('session_manager', self.session_manager)
         self.agent.tool_executor.update_context('project_data_dir', self.project_data_dir)
@@ -1710,6 +1759,7 @@ class ReverieInterface:
                 "\n".join(lsp_lines),
                 self.mcp_runtime.describe_for_prompt(),
                 self.runtime_plugin_manager.describe_for_prompt(),
+                self.skills_manager.describe_for_prompt(),
                 atlas_block,
                 memory_block,
             ]
@@ -1802,6 +1852,7 @@ class ReverieInterface:
         return {
             'config_manager': self.config_manager, 'rules_manager': self.rules_manager,
             'mcp_config_manager': self.mcp_config_manager, 'mcp_runtime': self.mcp_runtime,
+            'skills_manager': self.skills_manager,
             'runtime_plugin_manager': self.runtime_plugin_manager,
             'session_manager': self.session_manager, 'indexer': self.indexer,
             'retriever': self.retriever, 'git_integration': self.git_integration,

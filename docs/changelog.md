@@ -1,9 +1,11 @@
-## Reverie CLI v2.1.6 - Single-File Gamer Runtime Integration, Ren'Py Runtime Support, and Video Packaging
+## Reverie CLI v2.1.6 - Codex-Style Skills Support, Single-File Gamer Runtime Integration, and Runtime Packaging Cleanup
 
-**Release Date:** 2026-03-29
+**Release Date:** 2026-03-30
 
 ### Added
 
+* Added OpenAI Codex-style skill discovery so Reverie now scans compatible `.reverie/Skills`, `.reverie/skills`, and `.codex/skills` roots for `SKILL.md` instruction packs.
+* Added explicit `$skill-name` turn injection so a detected skill's `SKILL.md` body can be loaded directly into the active model turn when requested by the user.
 * Added built-in primitive 3D asset generation so Reverie-Gamer can create runtime `.gltf` placeholders and preview renders directly through `/modeling primitive`.
 * Added built-in playblast and encoded video export through `/engine video`, including frame-sequence export that works even when no external encoder is installed.
 * Added a practical Ren'Py import pipeline through `/engine renpy`, including stage-command support for `scene`, `show`, `hide`, `play`, `voice`, and `stop`.
@@ -11,10 +13,18 @@
 
 ### Changed
 
+* Added a new `/skills` surface plus status/prompt integration so detected `SKILL.md` metadata is visible in the CLI and available to the active system prompt.
+* Expanded skill discovery to support nested repository layouts such as `.\.reverie\Skills\<repo>\skills\<skill>\SKILL.md`, which makes Anthropic's public `skills` repository work without repacking.
+* Added automatic skill matching so clearly relevant skills can be loaded even when the user does not type an explicit `$skill-name`.
+* Simplified MCP persistence to a standard `.reverie/mcp.json` layout centered on top-level `mcpServers`, while still reading legacy `.Reverie/MCP.json` files.
 * Promoted Ren'Py menu conditions into Reverie's executable `choices.conditions`, so imported conditional branches now run instead of staying as metadata-only hints.
 * Expanded the runtime dialogue/effects system so imported Ren'Py stage and audio commands execute during playtest rather than appearing as inert content.
 * Updated the PyInstaller spec and Windows build flow so the packaged executable explicitly collects the new Reverie-Gamer engine, modeling, Ren'Py, and video modules.
-* Updated `build.bat` to run `tests\engine_lite` before packaging and to support a non-interactive `--test-exe` sanity-check flow.
+* Updated `build.bat` so packaging no longer runs the removed repository test suite before building and still supports the non-interactive `--test-exe` sanity-check flow.
+
+### Removed
+
+* Removed the tracked `tests/` repository directory from GitHub distribution; local tests can now stay untracked.
 
 ## Reverie CLI v2.1.5 - Reverie-Gamer Modeling Pipeline, Engine Cleanup, and Blockbench/Ashfox Integration
 

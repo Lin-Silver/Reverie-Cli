@@ -48,18 +48,9 @@ Legacy `.reverie` files may still be read for migration, but new writes should s
 Recommended checks:
 
 ```bash
-pytest
 mypy reverie
 black reverie
 ```
-
-Current regression coverage includes:
-
-- Atlas mode config and prompt contract
-- Codex and Gemini endpoint normalization
-- Native streaming resilience when providers terminate early after partial output
-- Project cache placement, legacy `.reverie` migration, and command audit routing
-- Workspace memory indexing behavior
 
 ## Packaging
 
@@ -78,6 +69,7 @@ Windows packaging is handled by `build.bat`.
 - Installs the project in editable mode
 - Validates dependency health
 - Does not run packaging-time regression tests automatically
+- Supports Codex-style `SKILL.md` discovery through `.reverie/Skills`, `.reverie/skills`, and `.codex/skills`, including nested `<repo>/skills/<skill>/SKILL.md` layouts
 - Bundles required Comfy assets
 - Bundles `ffmpeg` into the one-file executable when it is available at build time
 - Builds `dist/reverie.exe` with PyInstaller
@@ -97,7 +89,7 @@ When you change user-facing behavior, update the docs in the same change:
 
 If the change affects command wording, also update `reverie/cli/help_catalog.py`.
 
-If the change affects runtime storage or spec/steering paths, also update `reverie/agent/system_prompt.py` and the relevant regression tests under `reverie/tests/`.
+If the change affects runtime storage or spec/steering paths, also update `reverie/agent/system_prompt.py` and the relevant local regression tests under `tests/` when you keep them outside Git.
 
 The command catalog in `reverie/cli/help_catalog.py` is the authoritative source for command descriptions.
 

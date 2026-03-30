@@ -97,15 +97,14 @@ reverie/
 ├── tools/                   # tool implementations exposed to the agent
 ├── engine/                  # canonical public built-in engine API
 ├── engine_lite/             # shared runtime, project, and modeling implementation
-├── writer/                  # writer mode helpers
-└── reverie/tests/           # regression coverage
+├── skills_manager.py        # SKILL.md discovery, matching, and prompt injection helpers
+└── writer/                  # writer mode helpers
 ```
 
 ## Development
 
 ```bash
 pip install -e ".[dev]"
-pytest
 mypy reverie
 black reverie
 ```

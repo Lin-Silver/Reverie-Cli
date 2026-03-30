@@ -28,8 +28,10 @@ MCP_PROTOCOL_VERSION = "2025-06-18"
 MCP_DEFAULT_TIMEOUT_MS = 600_000
 MCP_DEFAULT_DISCOVERY_TIMEOUT_MS = 15_000
 MCP_DEFAULT_SSE_ENDPOINT_TIMEOUT_MS = 15_000
-MCP_CONFIG_DIRNAME = ".Reverie"
-MCP_CONFIG_FILENAME = "MCP.json"
+MCP_CONFIG_DIRNAME = ".reverie"
+MCP_CONFIG_FILENAME = "mcp.json"
+MCP_LEGACY_CONFIG_DIRNAME = ".Reverie"
+MCP_LEGACY_CONFIG_FILENAME = "MCP.json"
 MCP_SESSION_HEADER = "Mcp-Session-Id"
 MCP_CLIENT_INFO = {"name": "Reverie CLI", "version": __version__}
 
@@ -50,6 +52,22 @@ def default_mcp_config() -> Dict[str, Any]:
         },
         "mcpServers": {},
     }
+
+
+def _extract_mcp_globals(raw_config: Any) -> Dict[str, Any]:
+    """Read MCP global settings from either nested or flattened config layouts."""
+    if not isinstance(raw_config, dict):
+        return {}
+
+    nested = raw_config.get("mcp")
+    if isinstance(nested, dict):
+        return dict(nested)
+
+    flattened: Dict[str, Any] = {}
+    for key in ("enabled", "allowed", "excluded", "serverCommand", "discovery_timeout_ms"):
+        if key in raw_config:
+            flattened[key] = raw_config.get(key)
+    return flattened
 
 
 def _stable_json_signature(value: Any) -> str:
@@ -180,12 +198,10 @@ def normalize_mcp_server_config(server_name: str, raw_server: Any) -> Dict[str, 
 
 def normalize_mcp_config(raw_config: Any) -> Dict[str, Any]:
     """Normalize the top-level MCP config file."""
-    normalized = default_mcp_config()
-    if isinstance(raw_config, dict):
-        normalized.update(raw_config)
-
-    mcp_raw = normalized.get("mcp", {})
-    mcp = dict(mcp_raw) if isinstance(mcp_raw, dict) else {}
+    defaults = default_mcp_config()
+    source = dict(raw_config) if isinstance(raw_config, dict) else {}
+    mcp = dict(defaults.get("mcp", {}))
+    mcp.update(_extract_mcp_globals(source))
     try:
         discovery_timeout_ms = int(mcp.get("discovery_timeout_ms", MCP_DEFAULT_DISCOVERY_TIMEOUT_MS))
     except (TypeError, ValueError):
@@ -193,7 +209,7 @@ def normalize_mcp_config(raw_config: Any) -> Dict[str, Any]:
     if discovery_timeout_ms <= 0:
         discovery_timeout_ms = MCP_DEFAULT_DISCOVERY_TIMEOUT_MS
 
-    servers_raw = normalized.get("mcpServers", {})
+    servers_raw = source.get("mcpServers", {})
     servers: Dict[str, Dict[str, Any]] = {}
     if isinstance(servers_raw, dict):
         for raw_name, raw_server in servers_raw.items():
@@ -203,7 +219,7 @@ def normalize_mcp_config(raw_config: Any) -> Dict[str, Any]:
             servers[name] = normalize_mcp_server_config(name, raw_server)
 
     return {
-        "version": int(normalized.get("version", 1) or 1),
+        "version": int(source.get("version", defaults.get("version", 1)) or 1),
         "mcp": {
             "enabled": bool(mcp.get("enabled", True)),
             "allowed": _normalize_string_list(mcp.get("allowed", [])),
@@ -213,6 +229,98 @@ def normalize_mcp_config(raw_config: Any) -> Dict[str, Any]:
         },
         "mcpServers": servers,
     }
+
+
+def serialize_mcp_server_config(server_name: str, raw_server: Any) -> Dict[str, Any]:
+    """Serialize one MCP server to a compact on-disk format."""
+    server = normalize_mcp_server_config(server_name, raw_server)
+    payload: Dict[str, Any] = {}
+
+    server_type = str(server.get("type", "stdio") or "stdio").strip().lower()
+    if server_type != "stdio" or not str(server.get("command", "") or "").strip():
+        payload["type"] = server_type
+
+    command = str(server.get("command", "") or "").strip()
+    args = _normalize_string_list(server.get("args", []))
+    if command:
+        payload["command"] = command
+    if args:
+        payload["args"] = args
+
+    if server_type == "http":
+        http_url = str(server.get("httpUrl", "") or server.get("url", "") or "").strip()
+        if http_url:
+            payload["httpUrl"] = http_url
+    elif server_type == "sse":
+        sse_url = str(server.get("url", "") or server.get("httpUrl", "") or "").strip()
+        if sse_url:
+            payload["url"] = sse_url
+
+    headers = _normalize_string_map(server.get("headers", {}))
+    env = _normalize_string_map(server.get("env", {}))
+    cwd = str(server.get("cwd", "") or "").strip()
+    timeout_ms = int(server.get("timeout", MCP_DEFAULT_TIMEOUT_MS) or MCP_DEFAULT_TIMEOUT_MS)
+    include_tools = _normalize_string_list(server.get("includeTools", []))
+    exclude_tools = _normalize_string_list(server.get("excludeTools", []))
+    include_modes = _normalize_string_list(server.get("includeModes", []))
+    exclude_modes = _normalize_string_list(server.get("excludeModes", []))
+
+    if headers:
+        payload["headers"] = headers
+    if env:
+        payload["env"] = env
+    if cwd:
+        payload["cwd"] = cwd
+    if timeout_ms != MCP_DEFAULT_TIMEOUT_MS:
+        payload["timeout"] = timeout_ms
+    if not bool(server.get("enabled", True)):
+        payload["enabled"] = False
+    if bool(server.get("trust", False)):
+        payload["trust"] = True
+    if include_tools:
+        payload["includeTools"] = include_tools
+    if exclude_tools:
+        payload["excludeTools"] = exclude_tools
+    if include_modes:
+        payload["includeModes"] = include_modes
+    if exclude_modes:
+        payload["excludeModes"] = exclude_modes
+
+    return payload
+
+
+def serialize_mcp_config(raw_config: Any) -> Dict[str, Any]:
+    """Serialize MCP config to a compact, standard top-level layout."""
+    normalized = normalize_mcp_config(raw_config)
+    mcp = dict(normalized.get("mcp", {}) or {})
+    payload: Dict[str, Any] = {
+        "mcpServers": {
+            server_name: serialize_mcp_server_config(server_name, server_cfg)
+            for server_name, server_cfg in (normalized.get("mcpServers", {}) or {}).items()
+        }
+    }
+
+    if not bool(mcp.get("enabled", True)):
+        payload["enabled"] = False
+
+    allowed = _normalize_string_list(mcp.get("allowed", []))
+    excluded = _normalize_string_list(mcp.get("excluded", []))
+    server_command = str(mcp.get("serverCommand", "") or "").strip()
+    try:
+        discovery_timeout_ms = int(mcp.get("discovery_timeout_ms", MCP_DEFAULT_DISCOVERY_TIMEOUT_MS))
+    except (TypeError, ValueError):
+        discovery_timeout_ms = MCP_DEFAULT_DISCOVERY_TIMEOUT_MS
+
+    if allowed:
+        payload["allowed"] = allowed
+    if excluded:
+        payload["excluded"] = excluded
+    if server_command:
+        payload["serverCommand"] = server_command
+    if discovery_timeout_ms != MCP_DEFAULT_DISCOVERY_TIMEOUT_MS:
+        payload["discovery_timeout_ms"] = discovery_timeout_ms
+
+    return payload
 
 
 def get_effective_mcp_servers(mcp_config: Any) -> Dict[str, Dict[str, Any]]:
@@ -397,25 +505,36 @@ class MCPConfigManager:
     def __init__(self, app_root: Optional[Path] = None):
         self.app_root = Path(app_root).resolve() if app_root is not None else get_app_root()
         self.config_path = self.app_root / MCP_CONFIG_DIRNAME / MCP_CONFIG_FILENAME
+        self.legacy_config_path = self.app_root / MCP_LEGACY_CONFIG_DIRNAME / MCP_LEGACY_CONFIG_FILENAME
         self._config: Optional[Dict[str, Any]] = None
+        self._loaded_path: Path = self.config_path
         self._last_mtime = 0.0
 
     def ensure_dirs(self) -> None:
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
 
-    def load(self) -> Dict[str, Any]:
+    def _resolve_existing_config_path(self) -> Path:
         if self.config_path.exists():
+            return self.config_path
+        if self.legacy_config_path.exists():
+            return self.legacy_config_path
+        return self.config_path
+
+    def load(self) -> Dict[str, Any]:
+        target_path = self._resolve_existing_config_path()
+        if target_path.exists():
             try:
-                current_mtime = os.path.getmtime(self.config_path)
+                current_mtime = os.path.getmtime(target_path)
             except OSError:
                 current_mtime = 0.0
-            if self._config is None or current_mtime > self._last_mtime:
+            if self._config is None or target_path != self._loaded_path or current_mtime > self._last_mtime:
                 try:
-                    with open(self.config_path, "r", encoding="utf-8") as handle:
+                    with open(target_path, "r", encoding="utf-8") as handle:
                         data = json.load(handle)
                 except Exception:
                     data = {}
                 self._config = normalize_mcp_config(data)
+                self._loaded_path = target_path
                 self._last_mtime = current_mtime
         elif self._config is None:
             self._config = normalize_mcp_config({})
@@ -424,8 +543,9 @@ class MCPConfigManager:
     def save(self, config: Dict[str, Any]) -> Dict[str, Any]:
         self.ensure_dirs()
         normalized = normalize_mcp_config(config)
-        write_json_secure(self.config_path, normalized)
+        write_json_secure(self.config_path, serialize_mcp_config(normalized))
         self._config = normalized
+        self._loaded_path = self.config_path
         try:
             self._last_mtime = os.path.getmtime(self.config_path)
         except OSError:

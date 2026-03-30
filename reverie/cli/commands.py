@@ -59,6 +59,7 @@ class CommandHandler:
             'clean': self.cmd_clean,
             'index': self.cmd_index,
             'tools': self.cmd_tools,
+            'skills': self.cmd_skills,
             'plugins': self.cmd_plugins,
             'mcp': self.cmd_mcp,
             'setting': self.cmd_setting,
@@ -1087,7 +1088,7 @@ class CommandHandler:
                 "name": "Discovery Timeout",
                 "kind": "global-int",
                 "description": "Timeout used while discovering tools, resources, and prompts from each server.",
-                "command": "Edit in panel or .Reverie/MCP.json",
+                "command": "Edit in panel or .reverie/mcp.json",
                 "value": int(mcp_cfg.get("discovery_timeout_ms", 15000) or 15000),
                 "min": 1000,
                 "max": 600000,
@@ -1252,7 +1253,7 @@ class CommandHandler:
             if str(item.get("action", "")).strip().lower() == "refresh":
                 detail_lines.append(f"[{self.theme.TEXT_DIM}]Behavior[/{self.theme.TEXT_DIM}] Re-runs discovery for enabled servers and updates notes/counts.")
             else:
-                detail_lines.append(f"[{self.theme.TEXT_DIM}]Behavior[/{self.theme.TEXT_DIM}] Prompts for transport, name, and target, then saves the server into MCP.json.")
+                detail_lines.append(f"[{self.theme.TEXT_DIM}]Behavior[/{self.theme.TEXT_DIM}] Prompts for transport, name, and target, then saves the server into `.reverie/mcp.json`.")
         elif kind == "server":
             notes = str(item.get("notes", "") or "").strip() or "ready"
             detail_lines.extend(
@@ -2183,6 +2184,7 @@ class CommandHandler:
         """Show current status with dreamy styling"""
         config_manager = self.app.get('config_manager')
         config = config_manager.load() if config_manager else None
+        skills_manager = self.app.get('skills_manager')
         runtime_plugin_manager = self.app.get('runtime_plugin_manager')
         indexer = self.app.get('indexer')
         ensure_context_engine = self.app.get('ensure_context_engine')
@@ -2255,6 +2257,19 @@ class CommandHandler:
                 f"{self.deco.DOT_MEDIUM} Plugin Root",
                 f"[{self.theme.TEXT_DIM}]{escape(str(plugin_summary.get('install_root', '')))}[/{self.theme.TEXT_DIM}]",
             )
+        if skills_manager:
+            skill_summary = skills_manager.get_status_summary()
+            skill_label = str(skill_summary.get("summary_label", "0 skills | 0 invalid") or "0 skills | 0 invalid")
+            table.add_row(
+                f"{self.deco.SPARKLE} Skills",
+                f"[{self.theme.BLUE_SOFT}]{escape(skill_label)}[/{self.theme.BLUE_SOFT}]",
+            )
+            skill_names = str(skill_summary.get("skill_names", "") or "").strip()
+            if skill_names:
+                table.add_row(
+                    f"{self.deco.DOT_MEDIUM} Skill Names",
+                    f"[{self.theme.MINT_SOFT}]{escape(skill_names)}[/{self.theme.MINT_SOFT}]",
+                )
         
         # Session info
         if session_manager:
@@ -2367,6 +2382,176 @@ class CommandHandler:
             )
         
         self.console.print(table)
+        self.console.print()
+        return True
+
+    def cmd_skills(self, args: str) -> bool:
+        """Inspect Codex-style skill discovery and prompt injection roots."""
+        skills_manager = self.app.get('skills_manager')
+        if not skills_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Skills manager is not available.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        query = str(args or "").strip().lower()
+        if query in ("", "status", "list"):
+            force_refresh = False
+        elif query in ("rescan", "reload", "refresh"):
+            force_refresh = True
+        elif query.startswith("inspect "):
+            return self._cmd_skills_inspect(args.strip()[8:].strip())
+        elif query == "path":
+            summary = skills_manager.get_status_summary()
+            rows = [(f"Root {idx + 1}", path) for idx, path in enumerate(summary.get("root_paths", []) or [])]
+            if not rows:
+                rows = [("Roots", "(none configured)")]
+            self._show_command_panel(
+                "Skill Roots",
+                subtitle="Reverie scans Codex-style `SKILL.md` directories from compatibility roots.",
+                accent=self.theme.BLUE_SOFT,
+            )
+            self.console.print(self._build_key_value_table(rows))
+            self.console.print()
+            return True
+        else:
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /skills [status|rescan|path|inspect <skill-name>][/{self.theme.AMBER_GLOW}]"
+            )
+            return True
+
+        summary = skills_manager.get_status_summary(force_refresh=force_refresh)
+        rows = skills_manager.list_display_rows(force_refresh=False)
+        error_rows = skills_manager.list_error_rows(force_refresh=False)
+        if force_refresh and self.app.get('refresh_agent_prompt_guidance'):
+            self.app['refresh_agent_prompt_guidance']()
+
+        self._show_command_panel(
+            "Skills",
+            subtitle="Codex-style `SKILL.md` instructions discovered from workspace and user compatibility roots.",
+            accent=self.theme.BLUE_SOFT,
+        )
+
+        overview = self._build_key_value_table(
+            [
+                ("Summary", summary.get("summary_label", "0 skills | 0 invalid")),
+                ("Valid Skills", str(summary.get("skill_count", 0))),
+                ("Invalid Skills", str(summary.get("error_count", 0))),
+                ("Skill Names", summary.get("skill_names", "") or "(none)"),
+            ]
+        )
+        self.console.print(overview)
+        self.console.print()
+
+        if not rows:
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} No valid `SKILL.md` files are currently detected.[/{self.theme.TEXT_DIM}]"
+            )
+        else:
+            table = Table(
+                title=f"[bold {self.theme.PINK_SOFT}]{self.deco.CRYSTAL} Detected Skills[/bold {self.theme.PINK_SOFT}]",
+                box=box.ROUNDED,
+                border_style=self.theme.BORDER_PRIMARY,
+                expand=True,
+            )
+            table.add_column("Skill", style=f"bold {self.theme.BLUE_SOFT}", width=22)
+            table.add_column("Scope", style=self.theme.TEXT_SECONDARY, width=12)
+            table.add_column("Root", style=self.theme.TEXT_DIM, width=18)
+            table.add_column("Description", style=self.theme.TEXT_PRIMARY, ratio=3)
+            table.add_column("Path", style=self.theme.TEXT_DIM, ratio=3)
+
+            for row in rows:
+                table.add_row(
+                    row.get("name", ""),
+                    row.get("scope", ""),
+                    row.get("root", ""),
+                    escape(row.get("description", "")),
+                    escape(row.get("path", "")),
+                )
+
+            self.console.print(table)
+
+        if error_rows:
+            self.console.print()
+            error_table = Table(
+                title=f"[bold {self.theme.AMBER_GLOW}]{self.deco.CRYSTAL} Invalid Skills[/bold {self.theme.AMBER_GLOW}]",
+                box=box.ROUNDED,
+                border_style=self.theme.AMBER_GLOW,
+                expand=True,
+            )
+            error_table.add_column("Scope", style=self.theme.TEXT_SECONDARY, width=12)
+            error_table.add_column("Root", style=self.theme.TEXT_DIM, width=18)
+            error_table.add_column("Path", style=self.theme.TEXT_PRIMARY, ratio=3)
+            error_table.add_column("Reason", style=self.theme.CORAL_SOFT, ratio=2)
+
+            for row in error_rows:
+                error_table.add_row(
+                    row.get("scope", ""),
+                    row.get("root", ""),
+                    escape(row.get("path", "")),
+                    escape(row.get("message", "")),
+                )
+
+            self.console.print(error_table)
+
+        self.console.print()
+        return True
+
+    def _cmd_skills_inspect(self, skill_name: str) -> bool:
+        """Inspect one detected skill and preview its instructions."""
+        skills_manager = self.app.get('skills_manager')
+        if not skills_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Skills manager is not available.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        wanted = str(skill_name or "").strip()
+        if not wanted:
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /skills inspect <skill-name>[/{self.theme.AMBER_GLOW}]"
+            )
+            return True
+
+        record = skills_manager.get_record(wanted, force_refresh=False)
+        if record is None:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Skill not found: {escape(wanted)}[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        self._show_command_panel(
+            f"Skill {record.name}",
+            subtitle="Detected Codex-style skill metadata and instruction preview.",
+            accent=self.theme.BLUE_SOFT,
+            meta=record.display_path,
+        )
+
+        overview = self._build_key_value_table(
+            [
+                ("Skill", record.name),
+                ("Scope", record.scope_label),
+                ("Root", record.root_label),
+                ("Path", record.display_path),
+                ("Description", record.description),
+            ]
+        )
+        self.console.print(overview)
+        self.console.print()
+
+        body_preview = record.body.strip() or "(empty skill body)"
+        preview_lines = body_preview.splitlines()
+        if len(preview_lines) > 24:
+            body_preview = "\n".join(preview_lines[:24]).rstrip() + "\n..."
+
+        self.console.print(
+            Panel(
+                escape(body_preview),
+                title=f"[bold {self.theme.PINK_SOFT}]SKILL.md Preview[/bold {self.theme.PINK_SOFT}]",
+                border_style=self.theme.BORDER_PRIMARY,
+                box=box.ROUNDED,
+            )
+        )
         self.console.print()
         return True
 

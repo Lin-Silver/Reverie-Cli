@@ -69,7 +69,7 @@ Windows packaging is handled by `build.bat`.
 - Installs the project in editable mode
 - Validates dependency health
 - Does not run packaging-time regression tests automatically
-- Supports Codex-style `SKILL.md` discovery through `.reverie/Skills`, `.reverie/skills`, and `.codex/skills`, including nested `<repo>/skills/<skill>/SKILL.md` layouts
+- Supports Codex-style `SKILL.md` discovery only through the application-root `.reverie/Skills` and `.reverie/skills` directories, including nested `<repo>/skills/<skill>/SKILL.md` layouts under that tree
 - Bundles required Comfy assets
 - Bundles `ffmpeg` into the one-file executable when it is available at build time
 - Builds `dist/reverie.exe` with PyInstaller

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Optional
 import json
+import os
 import re
 import time
 
@@ -15,6 +16,7 @@ import yaml
 _FRONTMATTER_RE = re.compile(r"\A---\s*\r?\n(.*?)\r?\n---\s*(?:\r?\n|$)", re.DOTALL)
 _EXPLICIT_SKILL_RE = re.compile(r"(?<![A-Za-z0-9_.-])\$([A-Za-z0-9][A-Za-z0-9._-]*)")
 _TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{1,}")
+_SKILL_SCAN_SKIP_DIRS = {".git", ".hg", ".svn", "__pycache__", "node_modules", ".venv", "venv"}
 _SKILL_STOPWORDS = {
     "the", "and", "for", "with", "that", "this", "from", "into", "your", "when", "use", "using",
     "user", "wants", "want", "anything", "files", "file", "skill", "guide", "whenever", "does",
@@ -198,21 +200,14 @@ class SkillsManager:
     def __init__(self, project_root: Path, app_root: Path) -> None:
         self.project_root = Path(project_root).resolve()
         self.app_root = Path(app_root).resolve()
-        self.home_root = Path.home().resolve()
         self._snapshot: Optional[SkillsSnapshot] = None
         self._generation = 0
         self._signature = ""
 
     def _build_root_candidates(self) -> tuple[SkillRoot, ...]:
         candidates = [
-            SkillRoot("workspace", ".reverie/Skills", self.project_root / ".reverie" / "Skills", 0),
-            SkillRoot("workspace", ".reverie/skills", self.project_root / ".reverie" / "skills", 1),
-            SkillRoot("workspace", ".codex/skills", self.project_root / ".codex" / "skills", 2),
-            SkillRoot("app", ".reverie/Skills", self.app_root / ".reverie" / "Skills", 3),
-            SkillRoot("app", ".reverie/skills", self.app_root / ".reverie" / "skills", 4),
-            SkillRoot("user", "~/.reverie/Skills", self.home_root / ".reverie" / "Skills", 5),
-            SkillRoot("user", "~/.reverie/skills", self.home_root / ".reverie" / "skills", 6),
-            SkillRoot("user", "~/.codex/skills", self.home_root / ".codex" / "skills", 7),
+            SkillRoot("app", ".reverie/Skills", self.app_root / ".reverie" / "Skills", 0),
+            SkillRoot("app", ".reverie/skills", self.app_root / ".reverie" / "skills", 1),
         ]
 
         deduped: list[SkillRoot] = []
@@ -295,25 +290,22 @@ class SkillsManager:
         return snapshot
 
     def _iter_skill_files(self, root_path: Path) -> list[Path]:
-        """Return candidate SKILL.md files from direct and nested `skills/` layouts."""
+        """Return candidate SKILL.md files from one root, recursively."""
         skill_files: list[Path] = []
         seen: set[str] = set()
 
-        patterns = (
-            "*/SKILL.md",
-            "skills/*/SKILL.md",
-            "*/skills/*/SKILL.md",
-            "*/*/skills/*/SKILL.md",
-        )
-        for pattern in patterns:
-            for candidate in root_path.glob(pattern):
-                if not candidate.is_file():
-                    continue
-                normalized = str(candidate.resolve(strict=False)).lower()
-                if normalized in seen:
-                    continue
-                seen.add(normalized)
-                skill_files.append(candidate)
+        for dirpath, dirnames, filenames in os.walk(root_path):
+            dirnames[:] = [name for name in dirnames if name not in _SKILL_SCAN_SKIP_DIRS]
+            if "SKILL.md" not in filenames:
+                continue
+            candidate = Path(dirpath) / "SKILL.md"
+            if not candidate.is_file():
+                continue
+            normalized = str(candidate.resolve(strict=False)).lower()
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            skill_files.append(candidate)
 
         skill_files.sort(key=lambda path: str(path).lower())
         return skill_files
@@ -537,8 +529,8 @@ class SkillsManager:
         lines = [
             "## Skills",
             "- Reverie supports Codex/Claude-style skills: directories that contain a `SKILL.md` entrypoint.",
-            "- Scan roots include `.reverie/Skills`, `.reverie/skills`, and compatibility paths such as `.codex/skills`.",
-            "- Nested marketplace or repository layouts like `<root>/<repo>/skills/<skill>/SKILL.md` are supported.",
+            "- Skills are loaded only from the application root under `.reverie/Skills` or `.reverie/skills` beside the executable.",
+            "- Nested repository layouts like `.reverie/skills/<repo>/skills/<skill>/SKILL.md` are supported when they live under that application root.",
             "- If a listed skill clearly matches the user's request, inspect that skill's `SKILL.md` before implementing the task.",
             "- Users can explicitly activate a skill for the current turn by writing `$skill-name` in their message.",
             "- Use `/skills` to inspect available skills, rescan roots, and view exact `SKILL.md` paths.",

@@ -2396,19 +2396,19 @@ class CommandHandler:
 
         query = str(args or "").strip().lower()
         if query in ("", "status", "list"):
-            force_refresh = False
+            force_refresh = True
         elif query in ("rescan", "reload", "refresh"):
             force_refresh = True
         elif query.startswith("inspect "):
             return self._cmd_skills_inspect(args.strip()[8:].strip())
         elif query == "path":
-            summary = skills_manager.get_status_summary()
+            summary = skills_manager.get_status_summary(force_refresh=True)
             rows = [(f"Root {idx + 1}", path) for idx, path in enumerate(summary.get("root_paths", []) or [])]
             if not rows:
                 rows = [("Roots", "(none configured)")]
             self._show_command_panel(
                 "Skill Roots",
-                subtitle="Reverie scans Codex-style `SKILL.md` directories from compatibility roots.",
+                subtitle="Reverie scans Codex-style `SKILL.md` directories from the application `.reverie` root.",
                 accent=self.theme.BLUE_SOFT,
             )
             self.console.print(self._build_key_value_table(rows))
@@ -2428,7 +2428,7 @@ class CommandHandler:
 
         self._show_command_panel(
             "Skills",
-            subtitle="Codex-style `SKILL.md` instructions discovered from workspace and user compatibility roots.",
+            subtitle="Codex-style `SKILL.md` instructions discovered from the application `.reverie` skill roots.",
             accent=self.theme.BLUE_SOFT,
         )
 
@@ -2513,7 +2513,7 @@ class CommandHandler:
             )
             return True
 
-        record = skills_manager.get_record(wanted, force_refresh=False)
+        record = skills_manager.get_record(wanted, force_refresh=True)
         if record is None:
             self.console.print(
                 f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Skill not found: {escape(wanted)}[/{self.theme.CORAL_SOFT}]"

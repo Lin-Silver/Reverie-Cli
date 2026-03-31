@@ -4,7 +4,7 @@
 
 ### Added
 
-* Added OpenAI Codex-style skill discovery so Reverie now scans compatible `.reverie/Skills`, `.reverie/skills`, and `.codex/skills` roots for `SKILL.md` instruction packs.
+* Added OpenAI Codex-style skill discovery so Reverie now scans the application-root `.reverie/Skills` and `.reverie/skills` roots for `SKILL.md` instruction packs.
 * Added explicit `$skill-name` turn injection so a detected skill's `SKILL.md` body can be loaded directly into the active model turn when requested by the user.
 * Added built-in primitive 3D asset generation so Reverie-Gamer can create runtime `.gltf` placeholders and preview renders directly through `/modeling primitive`.
 * Added built-in playblast and encoded video export through `/engine video`, including frame-sequence export that works even when no external encoder is installed.
@@ -16,6 +16,7 @@
 * Added a new `/skills` surface plus status/prompt integration so detected `SKILL.md` metadata is visible in the CLI and available to the active system prompt.
 * Expanded skill discovery to support nested repository layouts such as `.\.reverie\Skills\<repo>\skills\<skill>\SKILL.md`, which makes Anthropic's public `skills` repository work without repacking.
 * Added automatic skill matching so clearly relevant skills can be loaded even when the user does not type an explicit `$skill-name`.
+* Tightened skill storage so detection only uses the executable-root `.reverie/skills` tree, removing user-level and `.codex` compatibility scanning, and `/skills` now refreshes from disk by default.
 * Simplified MCP persistence to a standard `.reverie/mcp.json` layout centered on top-level `mcpServers`, while still reading legacy `.Reverie/MCP.json` files.
 * Promoted Ren'Py menu conditions into Reverie's executable `choices.conditions`, so imported conditional branches now run instead of staying as metadata-only hints.
 * Expanded the runtime dialogue/effects system so imported Ren'Py stage and audio commands execute during playtest rather than appearing as inert content.

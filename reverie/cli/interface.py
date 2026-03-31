@@ -988,12 +988,12 @@ class ReverieInterface:
         agent_display_text = transcript_message
         skill_context_text = ""
 
-        skill_mentions = self.skills_manager.resolve_explicit_mentions(clean_message, force_refresh=False)
+        skill_mentions = self.skills_manager.resolve_explicit_mentions(clean_message, force_refresh=True)
         resolved_skill_records = list(skill_mentions.get("records", []) or [])
         missing_skill_names = list(skill_mentions.get("missing", []) or [])
         if not resolved_skill_records:
             resolved_skill_records = list(
-                self.skills_manager.resolve_automatic_matches(clean_message, force_refresh=False, top_n=2)
+                self.skills_manager.resolve_automatic_matches(clean_message, force_refresh=True, top_n=2)
             )
             if resolved_skill_records:
                 auto_names = ", ".join(record.name for record in resolved_skill_records[:4])
@@ -1759,7 +1759,7 @@ class ReverieInterface:
                 "\n".join(lsp_lines),
                 self.mcp_runtime.describe_for_prompt(),
                 self.runtime_plugin_manager.describe_for_prompt(),
-                self.skills_manager.describe_for_prompt(),
+                self.skills_manager.describe_for_prompt(force_refresh=True),
                 atlas_block,
                 memory_block,
             ]

@@ -166,6 +166,13 @@ Examples:
                     except Exception:
                         pass
                     self._retriever = self.context.get('retriever')
+                    if self._retriever is None:
+                        agent = self.context.get("agent")
+                        tool_executor = getattr(agent, "tool_executor", None) if agent is not None else None
+                        latest_context = getattr(tool_executor, "context", None) if tool_executor is not None else None
+                        if isinstance(latest_context, dict):
+                            self.context.update(latest_context)
+                            self._retriever = latest_context.get("retriever")
         return self._retriever
 
     @staticmethod

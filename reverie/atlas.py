@@ -68,6 +68,32 @@ ATLAS_MEMORY_PROTOCOL = (
 )
 
 
+def _contains_cjk(text: str) -> bool:
+    return any("\u4e00" <= ch <= "\u9fff" for ch in str(text or ""))
+
+
+def _repair_mojibake_text(value: Any) -> str:
+    """Repair legacy UTF-8 mojibake that may survive in persisted config.json."""
+    text = str(value or "").strip()
+    if not text or _contains_cjk(text):
+        return text
+
+    mojibake_markers = ("Ã", "â", "å", "æ", "ç", "é", "è", "ï", "¤", "½")
+    if not any(marker in text for marker in mojibake_markers):
+        return text
+
+    try:
+        repaired = text.encode("latin1").decode("utf-8").strip()
+    except Exception:
+        return text
+
+    if not repaired:
+        return text
+    if _contains_cjk(repaired) or "—" in repaired or "Appendix" in repaired:
+        return repaired
+    return text
+
+
 def _coerce_bool(value: Any, default: bool) -> bool:
     if isinstance(value, bool):
         return value
@@ -138,10 +164,10 @@ def normalize_atlas_mode_config(raw_config: Any) -> Dict[str, Any]:
     )
     cfg["use_context_engine_memory"] = _coerce_bool(cfg.get("use_context_engine_memory"), True)
 
-    master_document_filename = str(cfg.get("master_document_filename", "") or "").strip()
+    master_document_filename = _repair_mojibake_text(cfg.get("master_document_filename", ""))
     cfg["master_document_filename"] = master_document_filename or ATLAS_DEFAULT_MASTER_DOCUMENT_FILENAME
 
-    appendix_filename_pattern = str(cfg.get("appendix_filename_pattern", "") or "").strip()
+    appendix_filename_pattern = _repair_mojibake_text(cfg.get("appendix_filename_pattern", ""))
     cfg["appendix_filename_pattern"] = appendix_filename_pattern or ATLAS_DEFAULT_APPENDIX_FILENAME_PATTERN
 
     verification_depth = str(cfg.get("verification_depth", "deep") or "").strip().lower()
@@ -201,6 +227,7 @@ def build_atlas_additional_rules(
             "## Atlas Confirmation Gate",
             "- After the first complete document bundle, explain the doc set to the user in plain language.",
             "- Use `userInput` to confirm the document information before broad implementation whenever the project scope is non-trivial.",
+            "- If the current user request already pre-authorized draft-to-implementation continuation after the initial document bundle, Atlas may treat that as satisfying the first confirmation gate unless a material blocker or ambiguity remains.",
             "- If the active document baseline has already been confirmed and the scope has not materially changed, continue implementation without reopening confirmation.",
             "- Re-confirm only when architecture, delivery scope, constraints, or implementation direction changes in a meaningful way.",
             "- The confirmation should explicitly cover:",

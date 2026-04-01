@@ -15,6 +15,9 @@
 
 * Slimmed the tool section injected into system prompts into a discovery-first format closer to Claude Code: short workflow guidance, compact tool-surface summaries, and explicit use of `tool_catalog` when schemas or tool choice are unclear.
 * Updated the welcome banner so the large `REVERIE` ASCII title is left-aligned, no longer wrapped in a border panel, and renders with extra top spacing instead of sticking to the top edge of the terminal.
+* Tightened the base Reverie system prompt so ASCII is preferred more explicitly in code, config, identifiers, and decorative terminal output unless Unicode is intentional.
+* Refreshed the interactive input prompt styling and continuation prompt formatting for a cleaner CLI rhythm.
+* Improved the TUI selector so it refreshes correctly when the terminal size changes during selection.
 * Bumped the source-tree package version from `2.1.6` to `2.1.7`.
 
 ### Removed
@@ -27,6 +30,12 @@
 * Updated `/clean` help and CLI command documentation to reflect the new cleanup scope: sessions, caches, checkpoints, and audit history, without snapshot/backups wording.
 * Updated configuration documentation to stop advertising `snapshots/` as a current on-demand project-cache directory in the active runtime flow.
 * Recorded this 2.1.7 source-track update in the changelog without publishing a GitHub Release, installer, or formal release package.
+
+### Fixed
+
+* Added a fallback path in `codebase-retrieval` so the tool can recover the live retriever object from the active tool-execution context when the immediate tool context is incomplete.
+* Added repair logic for legacy mojibake in persisted Atlas document-filename settings, reducing broken `master_document_filename` and `appendix_filename_pattern` values in older configs.
+* Relaxed the Atlas confirmation-gate wording so previously user-authorized “draft to implementation” flows can continue without a redundant first confirmation step when no material ambiguity remains.
 
 ## Reverie CLI v2.1.6 - Codex-Style Skills Support, Single-File Gamer Runtime Integration, and Runtime Packaging Cleanup
 

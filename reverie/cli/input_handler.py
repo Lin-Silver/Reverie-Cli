@@ -51,19 +51,20 @@ class InputHandler:
     def _render_prompt(self, prompt_text: str, is_continuation: bool = False) -> None:
         """Render the dreamy themed prompt"""
         if is_continuation:
-            self.console.print(
-                f"[{self.theme.PURPLE_MEDIUM}]   {self.deco.LINE_VERTICAL}[/{self.theme.PURPLE_MEDIUM}] ",
-                end=""
-            )
+            continuation = Text()
+            continuation.append("  ", style=self.theme.TEXT_DIM)
+            continuation.append(self.deco.LINE_VERTICAL, style=self.theme.PURPLE_MEDIUM)
+            continuation.append(" continue ", style=self.theme.TEXT_DIM)
+            continuation.append(self.deco.CHEVRON_RIGHT, style=self.theme.BLUE_SOFT)
+            continuation.append(" ", style=self.theme.TEXT_DIM)
+            self.console.print(continuation, end="")
         else:
             prompt_parts = Text()
-            
-            prompt_parts.append(f"{self.deco.SPARKLE_FILLED} ", style=self.theme.PINK_SOFT)
-            
+            prompt_parts.append(f"{self.deco.DIAMOND_FILLED} ", style=self.theme.BLUE_SOFT)
             prompt_parts.append(prompt_text.rstrip("> "), style=f"bold {self.theme.PURPLE_SOFT}")
-            
+            prompt_parts.append(f" {self.deco.DOT_MEDIUM} ", style=self.theme.TEXT_DIM)
+            prompt_parts.append("ready", style=self.theme.TEXT_DIM)
             prompt_parts.append(f" {self.deco.CHEVRON_RIGHT} ", style=self.theme.BLUE_SOFT)
-            
             self.console.print(prompt_parts, end="")
 
     def _get_seeded_single_line_input(self, prompt_text: str, initial_text: str) -> Optional[str]:

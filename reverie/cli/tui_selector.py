@@ -223,6 +223,7 @@ class TUISelector:
             auto_refresh=False,
             vertical_overflow="visible",
         ) as live:
+            last_size = (self._console_width(), self._console_height())
             while True:
                 # Wait for key press
                 if msvcrt.kbhit():
@@ -251,9 +252,6 @@ class TUISelector:
                         elif key == b'O':  # End
                             self._go_end()
                             state_changed = True
-                        else:
-                            # Unknown function key, skip
-                            continue
                     
                     elif key == b'\r':  # Enter
                         if self.filtered_items:
@@ -310,13 +308,19 @@ class TUISelector:
                         self._go_end()
                         state_changed = True
                     
-                    else:
-                        # Other keys, skip
-                        continue
+                    current_size = (self._console_width(), self._console_height())
+                    if current_size != last_size:
+                        last_size = current_size
+                        state_changed = True
                     
                     # Update only when state changes so the terminal keeps normal scroll behavior.
                     if state_changed:
                         live.update(self._build_content(), refresh=True)
+
+                current_size = (self._console_width(), self._console_height())
+                if current_size != last_size:
+                    last_size = current_size
+                    live.update(self._build_content(), refresh=True)
 
                 # Small sleep to prevent CPU spinning
                 time.sleep(0.025)

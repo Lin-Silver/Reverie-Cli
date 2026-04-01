@@ -231,6 +231,58 @@ web_search(query="python contextvars tutorial")
 """
 
 
+def get_tool_catalog_description() -> str:
+    """Description for runtime tool discovery."""
+    return """
+## Tool Catalog Tool (tool_catalog)
+
+Search or inspect the tools currently visible to the active agent.
+
+**Operations**:
+- `list`: show the visible tool surface for the current or specified mode
+- `search`: search tools by keywords across names, descriptions, and parameter names
+- `inspect`: inspect one tool's parameters and schema details
+
+**When to use**:
+- You are unsure which built-in, MCP, or runtime-plugin tool best fits the task
+- The request may depend on dynamic tools that were loaded after startup
+- You need the exact parameter names for a tool before calling it
+
+**Example calls**:
+```
+tool_catalog(operation="search", query="mcp resource")
+tool_catalog(operation="inspect", tool_name="command_exec")
+tool_catalog(operation="list", mode="reverie-gamer")
+```
+"""
+
+
+def get_skill_lookup_description() -> str:
+    """Description for runtime skill discovery."""
+    return """
+## Skill Lookup Tool (skill_lookup)
+
+Inspect Codex-style `SKILL.md` files that Reverie has discovered.
+
+**Operations**:
+- `list`
+- `search`
+- `inspect`
+
+**When to use**:
+- A detected skill seems relevant and you need its exact instructions
+- You want to confirm the summary or path of a skill before following it
+- The user references a skill indirectly and you want to search for the closest match
+
+**Example calls**:
+```
+skill_lookup(operation="list")
+skill_lookup(operation="search", query="openai docs")
+skill_lookup(operation="inspect", skill_name="plugin-creator")
+```
+"""
+
+
 def get_mcp_tool_description() -> str:
     """Description for dynamic MCP tools."""
     return """
@@ -253,6 +305,30 @@ Reverie can expose tools discovered from configured MCP servers.
 ```
 mcp_filesystem_read_file(path="/workspace/README.md")
 mcp_jira_create_issue(project="CLI", summary="Add MCP onboarding docs")
+```
+"""
+
+
+def get_mcp_resource_description() -> str:
+    """Description for MCP resource discovery and reading."""
+    return """
+## MCP Resource Tools (`list_mcp_resources`, `read_mcp_resource`)
+
+Use these tools to inspect read-only MCP resources such as documents, datasets, or server-provided context artifacts.
+
+**Typical flow**:
+1. Call `list_mcp_resources` to discover what a server exposes
+2. Pick the exact `server` + `uri`
+3. Call `read_mcp_resource` to inspect the content
+
+**Notes**:
+- Prefer these resource tools when the MCP server exposes context as resources instead of callable tools
+- `read_mcp_resource` can persist binary blobs into the project cache and return the saved path
+
+**Example calls**:
+```
+list_mcp_resources(server="filesystem")
+read_mcp_resource(server="filesystem", uri="file:///workspace/README.md")
 ```
 """
 
@@ -714,6 +790,9 @@ def get_all_tool_descriptions() -> str:
             get_delete_file_description(),
             get_workspace_command_description(),
             get_web_search_description(),
+            get_tool_catalog_description(),
+            get_skill_lookup_description(),
+            get_mcp_resource_description(),
             get_vision_tool_description(),
             get_text_to_image_description(),
             get_token_counter_description(),
@@ -839,61 +918,92 @@ def _get_mode_tool_workflow(mode: str) -> str:
 """
 
 
-def get_tool_descriptions_for_mode(mode: str) -> str:
-    """
-    Get tool descriptions relevant for a specific mode.
+def _get_tool_discovery_brief() -> str:
+    """Compact Claude-style discovery-first guidance for prompt injection."""
+    return """
+## Tool Discovery
 
-    For Reverie mode, this is intentionally comprehensive so the system prompt
-    contains the actual usage guidance for every main engineering tool exposed to
-    the model.
-    """
+- If the right tool or exact schema is unclear, start with `tool_catalog`.
+- Use `tool_catalog(operation="search", query="...")` to find candidates.
+- Use `tool_catalog(operation="inspect", tool_name="...")` before first use of unfamiliar, dynamic, or high-impact tools.
+- Use `skill_lookup` only when a discovered `SKILL.md` may materially change the workflow.
+- Use `list_mcp_resources` / `read_mcp_resource` for MCP resources, and inspect dynamic `mcp_*` tools through `tool_catalog`.
+"""
+
+
+def _get_compact_tool_surface(mode: str) -> str:
+    """Return a compact tool surface summary for the active mode."""
     normalized = _normalize_mode(mode)
 
-    descriptions = [
-        _get_mode_tool_workflow(mode),
-        get_codebase_retrieval_description(),
-        get_git_commit_retrieval_description(),
-        get_str_replace_editor_description(),
-        get_create_file_description(),
-        get_workspace_file_ops_description(),
-        get_delete_file_description(),
-        get_workspace_command_description(),
-        get_web_search_description(),
-        get_mcp_tool_description(),
-        get_vision_tool_description(),
-        get_token_counter_description(),
-        get_user_input_description(),
-        get_tool_calling_reliability_notes(),
+    lines = [
+        "## Tool Surface",
+        "",
+        "- `codebase-retrieval`: inspect files, symbols, dependencies, task context, workspace memory, or LSP state before non-trivial edits.",
+        "- `str_replace_editor` / `create_file`: modify existing files or create new files in the workspace.",
+        "- `file_ops` / `delete_file`: inspect the filesystem, create directories, or delete one file safely.",
+        "- `command_exec`: run project-local build, test, lint, smoke, packaging, or git commands.",
+        "- `git-commit-retrieval`: inspect history, blame, regressions, or earlier patterns before touching fragile code.",
+        "- `web_search`: use only for unstable external facts, external docs, products, or exact references.",
+        "- `vision_upload`: inspect screenshots, diagrams, or local image files when visual context matters.",
+        "- `count_tokens` / `context_management`: manage long-session context, checkpoint before compression, and avoid context loss.",
+        "- `userInput`: ask only when a blocking ambiguity or high-impact decision cannot be resolved safely from local context.",
+        "- Dynamic `mcp_*` and runtime-plugin tools may appear at runtime; discover and inspect them with `tool_catalog`.",
     ]
 
     if normalized != "computer-controller":
-        descriptions.append(get_text_to_image_description())
+        lines.append("- `text_to_image`: generate raster images only when the task explicitly needs image assets.")
 
     if normalized in {"reverie", "reverie-gamer"}:
-        descriptions.append(get_task_manager_description())
-
-    if normalized == "reverie":
-        descriptions.append(get_reverie_progress_review_description())
+        lines.append("- `task_manager`: use for larger multi-step work; skip it for tiny fixes and short greenfield scaffolds.")
 
     if normalized == "reverie-atlas":
-        descriptions.append(get_reverie_atlas_documentation_description())
-        descriptions.append(get_atlas_delivery_orchestrator_description())
+        lines.append("- `atlas_delivery_orchestrator`: keep Atlas contracts, slice state, blockers, checkpoints, and closure checks durable under `artifacts/atlas/`.")
 
     if normalized == "reverie-gamer":
-        descriptions.extend(
+        lines.extend(
             [
-                get_game_design_orchestrator_description(),
-                get_game_project_scaffolder_description(),
-                get_game_playtest_lab_description(),
-                get_game_modeling_workbench_description(),
-                get_reverie_engine_lite_description(),
+                "- `game_design_orchestrator`: create blueprints, analyze scope, expand systems, and generate vertical-slice plans.",
+                "- `game_project_scaffolder`: plan or create the runtime, data, tests, playtest, and content-pipeline foundation.",
+                "- `reverie_engine` / `reverie_engine_lite`: create, inspect, validate, benchmark, and smoke-test Reverie's built-in runtime projects.",
+                "- `game_modeling_workbench`: manage the built-in Blockbench plus Ashfox MCP pipeline, model stubs, registry sync, and runtime imports.",
+                "- `game_playtest_lab`: generate telemetry schemas, quality gates, playtest plans, and feedback analysis artifacts.",
+                "- Other Gamer tools such as `game_gdd_manager`, `level_design`, `game_asset_manager`, `game_balance_analyzer`, `game_math_simulator`, `game_stats_analyzer`, and `story_design` remain available through `tool_catalog`.",
             ]
         )
 
-    if normalized != "computer-controller":
-        descriptions.append(get_mode_switch_description())
-
     if normalized == "computer-controller":
-        descriptions.append(get_computer_control_description())
+        lines.append("- `computer_control`: run an observe -> act -> re-observe desktop loop until the target task is actually complete.")
+    else:
+        lines.append("- `switch_mode`: move to another specialist mode when its workflow is materially better for the current phase.")
+
+    return "\n".join(lines)
+
+
+def _get_compact_tool_calling_notes() -> str:
+    """Short tool-calling rules suitable for system-prompt injection."""
+    return """
+## Tool Calling Rules
+
+- Prefer exact tool names and exact schema field names.
+- Start with required fields, then add optional fields only when needed.
+- Retrieve before editing, and verify after editing.
+- When impact is high, choose the narrowest call that can still finish the job.
+"""
+
+
+def get_tool_descriptions_for_mode(mode: str) -> str:
+    """
+    Get compact, discovery-first tool guidance for the active mode.
+
+    The detailed tool schemas are already available to the model at call time,
+    and `tool_catalog` can be used to inspect dynamic or unfamiliar tools. Keep
+    the prompt-side guide concise so more context budget remains for the task.
+    """
+    descriptions = [
+        _get_mode_tool_workflow(mode),
+        _get_tool_discovery_brief(),
+        _get_compact_tool_surface(mode),
+        _get_compact_tool_calling_notes(),
+    ]
 
     return "\n".join(part for part in descriptions if str(part or "").strip())

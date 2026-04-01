@@ -9,7 +9,10 @@ Tools available to the AI Agent:
 - delete_file: Delete a single workspace file with confirmation
 - command_exec: Execute audited workspace commands with move/delete blacklist
 - web_search: Search the web
+- tool_catalog: Search and inspect the currently visible tool surface
 - task_manager: Organize complex work
+- skill_lookup: Inspect discovered SKILL.md instructions
+- list_mcp_resources/read_mcp_resource: Inspect MCP resources exposed by connected servers
 - nexus: Large-scale project development with 24+ hour support
 - vision_upload: Upload and process visual files for AI analysis
 - count_tokens: Count tokens in text or current conversation
@@ -23,10 +26,12 @@ from .file_ops import FileOpsTool
 from .delete_file import DeleteFileTool
 from .command_exec import CommandExecTool
 from .web_search import WebSearchTool
+from .tool_catalog import ToolCatalogTool
 from .task_manager import TaskManagerTool
 from .context_management import ContextManagementTool
 from .create_file import CreateFileTool
 from .user_input import UserInputTool
+from .skill_lookup import SkillLookupTool
 from .clarification import ClarificationTool
 from .text_to_image import TextToImageTool
 from .ant_tools import TaskBoundaryTool, NotifyUserTool
@@ -55,6 +60,7 @@ from .token_counter import TokenCounterTool
 from .mode_switch import ModeSwitchTool
 from .computer_control import ComputerControlTool
 from .mcp_dynamic import MCPDynamicTool
+from .mcp_resource_tools import ListMcpResourcesTool, ReadMcpResourceTool
 
 __all__ = [
     'BaseTool',
@@ -67,10 +73,12 @@ __all__ = [
     'DeleteFileTool',
     'CommandExecTool',
     'WebSearchTool',
+    'ToolCatalogTool',
     'TaskManagerTool',
     "ContextManagementTool",
     "CreateFileTool",
     "UserInputTool",
+    "SkillLookupTool",
     "ClarificationTool",
     "TextToImageTool",
     "TaskBoundaryTool",
@@ -100,4 +108,6 @@ __all__ = [
     "ModeSwitchTool",
     "ComputerControlTool",
     "MCPDynamicTool",
+    "ListMcpResourcesTool",
+    "ReadMcpResourceTool",
 ]

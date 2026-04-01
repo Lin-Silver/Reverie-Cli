@@ -14,6 +14,7 @@ from rich.console import Console, Group
 from rich.table import Table
 from rich.prompt import Prompt, Confirm
 from rich.panel import Panel
+from rich.syntax import Syntax
 from rich.text import Text
 from rich.align import Align
 from rich.columns import Columns
@@ -89,6 +90,87 @@ class CommandHandler:
         self._help_search_cache: Dict[str, str] = {}
         self._prime_help_catalog_cache()
 
+    def _console_width(self) -> int:
+        """Best-effort terminal width with a safe minimum."""
+        try:
+            width = int(getattr(self.console.size, "width", 0) or self.console.width or 0)
+        except Exception:
+            width = 0
+        return max(width, 60)
+
+    def _console_height(self) -> int:
+        """Best-effort terminal height with a safe minimum."""
+        try:
+            height = int(getattr(self.console.size, "height", 0) or 0)
+        except Exception:
+            height = 0
+        return max(height, 20)
+
+    def _console_size(self) -> tuple[int, int]:
+        """Return the current terminal width/height tuple."""
+        return (self._console_width(), self._console_height())
+
+    def _is_compact(self, cutoff: int = 108) -> bool:
+        """Whether the current terminal should prefer denser layouts."""
+        return self._console_width() < cutoff
+
+    def _truncate_middle(self, value: Any, max_length: int) -> str:
+        """Trim long values by preserving both ends."""
+        text = str(value or "").strip()
+        if len(text) <= max_length:
+            return text
+        if max_length <= 5:
+            return text[:max_length]
+        left = max(2, (max_length - 3) // 2)
+        right = max(2, max_length - 3 - left)
+        return f"{text[:left]}...{text[-right:]}"
+
+    def _build_metric_panel(
+        self,
+        label: str,
+        value: Any,
+        *,
+        accent: str,
+        detail: str = "",
+    ) -> Panel:
+        """Build a compact stat card for dashboard-like command pages."""
+        body: List[Any] = [
+            Text(str(value), style=f"bold {accent}"),
+            Text(str(label), style=self.theme.TEXT_DIM),
+        ]
+        if detail:
+            body.append(Text(str(detail), style=self.theme.TEXT_SECONDARY))
+        return Panel(
+            Group(*body),
+            border_style=accent,
+            box=box.ROUNDED,
+            padding=(0, 1),
+        )
+
+    def _build_roster_text(
+        self,
+        labels: List[str],
+        *,
+        accent: Optional[str] = None,
+        limit: int = 12,
+    ) -> Text:
+        """Render a wrapped badge-like label line."""
+        color = accent or self.theme.BLUE_SOFT
+        text = Text()
+        visible = [str(label).strip() for label in labels if str(label).strip()][:limit]
+        for index, label in enumerate(visible):
+            if index:
+                text.append(f" {self.deco.DOT_MEDIUM} ", style=self.theme.TEXT_DIM)
+            text.append(label, style=f"bold {color}")
+        remaining = len([label for label in labels if str(label).strip()]) - len(visible)
+        if remaining > 0:
+            if visible:
+                text.append(f" {self.deco.DOT_MEDIUM} ", style=self.theme.TEXT_DIM)
+            text.append(f"+{remaining} more", style=self.theme.TEXT_SECONDARY)
+        if not text.plain:
+            text.append("(none)", style=self.theme.TEXT_DIM)
+        return text
+
     def _resolve_activity_style(self, status: str) -> tuple[str, str, str, str]:
         """Resolve colors and labels for lightweight command activity blocks."""
         styles = {
@@ -156,11 +238,23 @@ class CommandHandler:
     ) -> None:
         """Render a shared section banner for command pages."""
         accent_color = accent or self.theme.BORDER_PRIMARY
-        body: List[Any] = [Text(title, style=f"bold {accent_color}")]
+        compact = self._is_compact(104)
+
+        eyebrow = Text()
+        eyebrow.append("Command Center", style=self.theme.TEXT_DIM)
+        if meta:
+            eyebrow.append(f"  {self.deco.DOT_MEDIUM}  ", style=self.theme.TEXT_DIM)
+            eyebrow.append(self._truncate_middle(meta, 64 if compact else 92), style=self.theme.TEXT_SECONDARY)
+
+        title_text = Text()
+        title_text.append(f"{self.deco.DIAMOND_FILLED} ", style=accent_color)
+        title_text.append(str(title), style=f"bold {accent_color}")
+
+        body: List[Any] = [eyebrow, title_text]
         if subtitle:
             body.append(Text(subtitle, style=self.theme.TEXT_SECONDARY))
-        if meta:
-            body.append(Text(meta, style=self.theme.TEXT_DIM))
+        divider = Text("─" * min(58 if compact else 78, max(self._console_width() - 14, 12)), style=self.theme.BORDER_SUBTLE)
+        body.append(divider)
 
         self.console.print()
         self.console.print(
@@ -168,19 +262,658 @@ class CommandHandler:
                 Group(*body),
                 border_style=accent_color,
                 box=box.ROUNDED,
-                padding=(0, 1),
+                padding=(1 if compact else 0, 1 if compact else 2),
             )
         )
         self.console.print()
 
     def _build_key_value_table(self, rows: List[tuple[str, Any]], *, value_style: Optional[str] = None) -> Table:
         """Build a simple two-column detail table."""
-        table = Table(show_header=False, box=box.SIMPLE, padding=(0, 2))
-        table.add_column("Label", style=self.theme.TEXT_SECONDARY, width=24)
-        table.add_column("Value", style=value_style or self.theme.TEXT_PRIMARY)
+        compact = self._is_compact(104)
+        table = Table(
+            show_header=False,
+            box=box.SIMPLE_HEAVY if not compact else box.SIMPLE,
+            padding=(0, 1 if compact else 2),
+            pad_edge=False,
+            expand=True,
+        )
+        table.add_column("Label", style=f"bold {self.theme.BLUE_SOFT}", width=18 if compact else 24)
+        table.add_column("Value", style=value_style or self.theme.TEXT_PRIMARY, ratio=1)
         for label, value in rows:
             table.add_row(str(label), str(value))
         return table
+
+    def _build_skill_overview_panels(
+        self,
+        summary: Dict[str, Any],
+        rows: List[Dict[str, str]],
+        error_rows: List[Dict[str, str]],
+    ) -> Any:
+        """Build the top summary row for `/skills`."""
+        panels = [
+            self._build_metric_panel(
+                "Detected",
+                summary.get("skill_count", 0),
+                accent=self.theme.MINT_VIBRANT,
+                detail="valid SKILL.md directories",
+            ),
+            self._build_metric_panel(
+                "Invalid",
+                summary.get("error_count", 0),
+                accent=self.theme.AMBER_GLOW if error_rows else self.theme.BLUE_SOFT,
+                detail="needs cleanup before loading",
+            ),
+            self._build_metric_panel(
+                "Roots",
+                len(summary.get("root_paths", []) or []),
+                accent=self.theme.PURPLE_SOFT,
+                detail="scan targets under .reverie",
+            ),
+        ]
+        return Columns(panels, equal=True, expand=True)
+
+    def _build_skill_table(self, rows: List[Dict[str, str]]) -> Table:
+        """Build a denser, easier-to-scan skill table."""
+        compact = self._is_compact(118)
+        table = Table(
+            title=f"[bold {self.theme.PINK_SOFT}]{self.deco.CRYSTAL} Detected Skills[/bold {self.theme.PINK_SOFT}]",
+            box=box.SIMPLE_HEAVY if compact else box.ROUNDED,
+            border_style=self.theme.BORDER_PRIMARY,
+            header_style=f"bold {self.theme.TEXT_SECONDARY}",
+            expand=True,
+            show_lines=not compact,
+            pad_edge=False,
+        )
+        table.add_column("Skill", width=26 if compact else 30)
+        table.add_column("Description", ratio=3, min_width=26)
+        table.add_column("Path", width=26 if compact else 40, no_wrap=True)
+
+        for row in rows:
+            scope = str(row.get("scope", "")).strip()
+            root = str(row.get("root", "")).strip()
+
+            skill_cell = Group(
+                Text(str(row.get("name", "")), style=f"bold {self.theme.BLUE_GLOW}"),
+                Text(f"{scope} {self.deco.DOT_MEDIUM} {root}", style=self.theme.TEXT_DIM),
+            )
+            description_cell = Text(str(row.get("description", "")), style=self.theme.TEXT_PRIMARY)
+            path_cell = Text(
+                self._truncate_middle(row.get("path", ""), 40 if compact else 56),
+                style=self.theme.TEXT_DIM,
+                overflow="ellipsis",
+                no_wrap=True,
+            )
+            table.add_row(skill_cell, description_cell, path_cell)
+        return table
+
+    def _build_invalid_skill_table(self, error_rows: List[Dict[str, str]]) -> Table:
+        """Build the invalid-skill diagnostics table."""
+        compact = self._is_compact(118)
+        table = Table(
+            title=f"[bold {self.theme.AMBER_GLOW}]{self.deco.CRYSTAL} Invalid Skills[/bold {self.theme.AMBER_GLOW}]",
+            box=box.SIMPLE_HEAVY if compact else box.ROUNDED,
+            border_style=self.theme.AMBER_GLOW,
+            header_style=f"bold {self.theme.TEXT_SECONDARY}",
+            expand=True,
+            show_lines=not compact,
+            pad_edge=False,
+        )
+        table.add_column("Where", width=24 if compact else 28)
+        table.add_column("Issue", ratio=2, min_width=22)
+        table.add_column("Path", width=26 if compact else 40, no_wrap=True)
+
+        for row in error_rows:
+            where_cell = Group(
+                Text(str(row.get("scope", "")), style=f"bold {self.theme.PEACH_SOFT}"),
+                Text(str(row.get("root", "")), style=self.theme.TEXT_DIM),
+            )
+            issue_cell = Text(str(row.get("message", "")), style=self.theme.CORAL_SOFT)
+            path_cell = Text(
+                self._truncate_middle(row.get("path", ""), 40 if compact else 56),
+                style=self.theme.TEXT_DIM,
+                overflow="ellipsis",
+                no_wrap=True,
+            )
+            table.add_row(where_cell, issue_cell, path_cell)
+        return table
+
+    def _print_skills_status_view(
+        self,
+        summary: Dict[str, Any],
+        rows: List[Dict[str, str]],
+        error_rows: List[Dict[str, str]],
+    ) -> None:
+        """Print the non-interactive skill overview page."""
+        self._show_command_panel(
+            "Skills",
+            subtitle="Codex-style `SKILL.md` instructions discovered from the application `.reverie` skill roots.",
+            accent=self.theme.BLUE_SOFT,
+        )
+
+        self.console.print(self._build_skill_overview_panels(summary, rows, error_rows))
+        self.console.print()
+
+        compact = self._is_compact(124)
+        roster_panel = Panel(
+            Group(
+                Text("Available skill names", style=self.theme.TEXT_DIM),
+                self._build_roster_text([row.get("name", "") for row in rows], accent=self.theme.BLUE_GLOW),
+            ),
+            title=f"[bold {self.theme.BLUE_SOFT}]{self.deco.DIAMOND} Roster[/bold {self.theme.BLUE_SOFT}]",
+            border_style=self.theme.BORDER_SUBTLE,
+            box=box.ROUNDED,
+            padding=(0, 1),
+        )
+        roots_panel = Panel(
+            Group(
+                *[
+                    Text(self._truncate_middle(path, 58 if compact else 92), style=self.theme.TEXT_SECONDARY)
+                    for path in (summary.get("root_paths", []) or [])
+                ]
+                or [Text("(none configured)", style=self.theme.TEXT_DIM)]
+            ),
+            title=f"[bold {self.theme.PURPLE_SOFT}]{self.deco.DIAMOND} Scan Roots[/bold {self.theme.PURPLE_SOFT}]",
+            border_style=self.theme.BORDER_SUBTLE,
+            box=box.ROUNDED,
+            padding=(0, 1),
+        )
+        shortcuts_panel = Panel(
+            Text.from_markup(
+                f"[bold {self.theme.BLUE_SOFT}]/skills inspect <name>[/bold {self.theme.BLUE_SOFT}] preview one skill\n"
+                f"[bold {self.theme.BLUE_SOFT}]/skills path[/bold {self.theme.BLUE_SOFT}] show scan directories\n"
+                f"[bold {self.theme.BLUE_SOFT}]/skills rescan[/bold {self.theme.BLUE_SOFT}] refresh prompt guidance"
+            ),
+            title=f"[bold {self.theme.PINK_SOFT}]{self.deco.DIAMOND} Shortcuts[/bold {self.theme.PINK_SOFT}]",
+            border_style=self.theme.BORDER_SUBTLE,
+            box=box.ROUNDED,
+            padding=(0, 1),
+        )
+
+        if compact:
+            self.console.print(Group(roster_panel, roots_panel, shortcuts_panel))
+        else:
+            right_stack = Group(roots_panel, shortcuts_panel)
+            self.console.print(Columns([roster_panel, right_stack], expand=True, equal=False))
+        self.console.print()
+
+        if not rows:
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} No valid `SKILL.md` files are currently detected.[/{self.theme.TEXT_DIM}]"
+            )
+        else:
+            self.console.print(self._build_skill_table(rows))
+
+        if error_rows:
+            self.console.print()
+            self.console.print(self._build_invalid_skill_table(error_rows))
+
+        self.console.print()
+
+    def _build_skill_browser_search_document(self, record: Any) -> str:
+        """Build a search document for one skill record."""
+        metadata = getattr(record, "metadata", {}) or {}
+        metadata_parts: List[str] = []
+        for key, value in metadata.items():
+            if isinstance(value, dict):
+                metadata_parts.extend(str(inner) for inner in value.values() if inner not in (None, ""))
+            elif isinstance(value, list):
+                metadata_parts.extend(str(inner) for inner in value if inner not in (None, ""))
+            elif value not in (None, ""):
+                metadata_parts.append(str(value))
+            metadata_parts.append(str(key))
+        parts = [
+            getattr(record, "name", ""),
+            getattr(record, "description", ""),
+            getattr(record, "scope_label", ""),
+            getattr(record, "root_label", ""),
+            getattr(record, "display_path", ""),
+            getattr(record, "body", ""),
+            " ".join(metadata_parts),
+        ]
+        return " ".join(str(part).lower() for part in parts if str(part).strip())
+
+    def _filter_skill_records(self, records: List[Any], query: str) -> List[Any]:
+        """Filter skills by name, description, path, root, and body content."""
+        raw_query = str(query or "").strip().lower()
+        if not raw_query:
+            return list(records)
+
+        terms = [term for term in raw_query.split() if term]
+        filtered: List[Any] = []
+        for record in records:
+            haystack = self._build_skill_browser_search_document(record)
+            if all(term in haystack for term in terms):
+                filtered.append(record)
+        return filtered
+
+    def _skill_browser_visible_count(self) -> int:
+        """Choose a stable visible-row count for the skill browser list."""
+        width = self._console_width()
+        reserve = 18 if width >= 140 else 20 if width >= 110 else 22
+        return max(5, min(9, self._console_height() - reserve))
+
+    def _build_skill_browser_summary_panel(
+        self,
+        records: List[Any],
+        filtered_records: List[Any],
+        selected_record: Any,
+        search_query: str,
+        is_searching: bool,
+        invalid_count: int,
+        root_count: int,
+    ) -> Panel:
+        """Build the top summary panel for the interactive skills browser."""
+        name = str(getattr(selected_record, "name", "") or "").strip()
+        summary = str(getattr(selected_record, "summary", "") or getattr(selected_record, "description", "") or "").strip()
+        scope = str(getattr(selected_record, "scope_label", "") or "").strip()
+        root = str(getattr(selected_record, "root_label", "") or "").strip()
+        compact = self._console_width() < 110
+        count_text = f"{len(filtered_records)}/{len(records)} skills" if len(filtered_records) != len(records) else f"{len(records)} skills"
+        if invalid_count:
+            count_text = f"{count_text} · {invalid_count} invalid"
+        if root_count:
+            count_text = f"{count_text} · {root_count} roots"
+
+        title_grid = Table.grid(expand=True)
+        title_grid.add_column(ratio=1)
+        title_grid.add_column(justify="right", no_wrap=True)
+        title_grid.add_row(
+            Text.assemble(
+                (f"{self.deco.SPARKLE} ", self.theme.PINK_SOFT),
+                ("Skill Browser", f"bold {self.theme.PINK_SOFT}"),
+            ),
+            Text(count_text, style=self.theme.TEXT_DIM),
+        )
+
+        search_display = search_query + ("_" if is_searching else "")
+        body_lines = [
+            f"[{self.theme.TEXT_DIM}]Focused:[/{self.theme.TEXT_DIM}] [bold {self.theme.BLUE_SOFT}]{escape(name)}[/bold {self.theme.BLUE_SOFT}] [{self.theme.TEXT_DIM}]· {escape(scope)} · {escape(root)}[/{self.theme.TEXT_DIM}]",
+        ]
+        if summary:
+            body_lines.append(
+                f"[{self.theme.TEXT_PRIMARY}]{escape(self._truncate_middle(summary, 120 if compact else 180))}[/{self.theme.TEXT_PRIMARY}]"
+            )
+        if search_query or is_searching:
+            body_lines.append(
+                f"[bold {self.theme.PURPLE_SOFT}]{self.deco.SEARCH} Filter[/bold {self.theme.PURPLE_SOFT}] "
+                f"[{self.theme.TEXT_PRIMARY}]{escape(search_display)}[/{self.theme.TEXT_PRIMARY}]"
+            )
+        else:
+            body_lines.append(
+                f"[{self.theme.TEXT_DIM}]Use ↑↓ / j k to browse, only a small window of skills is shown at once, and Enter or Esc keeps the focused skill page in the transcript.[/{self.theme.TEXT_DIM}]"
+            )
+
+        return Panel(
+            Group(title_grid, Text.from_markup("\n".join(body_lines))),
+            border_style=self.theme.BORDER_PRIMARY,
+            padding=(1, 2),
+            box=box.ROUNDED,
+        )
+
+    def _build_skill_browser_list_panel(
+        self,
+        filtered_records: List[Any],
+        selected_idx: int,
+        scroll_offset: int,
+        max_visible: int,
+    ) -> Panel:
+        """Build the skill list panel for the interactive browser."""
+        if not filtered_records:
+            return Panel(
+                Text.from_markup(
+                    f"[{self.theme.TEXT_DIM}]No matching skills. Refine the filter or press Esc to keep the previously focused skill page.[/{self.theme.TEXT_DIM}]"
+                ),
+                title=f"[bold {self.theme.BLUE_SOFT}]{self.deco.DIAMOND} Skills[/bold {self.theme.BLUE_SOFT}]",
+                border_style=self.theme.BORDER_SUBTLE,
+                padding=(1, 2),
+                box=box.ROUNDED,
+            )
+
+        table = Table(
+            box=box.SIMPLE_HEAVY,
+            border_style=self.theme.BORDER_SUBTLE,
+            expand=True,
+            show_header=True,
+            pad_edge=False,
+            show_lines=False,
+        )
+        table.add_column("", width=2, no_wrap=True)
+        table.add_column("#", style=self.theme.TEXT_DIM, width=4, justify="right", no_wrap=True)
+        table.add_column("Skill", width=28, no_wrap=True)
+        table.add_column("Scope", width=10, no_wrap=True)
+        table.add_column("Root", width=18, no_wrap=True)
+        table.add_column("Summary", style=self.theme.TEXT_SECONDARY, ratio=1)
+
+        end_idx = min(scroll_offset + max_visible, len(filtered_records))
+        visible_records = filtered_records[scroll_offset:end_idx]
+        for row_index, record in enumerate(visible_records):
+            actual_idx = scroll_offset + row_index
+            is_selected = actual_idx == selected_idx
+            indicator = Text("›" if is_selected else "", style=f"bold {self.theme.PINK_SOFT}")
+            skill_style = f"bold {self.theme.TEXT_PRIMARY} on {self.theme.PURPLE_DEEP}" if is_selected else f"bold {self.theme.BLUE_SOFT}"
+            meta_style = self.theme.TEXT_PRIMARY if is_selected else self.theme.TEXT_DIM
+            preview_style = self.theme.TEXT_PRIMARY if is_selected else self.theme.TEXT_SECONDARY
+            table.add_row(
+                indicator,
+                Text(str(actual_idx + 1), style=self.theme.TEXT_DIM),
+                Text(self._truncate_middle(str(getattr(record, "name", "") or "").strip(), 26), style=skill_style, overflow="ellipsis", no_wrap=True),
+                Text(str(getattr(record, "scope_label", "") or "").strip(), style=meta_style, overflow="ellipsis", no_wrap=True),
+                Text(str(getattr(record, "root_label", "") or "").strip(), style=meta_style, overflow="ellipsis", no_wrap=True),
+                Text(
+                    self._truncate_middle(str(getattr(record, "summary", "") or "").strip(), 72 if self._console_width() >= 130 else 48),
+                    style=preview_style,
+                    overflow="ellipsis",
+                    no_wrap=True,
+                ),
+            )
+
+        visible_range = (
+            f"{scroll_offset + 1}-{end_idx} / {len(filtered_records)}"
+            if visible_records
+            else f"0 / {len(filtered_records)}"
+        )
+        return Panel(
+            table,
+            title=f"[bold {self.theme.BLUE_SOFT}]{self.deco.DIAMOND} Skills[/bold {self.theme.BLUE_SOFT}]",
+            subtitle=f"[{self.theme.TEXT_DIM}]Visible window: {visible_range}  {self.deco.DOT_MEDIUM}  Scroll down to reveal more[/{self.theme.TEXT_DIM}]",
+            border_style=self.theme.BORDER_SUBTLE,
+            padding=(0, 1),
+            box=box.ROUNDED,
+        )
+
+    def _build_skill_browser_detail_panel(self, record: Any, *, compact: bool = False) -> Panel:
+        """Build the detail side for the interactive skills browser."""
+        body_text = str(getattr(record, "body", "") or "").strip()
+        excerpt_source = [line.strip() for line in body_text.splitlines() if line.strip()]
+        excerpt_lines = excerpt_source[:4]
+        overview = Table(show_header=False, box=box.SIMPLE, pad_edge=False, expand=True)
+        overview.add_column(style=self.theme.TEXT_DIM, width=9)
+        overview.add_column(style=self.theme.TEXT_PRIMARY, ratio=1)
+        overview.add_row("Scope", str(getattr(record, "scope_label", "") or ""))
+        overview.add_row("Root", str(getattr(record, "root_label", "") or ""))
+        overview.add_row("Path", self._truncate_middle(getattr(record, "display_path", ""), 68 if compact else 112))
+
+        content: List[Any] = [
+            Text(str(getattr(record, "name", "") or ""), style=f"bold {self.theme.PURPLE_SOFT}"),
+            Text(str(getattr(record, "description", "") or ""), style=self.theme.TEXT_SECONDARY),
+            overview,
+        ]
+        if excerpt_lines:
+            content.append(Text("Instruction excerpt", style=self.theme.TEXT_DIM))
+            for line in excerpt_lines:
+                content.append(Text(self._truncate_middle(line, 120 if compact else 180), style=self.theme.TEXT_PRIMARY))
+        content.append(
+            Text("Press Enter or Esc to keep the full skill page in the transcript.", style=self.theme.TEXT_DIM)
+        )
+
+        return Panel(
+            Group(*content),
+            title=f"[bold {self.theme.PURPLE_SOFT}]{self.deco.DIAMOND} Focused Skill[/bold {self.theme.PURPLE_SOFT}]",
+            border_style=self.theme.BORDER_SUBTLE,
+            padding=(0, 1),
+            box=box.ROUNDED,
+        )
+
+    def _build_skill_browser_footer_panel(
+        self,
+        filtered_count: int,
+        search_query: str,
+        is_searching: bool,
+    ) -> Panel:
+        """Build the navigation footer for the interactive skills browser."""
+        footer_text = Text()
+        footer_text.append("Navigate ", style=self.theme.TEXT_DIM)
+        footer_text.append("↑↓ / j k", style=self.theme.BLUE_SOFT)
+        footer_text.append("  Page ", style=self.theme.TEXT_DIM)
+        footer_text.append("PgUp/PgDn", style=self.theme.BLUE_SOFT)
+        footer_text.append("  Keep page ", style=self.theme.TEXT_DIM)
+        footer_text.append("Enter / Esc", style=self.theme.BLUE_SOFT)
+        footer_text.append("  Filter ", style=self.theme.TEXT_DIM)
+        footer_text.append("/", style=self.theme.BLUE_SOFT)
+        footer_text.append("  Edit ", style=self.theme.TEXT_DIM)
+        footer_text.append("Backspace", style=self.theme.BLUE_SOFT)
+        footer_text.append("  Jump ", style=self.theme.TEXT_DIM)
+        footer_text.append("Home/End", style=self.theme.BLUE_SOFT)
+
+        status_text = "Typing filter" if is_searching else ("Filter active" if search_query else "Live browser")
+        status_color = self.theme.PURPLE_SOFT if (is_searching or search_query) else self.theme.TEXT_DIM
+
+        footer_grid = Table.grid(expand=True)
+        footer_grid.add_column(ratio=1)
+        footer_grid.add_column(justify="right", no_wrap=True)
+        footer_grid.add_row(
+            footer_text,
+            Text(f"{filtered_count} visible · {status_text}", style=status_color),
+        )
+
+        return Panel(
+            footer_grid,
+            border_style=self.theme.BORDER_SUBTLE,
+            padding=(0, 1),
+            box=box.ROUNDED,
+        )
+
+    def _render_skill_browser_ui(
+        self,
+        records: List[Any],
+        filtered_records: List[Any],
+        selected_idx: int,
+        scroll_offset: int,
+        max_visible: int,
+        selected_record: Any,
+        search_query: str,
+        is_searching: bool,
+        invalid_count: int,
+        root_count: int,
+    ) -> Group:
+        """Compose the full interactive skills browser layout."""
+        summary_panel = self._build_skill_browser_summary_panel(
+            records,
+            filtered_records,
+            selected_record,
+            search_query,
+            is_searching,
+            invalid_count,
+            root_count,
+        )
+        list_panel = self._build_skill_browser_list_panel(filtered_records, selected_idx, scroll_offset, max_visible)
+        width = self._console_width()
+        detail_panel = self._build_skill_browser_detail_panel(selected_record, compact=width < 138)
+        footer_panel = self._build_skill_browser_footer_panel(len(filtered_records), search_query, is_searching)
+        return Group(summary_panel, list_panel, detail_panel, footer_panel)
+
+    def _print_skill_detail_page(self, record: Any) -> None:
+        """Print one selected skill page into the transcript."""
+        self._show_command_panel(
+            f"Skill {getattr(record, 'name', '')}",
+            subtitle="Detected Codex-style skill metadata and instruction preview.",
+            accent=self.theme.BLUE_SOFT,
+            meta=str(getattr(record, "display_path", "") or ""),
+        )
+
+        overview = self._build_key_value_table(
+            [
+                ("Skill", getattr(record, "name", "")),
+                ("Scope", getattr(record, "scope_label", "")),
+                ("Root", getattr(record, "root_label", "")),
+                ("Path", getattr(record, "display_path", "")),
+                ("Description", getattr(record, "description", "")),
+            ]
+        )
+        self.console.print(overview)
+        self.console.print()
+
+        body_preview = str(getattr(record, "body", "") or "").strip() or "(empty skill body)"
+        preview_lines = body_preview.splitlines()
+        if len(preview_lines) > 24:
+            body_preview = "\n".join(preview_lines[:24]).rstrip() + "\n..."
+
+        self.console.print(
+            Panel(
+                Syntax(body_preview, "markdown", word_wrap=True, line_numbers=False, background_color="default"),
+                title=f"[bold {self.theme.PINK_SOFT}]SKILL.md Preview[/bold {self.theme.PINK_SOFT}]",
+                border_style=self.theme.BORDER_PRIMARY,
+                box=box.ROUNDED,
+                padding=(0, 1),
+            )
+        )
+        self.console.print()
+
+    def _cmd_skills_ui(self, initial_query: str = "", *, force_refresh: bool = False) -> bool:
+        """Launch the interactive skills browser and keep the focused page on exit."""
+        skills_manager = self.app.get('skills_manager')
+        if not skills_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Skills manager is not available.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        summary = skills_manager.get_status_summary(force_refresh=force_refresh)
+        rows = skills_manager.list_display_rows(force_refresh=False)
+        error_rows = skills_manager.list_error_rows(force_refresh=False)
+        snapshot = skills_manager.get_snapshot(force_refresh=False)
+        records = list(getattr(snapshot, "records", ()) or [])
+        if force_refresh and self.app.get('refresh_agent_prompt_guidance'):
+            self.app['refresh_agent_prompt_guidance']()
+
+        try:
+            import msvcrt
+        except ImportError:
+            self._print_skills_status_view(summary, rows, error_rows)
+            return True
+
+        if not records:
+            self._print_skills_status_view(summary, rows, error_rows)
+            return True
+
+        search_query = str(initial_query or "").strip()
+        is_searching = bool(search_query)
+        filtered_records = self._filter_skill_records(records, search_query)
+        selected_idx = 0
+        scroll_offset = 0
+        selected_record = filtered_records[0] if filtered_records else records[0]
+        max_visible = self._skill_browser_visible_count()
+
+        from rich.live import Live
+
+        with Live(
+            self._render_skill_browser_ui(
+                records,
+                filtered_records,
+                selected_idx,
+                scroll_offset,
+                max_visible,
+                selected_record,
+                search_query,
+                is_searching,
+                len(error_rows),
+                len(summary.get("root_paths", []) or []),
+            ),
+            auto_refresh=False,
+            screen=True,
+            transient=True,
+            vertical_overflow="ellipsis",
+            console=self.console,
+        ) as live:
+            last_size = self._console_size()
+            while True:
+                state_changed = False
+                if msvcrt.kbhit():
+                    key = msvcrt.getch()
+
+                    if key == b"\x1b":
+                        break
+                    if key == b"/":
+                        is_searching = True
+                        state_changed = True
+                    elif key in (b"\r", b"\n"):
+                        break
+                    elif key == b"\x08":
+                        if search_query:
+                            search_query = search_query[:-1]
+                            filtered_records = self._filter_skill_records(records, search_query)
+                            selected_idx = min(selected_idx, max(0, len(filtered_records) - 1))
+                            scroll_offset = 0
+                            if filtered_records:
+                                selected_record = filtered_records[selected_idx]
+                            state_changed = True
+                        else:
+                            is_searching = False
+                            state_changed = True
+                    elif key in (b"k", b"K") and filtered_records:
+                        selected_idx = (selected_idx - 1) % len(filtered_records)
+                        selected_record = filtered_records[selected_idx]
+                        state_changed = True
+                    elif key in (b"j", b"J") and filtered_records:
+                        selected_idx = (selected_idx + 1) % len(filtered_records)
+                        selected_record = filtered_records[selected_idx]
+                        state_changed = True
+                    elif key in (b"\x00", b"\xe0"):
+                        key = msvcrt.getch()
+                        if key == b"H" and filtered_records:
+                            selected_idx = (selected_idx - 1) % len(filtered_records)
+                            selected_record = filtered_records[selected_idx]
+                            state_changed = True
+                        elif key == b"P" and filtered_records:
+                            selected_idx = (selected_idx + 1) % len(filtered_records)
+                            selected_record = filtered_records[selected_idx]
+                            state_changed = True
+                        elif key == b"I" and filtered_records:
+                            selected_idx = max(0, selected_idx - max_visible)
+                            selected_record = filtered_records[selected_idx]
+                            state_changed = True
+                        elif key == b"Q" and filtered_records:
+                            selected_idx = min(len(filtered_records) - 1, selected_idx + max_visible)
+                            selected_record = filtered_records[selected_idx]
+                            state_changed = True
+                        elif key == b"G" and filtered_records:
+                            selected_idx = 0
+                            selected_record = filtered_records[selected_idx]
+                            state_changed = True
+                        elif key == b"O" and filtered_records:
+                            selected_idx = len(filtered_records) - 1
+                            selected_record = filtered_records[selected_idx]
+                            state_changed = True
+                    elif 32 <= key[0] <= 126:
+                        search_query += key.decode("ascii", errors="ignore")
+                        is_searching = True
+                        filtered_records = self._filter_skill_records(records, search_query)
+                        selected_idx = 0
+                        scroll_offset = 0
+                        if filtered_records:
+                            selected_record = filtered_records[0]
+                        state_changed = True
+
+                current_size = self._console_size()
+                if current_size != last_size:
+                    last_size = current_size
+                    state_changed = True
+
+                if state_changed:
+                    max_visible = self._skill_browser_visible_count()
+                    scroll_offset = self._clamp_help_browser_scroll(selected_idx, scroll_offset, len(filtered_records), max_visible)
+                    if filtered_records:
+                        selected_record = filtered_records[selected_idx]
+                    live.update(
+                        self._render_skill_browser_ui(
+                            records,
+                            filtered_records,
+                            selected_idx,
+                            scroll_offset,
+                            max_visible,
+                            selected_record,
+                            search_query,
+                            is_searching,
+                            len(error_rows),
+                            len(summary.get("root_paths", []) or []),
+                        ),
+                        refresh=True,
+                    )
+                time.sleep(0.025)
+
+        self.console.print()
+        self._print_skill_detail_page(selected_record)
+        return True
 
     def _build_command_table(
         self,
@@ -851,6 +1584,7 @@ class CommandHandler:
             vertical_overflow="ellipsis",
             console=self.console,
         ) as live:
+            last_size = self._console_size()
             while True:
                 if msvcrt.kbhit():
                     key = msvcrt.getch()
@@ -914,6 +1648,26 @@ class CommandHandler:
                     if filtered_items:
                         selected_topic = filtered_items[selected_idx]
 
+                    live.update(
+                        self._render_help_ui(
+                            filtered_items,
+                            selected_idx,
+                            scroll_offset,
+                            max_visible,
+                            selected_topic,
+                            search_query,
+                            is_searching,
+                            len(all_items),
+                        ),
+                        refresh=True,
+                    )
+                current_size = self._console_size()
+                if current_size != last_size:
+                    last_size = current_size
+                    max_visible = self._help_browser_visible_count()
+                    scroll_offset = self._clamp_help_browser_scroll(selected_idx, scroll_offset, len(filtered_items), max_visible)
+                    if filtered_items:
+                        selected_topic = filtered_items[selected_idx]
                     live.update(
                         self._render_help_ui(
                             filtered_items,
@@ -1510,6 +2264,7 @@ class CommandHandler:
             vertical_overflow="visible",
             console=self.console,
         ) as live:
+            last_size = self._console_size()
             while True:
                 if msvcrt.kbhit():
                     key = msvcrt.getch()
@@ -1569,6 +2324,12 @@ class CommandHandler:
                         time.sleep(0.025)
                         continue
 
+                    items = self._get_mcp_ui_items(config, rows, manager)
+                    selected_idx = max(0, min(selected_idx, max(0, len(items) - 1)))
+                    live.update(self._render_mcp_ui(config, rows, manager, selected_idx, changed=changed), refresh=True)
+                current_size = self._console_size()
+                if current_size != last_size:
+                    last_size = current_size
                     items = self._get_mcp_ui_items(config, rows, manager)
                     selected_idx = max(0, min(selected_idx, max(0, len(items) - 1)))
                     live.update(self._render_mcp_ui(config, rows, manager, selected_idx, changed=changed), refresh=True)
@@ -2394,13 +3155,14 @@ class CommandHandler:
             )
             return True
 
-        query = str(args or "").strip().lower()
+        raw_query = str(args or "").strip()
+        query = raw_query.lower()
         if query in ("", "status", "list"):
-            force_refresh = True
+            return self._cmd_skills_ui(force_refresh=True)
         elif query in ("rescan", "reload", "refresh"):
-            force_refresh = True
+            return self._cmd_skills_ui(force_refresh=True)
         elif query.startswith("inspect "):
-            return self._cmd_skills_inspect(args.strip()[8:].strip())
+            return self._cmd_skills_inspect(raw_query[8:].strip())
         elif query == "path":
             summary = skills_manager.get_status_summary(force_refresh=True)
             rows = [(f"Root {idx + 1}", path) for idx, path in enumerate(summary.get("root_paths", []) or [])]
@@ -2414,88 +3176,13 @@ class CommandHandler:
             self.console.print(self._build_key_value_table(rows))
             self.console.print()
             return True
-        else:
-            self.console.print(
-                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /skills [status|rescan|path|inspect <skill-name>][/{self.theme.AMBER_GLOW}]"
-            )
+
+        record = skills_manager.get_record(raw_query, force_refresh=True)
+        if record is not None:
+            self._print_skill_detail_page(record)
             return True
 
-        summary = skills_manager.get_status_summary(force_refresh=force_refresh)
-        rows = skills_manager.list_display_rows(force_refresh=False)
-        error_rows = skills_manager.list_error_rows(force_refresh=False)
-        if force_refresh and self.app.get('refresh_agent_prompt_guidance'):
-            self.app['refresh_agent_prompt_guidance']()
-
-        self._show_command_panel(
-            "Skills",
-            subtitle="Codex-style `SKILL.md` instructions discovered from the application `.reverie` skill roots.",
-            accent=self.theme.BLUE_SOFT,
-        )
-
-        overview = self._build_key_value_table(
-            [
-                ("Summary", summary.get("summary_label", "0 skills | 0 invalid")),
-                ("Valid Skills", str(summary.get("skill_count", 0))),
-                ("Invalid Skills", str(summary.get("error_count", 0))),
-                ("Skill Names", summary.get("skill_names", "") or "(none)"),
-            ]
-        )
-        self.console.print(overview)
-        self.console.print()
-
-        if not rows:
-            self.console.print(
-                f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} No valid `SKILL.md` files are currently detected.[/{self.theme.TEXT_DIM}]"
-            )
-        else:
-            table = Table(
-                title=f"[bold {self.theme.PINK_SOFT}]{self.deco.CRYSTAL} Detected Skills[/bold {self.theme.PINK_SOFT}]",
-                box=box.ROUNDED,
-                border_style=self.theme.BORDER_PRIMARY,
-                expand=True,
-            )
-            table.add_column("Skill", style=f"bold {self.theme.BLUE_SOFT}", width=22)
-            table.add_column("Scope", style=self.theme.TEXT_SECONDARY, width=12)
-            table.add_column("Root", style=self.theme.TEXT_DIM, width=18)
-            table.add_column("Description", style=self.theme.TEXT_PRIMARY, ratio=3)
-            table.add_column("Path", style=self.theme.TEXT_DIM, ratio=3)
-
-            for row in rows:
-                table.add_row(
-                    row.get("name", ""),
-                    row.get("scope", ""),
-                    row.get("root", ""),
-                    escape(row.get("description", "")),
-                    escape(row.get("path", "")),
-                )
-
-            self.console.print(table)
-
-        if error_rows:
-            self.console.print()
-            error_table = Table(
-                title=f"[bold {self.theme.AMBER_GLOW}]{self.deco.CRYSTAL} Invalid Skills[/bold {self.theme.AMBER_GLOW}]",
-                box=box.ROUNDED,
-                border_style=self.theme.AMBER_GLOW,
-                expand=True,
-            )
-            error_table.add_column("Scope", style=self.theme.TEXT_SECONDARY, width=12)
-            error_table.add_column("Root", style=self.theme.TEXT_DIM, width=18)
-            error_table.add_column("Path", style=self.theme.TEXT_PRIMARY, ratio=3)
-            error_table.add_column("Reason", style=self.theme.CORAL_SOFT, ratio=2)
-
-            for row in error_rows:
-                error_table.add_row(
-                    row.get("scope", ""),
-                    row.get("root", ""),
-                    escape(row.get("path", "")),
-                    escape(row.get("message", "")),
-                )
-
-            self.console.print(error_table)
-
-        self.console.print()
-        return True
+        return self._cmd_skills_ui(initial_query=raw_query, force_refresh=False)
 
     def _cmd_skills_inspect(self, skill_name: str) -> bool:
         """Inspect one detected skill and preview its instructions."""
@@ -2520,39 +3207,7 @@ class CommandHandler:
             )
             return True
 
-        self._show_command_panel(
-            f"Skill {record.name}",
-            subtitle="Detected Codex-style skill metadata and instruction preview.",
-            accent=self.theme.BLUE_SOFT,
-            meta=record.display_path,
-        )
-
-        overview = self._build_key_value_table(
-            [
-                ("Skill", record.name),
-                ("Scope", record.scope_label),
-                ("Root", record.root_label),
-                ("Path", record.display_path),
-                ("Description", record.description),
-            ]
-        )
-        self.console.print(overview)
-        self.console.print()
-
-        body_preview = record.body.strip() or "(empty skill body)"
-        preview_lines = body_preview.splitlines()
-        if len(preview_lines) > 24:
-            body_preview = "\n".join(preview_lines[:24]).rstrip() + "\n..."
-
-        self.console.print(
-            Panel(
-                escape(body_preview),
-                title=f"[bold {self.theme.PINK_SOFT}]SKILL.md Preview[/bold {self.theme.PINK_SOFT}]",
-                border_style=self.theme.BORDER_PRIMARY,
-                box=box.ROUNDED,
-            )
-        )
-        self.console.print()
+        self._print_skill_detail_page(record)
         return True
 
     def cmd_plugins(self, args: str) -> bool:
@@ -6366,7 +7021,7 @@ class CommandHandler:
         return True
 
     def cmd_clean(self, args: str) -> bool:
-        """Delete current-workspace cache, memory, backups, and audit logs."""
+        """Delete current-workspace cache, memory, and audit logs."""
         raw = args.strip().lower()
         if raw not in ("", "force", "--force"):
             self.console.print(
@@ -6388,7 +7043,7 @@ class CommandHandler:
         if raw not in ("force", "--force"):
             self.console.print()
             self.console.print(
-                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} This will delete only the current workspace's memories, sessions, snapshots, backups, and command audit logs.[/{self.theme.AMBER_GLOW}]"
+                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} This will delete only the current workspace's memories, sessions, caches, checkpoints, and command audit logs.[/{self.theme.AMBER_GLOW}]"
             )
             if workspace_root:
                 self.console.print(
@@ -6735,30 +7390,62 @@ class CommandHandler:
             box=box.ROUNDED,
         )
 
-    def _build_setting_list_panel(self, items: List[Dict[str, Any]], selected_idx: int, config, config_manager, rules_manager) -> Panel:
+    def _setting_visible_count(self) -> int:
+        """Choose a stable visible-row count for the settings browser."""
+        width = self._console_width()
+        reserve = 18 if width >= 140 else 20 if width >= 110 else 22
+        return max(5, min(9, self._console_height() - reserve))
+
+    def _build_setting_list_panel(
+        self,
+        items: List[Dict[str, Any]],
+        selected_idx: int,
+        scroll_offset: int,
+        max_visible: int,
+        config,
+        config_manager,
+        rules_manager,
+    ) -> Panel:
         """Settings list panel for the TUI."""
         table = Table(box=box.SIMPLE, show_header=True, pad_edge=False)
         table.add_column("#", style=self.theme.TEXT_DIM, width=4, justify="right")
-        table.add_column("Setting", style=f"bold {self.theme.BLUE_SOFT}", width=24)
-        table.add_column("Value", style=self.theme.TEXT_PRIMARY)
+        table.add_column("Setting", style=f"bold {self.theme.BLUE_SOFT}", width=24, no_wrap=True)
+        table.add_column("Kind", style=self.theme.TEXT_DIM, width=10, no_wrap=True)
+        table.add_column("Value", style=self.theme.TEXT_PRIMARY, ratio=1, no_wrap=True)
 
-        for index, item in enumerate(items):
-            is_selected = index == selected_idx
-            marker = f"{self.deco.CHEVRON_RIGHT}" if is_selected else " "
-            item_name = f"{marker} {item['name']}"
+        end_idx = min(scroll_offset + max_visible, len(items))
+        visible_items = items[scroll_offset:end_idx]
+
+        for row_index, item in enumerate(visible_items):
+            actual_idx = scroll_offset + row_index
+            is_selected = actual_idx == selected_idx
             value_text = self._setting_display_value(item, config, config_manager, rules_manager)
+            kind_label = str(item.get("kind", "") or "").strip()
             if is_selected:
                 table.add_row(
-                    f"[{self.theme.TEXT_DIM}]{index + 1}[/{self.theme.TEXT_DIM}]",
-                    f"[bold {self.theme.PINK_SOFT}]{escape(item_name)}[/bold {self.theme.PINK_SOFT}]",
+                    f"[{self.theme.TEXT_DIM}]{actual_idx + 1}[/{self.theme.TEXT_DIM}]",
+                    f"[bold {self.theme.PINK_SOFT}]{escape(self._truncate_middle(item['name'], 22))}[/bold {self.theme.PINK_SOFT}]",
+                    f"[{self.theme.TEXT_PRIMARY}]{escape(kind_label)}[/{self.theme.TEXT_PRIMARY}]",
                     f"[reverse]{value_text}[/reverse]",
                 )
             else:
-                table.add_row(str(index + 1), escape(item_name), value_text)
+                table.add_row(
+                    str(actual_idx + 1),
+                    escape(self._truncate_middle(item["name"], 22)),
+                    escape(kind_label),
+                    value_text,
+                )
+
+        visible_range = (
+            f"{scroll_offset + 1}-{end_idx} / {len(items)}"
+            if visible_items
+            else f"0 / {len(items)}"
+        )
 
         return Panel(
             table,
             title=f"[bold {self.theme.BLUE_SOFT}]{self.deco.DIAMOND} Settings[/bold {self.theme.BLUE_SOFT}]",
+            subtitle=f"[{self.theme.TEXT_DIM}]Visible window: {visible_range}  {self.deco.DOT_MEDIUM}  Scroll down to reveal more[/{self.theme.TEXT_DIM}]",
             border_style=self.theme.BORDER_SUBTLE,
             padding=(0, 1),
             box=box.ROUNDED,
@@ -6805,10 +7492,10 @@ class CommandHandler:
                 detail_lines.append(f"[{self.theme.TEXT_DIM}]Rules[/{self.theme.TEXT_DIM}]")
                 detail_lines.extend(
                     f"[{self.theme.TEXT_SECONDARY}]{self.deco.DOT_MEDIUM} {escape(rule)}[/{self.theme.TEXT_SECONDARY}]"
-                    for rule in rules[:5]
+                    for rule in rules[:3]
                 )
-                if len(rules) > 5:
-                    detail_lines.append(f"[{self.theme.TEXT_DIM}]... and {len(rules) - 5} more[/{self.theme.TEXT_DIM}]")
+                if len(rules) > 3:
+                    detail_lines.append(f"[{self.theme.TEXT_DIM}]... and {len(rules) - 3} more[/{self.theme.TEXT_DIM}]")
 
         detail_lines.extend(
             [
@@ -6838,6 +7525,7 @@ class CommandHandler:
                 f"{self.deco.DOT_MEDIUM} ↑/↓ or j/k: Navigate  "
                 f"{self.deco.DOT_MEDIUM} ←/→ or h/l: Quick change  "
                 f"{self.deco.DOT_MEDIUM} Enter: Edit precisely  "
+                f"{self.deco.DOT_MEDIUM} One focused page at a time  "
                 f"{self.deco.DOT_MEDIUM} Esc: Save & exit"
                 f"[/{self.theme.TEXT_DIM}]"
             ),
@@ -6853,10 +7541,20 @@ class CommandHandler:
             box=box.ROUNDED,
         )
 
-    def _render_setting_ui(self, selected_idx: int, config, config_manager, rules_manager, *, changed: bool = False) -> Group:
+    def _render_setting_ui(
+        self,
+        selected_idx: int,
+        scroll_offset: int,
+        config,
+        config_manager,
+        rules_manager,
+        *,
+        changed: bool = False,
+    ) -> Group:
         """Compose the full settings TUI renderable."""
         items = self._get_setting_items(config, config_manager, rules_manager)
         selected_item = items[selected_idx]
+        max_visible = self._setting_visible_count()
         summary_panel = self._build_setting_summary_panel(
             config,
             config_manager,
@@ -6865,16 +7563,18 @@ class CommandHandler:
             changed=changed,
             item_count=len(items),
         )
-        list_panel = self._build_setting_list_panel(items, selected_idx, config, config_manager, rules_manager)
+        list_panel = self._build_setting_list_panel(
+            items,
+            selected_idx,
+            scroll_offset,
+            max_visible,
+            config,
+            config_manager,
+            rules_manager,
+        )
         detail_panel = self._build_setting_detail_panel(selected_item, config, config_manager, rules_manager)
         footer_panel = self._build_setting_footer_panel(changed=changed, selected_idx=selected_idx, total_items=len(items))
-
-        width = int(getattr(self.console.size, "width", 0) or self.console.width or 0)
-        if width >= 92:
-            body = Columns([list_panel, detail_panel], expand=True, equal=False)
-        else:
-            body = Group(list_panel, detail_panel)
-        return Group(summary_panel, body, footer_panel)
+        return Group(summary_panel, list_panel, detail_panel, footer_panel)
 
     def _setting_parse_bool(self, value: str):
         """Parse common boolean input values."""
@@ -7276,16 +7976,20 @@ class CommandHandler:
         rules_manager = self.app.get('rules_manager')
         config = config_manager.load()
         selected_idx = 0
+        scroll_offset = 0
         changed = False
 
         from rich.live import Live
 
         with Live(
-            self._render_setting_ui(selected_idx, config, config_manager, rules_manager, changed=changed),
+            self._render_setting_ui(selected_idx, scroll_offset, config, config_manager, rules_manager, changed=changed),
             auto_refresh=False,
-            vertical_overflow="visible",
+            screen=True,
+            transient=True,
+            vertical_overflow="ellipsis",
             console=self.console,
         ) as live:
+            last_size = self._console_size()
             while True:
                 if msvcrt.kbhit():
                     key = msvcrt.getch()
@@ -7330,8 +8034,28 @@ class CommandHandler:
 
                     if should_reload_config:
                         config = config_manager.load()
+                    scroll_offset = self._clamp_help_browser_scroll(
+                        selected_idx,
+                        scroll_offset,
+                        len(items),
+                        self._setting_visible_count(),
+                    )
                     live.update(
-                        self._render_setting_ui(selected_idx, config, config_manager, rules_manager, changed=changed),
+                        self._render_setting_ui(selected_idx, scroll_offset, config, config_manager, rules_manager, changed=changed),
+                        refresh=True,
+                    )
+                current_size = self._console_size()
+                if current_size != last_size:
+                    last_size = current_size
+                    items = self._get_setting_items(config, config_manager, rules_manager)
+                    scroll_offset = self._clamp_help_browser_scroll(
+                        selected_idx,
+                        scroll_offset,
+                        len(items),
+                        self._setting_visible_count(),
+                    )
+                    live.update(
+                        self._render_setting_ui(selected_idx, scroll_offset, config, config_manager, rules_manager, changed=changed),
                         refresh=True,
                     )
                 time.sleep(0.025)

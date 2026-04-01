@@ -1,3 +1,33 @@
+## Reverie CLI v2.1.7 - Tool Discovery Upgrade, Prompt Slimming, Snapshot Removal, and Gamer Roadmap Refresh
+
+**Update Date:** 2026-04-01
+
+**Status:** Source-only update tracked in Git, not a formal packaged release.
+
+### Added
+
+* Added a first-class `tool_catalog` tool so the active model can list, search, and inspect the currently visible built-in, MCP, and runtime-plugin tools at runtime.
+* Added a first-class `skill_lookup` tool so discovered `SKILL.md` instruction packs can be listed, searched, and inspected on demand instead of relying only on automatic injection.
+* Added `list_mcp_resources` and `read_mcp_resource` so MCP resources are exposed to the model directly, including safe persistence of binary resource payloads into the project cache when needed.
+* Added a new Reverie-Gamer assessment and upgrade-roadmap document focused on evolving the mode toward prompt-to-vertical-slice 3D game generation.
+
+### Changed
+
+* Slimmed the tool section injected into system prompts into a discovery-first format closer to Claude Code: short workflow guidance, compact tool-surface summaries, and explicit use of `tool_catalog` when schemas or tool choice are unclear.
+* Updated the welcome banner so the large `REVERIE` ASCII title is left-aligned, no longer wrapped in a border panel, and renders with extra top spacing instead of sticking to the top edge of the terminal.
+* Bumped the source-tree package version from `2.1.6` to `2.1.7`.
+
+### Removed
+
+* Removed the automatic workspace snapshot / project-copy backup chain from the active CLI runtime flow, including the pre-message snapshot step and the dedicated `SnapshotManager` session integration.
+* Removed active support for the `.reverie/project_caches/<project>/snapshots/` runtime path from the current workspace flow.
+
+### Docs
+
+* Updated `/clean` help and CLI command documentation to reflect the new cleanup scope: sessions, caches, checkpoints, and audit history, without snapshot/backups wording.
+* Updated configuration documentation to stop advertising `snapshots/` as a current on-demand project-cache directory in the active runtime flow.
+* Recorded this 2.1.7 source-track update in the changelog without publishing a GitHub Release, installer, or formal release package.
+
 ## Reverie CLI v2.1.6 - Codex-Style Skills Support, Single-File Gamer Runtime Integration, and Runtime Packaging Cleanup
 
 **Release Date:** 2026-03-30

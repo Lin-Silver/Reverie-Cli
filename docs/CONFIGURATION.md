@@ -29,7 +29,7 @@ For each project Reverie creates a cache directory:
                 `-- command_audit.jsonl
 ```
 
-Additional subdirectories such as `indexes/`, `snapshots/`, `computer_control/`, `nexus/`, or `runtime_sandbox/` are created on demand under the same project cache root.
+Additional subdirectories such as `indexes/`, `computer_control/`, `nexus/`, or `runtime_sandbox/` are created on demand under the same project cache root.
 
 `<project-key>` is derived from the absolute project path plus a short hash so different workspaces stay isolated.
 

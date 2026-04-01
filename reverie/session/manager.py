@@ -69,14 +69,13 @@ class SessionManager:
     Enhanced with:
     - Automatic session rotation at 80% token threshold
     - Working memory injection for session continuity
-    - Integration with snapshot and memory systems
+    - Integration with persistent memory systems
     """
 
     def __init__(
         self,
         base_dir: Path,
         project_root: Optional[Path] = None,
-        snapshot_manager=None,
         memory_indexer=None,
         always_new_session: bool = False,
         refresh_memory_index_on_save: bool = False,
@@ -99,7 +98,6 @@ class SessionManager:
         self._session_index: Dict[str, Dict[str, Any]] = self._load_session_index()
 
         # Enhanced features
-        self.snapshot_manager = snapshot_manager
         self.memory_indexer = memory_indexer
         self.always_new_session = bool(always_new_session)
         self.refresh_memory_index_on_save = bool(refresh_memory_index_on_save)

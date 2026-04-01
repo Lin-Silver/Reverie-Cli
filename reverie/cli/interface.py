@@ -406,11 +406,7 @@ class ReverieInterface:
         self._context_engine_ready = False
         self._indexing_in_progress = False
 
-        from ..session import SnapshotManager, MemoryIndexer, WorkspaceStatsManager
-        self.snapshot_manager = SnapshotManager(
-            project_root=self.project_root,
-            snapshots_dir=self.project_data_dir / 'snapshots'
-        )
+        from ..session import MemoryIndexer, WorkspaceStatsManager
         self.memory_indexer = MemoryIndexer(self.project_data_dir)
         self.workspace_stats_manager = WorkspaceStatsManager(
             self.project_data_dir,
@@ -420,7 +416,6 @@ class ReverieInterface:
         self.session_manager = SessionManager(
             self.project_data_dir,
             project_root=None if runtime_scope == "computer-controller" else self.project_root,
-            snapshot_manager=self.snapshot_manager,
             memory_indexer=self.memory_indexer,
             always_new_session=runtime_scope == "computer-controller",
             refresh_memory_index_on_save=runtime_scope == "computer-controller",
@@ -570,7 +565,8 @@ class ReverieInterface:
                 self.run_setup_wizard()
             
             config = self.config_manager.load()
-            self.display.show_welcome(mode=config.mode)
+            self.display.show_welcome()
+            self._show_startup_configuration_log(config)
             
             self._init_agent()
             self.command_handler = CommandHandler(self.console, self._get_app_context())
@@ -586,6 +582,29 @@ class ReverieInterface:
             traceback.print_exc()
         finally:
             self._persist_runtime_stats()
+
+    def _show_startup_configuration_log(self, config: Config) -> None:
+        """Render startup configuration in the shared timeline/log format."""
+        from ..version import __version__
+
+        mode_label = str(getattr(config, "mode", "reverie") or "reverie").upper()
+        theme_label = str(getattr(config, "theme", "default") or "default").strip() or "default"
+        source_label = str(getattr(config, "active_model_source", "standard") or "standard").strip() or "standard"
+        detail = "\n".join(
+            [
+                f"version: v{__version__}",
+                f"mode: {mode_label}",
+                f"theme: {theme_label}",
+                f"source: {source_label}",
+                f"workspace: {self.project_root}",
+            ]
+        )
+        self._show_activity_event(
+            "Startup",
+            "Configuration loaded",
+            status="info",
+            detail=detail,
+        )
 
     def _get_status_line(self):
         """Generate a responsive live status panel."""
@@ -661,8 +680,18 @@ class ReverieInterface:
         ):
             return self._status_line_cache_renderable
 
+        def build_meter(percent: float, color: str, *, width_hint: int) -> Text:
+            meter_width = max(8, width_hint)
+            filled = min(meter_width, max(0, int(round((percent / 100) * meter_width)))) if meter_width else 0
+            bar = Text()
+            if filled:
+                bar.append("█" * filled, style=f"bold {color}")
+            if filled < meter_width:
+                bar.append("░" * (meter_width - filled), style=self.theme.TEXT_MUTED)
+            return bar
+
         top_left = Text()
-        top_left.append(f"{self.deco.SPARKLE_FILLED} ", style=self.theme.PINK_SOFT)
+        top_left.append(f"{self.deco.DIAMOND_FILLED} ", style=self.theme.BLUE_SOFT)
         top_left.append(model_label, style=f"bold {self.theme.PURPLE_SOFT}")
 
         top_right = Text()
@@ -676,46 +705,52 @@ class ReverieInterface:
         top_grid.add_row(top_left, top_right)
 
         summary = Text()
+        summary.append("Source ", style=self.theme.TEXT_DIM)
         summary.append(provider_label, style=self.theme.BLUE_SOFT)
         summary.append(f" {self.deco.DOT_MEDIUM} ", style=self.theme.TEXT_DIM)
+        summary.append("Mode ", style=self.theme.TEXT_DIM)
         summary.append(str(mode).upper(), style=f"bold {self.theme.BLUE_SOFT}")
         if reasoning_label:
             summary.append(f" {self.deco.DOT_MEDIUM} ", style=self.theme.TEXT_DIM)
+            summary.append("Reasoning ", style=self.theme.TEXT_DIM)
             summary.append(reasoning_label, style=self.theme.AMBER_GLOW)
-        if total_tokens is not None:
-            summary.append(f" {self.deco.DOT_MEDIUM} ", style=self.theme.TEXT_DIM)
-            usage = f"{self._format_compact_quantity(total_tokens)}/{self._format_compact_quantity(max_tokens)}"
-            if not tiny:
-                usage += f" ({percentage:.0f}%)"
-            summary.append(usage, style=token_color)
         if index_status_text:
             summary.append(f" {self.deco.DOT_MEDIUM} ", style=self.theme.TEXT_DIM)
             summary.append_text(index_status_text)
 
+        renderables = [top_grid, summary]
+
+        if total_tokens is not None:
+            meter = build_meter(percentage, token_color, width_hint=10 if tiny else 16 if compact else 22)
+            context_row = Text()
+            context_row.append("Context ", style=self.theme.TEXT_DIM)
+            context_row.append_text(meter)
+            context_row.append("  ", style=self.theme.TEXT_DIM)
+            context_row.append(
+                f"{self._format_compact_quantity(total_tokens)}/{self._format_compact_quantity(max_tokens)}",
+                style=token_color,
+            )
+            if not tiny:
+                context_row.append(f" ({percentage:.0f}%)", style=token_color)
+            renderables.append(context_row)
+
         if compact:
-            body = Group(top_grid, summary)
+            body_content = Group(*renderables)
         else:
-            secondary = Text()
-            secondary.append("Source ", style=self.theme.TEXT_DIM)
-            secondary.append(provider_label, style=self.theme.BLUE_SOFT)
-            secondary.append(f" {self.deco.DOT_MEDIUM} ", style=self.theme.TEXT_DIM)
-            secondary.append("Mode ", style=self.theme.TEXT_DIM)
-            secondary.append(str(mode).upper(), style=f"bold {self.theme.BLUE_SOFT}")
-            if reasoning_label:
-                secondary.append(f" {self.deco.DOT_MEDIUM} ", style=self.theme.TEXT_DIM)
-                secondary.append("Reasoning ", style=self.theme.TEXT_DIM)
-                secondary.append(reasoning_label, style=self.theme.AMBER_GLOW)
-            if total_tokens is not None:
-                secondary.append(f" {self.deco.DOT_MEDIUM} ", style=self.theme.TEXT_DIM)
-                secondary.append("Context ", style=self.theme.TEXT_DIM)
-                secondary.append(
-                    f"{self._format_compact_quantity(total_tokens)}/{self._format_compact_quantity(max_tokens)} ({percentage:.0f}%)",
-                    style=token_color,
-                )
-            if index_status_text:
-                secondary.append(f" {self.deco.DOT_MEDIUM} ", style=self.theme.TEXT_DIM)
-                secondary.append_text(index_status_text)
-            body = Group(top_grid, secondary)
+            hint_row = Text()
+            hint_row.append("Session ", style=self.theme.TEXT_DIM)
+            hint_row.append("live", style=self.theme.MINT_SOFT)
+            hint_row.append(f" {self.deco.DOT_MEDIUM} ", style=self.theme.TEXT_DIM)
+            hint_row.append("Footer ", style=self.theme.TEXT_DIM)
+            hint_row.append("active", style=self.theme.TEXT_SECONDARY)
+            body_content = Group(*renderables, hint_row)
+
+        body = Panel(
+            body_content,
+            border_style=token_color if total_tokens is not None and percentage >= 70 else self.theme.BORDER_SUBTLE,
+            box=box.ROUNDED,
+            padding=(0, 1),
+        )
 
         self._status_line_cache_key = cache_key
         self._status_line_cache_renderable = body
@@ -735,18 +770,24 @@ class ReverieInterface:
         return self._stream_input_state.snapshot()
 
     def _build_stream_input_prompt(self) -> Text:
-        """Render the streaming-time interjection prompt as a plain prompt line."""
+        """Render the streaming-time interjection prompt with clearer queue guidance."""
         snapshot = self._snapshot_stream_input_state()
         buffer_text = str(snapshot.get("buffer", "") or "")
         is_paused = bool(snapshot.get("paused"))
+        compact = max(int(getattr(self.console.size, "width", 0) or self.console.width or 0), 60) < 100
         prompt = Text()
         prompt.append(f"{self.deco.SPARKLE_FILLED} ", style=self.theme.PINK_SOFT)
-        prompt.append("Reverie", style=f"bold {self.theme.PURPLE_SOFT}")
+        prompt.append("Queue Follow-up", style=f"bold {self.theme.PURPLE_SOFT}")
         prompt.append(f" {self.deco.CHEVRON_RIGHT} ", style=self.theme.BLUE_SOFT)
         if buffer_text:
             prompt.append(buffer_text, style=f"bold {self.theme.TEXT_PRIMARY}")
         elif is_paused:
             prompt.append("(input paused)", style=self.theme.TEXT_DIM)
+        else:
+            prompt.append("Type while the model is streaming", style=self.theme.TEXT_DIM)
+        if not compact:
+            prompt.append(f"  {self.deco.DOT_MEDIUM}  ", style=self.theme.TEXT_DIM)
+            prompt.append("Enter sends", style=self.theme.TEXT_SECONDARY)
         return prompt
 
     def _get_streaming_footer(self):
@@ -1066,37 +1107,6 @@ class ReverieInterface:
 
         # Get current session ID
         session_id = self.session_manager.current_session.id if self.session_manager.current_session else "default"
-        
-        # Create project snapshot before processing user question
-        try:
-            snapshot_info = self.snapshot_manager.create_snapshot(
-                description=f"Before question: {transcript_message[:50]}..."
-            )
-            if snapshot_info:
-                if getattr(snapshot_info, "reused", False):
-                    self._show_activity_event(
-                        "Snapshot",
-                        "Workspace snapshot unchanged",
-                        status="info",
-                        detail="Reused the latest snapshot because the workspace has not changed.",
-                        meta=snapshot_info.id,
-                    )
-                else:
-                    self._show_activity_event(
-                        "Snapshot",
-                        "Workspace snapshot saved",
-                        status="success",
-                        detail=f"{snapshot_info.file_count} files captured before the next model call.",
-                        meta=snapshot_info.id,
-                    )
-        except Exception as e:
-            self._show_activity_event(
-                "Snapshot",
-                "Snapshot creation failed",
-                status="warning",
-                detail="The turn will continue without a pre-message snapshot.",
-                meta=str(e),
-            )
         
         try:
             first_non_tool_chunk = True

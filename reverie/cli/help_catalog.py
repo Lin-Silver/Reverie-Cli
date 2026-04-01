@@ -55,11 +55,11 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
     "clean": {
         "command": "/clean",
         "section": "Core",
-        "summary": "Delete current-workspace memory, backups, caches, and command audit history, then start fresh.",
+        "summary": "Delete current-workspace memory, caches, checkpoints, and command audit history, then start fresh.",
         "detail": "Only the active workspace is affected. Reverie removes the current workspace's cache under `.reverie/project_caches/<project-key>/` and also cleans legacy workspace-local `.reverie/context_cache` or `.reverie/security` folders when they still exist; config and rules remain intact.",
         "overview": "reset workspace memory, force",
         "subcommands": [
-            {"usage": "/clean", "description": "Prompt for confirmation, then delete current-workspace sessions, snapshots, caches, backups, and audit logs."},
+            {"usage": "/clean", "description": "Prompt for confirmation, then delete current-workspace sessions, caches, checkpoints, and audit logs."},
             {"usage": "/clean force", "description": "Run the same cleanup without the confirmation prompt."},
         ],
         "examples": ["/clean", "/clean force"],

@@ -1563,6 +1563,17 @@ class MCPRuntime:
             found = self._tool_lookup.get(wanted)
             return dict(found) if isinstance(found, dict) else None
 
+    def _resolve_server_name_locked(self, requested_name: str, effective_servers: Dict[str, Dict[str, Any]]) -> str:
+        """Resolve a server name case-insensitively against enabled servers."""
+        wanted = str(requested_name or "").strip()
+        if not wanted:
+            return ""
+        lowered = wanted.lower()
+        for server_name in effective_servers.keys():
+            if str(server_name).lower() == lowered:
+                return str(server_name)
+        return ""
+
     def call_tool(self, server_name: str, tool_name: str, arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         with self._lock:
             self._refresh_config_locked(force=False)
@@ -1580,6 +1591,74 @@ class MCPRuntime:
             "result": result,
             "data": metadata,
         }
+
+    def list_resources(self, server_name: str = "", force_refresh: bool = False) -> List[Dict[str, Any]]:
+        """List MCP resources exposed by enabled servers."""
+        with self._lock:
+            self._refresh_config_locked(force=False)
+            effective_servers = self._get_effective_servers_locked()
+            resolved_name = self._resolve_server_name_locked(server_name, effective_servers)
+            if str(server_name or "").strip() and not resolved_name:
+                available = ", ".join(sorted(effective_servers.keys()))
+                raise MCPClientError(
+                    f"MCP server '{server_name}' is not enabled. Available servers: {available or '(none)'}."
+                )
+
+            if resolved_name:
+                server_items = [(resolved_name, effective_servers[resolved_name])]
+            else:
+                server_items = sorted(effective_servers.items(), key=lambda item: str(item[0]).lower())
+
+            timeout_ms = int(self._config.get("mcp", {}).get("discovery_timeout_ms", MCP_DEFAULT_DISCOVERY_TIMEOUT_MS))
+            resources: List[Dict[str, Any]] = []
+
+            for current_name, server_cfg in server_items:
+                client = self._get_client_locked(current_name, server_cfg)
+                try:
+                    discovery = client.discover(force=force_refresh, timeout_ms=timeout_ms)
+                except Exception:
+                    if resolved_name:
+                        raise
+                    logger.debug("Failed to discover MCP resources for %s", current_name, exc_info=True)
+                    continue
+
+                for item in discovery.get("resources", []) or []:
+                    if not isinstance(item, dict):
+                        continue
+                    uri = str(item.get("uri", "") or "").strip()
+                    if not uri:
+                        continue
+                    name = str(item.get("name", "") or item.get("title", "") or uri).strip() or uri
+                    description = str(item.get("description", "") or "").strip()
+                    mime_type = str(item.get("mimeType", "") or item.get("mime_type", "") or "").strip()
+                    resources.append(
+                        {
+                            "server": current_name,
+                            "uri": uri,
+                            "name": name,
+                            "description": description or None,
+                            "mimeType": mime_type or None,
+                        }
+                    )
+
+            resources.sort(key=lambda item: (str(item.get("server", "")).lower(), str(item.get("name", "")).lower()))
+            return resources
+
+    def read_resource(self, server_name: str, uri: str) -> Dict[str, Any]:
+        """Read one resource from an enabled MCP server."""
+        with self._lock:
+            self._refresh_config_locked(force=False)
+            effective_servers = self._get_effective_servers_locked()
+            resolved_name = self._resolve_server_name_locked(server_name, effective_servers)
+            if not resolved_name:
+                available = ", ".join(sorted(effective_servers.keys()))
+                raise MCPClientError(
+                    f"MCP server '{server_name}' is not enabled. Available servers: {available or '(none)'}."
+                )
+            client = self._get_client_locked(resolved_name, effective_servers[resolved_name])
+
+        result = client.read_resource(uri)
+        return result if isinstance(result, dict) else {"contents": []}
 
     def list_server_status(self, force_refresh: bool = False) -> List[Dict[str, Any]]:
         with self._lock:

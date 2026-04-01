@@ -108,86 +108,51 @@ class DisplayComponents:
             text.append(str(value), style=f"bold {value_color}")
         return text
     
-    def show_welcome(self, mode: str = "reverie") -> None:
-        """Display the large ASCII banner plus version and mode."""
-        from .. import __version__
+    def show_welcome(self, title: str = "REVERIE") -> None:
+        """Display the original large startup banner without a border panel."""
+        normalized_title = (str(title or "REVERIE").strip().upper() or "REVERIE")
 
-        # IMPORTANT: Keep original banner colors as requested.
+        # Keep the original banner palette and glyph layout.
         colors = ["#f3e5f5", "#f0e0f8", "#ede0fb", "#ead0fe", "#e7c0ff", "#e4b0ff"]
-
         banner_lines = [
-            "   ██████╗ ███████╗██╗   ██╗███████╗██████╗ ██╗███████╗",
-            "   ██╔══██╗██╔════╝██║   ██║██╔════╝██╔══██╗██║██╔════╝",
-            "   ██████╔╝█████╗  ██║   ██║█████╗  ██████╔╝██║█████╗  ",
-            "   ██╔══██╗██╔══╝  ╚██╗ ██╔╝██╔══╝  ██╔══██╗██║██╔══╝  ",
-            "   ██║  ██║███████╗ ╚████╔╝ ███████╗██║  ██║██║███████╗",
-            "   ╚═╝  ╚═╝╚══════╝  ╚═══╝  ╚══════╝╚═╝  ╚═╝╚═╝╚══════╝",
+            "██████╗ ███████╗██╗   ██╗███████╗██████╗ ██╗███████╗",
+            "██╔══██╗██╔════╝██║   ██║██╔════╝██╔══██╗██║██╔════╝",
+            "██████╔╝█████╗  ██║   ██║█████╗  ██████╔╝██║█████╗  ",
+            "██╔══██╗██╔══╝  ╚██╗ ██╔╝██╔══╝  ██╔══██╗██║██╔══╝  ",
+            "██║  ██║███████╗ ╚████╔╝ ███████╗██║  ██║██║███████╗",
+            "╚═╝  ╚═╝╚══════╝  ╚═══╝  ╚══════╝╚═╝  ╚═╝╚═╝╚══════╝",
         ]
 
-        styled_banner = ""
+        banner_lines = [
+            "██████╗ ███████╗██╗   ██╗███████╗██████╗ ██╗███████╗",
+            "██╔══██╗██╔════╝██║   ██║██╔════╝██╔══██╗██║██╔════╝",
+            "██████╔╝█████╗  ██║   ██║█████╗  ██████╔╝██║█████╗  ",
+            "██╔══██╗██╔══╝  ╚██╗ ██╔╝██╔══╝  ██╔══██╗██║██╔══╝  ",
+            "██║  ██║███████╗ ╚████╔╝ ███████╗██║  ██║██║███████╗",
+            "╚═╝  ╚═╝╚══════╝  ╚═══╝  ╚══════╝╚═╝  ╚═╝╚═╝╚══════╝",
+        ]
+
+        banner_lines = [
+            "██████╗ ███████╗██╗   ██╗███████╗██████╗ ██╗███████╗",
+            "██╔══██╗██╔════╝██║   ██║██╔════╝██╔══██╗██║██╔════╝",
+            "██████╔╝█████╗  ██║   ██║█████╗  ██████╔╝██║█████╗  ",
+            "██╔══██╗██╔══╝  ╚██╗ ██╔╝██╔══╝  ██╔══██╗██║██╔══╝  ",
+            "██║  ██║███████╗ ╚████╔╝ ███████╗██║  ██║██║███████╗",
+            "╚═╝  ╚═╝╚══════╝  ╚═══╝  ╚══════╝╚═╝  ╚═╝╚═╝╚══════╝",
+        ]
+
+        banner_text = Text()
         for index, line in enumerate(banner_lines):
             color = colors[min(index, len(colors) - 1)]
-            styled_banner += f"[bold {color}]{line}[/bold {color}]\n"
-
-        compact = self._is_compact(112)
-        banner_text = Text.from_markup(styled_banner.rstrip())
+            banner_text.append(f"{line}\n", style=f"bold {color}")
+        banner_text.rstrip()
         banner_text.no_wrap = True
 
-        intro_text = Text.from_markup(
-            f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} World-Class Context Engine Coding Assistant {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]\n"
-            f"[{self.theme.TEXT_SECONDARY}]Sharper hierarchy, cleaner output rhythm, and stronger terminal fit without changing the Dreamscape palette.[/{self.theme.TEXT_SECONDARY}]"
-        )
-
-        session_panel = Panel(
-            Group(
-                self._build_badge_line(
-                    [
-                        ("Version", f"v{__version__}", self.theme.TEXT_DIM, self.theme.MINT_SOFT),
-                        ("Mode", str(mode or "reverie").upper(), self.theme.TEXT_DIM, self.theme.BLUE_SOFT),
-                    ]
-                ),
-                Text.from_markup(f"[{self.theme.TEXT_DIM}]Created by Raiden[/{self.theme.TEXT_DIM}]"),
-            ),
-            title=f"[bold {self.theme.PURPLE_SOFT}]{self.deco.DIAMOND} Session[/bold {self.theme.PURPLE_SOFT}]",
-            border_style=self.theme.BORDER_SUBTLE,
-            box=box.ROUNDED,
-            padding=(0, 1),
-        )
-
-        quickstart_panel = Panel(
-            Text.from_markup(
-                f"[bold {self.theme.BLUE_SOFT}]/help[/bold {self.theme.BLUE_SOFT}] command guide\n"
-                f"[bold {self.theme.BLUE_SOFT}]/status[/bold {self.theme.BLUE_SOFT}] model and token state\n"
-                f"[bold {self.theme.BLUE_SOFT}]/model[/bold {self.theme.BLUE_SOFT}] standard catalog\n"
-                f"[bold {self.theme.BLUE_SOFT}]/CE[/bold {self.theme.BLUE_SOFT}] context engine controls"
-            ),
-            title=f"[bold {self.theme.PURPLE_SOFT}]{self.deco.DIAMOND} Quick Start[/bold {self.theme.PURPLE_SOFT}]",
-            border_style=self.theme.BORDER_SUBTLE,
-            box=box.ROUNDED,
-            padding=(0, 1),
-        )
-
-        info_renderable = (
-            Group(session_panel, quickstart_panel)
-            if compact
-            else Columns([session_panel, quickstart_panel], equal=True, expand=True)
-        )
-
-        body = Group(
-            Align.center(banner_text) if self._console_width() >= 110 else Align.left(banner_text),
-            Align.center(intro_text) if not compact else intro_text,
-            info_renderable,
-        )
-
-        self.console.print(
-            Panel(
-                body,
-                border_style=self.theme.BORDER_PRIMARY,
-                padding=(1 if not compact else 0, 1 if compact else 2),
-                width=self._fit_panel_width(120, margin=2 if compact else 4),
-                box=box.ROUNDED,
-            )
-        )
+        self.console.print()
+        self.console.print()
+        self.console.print(Align.left(banner_text))
+        if normalized_title != "REVERIE":
+            self.console.print(Text(normalized_title, style=f"bold {self.theme.TEXT_DIM}"))
         self.console.print()
 
     def show_response_header(

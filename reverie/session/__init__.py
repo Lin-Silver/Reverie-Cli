@@ -8,7 +8,6 @@ Session management for conversation persistence:
 - ArchiveManager: Long-term storage
 - OperationHistory: Track all operations for rollback support
 - RollbackManager: Advanced rollback functionality
-- SnapshotManager: Repository-grade project snapshots
 - MemoryIndexer: Project database indexing for persistent memory
 """
 
@@ -17,7 +16,6 @@ from .checkpoint import CheckpointManager, Checkpoint, FileCheckpoint
 from .archive import ArchiveManager, Archive
 from .operation_history import OperationHistory, Operation, OperationType
 from .rollback_manager import RollbackManager, RollbackResult
-from .snapshot_manager import SnapshotManager, SnapshotInfo
 from .memory_indexer import MemoryIndexer, MemoryFragment, ProjectIndex
 from .workspace_stats import WorkspaceStatsManager, get_known_workspaces
 
@@ -35,8 +33,6 @@ __all__ = [
     'OperationType',
     'RollbackManager',
     'RollbackResult',
-    'SnapshotManager',
-    'SnapshotInfo',
     'MemoryIndexer',
     'MemoryFragment',
     'ProjectIndex',

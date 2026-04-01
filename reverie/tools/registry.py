@@ -14,10 +14,12 @@ from .file_ops import FileOpsTool
 from .delete_file import DeleteFileTool
 from .command_exec import CommandExecTool
 from .web_search import WebSearchTool
+from .tool_catalog import ToolCatalogTool
 from .task_manager import TaskManagerTool
 from .context_management import ContextManagementTool
 from .create_file import CreateFileTool
 from .user_input import UserInputTool
+from .skill_lookup import SkillLookupTool
 from .clarification import ClarificationTool
 from .text_to_image import TextToImageTool
 from .ant_tools import TaskBoundaryTool, NotifyUserTool
@@ -44,6 +46,7 @@ from .vision_upload import VisionUploadTool
 from .token_counter import TokenCounterTool
 from .mode_switch import ModeSwitchTool
 from .computer_control import ComputerControlTool
+from .mcp_resource_tools import ListMcpResourcesTool, ReadMcpResourceTool
 
 
 ToolClass = Type[BaseTool]
@@ -152,12 +155,16 @@ def _register_builtin_tools() -> None:
     register_tool_class(DeleteFileTool)
     register_tool_class(CommandExecTool)
     register_tool_class(WebSearchTool)
+    register_tool_class(ToolCatalogTool)
     register_tool_class(TaskManagerTool, include_modes=("reverie", "reverie-gamer"))
     register_tool_class(ContextManagementTool, expose_schema=False)
     register_tool_class(CreateFileTool)
     register_tool_class(UserInputTool)
+    register_tool_class(SkillLookupTool)
     register_tool_class(ClarificationTool, include_modes=("writer",))
     register_tool_class(TextToImageTool)
+    register_tool_class(ListMcpResourcesTool)
+    register_tool_class(ReadMcpResourceTool)
     register_tool_class(TaskBoundaryTool, include_modes=("reverie-ant",))
     register_tool_class(NotifyUserTool, include_modes=("reverie-ant",))
     register_tool_class(NovelContextManagerTool, include_modes=("writer",))

@@ -15,6 +15,15 @@ class RuntimePluginDynamicTool(BaseTool):
         super().__init__(context=context)
         self.metadata = dict(metadata or {})
         self.name = str(self.metadata.get("name", "") or "").strip() or "rc_plugin_tool"
+        self.aliases = tuple(self.metadata.get("aliases", []) or ())
+        self.search_hint = str(self.metadata.get("search_hint", "") or "").strip()
+        self.tool_category = str(self.metadata.get("category", "") or "").strip() or "runtime-plugin"
+        self.tool_tags = tuple(self.metadata.get("tags", []) or ())
+        self.read_only = bool(self.metadata.get("read_only", False))
+        self.concurrency_safe = bool(self.metadata.get("concurrency_safe", False))
+        self.destructive = bool(self.metadata.get("destructive", False))
+        self.should_defer = bool(self.metadata.get("should_defer", False))
+        self.always_load = bool(self.metadata.get("always_load", False))
         self.description = str(self.metadata.get("description", "") or "").strip() or self.name
         self.parameters = (
             dict(self.metadata.get("parameters", {}))

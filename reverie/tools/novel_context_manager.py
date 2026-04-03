@@ -27,6 +27,10 @@ class NovelContextManagerTool(BaseTool):
     """
     
     name = "novel_context_manager"
+    aliases = ("writer_memory", "story_context")
+    search_hint = "manage novel memory characters and chapter context"
+    tool_category = "writer"
+    tool_tags = ("novel", "chapter", "character", "location", "plot", "story", "memory")
     description = "Manage novel content, memory, and context for long-form story writing"
     
     parameters = {

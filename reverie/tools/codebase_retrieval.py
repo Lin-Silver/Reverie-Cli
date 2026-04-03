@@ -26,6 +26,12 @@ class CodebaseRetrievalTool(BaseTool):
     """
     
     name = "codebase-retrieval"
+    aliases = ("codebase_retrieval", "retrieve_codebase", "repo_context")
+    search_hint = "inspect files symbols dependencies memory and lsp"
+    tool_category = "retrieval"
+    tool_tags = ("codebase", "symbol", "file", "dependency", "memory", "lsp", "search")
+    read_only = True
+    concurrency_safe = True
     
     description = """Query the codebase for detailed information about symbols, files, and code structure.
 

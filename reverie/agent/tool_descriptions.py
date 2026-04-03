@@ -242,16 +242,20 @@ Search or inspect the tools currently visible to the active agent.
 - `list`: show the visible tool surface for the current or specified mode
 - `search`: search tools by keywords across names, descriptions, and parameter names
 - `inspect`: inspect one tool's parameters and schema details
+- `recommend`: ask which tools best fit a short task description
+- `groups`: summarize the visible tool surface by category and kind
 
 **When to use**:
 - You are unsure which built-in, MCP, or runtime-plugin tool best fits the task
 - The request may depend on dynamic tools that were loaded after startup
 - You need the exact parameter names for a tool before calling it
+- You want a safer first pass that favors read-only tools before editing
 
 **Example calls**:
 ```
 tool_catalog(operation="search", query="mcp resource")
 tool_catalog(operation="inspect", tool_name="command_exec")
+tool_catalog(operation="recommend", query="inspect repo files then run tests")
 tool_catalog(operation="list", mode="reverie-gamer")
 ```
 """
@@ -925,6 +929,7 @@ def _get_tool_discovery_brief() -> str:
 
 - If the right tool or exact schema is unclear, start with `tool_catalog`.
 - Use `tool_catalog(operation="search", query="...")` to find candidates.
+- Use `tool_catalog(operation="recommend", query="...")` when you want the likely best tool sequence for a short task description.
 - Use `tool_catalog(operation="inspect", tool_name="...")` before first use of unfamiliar, dynamic, or high-impact tools.
 - Use `skill_lookup` only when a discovered `SKILL.md` may materially change the workflow.
 - Use `list_mcp_resources` / `read_mcp_resource` for MCP resources, and inspect dynamic `mcp_*` tools through `tool_catalog`.

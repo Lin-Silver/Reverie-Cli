@@ -21,6 +21,10 @@ from ..engine import (
 
 class GameModelingWorkbenchTool(BaseTool):
     name = "game_modeling_workbench"
+    aliases = ("modeling_workbench",)
+    search_hint = "manage blockbench models and ashfox workflows"
+    tool_category = "game-modeling"
+    tool_tags = ("game", "model", "blockbench", "ashfox", "gltf", "3d", "asset")
     description = (
         "Manage Reverie-Gamer's built-in modeling workflow: inspect Blockbench and Ashfox MCP availability, "
         "materialize workspace folders, create `.bbmodel` stubs, import runtime exports, and call the built-in "

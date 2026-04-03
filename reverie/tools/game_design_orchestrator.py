@@ -18,6 +18,10 @@ from ..engine import canonical_engine_name, is_builtin_engine_name
 
 class GameDesignOrchestratorTool(BaseTool):
     name = "game_design_orchestrator"
+    aliases = ("game_blueprint", "blueprint_orchestrator")
+    search_hint = "create game blueprints and vertical slice plans"
+    tool_category = "game-design"
+    tool_tags = ("game", "blueprint", "design", "system", "vertical-slice", "scope")
     description = (
         "Create structured game blueprints, expand gameplay systems, plan "
         "vertical slices, analyze scope, and export markdown design packets."

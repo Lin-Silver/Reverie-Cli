@@ -25,7 +25,14 @@ from rich.markup import escape
 from .help_catalog import HELP_SECTION_ORDER, HELP_TOPICS, normalize_help_topic
 from .markdown_formatter import MarkdownFormatter, format_markdown
 from .theme import THEME, DECO, DREAM
-from ..modes import get_mode_description, list_modes, normalize_mode
+from ..modes import (
+    get_mode_description,
+    get_mode_display_name,
+    get_mode_tool_discovery_profile,
+    list_modes,
+    normalize_mode,
+)
+from ..tools.tool_catalog import ToolCatalogTool
 
 
 class CommandHandler:
@@ -1689,13 +1696,114 @@ class CommandHandler:
         return True
     
     def cmd_tools(self, args: str) -> bool:
-        """List available tools with dreamy styling"""
+        """Browse tools with mode-aware discovery and inspection."""
         agent = self.app.get('agent')
         if not agent:
             self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Agent not initialized[/{self.theme.CORAL_SOFT}]")
             return True
 
-        # Resolve current mode for tool visibility filtering.
+        parsed = self._parse_tools_args(args)
+        if parsed.get("error"):
+            self._show_activity_event(
+                "Tools",
+                "Could not parse `/tools` arguments.",
+                status="error",
+                detail=str(parsed.get("error", "")),
+            )
+            self.console.print(self._build_tools_shortcuts_table())
+            self.console.print()
+            return True
+
+        operation = str(parsed.get("operation", "overview") or "overview").lower()
+        mode = self._resolve_tools_mode(agent, str(parsed.get("mode_override", "") or ""))
+        query = str(parsed.get("query", "") or "").strip()
+        tool_name = str(parsed.get("tool_name", "") or "").strip()
+
+        if operation in {"overview", "list", "status"}:
+            return self._render_tools_overview(agent, mode)
+        if operation == "groups":
+            return self._render_tools_groups(agent, mode)
+        if operation == "search":
+            return self._render_tools_search(agent, mode, query)
+        if operation == "recommend":
+            return self._render_tools_recommend(agent, mode, query)
+        if operation == "inspect":
+            return self._render_tools_inspect(agent, mode, tool_name)
+
+        self._show_activity_event(
+            "Tools",
+            f"Unknown `/tools` action: {operation}",
+            status="error",
+            detail="Use `/tools`, `/tools search <query>`, `/tools recommend <task>`, `/tools inspect <tool>`, or `/tools groups`.",
+        )
+        self.console.print(self._build_tools_shortcuts_table())
+        self.console.print()
+        return True
+
+    def _parse_tools_args(self, args: str) -> Dict[str, Any]:
+        """Parse `/tools` arguments with optional `--mode` support."""
+        raw = str(args or "").strip()
+        if not raw:
+            return {"operation": "overview", "mode_override": "", "query": "", "tool_name": ""}
+
+        try:
+            tokens = shlex.split(raw, posix=False)
+        except ValueError as exc:
+            return {"error": str(exc)}
+
+        filtered: List[str] = []
+        mode_override = ""
+        index = 0
+        while index < len(tokens):
+            token = str(tokens[index] or "").strip()
+            lowered = token.lower()
+            if lowered in {"--mode", "-m"}:
+                index += 1
+                if index >= len(tokens):
+                    return {"error": "Missing mode name after --mode."}
+                mode_override = str(tokens[index] or "").strip()
+            elif token:
+                filtered.append(token)
+            index += 1
+
+        if not filtered:
+            return {"operation": "overview", "mode_override": mode_override, "query": "", "tool_name": ""}
+
+        known_operations = {"overview", "list", "status", "search", "recommend", "inspect", "groups"}
+        available_modes = {normalize_mode(mode_name) for mode_name in list_modes()}
+
+        operation = str(filtered[0] or "").strip().lower()
+        if operation not in known_operations:
+            shorthand_mode = normalize_mode(operation)
+            if shorthand_mode in available_modes:
+                return {
+                    "operation": "overview",
+                    "mode_override": shorthand_mode,
+                    "query": "",
+                    "tool_name": "",
+                }
+            return {"operation": operation, "mode_override": mode_override, "query": "", "tool_name": ""}
+
+        remainder = list(filtered[1:])
+        if operation in {"overview", "list", "status", "groups"} and remainder and not mode_override:
+            maybe_mode = normalize_mode(remainder[0])
+            if maybe_mode in available_modes:
+                mode_override = maybe_mode
+                remainder = remainder[1:]
+
+        payload = " ".join(str(item).strip() for item in remainder if str(item).strip()).strip()
+        return {
+            "operation": operation,
+            "mode_override": mode_override,
+            "query": payload if operation in {"search", "recommend"} else "",
+            "tool_name": payload if operation == "inspect" else "",
+        }
+
+    def _resolve_tools_mode(self, agent: Any, mode_override: str = "") -> str:
+        """Resolve the tool view mode, honoring explicit overrides first."""
+        if str(mode_override or "").strip():
+            return normalize_mode(mode_override)
+
         mode = getattr(agent, "mode", "reverie") or "reverie"
         config_manager = self.app.get('config_manager')
         if config_manager:
@@ -1704,48 +1812,577 @@ class CommandHandler:
                 if getattr(config, "mode", None):
                     mode = config.mode
             except Exception:
-                # Fall back to agent mode if config loading fails.
                 pass
+        return normalize_mode(mode)
 
-        get_visible_tool_schemas = getattr(agent, "get_visible_tool_schemas", None)
-        if callable(get_visible_tool_schemas):
-            tool_schemas = get_visible_tool_schemas(mode=mode)
-        else:
-            tool_schemas = agent.tool_executor.get_tool_schemas(mode=mode)
+    def _execute_tool_catalog(
+        self,
+        agent: Any,
+        *,
+        operation: str,
+        mode: str,
+        query: str = "",
+        tool_name: str = "",
+        max_results: int = 8,
+        include_schema: bool = False,
+    ) -> Any:
+        """Call the shared tool catalog so CLI and model discovery stay aligned."""
+        tool = ToolCatalogTool({"agent": agent, "project_root": self.app.get("project_root")})
+        kwargs: Dict[str, Any] = {
+            "operation": operation,
+            "mode": mode,
+            "max_results": max_results,
+            "include_schema": include_schema,
+        }
+        if query:
+            kwargs["query"] = query
+        if tool_name:
+            kwargs["tool_name"] = tool_name
+        return tool.execute(**kwargs)
 
-        visible_tools = []
-        for schema in tool_schemas:
-            if not isinstance(schema, dict):
+    def _default_tools_query(self, mode: str) -> str:
+        """Derive a stable quick-pick query from the mode discovery profile."""
+        profile = get_mode_tool_discovery_profile(mode)
+        raw_tokens: List[str] = []
+        raw_tokens.extend(str(item) for item in (profile.get("domain_tokens", ()) or ()))
+        raw_tokens.extend(str(item).replace("-", " ") for item in (profile.get("focus_categories", ()) or ()))
+
+        ordered: List[str] = []
+        seen: set[str] = set()
+        for token in raw_tokens:
+            cleaned = " ".join(str(token).strip().replace("_", " ").split()).lower()
+            if not cleaned or cleaned in seen:
                 continue
-            function = schema.get("function", {})
-            name = str(function.get("name", "")).strip()
-            if not name:
-                continue
-            tool = agent.tool_executor.get_tool(name)
-            if tool:
-                visible_tools.append((name, tool))
+            ordered.append(cleaned)
+            seen.add(cleaned)
+            if len(ordered) >= 6:
+                break
 
-        if not visible_tools:
+        if not ordered:
+            ordered = [mode.replace("-", " "), "tooling"]
+        return " ".join(ordered)
+
+    def _build_tool_items_table(
+        self,
+        items: List[Dict[str, Any]],
+        *,
+        title: str,
+        accent: str,
+        detail_label: str,
+        detail_key: str,
+    ) -> Table:
+        """Build a reusable tool result table for list/search/recommend views."""
+        compact = self._is_compact(128)
+        table = Table(
+            title=f"[bold {accent}]{self.deco.CRYSTAL} {escape(title)}[/bold {accent}]",
+            box=box.SIMPLE_HEAVY if compact else box.ROUNDED,
+            border_style=accent,
+            header_style=f"bold {self.theme.TEXT_SECONDARY}",
+            expand=True,
+            show_lines=not compact,
+            pad_edge=False,
+        )
+        table.add_column("Name", style=f"bold {self.theme.BLUE_SOFT}", width=24 if compact else 28)
+        table.add_column("Category", style=self.theme.PURPLE_SOFT, width=16, no_wrap=True)
+        table.add_column("Traits", style=self.theme.TEXT_DIM, width=18 if compact else 22)
+        table.add_column(detail_label, style=self.theme.MINT_SOFT, ratio=1)
+        table.add_column("Description", style=self.theme.TEXT_SECONDARY, ratio=2)
+
+        for item in items:
+            detail_value = item.get(detail_key, [])
+            if isinstance(detail_value, list):
+                detail_text = ", ".join(str(part) for part in detail_value if str(part).strip()) or "(none)"
+            else:
+                detail_text = str(detail_value or "").strip() or "(none)"
+            description = str(item.get("description", "") or "").strip().splitlines()[0] if str(item.get("description", "") or "").strip() else "(no description)"
+            table.add_row(
+                str(item.get("name", "") or ""),
+                str(item.get("category", "") or "general"),
+                ", ".join(str(part) for part in (item.get("traits", []) or [])) or "(none)",
+                self._truncate_middle(detail_text, 56 if compact else 84),
+                self._truncate_middle(description, 90 if compact else 140),
+            )
+        return table
+
+    def _build_tool_group_table(
+        self,
+        mapping: Dict[str, List[str]],
+        *,
+        title: str,
+        accent: str,
+        label: str,
+    ) -> Table:
+        """Build a compact grouping table for `/tools groups`."""
+        compact = self._is_compact(118)
+        table = Table(
+            title=f"[bold {accent}]{self.deco.CRYSTAL} {escape(title)}[/bold {accent}]",
+            box=box.SIMPLE_HEAVY if compact else box.ROUNDED,
+            border_style=accent,
+            header_style=f"bold {self.theme.TEXT_SECONDARY}",
+            expand=True,
+            pad_edge=False,
+        )
+        table.add_column(label, style=f"bold {self.theme.BLUE_SOFT}", width=16 if compact else 20)
+        table.add_column("Count", style=self.theme.MINT_SOFT, width=7, justify="right")
+        table.add_column("Sample Tools", style=self.theme.TEXT_SECONDARY, ratio=1)
+
+        for group_name, tools in sorted(mapping.items()):
+            sample = ", ".join(str(item) for item in (tools or [])[:5])
+            if len(tools or []) > 5:
+                sample = f"{sample}, +{len(tools) - 5} more"
+            table.add_row(str(group_name or "general"), str(len(tools or [])), sample or "(none)")
+        return table
+
+    def _build_tools_shortcuts_table(self) -> Table:
+        """Build the `/tools` shortcut reference."""
+        return self._build_command_table(
+            [
+                ("/tools", "Show the mode-aware tool overview with quick picks and groups"),
+                ("/tools search <query>", "Keyword search against visible tool names, aliases, tags, and parameters"),
+                ("/tools recommend <task>", "Get intent-ranked tool suggestions for a task description"),
+                ("/tools inspect <tool>", "Inspect one tool or alias with supported modes and schema"),
+                ("/tools groups", "Summarize the current mode's categories and runtime kinds"),
+                ("/tools --mode <mode>", "Preview another mode's tool surface without switching the session"),
+            ],
+            title="Tool Browser Shortcuts",
+            accent=self.theme.BORDER_SECONDARY,
+        )
+
+    def _render_tools_overview(self, agent: Any, mode: str) -> bool:
+        """Render the default `/tools` overview page."""
+        self._show_command_panel(
+            "Tools",
+            subtitle="Live tool surface for the selected mode, powered by the shared discovery catalog.",
+            accent=self.theme.BORDER_PRIMARY,
+            meta=f"{get_mode_display_name(mode)}  {self.deco.DOT_MEDIUM}  {mode}",
+        )
+
+        list_result = self._execute_tool_catalog(agent, operation="list", mode=mode, max_results=12)
+        if not list_result.success:
+            self._show_activity_event(
+                "Tools",
+                "Tool catalog could not load the visible tool surface.",
+                status="error",
+                detail=str(list_result.error or ""),
+            )
+            self.console.print()
+            return True
+
+        groups_result = self._execute_tool_catalog(agent, operation="groups", mode=mode)
+        quick_query = self._default_tools_query(mode)
+        recommend_result = self._execute_tool_catalog(
+            agent,
+            operation="recommend",
+            mode=mode,
+            query=quick_query,
+            max_results=5,
+        )
+
+        list_data = list_result.data if isinstance(list_result.data, dict) else {}
+        groups_data = groups_result.data if groups_result.success and isinstance(groups_result.data, dict) else {}
+        recommend_data = recommend_result.data if recommend_result.success and isinstance(recommend_result.data, dict) else {}
+        items = list_data.get("items", []) or []
+        quick_items = recommend_data.get("items", []) or []
+        category_map = groups_data.get("by_category", {}) or {}
+
+        self.console.print(
+            Columns(
+                [
+                    self._build_metric_panel(
+                        "Visible",
+                        list_data.get("count", 0),
+                        accent=self.theme.MINT_VIBRANT,
+                        detail="tools exposed in this mode",
+                    ),
+                    self._build_metric_panel(
+                        "Categories",
+                        len(category_map),
+                        accent=self.theme.BLUE_SOFT,
+                        detail="discovery groups",
+                    ),
+                    self._build_metric_panel(
+                        "Quick Picks",
+                        len(quick_items),
+                        accent=self.theme.PURPLE_SOFT,
+                        detail="mode-prioritized suggestions",
+                    ),
+                ],
+                equal=True,
+                expand=True,
+            )
+        )
+        self.console.print()
+
+        self.console.print(
+            Panel(
+                Group(
+                    Text(get_mode_description(mode), style=self.theme.TEXT_PRIMARY),
+                    Text(f"Quick-pick profile: {quick_query}", style=self.theme.TEXT_DIM),
+                ),
+                title=f"[bold {self.theme.BLUE_SOFT}]{self.deco.DIAMOND} Mode Lens[/bold {self.theme.BLUE_SOFT}]",
+                border_style=self.theme.BORDER_SUBTLE,
+                box=box.ROUNDED,
+                padding=(0, 1),
+            )
+        )
+        self.console.print()
+
+        if quick_items:
             self.console.print(
-                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} "
-                "No tools are currently available to the active model/provider."
-                f"[/{self.theme.AMBER_GLOW}]"
+                self._build_tool_items_table(
+                    quick_items,
+                    title="Mode Quick Picks",
+                    accent=self.theme.PURPLE_SOFT,
+                    detail_label="Why",
+                    detail_key="reasons",
+                )
+            )
+            self.console.print()
+
+        if items:
+            self.console.print(
+                self._build_tool_items_table(
+                    items,
+                    title="Visible Tools",
+                    accent=self.theme.BORDER_PRIMARY,
+                    detail_label="Aliases",
+                    detail_key="aliases",
+                )
+            )
+            total_count = int(list_data.get("count", len(items)))
+            if total_count > len(items):
+                self.console.print()
+                self._show_activity_event(
+                    "Tools",
+                    "The visible tool list is clipped for readability.",
+                    status="info",
+                    detail=f"Showing {len(items)} of {total_count}. Use `/tools search <query>` or `/tools inspect <tool>` for narrower views.",
+                )
+                self.console.print()
+        else:
+            self._show_activity_event(
+                "Tools",
+                "No tools are currently visible in this mode.",
+                status="warning",
+                detail="Check provider capabilities or try `/tools --mode reverie` to inspect the baseline coding surface.",
+            )
+            self.console.print()
+
+        if groups_data:
+            self.console.print(
+                Columns(
+                    [
+                        self._build_tool_group_table(
+                            groups_data.get("by_category", {}) or {},
+                            title="By Category",
+                            accent=self.theme.BLUE_SOFT,
+                            label="Category",
+                        ),
+                        self._build_tool_group_table(
+                            groups_data.get("by_kind", {}) or {},
+                            title="By Kind",
+                            accent=self.theme.PINK_SOFT,
+                            label="Kind",
+                        ),
+                    ],
+                    equal=True,
+                    expand=True,
+                )
+            )
+            self.console.print()
+
+        self.console.print(self._build_tools_shortcuts_table())
+        self.console.print()
+        return True
+
+    def _render_tools_groups(self, agent: Any, mode: str) -> bool:
+        """Render `/tools groups`."""
+        result = self._execute_tool_catalog(agent, operation="groups", mode=mode)
+        if not result.success:
+            self._show_activity_event(
+                "Tools",
+                "Could not summarize the tool groups.",
+                status="error",
+                detail=str(result.error or ""),
             )
             return True
 
-        table = Table(
-            title=f"[bold {self.theme.PINK_SOFT}]{self.deco.CRYSTAL} Available Tools[/bold {self.theme.PINK_SOFT}]",
-            box=box.ROUNDED,
-            border_style=self.theme.BORDER_PRIMARY
+        data = result.data if isinstance(result.data, dict) else {}
+        self._show_command_panel(
+            "Tool Groups",
+            subtitle="Category and runtime grouping for the selected mode.",
+            accent=self.theme.BORDER_PRIMARY,
+            meta=f"{get_mode_display_name(mode)}  {self.deco.DOT_MEDIUM}  {mode}",
         )
-        table.add_column("Name", style=f"bold {self.theme.BLUE_SOFT}")
-        table.add_column("Description", style=self.theme.TEXT_SECONDARY)
+        self.console.print(
+            Columns(
+                [
+                    self._build_metric_panel(
+                        "Visible",
+                        data.get("count", 0),
+                        accent=self.theme.MINT_VIBRANT,
+                        detail="tools in this mode",
+                    ),
+                    self._build_metric_panel(
+                        "Categories",
+                        len(data.get("by_category", {}) or {}),
+                        accent=self.theme.BLUE_SOFT,
+                        detail="mode groupings",
+                    ),
+                    self._build_metric_panel(
+                        "Kinds",
+                        len(data.get("by_kind", {}) or {}),
+                        accent=self.theme.PURPLE_SOFT,
+                        detail="built-in, MCP, plugin...",
+                    ),
+                ],
+                equal=True,
+                expand=True,
+            )
+        )
+        self.console.print()
+        self.console.print(
+            Columns(
+                [
+                    self._build_tool_group_table(
+                        data.get("by_category", {}) or {},
+                        title="By Category",
+                        accent=self.theme.BLUE_SOFT,
+                        label="Category",
+                    ),
+                    self._build_tool_group_table(
+                        data.get("by_kind", {}) or {},
+                        title="By Kind",
+                        accent=self.theme.PINK_SOFT,
+                        label="Kind",
+                    ),
+                ],
+                equal=True,
+                expand=True,
+            )
+        )
+        self.console.print()
+        return True
 
-        for name, tool in visible_tools:
-            desc = tool.description.strip().split('\n')[0]
-            table.add_row(f"{self.deco.DOT_MEDIUM} {name}", desc)
+    def _render_tools_search(self, agent: Any, mode: str, query: str) -> bool:
+        """Render `/tools search`."""
+        if not query:
+            self._show_activity_event(
+                "Tools",
+                "Search needs a keyword or task description.",
+                status="warning",
+                detail="Example: `/tools search vertical slice telemetry --mode reverie-gamer`",
+            )
+            return True
 
-        self.console.print(table)
+        result = self._execute_tool_catalog(agent, operation="search", mode=mode, query=query, max_results=12)
+        if not result.success:
+            self._show_activity_event(
+                "Tools",
+                "Tool search failed.",
+                status="error",
+                detail=str(result.error or ""),
+            )
+            return True
+
+        data = result.data if isinstance(result.data, dict) else {}
+        self._show_command_panel(
+            "Tool Search",
+            subtitle=f"Search results for `{query}` in the selected mode.",
+            accent=self.theme.BORDER_PRIMARY,
+            meta=f"{get_mode_display_name(mode)}  {self.deco.DOT_MEDIUM}  {mode}",
+        )
+        self.console.print(
+            self._build_key_value_table(
+                [
+                    ("Mode", f"{get_mode_display_name(mode)} ({mode})"),
+                    ("Query", query),
+                    ("Matches", data.get("count", 0)),
+                ]
+            )
+        )
+        self.console.print()
+        items = data.get("items", []) or []
+        if items:
+            self.console.print(
+                self._build_tool_items_table(
+                    items,
+                    title="Matches",
+                    accent=self.theme.BORDER_PRIMARY,
+                    detail_label="Aliases",
+                    detail_key="aliases",
+                )
+            )
+        else:
+            self._show_activity_event(
+                "Tools",
+                "No matching tools were found.",
+                status="warning",
+                detail="Try broader keywords or `/tools recommend <task>` for intent-based suggestions.",
+            )
+        self.console.print()
+        return True
+
+    def _render_tools_recommend(self, agent: Any, mode: str, query: str) -> bool:
+        """Render `/tools recommend`."""
+        if not query:
+            self._show_activity_event(
+                "Tools",
+                "Recommendations need a short task description.",
+                status="warning",
+                detail="Example: `/tools recommend inspect MCP docs --mode reverie-atlas`",
+            )
+            return True
+
+        result = self._execute_tool_catalog(agent, operation="recommend", mode=mode, query=query, max_results=8)
+        if not result.success:
+            self._show_activity_event(
+                "Tools",
+                "Tool recommendation failed.",
+                status="error",
+                detail=str(result.error or ""),
+            )
+            return True
+
+        data = result.data if isinstance(result.data, dict) else {}
+        self._show_command_panel(
+            "Tool Recommendations",
+            subtitle=f"Intent-ranked suggestions for `{query}`.",
+            accent=self.theme.BORDER_PRIMARY,
+            meta=f"{get_mode_display_name(mode)}  {self.deco.DOT_MEDIUM}  {mode}",
+        )
+        self.console.print(
+            self._build_key_value_table(
+                [
+                    ("Mode", f"{get_mode_display_name(mode)} ({mode})"),
+                    ("Task", query),
+                    ("Candidates", data.get("count", 0)),
+                ]
+            )
+        )
+        self.console.print()
+        items = data.get("items", []) or []
+        if items:
+            self.console.print(
+                self._build_tool_items_table(
+                    items,
+                    title="Recommendations",
+                    accent=self.theme.PURPLE_SOFT,
+                    detail_label="Why",
+                    detail_key="reasons",
+                )
+            )
+        else:
+            self._show_activity_event(
+                "Tools",
+                "No strong recommendations were found.",
+                status="warning",
+                detail="Try `/tools search <keywords>` or inspect the full mode surface with bare `/tools`.",
+            )
+        self.console.print()
+        return True
+
+    def _render_tools_inspect(self, agent: Any, mode: str, tool_name: str) -> bool:
+        """Render `/tools inspect`."""
+        if not tool_name:
+            self._show_activity_event(
+                "Tools",
+                "Inspect needs a tool name or alias.",
+                status="warning",
+                detail="Example: `/tools inspect shell` or `/tools inspect game_design_orchestrator --mode reverie-gamer`",
+            )
+            return True
+
+        result = self._execute_tool_catalog(
+            agent,
+            operation="inspect",
+            mode=mode,
+            tool_name=tool_name,
+            include_schema=True,
+        )
+        if not result.success:
+            self._show_activity_event(
+                "Tools",
+                f"Could not inspect `{tool_name}` in this mode.",
+                status="error",
+                detail=str(result.error or ""),
+            )
+            return True
+
+        data = result.data if isinstance(result.data, dict) else {}
+        self._show_command_panel(
+            "Tool Inspection",
+            subtitle="Deep capability, schema, and mode-visibility view for one tool.",
+            accent=self.theme.BORDER_PRIMARY,
+            meta=f"{data.get('name', tool_name)}  {self.deco.DOT_MEDIUM}  {get_mode_display_name(mode)}",
+        )
+        self.console.print(
+            self._build_key_value_table(
+                [
+                    ("Name", data.get("name", tool_name)),
+                    ("Mode", f"{get_mode_display_name(mode)} ({mode})"),
+                    ("Kind", data.get("kind", "")),
+                    ("Category", data.get("category", "")),
+                    ("Supported Modes", ", ".join(data.get("supported_modes", []) or []) or "(dynamic or runtime-managed)"),
+                    ("Aliases", ", ".join(data.get("aliases", []) or []) or "(none)"),
+                    ("Tags", ", ".join(data.get("tags", []) or []) or "(none)"),
+                    ("Traits", ", ".join(data.get("traits", []) or []) or "(none)"),
+                    ("Search Hint", data.get("search_hint", "") or "(none)"),
+                    ("Required", ", ".join(data.get("required", []) or []) or "(none)"),
+                ]
+            )
+        )
+        self.console.print()
+
+        properties = data.get("properties", {}) or {}
+        if properties:
+            parameter_table = Table(
+                title=f"[bold {self.theme.BLUE_SOFT}]{self.deco.CRYSTAL} Parameters[/bold {self.theme.BLUE_SOFT}]",
+                box=box.ROUNDED,
+                border_style=self.theme.BORDER_PRIMARY,
+                expand=True,
+            )
+            parameter_table.add_column("Parameter", style=f"bold {self.theme.PINK_SOFT}", width=18)
+            parameter_table.add_column("Type", style=self.theme.BLUE_SOFT, width=14)
+            parameter_table.add_column("Requirement", style=self.theme.PURPLE_SOFT, width=12)
+            parameter_table.add_column("Description", style=self.theme.TEXT_SECONDARY)
+            required = set(data.get("required", []) or [])
+            for parameter_name, parameter_schema in properties.items():
+                schema = parameter_schema if isinstance(parameter_schema, dict) else {}
+                description = str(schema.get("description", "") or "").strip() or "(no description)"
+                enum_values = schema.get("enum")
+                enum_hint = ""
+                if isinstance(enum_values, list) and enum_values:
+                    preview = ", ".join(str(item) for item in enum_values[:4])
+                    if len(enum_values) > 4:
+                        preview = f"{preview}, +{len(enum_values) - 4} more"
+                    enum_hint = f" | {preview}"
+                parameter_table.add_row(
+                    str(parameter_name),
+                    str(schema.get("type", "any") or "any"),
+                    "required" if parameter_name in required else "optional",
+                    self._truncate_middle(f"{description}{enum_hint}", 110 if self._is_compact(124) else 160),
+                )
+            self.console.print(parameter_table)
+            self.console.print()
+
+        schema = data.get("schema")
+        if schema:
+            self.console.print(
+                Panel(
+                    Syntax(
+                        json.dumps(schema, indent=2, ensure_ascii=False),
+                        "json",
+                        line_numbers=False,
+                        word_wrap=True,
+                    ),
+                    title=f"[bold {self.theme.PURPLE_SOFT}]{self.deco.DIAMOND} Schema[/bold {self.theme.PURPLE_SOFT}]",
+                    border_style=self.theme.BORDER_SUBTLE,
+                    box=box.ROUNDED,
+                    padding=(0, 1),
+                )
+            )
+            self.console.print()
         return True
 
     def _get_mcp_services(self):

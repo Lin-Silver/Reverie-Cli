@@ -17,6 +17,10 @@ from ..engine import canonical_engine_name, create_project_skeleton, is_builtin_
 
 class GameProjectScaffolderTool(BaseTool):
     name = "game_project_scaffolder"
+    aliases = ("game_scaffold",)
+    search_hint = "scaffold engine aware game project foundations"
+    tool_category = "game-scaffold"
+    tool_tags = ("game", "scaffold", "project", "engine", "pipeline", "module")
     description = (
         "Plan and scaffold engine-aware game project foundations, module maps, "
         "and content pipelines for 2D, 2.5D, and 3D projects."

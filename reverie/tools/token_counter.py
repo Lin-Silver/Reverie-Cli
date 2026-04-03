@@ -16,6 +16,12 @@ class TokenCounterTool(BaseTool):
     
     name = "count_tokens"
     description = "Count tokens in text or current conversation"
+    aliases = ("token_counter", "token_count")
+    search_hint = "measure context size and token usage"
+    tool_category = "context"
+    tool_tags = ("tokens", "context", "budget", "estimate")
+    read_only = True
+    concurrency_safe = True
     
     def __init__(self, context: Optional[Dict] = None):
         super().__init__(context)

@@ -24,6 +24,10 @@ from .base import BaseTool, ToolResult
 
 class GameGDDManagerTool(BaseTool):
     name = "game_gdd_manager"
+    aliases = ("gdd_manager",)
+    search_hint = "manage the game design document and versions"
+    tool_category = "game-design"
+    tool_tags = ("game", "gdd", "design-document", "design", "story", "version")
     description = "Manage Game Design Documents: create, view, update, summary, append sections, set metadata."
 
     parameters = {

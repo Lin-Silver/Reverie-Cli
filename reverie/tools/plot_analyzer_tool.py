@@ -20,6 +20,10 @@ class PlotAnalyzerTool(BaseTool):
     """
     
     name = "plot_analyzer"
+    aliases = ("story_analyzer",)
+    search_hint = "analyze plot arcs narrative flow and character voice"
+    tool_category = "writer"
+    tool_tags = ("plot", "narrative", "arc", "tone", "voice", "story")
     description = "Analyze plot structure, detect plot holes, and track narrative elements"
     
     parameters = {

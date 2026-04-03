@@ -577,6 +577,10 @@ class AtlasDeliveryState:
 
 
 class AtlasDeliveryOrchestratorTool(BaseTool):
+    aliases = ("atlas_delivery", "atlas_orchestrator")
+    search_hint = "manage atlas contracts slices blockers and handoffs"
+    tool_category = "atlas"
+    tool_tags = ("atlas", "delivery", "slice", "blocker", "handoff", "tracker", "document")
     name = "atlas_delivery_orchestrator"
     description = (
         "Track Atlas document contracts, implementation slices, verification "

@@ -6,7 +6,7 @@ All tools must implement this interface to be callable by the AI Agent.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Iterable
 from enum import Enum
 from pathlib import Path
 
@@ -76,6 +76,16 @@ class BaseTool(ABC):
     # Must be overridden in subclasses
     name: str = "base_tool"
     description: str = "Base tool description"
+    aliases: tuple[str, ...] = ()
+    search_hint: str = ""
+    tool_category: str = "general"
+    tool_tags: tuple[str, ...] = ()
+    read_only: bool = False
+    concurrency_safe: bool = False
+    destructive: bool = False
+    should_defer: bool = False
+    always_load: bool = False
+    max_result_chars: float = 50_000
     
     # Parameter schema in JSON Schema format
     parameters: Dict = {
@@ -98,6 +108,53 @@ class BaseTool(ABC):
     def get_project_root(self) -> Path:
         """Return the canonical workspace root for this tool."""
         return get_workspace_root(self.context.get("project_root"))
+
+    def get_aliases(self) -> List[str]:
+        """Return normalized public aliases for this tool."""
+        seen: set[str] = set()
+        aliases: List[str] = []
+        for value in self._iter_tool_names(self.aliases):
+            lowered = value.lower()
+            if lowered == str(self.name or "").strip().lower() or lowered in seen:
+                continue
+            aliases.append(value)
+            seen.add(lowered)
+        return aliases
+
+    @staticmethod
+    def _iter_tool_names(values: Iterable[Any]) -> Iterable[str]:
+        for value in values or ():
+            text = str(value or "").strip()
+            if text:
+                yield text
+
+    def matches_name(self, candidate: Any) -> bool:
+        """Return True when the candidate matches the tool name or an alias."""
+        wanted = str(candidate or "").strip().lower()
+        if not wanted:
+            return False
+        if wanted == str(self.name or "").strip().lower():
+            return True
+        return wanted in {alias.lower() for alias in self.get_aliases()}
+
+    def get_metadata(self) -> Dict[str, Any]:
+        """Return a normalized metadata bundle for discovery and orchestration."""
+        return {
+            "name": str(self.name or "").strip(),
+            "aliases": self.get_aliases(),
+            "search_hint": str(self.search_hint or "").strip(),
+            "category": str(self.tool_category or "general").strip() or "general",
+            "tags": [
+                str(tag).strip()
+                for tag in self._iter_tool_names(self.tool_tags)
+            ],
+            "read_only": bool(self.read_only),
+            "concurrency_safe": bool(self.concurrency_safe),
+            "destructive": bool(self.destructive),
+            "should_defer": bool(self.should_defer),
+            "always_load": bool(self.always_load),
+            "max_result_chars": self.max_result_chars,
+        }
 
     def resolve_workspace_path(self, raw_path: Any, *, purpose: str = "access") -> Path:
         """Resolve user-provided paths relative to the active workspace root."""
@@ -241,6 +298,10 @@ class BaseTool(ABC):
             A concise, human-readable string.
         """
         return f"Executing {self.name}..."
+
+    def visible_in_mode(self, mode: object) -> bool:
+        """Dynamic tools may override this; built-ins are visible by default."""
+        return True
 
     def __repr__(self) -> str:
         return f"<Tool: {self.name}>"

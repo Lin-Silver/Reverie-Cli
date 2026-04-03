@@ -24,6 +24,12 @@ class GitCommitRetrievalTool(BaseTool):
     """
     
     name = "git-commit-retrieval"
+    aliases = ("git_history", "commit_history", "blame_lookup")
+    search_hint = "inspect git history blame and prior fixes"
+    tool_category = "retrieval"
+    tool_tags = ("git", "history", "commit", "blame", "diff", "regression")
+    read_only = True
+    concurrency_safe = True
     
     description = """Retrieve git commit history, blame information, and code changes.
 

@@ -8,6 +8,10 @@ from .base import BaseTool, ToolResult
 
 class LevelDesignTool(BaseTool):
     name = "level_design"
+    aliases = ("level_designer",)
+    search_hint = "generate and analyze game level layouts"
+    tool_category = "game-design"
+    tool_tags = ("game", "level", "layout", "pathing", "difficulty", "flow")
     description = "Advanced level design: generate layouts, validate pathing, analyze difficulty, recommend NPC placement, inspect spatial flow, and export configs."
 
     parameters = {

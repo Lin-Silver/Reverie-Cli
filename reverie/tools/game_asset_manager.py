@@ -27,6 +27,10 @@ from .base import BaseTool, ToolResult
 
 class GameAssetManagerTool(BaseTool):
     name = "game_asset_manager"
+    aliases = ("asset_manager",)
+    search_hint = "inspect and manage game assets manifests and dependencies"
+    tool_category = "game-data"
+    tool_tags = ("game", "asset", "manifest", "dependency", "atlas", "compression")
     description = "Manage game assets: inventory, manifest, dependency graph, compression guidance, memory sizing, usage checks, naming validation, and atlas planning."
 
     parameters = {

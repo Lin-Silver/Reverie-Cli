@@ -35,6 +35,10 @@ class CommandExecTool(BaseTool):
     """
 
     name = "command_exec"
+    aliases = ("shell", "terminal", "run_command")
+    search_hint = "run builds tests git and workspace commands"
+    tool_category = "workspace"
+    tool_tags = ("command", "shell", "terminal", "build", "test", "git", "verify")
 
     description = """Execute audited commands inside the active workspace.
 

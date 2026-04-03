@@ -1,24 +1,27 @@
-## Reverie CLI v2.1.7 - Tool Discovery Upgrade, Prompt Slimming, Snapshot Removal, and Gamer Roadmap Refresh
+## Reverie CLI v2.1.7 - Tool Discovery Upgrade, Mode-Aware Tool Browser, Prompt Slimming, and Snapshot Removal
 
-**Update Date:** 2026-04-01
+**Release Date:** 2026-04-03
 
-**Status:** Source-only update tracked in Git, not a formal packaged release.
+**Status:** Formal packaged release with a Windows executable and GitHub Release asset.
 
 ### Added
 
 * Added a first-class `tool_catalog` tool so the active model can list, search, and inspect the currently visible built-in, MCP, and runtime-plugin tools at runtime.
 * Added a first-class `skill_lookup` tool so discovered `SKILL.md` instruction packs can be listed, searched, and inspected on demand instead of relying only on automatic injection.
 * Added `list_mcp_resources` and `read_mcp_resource` so MCP resources are exposed to the model directly, including safe persistence of binary resource payloads into the project cache when needed.
+* Added a shared tool-metadata layer across the built-in and dynamic tool surfaces, including aliases, search hints, categories, tags, safety traits, mode visibility, and result-size budgets for discovery and execution.
+* Added mode-aware discovery profiles for every shipped mode so tool search and recommendation can adapt to `reverie`, `reverie-atlas`, `reverie-gamer`, `reverie-ant`, `spec-driven`, `spec-vibe`, `writer`, and `computer-controller`.
 * Added a new Reverie-Gamer assessment and upgrade-roadmap document focused on evolving the mode toward prompt-to-vertical-slice 3D game generation.
 
 ### Changed
 
 * Slimmed the tool section injected into system prompts into a discovery-first format closer to Claude Code: short workflow guidance, compact tool-surface summaries, and explicit use of `tool_catalog` when schemas or tool choice are unclear.
-* Updated the welcome banner so the large `REVERIE` ASCII title is left-aligned, no longer wrapped in a border panel, and renders with extra top spacing instead of sticking to the top edge of the terminal.
+* Reworked tool execution and discovery so aliases resolve cleanly, unknown-tool errors suggest likely matches, and oversized tool output is clipped and persisted to cache instead of flooding model context.
+* Upgraded the user-facing `/tools` command into a mode-aware browser with overview, search, recommendation, inspection, grouping, and `--mode` preview support that stays aligned with the internal `tool_catalog` ranking logic.
 * Tightened the base Reverie system prompt so ASCII is preferred more explicitly in code, config, identifiers, and decorative terminal output unless Unicode is intentional.
 * Refreshed the interactive input prompt styling and continuation prompt formatting for a cleaner CLI rhythm.
 * Improved the TUI selector so it refreshes correctly when the terminal size changes during selection.
-* Bumped the source-tree package version from `2.1.6` to `2.1.7`.
+* Bumped the packaged application version from `2.1.6` to `2.1.7`.
 
 ### Removed
 
@@ -29,7 +32,8 @@
 
 * Updated `/clean` help and CLI command documentation to reflect the new cleanup scope: sessions, caches, checkpoints, and audit history, without snapshot/backups wording.
 * Updated configuration documentation to stop advertising `snapshots/` as a current on-demand project-cache directory in the active runtime flow.
-* Recorded this 2.1.7 source-track update in the changelog without publishing a GitHub Release, installer, or formal release package.
+* Updated `/tools` help and command documentation to describe the new mode-aware browser, search, recommendation, inspection, and grouping flows.
+* Recorded `v2.1.7` as a formal packaged release with an attached Windows executable.
 
 ### Fixed
 

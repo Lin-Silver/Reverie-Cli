@@ -9,6 +9,10 @@ class CreateFileTool(BaseTool):
     Tool for creating new files with content.
     """
     name = "create_file"
+    aliases = ("write_file", "new_file")
+    search_hint = "create brand new files from full content"
+    tool_category = "editing"
+    tool_tags = ("create", "write", "file", "scaffold")
     description = """Create a new file with the specified content inside the active workspace.
 Use this tool to create new files from scratch, including large files.
 Do NOT use this for editing existing files.

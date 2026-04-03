@@ -20,6 +20,10 @@ class ConsistencyCheckerTool(BaseTool):
     """
     
     name = "consistency_checker"
+    aliases = ("story_consistency",)
+    search_hint = "check continuity contradictions and repetition in prose"
+    tool_category = "writer"
+    tool_tags = ("consistency", "continuity", "contradiction", "timeline", "character", "story")
     description = "Check for repetitions, contradictions, timeline issues, and continuity errors in novel content"
     
     parameters = {

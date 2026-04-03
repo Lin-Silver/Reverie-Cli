@@ -38,6 +38,10 @@ from ..engine_lite.serialization import node_from_dict
 
 
 class _BaseReverieEngineTool(BaseTool):
+    aliases = ("engine_runtime",)
+    search_hint = "create validate and smoke test reverie engine projects"
+    tool_category = "game-runtime"
+    tool_tags = ("game", "engine", "runtime", "scene", "prefab", "sample", "benchmark")
     description = (
         "Create, inspect, validate, sample, and smoke-test projects powered by "
         "the built-in Reverie Engine runtime."

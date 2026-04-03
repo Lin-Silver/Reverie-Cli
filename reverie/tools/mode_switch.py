@@ -16,6 +16,10 @@ from ..modes import get_mode_description, list_modes, normalize_mode
 class ModeSwitchTool(BaseTool):
     """Switch the current Reverie mode without leaving the session."""
 
+    aliases = ("switch_mode",)
+    search_hint = "switch into a better specialized workflow mode"
+    tool_category = "coordination"
+    tool_tags = ("mode", "switch", "workflow", "specialist")
     name = "switch_mode"
     description = (
         "Switch Reverie into a different task mode when another workflow is a better fit. "

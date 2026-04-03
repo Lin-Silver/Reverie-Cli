@@ -16,6 +16,11 @@ class DeleteFileTool(BaseTool):
     """Delete a single file inside the active workspace."""
 
     name = "delete_file"
+    aliases = ("remove_file",)
+    search_hint = "delete one workspace file safely"
+    tool_category = "editing"
+    tool_tags = ("delete", "remove", "file", "cleanup")
+    destructive = True
 
     description = """Delete a single file inside the active workspace only.
 

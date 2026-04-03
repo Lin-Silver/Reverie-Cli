@@ -33,6 +33,12 @@ class SkillLookupTool(BaseTool):
     """Search and inspect discovered Codex-style skills."""
 
     name = "skill_lookup"
+    aliases = ("skill_search", "skills_help")
+    search_hint = "search discovered skill instruction packs"
+    tool_category = "orchestration"
+    tool_tags = ("skill", "workflow", "instruction", "skill.md")
+    read_only = True
+    concurrency_safe = True
 
     description = """Search or inspect the SKILL.md files Reverie has discovered.
 

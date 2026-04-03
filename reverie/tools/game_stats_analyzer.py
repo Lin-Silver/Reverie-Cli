@@ -41,6 +41,10 @@ from .base import BaseTool, ToolResult
 
 
 class GameStatsAnalyzerTool(BaseTool):
+    aliases = ("stats_analyzer",)
+    search_hint = "analyze game metrics distributions and anomalies"
+    tool_category = "game-data"
+    tool_tags = ("game", "stats", "metrics", "distribution", "trend", "anomaly", "fairness")
     name = "game_stats_analyzer"
     description = "Analyze game statistics: descriptive stats, correlation, distribution, outliers, comparison, visualization, trend analysis, and anomaly detection."
 

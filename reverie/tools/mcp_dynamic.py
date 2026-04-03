@@ -16,6 +16,15 @@ class MCPDynamicTool(BaseTool):
         super().__init__(context=context)
         self.metadata = dict(metadata or {})
         self.name = str(self.metadata.get("name", "") or "").strip() or "mcp_tool"
+        self.aliases = tuple(self.metadata.get("aliases", []) or ())
+        self.search_hint = str(self.metadata.get("search_hint", "") or "").strip()
+        self.tool_category = str(self.metadata.get("category", "") or "").strip() or "mcp"
+        self.tool_tags = tuple(self.metadata.get("tags", []) or ())
+        self.read_only = bool(self.metadata.get("read_only", False))
+        self.concurrency_safe = bool(self.metadata.get("concurrency_safe", False))
+        self.destructive = bool(self.metadata.get("destructive", False))
+        self.should_defer = bool(self.metadata.get("should_defer", False))
+        self.always_load = bool(self.metadata.get("always_load", False))
         qualified_name = str(self.metadata.get("qualified_name", "") or "").strip()
         description = str(self.metadata.get("description", "") or "").strip()
         trust_label = "trusted" if bool(self.metadata.get("trust", False)) else "confirmation-required"

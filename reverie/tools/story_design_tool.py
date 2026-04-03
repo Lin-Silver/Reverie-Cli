@@ -33,6 +33,10 @@ from .base import BaseTool, ToolResult
 
 class StoryDesignTool(BaseTool):
     name = "story_design"
+    aliases = ("game_story_design",)
+    search_hint = "design questlines dialogue trees and npc narratives"
+    tool_category = "game-design"
+    tool_tags = ("game", "story", "quest", "npc", "dialogue", "faction", "narrative")
     description = "Create and analyze RPG narrative: story bible, questlines, NPC profiles, dialogue trees, faction matrix, consistency checks, pacing, and character arcs."
 
     parameters = {

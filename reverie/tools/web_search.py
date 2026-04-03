@@ -26,6 +26,12 @@ from .base import BaseTool, ToolResult
 
 class WebSearchTool(BaseTool):
     name = "web_search"
+    aliases = ("search_web", "internet_search")
+    search_hint = "search unstable external docs and facts"
+    tool_category = "external"
+    tool_tags = ("web", "search", "docs", "internet", "reference", "news")
+    read_only = True
+    concurrency_safe = True
 
     description = """Search the web and optionally fetch readable page content."""
 

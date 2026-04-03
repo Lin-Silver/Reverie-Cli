@@ -14,8 +14,14 @@ from .base import BaseTool, ToolResult
 
 class VisionUploadTool(BaseTool):
     """Tool for uploading and encoding visual files for AI models"""
-    
+
     name = "vision_upload"
+    aliases = ("image_upload", "inspect_image")
+    search_hint = "load local images for visual analysis"
+    tool_category = "vision"
+    tool_tags = ("image", "vision", "screenshot", "ocr", "visual")
+    read_only = True
+    concurrency_safe = True
     description = "Upload and encode visual files (images) for AI model processing"
     
     def __init__(self, context: Optional[Dict] = None):

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Iterable, List, Optional, Sequence, Type
 
-from ..modes import normalize_mode
+from ..modes import list_modes, normalize_mode
 from .base import BaseTool
 from .codebase_retrieval import CodebaseRetrievalTool
 from .git_commit_retrieval import GitCommitRetrievalTool
@@ -79,6 +79,15 @@ class ToolRegistration:
             return bool(self.predicate(normalized_mode))
         return True
 
+    def supported_modes(self, *, include_hidden: bool = False) -> List[str]:
+        """Return canonical modes where this tool can be exposed."""
+        return [
+            mode_name
+            for mode_name in list_modes(include_computer=True, switchable_only=False)
+            if include_hidden or self.expose_schema
+            if self.enabled_in_mode(mode_name)
+        ]
+
 
 _TOOL_REGISTRY: List[ToolRegistration] = []
 
@@ -147,6 +156,25 @@ def is_tool_visible_in_mode(tool_name: str, mode: object) -> bool:
     return True
 
 
+def get_tool_registration(tool_name: str) -> Optional[ToolRegistration]:
+    """Return the registry entry for one built-in tool name."""
+    normalized_name = str(tool_name or "").strip()
+    if not normalized_name:
+        return None
+    for registration in _TOOL_REGISTRY:
+        if registration.name == normalized_name:
+            return registration
+    return None
+
+
+def get_supported_modes_for_tool(tool_name: str, *, include_hidden: bool = False) -> List[str]:
+    """Return canonical supported modes for a built-in tool."""
+    registration = get_tool_registration(tool_name)
+    if registration is None:
+        return []
+    return registration.supported_modes(include_hidden=include_hidden)
+
+
 def _register_builtin_tools() -> None:
     register_tool_class(CodebaseRetrievalTool)
     register_tool_class(GitCommitRetrievalTool)
@@ -198,7 +226,9 @@ _register_builtin_tools()
 __all__ = [
     "ToolRegistration",
     "get_registered_tool_classes",
+    "get_supported_modes_for_tool",
     "get_tool_classes_for_mode",
+    "get_tool_registration",
     "get_tool_registrations",
     "is_tool_visible_in_mode",
     "register_tool_class",

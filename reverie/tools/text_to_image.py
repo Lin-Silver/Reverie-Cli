@@ -30,6 +30,10 @@ class TextToImageTool(BaseTool):
     """Generate images via Comfy backend script."""
 
     name = "text_to_image"
+    aliases = ("generate_image", "tti")
+    search_hint = "generate image assets from text prompts"
+    tool_category = "image-generation"
+    tool_tags = ("image", "generate", "art", "asset", "comfy", "prompt")
 
     description = """Generate images from text prompts using configured Comfy models.
 

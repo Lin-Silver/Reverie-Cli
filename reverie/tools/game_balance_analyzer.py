@@ -24,6 +24,10 @@ class GameBalanceAnalyzerTool(BaseTool):
     """
     
     name = "game_balance_analyzer"
+    aliases = ("balance_analyzer",)
+    search_hint = "analyze combat economy progression and loot balance"
+    tool_category = "game-data"
+    tool_tags = ("game", "balance", "economy", "combat", "progression", "loot", "difficulty")
     description = "Advanced game balance analysis: combat, economy, progression, loot, difficulty, crafting, and stat distributions with recommendations."
 
     parameters = {

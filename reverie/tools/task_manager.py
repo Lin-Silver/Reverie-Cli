@@ -487,6 +487,10 @@ class TaskManagerTool(BaseTool):
     """
     
     name = "task_manager"
+    aliases = ("todo_write", "todos", "checklist")
+    search_hint = "manage the session task checklist"
+    tool_category = "planning"
+    tool_tags = ("task", "todo", "checklist", "plan", "progress")
     
     description = TASK_MANAGER_TOOL_DESCRIPTION
     

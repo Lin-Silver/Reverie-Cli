@@ -31,6 +31,12 @@ class ListMcpResourcesTool(BaseTool):
     """Expose MCP resource discovery to the agent."""
 
     name = "list_mcp_resources"
+    aliases = ("mcp_resources",)
+    search_hint = "discover read-only mcp resources"
+    tool_category = "mcp-resource"
+    tool_tags = ("mcp", "resource", "discover", "dataset", "document")
+    read_only = True
+    concurrency_safe = True
 
     description = """List resources exposed by currently enabled MCP servers.
 
@@ -119,6 +125,12 @@ class ReadMcpResourceTool(BaseTool):
     """Read one MCP resource by server name and URI."""
 
     name = "read_mcp_resource"
+    aliases = ("open_mcp_resource",)
+    search_hint = "read one mcp resource by uri"
+    tool_category = "mcp-resource"
+    tool_tags = ("mcp", "resource", "read", "document", "dataset")
+    read_only = True
+    concurrency_safe = True
 
     description = """Read a specific MCP resource by server name and URI.
 

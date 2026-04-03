@@ -15,6 +15,10 @@ class ContextManagementTool(BaseTool):
     """
     
     name = "context_management"
+    aliases = ("manage_context", "compress_context")
+    search_hint = "compress checkpoint and restore conversation context"
+    tool_category = "context"
+    tool_tags = ("context", "compress", "checkpoint", "restore", "truncate", "summary")
     description = (
         "Manage and compress your own context window. "
         "Use this when you are running low on tokens or want to declutter conversation history. "

@@ -13,6 +13,10 @@ class ClarificationTool(BaseTool):
     """
     
     name = "ask_clarification"
+    aliases = ("clarify", "clarification")
+    search_hint = "ask the user a targeted clarification question"
+    tool_category = "coordination"
+    tool_tags = ("clarification", "question", "user", "requirements")
     description = (
         "Ask the user for clarification or specific details about the current task. "
         "Use this when requirements are vague, you need to make a choice between options, "

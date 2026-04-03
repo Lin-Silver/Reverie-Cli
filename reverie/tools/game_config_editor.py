@@ -8,6 +8,10 @@ from .base import BaseTool, ToolResult
 
 class GameConfigEditorTool(BaseTool):
     name = "game_config_editor"
+    aliases = ("config_editor",)
+    search_hint = "edit structured game config data with validation"
+    tool_category = "game-data"
+    tool_tags = ("game", "config", "json", "yaml", "xml", "validation")
     description = "Edit game configuration files (JSON/YAML/XML) with validation and templates."
 
     parameters = {

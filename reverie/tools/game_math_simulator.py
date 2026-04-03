@@ -38,6 +38,10 @@ from .base import BaseTool, ToolResult
 
 class GameMathSimulatorTool(BaseTool):
     name = "game_math_simulator"
+    aliases = ("math_simulator",)
+    search_hint = "run monte carlo simulations for game systems"
+    tool_category = "game-data"
+    tool_tags = ("game", "simulation", "monte-carlo", "economy", "combat", "loot", "progression")
     description = "Run Monte Carlo simulations and parameter sweeps for game balance testing, including configurable custom event pipelines."
 
     parameters = {

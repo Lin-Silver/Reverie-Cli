@@ -19,6 +19,10 @@ from ..engine import is_builtin_engine_name
 
 class GamePlaytestLabTool(BaseTool):
     name = "game_playtest_lab"
+    aliases = ("playtest_lab",)
+    search_hint = "create playtest plans telemetry and quality gates"
+    tool_category = "game-playtest"
+    tool_tags = ("game", "playtest", "telemetry", "quality", "feedback", "session")
     description = (
         "Create playtest plans, telemetry schemas, quality gates, and analyze "
         "session logs or playtest feedback for game development."

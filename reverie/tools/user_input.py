@@ -19,7 +19,11 @@ class UserInputTool(BaseTool):
     
     **Validates: Requirements 8.1-8.10**
     """
-    
+
+    aliases = ("ask_user",)
+    search_hint = "request explicit user confirmation or missing input"
+    tool_category = "coordination"
+    tool_tags = ("user", "confirmation", "approval", "clarification")
     name = "userInput"
     description = (
         "Ask the user for specific input, feedback, or approval. "

@@ -184,13 +184,18 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
     "tools": {
         "command": "/tools",
         "section": "Tools & Context",
-        "summary": "List the tools currently visible to the active model/provider.",
-        "detail": "Tool visibility changes with the active mode, provider setup, and model capabilities, so this is the live source of truth.",
-        "overview": "tool visibility",
+        "summary": "Browse the live, mode-aware tool surface with search, recommendations, groups, and schema inspection.",
+        "detail": "Tool visibility changes with the active mode, provider setup, and model capabilities. `/tools` now uses the same discovery catalog the model uses internally, so quick picks, search ranking, and inspect output stay aligned across all modes.",
+        "overview": "overview, search <query>, recommend <task>, inspect <tool>, groups, --mode <mode>",
         "subcommands": [
-            {"usage": "/tools", "description": "Show all tools currently available to the active model/provider combination."},
+            {"usage": "/tools", "description": "Show the current mode's visible tools, quick picks, grouping summaries, and shortcuts."},
+            {"usage": "/tools search <query>", "description": "Search visible tools by keywords, aliases, tags, and parameter names.", "example": "/tools search telemetry vertical slice"},
+            {"usage": "/tools recommend <task>", "description": "Get intent-ranked tool suggestions for a short task description.", "example": "/tools recommend inspect MCP docs"},
+            {"usage": "/tools inspect <tool>", "description": "Inspect one tool or alias, including supported modes and schema.", "example": "/tools inspect shell"},
+            {"usage": "/tools groups", "description": "Summarize the visible tools by category and runtime kind."},
+            {"usage": "/tools --mode <mode>", "description": "Preview another mode's tool surface without switching the current session.", "example": "/tools --mode reverie-gamer"},
         ],
-        "examples": ["/tools"],
+        "examples": ["/tools", "/tools search blueprint", "/tools recommend read MCP resources", "/tools inspect tool_catalog", "/tools groups", "/tools --mode writer"],
     },
     "skills": {
         "command": "/skills",

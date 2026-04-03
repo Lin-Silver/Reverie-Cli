@@ -24,6 +24,10 @@ class FileOpsTool(BaseTool):
     """
     
     name = "file_ops"
+    aliases = ("read_file", "list_dir", "filesystem")
+    search_hint = "read files and inspect directories"
+    tool_category = "workspace"
+    tool_tags = ("file", "read", "list", "exists", "info", "mkdir", "filesystem")
     
     description = """Perform file system operations inside the active workspace only.
 

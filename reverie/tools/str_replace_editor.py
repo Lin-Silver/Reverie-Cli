@@ -28,7 +28,11 @@ class StrReplaceEditorTool(BaseTool):
     """
     
     name = "str_replace_editor"
-    
+    aliases = ("editor", "edit_file", "replace_text")
+    search_hint = "view files and make exact text edits"
+    tool_category = "editing"
+    tool_tags = ("edit", "replace", "insert", "view", "file", "patch")
+
     description = """Edit files inside the active workspace by viewing, creating, or replacing specific text.
 
 Commands:

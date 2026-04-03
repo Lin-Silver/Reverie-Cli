@@ -1,0 +1,206 @@
+from pathlib import Path
+
+import reverie.config as config_module
+
+from reverie.config import (
+    ConfigManager,
+    _escape_invalid_json_string_control_chars,
+    get_app_root,
+)
+
+
+def test_escape_invalid_json_string_control_chars_only_changes_string_payloads() -> None:
+    raw = '{\n  "message": "line1\nline2\tend",\n  "count": 1\n}\n'
+    repaired, changed = _escape_invalid_json_string_control_chars(raw)
+
+    assert changed is True
+    assert '"message": "line1\\nline2\\tend"' in repaired
+    assert '\n  "count": 1\n' in repaired
+
+
+def test_config_manager_repairs_invalid_control_chars_and_emits_notice(tmp_path: Path, monkeypatch) -> None:
+    app_root = tmp_path / "app"
+    project_root = tmp_path / "project"
+    project_root.mkdir(parents=True, exist_ok=True)
+    (app_root / ".reverie").mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr("reverie.config.get_app_root", lambda: app_root)
+
+    config_path = app_root / ".reverie" / "config.json"
+    config_path.write_text(
+        '{\n'
+        '  "models": [\n'
+        '    {\n'
+        '      "model": "gpt-4",\n'
+        '      "model_display_name": "GPT-4",\n'
+        '      "base_url": "https://api.openai.com/v1",\n'
+        '      "api_key": "line1\nline2"\n'
+        '    }\n'
+        '  ],\n'
+        '  "active_model_index": 0,\n'
+        '  "active_model_source": "standard"\n'
+        '}\n',
+        encoding="utf-8",
+    )
+
+    manager = ConfigManager(project_root)
+    loaded = manager.load()
+    notice = manager.consume_load_notice()
+
+    assert loaded.models
+    assert loaded.models[0].api_key == "line1\nline2"
+    assert notice is not None
+    assert notice["title"] == "Recovered malformed config"
+    assert "Recovered malformed config at" in notice["detail"]
+
+    repaired_text = config_path.read_text(encoding="utf-8")
+    assert '"api_key": "line1\\nline2"' in repaired_text
+
+    backups = sorted(config_path.parent.glob("config.json.invalid-*.bak"))
+    assert backups
+
+
+def test_get_app_root_uses_launcher_root_for_packaged_windows(tmp_path: Path, monkeypatch) -> None:
+    launcher_root = tmp_path / "Program Files" / "Reverie"
+    launcher_root.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(config_module, "get_launcher_root", lambda: launcher_root)
+    monkeypatch.setattr(config_module.sys, "frozen", True, raising=False)
+
+    assert get_app_root() == launcher_root.resolve()
+
+
+def test_config_manager_creates_default_config_file_for_manual_editing(tmp_path: Path, monkeypatch) -> None:
+    app_root = tmp_path / "app"
+    project_root = tmp_path / "project"
+    project_root.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr("reverie.config.get_app_root", lambda: app_root)
+    monkeypatch.setattr("reverie.config.get_launcher_root", lambda: app_root)
+
+    manager = ConfigManager(project_root)
+    config = manager.load()
+    notice = manager.consume_load_notice()
+
+    config_path = app_root / ".reverie" / "config.json"
+    assert config_path.exists()
+    assert config.models == []
+    assert notice is not None
+    assert notice["title"] == "Created default config"
+
+
+def test_config_manager_backs_up_and_reports_unrepairable_config(tmp_path: Path, monkeypatch) -> None:
+    app_root = tmp_path / "app"
+    project_root = tmp_path / "project"
+    project_root.mkdir(parents=True, exist_ok=True)
+    (app_root / ".reverie").mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr("reverie.config.get_app_root", lambda: app_root)
+    monkeypatch.setattr("reverie.config.get_launcher_root", lambda: app_root)
+
+    config_path = app_root / ".reverie" / "config.json"
+    config_path.write_text(
+        '{\n'
+        '  "models": [\n'
+        '    {"model": "gpt-4", "model_display_name": "GPT-4",}\n'
+        '  ]\n',
+        encoding="utf-8",
+    )
+
+    manager = ConfigManager(project_root)
+    config = manager.load()
+    notice = manager.consume_load_notice()
+
+    assert config.models == []
+    assert notice is not None
+    assert notice["title"] == "Failed to repair config"
+    assert "Could not automatically repair malformed config" in notice["detail"]
+
+    backups = sorted(config_path.parent.glob("config.json.invalid-*.bak"))
+    assert backups
+
+
+def test_global_config_wins_over_workspace_file_without_explicit_workspace_flag(tmp_path: Path, monkeypatch) -> None:
+    app_root = tmp_path / "app"
+    project_root = tmp_path / "project"
+    project_root.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr("reverie.config.get_app_root", lambda: app_root)
+    monkeypatch.setattr("reverie.config.get_launcher_root", lambda: app_root)
+
+    manager = ConfigManager(project_root)
+    manager.ensure_dirs()
+
+    manager.global_config_path.write_text(
+        '{\n'
+        '  "models": [{"model": "global-model", "model_display_name": "Global", "base_url": "https://example.com"}],\n'
+        '  "active_model_index": 0,\n'
+        '  "active_model_source": "standard"\n'
+        '}\n',
+        encoding="utf-8",
+    )
+    manager.workspace_config_path.write_text(
+        '{\n'
+        '  "models": [{"model": "workspace-model", "model_display_name": "Workspace", "base_url": "https://example.com"}],\n'
+        '  "active_model_index": 0,\n'
+        '  "active_model_source": "standard"\n'
+        '}\n',
+        encoding="utf-8",
+    )
+
+    loaded = manager.load()
+
+    assert loaded.models[0].model == "global-model"
+    assert manager.get_active_config_path() == manager.global_config_path
+    assert manager.is_workspace_mode() is False
+
+
+def test_save_writes_back_to_loaded_source_instead_of_overwriting_other_profile(tmp_path: Path, monkeypatch) -> None:
+    app_root = tmp_path / "app"
+    project_root = tmp_path / "project"
+    project_root.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr("reverie.config.get_app_root", lambda: app_root)
+    monkeypatch.setattr("reverie.config.get_launcher_root", lambda: app_root)
+
+    manager = ConfigManager(project_root)
+    manager.ensure_dirs()
+
+    manager.global_config_path.write_text(
+        '{\n'
+        '  "models": [{"model": "global-model", "model_display_name": "Global", "base_url": "https://global.example.com"}],\n'
+        '  "active_model_index": 0,\n'
+        '  "active_model_source": "standard"\n'
+        '}\n',
+        encoding="utf-8",
+    )
+    manager.workspace_config_path.write_text(
+        '{\n'
+        '  "models": [{"model": "workspace-model", "model_display_name": "Workspace", "base_url": "https://workspace.example.com"}],\n'
+        '  "active_model_index": 0,\n'
+        '  "active_model_source": "standard",\n'
+        '  "use_workspace_config": true\n'
+        '}\n',
+        encoding="utf-8",
+    )
+
+    loaded = manager.load()
+    assert loaded.models[0].model == "workspace-model"
+
+    loaded.models.append(
+        loaded.models[0].__class__(
+            model="added-model",
+            model_display_name="Added",
+            base_url="https://added.example.com",
+        )
+    )
+    manager.save(loaded)
+
+    reloaded_workspace = ConfigManager(project_root)
+    reloaded = reloaded_workspace.load()
+
+    assert reloaded.models[0].model == "workspace-model"
+    assert any(model.model == "added-model" for model in reloaded.models)
+
+    global_text = manager.global_config_path.read_text(encoding="utf-8")
+    assert "added-model" not in global_text

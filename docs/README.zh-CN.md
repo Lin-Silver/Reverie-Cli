@@ -69,7 +69,7 @@ reverie --version            # 打印版本号
 | --- | --- |
 | `Reverie` | 通用代码模式，使用最小且必要的工具集 |
 | `Reverie-Atlas` | 面向复杂系统的文档驱动 Spec 开发模式 |
-| `Reverie-Gamer` | 面向游戏设计、脚手架、资产与试玩迭代 |
+| `Reverie-Gamer` | 面向提示词编译、蓝图生成、运行时脚手架、可玩切片与验证闭环的游戏生产模式 |
 | `Reverie-Ant` | 面向长流程任务的规划、执行与验证模式 |
 | `Spec-Driven` | 需求、设计与任务拆分的 Spec 编写模式 |
 | `Spec-Vibe` | 执行已批准 Spec 的轻量实现模式 |

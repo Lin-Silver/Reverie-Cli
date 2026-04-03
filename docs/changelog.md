@@ -18,6 +18,7 @@
 * Slimmed the tool section injected into system prompts into a discovery-first format closer to Claude Code: short workflow guidance, compact tool-surface summaries, and explicit use of `tool_catalog` when schemas or tool choice are unclear.
 * Reworked tool execution and discovery so aliases resolve cleanly, unknown-tool errors suggest likely matches, and oversized tool output is clipped and persisted to cache instead of flooding model context.
 * Upgraded the user-facing `/tools` command into a mode-aware browser with overview, search, recommendation, inspection, grouping, and `--mode` preview support that stays aligned with the internal `tool_catalog` ranking logic.
+* Rebuilt the active `reverie-gamer` mode prompt around the new assessment target: prompt compilation, scope reduction, blueprint-first planning, engine-aware foundations, playable vertical slices, and verification-first iteration.
 * Tightened the base Reverie system prompt so ASCII is preferred more explicitly in code, config, identifiers, and decorative terminal output unless Unicode is intentional.
 * Refreshed the interactive input prompt styling and continuation prompt formatting for a cleaner CLI rhythm.
 * Improved the TUI selector so it refreshes correctly when the terminal size changes during selection.

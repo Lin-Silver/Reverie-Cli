@@ -10,6 +10,7 @@ Handles loading and saving configuration including:
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field, asdict
+from datetime import datetime
 import json
 import os
 import sys
@@ -44,6 +45,86 @@ from .version import CONFIG_VERSION, __version__
 
 EXTERNAL_MODEL_SOURCES = ("qwencode", "geminicli", "codex", "nvidia")
 SUPPORTED_ACTIVE_MODEL_SOURCES = ("standard",) + EXTERNAL_MODEL_SOURCES
+
+
+def _escape_invalid_json_string_control_chars(raw: str) -> tuple[str, bool]:
+    """Escape literal control characters that appear inside JSON strings."""
+    if not raw:
+        return "", False
+
+    replacements = {
+        "\b": r"\b",
+        "\f": r"\f",
+        "\n": r"\n",
+        "\r": r"\r",
+        "\t": r"\t",
+    }
+
+    pieces: List[str] = []
+    in_string = False
+    escaped = False
+    changed = False
+
+    for ch in raw:
+        if in_string:
+            if escaped:
+                pieces.append(ch)
+                escaped = False
+                continue
+
+            if ch == "\\":
+                pieces.append(ch)
+                escaped = True
+                continue
+
+            if ch == '"':
+                pieces.append(ch)
+                in_string = False
+                continue
+
+            if ord(ch) < 0x20:
+                pieces.append(replacements.get(ch, f"\\u{ord(ch):04x}"))
+                changed = True
+                continue
+
+            pieces.append(ch)
+            continue
+
+        pieces.append(ch)
+        if ch == '"':
+            in_string = True
+
+    return "".join(pieces), changed
+
+
+def _resolve_runner_root() -> Path:
+    """Return the physical launcher root: exe dir, script dir, or source root."""
+    if getattr(sys, 'frozen', False):
+        return Path(sys.executable).resolve().parent
+
+    if sys.argv and sys.argv[0]:
+        try:
+            exec_path = Path(os.path.abspath(sys.argv[0])).resolve()
+            if exec_path.name == '__main__.py':
+                return exec_path.parent.parent
+            if exec_path.exists() and exec_path.is_file():
+                return exec_path.parent
+        except Exception:
+            pass
+
+    try:
+        source_root = Path(__file__).resolve().parent.parent
+        if (source_root / 'reverie').exists():
+            return source_root
+    except Exception:
+        pass
+
+    return Path.cwd()
+
+
+def get_launcher_root() -> Path:
+    """Return the directory that physically launched Reverie."""
+    return _resolve_runner_root()
 
 
 def default_text_to_image_config() -> Dict[str, Any]:
@@ -295,37 +376,7 @@ def get_app_root() -> Path:
     point so packaged builds keep their cache beside the executable, while
     development runs keep their cache beside the source checkout / launcher.
     """
-    # 1. Check if running as a compiled PyInstaller EXE
-    if getattr(sys, 'frozen', False):
-        return Path(sys.executable).resolve().parent
-    
-    # 2. Identify the runner (the shim exe or the script)
-    if sys.argv and sys.argv[0]:
-        try:
-            # os.path.abspath(sys.argv[0]) is the most direct way to find the file
-            # that the OS actually executed (the binary shim or the script).
-            exec_path = Path(os.path.abspath(sys.argv[0])).resolve()
-            
-            # If running via 'python -m reverie', it resolves to .../reverie/__main__.py
-            if exec_path.name == '__main__.py':
-                return exec_path.parent.parent
-            
-            # For reverie.exe (shim) or direct script, use its immediate parent directory.
-            if exec_path.exists() and exec_path.is_file():
-                return exec_path.parent
-        except Exception:
-            pass
-
-    # 3. Development fallback (only if argv[0] is missing or invalid)
-    try:
-        source_root = Path(__file__).resolve().parent.parent
-        if (source_root / 'reverie').exists():
-            return source_root
-    except Exception:
-        pass
-        
-    # Ultimate fallback to current working directory
-    return Path.cwd()
+    return get_launcher_root()
 
 
 def get_computer_controller_data_dir(app_root: Optional[Path] = None) -> Path:
@@ -633,6 +684,8 @@ class ConfigManager:
         self._config: Optional[Config] = None
         self._last_mtime: float = 0
         self._loaded_config_path: Optional[Path] = None
+        self._pending_load_notice: Optional[Dict[str, str]] = None
+        self._last_load_notice_key: Optional[tuple[str, str, str]] = None
 
         # Determine config path based on setting and any persisted workspace state.
         self._use_workspace_config = bool(
@@ -658,28 +711,117 @@ class ConfigManager:
         if not path.exists():
             return None
         try:
-            with open(path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
+            data = self._load_json_payload(path, persist_repairs=False, record_notice=False)
             return data if isinstance(data, dict) else None
         except Exception as exc:
             self._logger.debug("Failed to read JSON config candidate %s", path, exc_info=True)
             return None
+
+    def _set_load_notice(
+        self,
+        *,
+        key: tuple[str, str, str],
+        title: str,
+        detail: str,
+        status: str = "warning",
+    ) -> None:
+        """Queue one user-facing config-load notice for later TUI rendering."""
+        if self._last_load_notice_key == key:
+            return
+        self._last_load_notice_key = key
+        self._pending_load_notice = {
+            "title": str(title or "").strip(),
+            "detail": str(detail or "").strip(),
+            "status": str(status or "warning").strip() or "warning",
+        }
+
+    def consume_load_notice(self) -> Optional[Dict[str, str]]:
+        """Return and clear the latest deferred config-load notice."""
+        notice = dict(self._pending_load_notice or {}) if self._pending_load_notice else None
+        self._pending_load_notice = None
+        return notice
+
+    def _create_invalid_config_backup(self, path: Path, raw_text: str) -> Optional[Path]:
+        """Persist the original malformed config beside the repaired one."""
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            backup_path = path.with_name(f"{path.name}.invalid-{timestamp}.bak")
+            counter = 1
+            while backup_path.exists():
+                backup_path = path.with_name(f"{path.name}.invalid-{timestamp}-{counter}.bak")
+                counter += 1
+            backup_path.write_text(raw_text, encoding="utf-8")
+            return backup_path
+        except Exception:
+            self._logger.debug("Failed to write malformed-config backup for %s", path, exc_info=True)
+            return None
+
+    def _load_json_payload(
+        self,
+        path: Path,
+        *,
+        persist_repairs: bool,
+        record_notice: bool,
+    ) -> Any:
+        """Load JSON with best-effort repair for literal control chars in strings."""
+        raw_text = path.read_text(encoding="utf-8-sig")
+        try:
+            return json.loads(raw_text)
+        except json.JSONDecodeError as exc:
+            backup_path = self._create_invalid_config_backup(path, raw_text) if persist_repairs else None
+            repaired_text, changed = _escape_invalid_json_string_control_chars(raw_text)
+            if not changed:
+                backup_detail = f" Backup saved to {backup_path}." if backup_path is not None else ""
+                raise ValueError(
+                    f"Could not automatically repair malformed config at {path}.{backup_detail} Parser error: {exc}"
+                ) from exc
+
+            try:
+                data = json.loads(repaired_text)
+            except json.JSONDecodeError as repair_exc:
+                backup_detail = f" Backup saved to {backup_path}." if backup_path is not None else ""
+                raise ValueError(
+                    f"Could not automatically repair malformed config at {path}.{backup_detail} Parser error: {repair_exc}"
+                ) from repair_exc
+
+            if persist_repairs:
+                try:
+                    write_json_secure(path, data)
+                except Exception:
+                    self._logger.debug("Failed to persist repaired config at %s", path, exc_info=True)
+                if record_notice:
+                    repair_signature = hashlib.sha1(raw_text.encode("utf-8", errors="replace")).hexdigest()
+                    detail = f"Recovered malformed config at {path}."
+                    if backup_path is not None:
+                        detail += f"\nBackup saved to {backup_path}."
+                    detail += "\nLiteral control characters inside JSON strings were escaped automatically."
+                    self._set_load_notice(
+                        key=(str(path), repair_signature, "repaired"),
+                        title="Recovered malformed config",
+                        detail=detail,
+                        status="warning",
+                    )
+            return data
 
     def _detect_workspace_mode_from_files(self) -> bool:
         """
         Detect whether this project should default to workspace mode.
 
         Workspace enable/disable is persisted on the workspace config itself.
-        If that file exists and says `use_workspace_config=true`, we honor it.
-        Older workspace configs that predate the flag are treated as enabled.
+        Only an explicit `use_workspace_config=true` turns workspace mode on.
+        Older workspace configs without the flag no longer override the global
+        profile by mere existence.
         """
+        workspace_found = False
         for candidate in (self.workspace_config_path, self.legacy_workspace_config_path):
             if not candidate.exists():
                 continue
+            workspace_found = True
             data = self._read_json_dict(candidate)
-            if data is None:
-                return True
-            return bool(data.get('use_workspace_config', True))
+            if isinstance(data, dict) and 'use_workspace_config' in data:
+                return bool(data.get('use_workspace_config', False))
+        if workspace_found and not any(path.exists() for path in self._path_candidates_for_mode(False)):
+            return True
         return False
 
     def _sync_legacy_mirror(self, serialized: Dict[str, Any]) -> None:
@@ -696,14 +838,78 @@ class ConfigManager:
                 exc,
             )
 
+    def _is_workspace_candidate_path(self, path: Path) -> bool:
+        """Return True when the path is one of the workspace-profile candidates."""
+        resolved = path.resolve(strict=False)
+        return any(
+            resolved == candidate.resolve(strict=False)
+            for candidate in self._path_candidates_for_mode(True)
+        )
+
+    def _candidate_records(self) -> List[Dict[str, Any]]:
+        """Inspect existing config candidates with enough metadata to choose a source."""
+        records: List[Dict[str, Any]] = []
+        seen = set()
+        for workspace_mode in (False, True):
+            canonical = self.workspace_config_path if workspace_mode else self.global_config_path
+            for candidate in self._path_candidates_for_mode(workspace_mode):
+                key = str(candidate.resolve(strict=False)).lower()
+                if key in seen or not candidate.exists():
+                    continue
+                seen.add(key)
+                data = self._read_json_dict(candidate)
+                workspace_flag = None
+                if isinstance(data, dict) and 'use_workspace_config' in data:
+                    workspace_flag = bool(data.get('use_workspace_config', False))
+                try:
+                    mtime = os.path.getmtime(candidate)
+                except OSError:
+                    mtime = 0.0
+                records.append(
+                    {
+                        "path": candidate,
+                        "workspace_mode": workspace_mode,
+                        "workspace_flag": workspace_flag,
+                        "mtime": mtime,
+                        "is_canonical": candidate.resolve(strict=False) == canonical.resolve(strict=False),
+                    }
+                )
+        return records
+
+    def _pick_active_record(self) -> Optional[Dict[str, Any]]:
+        """Choose the config source record to load from."""
+        records = self._candidate_records()
+        if not records:
+            return None
+
+        def _rank(record: Dict[str, Any]) -> tuple[float, int]:
+            return (float(record.get("mtime", 0.0)), 1 if record.get("is_canonical") else 0)
+
+        workspace_enabled = [
+            record for record in records
+            if record.get("workspace_mode") and record.get("workspace_flag") is True
+        ]
+        if workspace_enabled:
+            return max(workspace_enabled, key=_rank)
+
+        global_records = [record for record in records if not record.get("workspace_mode")]
+        if global_records:
+            return max(global_records, key=_rank)
+
+        workspace_records = [record for record in records if record.get("workspace_mode")]
+        if workspace_records:
+            return max(workspace_records, key=_rank)
+
+        return None
+
     def get_active_config_path(self) -> Path:
         """Return the currently effective config path for this workspace."""
         if self._loaded_config_path is not None:
             return self._loaded_config_path
 
-        existing = self._find_existing_path(self._use_workspace_config)
-        if existing is not None:
-            return existing
+        record = self._pick_active_record()
+        if record is not None:
+            return record["path"]
         return self.config_path
 
     def _path_candidates_for_mode(self, workspace_mode: bool) -> List[Path]:
@@ -771,8 +977,7 @@ class ConfigManager:
 
         try:
             # Load global config
-            with open(source_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
+            data = self._load_json_payload(source_path, persist_repairs=True, record_notice=True)
 
             # Update to workspace mode
             data['use_workspace_config'] = True
@@ -811,8 +1016,7 @@ class ConfigManager:
         data = self._read_json_dict(source_path)
         if data is None:
             try:
-                with open(source_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
+                data = self._load_json_payload(source_path, persist_repairs=True, record_notice=True)
             except Exception:
                 data = None
         if not isinstance(data, dict):
@@ -836,8 +1040,7 @@ class ConfigManager:
 
         try:
             # Load workspace config
-            with open(source_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
+            data = self._load_json_payload(source_path, persist_repairs=True, record_notice=True)
 
             # Update to global mode
             data['use_workspace_config'] = False
@@ -886,46 +1089,76 @@ class ConfigManager:
     
     def load(self) -> Config:
         """Load configuration from file, reloading if file changed"""
-        source_path = None
-        for candidate in self._load_path_candidates():
-            if candidate.exists():
-                source_path = candidate
-                break
+        active_record = self._pick_active_record()
+        source_path = active_record["path"] if active_record is not None else None
 
         # Check if we need to switch config mode based on loaded config
         if source_path is not None:
+            self._use_workspace_config = bool(active_record.get("workspace_mode")) if active_record else self._is_workspace_candidate_path(source_path)
+            self._update_config_path()
             current_mtime = os.path.getmtime(source_path)
             # Reload if file changed or not loaded yet
             if self._config is None or current_mtime > self._last_mtime:
                 try:
-                    with open(source_path, 'r', encoding='utf-8') as f:
-                        data = json.load(f)
+                    data = self._load_json_payload(
+                        source_path,
+                        persist_repairs=True,
+                        record_notice=True,
+                    )
                     self._config = Config.from_dict(data)
-                    self._last_mtime = current_mtime
+                    try:
+                        self._last_mtime = os.path.getmtime(source_path)
+                    except OSError:
+                        self._last_mtime = current_mtime
                     self._loaded_config_path = source_path
 
                     # Auto-update config file if it's missing new fields or still
                     # lives in the active canonical location.
-                    if source_path == self.config_path and self._needs_config_update(data):
+                    if self._needs_config_update(data):
                         self.save(self._config)
                         # Update mtime after saving to avoid infinite loop
-                        self._last_mtime = os.path.getmtime(self.config_path)
+                        self._last_mtime = os.path.getmtime(self.get_active_config_path())
                     else:
-                        if source_path == self.config_path:
+                        if not self._is_workspace_candidate_path(source_path):
                             self._sync_legacy_mirror(self._config.to_dict())
                 except Exception as exc:
-                    self._logger.warning(
-                        "Failed to load config from %s; using cached/default config",
+                    self._logger.debug(
+                        "Failed to load or repair config from %s",
                         source_path,
                         exc_info=True,
                     )
-                    # If error reading (e.g., partial write), keep old config if available
-                    if self._config is None:
-                        self._config = Config()
-                        self._loaded_config_path = self.config_path
+                    notice_mtime = current_mtime
+                    notice_key = (
+                        str(source_path),
+                        f"{notice_mtime:.6f}",
+                        f"{type(exc).__name__}:{exc}",
+                    )
+                    self._set_load_notice(
+                        key=notice_key,
+                        title="Failed to repair config",
+                        detail=str(exc),
+                        status="error",
+                    )
+                    self._config = Config()
+                    self._loaded_config_path = source_path
+                    self._last_mtime = current_mtime
         else:
+            self._use_workspace_config = False
+            self._update_config_path()
             self._config = Config()
             self._loaded_config_path = self.config_path
+            self.ensure_dirs()
+            if not self.config_path.exists():
+                try:
+                    self.save(self._config)
+                    self._set_load_notice(
+                        key=(str(self.config_path), "created", "default-config"),
+                        title="Created default config",
+                        detail=f"Default configuration created at {self.config_path}. You can edit this file manually or use /model inside Reverie.",
+                        status="info",
+                    )
+                except Exception:
+                    self._logger.debug("Failed to persist default config at %s", self.config_path, exc_info=True)
         
         return self._config
     
@@ -1088,13 +1321,22 @@ class ConfigManager:
         self.ensure_dirs()
 
         serialized = self._config.to_dict()
-        write_json_secure(self.config_path, serialized)
-        self._loaded_config_path = self.config_path
+        target_path = self._loaded_config_path or self.config_path
+        if self._is_workspace_candidate_path(target_path):
+            self._use_workspace_config = True
+            self.config_path = self.workspace_config_path
+        else:
+            self._use_workspace_config = False
+            self.config_path = self.global_config_path
+
+        write_json_secure(target_path, serialized)
+        self._loaded_config_path = target_path
         try:
-            self._last_mtime = os.path.getmtime(self.config_path)
+            self._last_mtime = os.path.getmtime(target_path)
         except OSError:
             self._last_mtime = 0
-        self._sync_legacy_mirror(serialized)
+        if not self._is_workspace_candidate_path(target_path):
+            self._sync_legacy_mirror(serialized)
     
     def is_configured(self) -> bool:
         """Check if initial configuration is done"""

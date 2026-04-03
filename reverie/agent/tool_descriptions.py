@@ -870,11 +870,15 @@ def _get_mode_tool_workflow(mode: str) -> str:
         return """
 ## Reverie-Gamer Mode Tool Workflow
 
-- Start with retrieval, then create or inspect the game blueprint before broad implementation.
-- Use the design orchestrator and project scaffolder to define systems, scope, and runtime structure first.
-- Default to Reverie Engine when the user did not choose another engine and the repo does not already depend on one.
+- Start with retrieval; if the right tool or schema is unclear, use `tool_catalog` before guessing.
+- Treat substantial requests as a prompt-to-production flow: compile the request, define the blueprint, choose scope, scaffold the runtime, build the first playable, then verify the slice.
+- Use `game_design_orchestrator` early to create the blueprint, analyze scope, and generate a vertical-slice plan before broad implementation.
+- For large 3D, open-world, or "AAA-like" requests, automatically reduce scope to the first credible playable slice and record deferred systems explicitly.
+- Use `game_project_scaffolder` to define runtime, data, telemetry, tests, and playtest structure before broad file creation.
+- Default to the repository's existing runtime; otherwise prefer `reverie_engine` for the fastest runnable slice and keep external-engine choices explicit.
 - Prefer `reverie_engine`; accept `reverie_engine_lite` as a compatibility alias for existing projects.
 - Treat the built-in Blockbench plus Ashfox MCP flow as the preferred Reverie-Gamer modeling path when the project needs authored models.
+- Bring `game_playtest_lab` in early enough to define quality gates and telemetry before the project sprawls.
 - Treat implementation, balance simulation, runtime testing, playtests, telemetry, and content iteration as one loop.
 - Do not stop at documents alone when the user asked to build a game; push through to runnable implementation and verification.
 """

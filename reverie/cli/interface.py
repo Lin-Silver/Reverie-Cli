@@ -83,6 +83,7 @@ _TOOL_MARKUP_PREFIXES = (
     "[bold #66bb6a]",
     "[#ba68c8]   │",
 )
+_STRONG_CLEAR_SEQUENCE = "\033[3J\033[2J\033[H"
 
 
 def _find_trailing_incomplete_markdown_block_start(completed_lines: list[str]) -> int:
@@ -497,6 +498,15 @@ class ReverieInterface:
     def _fast_clear_terminal(self) -> None:
         """Clear the terminal without going through a shell command."""
         try:
+            for stream in (sys.stdout, sys.stderr):
+                if stream and hasattr(stream, "write"):
+                    stream.write(_STRONG_CLEAR_SEQUENCE)
+                    if hasattr(stream, "flush"):
+                        stream.flush()
+        except Exception:
+            pass
+
+        try:
             self.console.clear()
             return
         except Exception:
@@ -504,7 +514,7 @@ class ReverieInterface:
 
         try:
             if sys.stdout and hasattr(sys.stdout, "write"):
-                sys.stdout.write("\033[2J\033[H")
+                sys.stdout.write(_STRONG_CLEAR_SEQUENCE)
                 sys.stdout.flush()
         except Exception:
             pass
@@ -513,6 +523,33 @@ class ReverieInterface:
             self.console.clear()
         except Exception:
             pass
+
+    def _show_pending_config_notice(self) -> None:
+        """Render any deferred config-load issue inside Reverie's own TUI."""
+        notice = self.config_manager.consume_load_notice()
+        if not notice:
+            return
+        self._show_activity_event(
+            "Config",
+            notice.get("title", "Configuration notice"),
+            status=notice.get("status", "warning"),
+            detail=notice.get("detail", ""),
+        )
+
+    def _show_unconfigured_model_notice(self, config: Config) -> None:
+        """Explain how to configure Reverie without forcing the setup wizard."""
+        if config.active_model is not None or self.config_manager.is_configured():
+            return
+        config_path = self.config_manager.get_active_config_path()
+        self._show_activity_event(
+            "Model",
+            "No active model is configured yet",
+            status="warning",
+            detail=(
+                f"Edit {config_path} manually or use /model inside Reverie. "
+                "The TUI stays available even before a model is configured."
+            ),
+        )
 
     def _truncate_label(self, value: str, max_length: int) -> str:
         """Trim long labels for narrow terminals."""
@@ -560,12 +597,11 @@ class ReverieInterface:
         """Main entry point"""
         try:
             self._fast_clear_terminal()
-            
-            if not self.config_manager.is_configured():
-                self.run_setup_wizard()
-            
             config = self.config_manager.load()
+            self._fast_clear_terminal()
             self.display.show_welcome()
+            self._show_pending_config_notice()
+            self._show_unconfigured_model_notice(config)
             self._show_startup_configuration_log(config)
             
             self._init_agent()
@@ -1007,6 +1043,15 @@ class ReverieInterface:
     def _process_message(self, message: str) -> bool:
         """Process message with direct streaming output to avoid truncation"""
         if not self.agent:
+            self._init_agent()
+        if not self.agent:
+            config_path = self.config_manager.get_active_config_path()
+            self._show_activity_event(
+                "Model",
+                "Cannot send chat messages without a configured model",
+                status="warning",
+                detail=f"Use /model or edit {config_path}, then continue in the same TUI session.",
+            )
             return True
 
         self.current_task_start = time.time()

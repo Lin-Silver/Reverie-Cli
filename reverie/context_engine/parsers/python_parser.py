@@ -49,6 +49,8 @@ class PythonParser(BaseParser):
             if content is None:
                 result.errors.append(f"Could not read file: {file_path}")
                 return result
+        else:
+            content = str(content).lstrip("\ufeff")
         
         # Store content lines for source extraction
         self._lines = content.split('\n')

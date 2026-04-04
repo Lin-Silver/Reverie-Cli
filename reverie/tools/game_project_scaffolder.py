@@ -13,6 +13,10 @@ import json
 
 from .base import BaseTool, ToolResult
 from ..engine import canonical_engine_name, create_project_skeleton, is_builtin_engine_name
+from ..gamer.prompt_compiler import compile_game_prompt
+from ..gamer.production_plan import build_blueprint_from_request
+from ..gamer.runtime_registry import select_runtime_profile
+from ..gamer.vertical_slice_builder import build_vertical_slice_project
 
 
 class GameProjectScaffolderTool(BaseTool):
@@ -34,6 +38,8 @@ class GameProjectScaffolderTool(BaseTool):
                 "enum": [
                     "plan_structure",
                     "create_foundation",
+                    "create_from_request",
+                    "generate_vertical_slice",
                     "generate_module_map",
                     "generate_content_pipeline",
                 ],
@@ -50,6 +56,14 @@ class GameProjectScaffolderTool(BaseTool):
             "blueprint_path": {
                 "type": "string",
                 "description": "Optional blueprint path to read project context from",
+            },
+            "request_path": {
+                "type": "string",
+                "description": "Optional compiled request path (default: artifacts/game_request.json)",
+            },
+            "prompt": {
+                "type": "string",
+                "description": "Single prompt used to compile a request when no request artifact exists",
             },
             "project_name": {
                 "type": "string",
@@ -79,6 +93,14 @@ class GameProjectScaffolderTool(BaseTool):
                 "type": "boolean",
                 "description": "Overwrite starter files if they already exist",
             },
+            "requested_runtime": {
+                "type": "string",
+                "description": "Optional explicit runtime request such as reverie_engine or godot",
+            },
+            "existing_runtime": {
+                "type": "string",
+                "description": "Optional existing runtime to preserve",
+            },
             "data": {
                 "type": "object",
                 "description": "Optional override data for scaffolding outputs",
@@ -94,12 +116,17 @@ class GameProjectScaffolderTool(BaseTool):
     def execute(self, **kwargs) -> ToolResult:
         action = kwargs.get("action")
         output_dir = self._resolve_path(kwargs.get("output_dir", "."))
+        request_path = self._resolve_path(kwargs.get("request_path", str(output_dir / "artifacts/game_request.json")))
 
         try:
             if action == "plan_structure":
                 return self._plan_structure(output_dir, kwargs)
             if action == "create_foundation":
                 return self._create_foundation(output_dir, kwargs)
+            if action == "create_from_request":
+                return self._create_from_request(output_dir, request_path, kwargs)
+            if action == "generate_vertical_slice":
+                return self._generate_vertical_slice(output_dir, request_path, kwargs)
             if action == "generate_module_map":
                 output_path = self._resolve_path(kwargs.get("output_path", str(output_dir / "artifacts/module_map.json")))
                 return self._generate_module_map(output_dir, output_path, kwargs)
@@ -164,6 +191,87 @@ class GameProjectScaffolderTool(BaseTool):
                 "profile": profile,
                 "directories": created_paths,
                 "files": written,
+            },
+        )
+
+    def _create_from_request(self, output_dir: Path, request_path: Path, kwargs: Dict[str, Any]) -> ToolResult:
+        game_request = self._load_or_compile_request(request_path, kwargs, output_dir=output_dir)
+        runtime_selection = select_runtime_profile(
+            game_request,
+            project_root=output_dir,
+            requested_runtime=kwargs.get("requested_runtime", ""),
+            existing_runtime=kwargs.get("existing_runtime", ""),
+        )
+        blueprint = build_blueprint_from_request(
+            game_request,
+            runtime_profile=runtime_selection["profile"],
+            overrides=kwargs.get("data") or {},
+        )
+        merged_kwargs = dict(kwargs)
+        merged_kwargs["project_name"] = blueprint.get("meta", {}).get("project_name", kwargs.get("project_name", "Untitled Game"))
+        merged_kwargs["engine"] = runtime_selection["selected_runtime"]
+        merged_kwargs["dimension"] = blueprint.get("meta", {}).get("dimension", kwargs.get("dimension", "3D"))
+        foundation = self._create_foundation(output_dir, merged_kwargs)
+        if not foundation.success:
+            return foundation
+
+        blueprint_path = self._resolve_path(kwargs.get("blueprint_path", str(output_dir / "artifacts/game_blueprint.json")))
+        blueprint_path.parent.mkdir(parents=True, exist_ok=True)
+        blueprint_path.write_text(json.dumps(blueprint, indent=2, ensure_ascii=False), encoding="utf-8")
+        request_path.parent.mkdir(parents=True, exist_ok=True)
+        request_path.write_text(json.dumps(game_request, indent=2, ensure_ascii=False), encoding="utf-8")
+
+        output = (
+            f"Created request-backed foundation in {output_dir}\n"
+            f"Runtime: {runtime_selection['selected_runtime']}\n"
+            f"Scope: {game_request['production']['delivery_scope']}\n"
+            f"Blueprint: {blueprint_path}"
+        )
+        data = dict(foundation.data)
+        data.update(
+            {
+                "request_path": str(request_path.relative_to(self.project_root)),
+                "blueprint_path": str(blueprint_path.relative_to(self.project_root)),
+                "runtime": runtime_selection["selected_runtime"],
+            }
+        )
+        return ToolResult.ok(output, data)
+
+    def _generate_vertical_slice(self, output_dir: Path, request_path: Path, kwargs: Dict[str, Any]) -> ToolResult:
+        result = build_vertical_slice_project(
+            output_dir,
+            prompt=self._resolve_prompt(kwargs),
+            project_name=kwargs.get("project_name", ""),
+            requested_runtime=kwargs.get("requested_runtime", ""),
+            existing_runtime=kwargs.get("existing_runtime", ""),
+            overwrite=kwargs.get("overwrite", False),
+            app_root=self.project_root,
+        )
+        verification = result.get("verification", {})
+        output = (
+            f"Generated vertical slice in {output_dir}\n"
+            f"Runtime: {result['runtime']}\n"
+            f"Artifacts: {len(result.get('written_artifacts', []))}\n"
+            f"Runtime files: {len(result.get('runtime_files', []))}\n"
+            f"Verification: {'ok' if verification.get('valid', False) else 'needs review'}\n"
+            f"Slice score: {result.get('slice_score', {}).get('score', 0)}/100"
+        )
+        return ToolResult.ok(
+            output,
+            {
+                "project_root": result["project_root"],
+                "runtime": result["runtime"],
+                "request_path": str(request_path.relative_to(self.project_root)),
+                "runtime_files": result.get("runtime_files", []),
+                "written_artifacts": result.get("written_artifacts", []),
+                "verification": verification,
+                "slice_score": result.get("slice_score", {}),
+                "task_graph": result.get("task_graph", {}),
+                "content_expansion": result.get("content_expansion", {}),
+                "asset_pipeline": result.get("asset_pipeline", {}),
+                "expansion_backlog": result.get("expansion_backlog", {}),
+                "resume_state": result.get("resume_state", {}),
+                "modeling_workspace": result.get("modeling_workspace", {}),
             },
         )
 
@@ -391,6 +499,34 @@ class GameProjectScaffolderTool(BaseTool):
             return json.loads(path.read_text(encoding="utf-8"))
         except Exception:
             return {}
+
+    def _load_or_compile_request(self, request_path: Path, kwargs: Dict[str, Any], *, output_dir: Path) -> Dict[str, Any]:
+        if request_path.exists():
+            try:
+                return json.loads(request_path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        request = compile_game_prompt(
+            self._resolve_prompt(kwargs),
+            project_name=kwargs.get("project_name", output_dir.name or "Untitled Reverie Slice"),
+            requested_runtime=kwargs.get("requested_runtime", ""),
+            existing_runtime=kwargs.get("existing_runtime", ""),
+            overrides=kwargs.get("data") or kwargs,
+        )
+        return request
+
+    def _resolve_prompt(self, kwargs: Dict[str, Any]) -> str:
+        prompt = str(kwargs.get("prompt") or "").strip()
+        if prompt:
+            return prompt
+        fragments = [
+            kwargs.get("project_name", ""),
+            kwargs.get("engine", ""),
+            kwargs.get("dimension", ""),
+            " ".join((kwargs.get("data") or {}).get("themes", [])),
+        ]
+        fallback = " ".join(str(fragment).strip() for fragment in fragments if str(fragment).strip())
+        return fallback or "Build a polished vertical slice with a complete gameplay loop and runtime-ready structure."
 
     def _default_language(self, engine: str) -> str:
         normalized = str(engine).lower()

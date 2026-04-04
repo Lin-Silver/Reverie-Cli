@@ -38,6 +38,9 @@ class DisplayComponents:
         self.console = console or Console()
         self.theme = THEME
         self.deco = DECO
+        self._pending_tool_events: Dict[str, Dict[str, Any]] = {}
+        self.tool_output_style = "compact"
+        self.thinking_output_style = "full"
 
     def _console_width(self) -> int:
         """Best-effort terminal width with a sane fallback."""
@@ -92,6 +95,30 @@ class DisplayComponents:
         """Compact divider used by lightweight Gemini-style surfaces."""
         return self._safe_symbol("\u00b7", "|")
 
+    @staticmethod
+    def _normalize_tool_output_style(value: Any) -> str:
+        """Normalize transcript tool-result style selection."""
+        candidate = str(value or "").strip().lower()
+        if candidate in {"compact", "condensed", "full"}:
+            return candidate
+        return "compact"
+
+    def set_tool_output_style(self, value: Any) -> None:
+        """Update how completed tool results are written into the transcript."""
+        self.tool_output_style = self._normalize_tool_output_style(value)
+
+    @staticmethod
+    def _normalize_thinking_output_style(value: Any) -> str:
+        """Normalize streamed thinking/reasoning transcript visibility."""
+        candidate = str(value or "").strip().lower()
+        if candidate in {"hidden", "compact", "full"}:
+            return candidate
+        return "full"
+
+    def set_thinking_output_style(self, value: Any) -> None:
+        """Update how streamed reasoning content is rendered in the transcript."""
+        self.thinking_output_style = self._normalize_thinking_output_style(value)
+
     def _build_badge_line(
         self,
         badges: List[Tuple[str, str, str, str]],
@@ -109,29 +136,10 @@ class DisplayComponents:
         return text
     
     def show_welcome(self, title: str = "REVERIE") -> None:
-        """Display the original large startup banner without a border panel."""
+        """Display a clean startup banner without legacy panel chrome."""
         normalized_title = (str(title or "REVERIE").strip().upper() or "REVERIE")
 
-        # Keep the original banner palette and glyph layout.
         colors = ["#f3e5f5", "#f0e0f8", "#ede0fb", "#ead0fe", "#e7c0ff", "#e4b0ff"]
-        banner_lines = [
-            "██████╗ ███████╗██╗   ██╗███████╗██████╗ ██╗███████╗",
-            "██╔══██╗██╔════╝██║   ██║██╔════╝██╔══██╗██║██╔════╝",
-            "██████╔╝█████╗  ██║   ██║█████╗  ██████╔╝██║█████╗  ",
-            "██╔══██╗██╔══╝  ╚██╗ ██╔╝██╔══╝  ██╔══██╗██║██╔══╝  ",
-            "██║  ██║███████╗ ╚████╔╝ ███████╗██║  ██║██║███████╗",
-            "╚═╝  ╚═╝╚══════╝  ╚═══╝  ╚══════╝╚═╝  ╚═╝╚═╝╚══════╝",
-        ]
-
-        banner_lines = [
-            "██████╗ ███████╗██╗   ██╗███████╗██████╗ ██╗███████╗",
-            "██╔══██╗██╔════╝██║   ██║██╔════╝██╔══██╗██║██╔════╝",
-            "██████╔╝█████╗  ██║   ██║█████╗  ██████╔╝██║█████╗  ",
-            "██╔══██╗██╔══╝  ╚██╗ ██╔╝██╔══╝  ██╔══██╗██║██╔══╝  ",
-            "██║  ██║███████╗ ╚████╔╝ ███████╗██║  ██║██║███████╗",
-            "╚═╝  ╚═╝╚══════╝  ╚═══╝  ╚══════╝╚═╝  ╚═╝╚═╝╚══════╝",
-        ]
-
         banner_lines = [
             "██████╗ ███████╗██╗   ██╗███████╗██████╗ ██╗███████╗",
             "██╔══██╗██╔════╝██║   ██║██╔════╝██╔══██╗██║██╔════╝",
@@ -212,17 +220,14 @@ class DisplayComponents:
 
     def show_thinking_banner(self, model_name: str = "") -> None:
         """Render a lightweight thinking marker before streamed reasoning."""
-        prefix = self._safe_symbol("\u2502", "|")
-        line = Text()
-        line.append(f"{prefix} ", style=self.theme.TEXT_DIM)
-        line.append("Thinking...", style=f"italic {self.theme.THINKING_MEDIUM}")
-        if model_name:
-            line.append("  ", style=self.theme.TEXT_DIM)
-            line.append(
-                self._truncate_text(model_name, 28),
-                style=self.theme.TEXT_DIM,
-            )
-        self.console.print(line)
+        separator = self._safe_separator()
+        footer = self._truncate_text(model_name, 28) if model_name else "reasoning stream open"
+        self._show_timeline_block(
+            title=f"Assistant  {separator}  thinking",
+            accent=self.theme.THINKING_MEDIUM,
+            body=Text("Reasoning in progress", style=f"italic {self.theme.THINKING_MEDIUM}"),
+            footer=footer,
+        )
 
     def _show_timeline_block(
         self,
@@ -233,8 +238,8 @@ class DisplayComponents:
         footer: str = "",
     ) -> None:
         """Render a compact timeline block closer to Codex's transcript rhythm."""
-        top_prefix = self._safe_symbol("│ ", "| ")
-        bottom_prefix = self._safe_symbol("└ ", "\\- ")
+        top_prefix = f"{self._safe_symbol('│', '|')} "
+        bottom_prefix = f"{self._safe_symbol('└', '`')} "
         top = Text()
         top.append(top_prefix, style=accent)
         top.append(title, style=f"bold {accent}")
@@ -899,6 +904,260 @@ class DisplayComponents:
                 deletions += 1
         return additions, deletions, hunks
 
+    def _tool_display_label(self, tool_name: str, arguments: Optional[Dict[str, Any]] = None) -> str:
+        """Map raw tool names to concise UI labels."""
+        lowered = str(tool_name or "").strip().lower()
+        args = arguments or {}
+
+        if lowered == "str_replace_editor":
+            command = str(args.get("command", "") or "").strip().lower()
+            return {
+                "view": "ReadFile",
+                "str_replace": "Edit",
+                "insert": "Edit",
+                "create": "CreateFile",
+            }.get(command, "Edit")
+        if lowered == "file_ops":
+            operation = str(args.get("operation", "") or "").strip().lower()
+            return {
+                "read": "ReadFile",
+                "list": "ReadFolder",
+                "exists": "PathCheck",
+                "info": "FileInfo",
+                "mkdir": "MakeDir",
+            }.get(operation, "FileOp")
+        if lowered == "codebase-retrieval":
+            query_type = str(args.get("query_type", "") or "").strip().lower()
+            return {
+                "file": "ReadFile",
+                "search": "SearchText",
+                "symbol": "ReadSymbol",
+                "dependencies": "FindDeps",
+                "task": "TaskSearch",
+                "memory": "ReadMemory",
+                "lsp": "LSP",
+                "outline": "Outline",
+            }.get(query_type, "SearchCode")
+        if lowered == "command_exec":
+            return "Run"
+
+        normalized = re.sub(r"[^A-Za-z0-9]+", " ", str(tool_name or "")).strip().title().replace(" ", "")
+        return normalized or "Tool"
+
+    def _tool_subject(self, tool_name: str, arguments: Optional[Dict[str, Any]] = None) -> str:
+        """Choose the most useful human-facing subject for a tool row."""
+        lowered = str(tool_name or "").strip().lower()
+        args = arguments or {}
+        compact = self._is_compact(100)
+        path_limit = 44 if compact else 78
+        query_limit = 32 if compact else 56
+        command_limit = 48 if compact else 90
+
+        if lowered == "command_exec":
+            return self._truncate_text(args.get("command", ""), command_limit)
+        if lowered == "codebase-retrieval":
+            query = str(args.get("query", "") or "").strip()
+            if not query:
+                return ""
+            query_type = str(args.get("query_type", "") or "").strip().lower()
+            if query_type in {"search", "symbol", "dependencies", "task", "memory"}:
+                return self._truncate_text(f"'{query}'", query_limit)
+            return self._truncate_text(query, path_limit)
+
+        path_value = args.get("path") or args.get("file_path") or args.get("file") or args.get("directory")
+        if path_value:
+            return self._truncate_text(str(path_value), path_limit)
+        return ""
+
+    @staticmethod
+    def _extract_prefixed_value(lines: List[str], prefix: str) -> str:
+        """Return the text that follows a known prefix in the first matching line."""
+        prefix_lower = prefix.lower()
+        for line in lines:
+            if line.lower().startswith(prefix_lower):
+                return line[len(prefix):].strip()
+        return ""
+
+    def _summarize_tool_result(
+        self,
+        tool_name: str,
+        output: Any,
+        arguments: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[str, List[str]]:
+        """Build a compact summary line plus optional preview rows."""
+        raw_text = str(output or "").strip()
+        if not raw_text:
+            return "Completed", []
+
+        lines = [line.rstrip() for line in raw_text.splitlines()]
+        non_empty = [line for line in lines if line.strip()]
+        lowered = str(tool_name or "").strip().lower()
+        args = arguments or {}
+
+        if lowered == "str_replace_editor":
+            command = str(args.get("command", "") or "").strip().lower()
+            if command == "view":
+                total_lines = self._extract_prefixed_value(lines, "Total lines:")
+                showing = self._extract_prefixed_value(lines, "Showing lines")
+                summary = "Read file contents"
+                if showing and total_lines:
+                    summary = f"Read lines {showing} of {total_lines}"
+                elif showing:
+                    summary = f"Read lines {showing}"
+                preview = [line for line in lines if re.match(r"^\s*\d+\s+\|", line)][:4]
+                return summary, preview
+            if command in {"str_replace", "insert"}:
+                additions, deletions, _ = self._summarize_diff_text(raw_text)
+                if additions or deletions:
+                    return f"Accepted (+{additions}, -{deletions})", []
+                return "Accepted", []
+            if command == "create":
+                line_count = self._extract_prefixed_value(lines, "Lines:")
+                return (f"Created file ({line_count} lines)" if line_count else "Created file"), []
+
+        if lowered == "file_ops":
+            operation = str(args.get("operation", "") or "").strip().lower()
+            if operation == "list":
+                item_count = self._extract_prefixed_value(lines, "Items:")
+                preview = [line for line in lines if line.startswith("[DIR]") or line.startswith("[FILE]")][:6]
+                return (f"Listed {item_count} item(s)." if item_count else "Listed directory contents."), preview
+            if operation == "read":
+                return f"Read {len(lines)} line(s).", non_empty[:4]
+            return non_empty[0], non_empty[1:5]
+
+        if lowered == "codebase-retrieval":
+            query_type = str(args.get("query_type", "") or "").strip().lower()
+            if query_type == "search":
+                found_line = next((line for line in non_empty if line.lower().startswith("found ")), "")
+                preview = [line for line in non_empty if line.startswith("- ") or line.startswith("  File:")][:6]
+                return found_line or "Search complete", preview
+            if query_type == "file":
+                symbol_count = self._extract_prefixed_value(lines, "Symbols found:")
+                preview = [line for line in non_empty if line.startswith("- **")][:6]
+                return (f"Found {symbol_count} symbol(s)." if symbol_count else "Read file outline."), preview
+            if query_type in {"task", "memory"}:
+                return non_empty[0], non_empty[1:5]
+
+        if lowered == "command_exec":
+            exit_code = self._extract_prefixed_value(lines, "Exit code:")
+            duration = self._extract_prefixed_value(lines, "Duration:")
+            summary = "Command completed"
+            if exit_code and duration:
+                summary = f"Exit {exit_code} in {duration}"
+            elif exit_code:
+                summary = f"Exit {exit_code}"
+            preview: List[str] = []
+            if "--- STDOUT ---" in lines:
+                start = lines.index("--- STDOUT ---") + 1
+                end = lines.index("--- STDERR ---") if "--- STDERR ---" in lines else len(lines)
+                preview = [line for line in lines[start:end] if line.strip()][:6]
+            elif "--- STDERR ---" in lines:
+                start = lines.index("--- STDERR ---") + 1
+                preview = [line for line in lines[start:] if line.strip()][:6]
+            return summary, preview
+
+        summary = non_empty[0]
+        preview = non_empty[1:5]
+        return summary, preview
+
+    def _render_compact_tool_event(
+        self,
+        *,
+        tool_name: str,
+        arguments: Optional[Dict[str, Any]] = None,
+        summary: str = "",
+        preview_lines: Optional[List[str]] = None,
+        state: str = "success",
+    ) -> None:
+        """Render a single compact tool activity row with optional preview lines."""
+        state_key = str(state or "success").strip().lower()
+        state_styles = {
+            "success": (self._safe_symbol("√", "+"), self.theme.MINT_VIBRANT),
+            "pending": (self._safe_symbol("›", ">"), self.theme.BLUE_SOFT),
+            "error": (self._safe_symbol("×", "x"), self.theme.CORAL_VIBRANT),
+        }
+        icon, accent = state_styles.get(state_key, state_styles["success"])
+        arrow = self._safe_symbol("→", "->")
+        label = self._tool_display_label(tool_name, arguments)
+        subject = self._tool_subject(tool_name, arguments)
+        summary_text = self._truncate_text(
+            summary or ("Running" if state_key == "pending" else "Completed"),
+            52 if self._is_compact(100) else 100,
+        )
+
+        line = Text()
+        line.append(f"{icon} ", style=accent)
+        line.append(label, style=f"bold {self.theme.TEXT_PRIMARY}")
+        if subject:
+            line.append("  ", style=self.theme.TEXT_DIM)
+            line.append(subject, style=self.theme.TEXT_SECONDARY)
+        if summary_text:
+            line.append(f" {arrow} ", style=accent)
+            line.append(
+                summary_text,
+                style=f"bold {self.theme.PURPLE_SOFT if state_key != 'error' else self.theme.CORAL_SOFT}",
+            )
+        self.console.print(line)
+
+        cleaned_preview = [
+            self._truncate_text(str(item), 108 if self._is_compact(100) else 156)
+            for item in (preview_lines or [])
+            if str(item).strip()
+        ]
+        if cleaned_preview:
+            self.console.print(
+                Padding(Text("\n".join(cleaned_preview[:4]), style=self.theme.TEXT_DIM), (0, 0, 0, 2))
+            )
+
+    def _render_full_tool_result_card(
+        self,
+        *,
+        tool_name: str,
+        success: bool,
+        output: Any = "",
+        error: str = "",
+        arguments: Optional[Dict[str, Any]] = None,
+        tool_call_id: str = "",
+    ) -> None:
+        """Render the complete post-tool transcript block without collapsing."""
+        accent = self._resolve_tool_color(tool_name) if success else self.theme.CORAL_VIBRANT
+        title_body = "Computer Controller" if str(tool_name or "").strip().lower() == "computer_control" else tool_name
+        argument_summary = self._format_tool_argument_summary(arguments)
+        separator = self._safe_separator()
+
+        if success:
+            renderable, footer = self._build_tool_output_renderable(output, arguments=arguments, full=True)
+            parts: List[Any] = []
+            if argument_summary:
+                parts.append(Text(argument_summary, style=self.theme.TEXT_DIM))
+            if str(output or "").strip():
+                parts.append(renderable)
+            else:
+                parts.append(Text("No textual output returned", style=self.theme.TEXT_SECONDARY))
+            if tool_call_id:
+                footer = f"{footer}  {separator}  call {tool_call_id[-8:]}" if footer else f"call {tool_call_id[-8:]}"
+            self._show_timeline_block(
+                title=f"{title_body}  {separator}  done",
+                accent=accent,
+                body=Group(*parts),
+                footer=footer,
+            )
+            return
+
+        failure_parts: List[Any] = []
+        if argument_summary:
+            failure_parts.append(Text(argument_summary, style=self.theme.TEXT_DIM))
+        failure_parts.append(Text(str(error or "Tool execution failed").strip(), style=self.theme.CORAL_SOFT))
+        if str(output or "").strip():
+            failure_parts.append(Text(str(output).strip(), style=self.theme.TEXT_SECONDARY))
+        footer = f"call {tool_call_id[-8:]}" if tool_call_id else "tool failure"
+        self._show_timeline_block(
+            title=f"{title_body}  {separator}  failed",
+            accent=accent,
+            body=Group(*failure_parts),
+            footer=footer,
+        )
+
     def _build_diff_renderable(self, diff_text: str, preview_line_limit: int) -> Tuple[Any, str]:
         """Render diff text with a tighter, syntax-highlighted preview."""
         lines = str(diff_text or "").splitlines()
@@ -923,6 +1182,8 @@ class DisplayComponents:
         self,
         output: Any,
         arguments: Optional[Dict[str, Any]] = None,
+        *,
+        full: bool = False,
     ) -> Tuple[Any, str]:
         """Convert tool output into a rich renderable plus a metadata footer."""
         raw_text = str(output or "").rstrip()
@@ -935,10 +1196,14 @@ class DisplayComponents:
         preview_line_limit = 10 if compact else 16
         fenced_language, fenced_body = self._extract_fenced_block(raw_text)
         if fenced_language == "diff":
-            return self._build_diff_renderable(fenced_body, preview_line_limit=18 if compact else 28)
+            return self._build_diff_renderable(
+                fenced_body,
+                preview_line_limit=len(fenced_body.splitlines()) if full else (18 if compact else 28),
+            )
         if fenced_language:
             fenced_lines = fenced_body.splitlines()
-            preview_text = "\n".join(fenced_lines[:preview_line_limit])
+            selected_lines = fenced_lines if full else fenced_lines[:preview_line_limit]
+            preview_text = "\n".join(selected_lines)
             renderable = Syntax(
                 preview_text,
                 fenced_language,
@@ -947,7 +1212,7 @@ class DisplayComponents:
                 word_wrap=True,
             )
             footer_parts = [f"{len(fenced_lines)} lines", f"{len(fenced_body):,} chars"]
-            if len(fenced_lines) > preview_line_limit:
+            if not full and len(fenced_lines) > preview_line_limit:
                 footer_parts.append(f"showing first {preview_line_limit}")
             return renderable, "  |  ".join(footer_parts)
         if raw_text.startswith("{") or raw_text.startswith("["):
@@ -974,7 +1239,7 @@ class DisplayComponents:
             return table, footer
 
         if isinstance(parsed_json, list):
-            preview = parsed_json[:6]
+            preview = parsed_json if full else parsed_json[:6]
             syntax = Syntax(
                 json.dumps(preview, indent=2, ensure_ascii=False),
                 "json",
@@ -984,7 +1249,7 @@ class DisplayComponents:
             )
             extra = len(parsed_json) - len(preview)
             footer = f"{len(parsed_json)} items"
-            if extra > 0:
+            if not full and extra > 0:
                 footer = f"{footer}  |  showing first {len(preview)}"
             return syntax, footer
 
@@ -1011,7 +1276,7 @@ class DisplayComponents:
             inferred_language = suffix_to_language[suffix]
 
         lines = raw_text.splitlines()
-        preview_lines = lines[:preview_line_limit]
+        preview_lines = lines if full else lines[:preview_line_limit]
         preview_text = "\n".join(preview_lines)
         if inferred_language and len(preview_lines) >= 4:
             renderable = Syntax(
@@ -1025,7 +1290,7 @@ class DisplayComponents:
             renderable = Text(preview_text, style=self.theme.TEXT_SECONDARY)
 
         footer_parts = [f"{len(lines)} lines", f"{len(raw_text):,} chars"]
-        if len(lines) > len(preview_lines):
+        if not full and len(lines) > len(preview_lines):
             footer_parts.append(f"showing first {len(preview_lines)}")
         return renderable, "  |  ".join(footer_parts)
 
@@ -1036,23 +1301,22 @@ class DisplayComponents:
         arguments: Optional[Dict[str, Any]] = None,
         tool_call_id: str = "",
     ) -> None:
-        """Render a Gemini-inspired lightweight tool execution block."""
-        accent = self._resolve_tool_color(tool_name)
-        argument_summary = self._format_tool_argument_summary(arguments)
-        separator = self._safe_separator()
-        title_label = "Computer Controller" if str(tool_name or "").strip().lower() == "computer_control" else f"Tool {separator} {tool_name}"
-        title = str(message or f"Executing {tool_name}...").strip() or title_label
-        title_text = f"{title_label}  {separator}  running"
-        parts: List[Any] = [Text(title, style=f"bold {self.theme.TEXT_PRIMARY}")]
-        if argument_summary:
-            parts.append(Text(argument_summary, style=self.theme.TEXT_DIM))
+        """Buffer tool-start metadata so the final result prints as one compact row."""
+        payload = {
+            "tool_name": tool_name,
+            "message": str(message or "").strip(),
+            "arguments": dict(arguments or {}),
+        }
         if tool_call_id:
-            parts.append(Text(f"call {tool_call_id[-8:]}", style=self.theme.TEXT_DIM))
-        self._show_timeline_block(
-            title=title_text,
-            accent=accent,
-            body=Group(*parts),
-            footer="waiting for result",
+            self._pending_tool_events[tool_call_id] = payload
+            return
+
+        fallback_summary = str(message or "").strip() or "Running"
+        self._render_compact_tool_event(
+            tool_name=tool_name,
+            arguments=arguments,
+            summary=fallback_summary,
+            state="pending",
         )
 
     def show_tool_result_card(
@@ -1064,49 +1328,45 @@ class DisplayComponents:
         arguments: Optional[Dict[str, Any]] = None,
         tool_call_id: str = "",
     ) -> None:
-        """Render a structured tool result block with lower visual noise."""
-        accent = self._resolve_tool_color(tool_name) if success else self.theme.CORAL_VIBRANT
-        title_body = "Computer Controller" if str(tool_name or "").strip().lower() == "computer_control" else tool_name
-        argument_summary = self._format_tool_argument_summary(arguments)
-        separator = self._safe_separator()
+        """Render compact Gemini-like tool completion rows with optional previews."""
+        pending = self._pending_tool_events.pop(tool_call_id, {}) if tool_call_id else {}
+        merged_tool_name = str(pending.get("tool_name") or tool_name or "tool")
+        merged_arguments = arguments if isinstance(arguments, dict) and arguments else pending.get("arguments")
+        output_style = self._normalize_tool_output_style(self.tool_output_style)
+
+        if output_style == "full":
+            self._render_full_tool_result_card(
+                tool_name=merged_tool_name,
+                success=success,
+                output=output,
+                error=error,
+                arguments=merged_arguments if isinstance(merged_arguments, dict) else None,
+                tool_call_id=tool_call_id,
+            )
+            return
+
         if success:
-            renderable, footer = self._build_tool_output_renderable(output, arguments=arguments)
-            parts: List[Any] = []
-            if argument_summary:
-                parts.append(Text(argument_summary, style=self.theme.TEXT_DIM))
-            if str(output or "").strip():
-                parts.append(renderable)
-            else:
-                parts.extend(
-                    [
-                        Text("No textual output returned", style=self.theme.TEXT_SECONDARY),
-                        Text("The tool may have completed through file changes, state updates, or side effects.", style=self.theme.TEXT_DIM),
-                    ]
-                )
-            if tool_call_id:
-                footer = f"{footer}  {separator}  call {tool_call_id[-8:]}" if footer else f"call {tool_call_id[-8:]}"
-            self._show_timeline_block(
-                title=f"{title_body}  {separator}  done",
-                accent=accent,
-                body=Group(*parts),
-                footer=footer,
+            summary, preview_lines = self._summarize_tool_result(
+                merged_tool_name,
+                output,
+                merged_arguments if isinstance(merged_arguments, dict) else None,
             )
-        else:
-            message = str(error or "Tool execution failed").strip()
-            parts = []
-            if argument_summary:
-                parts.append(Text(argument_summary, style=self.theme.TEXT_DIM))
-            parts.extend([
-                Text(message, style=self.theme.CORAL_SOFT),
-                Text("execution error", style=self.theme.TEXT_DIM),
-            ])
-            footer = f"call {tool_call_id[-8:]}" if tool_call_id else "tool failure"
-            self._show_timeline_block(
-                title=f"{title_body}  {separator}  failed",
-                accent=accent,
-                body=Group(*parts),
-                footer=footer,
+            self._render_compact_tool_event(
+                tool_name=merged_tool_name,
+                arguments=merged_arguments if isinstance(merged_arguments, dict) else None,
+                summary=summary,
+                preview_lines=preview_lines if output_style == "condensed" else [],
+                state="success",
             )
+            return
+
+        message = str(error or output or "Tool execution failed").strip() or "Tool execution failed"
+        self._render_compact_tool_event(
+            tool_name=merged_tool_name,
+            arguments=merged_arguments if isinstance(merged_arguments, dict) else None,
+            summary=message,
+            state="error",
+        )
 
     def show_stream_event(self, event: Dict[str, Any]) -> bool:
         """Render a structured stream event if supported."""
@@ -1130,6 +1390,106 @@ class DisplayComponents:
             )
             return True
         return False
+
+    def build_task_drawer(self, snapshot: Dict[str, Any], *, toggle_hint: str = "Ctrl+T to toggle") -> Panel:
+        """Build a compact, toggleable todo drawer for the streaming footer."""
+        total = max(0, int(snapshot.get("total", 0) or 0))
+        completed = max(0, int(snapshot.get("completed", 0) or 0))
+        hidden = max(0, int(snapshot.get("hidden", 0) or 0))
+        tasks = [item for item in snapshot.get("tasks", []) if isinstance(item, dict)]
+        compact = self._is_compact(100)
+
+        header = Text()
+        header.append("Todo ", style=f"bold {self.theme.TEXT_PRIMARY}")
+        header.append(f"{completed}/{total} completed", style=self.theme.TEXT_SECONDARY)
+        header.append(f" ({toggle_hint})", style=self.theme.TEXT_DIM)
+
+        lines: List[Any] = [header]
+        state_styles = {
+            "NOT_STARTED": (self._safe_symbol("☐", "[ ]"), self.theme.TEXT_SECONDARY),
+            "IN_PROGRESS": (self._safe_symbol("◐", "[/]"), self.theme.AMBER_GLOW),
+            "COMPLETED": (self._safe_symbol("☑", "[x]"), self.theme.MINT_VIBRANT),
+            "CANCELLED": (self._safe_symbol("⊘", "[-]"), self.theme.TEXT_DIM),
+        }
+        name_limit = 44 if compact else 82
+
+        for task in tasks:
+            state = str(task.get("state", "NOT_STARTED") or "NOT_STARTED").upper()
+            icon, color = state_styles.get(state, state_styles["NOT_STARTED"])
+            indent = "  " * max(0, int(task.get("indent", 0) or 0))
+            task_name = self._truncate_text(task.get("name", ""), name_limit)
+            row = Text()
+            row.append(indent, style=self.theme.TEXT_DIM)
+            row.append(icon, style=color)
+            row.append(" ")
+            row.append(
+                task_name,
+                style=f"bold {self.theme.TEXT_PRIMARY}" if state == "IN_PROGRESS" else self.theme.TEXT_SECONDARY,
+            )
+            lines.append(row)
+
+        if hidden:
+            lines.append(Text(f"+{hidden} more task(s)", style=self.theme.TEXT_DIM))
+        if not tasks:
+            lines.append(Text("No tracked tasks yet.", style=self.theme.TEXT_DIM))
+
+        return Panel(
+            Group(*lines),
+            border_style=self.theme.BORDER_SUBTLE,
+            box=box.SQUARE,
+            padding=(0, 1),
+            width=self._fit_panel_width(116, margin=2, min_width=52),
+        )
+
+    def build_live_tool_panel(self, active_tools: List[Dict[str, Any]]) -> Panel:
+        """Build the live tool activity surface shown while tools are running."""
+        tool_items = [item for item in active_tools if isinstance(item, dict)]
+        body_parts: List[Any] = []
+
+        for index, item in enumerate(tool_items[:2]):
+            tool_name = str(item.get("tool_name", "") or "tool")
+            arguments = item.get("arguments") if isinstance(item.get("arguments"), dict) else None
+            message = str(item.get("message", "") or "").strip()
+            stdout_text = str(item.get("stdout", "") or "")
+            stderr_text = str(item.get("stderr", "") or "")
+
+            header = Text()
+            header.append(self._tool_display_label(tool_name, arguments), style=f"bold {self.theme.TEXT_PRIMARY}")
+            subject = self._tool_subject(tool_name, arguments)
+            if subject:
+                header.append("  ")
+                header.append(subject, style=self.theme.TEXT_SECONDARY)
+            header.append(f"  {self._safe_separator()}  ", style=self.theme.TEXT_DIM)
+            header.append("running", style=f"bold {self.theme.BLUE_SOFT}")
+            body_parts.append(header)
+
+            if message:
+                body_parts.append(Text(message, style=self.theme.TEXT_SECONDARY))
+            if arguments:
+                body_parts.append(
+                    Text(json.dumps(arguments, indent=2, ensure_ascii=False), style=self.theme.TEXT_DIM)
+                )
+            if stdout_text:
+                body_parts.append(Text("STDOUT", style=f"bold {self.theme.MINT_SOFT}"))
+                body_parts.append(Text(stdout_text.rstrip(), style=self.theme.TEXT_SECONDARY))
+            if stderr_text:
+                body_parts.append(Text("STDERR", style=f"bold {self.theme.CORAL_SOFT}"))
+                body_parts.append(Text(stderr_text.rstrip(), style=self.theme.CORAL_SOFT))
+            if index < min(len(tool_items), 2) - 1:
+                body_parts.append(Text(""))
+
+        title = Text()
+        title.append("Live Tool Output", style=f"bold {self.theme.TEXT_PRIMARY}")
+        title.append(f" ({len(tool_items)} active)", style=self.theme.TEXT_DIM)
+
+        return Panel(
+            Group(*body_parts) if body_parts else Text("No active tools.", style=self.theme.TEXT_DIM),
+            title=title,
+            border_style=self.theme.BORDER_SUBTLE,
+            box=box.SQUARE,
+            padding=(0, 1),
+            width=self._fit_panel_width(116, margin=2, min_width=52),
+        )
 
     def show_tool_output(
         self,

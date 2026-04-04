@@ -14,6 +14,29 @@ import json
 
 from .base import BaseTool, ToolResult
 from ..engine import canonical_engine_name, is_builtin_engine_name
+from ..gamer.asset_pipeline import build_asset_pipeline_plan, asset_pipeline_markdown
+from ..gamer.expansion_planner import (
+    build_content_expansion_plan,
+    build_expansion_backlog,
+    build_resume_state,
+    content_expansion_markdown,
+    expansion_backlog_markdown,
+    resume_state_markdown,
+)
+from ..gamer.prompt_compiler import compile_game_prompt
+from ..gamer.production_plan import (
+    build_blueprint_from_request,
+    build_production_plan,
+    build_vertical_slice_plan,
+    vertical_slice_markdown,
+)
+from ..gamer.runtime_registry import discover_runtime_profiles, select_runtime_profile
+from ..gamer.system_generators import (
+    build_system_packet_bundle,
+    build_task_graph,
+    system_packet_markdown,
+    task_graph_markdown,
+)
 
 
 class GameDesignOrchestratorTool(BaseTool):
@@ -33,7 +56,9 @@ class GameDesignOrchestratorTool(BaseTool):
             "action": {
                 "type": "string",
                 "enum": [
+                    "compile_request",
                     "create_blueprint",
+                    "plan_production",
                     "expand_system",
                     "generate_vertical_slice",
                     "analyze_scope",
@@ -45,9 +70,17 @@ class GameDesignOrchestratorTool(BaseTool):
                 "type": "string",
                 "description": "Blueprint JSON path (default: artifacts/game_blueprint.json)",
             },
+            "request_path": {
+                "type": "string",
+                "description": "Compiled request JSON path (default: artifacts/game_request.json)",
+            },
             "output_path": {
                 "type": "string",
                 "description": "Optional export path for markdown outputs",
+            },
+            "prompt": {
+                "type": "string",
+                "description": "Single prompt used for request compilation or production planning",
             },
             "project_name": {
                 "type": "string",
@@ -72,6 +105,14 @@ class GameDesignOrchestratorTool(BaseTool):
             "scope": {
                 "type": "string",
                 "description": "Target production scope such as prototype, vertical_slice, full_game",
+            },
+            "requested_runtime": {
+                "type": "string",
+                "description": "Optional explicit runtime request such as reverie_engine or godot",
+            },
+            "existing_runtime": {
+                "type": "string",
+                "description": "Optional existing runtime that should be preserved",
             },
             "system_name": {
                 "type": "string",
@@ -106,10 +147,18 @@ class GameDesignOrchestratorTool(BaseTool):
     def execute(self, **kwargs) -> ToolResult:
         action = kwargs.get("action")
         blueprint_path = self._resolve_path(kwargs.get("blueprint_path", "artifacts/game_blueprint.json"))
+        request_path = self._resolve_path(kwargs.get("request_path", "artifacts/game_request.json"))
 
         try:
+            if action == "compile_request":
+                return self._compile_request(request_path, kwargs)
             if action == "create_blueprint":
-                return self._create_blueprint(blueprint_path, kwargs)
+                return self._create_blueprint(request_path, blueprint_path, kwargs)
+            if action == "plan_production":
+                output_path = self._resolve_path(
+                    kwargs.get("output_path", "artifacts/production_plan.json")
+                )
+                return self._plan_production(request_path, blueprint_path, output_path, kwargs)
             if action == "expand_system":
                 system_name = kwargs.get("system_name")
                 if not system_name:
@@ -119,7 +168,7 @@ class GameDesignOrchestratorTool(BaseTool):
                 output_path = self._resolve_path(
                     kwargs.get("output_path", "artifacts/vertical_slice_plan.md")
                 )
-                return self._generate_vertical_slice(blueprint_path, output_path, kwargs.get("data") or {})
+                return self._generate_vertical_slice(request_path, blueprint_path, output_path, kwargs.get("data") or {})
             if action == "analyze_scope":
                 return self._analyze_scope(blueprint_path, kwargs)
             if action == "export_markdown":
@@ -131,14 +180,54 @@ class GameDesignOrchestratorTool(BaseTool):
         except Exception as exc:
             return ToolResult.fail(f"Error executing {action}: {str(exc)}")
 
-    def _create_blueprint(self, blueprint_path: Path, kwargs: Dict[str, Any]) -> ToolResult:
+    def _compile_request(self, request_path: Path, kwargs: Dict[str, Any]) -> ToolResult:
+        request = compile_game_prompt(
+            self._resolve_prompt(kwargs),
+            project_name=kwargs.get("project_name", ""),
+            requested_runtime=kwargs.get("requested_runtime", ""),
+            existing_runtime=kwargs.get("existing_runtime", ""),
+            overrides=kwargs.get("data") or kwargs,
+        )
+        request_path.parent.mkdir(parents=True, exist_ok=True)
+        request_path.write_text(json.dumps(request, indent=2, ensure_ascii=False), encoding="utf-8")
+        output = (
+            f"Compiled request at {request_path}\n"
+            f"Project: {request['meta']['project_name']}\n"
+            f"Genre: {request['creative_target']['primary_genre']}\n"
+            f"Dimension: {request['experience']['dimension']}\n"
+            f"Scope: {request['production']['delivery_scope']}\n"
+            f"Preferred runtime: {request['runtime_preferences']['preferred_runtime']}"
+        )
+        return ToolResult.ok(
+            output,
+            {
+                "request_path": str(request_path.relative_to(self.project_root)),
+                "game_request": request,
+            },
+        )
+
+    def _create_blueprint(self, request_path: Path, blueprint_path: Path, kwargs: Dict[str, Any]) -> ToolResult:
         overwrite = kwargs.get("overwrite", False)
         if blueprint_path.exists() and not overwrite:
             return ToolResult.fail(
                 f"Blueprint already exists at {blueprint_path}. Use overwrite=true to replace it."
             )
 
-        blueprint = self._deep_merge(self._default_blueprint(kwargs), kwargs.get("data") or {})
+        if request_path.exists() or kwargs.get("prompt"):
+            game_request = self._load_or_compile_request(request_path, kwargs)
+            runtime_selection = select_runtime_profile(
+                game_request,
+                project_root=self.project_root,
+                requested_runtime=kwargs.get("requested_runtime", ""),
+                existing_runtime=kwargs.get("existing_runtime", ""),
+            )
+            blueprint = build_blueprint_from_request(
+                game_request,
+                runtime_profile=runtime_selection["profile"],
+                overrides=kwargs.get("data") or {},
+            )
+        else:
+            blueprint = self._deep_merge(self._default_blueprint(kwargs), kwargs.get("data") or {})
         blueprint_path.parent.mkdir(parents=True, exist_ok=True)
         blueprint_path.write_text(json.dumps(blueprint, indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -156,6 +245,169 @@ class GameDesignOrchestratorTool(BaseTool):
             {
                 "blueprint_path": str(blueprint_path.relative_to(self.project_root)),
                 "blueprint": blueprint,
+            },
+        )
+
+    def _plan_production(
+        self,
+        request_path: Path,
+        blueprint_path: Path,
+        output_path: Path,
+        kwargs: Dict[str, Any],
+    ) -> ToolResult:
+        game_request = self._load_or_compile_request(request_path, kwargs)
+        runtime_selection = select_runtime_profile(
+            game_request,
+            project_root=self.project_root,
+            requested_runtime=kwargs.get("requested_runtime", ""),
+            existing_runtime=kwargs.get("existing_runtime", ""),
+        )
+        blueprint = build_blueprint_from_request(
+            game_request,
+            runtime_profile=runtime_selection["profile"],
+            overrides=kwargs.get("data") or {},
+        )
+        production_plan = build_production_plan(
+            game_request,
+            blueprint,
+            runtime_profile=runtime_selection["profile"],
+        )
+        system_bundle = build_system_packet_bundle(
+            game_request,
+            blueprint,
+            runtime_profile=runtime_selection["profile"],
+        )
+        task_graph = build_task_graph(
+            game_request,
+            blueprint,
+            system_bundle,
+            runtime_profile=runtime_selection["profile"],
+            production_plan=production_plan,
+        )
+        content_expansion = build_content_expansion_plan(
+            game_request,
+            blueprint,
+            runtime_profile=runtime_selection["profile"],
+        )
+        asset_pipeline = build_asset_pipeline_plan(
+            game_request,
+            blueprint,
+            system_bundle,
+            content_expansion,
+            runtime_profile=runtime_selection["profile"],
+        )
+        expansion_backlog = build_expansion_backlog(
+            game_request,
+            blueprint,
+            task_graph,
+            content_expansion,
+        )
+        resume_state = build_resume_state(
+            game_request,
+            blueprint,
+            production_plan,
+            task_graph,
+            content_expansion,
+            expansion_backlog,
+            runtime_profile=runtime_selection["profile"],
+        )
+
+        request_path.parent.mkdir(parents=True, exist_ok=True)
+        request_path.write_text(json.dumps(game_request, indent=2, ensure_ascii=False), encoding="utf-8")
+        blueprint_path.parent.mkdir(parents=True, exist_ok=True)
+        blueprint_path.write_text(json.dumps(blueprint, indent=2, ensure_ascii=False), encoding="utf-8")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(production_plan, indent=2, ensure_ascii=False), encoding="utf-8")
+
+        system_specs_path = self._resolve_path("artifacts/system_specs.json")
+        system_specs_path.parent.mkdir(parents=True, exist_ok=True)
+        system_specs_path.write_text(json.dumps(system_bundle, indent=2, ensure_ascii=False), encoding="utf-8")
+
+        system_specs_markdown_path = self._resolve_path("artifacts/system_specs.md")
+        system_specs_markdown_path.parent.mkdir(parents=True, exist_ok=True)
+        system_specs_markdown_path.write_text(system_packet_markdown(system_bundle), encoding="utf-8")
+
+        task_graph_path = self._resolve_path("artifacts/task_graph.json")
+        task_graph_path.parent.mkdir(parents=True, exist_ok=True)
+        task_graph_path.write_text(json.dumps(task_graph, indent=2, ensure_ascii=False), encoding="utf-8")
+
+        task_graph_markdown_path = self._resolve_path("artifacts/task_graph.md")
+        task_graph_markdown_path.parent.mkdir(parents=True, exist_ok=True)
+        task_graph_markdown_path.write_text(task_graph_markdown(task_graph), encoding="utf-8")
+
+        content_expansion_path = self._resolve_path("artifacts/content_expansion.json")
+        content_expansion_path.parent.mkdir(parents=True, exist_ok=True)
+        content_expansion_path.write_text(json.dumps(content_expansion, indent=2, ensure_ascii=False), encoding="utf-8")
+
+        content_expansion_markdown_path = self._resolve_path("artifacts/content_expansion.md")
+        content_expansion_markdown_path.parent.mkdir(parents=True, exist_ok=True)
+        content_expansion_markdown_path.write_text(content_expansion_markdown(content_expansion), encoding="utf-8")
+
+        asset_pipeline_path = self._resolve_path("artifacts/asset_pipeline.json")
+        asset_pipeline_path.parent.mkdir(parents=True, exist_ok=True)
+        asset_pipeline_path.write_text(json.dumps(asset_pipeline, indent=2, ensure_ascii=False), encoding="utf-8")
+
+        asset_pipeline_markdown_path = self._resolve_path("artifacts/asset_pipeline.md")
+        asset_pipeline_markdown_path.parent.mkdir(parents=True, exist_ok=True)
+        asset_pipeline_markdown_path.write_text(asset_pipeline_markdown(asset_pipeline), encoding="utf-8")
+
+        expansion_backlog_path = self._resolve_path("artifacts/expansion_backlog.json")
+        expansion_backlog_path.parent.mkdir(parents=True, exist_ok=True)
+        expansion_backlog_path.write_text(json.dumps(expansion_backlog, indent=2, ensure_ascii=False), encoding="utf-8")
+
+        expansion_backlog_markdown_path = self._resolve_path("artifacts/expansion_backlog.md")
+        expansion_backlog_markdown_path.parent.mkdir(parents=True, exist_ok=True)
+        expansion_backlog_markdown_path.write_text(expansion_backlog_markdown(expansion_backlog), encoding="utf-8")
+
+        resume_state_path = self._resolve_path("artifacts/resume_state.json")
+        resume_state_path.parent.mkdir(parents=True, exist_ok=True)
+        resume_state_path.write_text(json.dumps(resume_state, indent=2, ensure_ascii=False), encoding="utf-8")
+
+        resume_state_markdown_path = self._resolve_path("artifacts/resume_state.md")
+        resume_state_markdown_path.parent.mkdir(parents=True, exist_ok=True)
+        resume_state_markdown_path.write_text(resume_state_markdown(resume_state), encoding="utf-8")
+
+        runtime_registry_path = self._resolve_path("artifacts/runtime_registry.json")
+        runtime_registry_payload = {
+            "selected_runtime": runtime_selection["selected_runtime"],
+            "reason": runtime_selection["reason"],
+            "fallback_reason": runtime_selection["fallback_reason"],
+            "profiles": discover_runtime_profiles(self.project_root),
+        }
+        runtime_registry_path.parent.mkdir(parents=True, exist_ok=True)
+        runtime_registry_path.write_text(
+            json.dumps(runtime_registry_payload, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        output = (
+            f"Planned production at {output_path}\n"
+            f"Project: {blueprint['meta']['project_name']}\n"
+            f"Runtime: {runtime_selection['selected_runtime']}\n"
+            f"Scope: {blueprint['meta']['scope']}\n"
+            f"Lanes: {len(production_plan.get('lanes', []))}\n"
+            f"System packets: {len(system_bundle.get('packets', {}))}"
+        )
+        return ToolResult.ok(
+            output,
+            {
+                "request_path": str(request_path.relative_to(self.project_root)),
+                "blueprint_path": str(blueprint_path.relative_to(self.project_root)),
+                "output_path": str(output_path.relative_to(self.project_root)),
+                "runtime_registry_path": str(runtime_registry_path.relative_to(self.project_root)),
+                "system_specs_path": str(system_specs_path.relative_to(self.project_root)),
+                "task_graph_path": str(task_graph_path.relative_to(self.project_root)),
+                "content_expansion_path": str(content_expansion_path.relative_to(self.project_root)),
+                "asset_pipeline_path": str(asset_pipeline_path.relative_to(self.project_root)),
+                "expansion_backlog_path": str(expansion_backlog_path.relative_to(self.project_root)),
+                "resume_state_path": str(resume_state_path.relative_to(self.project_root)),
+                "production_plan": production_plan,
+                "system_bundle": system_bundle,
+                "task_graph": task_graph,
+                "content_expansion": content_expansion,
+                "asset_pipeline": asset_pipeline,
+                "expansion_backlog": expansion_backlog,
+                "resume_state": resume_state,
             },
         )
 
@@ -185,12 +437,31 @@ class GameDesignOrchestratorTool(BaseTool):
         )
 
     def _generate_vertical_slice(
-        self, blueprint_path: Path, output_path: Path, data: Dict[str, Any]
+        self, request_path: Path, blueprint_path: Path, output_path: Path, data: Dict[str, Any]
     ) -> ToolResult:
         blueprint = self._load_or_create_blueprint(blueprint_path, {})
-        slice_plan = self._build_vertical_slice(blueprint, data)
+        game_request = self._load_request(request_path)
+        if game_request:
+            runtime_selection = select_runtime_profile(
+                game_request,
+                project_root=self.project_root,
+                requested_runtime="",
+                existing_runtime="",
+            )
+            slice_plan = self._deep_merge(
+                build_vertical_slice_plan(
+                    game_request,
+                    blueprint,
+                    runtime_profile=runtime_selection["profile"],
+                ),
+                data,
+            )
+            markdown = vertical_slice_markdown(slice_plan)
+        else:
+            slice_plan = self._build_vertical_slice(blueprint, data)
+            markdown = self._vertical_slice_to_markdown(slice_plan)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(self._vertical_slice_to_markdown(slice_plan), encoding="utf-8")
+        output_path.write_text(markdown, encoding="utf-8")
 
         output = (
             f"Generated vertical slice plan at {output_path}\n"
@@ -247,6 +518,41 @@ class GameDesignOrchestratorTool(BaseTool):
         if blueprint_path.exists():
             return json.loads(blueprint_path.read_text(encoding="utf-8"))
         return self._default_blueprint(kwargs)
+
+    def _load_request(self, request_path: Path) -> Dict[str, Any]:
+        if not request_path.exists():
+            return {}
+        try:
+            return json.loads(request_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+    def _load_or_compile_request(self, request_path: Path, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        existing = self._load_request(request_path)
+        if existing:
+            return existing
+        return compile_game_prompt(
+            self._resolve_prompt(kwargs),
+            project_name=kwargs.get("project_name", ""),
+            requested_runtime=kwargs.get("requested_runtime", ""),
+            existing_runtime=kwargs.get("existing_runtime", ""),
+            overrides=kwargs.get("data") or kwargs,
+        )
+
+    def _resolve_prompt(self, kwargs: Dict[str, Any]) -> str:
+        prompt = str(kwargs.get("prompt") or "").strip()
+        if prompt:
+            return prompt
+        fragments = [
+            kwargs.get("project_name", ""),
+            kwargs.get("genre", ""),
+            kwargs.get("dimension", ""),
+            kwargs.get("camera_model", ""),
+            " ".join(kwargs.get("pillars") or []),
+            " ".join(kwargs.get("references") or []),
+        ]
+        fallback = " ".join(str(fragment).strip() for fragment in fragments if str(fragment).strip())
+        return fallback or "Build a game vertical slice with a clear core loop and production-ready foundation."
 
     def _default_blueprint(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
         project_name = kwargs.get("project_name", "Untitled Game")

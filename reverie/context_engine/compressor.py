@@ -11,43 +11,9 @@ from ..nvidia import (
     is_nvidia_api_url,
     is_nvidia_model,
 )
+from ..sse import iter_sse_data_strings
 
 logger = logging.getLogger(__name__)
-
-
-def _iter_sse_data_strings(response: requests.Response):
-    """Yield SSE `data:` payloads from a streaming HTTP response."""
-    saw_payload = False
-    stream_interrupted = False
-
-    try:
-        for raw_line in response.iter_lines(decode_unicode=True, chunk_size=1):
-            if raw_line is None:
-                continue
-
-            stripped = str(raw_line).strip()
-            if not stripped or stripped.startswith(":"):
-                continue
-
-            if stripped.startswith("data:"):
-                data_str = stripped[5:].lstrip()
-            else:
-                data_str = stripped
-
-            if data_str.strip() == "[DONE]":
-                return
-            if data_str:
-                saw_payload = True
-                yield data_str
-    except requests.exceptions.RequestException as exc:
-        if saw_payload:
-            stream_interrupted = True
-            logger.warning("Compression SSE stream ended prematurely after partial payload: %s", exc)
-        else:
-            raise
-
-    if stream_interrupted and not saw_payload:
-        logger.warning("Compression SSE stream ended before any usable payload was decoded")
 
 
 def _collect_geminicli_summary_text(response: requests.Response) -> str:

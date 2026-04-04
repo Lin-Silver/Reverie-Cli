@@ -8,6 +8,7 @@ This is the main agent class that:
 - Supports both streaming and non-streaming modes
 """
 
+from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Generator, AsyncGenerator
 from pathlib import Path
 import json
@@ -23,6 +24,7 @@ from .tool_executor import ToolExecutor
 from ..context_engine.handoff import build_session_handoff_packet
 from ..inline_images import resolve_inline_image_content_for_request
 from ..modes import normalize_mode
+from ..sse import iter_sse_data_strings as iter_provider_sse_data_strings
 from ..tools.base import ToolResult
 from ..nvidia import (
     apply_nvidia_request_defaults,
@@ -37,6 +39,7 @@ from ..nvidia import (
 THINKING_START_MARKER = "[[THINKING_START]]"
 THINKING_END_MARKER = "[[THINKING_END]]"
 STREAM_EVENT_MARKER = "[[REVERIE_EVENT]]"
+HIDDEN_STREAM_TOKEN = "//END//"
 
 # Configure logging for debugging
 logger = logging.getLogger(__name__)
@@ -313,6 +316,134 @@ def _build_anthropic_tool_result_block(tool_call_id: str, result: ToolResult) ->
         "content": str(_coerce_text_fragments(_tool_result_content(result)) or ""),
         "is_error": not bool(result.success),
     }
+
+
+@dataclass
+class _StreamingTurnState:
+    """Shared state machine for streaming providers."""
+
+    collected_content: str = ""
+    collected_thinking: str = ""
+    tool_calls: List[Dict[str, Any]] = field(default_factory=list)
+    finish_reason: Optional[str] = None
+    thinking_started: bool = False
+    stream_buffer: str = ""
+    token_to_hide: str = HIDDEN_STREAM_TOKEN
+
+    def add_reasoning(self, text: Any) -> List[str]:
+        reasoning_text = str(text or "")
+        if not reasoning_text:
+            return []
+        chunks: List[str] = []
+        self.collected_thinking += reasoning_text
+        if not self.thinking_started:
+            chunks.append(THINKING_START_MARKER)
+            self.thinking_started = True
+        chunks.append(reasoning_text)
+        return chunks
+
+    def add_content(self, text: Any) -> List[str]:
+        content_text = str(text or "")
+        if not content_text:
+            return []
+
+        chunks: List[str] = []
+        if self.thinking_started:
+            chunks.append(THINKING_END_MARKER)
+            self.thinking_started = False
+
+        self.collected_content += content_text
+        self.stream_buffer += content_text
+
+        if self.token_to_hide in self.stream_buffer:
+            parts = self.stream_buffer.split(self.token_to_hide)
+            if parts[0]:
+                chunks.append(parts[0])
+            self.stream_buffer = "".join(parts[1:])
+
+        partial_match_len = 0
+        for i in range(1, len(self.token_to_hide)):
+            if len(self.stream_buffer) >= i:
+                suffix = self.stream_buffer[-i:]
+                if self.token_to_hide.startswith(suffix):
+                    partial_match_len = i
+
+        if partial_match_len > 0:
+            safe_text = self.stream_buffer[:-partial_match_len]
+            self.stream_buffer = self.stream_buffer[-partial_match_len:]
+            if safe_text:
+                chunks.append(safe_text)
+        else:
+            if self.stream_buffer:
+                chunks.append(self.stream_buffer)
+            self.stream_buffer = ""
+
+        return chunks
+
+    def ensure_tool_call(self, index: int) -> Dict[str, Any]:
+        normalized_index = max(0, int(index or 0))
+        while len(self.tool_calls) <= normalized_index:
+            self.tool_calls.append(
+                {
+                    "id": "",
+                    "type": "function",
+                    "thought_signature": "",
+                    "function": {
+                        "name": "",
+                        "arguments": "",
+                    },
+                }
+            )
+        return self.tool_calls[normalized_index]
+
+    def update_tool_call(
+        self,
+        index: int,
+        *,
+        tool_call_id: str = "",
+        name: str = "",
+        arguments: Optional[Any] = None,
+        append_arguments: bool = False,
+        thought_signature: str = "",
+    ) -> None:
+        tool_call = self.ensure_tool_call(index)
+
+        normalized_id = str(tool_call_id or "").strip()
+        if normalized_id:
+            tool_call["id"] = normalized_id
+
+        normalized_name = str(name or "").strip()
+        if normalized_name:
+            tool_call["function"]["name"] = normalized_name
+
+        if arguments is not None:
+            argument_text = str(arguments or "")
+            if append_arguments:
+                tool_call["function"]["arguments"] += argument_text
+            else:
+                tool_call["function"]["arguments"] = argument_text
+
+        normalized_signature = str(thought_signature or "").strip()
+        if normalized_signature:
+            tool_call["thought_signature"] = normalized_signature
+
+    def set_finish_reason(self, reason: Any) -> None:
+        normalized_reason = str(reason or "").strip()
+        if normalized_reason:
+            self.finish_reason = normalized_reason
+
+    def flush(self) -> List[str]:
+        chunks: List[str] = []
+        if self.thinking_started:
+            chunks.append(THINKING_END_MARKER)
+            self.thinking_started = False
+        if self.stream_buffer and self.token_to_hide not in self.stream_buffer:
+            chunks.append(self.stream_buffer)
+        self.stream_buffer = ""
+        return chunks
+
+    def cleaned_content(self) -> str:
+        return self.collected_content.replace(self.token_to_hide, "").strip()
 
 
 def _convert_messages_to_anthropic_format(messages: List[Dict[str, Any]]) -> tuple[Optional[str], List[Dict[str, Any]]]:
@@ -1611,61 +1742,233 @@ class ReverieAgent:
             )
 
     def _iter_sse_data_strings(self, response) -> Generator[str, None, None]:
-        """Yield decoded SSE data payloads from an HTTP streaming response."""
-        import requests
+        """Yield decoded SSE/JSON payloads from an HTTP streaming response."""
+        yield from iter_provider_sse_data_strings(response)
 
-        saw_payload = False
-        stream_interrupted = False
-
+    def _close_stream_response(self, response: Any) -> None:
+        """Close a provider response object when it exposes a close method."""
         try:
-            for raw_line in response.iter_lines(decode_unicode=True, chunk_size=1):
-                if raw_line is None:
-                    continue
+            close = getattr(response, "close", None)
+            if callable(close):
+                close()
+        except Exception:
+            logger.debug("Failed to close streaming response", exc_info=True)
 
-                stripped = str(raw_line).strip()
-                if not stripped or stripped.startswith(":"):
-                    continue
+    def _apply_stream_event(
+        self,
+        state: _StreamingTurnState,
+        event: Dict[str, Any],
+    ) -> Generator[str, None, None]:
+        """Apply one normalized stream event to the shared turn state."""
+        if not isinstance(event, dict):
+            return
 
-                if stripped.startswith("data:"):
-                    data_str = stripped[5:].lstrip()
-                else:
-                    # NVIDIA-hosted examples consume iter_lines() directly, so
-                    # also accept raw JSON lines that are not prefixed with data:.
-                    data_str = stripped
+        event_type = str(event.get("type", "") or "").strip().lower()
+        if event_type == "reasoning":
+            for chunk in state.add_reasoning(event.get("text", "")):
+                yield chunk
+            return
 
-                if data_str.strip() == "[DONE]":
-                    return
-                if data_str:
-                    saw_payload = True
-                    yield data_str
-        except requests.exceptions.RequestException as exc:
-            # Some upstream SSE implementations close the socket without a final
-            # chunk terminator. If we already received payload data, treat that
-            # as an incomplete-but-usable stream instead of failing the turn.
-            if saw_payload:
-                stream_interrupted = True
-                logger.warning("Streaming response ended prematurely after partial payload: %s", exc)
-            else:
-                raise
+        if event_type == "content":
+            for chunk in state.add_content(event.get("text", "")):
+                yield chunk
+            return
 
-        if stream_interrupted and not saw_payload:
-            logger.warning("Streaming response ended prematurely before any usable SSE payload was decoded")
-
-    def _ensure_stream_tool_call(self, collected_tool_calls: List[Dict[str, Any]], index: int) -> Dict[str, Any]:
-        """Ensure a mutable tool-call slot exists for stream assembly."""
-        while len(collected_tool_calls) <= index:
-            collected_tool_calls.append(
-                {
-                    "id": "",
-                    "type": "function",
-                    "thought_signature": "",
-                    "function": {
-                        "name": "",
-                        "arguments": "",
-                    },
-                }
+        if event_type in {"tool_call", "tool_call_start", "tool_call_args", "tool_call_delta"}:
+            append_arguments = event_type in {"tool_call_args", "tool_call_delta"} and bool(
+                event.get("append_arguments", event_type == "tool_call_args")
             )
-        return collected_tool_calls[index]
+            state.update_tool_call(
+                int(event.get("index", 0) or 0),
+                tool_call_id=str(event.get("id", "") or "").strip(),
+                name=str(event.get("name", "") or "").strip(),
+                arguments=event.get("arguments") if "arguments" in event else None,
+                append_arguments=append_arguments,
+                thought_signature=str(event.get("thought_signature", "") or "").strip(),
+            )
+            return
+
+        if event_type == "finish":
+            state.set_finish_reason(event.get("reason"))
+
+    def _iter_openai_sdk_stream_events(self, response: Any) -> Generator[Dict[str, Any], None, None]:
+        """Translate OpenAI SDK streaming chunks into normalized events."""
+        for chunk in response:
+            choice = chunk.choices[0] if chunk.choices else None
+            if choice is None:
+                continue
+
+            if choice.finish_reason:
+                yield {"type": "finish", "reason": choice.finish_reason}
+
+            delta = choice.delta
+            if delta is None:
+                continue
+
+            reasoning_content = _extract_text_from_candidates(
+                delta,
+                "reasoning_content",
+                "thinking",
+                "reasoning",
+            )
+            if reasoning_content:
+                yield {"type": "reasoning", "text": reasoning_content}
+
+            content_piece = _extract_text_from_candidates(delta, "content")
+            if content_piece:
+                yield {"type": "content", "text": content_piece}
+
+            if not delta.tool_calls:
+                continue
+
+            for tool_call in delta.tool_calls:
+                function = getattr(tool_call, "function", None)
+                yield {
+                    "type": "tool_call_delta",
+                    "index": int(getattr(tool_call, "index", 0) or 0),
+                    "id": str(getattr(tool_call, "id", "") or "").strip(),
+                    "name": str(getattr(function, "name", "") or "").strip() if function else "",
+                    "arguments": getattr(function, "arguments", None) if function else None,
+                    "append_arguments": True,
+                }
+
+    def _iter_request_stream_events(
+        self,
+        response: Any,
+        provider_label: str,
+    ) -> Generator[Dict[str, Any], None, None]:
+        """Translate OpenAI-compatible SSE chunks into normalized events."""
+        for data_str in self._iter_sse_data_strings(response):
+            try:
+                chunk_data = json.loads(data_str)
+            except json.JSONDecodeError:
+                continue
+
+            _raise_for_wrapped_api_error(chunk_data, provider_label=provider_label)
+            normalized_chunk = _unwrap_openai_compatible_payload(chunk_data) or chunk_data
+
+            choices = normalized_chunk.get("choices", [])
+            if not choices:
+                continue
+
+            choice = choices[0]
+            finish_reason = choice.get("finish_reason")
+            if finish_reason:
+                yield {"type": "finish", "reason": finish_reason}
+
+            delta = choice.get("delta") or {}
+            if not isinstance(delta, dict):
+                delta = {}
+
+            reasoning_content = _extract_text_from_candidates(
+                delta,
+                "reasoning_content",
+                "thinking",
+                "reasoning",
+            )
+            if not reasoning_content:
+                reasoning_content = _extract_text_from_candidates(
+                    choice,
+                    "reasoning_content",
+                    "thinking",
+                    "reasoning",
+                )
+            if not reasoning_content:
+                reasoning_content = _extract_text_from_candidates(
+                    choice.get("message") if isinstance(choice, dict) else None,
+                    "reasoning_content",
+                    "thinking",
+                    "reasoning",
+                )
+            if reasoning_content:
+                yield {"type": "reasoning", "text": reasoning_content}
+
+            content = _extract_text_from_candidates(delta, "content")
+            if not content:
+                content = _extract_text_from_candidates(
+                    choice.get("message") if isinstance(choice, dict) else None,
+                    "content",
+                )
+            if content:
+                yield {"type": "content", "text": content}
+
+            tool_calls_delta = delta.get("tool_calls", [])
+            if not tool_calls_delta:
+                continue
+
+            for tool_call_delta in tool_calls_delta:
+                function_delta = tool_call_delta.get("function", {})
+                yield {
+                    "type": "tool_call_delta",
+                    "index": int(tool_call_delta.get("index", 0) or 0),
+                    "id": str(tool_call_delta.get("id", "") or "").strip(),
+                    "name": str(function_delta.get("name", "") or "").strip(),
+                    "arguments": function_delta.get("arguments") if "arguments" in function_delta else None,
+                    "append_arguments": "arguments" in function_delta,
+                }
+
+    def _commit_stream_state(
+        self,
+        *,
+        state: _StreamingTurnState,
+        request_messages: List[Dict[str, Any]],
+        messages: List[Dict[str, Any]],
+        session_id: str,
+        usage: Any = None,
+    ) -> tuple[str, str]:
+        """Store the finalized turn and report which follow-up path to take."""
+        clean_content = state.cleaned_content()
+
+        if state.tool_calls:
+            _sanitize_tool_calls(state.tool_calls)
+            assistant_message = _build_assistant_history_message(
+                clean_content or None,
+                tool_calls=state.tool_calls,
+                reasoning_content=state.collected_thinking,
+            )
+            self.messages.append(assistant_message)
+            messages.append(assistant_message)
+            self._record_model_usage(
+                request_messages=request_messages,
+                assistant_text=clean_content,
+                reasoning_text=state.collected_thinking,
+                tool_calls=state.tool_calls,
+                usage=usage,
+                session_id=session_id,
+            )
+            return "tool_calls", clean_content
+
+        if clean_content:
+            self.messages.append(
+                _build_assistant_history_message(
+                    clean_content,
+                    reasoning_content=state.collected_thinking,
+                )
+            )
+            self._record_model_usage(
+                request_messages=request_messages,
+                assistant_text=clean_content,
+                reasoning_text=state.collected_thinking,
+                usage=usage,
+                session_id=session_id,
+            )
+            return "content", clean_content
+
+        return "empty", clean_content
+
+    def _execute_streamed_tool_calls(
+        self,
+        tool_calls: List[Dict[str, Any]],
+        messages: List[Dict[str, Any]],
+        session_id: str,
+    ) -> Generator[str, None, None]:
+        """Execute collected tool calls using the shared stream event surface."""
+        for tool_call in tool_calls:
+            yield from self._stream_execute_tool_call(
+                tool_call,
+                messages,
+                session_id=session_id,
+            )
 
     def _stream_execute_tool_call(
         self,
@@ -1700,7 +2003,11 @@ class ReverieAgent:
             tool_call_id=str(tool_call.get("id", "")).strip(),
         )
 
-        result = self.tool_executor.execute(tool_name, args)
+        result = self.tool_executor.execute(
+            tool_name,
+            args,
+            tool_call_id=str(tool_call.get("id", "")).strip(),
+        )
 
         if self.operation_history:
             try:
@@ -1843,13 +2150,7 @@ class ReverieAgent:
                 logger.error(f"Streaming API request failed for {provider_name}: {e}")
                 raise
 
-            collected_content = ""
-            collected_thinking = ""
-            collected_tool_calls: List[Dict[str, Any]] = []
-            finish_reason = None
-            thinking_started = False
-            stream_buffer = ""
-            token_to_hide = "//END//"
+            state = _StreamingTurnState()
             try:
                 for data_str in self._iter_sse_data_strings(response):
                     if provider_name == "codex":
@@ -1860,133 +2161,31 @@ class ReverieAgent:
                         events = parse_events(data_str)
 
                     for event in events:
-                        event_type = str(event.get("type", "")).strip().lower()
-
-                        if event_type == "reasoning":
-                            reasoning_content = str(event.get("text", "") or "")
-                            if reasoning_content:
-                                collected_thinking += reasoning_content
-                                if not thinking_started:
-                                    yield THINKING_START_MARKER
-                                    thinking_started = True
-                                yield reasoning_content
-                            continue
-
-                        if event_type == "content":
-                            content = str(event.get("text", "") or "")
-                            if not content:
-                                continue
-
-                            if thinking_started:
-                                yield THINKING_END_MARKER
-                                thinking_started = False
-
-                            collected_content += content
-                            stream_buffer += content
-
-                            if token_to_hide in stream_buffer:
-                                parts = stream_buffer.split(token_to_hide)
-                                if parts[0]:
-                                    yield parts[0]
-                                stream_buffer = "".join(parts[1:])
-
-                            partial_match_len = 0
-                            for i in range(1, len(token_to_hide)):
-                                if len(stream_buffer) >= i:
-                                    suffix = stream_buffer[-i:]
-                                    if token_to_hide.startswith(suffix):
-                                        partial_match_len = i
-
-                            if partial_match_len > 0:
-                                to_yield = stream_buffer[:-partial_match_len]
-                                stream_buffer = stream_buffer[-partial_match_len:]
-                                if to_yield:
-                                    yield to_yield
-                            else:
-                                if stream_buffer:
-                                    yield stream_buffer
-                                stream_buffer = ""
-                            continue
-
-                        if event_type == "tool_call":
-                            index = int(event.get("index", 0) or 0)
-                            tool_call = self._ensure_stream_tool_call(collected_tool_calls, index)
-                            tool_call["id"] = str(event.get("id", "")).strip() or tool_call["id"]
-                            tool_call["function"]["name"] = str(event.get("name", "")).strip() or tool_call["function"]["name"]
-                            tool_call["function"]["arguments"] = str(event.get("arguments", "") or "")
-                            tool_call["thought_signature"] = str(event.get("thought_signature", "") or "").strip() or tool_call.get("thought_signature", "")
-                            continue
-
-                        if event_type == "tool_call_start":
-                            index = int(event.get("index", 0) or 0)
-                            tool_call = self._ensure_stream_tool_call(collected_tool_calls, index)
-                            tool_call["id"] = str(event.get("id", "")).strip() or tool_call["id"]
-                            tool_call["function"]["name"] = str(event.get("name", "")).strip() or tool_call["function"]["name"]
-                            tool_call["thought_signature"] = str(event.get("thought_signature", "") or "").strip() or tool_call.get("thought_signature", "")
-                            continue
-
-                        if event_type == "tool_call_args":
-                            index = int(event.get("index", 0) or 0)
-                            tool_call = self._ensure_stream_tool_call(collected_tool_calls, index)
-                            tool_call["function"]["arguments"] += str(event.get("arguments", "") or "")
-                            tool_call["thought_signature"] = str(event.get("thought_signature", "") or "").strip() or tool_call.get("thought_signature", "")
-                            continue
-
-                        if event_type == "finish":
-                            finish_reason = str(event.get("reason", "") or "") or finish_reason
+                        yield from self._apply_stream_event(state, event)
             finally:
-                if thinking_started:
-                    yield THINKING_END_MARKER
-                if stream_buffer and token_to_hide not in stream_buffer:
-                    yield stream_buffer
-                try:
-                    response.close()
-                except Exception:
-                    logger.debug("Failed to close streaming response", exc_info=True)
+                for chunk in state.flush():
+                    yield chunk
+                self._close_stream_response(response)
 
-            if collected_tool_calls:
-                _sanitize_tool_calls(collected_tool_calls)
-                assistant_message = _build_assistant_history_message(
-                    collected_content or None,
-                    tool_calls=collected_tool_calls,
-                    reasoning_content=collected_thinking,
-                )
-                self.messages.append(assistant_message)
-                messages.append(assistant_message)
-                self._record_model_usage(
-                    request_messages=request_messages,
-                    assistant_text=collected_content,
-                    reasoning_text=collected_thinking,
-                    tool_calls=collected_tool_calls,
+            outcome, _ = self._commit_stream_state(
+                state=state,
+                request_messages=request_messages,
+                messages=messages,
+                session_id=session_id,
+            )
+
+            if outcome == "tool_calls":
+                yield from self._execute_streamed_tool_calls(
+                    state.tool_calls,
+                    messages,
                     session_id=session_id,
                 )
-
-                for tool_call in collected_tool_calls:
-                    yield from self._stream_execute_tool_call(
-                        tool_call,
-                        messages,
-                        session_id=session_id,
-                    )
 
                 continuation_count = 0
                 continue
 
-            if collected_content:
-                clean_content = collected_content.replace("//END//", "").strip()
-                self.messages.append(
-                    _build_assistant_history_message(
-                        clean_content,
-                        reasoning_content=collected_thinking,
-                    )
-                )
-                self._record_model_usage(
-                    request_messages=request_messages,
-                    assistant_text=clean_content,
-                    reasoning_text=collected_thinking,
-                    session_id=session_id,
-                )
-
-                if finish_reason in ("stop", "end_turn", "end", None) or "//END//" in collected_content:
+            if outcome == "content":
+                if self._should_end_generation(state.collected_content, state.finish_reason):
                     break
 
                 continuation_count += 1
@@ -2223,188 +2422,42 @@ class ReverieAgent:
                     },
                 )
             
-            # Collect streamed response
-            collected_content = ""
-            collected_thinking = ""  # Collect thinking/reasoning content
-            collected_tool_calls = []
-            finish_reason = None
-            
-            # Flag to track if we're in thinking mode
-            thinking_started = False
-            
-            # Buffer for handling split tokens (to hide //END//)
-            stream_buffer = ""
-            token_to_hide = "//END//"
-            
-            for chunk in response:
-                choice = chunk.choices[0] if chunk.choices else None
-                
-                if choice is None:
-                    continue
-                
-                # Track finish reason
-                if choice.finish_reason:
-                    finish_reason = choice.finish_reason
-                
-                delta = choice.delta
-                if delta is None:
-                    continue
-                
-                # Handle reasoning/thinking content FIRST (for thinking models like o1, DeepSeek-R1, etc.)
-                # Check for reasoning_content in delta (OpenAI o1 / DeepSeek style)
-                reasoning_content = _extract_text_from_candidates(
-                    delta,
-                    "reasoning_content",
-                    "thinking",
-                    "reasoning",
-                )
-                
-                if reasoning_content:
-                    collected_thinking += reasoning_content
-                    # Emit thinking content with special markers for the interface
-                    if not thinking_started:
-                        yield THINKING_START_MARKER
-                        thinking_started = True
-                    yield reasoning_content
-                
-                # Content streaming - yield with buffering
-                # If we were in thinking mode and now receiving regular content, end thinking first
-                content_piece = _extract_text_from_candidates(delta, "content")
-                if content_piece:
-                    # Check if we need to transition from thinking mode to regular content
-                    if thinking_started:
-                        yield THINKING_END_MARKER
-                        thinking_started = False  # Reset so we don't emit again
+            state = _StreamingTurnState()
+            try:
+                for event in self._iter_openai_sdk_stream_events(response):
+                    yield from self._apply_stream_event(state, event)
+            finally:
+                for chunk in state.flush():
+                    yield chunk
+                self._close_stream_response(response)
 
-                    collected_content += content_piece
-                    stream_buffer += content_piece
-                    
-                    if token_to_hide in stream_buffer:
-                        # Found the token - split and yield parts
-                        parts = stream_buffer.split(token_to_hide)
-                        
-                        # Yield everything before the first occurrence
-                        if parts[0]:
-                            yield parts[0]
-                        
-                        # We suppress the token itself.
-                        # Handle text after the token (if any)
-                        # Reconstruct remaining text without the token
-                        remaining = "".join(parts[1:])
-                        stream_buffer = remaining
-                        
-                    # Check for partial match at the end of buffer to prevent yielding partial token
-                    partial_match_len = 0
-                    for i in range(1, len(token_to_hide)):
-                        if len(stream_buffer) >= i:
-                            suffix = stream_buffer[-i:]
-                            if token_to_hide.startswith(suffix):
-                                partial_match_len = i
-                    
-                    if partial_match_len > 0:
-                        # Yield safe part
-                        to_yield = stream_buffer[:-partial_match_len]
-                        stream_buffer = stream_buffer[-partial_match_len:]
-                        if to_yield:
-                            yield to_yield
-                    else:
-                        # No partial match, yield everything
-                        yield stream_buffer
-                        stream_buffer = ""
-                
-                # Tool call streaming
-                if delta.tool_calls:
-                    for tool_call in delta.tool_calls:
-                        if tool_call.index >= len(collected_tool_calls):
-                            collected_tool_calls.append({
-                                "id": tool_call.id or "",
-                                "type": "function",
-                                "function": {
-                                    "name": tool_call.function.name or "" if tool_call.function else "",
-                                    "arguments": ""
-                                }
-                            })
-                        
-                        if tool_call.function:
-                            if tool_call.function.name:
-                                collected_tool_calls[tool_call.index]["function"]["name"] = tool_call.function.name
-                            if tool_call.function.arguments:
-                                collected_tool_calls[tool_call.index]["function"]["arguments"] += tool_call.function.arguments
-                        if tool_call.id:
-                            collected_tool_calls[tool_call.index]["id"] = tool_call.id
-            
-            # If thinking was streamed, emit end marker
-            if thinking_started:
-                yield THINKING_END_MARKER
-            
-            # Flush any remaining buffer that isn't the hidden token
-            if stream_buffer and token_to_hide not in stream_buffer:
-                yield stream_buffer
-            
-            # Check for tool calls
-            if collected_tool_calls:
-                # Sanitize tool-call arguments before storing them in messages
-                _sanitize_tool_calls(collected_tool_calls)
-                assistant_message = _build_assistant_history_message(
-                    collected_content or None,
-                    tool_calls=collected_tool_calls,
-                    reasoning_content=collected_thinking,
-                )
-                self.messages.append(assistant_message)
-                messages.append(assistant_message)
-                self._record_model_usage(
-                    request_messages=request_messages,
-                    assistant_text=collected_content,
-                    reasoning_text=collected_thinking,
-                    tool_calls=collected_tool_calls,
+            outcome, _ = self._commit_stream_state(
+                state=state,
+                request_messages=request_messages,
+                messages=messages,
+                session_id=session_id,
+            )
+
+            if outcome == "tool_calls":
+                yield from self._execute_streamed_tool_calls(
+                    state.tool_calls,
+                    messages,
                     session_id=session_id,
                 )
-                
-                # Execute tools
-                for tool_call in collected_tool_calls:
-                    yield from self._stream_execute_tool_call(
-                        tool_call,
-                        messages,
-                        session_id=session_id,
-                    )
-                
-                # Reset continuation count for tool calls (this is expected looping)
                 continuation_count = 0
                 continue
-            
-            # No tool calls - save content and check if we should continue
-            if collected_content:
-                # Clean up //END// token if present
-                clean_content = collected_content.replace("//END//", "").strip()
-                
-                # Save to messages
-                self.messages.append(
-                    _build_assistant_history_message(
-                        clean_content,
-                        reasoning_content=collected_thinking,
-                    )
-                )
-                self._record_model_usage(
-                    request_messages=request_messages,
-                    assistant_text=clean_content,
-                    reasoning_text=collected_thinking,
-                    session_id=session_id,
-                )
-                
-                # Check if model finished naturally or needs continuation
-                if self._should_end_generation(collected_content, finish_reason):
+
+            if outcome == "content":
+                if self._should_end_generation(state.collected_content, state.finish_reason):
                     break
-                
-                # Model stopped for other reason (length limit) - try to continue
+
                 continuation_count += 1
                 if continuation_count >= max_continuations:
                     break
-                
-                # Rebuild messages for continuation
+
                 messages = self._build_messages(resolve_local_images=True)
                 continue
-            
-            # No content at all, just break
+
             break
     
     def _process_streaming_request(self, session_id: str = "default") -> Generator[str, None, None]:
@@ -2448,194 +2501,44 @@ class ReverieAgent:
                 logger.error(f"Streaming API request failed: {e}")
                 raise
             
-            collected_content = ""
-            collected_thinking = ""
-            collected_tool_calls = []
-            finish_reason = None
-            thinking_started = False
-            stream_buffer = ""
-            token_to_hide = "//END//"
+            state = _StreamingTurnState()
             provider_label = self._request_provider_label()
 
             try:
-                for data_str in self._iter_sse_data_strings(response):
-                    try:
-                        chunk_data = json.loads(data_str)
-                    except json.JSONDecodeError:
-                        continue
-
-                    _raise_for_wrapped_api_error(chunk_data, provider_label=provider_label)
-                    normalized_chunk = _unwrap_openai_compatible_payload(chunk_data) or chunk_data
-
-                    choices = normalized_chunk.get("choices", [])
-                    if not choices:
-                        continue
-
-                    choice = choices[0]
-                    finish_reason = choice.get("finish_reason") or finish_reason
-
-                    delta = choice.get("delta") or {}
-                    if not isinstance(delta, dict):
-                        delta = {}
-
-                    reasoning_content = _extract_text_from_candidates(
-                        delta,
-                        "reasoning_content",
-                        "thinking",
-                        "reasoning",
-                    )
-                    if not reasoning_content:
-                        reasoning_content = _extract_text_from_candidates(
-                            choice,
-                            "reasoning_content",
-                            "thinking",
-                            "reasoning",
-                        )
-                    if not reasoning_content:
-                        reasoning_content = _extract_text_from_candidates(
-                            choice.get("message") if isinstance(choice, dict) else None,
-                            "reasoning_content",
-                            "thinking",
-                            "reasoning",
-                        )
-                    if reasoning_content:
-                        collected_thinking += reasoning_content
-                        if not thinking_started:
-                            yield THINKING_START_MARKER
-                            thinking_started = True
-                        yield reasoning_content
-
-                    content = _extract_text_from_candidates(delta, "content")
-                    if not content:
-                        content = _extract_text_from_candidates(
-                            choice.get("message") if isinstance(choice, dict) else None,
-                            "content",
-                        )
-                    if content:
-                        if thinking_started:
-                            yield THINKING_END_MARKER
-                            thinking_started = False
-
-                        collected_content += content
-                        stream_buffer += content
-
-                        if token_to_hide in stream_buffer:
-                            parts = stream_buffer.split(token_to_hide)
-                            if parts[0]:
-                                yield parts[0]
-                            stream_buffer = "".join(parts[1:])
-
-                        partial_match_len = 0
-                        for i in range(1, len(token_to_hide)):
-                            if len(stream_buffer) >= i:
-                                suffix = stream_buffer[-i:]
-                                if token_to_hide.startswith(suffix):
-                                    partial_match_len = i
-
-                        if partial_match_len > 0:
-                            to_yield = stream_buffer[:-partial_match_len]
-                            stream_buffer = stream_buffer[-partial_match_len:]
-                            if to_yield:
-                                yield to_yield
-                        else:
-                            if stream_buffer:
-                                yield stream_buffer
-                            stream_buffer = ""
-
-                    tool_calls_delta = delta.get("tool_calls", [])
-                    if tool_calls_delta:
-                        for tool_call_delta in tool_calls_delta:
-                            index = int(tool_call_delta.get("index", 0) or 0)
-
-                            if index >= len(collected_tool_calls):
-                                collected_tool_calls.append(
-                                    {
-                                        "id": tool_call_delta.get("id", ""),
-                                        "type": "function",
-                                        "function": {
-                                            "name": "",
-                                            "arguments": "",
-                                        },
-                                    }
-                                )
-
-                            function_delta = tool_call_delta.get("function", {})
-                            if "name" in function_delta:
-                                collected_tool_calls[index]["function"]["name"] = function_delta["name"]
-                            if "arguments" in function_delta:
-                                collected_tool_calls[index]["function"]["arguments"] += function_delta["arguments"]
-                            if "id" in tool_call_delta:
-                                collected_tool_calls[index]["id"] = tool_call_delta["id"]
+                for event in self._iter_request_stream_events(response, provider_label):
+                    yield from self._apply_stream_event(state, event)
             finally:
-                try:
-                    response.close()
-                except Exception:
-                    logger.debug("Failed to close streaming response", exc_info=True)
-            
-            # If thinking was streamed, emit end marker
-            if thinking_started:
-                yield THINKING_END_MARKER
-            
-            # Flush remaining buffer
-            if stream_buffer and token_to_hide not in stream_buffer:
-                yield stream_buffer
-            
-            # Check for tool calls
-            if collected_tool_calls:
-                # Sanitize streamed tool-call arguments before storing them
-                _sanitize_tool_calls(collected_tool_calls)
-                assistant_message = _build_assistant_history_message(
-                    collected_content or None,
-                    tool_calls=collected_tool_calls,
-                    reasoning_content=collected_thinking,
-                )
-                self.messages.append(assistant_message)
-                messages.append(assistant_message)
-                self._record_model_usage(
-                    request_messages=request_messages,
-                    assistant_text=collected_content,
-                    reasoning_text=collected_thinking,
-                    tool_calls=collected_tool_calls,
+                for chunk in state.flush():
+                    yield chunk
+                self._close_stream_response(response)
+
+            outcome, _ = self._commit_stream_state(
+                state=state,
+                request_messages=request_messages,
+                messages=messages,
+                session_id=session_id,
+            )
+
+            if outcome == "tool_calls":
+                yield from self._execute_streamed_tool_calls(
+                    state.tool_calls,
+                    messages,
                     session_id=session_id,
                 )
-                
-                # Execute tools
-                for tool_call in collected_tool_calls:
-                    yield from self._stream_execute_tool_call(
-                        tool_call,
-                        messages,
-                        session_id=session_id,
-                    )
-                
                 continuation_count = 0
                 continue
-            
-            # No tool calls - save content and check if we should continue
-            if collected_content:
-                clean_content = collected_content.replace("//END//", "").strip()
-                self.messages.append(
-                    _build_assistant_history_message(
-                        clean_content,
-                        reasoning_content=collected_thinking,
-                    )
-                )
-                self._record_model_usage(
-                    request_messages=request_messages,
-                    assistant_text=clean_content,
-                    reasoning_text=collected_thinking,
-                    session_id=session_id,
-                )
-                
-                if self._should_end_generation(collected_content, finish_reason):
+
+            if outcome == "content":
+                if self._should_end_generation(state.collected_content, state.finish_reason):
                     break
-                
+
                 continuation_count += 1
                 if continuation_count >= max_continuations:
                     break
-                
+
                 messages = self._build_messages(resolve_local_images=True)
                 continue
-            
+
             break
     
     def _process_streaming_anthropic(self, session_id: str = "default") -> Generator[str, None, None]:
@@ -2666,177 +2569,66 @@ class ReverieAgent:
             
             # Make request
             with self._client.messages.stream(**kwargs) as stream:
-                collected_content = ""
-                collected_thinking = ""
-                collected_tool_calls = []
-                thinking_started = False
-                stream_buffer = ""
-                token_to_hide = "//END//"
-                
+                state = _StreamingTurnState()
+
                 for event in stream:
-                    if event.type == "content_block_start":
-                        if hasattr(event.content_block, 'type') and event.content_block.type == "thinking":
-                            thinking_started = True
-                            yield THINKING_START_MARKER
-                    
-                    elif event.type == "content_block_delta":
-                        if hasattr(event.delta, 'type'):
-                            if event.delta.type == "thinking_delta":
-                                if hasattr(event.delta, 'thinking'):
-                                    collected_thinking += event.delta.thinking
-                                    yield event.delta.thinking
-                            elif event.delta.type == "text_delta":
-                                if hasattr(event.delta, 'text'):
-                                    text = event.delta.text
-                                    if thinking_started:
-                                        yield THINKING_END_MARKER
-                                        thinking_started = False
-                                    
-                                    collected_content += text
-                                    stream_buffer += text
-                                    
-                                    if token_to_hide in stream_buffer:
-                                        parts = stream_buffer.split(token_to_hide)
-                                        if parts[0]:
-                                            yield parts[0]
-                                        remaining = "".join(parts[1:])
-                                        stream_buffer = remaining
-                                    
-                                    partial_match_len = 0
-                                    for i in range(1, len(token_to_hide)):
-                                        if len(stream_buffer) >= i:
-                                            suffix = stream_buffer[-i:]
-                                            if token_to_hide.startswith(suffix):
-                                                partial_match_len = i
-                                    
-                                    if partial_match_len > 0:
-                                        to_yield = stream_buffer[:-partial_match_len]
-                                        stream_buffer = stream_buffer[-partial_match_len:]
-                                        if to_yield:
-                                            yield to_yield
-                                    else:
-                                        yield stream_buffer
-                                        stream_buffer = ""
-                    
-                    elif event.type == "content_block_stop":
-                        if thinking_started:
-                            yield THINKING_END_MARKER
-                            thinking_started = False
-                    
+                    if event.type == "content_block_delta" and hasattr(event.delta, "type"):
+                        if event.delta.type == "thinking_delta" and hasattr(event.delta, "thinking"):
+                            yield from self._apply_stream_event(
+                                state,
+                                {"type": "reasoning", "text": event.delta.thinking},
+                            )
+                        elif event.delta.type == "text_delta" and hasattr(event.delta, "text"):
+                            yield from self._apply_stream_event(
+                                state,
+                                {"type": "content", "text": event.delta.text},
+                            )
                     elif event.type == "message_stop":
                         break
-                
-                # Flush remaining buffer
-                if stream_buffer and token_to_hide not in stream_buffer:
-                    yield stream_buffer
+
+                for chunk in state.flush():
+                    yield chunk
                 
                 # Get final message for tool calls
                 final_message = stream.get_final_message()
+                state.set_finish_reason(getattr(final_message, "stop_reason", None))
                 
                 # Check for tool use blocks
                 tool_use_blocks = [block for block in final_message.content if block.type == "tool_use"]
                 
-                if tool_use_blocks:
-                    collected_tool_calls = []
-                    for block in tool_use_blocks:
-                        collected_tool_calls.append({
-                            "id": block.id,
-                            "type": "function",
-                            "function": {
-                                "name": block.name,
-                                "arguments": json.dumps(block.input)
-                            }
-                        })
-                
-                # Check for tool calls
-                if collected_tool_calls:
-                    # Sanitize tool args (defensive - block.input was json.dumps'ed above)
-                    _sanitize_tool_calls(collected_tool_calls)
-                    assistant_message = _build_assistant_history_message(
-                        collected_content or None,
-                        tool_calls=collected_tool_calls,
-                        reasoning_content=collected_thinking,
+                for block in tool_use_blocks:
+                    state.update_tool_call(
+                        len(state.tool_calls),
+                        tool_call_id=block.id,
+                        name=block.name,
+                        arguments=json.dumps(block.input),
                     )
-                    self.messages.append(assistant_message)
-                    self._record_model_usage(
-                        request_messages=request_messages,
-                        assistant_text=collected_content,
-                        reasoning_text=collected_thinking,
-                        tool_calls=collected_tool_calls,
-                        usage=getattr(final_message, "usage", None),
+
+                outcome, _ = self._commit_stream_state(
+                    state=state,
+                    request_messages=request_messages,
+                    messages=messages,
+                    session_id=session_id,
+                    usage=getattr(final_message, "usage", None),
+                )
+
+                if outcome == "tool_calls":
+                    yield from self._execute_streamed_tool_calls(
+                        state.tool_calls,
+                        messages,
                         session_id=session_id,
                     )
-                    anthropic_messages.append(
-                        {
-                            "role": "assistant",
-                            "content": _build_anthropic_assistant_tool_blocks(collected_content, collected_tool_calls),
-                        }
-                    )
-                    
-                    # Execute tools
-                    tool_result_blocks: List[Dict[str, Any]] = []
-                    for tool_call in collected_tool_calls:
-                        tool_name = tool_call["function"]["name"]
-                        tool = self.tool_executor.get_tool(tool_name)
-                        
-                        args = parse_tool_arguments(tool_call["function"]["arguments"])
-                        
-                        self._check_tool_side_effects(tool_name, args)
-                        
-                        exec_msg = tool.get_execution_message(**args) if tool else f"Executing {tool_name}..."
-                        yield f"\n[bold #ffb8d1]✧[/bold #ffb8d1] [bold #e4b0ff]{rich_escape(exec_msg)}[/bold #e4b0ff]\n"
-                        
-                        result = self.tool_executor.execute(tool_name, args)
-                        
-                        if result.success:
-                            output_preview = result.output.strip()
-                            if output_preview:
-                                preview_lines = output_preview.split('\n')
-                                formatted_output = ""
-                                for line in preview_lines:
-                                    formatted_output += f"[#ba68c8]   │[/#ba68c8] [#e0e0e0]{rich_escape(line)}[/#e0e0e0]\n"
-                                yield formatted_output
-                        else:
-                            yield f"[bold #ff5252]   ✘ Failed:[/bold #ff5252] [#ff8a80]{rich_escape(result.error or '')}[/#ff8a80]\n"
-                        
-                        tool_result_message = {
-                            "role": "tool",
-                            "tool_call_id": tool_call["id"],
-                            "content": _tool_result_content(result)
-                        }
-                        self.messages.append(tool_result_message)
-                        tool_result_blocks.append(_build_anthropic_tool_result_block(tool_call["id"], result))
-
-                    if tool_result_blocks:
-                        anthropic_messages.append({"role": "user", "content": tool_result_blocks})
-                    
                     continuation_count = 0
                     continue
-                
-                # No tool calls - save content and check if we should continue
-                if collected_content:
-                    clean_content = collected_content.replace("//END//", "").strip()
-                    self.messages.append(
-                        _build_assistant_history_message(
-                            clean_content,
-                            reasoning_content=collected_thinking,
-                        )
-                    )
-                    self._record_model_usage(
-                        request_messages=request_messages,
-                        assistant_text=clean_content,
-                        reasoning_text=collected_thinking,
-                        usage=getattr(final_message, "usage", None),
-                        session_id=session_id,
-                    )
-                    
-                    if self._should_end_generation(collected_content, finish_reason):
+
+                if outcome == "content":
+                    if self._should_end_generation(state.collected_content, state.finish_reason):
                         break
-                    
+
                     continuation_count += 1
                     if continuation_count >= max_continuations:
                         break
-                    
+
                     system_message, anthropic_messages = _convert_messages_to_anthropic_format(self._build_messages())
                     continue
             
@@ -2975,7 +2767,7 @@ class ReverieAgent:
                     
                     all_content.append(f"[bold #ffb8d1]✧[/bold #ffb8d1] [bold #e4b0ff]{rich_escape(exec_msg)}[/bold #e4b0ff]")
                     
-                    result = self.tool_executor.execute(tool_name, args)
+                    result = self.tool_executor.execute(tool_name, args, tool_call_id=str(tool_call.id or ""))
                     
                     if result.success:
                         all_content.append(f"[bold #66bb6a]   ✔ Success[/bold #66bb6a]")
@@ -3142,7 +2934,11 @@ class ReverieAgent:
                     exec_msg = tool.get_execution_message(**args) if tool else f"Executing {tool_name}..."
                     all_content.append(f"[bold #ffb8d1]✧[/bold #ffb8d1] [bold #e4b0ff]{rich_escape(exec_msg)}[/bold #e4b0ff]")
                     
-                    result = self.tool_executor.execute(tool_name, args)
+                    result = self.tool_executor.execute(
+                        tool_name,
+                        args,
+                        tool_call_id=str(tool_call.get("id", "")).strip(),
+                    )
                     
                     if result.success:
                         all_content.append(f"[bold #66bb6a]   ✔ Success[/bold #66bb6a]")
@@ -3290,7 +3086,11 @@ class ReverieAgent:
                     exec_msg = tool.get_execution_message(**args) if tool else f"Executing {tool_name}..."
                     all_content.append(f"[bold #ffb8d1]✧[/bold #ffb8d1] [bold #e4b0ff]{rich_escape(exec_msg)}[/bold #e4b0ff]")
                     
-                    result = self.tool_executor.execute(tool_name, args)
+                    result = self.tool_executor.execute(
+                        tool_name,
+                        args,
+                        tool_call_id=str(tool_call.get("id", "")).strip(),
+                    )
                     
                     if result.success:
                         all_content.append(f"[bold #66bb6a]   ✔ Success[/bold #66bb6a]")

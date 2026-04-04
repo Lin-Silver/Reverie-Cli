@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 
 import reverie.config as config_module
 
@@ -85,8 +86,42 @@ def test_config_manager_creates_default_config_file_for_manual_editing(tmp_path:
     config_path = app_root / ".reverie" / "config.json"
     assert config_path.exists()
     assert config.models == []
+    assert config.tool_output_style == "compact"
+    assert config.thinking_output_style == "full"
+    saved_payload = json.loads(config_path.read_text(encoding="utf-8"))
+    assert saved_payload["tool_output_style"] == "compact"
+    assert saved_payload["thinking_output_style"] == "full"
     assert notice is not None
     assert notice["title"] == "Created default config"
+
+
+def test_config_manager_auto_adds_tool_output_style_on_load(tmp_path: Path, monkeypatch) -> None:
+    app_root = tmp_path / "app"
+    project_root = tmp_path / "project"
+    project_root.mkdir(parents=True, exist_ok=True)
+    (app_root / ".reverie").mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr("reverie.config.get_app_root", lambda: app_root)
+    monkeypatch.setattr("reverie.config.get_launcher_root", lambda: app_root)
+
+    config_path = app_root / ".reverie" / "config.json"
+    config_path.write_text(
+        '{\n'
+        '  "models": [],\n'
+        '  "active_model_index": 0,\n'
+        '  "active_model_source": "standard"\n'
+        '}\n',
+        encoding="utf-8",
+    )
+
+    manager = ConfigManager(project_root)
+    loaded = manager.load()
+    repaired_payload = json.loads(config_path.read_text(encoding="utf-8"))
+
+    assert loaded.tool_output_style == "compact"
+    assert repaired_payload["tool_output_style"] == "compact"
+    assert loaded.thinking_output_style == "full"
+    assert repaired_payload["thinking_output_style"] == "full"
 
 
 def test_config_manager_backs_up_and_reports_unrepairable_config(tmp_path: Path, monkeypatch) -> None:

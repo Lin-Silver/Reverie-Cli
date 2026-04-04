@@ -86,12 +86,15 @@ Reverie also reads `NVIDIA_API_KEY` automatically when it is present, and Comput
 | Command | Description |
 | --- | --- |
 | `/setting` | Open the settings UI |
+| `/settings` | Alias of `/setting` |
 | `/setting status` | Print the settings dashboard |
 | `/setting mode <mode>` | Change active mode |
 | `/setting model` | Open the standard model selector |
 | `/setting theme <theme>` | Change stored theme preset |
 | `/setting auto-index on\|off` | Toggle startup indexing |
 | `/setting status-line on\|off` | Toggle the live status line |
+| `/setting tool-output compact\|condensed\|full` | Change how completed tool output is collapsed |
+| `/setting thinking full\|compact\|hidden` | Change how streamed reasoning is displayed |
 | `/setting stream on\|off` | Toggle streaming responses |
 | `/setting timeout <seconds>` | Set API timeout |
 | `/setting retries <count>` | Set retry budget |

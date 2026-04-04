@@ -58,7 +58,7 @@ _QWENCODE_BASE_MODELS = [
     {
         "id": "coder-model",
         "display_name": "coder-model",
-        "description": "Qwen 3.5 Plus - efficient hybrid model with leading coding performance",
+        "description": "Qwen 3.6 Plus - efficient hybrid model with leading coding performance",
         "context_length": 1_000_000,
     },
 ]

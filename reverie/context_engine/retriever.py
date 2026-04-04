@@ -174,6 +174,7 @@ class ContextRetriever:
         self.memory_indexer = memory_indexer
         self._activity_files: Dict[str, Dict[str, float]] = {}
         self._activity_symbols: Dict[str, Dict[str, float]] = {}
+        self._task_cache: Dict[tuple[Any, ...], tuple[float, TaskContextResult]] = {}
 
     def _normalize_file_path(self, file_path: str) -> str:
         """Normalize file paths so workset scoring is stable across callers."""
@@ -634,6 +635,23 @@ class ContextRetriever:
         max_symbols = max(1, int(max_symbols or 12))
         term_weights = self._build_task_term_weights(query_text)
 
+        cache_key = (
+            query_text.lower(),
+            max_tokens,
+            max_files,
+            max_symbols,
+            bool(include_history),
+            bool(include_memory),
+            tuple(sorted(str(path or "").strip() for path in (active_files or []) if str(path or "").strip())),
+            tuple(sorted(str(path or "").strip() for path in (changed_files or []) if str(path or "").strip())),
+            len(self.file_info) if isinstance(self.file_info, dict) else 0,
+            len(self.symbol_table),
+        )
+        cached_entry = self._task_cache.get(cache_key)
+        now = time.time()
+        if cached_entry and (now - cached_entry[0]) <= 15.0:
+            return cached_entry[1]
+
         normalized_active_files = {
             self._normalize_file_path(path)
             for path in (active_files or [])
@@ -797,7 +815,7 @@ class ContextRetriever:
         for symbol in selected_symbols[:8]:
             self.mark_symbol_activity(symbol.qualified_name, weight=0.8)
 
-        return TaskContextResult(
+        result = TaskContextResult(
             query=query_text,
             relevant_symbols=selected_symbols,
             relevant_files=selected_file_list,
@@ -813,6 +831,11 @@ class ContextRetriever:
                 "selected_symbol_count": len(selected_symbols),
             },
         )
+        self._task_cache[cache_key] = (now, result)
+        if len(self._task_cache) > 24:
+            oldest_key = min(self._task_cache.items(), key=lambda item: item[1][0])[0]
+            self._task_cache.pop(oldest_key, None)
+        return result
 
     def _score_file_for_task(
         self,

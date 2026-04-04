@@ -32,6 +32,7 @@ from ..modes import (
     list_modes,
     normalize_mode,
 )
+from ..config import normalize_thinking_output_style, normalize_tool_output_style
 from ..tools.tool_catalog import ToolCatalogTool
 
 
@@ -71,6 +72,7 @@ class CommandHandler:
             'plugins': self.cmd_plugins,
             'mcp': self.cmd_mcp,
             'setting': self.cmd_setting,
+            'settings': self.cmd_setting,
             'rules': self.cmd_rules,
             'workspace': self.cmd_workspace,
             'tti': self.cmd_tti,
@@ -7819,6 +7821,10 @@ class CommandHandler:
             return self._cmd_setting_bool("auto_index", "Auto Index", value)
         if action == "status-line":
             return self._cmd_setting_bool("show_status_line", "Status Line", value)
+        if action in ("tool-output", "tool-output-style", "output-style"):
+            return self._cmd_setting_tool_output_style(value)
+        if action in ("thinking", "thinking-output", "reasoning", "reasoning-output"):
+            return self._cmd_setting_thinking_output_style(value)
         if action == "stream":
             return self._cmd_setting_bool("stream_responses", "Stream Responses", value)
         if action in ("timeout", "api-timeout"):
@@ -7832,7 +7838,7 @@ class CommandHandler:
 
         self.console.print(
             f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} "
-            f"Usage: /setting [status|ui|mode|model|theme|auto-index|status-line|stream|timeout|retries|debug|workspace|rules]"
+            f"Usage: /setting [status|ui|mode|model|theme|auto-index|status-line|tool-output|thinking|stream|timeout|retries|debug|workspace|rules]"
             f"[/{self.theme.AMBER_GLOW}]"
         )
         return True
@@ -7844,6 +7850,14 @@ class CommandHandler:
     def _setting_theme_options(self) -> List[str]:
         """Available theme values stored in config."""
         return ["default", "dark", "light", "ocean"]
+
+    def _setting_tool_output_choices(self) -> List[str]:
+        """Available transcript styles for completed tool output."""
+        return ["compact", "condensed", "full"]
+
+    def _setting_thinking_output_choices(self) -> List[str]:
+        """Available transcript styles for streamed reasoning content."""
+        return ["full", "compact", "hidden"]
 
     def _get_setting_items(self, config, config_manager, rules_manager) -> List[Dict[str, Any]]:
         """Build setting metadata for the interactive settings view."""
@@ -7892,6 +7906,22 @@ class CommandHandler:
                 "kind": "bool",
                 "description": "Show the live status line before and after responses.",
                 "command": "/setting status-line on|off",
+            },
+            {
+                "name": "Tool Output Style",
+                "key": "tool_output_style",
+                "kind": "choice",
+                "choices": self._setting_tool_output_choices(),
+                "description": "Choose how completed tool results appear after the live running panel collapses.",
+                "command": "/setting tool-output compact|condensed|full",
+            },
+            {
+                "name": "Thinking Output",
+                "key": "thinking_output_style",
+                "kind": "choice",
+                "choices": self._setting_thinking_output_choices(),
+                "description": "Choose whether streamed reasoning stays fully visible, compact, or hidden in the transcript.",
+                "command": "/setting thinking full|compact|hidden",
             },
             {
                 "name": "Stream Responses",
@@ -7953,6 +7983,20 @@ class CommandHandler:
         if kind == "workspace":
             enabled = bool(config_manager.is_workspace_mode())
             return f"[{self.theme.MINT_SOFT}]Workspace[/{self.theme.MINT_SOFT}]" if enabled else f"[{self.theme.PURPLE_MEDIUM}]Global[/{self.theme.PURPLE_MEDIUM}]"
+        if key == "tool_output_style":
+            labels = {
+                "compact": f"[{self.theme.MINT_SOFT}]Compact[/{self.theme.MINT_SOFT}]",
+                "condensed": f"[{self.theme.BLUE_SOFT}]Condensed[/{self.theme.BLUE_SOFT}]",
+                "full": f"[{self.theme.PURPLE_SOFT}]Full[/{self.theme.PURPLE_SOFT}]",
+            }
+            return labels.get(normalize_tool_output_style(getattr(config, key, "compact")), escape(str(getattr(config, key, "compact"))))
+        if key == "thinking_output_style":
+            labels = {
+                "full": f"[{self.theme.MINT_SOFT}]Full[/{self.theme.MINT_SOFT}]",
+                "compact": f"[{self.theme.BLUE_SOFT}]Compact[/{self.theme.BLUE_SOFT}]",
+                "hidden": f"[{self.theme.TEXT_DIM}]Hidden[/{self.theme.TEXT_DIM}]",
+            }
+            return labels.get(normalize_thinking_output_style(getattr(config, key, "full")), escape(str(getattr(config, key, "full"))))
         if kind == "rules":
             if not rules_manager:
                 return f"[{self.theme.TEXT_DIM}](rules manager unavailable)[/{self.theme.TEXT_DIM}]"
@@ -8011,12 +8055,19 @@ class CommandHandler:
         summary.add_row(
             "Streaming",
             "ON" if bool(getattr(config, "stream_responses", True)) else "OFF",
-            "Rules",
-            str(len(rules_manager.get_rules())) if rules_manager else "0",
+            "Thinking",
+            normalize_thinking_output_style(getattr(config, "thinking_output_style", "full")).title(),
         )
-        summary.add_row("Focus", escape(focus_label), "State", f"[{pending_style}]{pending_label}[/{pending_style}]")
+        summary.add_row(
+            "Tool Output",
+            normalize_tool_output_style(getattr(config, "tool_output_style", "compact")).title(),
+            "State",
+            f"[{pending_style}]{pending_label}[/{pending_style}]",
+        )
+        summary.add_row("Rules", str(len(rules_manager.get_rules())) if rules_manager else "0", "Status Line", "ON" if bool(getattr(config, "show_status_line", True)) else "OFF")
+        summary.add_row("Focus", escape(focus_label), "Scope", "Runtime & persistence")
         if item_count:
-            summary.add_row("Items", str(item_count), "Scope", "Runtime & persistence")
+            summary.add_row("Items", str(item_count), "Storage", storage_label)
 
         return Panel(
             summary,
@@ -8229,6 +8280,11 @@ class CommandHandler:
             self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]")
             return True
         config_manager.save(config)
+        if self.app.get('apply_display_preferences'):
+            try:
+                self.app['apply_display_preferences'](config)
+            except Exception:
+                pass
         if reinit and self.app.get('reinit_agent'):
             self.app['reinit_agent']()
         self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} {message}[/{self.theme.MINT_VIBRANT}]")
@@ -8256,12 +8312,24 @@ class CommandHandler:
             )
         )
         self.console.print()
-        self.console.print(self._build_setting_list_panel(items, 0, config, config_manager, rules_manager))
+        self.console.print(
+            self._build_setting_list_panel(
+                items,
+                selected_idx=0,
+                scroll_offset=0,
+                max_visible=min(len(items), self._setting_visible_count()),
+                config=config,
+                config_manager=config_manager,
+                rules_manager=rules_manager,
+            )
+        )
         self.console.print()
         self.console.print(
             Panel(
                 f"[{self.theme.TEXT_DIM}]Direct edits:[/{self.theme.TEXT_DIM}] "
                 f"[bold {self.theme.BLUE_SOFT}]/setting mode writer[/bold {self.theme.BLUE_SOFT}]  "
+                f"[bold {self.theme.BLUE_SOFT}]/setting tool-output condensed[/bold {self.theme.BLUE_SOFT}]  "
+                f"[bold {self.theme.BLUE_SOFT}]/setting thinking full[/bold {self.theme.BLUE_SOFT}]  "
                 f"[bold {self.theme.BLUE_SOFT}]/setting timeout 120[/bold {self.theme.BLUE_SOFT}]  "
                 f"[bold {self.theme.BLUE_SOFT}]/setting workspace on[/bold {self.theme.BLUE_SOFT}]",
                 border_style=self.theme.BORDER_SUBTLE,
@@ -8378,6 +8446,72 @@ class CommandHandler:
             return True
         config.theme = candidate
         return self._setting_save_and_reinit(config, f"Theme set to {candidate}.", reinit=False)
+
+    def _cmd_setting_tool_output_style(self, value: str) -> bool:
+        """Update how completed tool output is shown after live execution ends."""
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]")
+            return True
+
+        config = config_manager.load()
+        choices = self._setting_tool_output_choices()
+        raw_candidate = str(value or "").strip().lower()
+        candidate = normalize_tool_output_style(raw_candidate, default="") if raw_candidate else ""
+        if raw_candidate and not candidate:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid tool output style: {escape(raw_candidate)}[/{self.theme.CORAL_SOFT}]")
+            return True
+        if not candidate:
+            candidate = normalize_tool_output_style(
+                Prompt.ask(
+                    "Tool output style",
+                    default=normalize_tool_output_style(getattr(config, "tool_output_style", "compact")),
+                    choices=choices,
+                ).strip().lower()
+            )
+        if candidate not in choices:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid tool output style: {escape(candidate)}[/{self.theme.CORAL_SOFT}]")
+            return True
+
+        config.tool_output_style = candidate
+        return self._setting_save_and_reinit(
+            config,
+            f"Tool output style set to {candidate}.",
+            reinit=False,
+        )
+
+    def _cmd_setting_thinking_output_style(self, value: str) -> bool:
+        """Update how streamed thinking/reasoning content is rendered."""
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]")
+            return True
+
+        config = config_manager.load()
+        choices = self._setting_thinking_output_choices()
+        raw_candidate = str(value or "").strip().lower()
+        candidate = normalize_thinking_output_style(raw_candidate, default="") if raw_candidate else ""
+        if raw_candidate and not candidate:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid thinking output style: {escape(raw_candidate)}[/{self.theme.CORAL_SOFT}]")
+            return True
+        if not candidate:
+            candidate = normalize_thinking_output_style(
+                Prompt.ask(
+                    "Thinking output style",
+                    default=normalize_thinking_output_style(getattr(config, "thinking_output_style", "full")),
+                    choices=choices,
+                ).strip().lower()
+            )
+        if candidate not in choices:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid thinking output style: {escape(candidate)}[/{self.theme.CORAL_SOFT}]")
+            return True
+
+        config.thinking_output_style = candidate
+        return self._setting_save_and_reinit(
+            config,
+            f"Thinking output style set to {candidate}.",
+            reinit=False,
+        )
 
     def _cmd_setting_bool(self, attr: str, label: str, value: str) -> bool:
         """Toggle or set a boolean config value."""

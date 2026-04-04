@@ -1,3 +1,144 @@
+## Reverie CLI v2.1.21 - TUI Performance, Streaming Controls, and Settings Upgrade
+
+**Release Date:** 2026-04-04
+
+### CLI and TUI
+
+* Reworked the streaming transcript so tool activity is denser, cleaner, and closer to Codex/Gemini-style terminal output.
+* Added a live tool-output panel that shows in-progress stdout/stderr during execution, then collapses automatically back into a compact finished-result card.
+* Added a streaming task drawer with `Ctrl+T` toggle support so long-running work can show or hide the current todo list without leaving the transcript.
+* Reduced empty-line churn in streamed output and tightened markdown rendering so assistant text, tool logs, and footer panels no longer fight each other.
+
+### Settings and Config
+
+* Added `/settings` as an alias of `/setting`.
+* Added `/setting tool-output compact|condensed|full` so finished tool results can be shown in fully compact, partially condensed, or full transcript form.
+* Added `/setting thinking full|compact|hidden` so streamed reasoning can stay fully visible, be compacted, or be hidden explicitly instead of being implicitly suppressed.
+* Config repair now auto-adds missing `tool_output_style` and `thinking_output_style` keys to `config.json`, so older configs upgrade themselves cleanly.
+
+### Runtime and Performance
+
+* Replaced the old slow streaming hot path with a shared SSE parser and shared streaming state logic across providers, reducing unnecessary latency on simple tasks.
+* Improved `command_exec` on Windows so PowerShell cmdlets, pipelines, quoted executables, and `python -c` style invocations behave more reliably.
+* Improved Context Engine resilience and speed by handling UTF-8 BOM files correctly, respecting symbol-search limits, and avoiding unnecessary retrieval work.
+
+### Reverie-Gamer Status
+
+* This version does not introduce a new large gameplay milestone by itself; it focuses on making Reverie faster and more dependable while the Gamer pipeline continues to expand.
+* The current expected Reverie-Gamer delivery window is:
+  * 2026-04-11 to 2026-04-18: next playable-slice stability update for prompt -> blueprint -> scaffold -> first runnable slice flow
+  * Late April 2026: stronger asset-pipeline and validation-loop integration for generated game projects
+  * May 2026: broader long-running project continuation and richer multi-region generation work
+
+### Validation
+
+* `python -m pytest -q`
+
+---
+
+## Reverie CLI v2.1.12 - Reverie-Gamer Guided Quest Arc and Gateway Priming
+
+**Release Date:** 2026-04-03
+
+### Added
+
+* Added a guided quest arc flow with `meet_guide`, `reach_ruins`, `purify_sentinels`, `defeat_warden`, and `activate_shrine` objective stages.
+* Added quest-flow payload fields for `active_arc`, `npc_briefings`, and `gateway_unlocks` in generated Godot runtime data.
+* Added save/load persistence for NPC contact, arc-stage progress, and gateway priming state in the generated Godot `GameState`.
+
+### Changed
+
+* Updated the generated Godot `GameState` so guide interaction, sentinel clear, guardian defeat, and gateway priming advance quest state explicitly instead of relying on one flat combat gate.
+* Updated the generated Godot HUD to show active arc progress, not just arc title.
+* Updated generated NPC anchors and region gateways so they now participate in quest and expansion progression rather than acting as passive markers only.
+
+---
+
+## Reverie CLI v2.1.11 - Reverie-Gamer Guardian Finale and Boss Encounter Template
+
+**Release Date:** 2026-04-03
+
+### Added
+
+* Added a generated `shrine_warden` boss archetype to Reverie-Gamer combat packet outputs.
+* Added generated Godot combat encounter templates including `shrine_guardian_finale`.
+* Added boss-tier enemy defaults and manifest payload fields such as `combat_tier`, burst-projectile settings, and phase thresholds.
+
+### Changed
+
+* Updated the generated Godot enemy runtime so boss-tier enemies can phase up and emit radial burst attacks instead of behaving like standard mobs.
+* Updated the generated Godot slice so the shrine route now includes a guardian-style finale encounter near the completion objective.
+* Expanded Gamer regression tests to verify boss encounter data in generated combat and manifest payloads.
+
+---
+
+## Reverie CLI v2.1.10 - Reverie-Gamer Region Gateways and NPC Anchors
+
+**Release Date:** 2026-04-03
+
+### Added
+
+* Added generated Godot runtime scripts `npc_anchor.gd` and `region_gateway.gd` so expansion seeds now become interactable in-scene markers.
+* Added `npc_beacons`, `region_gateways`, and `active_arc` fields to the generated Godot `slice_manifest.json`.
+* Added generated Reverie Engine `region_routes.yaml` so expansion routes now exist alongside region, NPC, and quest-arc seeds.
+
+### Changed
+
+* Updated the generated Godot `main.gd` to spawn NPC anchors and region gateways in the runtime scene.
+* Updated the generated Godot HUD and `GameState` so the active arc, next region, and anchor counts are visible during play.
+* Expanded Gamer tests to verify new gateway and anchor outputs in both data contracts and generated runtime files.
+
+---
+
+## Reverie CLI v2.1.9 - Reverie-Gamer Continuity, Expansion Backlog, and Resume State
+
+**Release Date:** 2026-04-03
+
+### Added
+
+* Added `reverie/gamer/expansion_planner.py` to generate durable `content_expansion`, `expansion_backlog`, and `resume_state` artifacts for long-running game projects.
+* Added generated `artifacts/content_expansion.json` / `.md` with region seeds, NPC roster, quest arcs, and multi-phase scale-up planning.
+* Added generated `artifacts/expansion_backlog.json` / `.md` so post-slice expansion work is queued explicitly instead of being lost in chat context.
+* Added generated `artifacts/resume_state.json` / `.md` so later sessions can reopen the same 3D project from an in-repo continuation file.
+* Added `continuity_snapshot` to the Reverie-Gamer task graph and a dedicated `continuity` lane in the production plan.
+* Added generated Reverie Engine runtime seed files: `region_seeds.yaml`, `npc_roster.yaml`, and `quest_arcs.yaml`.
+* Added generated Godot runtime seed files: `region_seeds.json`, `npc_roster.json`, and `quest_arcs.json`.
+
+### Changed
+
+* Updated `game_design_orchestrator(action="plan_production")` so it now emits continuity artifacts in addition to request, blueprint, runtime, system, and task-graph artifacts.
+* Updated `game_project_scaffolder(action="generate_vertical_slice")` so prompt-to-project generation now returns content expansion state, expansion backlog, and resume state data.
+* Updated the generated Godot `GameState` scaffold so it loads and exposes region seeds, NPC roster, and quest arcs as durable expansion data.
+* Updated Reverie-Gamer prompt/tool metadata to treat continuity artifacts as first-class outputs of the mode.
+* Expanded Gamer tests to verify continuity artifacts and runtime expansion-seed outputs for both Reverie Engine and Godot generation paths.
+
+---
+
+## Reverie CLI v2.1.8 - Reverie-Gamer Prompt Compiler, Runtime Registry, and 3D Slice Builder
+
+**Release Date:** 2026-04-03
+
+### Added
+
+* Added a new `reverie/gamer/` core pipeline with `prompt_compiler`, `scope_estimator`, `production_plan`, `runtime_registry`, runtime adapters, and `vertical_slice_builder`.
+* Added `game_design_orchestrator(action="compile_request")` so Reverie-Gamer can compile one prompt into `artifacts/game_request.json`.
+* Added `game_design_orchestrator(action="plan_production")` so Reverie-Gamer can produce `artifacts/production_plan.json` and `artifacts/runtime_registry.json` before broad implementation.
+* Added `game_project_scaffolder(action="create_from_request")` and `game_project_scaffolder(action="generate_vertical_slice")` so request-backed project generation is part of the built-in Gamer toolchain.
+* Added a generated Godot third-person 3D slice scaffold under `engine/godot/`, including a minimal action-RPG-ready runtime foundation, autoloaded state, HUD, enemy targets, and objective shrine.
+* Added deterministic system-packet generation under `reverie/gamer/system_generators/` for character controller, combat, quest flow, save/load, progression, and world structure.
+* Added generated `artifacts/system_specs.json`, `artifacts/task_graph.json`, and `playtest/slice_score.json` so long-running 3D slice work now has explicit subsystem contracts, dependency order, and readiness scoring.
+* Upgraded the generated Godot slice scaffold from a static prototype scene into a data-driven runtime template with `SaveService`, quest/progression state loading, `slice_manifest.json`, and basic enemy state-machine behavior.
+* Extended the generated Godot combat foundation with melee/ranged enemy roles, `enemy_projectile.gd`, and `combat.json`-driven enemy defaults so the 3D scaffold now demonstrates more than one enemy pressure pattern.
+* Extended the generated Godot player-combat foundation with `combat.json`-driven `player_actions`, lock-on targeting, and a basic skill attack so the slice now includes a stronger action-RPG combat loop on both sides.
+* Added generated `combat_feedback.gd`, dash i-frame handling, and HUD combat-state readouts so the Godot slice now includes clearer hit feedback and cooldown visibility instead of only raw combat logic.
+* Added new Gamer pipeline tests that cover request compilation, Reverie Engine slice generation, and Godot scaffold generation.
+
+### Changed
+
+* Upgraded `reverie-gamer` from a prompt-only workflow into a real single-prompt pipeline: prompt compilation -> runtime selection -> blueprint -> production plan -> system packets -> task graph -> vertical slice generation -> slice scoring.
+* Expanded the Gamer system prompt and prompt-side tool descriptions so the model now knows about `runtime_registry.json`, `production_plan.json`, `system_specs.json`, `task_graph.json`, `slice_score.json`, request compilation, and direct slice generation.
+* Updated mode metadata and discovery keywords so tool recommendation can rank Gamer compilation and production-flow tools more accurately.
+
 ## Reverie CLI v2.1.7 - Tool Discovery Upgrade, Mode-Aware Tool Browser, Prompt Slimming, and Snapshot Removal
 
 **Release Date:** 2026-04-03
@@ -668,3 +809,219 @@ Verification Phase:
 
 * No breaking changes
 * No new dependencies added
+
+---
+
+## ✨ Reverie CLI v2.1.13 — Guard Loop Upgrade
+
+**Release Date:** 2026-04-03
+
+### 🎮 Reverie-Gamer Combat Runtime
+
+* Upgraded the generated Godot 3D slice with a guard and perfect-guard loop
+* `combat.json` now includes `player_actions.guard` tuning with stamina drain, damage reduction, perfect-guard timing, and counter-poise rules
+* Generated player runtime now supports `C` guard, perfect-guard timing, reduced-damage blocking, and counter-poise feedback
+* Enemy melee and projectile hits now pass source context so guard responses can differentiate between normal blocks and clean defensive reads
+
+### ⚔️ Battle Feel Improvements
+
+* HUD now surfaces live guard state alongside skill and heavy cooldowns
+* Perfect guard now opens a real counter window instead of behaving like a cosmetic hint only
+* README for the generated Godot scaffold now documents the added defensive controls
+
+### ✅ Validation
+
+* `python -m pytest tests/test_gamer_mode_upgrade.py tests/test_tooling_upgrades.py -q`
+* `python -m pytest tests -q`
+
+---
+
+## Reverie CLI v2.1.21 - Squad Search Upgrade
+
+**Release Date:** 2026-04-04
+
+### Reverie-Gamer Regional AI
+
+* Generated slices now assign `squad_role` values to Godot enemy specs, so defenders can react as vanguards, suppressors, anchors, or boss anchors instead of sharing one alert response path
+* `alert_networks` now carry `search_duration_seconds` and `anchor_point`, and `world_graph.guard_networks` mirrors those fields so regional AI state is inspectable from the generated world graph
+* Godot runtime enemies now keep searching after an alert fades, which makes regional defense feel more persistent than a single converge pulse
+
+### Runtime Behavior
+
+* Suppressors now bias toward ranged response positions instead of collapsing into melee clumps every time an alert fires
+* Anchor units now bias toward local anchor points, which makes relay and spire defense read more like held territory than wandering cleanup
+* Generated runtime scripts now explicitly wire squad roles from `slice_manifest.json` into `enemy_dummy.gd`, and tests validate both the contract layer and the emitted GDScript search behavior
+
+### Validation
+
+* `python -m py_compile reverie/gamer/runtime_adapters/godot.py reverie/gamer/vertical_slice_builder.py tests/test_gamer_mode_upgrade.py`
+* `python -m pytest tests/test_gamer_mode_upgrade.py tests/test_tooling_upgrades.py -q`
+* `python -m pytest tests -q`
+
+---
+
+## Reverie CLI v2.1.20 - Alert Network Upgrade
+
+**Release Date:** 2026-04-04
+
+### Reverie-Gamer Regional AI
+
+* Generated slices now emit `alert_networks` contracts for both Reverie Engine content and Godot runtime data
+* `world_graph` now includes `guard_networks`, giving regional AI coordination a formal place in the generated world-state graph
+* Godot runtime enemies now raise and respond to regional alerts, so one defender making contact can pull nearby lane partners into the same fight
+
+### Runtime Coordination
+
+* Starter Ruins, Cloudstep Basin, and Echo Watch now each ship with their own regional alert networks
+* Patrol routes and alert networks now work together, so enemies can both inhabit a route and converge on a shared contact point
+* Frontier defense no longer feels like isolated 1v1 pockets only; local guards can reinforce relay and spire approaches in a more believable way
+
+### Validation
+
+* `python -m py_compile reverie/gamer/runtime_adapters/godot.py reverie/gamer/vertical_slice_builder.py tests/test_gamer_mode_upgrade.py`
+* `python -m pytest tests/test_gamer_mode_upgrade.py tests/test_tooling_upgrades.py -q`
+* `python -m pytest tests -q`
+
+---
+
+## Reverie CLI v2.1.19 - Patrol Route Upgrade
+
+**Release Date:** 2026-04-04
+
+### Reverie-Gamer World Population
+
+* Generated slices now emit `patrol_routes` contracts for both Reverie Engine content and Godot runtime data
+* Godot runtime now loads `patrol_routes.json`, and enemies can resolve a patrol lane from shared data instead of standing at a fixed spawn
+* World graphs now include `patrol_lanes`, which gives regional world-state data a formal place for guard-route ownership
+
+### Runtime Behavior
+
+* Starter Ruins, Cloudstep Basin, and Echo Watch now ship with their own sweep routes, so enemies feel stationed inside a living slice instead of dropped in as static props
+* Patrol routes are now region-aware, and frontier enemies can inherit combat tuning from archetypes while still following their own local lanes
+* HUD purification counts now stay region-correct while patrol populations scale across multiple areas
+
+### Validation
+
+* `python -m py_compile reverie/gamer/runtime_adapters/godot.py reverie/gamer/vertical_slice_builder.py reverie/gamer/system_generators/world_structure.py tests/test_gamer_mode_upgrade.py`
+* `python -m pytest tests/test_gamer_mode_upgrade.py tests/test_tooling_upgrades.py -q`
+* `python -m pytest tests -q`
+
+---
+
+## Reverie CLI v2.1.18 - Regional Encounter Upgrade
+
+**Release Date:** 2026-04-04
+
+### Reverie-Gamer Frontier Runtime
+
+* Secondary regions now generate their own defender encounters instead of only landmarks, NPC anchors, and objective props
+* Generated enemy instances can now derive from shared combat archetypes through `archetype_id`, which removes the old one-ID-per-enemy-type bottleneck
+* Regional objectives now carry `encounter_id` contracts, so basin and observatory goals are gated by local combat beats before they can be secured
+
+### Runtime Playability
+
+* Cloudstep Basin now ships with a relay-defense combat pocket, and Echo Watch now ships with an elite-backed spire reclaim encounter
+* HUD purification progress now reflects the current region instead of counting hidden enemies from every region at once
+* Root-region shrine progression now ignores frontier enemies, so multi-region content no longer pollutes the main slice objective loop
+
+### Validation
+
+* `python -m py_compile reverie/gamer/runtime_adapters/godot.py reverie/gamer/vertical_slice_builder.py tests/test_gamer_mode_upgrade.py`
+* `python -m pytest tests/test_gamer_mode_upgrade.py tests/test_tooling_upgrades.py -q`
+* `python -m pytest tests -q`
+
+---
+
+## Reverie CLI v2.1.17 - Region Objective Upgrade
+
+**Release Date:** 2026-04-04
+
+### Reverie-Gamer Regional Progression
+
+* `slice_manifest.json` now emits `region_objectives`, and `world_graph.json` now carries `regional_goals` plus per-region `region_objective_id` links
+* Generated Godot slices now include `region_objective_site.gd` and `region_objectives.json`, so secondary regions contain playable objectives instead of landmark-only previews
+* `GameState` now persists completed regional objectives alongside region travel, encounters, detour rewards, and quest progress
+
+### Runtime Payoff
+
+* Cloudstep Basin and Echo Watch now deliver persistent rewards such as `basin_insight` and `watch_resonance`
+* Regional rewards now feed back into runtime stats like skill range, cooldowns, dash i-frames, movement speed, and stamina recovery
+* HUD expansion status now surfaces current region goals and overall regional objective progress
+
+### Validation
+
+* `python -m pytest tests/test_gamer_mode_upgrade.py tests/test_tooling_upgrades.py -q`
+* `python -m pytest tests -q`
+
+---
+
+## ✨ Reverie CLI v2.1.14 — Encounter Director Upgrade
+
+**Release Date:** 2026-04-03
+
+### 🎮 Reverie-Gamer Encounter Runtime
+
+* Upgraded the generated Godot 3D slice with encounter sequencing instead of isolated enemy placement only
+* `combat.json` now emits a `pattern_library` for melee, ranged, and boss profiles, including multi-phase guardian pacing data
+* `slice_manifest.json` now emits explicit `encounters` so generated runtime scenes know where combat beats begin and how they escalate
+* Added generated `encounter_director.gd` to activate encounter beats, announce completions, and keep the runtime encounter state aligned with the authored data contracts
+
+### ⚔️ Boss Pattern Improvements
+
+* Generated boss enemies now consume phase profiles for windup timing, recovery timing, lunge distance, burst cadence, and movement pressure
+* HUD combat status now surfaces the active encounter and boss-phase summary instead of only player-side cooldown data
+* Save/load payloads now preserve encounter and boss-phase state alongside the existing slice continuity data
+
+### ✅ Validation
+
+* `python -m pytest tests/test_gamer_mode_upgrade.py tests/test_tooling_upgrades.py -q`
+* `python -m pytest tests -q`
+
+---
+
+## ✨ Reverie CLI v2.1.15 — Detour Reward Upgrade
+
+**Release Date:** 2026-04-03
+
+### 🗺️ Reverie-Gamer Slice Content
+
+* Upgraded the generated Godot 3D slice from a single critical-path route to a main-route plus optional detour structure
+* `combat.json` now emits an elite detour profile and encounter template for side-route pressure
+* `slice_manifest.json` now emits `reward_sites` so optional cache rewards exist as first-class runtime content
+* Generated slices now include an elite guard encounter and a reward cache that unlocks only after the detour is cleared
+
+### 🎮 Runtime Progression
+
+* Added generated `reward_cache.gd` and runtime spawning for optional reward sites
+* Save/load now persists completed encounters and claimed reward caches
+* Optional detour rewards now feed back into gameplay by improving guard timing, guard reduction, movement, and stamina recovery
+* Critical-path accounting now excludes optional detour elites so side content stays optional instead of accidentally blocking shrine completion
+
+### ✅ Validation
+
+* `python -m pytest tests/test_gamer_mode_upgrade.py tests/test_tooling_upgrades.py -q`
+* `python -m pytest tests -q`
+
+---
+
+## ✨ Reverie CLI v2.1.16 — Region Travel Upgrade
+
+**Release Date:** 2026-04-03
+
+### 🌍 Reverie-Gamer World Runtime
+
+* Upgraded the generated Godot 3D slice from a single-region scaffold to a multi-region runtime foundation
+* `slice_manifest.json` now emits `region_layouts`, `world_graph`, `active_region_id`, and richer gateway contracts with `from_region`, `target_spawn`, and travel gating rules
+* Generated Godot runtime now includes `region_manager.gd` and real gateway-driven region travel instead of gateway hints only
+* Save/load now persists current region and discovered regions alongside combat, quest, encounter, and reward state
+
+### 🧭 Expansion Flow
+
+* Secondary regions now have their own preview landmarks, home-region NPC placement, and return gateways
+* HUD expansion status now surfaces the active region and discovered-region count
+* Region switching now moves the player to region-specific spawn points and activates only the relevant region content
+
+### ✅ Validation
+
+* `python -m pytest tests/test_gamer_mode_upgrade.py tests/test_tooling_upgrades.py -q`
+* `python -m pytest tests -q`

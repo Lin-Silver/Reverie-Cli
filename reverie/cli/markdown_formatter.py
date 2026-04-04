@@ -133,15 +133,20 @@ class MarkdownFormatter:
         lines = str(markdown_text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
         renderables: List[RenderableType] = []
         i = 0
+        blank_pending = False
 
         while i < len(lines):
             line = lines[i]
             stripped = line.strip()
 
             if not stripped:
-                renderables.append(Text(""))
+                blank_pending = bool(renderables)
                 i += 1
                 continue
+
+            if blank_pending and renderables:
+                renderables.append(Text(""))
+                blank_pending = False
 
             fence_match = FENCE_RE.match(line)
             if fence_match:
@@ -229,8 +234,29 @@ class MarkdownFormatter:
                 i += 1
                 continue
 
-            renderables.append(self._render_paragraph(line))
+            paragraph_lines = [line]
             i += 1
+            while i < len(lines):
+                candidate = lines[i]
+                candidate_stripped = candidate.strip()
+                if not candidate_stripped:
+                    blank_pending = True
+                    i += 1
+                    break
+                if (
+                    FENCE_RE.match(candidate)
+                    or TABLE_ROW_RE.match(candidate)
+                    or HEADER_RE.match(candidate)
+                    or BLOCKQUOTE_RE.match(candidate)
+                    or UNORDERED_LIST_RE.match(candidate)
+                    or ORDERED_LIST_RE.match(candidate)
+                    or HORIZONTAL_RULE_RE.match(candidate)
+                ):
+                    break
+                paragraph_lines.append(candidate)
+                i += 1
+            renderables.append(self._render_paragraph("\n".join(paragraph_lines)))
+            continue
 
         while renderables and isinstance(renderables[-1], Text) and not renderables[-1].plain:
             renderables.pop()

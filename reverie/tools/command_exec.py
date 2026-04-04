@@ -17,7 +17,7 @@ import re
 import shlex
 import subprocess
 import sys
-import tempfile
+import threading
 import time
 
 from ..config import get_project_data_dir
@@ -54,7 +54,9 @@ Examples:
 - Git status: {"command": "git status"}
 - Python inline script: {"command": "python -c \\"print(1); print(2)\\""}
 - .NET solution creation: {"command": "dotnet new sln -n Demo"}
-- Search text: {"command": "rg TODO reverie"}"""
+- Search text: {"command": "rg TODO reverie"}
+- PowerShell pipeline: {"command": "Get-ChildItem reverie -Recurse | Select-Object -First 20"}
+- PowerShell cmdlet search: {"command": "Select-String -Path reverie\\\\*.py -Pattern \\"TODO\\""}"""
 
     parameters = {
         "type": "object",
@@ -121,6 +123,8 @@ Examples:
     }
 
     POWERSHELL_WRAPPED_COMMANDS = {"Get-ChildItem", "Get-Content", "Get-Location"}
+    POWERSHELL_META_TOKENS = {"|", ";", "&&", "||", ">", ">>", "<", "2>", "2>>", "*>", "*>>"}
+    POWERSHELL_CMDLET_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*-[A-Za-z][A-Za-z0-9-]*$")
 
     PYTHON_EXECUTABLES = {"python", "python.exe", "py"}
     NODE_EXECUTABLES = {"node", "node.exe"}
@@ -234,17 +238,49 @@ Examples:
 
         start_time = time.monotonic()
         try:
-            with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
-                result = subprocess.run(
-                    invocation["argv"],
-                    cwd=str(work_dir),
-                    env=self._build_process_env(invocation),
-                    stdout=stdout_file,
-                    stderr=stderr_file,
-                    timeout=timeout,
-                )
-                stdout = self._read_truncated_capture(stdout_file)
-                stderr = self._read_truncated_capture(stderr_file)
+            encoding = locale.getpreferredencoding(False) or "utf-8"
+            process = subprocess.Popen(
+                invocation["argv"],
+                cwd=str(work_dir),
+                env=self._build_process_env(invocation),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding=encoding,
+                errors="replace",
+                bufsize=1,
+            )
+
+            stdout_lines: List[str] = []
+            stderr_lines: List[str] = []
+            stdout_thread = threading.Thread(
+                target=self._collect_stream_lines,
+                args=(process.stdout, stdout_lines),
+                kwargs={"stream_name": "stdout", "emit_callback": self._emit_tool_progress},
+                daemon=True,
+                name="reverie-command-stdout",
+            )
+            stderr_thread = threading.Thread(
+                target=self._collect_stream_lines,
+                args=(process.stderr, stderr_lines),
+                kwargs={"stream_name": "stderr", "emit_callback": self._emit_tool_progress},
+                daemon=True,
+                name="reverie-command-stderr",
+            )
+            stdout_thread.start()
+            stderr_thread.start()
+            try:
+                returncode = process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                stdout_thread.join(timeout=0.5)
+                stderr_thread.join(timeout=0.5)
+                raise
+
+            stdout_thread.join(timeout=1.0)
+            stderr_thread.join(timeout=1.0)
+            stdout = self._truncate_output("".join(stdout_lines))
+            stderr = self._truncate_output("".join(stderr_lines))
         except subprocess.TimeoutExpired:
             duration_ms = int((time.monotonic() - start_time) * 1000)
             self.audit_command_event(
@@ -281,7 +317,7 @@ Examples:
                 "cwd": str(work_dir),
                 "timeout_seconds": timeout,
                 "duration_ms": duration_ms,
-                "exit_code": result.returncode,
+                "exit_code": returncode,
             }
         )
 
@@ -290,7 +326,7 @@ Examples:
             f"Working directory: {work_dir}",
             f"Executor: {invocation['executor']}",
             f"Policy: {invocation['policy']}",
-            f"Exit code: {result.returncode}",
+            f"Exit code: {returncode}",
             f"Duration: {duration_ms}ms",
         ]
         if stdout:
@@ -299,16 +335,60 @@ Examples:
             output_parts.extend(["", "--- STDERR ---", stderr])
 
         joined_output = "\n".join(output_parts)
-        if result.returncode == 0:
+        if returncode == 0:
             return ToolResult.ok(
                 joined_output,
                 data={
-                    "exit_code": result.returncode,
+                    "exit_code": returncode,
                     "success": True,
                     "duration_ms": duration_ms,
                 },
             )
-        return ToolResult.partial(joined_output, f"Command exited with code {result.returncode}")
+        return ToolResult.partial(joined_output, f"Command exited with code {returncode}")
+
+    def _emit_tool_progress(self, *, stream: str, text: str) -> None:
+        """Forward incremental command output to the live TUI when available."""
+        handler = self.context.get("ui_event_handler") if self.context else None
+        chunk = str(text or "")
+        if not callable(handler) or not chunk:
+            return
+
+        payload = {
+            "kind": "tool_progress",
+            "tool_call_id": str(self.context.get("active_tool_call_id", "") or ""),
+            "tool_name": str(self.context.get("active_tool_name", self.name) or self.name),
+            "stream": str(stream or "stdout").strip().lower() or "stdout",
+            "text": chunk,
+        }
+        try:
+            handler(payload)
+        except Exception:
+            pass
+
+    @classmethod
+    def _collect_stream_lines(
+        cls,
+        pipe: Any,
+        sink: List[str],
+        *,
+        stream_name: str,
+        emit_callback: Optional[Any] = None,
+    ) -> None:
+        """Read one subprocess pipe line-by-line without blocking the other stream."""
+        if pipe is None:
+            return
+        try:
+            for line in iter(pipe.readline, ""):
+                if not line:
+                    break
+                sink.append(line)
+                if callable(emit_callback):
+                    emit_callback(stream=stream_name, text=line)
+        finally:
+            try:
+                pipe.close()
+            except Exception:
+                pass
 
     def _build_invocation(self, command: str, work_dir: Path) -> Dict[str, Any]:
         tokens = self._tokenize(command)
@@ -322,8 +402,8 @@ Examples:
         self._validate_command(tokens, command, work_dir)
         self._validate_argument_tokens(tokens, work_dir)
 
-        if executable in self.POWERSHELL_WRAPPED_COMMANDS:
-            return self._build_powershell_alias_invocation(tokens)
+        if self._should_use_powershell_invocation(executable):
+            return self._build_powershell_invocation(tokens, original_command=command)
 
         env_overrides = self._build_dotnet_sandbox_env() if executable_lower in self.DOTNET_EXECUTABLES else {}
         return {
@@ -514,8 +594,17 @@ Examples:
             return self.SHELL_BLOCK_PATTERNS
         return ()
 
-    def _build_powershell_alias_invocation(self, tokens: List[str]) -> Dict[str, Any]:
-        ps_command = " ".join(self._quote_powershell_token(token) for token in tokens)
+    def _should_use_powershell_invocation(self, executable: str) -> bool:
+        if executable in self.POWERSHELL_WRAPPED_COMMANDS:
+            return True
+        return self._is_powershell_cmdlet(executable)
+
+    def _build_powershell_invocation(self, tokens: List[str], *, original_command: str) -> Dict[str, Any]:
+        ps_command = (
+            str(original_command or "").strip()
+            if self._requires_raw_powershell_command(tokens, original_command)
+            else " ".join(self._quote_powershell_token(token) for token in tokens)
+        )
         executable = "powershell.exe" if sys.platform == "win32" else "pwsh"
         return {
             "argv": [executable, "-NoProfile", "-Command", ps_command],
@@ -618,7 +707,14 @@ Examples:
         self._resolve_path_like_token(token, command_name=command_name, work_dir=work_dir)
 
     def _tokenize(self, command: str) -> List[str]:
-        return shlex.split(command, posix=(sys.platform != "win32"))
+        tokens = shlex.split(command, posix=(sys.platform != "win32"))
+        normalized: List[str] = []
+        for token in tokens:
+            text = str(token or "")
+            if len(text) >= 2 and text[0] == text[-1] and text[0] in {'"', "'"}:
+                text = text[1:-1]
+            normalized.append(text)
+        return normalized
 
     def _normalize_alias(self, tokens: List[str]) -> List[str]:
         if not tokens:
@@ -627,6 +723,18 @@ Examples:
         if not alias:
             return tokens
         return [alias, *tokens[1:]]
+
+    def _requires_raw_powershell_command(self, tokens: List[str], command: str) -> bool:
+        if any(token in self.POWERSHELL_META_TOKENS for token in tokens):
+            return True
+        command_text = str(command or "")
+        return any(marker in command_text for marker in ("|", ";", "&&", "||", ">", "<"))
+
+    def _is_powershell_cmdlet(self, token: str) -> bool:
+        text = str(token or "").strip()
+        if not text or self._looks_like_script_file(text) or self._is_absolute_path_token(text):
+            return False
+        return bool(self.POWERSHELL_CMDLET_RE.match(text))
 
     @staticmethod
     def _quote_powershell_token(token: str) -> str:

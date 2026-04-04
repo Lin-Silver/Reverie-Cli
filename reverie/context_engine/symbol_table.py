@@ -437,49 +437,76 @@ class SymbolTable:
         """
         import fnmatch
         
-        candidates = []
-        query_lower = str(query or "").strip().lower()
+        query_text = str(query or "").strip()
+        query_lower = query_text.lower()
         if not query_lower:
             return []
+        try:
+            limit_value = max(1, int(limit))
+        except (TypeError, ValueError):
+            limit_value = 999999
         file_pattern_text = str(file_pattern).strip() if file_pattern is not None else None
-        
-        for qname, symbol in self._symbols.items():
-            # Kind filter
+
+        candidate_scores: Dict[str, int] = {}
+
+        def eligible(symbol: Symbol) -> bool:
             if kinds and symbol.kind not in kinds:
-                continue
-            
-            # File pattern filter
+                return False
             if file_pattern_text and not fnmatch.fnmatch(symbol.file_path, file_pattern_text):
-                continue
-            
-            # Query matching
+                return False
+            return True
+
+        def record(qname: str, score: int) -> None:
+            symbol = self._symbols.get(qname)
+            if symbol is None or not eligible(symbol):
+                return
+            previous = candidate_scores.get(qname, 0)
+            if score > previous:
+                candidate_scores[qname] = score
+
+        for simple_name, qnames in self._name_index.items():
+            name_lower = simple_name.lower()
             score = 0
-            qname_lower = qname.lower()
-            name_lower = symbol.name.lower()
-            
-            # Exact name match
             if name_lower == query_lower:
                 score = 100
-            # Name starts with query
             elif name_lower.startswith(query_lower):
                 score = 80
-            # Query in name
             elif query_lower in name_lower:
                 score = 60
-            # Query in qualified name
-            elif query_lower in qname_lower:
-                score = 40
-            # Wildcard match
-            elif '*' in query_lower and fnmatch.fnmatch(qname_lower, query_lower):
-                score = 30
-            else:
+            elif "*" in query_lower and fnmatch.fnmatch(name_lower, query_lower):
+                score = 50
+            if score <= 0:
                 continue
-            
-            candidates.append((score, symbol))
-        
-        # Sort and return
-        candidates.sort(key=lambda x: x[0], reverse=True)
-        return [s for _, s in candidates]
+            for qname in qnames:
+                record(qname, score)
+
+        need_qname_fallback = "*" in query_lower or len(candidate_scores) < limit_value
+        if need_qname_fallback:
+            for qname, symbol in self._symbols.items():
+                if not eligible(symbol):
+                    continue
+                qname_lower = qname.lower()
+                score = 0
+                if qname_lower == query_lower:
+                    score = 70
+                elif qname_lower.startswith(query_lower):
+                    score = 55
+                elif query_lower in qname_lower:
+                    score = 40
+                elif "*" in query_lower and fnmatch.fnmatch(qname_lower, query_lower):
+                    score = 30
+                if score > 0:
+                    record(qname, score)
+
+        ranked_symbols = sorted(
+            (
+                (score, self._symbols[qname])
+                for qname, score in candidate_scores.items()
+                if qname in self._symbols
+            ),
+            key=lambda item: (-item[0], item[1].qualified_name),
+        )
+        return [symbol for _, symbol in ranked_symbols[:limit_value]]
     
     def __len__(self) -> int:
         return len(self._symbols)

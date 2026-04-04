@@ -14,6 +14,7 @@
 | [Development Guide](DEVELOPMENT.md) | Local setup, testing, packaging, and documentation maintenance rules |
 | [Reverie Engine User Guide](engine/reverie_engine_user_guide.md) | Built-in runtime architecture, content model, CLI workflow, AI authoring |
 | [Reverie-Gamer Modeling Guide](engine/reverie_gamer_modeling_pipeline.md) | Built-in Ashfox MCP integration for Reverie-Gamer, model workspace layout, import flow, and `/modeling` command usage |
+| [Reverie-Gamer 3D Roadmap](reverie_gamer_3d_game_generation_assessment.md) | Current capability assessment, upgrade path, and expected delivery windows for larger game-creation workflows |
 | [Changelog](changelog.md) | Release history and version notes |
 
 ## Source of Truth

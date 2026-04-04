@@ -12,6 +12,7 @@ import time
 import sys
 import threading
 import _thread
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -43,6 +44,8 @@ from ..config import (
     ModelConfig,
     Config,
     get_computer_controller_data_dir,
+    normalize_thinking_output_style,
+    normalize_tool_output_style,
     normalize_tti_models,
     resolve_tti_default_display_name,
 )
@@ -77,6 +80,7 @@ _THINKING_LIST_PREFIX_RE = re.compile(r"^(?:[-*]|\d+\.)\s+")
 _MARKDOWN_FENCE_RE = re.compile(r"^\s*(```+|~~~+)")
 _TABLE_ROW_RE = re.compile(r"^\s*\|(.+)\|\s*$")
 _TABLE_SEPARATOR_RE = re.compile(r"^\s*\|?\s*(:?-+:?)\s*(\|\s*(:?-+:?)\s*)+\|?\s*$")
+_TASK_CHECKLIST_LINE_RE = re.compile(r"^(?P<indent>\s*)\[(?P<state> |/|x|-)\]\s+(?P<name>.+?)\s*$")
 _TOOL_MARKUP_PREFIXES = (
     "[bold #ffb8d1]✧",
     "[bold #ff5252]",
@@ -84,6 +88,135 @@ _TOOL_MARKUP_PREFIXES = (
     "[#ba68c8]   │",
 )
 _STRONG_CLEAR_SEQUENCE = "\033[3J\033[2J\033[H"
+_TASK_STATE_BY_MARKER = {
+    " ": "NOT_STARTED",
+    "/": "IN_PROGRESS",
+    "x": "COMPLETED",
+    "-": "CANCELLED",
+}
+_TASK_COUNTER_FIELDS = ("NOT_STARTED", "IN_PROGRESS", "COMPLETED", "CANCELLED")
+
+
+def _task_artifact_paths(project_root: Path) -> tuple[Path, Path]:
+    """Return the canonical task JSON and checklist artifact paths."""
+    artifacts_dir = Path(project_root) / "artifacts"
+    return artifacts_dir / "task_list.json", artifacts_dir / "Tasks.md"
+
+
+def _load_task_entries_from_json(raw_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Hydrate ordered task entries from the persisted task metadata JSON."""
+    tasks_by_id: Dict[str, Dict[str, Any]] = {}
+    for item in raw_data.get("tasks", []) or []:
+        if not isinstance(item, dict):
+            continue
+        task_id = str(item.get("id", "") or "").strip()
+        if not task_id:
+            continue
+        tasks_by_id[task_id] = item
+
+    ordered: List[Dict[str, Any]] = []
+    visited: set[str] = set()
+
+    def walk(task_id: str, indent: int = 0) -> None:
+        if task_id in visited:
+            return
+        task = tasks_by_id.get(task_id)
+        if not task:
+            return
+
+        visited.add(task_id)
+        name = str(task.get("name", "") or "").strip() or task_id
+        state = str(task.get("state", "NOT_STARTED") or "NOT_STARTED").upper()
+        if state not in _TASK_COUNTER_FIELDS:
+            state = "NOT_STARTED"
+        ordered.append(
+            {
+                "id": task_id,
+                "name": name,
+                "state": state,
+                "indent": max(0, int(indent)),
+            }
+        )
+
+        for child_id in task.get("children", []) or []:
+            if isinstance(child_id, str):
+                walk(child_id, indent + 1)
+
+    for root_id in raw_data.get("root_tasks", []) or []:
+        if isinstance(root_id, str):
+            walk(root_id, 0)
+
+    for task_id, task in tasks_by_id.items():
+        if task_id in visited:
+            continue
+        fallback_indent = 0 if not task.get("parent_id") else 1
+        walk(task_id, fallback_indent)
+
+    return ordered
+
+
+def _load_task_entries_from_markdown(raw_text: str) -> List[Dict[str, Any]]:
+    """Fallback parser for checklist-only task artifacts."""
+    entries: List[Dict[str, Any]] = []
+    for raw_line in str(raw_text or "").splitlines():
+        match = _TASK_CHECKLIST_LINE_RE.match(raw_line)
+        if not match:
+            continue
+        indent_text = match.group("indent").replace("\t", "  ")
+        state = _TASK_STATE_BY_MARKER.get(match.group("state"), "NOT_STARTED")
+        entries.append(
+            {
+                "id": "",
+                "name": match.group("name").strip(),
+                "state": state,
+                "indent": max(0, len(indent_text) // 2),
+            }
+        )
+    return entries
+
+
+def _load_task_drawer_snapshot(project_root: Path, max_visible: int = 7) -> Dict[str, Any]:
+    """Build a compact task snapshot for the streaming todo drawer."""
+    json_path, markdown_path = _task_artifact_paths(project_root)
+
+    entries: List[Dict[str, Any]] = []
+    source = "empty"
+    source_path = ""
+
+    if json_path.exists():
+        source = "json"
+        source_path = str(json_path)
+        try:
+            raw_data = json.loads(json_path.read_text(encoding="utf-8"))
+            entries = _load_task_entries_from_json(raw_data)
+        except Exception:
+            entries = []
+
+    if not entries and markdown_path.exists():
+        source = "markdown"
+        source_path = str(markdown_path)
+        try:
+            entries = _load_task_entries_from_markdown(markdown_path.read_text(encoding="utf-8"))
+        except Exception:
+            entries = []
+
+    counts = {field: 0 for field in _TASK_COUNTER_FIELDS}
+    for entry in entries:
+        state = str(entry.get("state", "NOT_STARTED") or "NOT_STARTED").upper()
+        counts[state if state in counts else "NOT_STARTED"] += 1
+
+    visible_entries = entries[: max(0, int(max_visible or 0))]
+    return {
+        "source": source,
+        "source_path": source_path,
+        "total": len(entries),
+        "completed": counts["COMPLETED"],
+        "in_progress": counts["IN_PROGRESS"],
+        "cancelled": counts["CANCELLED"],
+        "not_started": counts["NOT_STARTED"],
+        "hidden": max(0, len(entries) - len(visible_entries)),
+        "tasks": visible_entries,
+    }
 
 
 def _find_trailing_incomplete_markdown_block_start(completed_lines: list[str]) -> int:
@@ -351,11 +484,18 @@ class ReverieInterface:
         self._status_line_cache_key = None
         self._status_line_cache_renderable = None
         self._status_line_cache_time = 0.0
+        self._task_drawer_visible = True
+        self._task_drawer_cache_key = None
+        self._task_drawer_cache_renderable = None
+        self._active_tool_details: Dict[str, Dict[str, Any]] = {}
+        self._active_tool_lock = threading.Lock()
         self._context_engine_ready = False
         self._indexing_in_progress = False
         self._git_integration_ready = False
         self._lsp_manager_ready = False
         self._runtime_scope = ""
+        self._assistant_render_started = False
+        self._assistant_blank_line_pending = False
 
     def _ensure_builtin_mcp_servers(self) -> None:
         """Ensure Reverie's built-in Ashfox MCP server entry exists."""
@@ -559,6 +699,43 @@ class ReverieInterface:
         if max_length <= 1:
             return text[:max_length]
         return f"{text[:max_length - 1]}…"
+
+    def _reset_assistant_render_state(self) -> None:
+        """Reset per-turn transcript rendering state for streamed assistant output."""
+        self._assistant_render_started = False
+        self._assistant_blank_line_pending = False
+
+    def _prepare_markdown_fragment_for_render(self, content: str) -> str:
+        """Normalize streamed markdown so blank lines stay intentional instead of noisy."""
+        text = str(content or "").replace("\r\n", "\n").replace("\r", "\n")
+        if not text:
+            return ""
+
+        text = re.sub(r"\n[ \t]*\n(?:[ \t]*\n)+", "\n\n", text)
+
+        leading_blank = text.startswith("\n")
+        trailing_blank = text.endswith("\n\n") or text == "\n"
+        text = text.strip("\n")
+
+        if not self._assistant_render_started:
+            leading_blank = False
+
+        if not text:
+            if (leading_blank or trailing_blank) and self._assistant_render_started:
+                self._assistant_blank_line_pending = True
+            return ""
+
+        if self._assistant_blank_line_pending:
+            text = f"\n\n{text}"
+            self._assistant_blank_line_pending = False
+        elif leading_blank:
+            text = f"\n\n{text}"
+
+        if trailing_blank:
+            self._assistant_blank_line_pending = True
+
+        self._assistant_render_started = True
+        return text
 
     def _format_compact_quantity(self, value: int) -> str:
         """Compact metric formatter for status surfaces."""
@@ -811,6 +988,7 @@ class ReverieInterface:
         buffer_text = str(snapshot.get("buffer", "") or "")
         is_paused = bool(snapshot.get("paused"))
         compact = max(int(getattr(self.console.size, "width", 0) or self.console.width or 0), 60) < 100
+        task_toggle_label = "Ctrl+T hides tasks" if self._task_drawer_visible else "Ctrl+T shows tasks"
         prompt = Text()
         prompt.append(f"{self.deco.SPARKLE_FILLED} ", style=self.theme.PINK_SOFT)
         prompt.append("Queue Follow-up", style=f"bold {self.theme.PURPLE_SOFT}")
@@ -821,20 +999,172 @@ class ReverieInterface:
             prompt.append("(input paused)", style=self.theme.TEXT_DIM)
         else:
             prompt.append("Type while the model is streaming", style=self.theme.TEXT_DIM)
-        if not compact:
-            prompt.append(f"  {self.deco.DOT_MEDIUM}  ", style=self.theme.TEXT_DIM)
-            prompt.append("Enter sends", style=self.theme.TEXT_SECONDARY)
+        prompt.append(f"  {self.deco.DOT_MEDIUM}  ", style=self.theme.TEXT_DIM)
+        prompt.append("Enter sends", style=self.theme.TEXT_SECONDARY)
+        prompt.append(f"  {self.deco.DOT_MEDIUM}  ", style=self.theme.TEXT_DIM)
+        prompt.append(
+            task_toggle_label if not compact else "Ctrl+T tasks",
+            style=self.theme.TEXT_SECONDARY if not compact else self.theme.TEXT_DIM,
+        )
         return prompt
+
+    def _build_task_drawer_cache_key(self) -> tuple[Any, ...]:
+        """Build a filesystem-aware cache key for the streaming task drawer."""
+        json_path, markdown_path = _task_artifact_paths(self.project_root)
+        try:
+            width_bucket = max(int(getattr(self.console.size, "width", 0) or self.console.width or 0), 60) // 8
+        except Exception:
+            width_bucket = 10
+
+        key_parts: List[Any] = [self._task_drawer_visible, width_bucket]
+        for path in (json_path, markdown_path):
+            if path.exists():
+                stat_result = path.stat()
+                key_parts.append((str(path), stat_result.st_mtime_ns, stat_result.st_size))
+            else:
+                key_parts.append((str(path), 0, 0))
+        return tuple(key_parts)
+
+    def _get_task_drawer(self):
+        """Return the cached task drawer renderable for streaming output."""
+        if not self._task_drawer_visible:
+            return None
+
+        cache_key = self._build_task_drawer_cache_key()
+        if cache_key == self._task_drawer_cache_key:
+            return self._task_drawer_cache_renderable
+
+        snapshot = _load_task_drawer_snapshot(self.project_root, max_visible=7)
+        renderable = None
+        if snapshot.get("source") != "empty" or int(snapshot.get("total", 0) or 0) > 0:
+            renderable = self.display.build_task_drawer(snapshot, toggle_hint="Ctrl+T to toggle")
+
+        self._task_drawer_cache_key = cache_key
+        self._task_drawer_cache_renderable = renderable
+        return renderable
+
+    def _apply_display_preferences(self, config: Optional[Config] = None) -> None:
+        """Sync persisted UI preferences onto the display layer."""
+        active_config = config or self.config_manager.load()
+        self.display.set_tool_output_style(
+            normalize_tool_output_style(getattr(active_config, "tool_output_style", "compact"))
+        )
+        self.display.set_thinking_output_style(
+            normalize_thinking_output_style(getattr(active_config, "thinking_output_style", "full"))
+        )
+
+    def _current_thinking_output_style(self) -> str:
+        """Resolve the active streamed-thinking display style."""
+        return normalize_thinking_output_style(getattr(self.display, "thinking_output_style", "full"))
+
+    def _upsert_active_tool(self, payload: Dict[str, Any]) -> None:
+        """Create or update one live tool surface entry."""
+        tool_call_id = str(payload.get("tool_call_id", "") or "").strip()
+        tool_name = str(payload.get("tool_name", "") or "tool").strip() or "tool"
+        key = tool_call_id or f"{tool_name}:{len(self._active_tool_details)}"
+        with self._active_tool_lock:
+            current = dict(self._active_tool_details.get(key, {}))
+            current.update(
+                {
+                    "tool_call_id": key,
+                    "tool_name": tool_name,
+                    "message": str(payload.get("message", current.get("message", "")) or "").strip(),
+                    "arguments": payload.get("arguments") if isinstance(payload.get("arguments"), dict) else current.get("arguments"),
+                    "stdout": str(current.get("stdout", "") or ""),
+                    "stderr": str(current.get("stderr", "") or ""),
+                }
+            )
+            self._active_tool_details[key] = current
+
+    def _append_active_tool_progress(self, payload: Dict[str, Any]) -> None:
+        """Append incremental stdout/stderr content to the live tool surface."""
+        tool_call_id = str(payload.get("tool_call_id", "") or "").strip()
+        stream_name = str(payload.get("stream", "stdout") or "stdout").strip().lower()
+        text = str(payload.get("text", "") or "")
+        if not text:
+            return
+
+        tool_name = str(payload.get("tool_name", "") or "tool").strip() or "tool"
+        key = tool_call_id or f"{tool_name}:live"
+        with self._active_tool_lock:
+            current = dict(self._active_tool_details.get(key, {}))
+            current.setdefault("tool_call_id", key)
+            current.setdefault("tool_name", tool_name)
+            current.setdefault("message", "")
+            current.setdefault("arguments", current.get("arguments"))
+            current["stdout"] = str(current.get("stdout", "") or "")
+            current["stderr"] = str(current.get("stderr", "") or "")
+            if stream_name == "stderr":
+                current["stderr"] += text
+            else:
+                current["stdout"] += text
+            self._active_tool_details[key] = current
+
+    def _clear_active_tool(self, tool_call_id: str) -> None:
+        """Remove one live tool surface entry after completion."""
+        key = str(tool_call_id or "").strip()
+        if not key:
+            return
+        with self._active_tool_lock:
+            self._active_tool_details.pop(key, None)
+
+    def _handle_stream_tool_event(self, event: Dict[str, Any]) -> None:
+        """Update live tool surfaces from streamed tool start/result events."""
+        event_type = str(event.get("event", "") or "").strip().lower()
+        if event_type == "tool_start":
+            self._upsert_active_tool(event)
+            self._refresh_streaming_footer()
+            return
+        if event_type == "tool_result":
+            self._clear_active_tool(str(event.get("tool_call_id", "") or ""))
+            self._refresh_streaming_footer()
+
+    def _get_live_tool_panel(self):
+        """Return the active tool details panel for the streaming footer."""
+        with self._active_tool_lock:
+            active_items = [dict(item) for item in self._active_tool_details.values()]
+        if not active_items:
+            return None
+        return self.display.build_live_tool_panel(active_items)
+
+    def _refresh_streaming_footer(self) -> None:
+        """Request a live footer refresh after local UI state changes."""
+        live = self._status_live
+        if live is None:
+            return
+        try:
+            live.update(self.streaming_footer, refresh=True)
+            return
+        except Exception:
+            pass
+        try:
+            live.refresh()
+        except Exception:
+            pass
+
+    def _toggle_task_drawer_visibility(self) -> None:
+        """Toggle the streaming task drawer and refresh the footer."""
+        self._task_drawer_visible = not self._task_drawer_visible
+        self._task_drawer_cache_key = None
+        self._task_drawer_cache_renderable = None
+        self._refresh_streaming_footer()
 
     def _get_streaming_footer(self):
         """Compose the live footer shown during streaming output."""
         renderables = []
         try:
             config = self.config_manager.load()
+            self._apply_display_preferences(config)
             if config.show_status_line:
                 renderables.append(self._get_status_line())
         except Exception:
             pass
+        live_tool_panel = self._get_live_tool_panel()
+        if live_tool_panel is not None:
+            renderables.append(live_tool_panel)
+        task_drawer = self._get_task_drawer()
+        if task_drawer is not None:
+            renderables.append(task_drawer)
         renderables.append(self._build_stream_input_prompt())
         return Group(*renderables)
 
@@ -887,6 +1217,9 @@ class ReverieInterface:
                     msvcrt.getwch()
                 except OSError:
                     pass
+                continue
+            if key == "\x14":
+                self._toggle_task_drawer_visibility()
                 continue
             if key == "\x1b":
                 state.request_interrupt()
@@ -964,6 +1297,10 @@ class ReverieInterface:
     def _handle_agent_ui_event(self, event: Dict[str, Any]) -> None:
         """Receive structured agent events and render them through the display layer."""
         if not isinstance(event, dict):
+            return
+        if str(event.get("kind", "") or "").strip().lower() == "tool_progress":
+            self._append_active_tool_progress(event)
+            self._refresh_streaming_footer()
             return
         self._show_activity_event(
             str(event.get("category", "") or "Activity"),
@@ -1056,12 +1393,16 @@ class ReverieInterface:
 
         self.current_task_start = time.time()
         config = self.config_manager.load()
+        self._apply_display_preferences(config)
         follow_up_message: Optional[str] = None
         draft_message: Optional[str] = None
         interrupted_by_user = False
         response_stream = None
         current_markdown_text = ""
         thinking_content = ""
+        with self._active_tool_lock:
+            self._active_tool_details.clear()
+        self._reset_assistant_render_state()
         response_model_name = getattr(config.active_model, "model_display_name", "Reverie")
         response_provider_label = self._resolve_provider_label(config)
         response_mode = config.mode
@@ -1201,7 +1542,8 @@ class ReverieInterface:
                             current_markdown_text = ""
                         ensure_response_header()
                         in_thinking_mode = True
-                        self.display.show_thinking_banner(response_model_name)
+                        if self._current_thinking_output_style() != "hidden":
+                            self.display.show_thinking_banner(response_model_name)
                         continue
                     
                     if chunk == THINKING_END_MARKER:
@@ -1210,8 +1552,6 @@ class ReverieInterface:
                             self._print_thinking_content(thinking_content)
                             thinking_content = ""
                         in_thinking_mode = False
-                        # Add a visual separator after thinking
-                        self.console.print()
                         continue
                     
                     # Handle thinking content
@@ -1231,6 +1571,7 @@ class ReverieInterface:
                             self._print_thinking_content(thinking_content)
                             thinking_content = ""
                         in_thinking_mode = False
+                        self._handle_stream_tool_event(decoded_event)
                         ensure_response_header()
                         if not self.display.show_stream_event(decoded_event):
                             self.console.print(chunk)
@@ -1284,6 +1625,8 @@ class ReverieInterface:
                 self._stream_input_state = None
                 footer_live.stop()
                 self._status_live = None
+                with self._active_tool_lock:
+                    self._active_tool_details.clear()
                 
         except KeyboardInterrupt:
             snapshot = self._snapshot_stream_input_state()
@@ -1396,7 +1739,7 @@ class ReverieInterface:
 
     def _flush_markdown_content(self, content: str, *, final: bool = False) -> None:
         """Render assistant markdown with a shared formatter for lower-latency streaming."""
-        text = str(content or "")
+        text = self._prepare_markdown_fragment_for_render(content)
         if not text:
             return
 
@@ -1409,11 +1752,32 @@ class ReverieInterface:
     
     def _print_thinking_content(self, content: str) -> None:
         """Helper method to print thinking content with proper formatting"""
-        for line in content.strip().split('\n'):
+        style = self._current_thinking_output_style()
+        if style == "hidden":
+            return
+
+        normalized = str(content or "").replace("\r\n", "\n").replace("\r", "\n")
+        lines = normalized.split("\n")
+        if lines and lines[-1] == "":
+            lines = lines[:-1]
+        for line in lines:
             self._render_thinking_line(line)
 
     def _render_thinking_line(self, raw_line: str) -> None:
         """Render one cleaned reasoning line without leaking raw markdown markers."""
+        style = self._current_thinking_output_style()
+        if style == "hidden":
+            return
+
+        if style == "full":
+            text = str(raw_line or "").replace("\r", "")
+            prefix = Text(f"{DECO.LINE_VERTICAL} ", style=self.theme.THINKING_DIM)
+            line = Text()
+            line.append_text(prefix)
+            line.append(text if text else " ", style=f"italic {self.theme.THINKING_SOFT}")
+            self.console.print(line)
+            return
+
         subject, description = parse_thinking_line(raw_line)
         if not subject and not description:
             return
@@ -1438,6 +1802,9 @@ class ReverieInterface:
         fragment: str,
     ) -> str:
         """Print only complete reasoning lines and keep the trailing fragment buffered."""
+        if self._current_thinking_output_style() == "hidden":
+            _, remainder = split_thinking_fragments(pending, fragment)
+            return remainder
         lines, remainder = split_thinking_fragments(pending, fragment)
         for line in lines:
             self._render_thinking_line(line)
@@ -1919,6 +2286,7 @@ class ReverieInterface:
             'current_task_start': self.current_task_start,
             'project_root': self.project_root,
             'reinit_agent': self._init_agent,
+            'apply_display_preferences': self._apply_display_preferences,
             'refresh_agent_prompt_guidance': self._refresh_agent_prompt_guidance,
             'ensure_context_engine': self.ensure_context_engine,
             'run_full_index': self._run_context_indexing_with_progress,

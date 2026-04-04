@@ -45,6 +45,24 @@ from .version import CONFIG_VERSION, __version__
 
 EXTERNAL_MODEL_SOURCES = ("qwencode", "geminicli", "codex", "nvidia")
 SUPPORTED_ACTIVE_MODEL_SOURCES = ("standard",) + EXTERNAL_MODEL_SOURCES
+SUPPORTED_TOOL_OUTPUT_STYLES = ("compact", "condensed", "full")
+SUPPORTED_THINKING_OUTPUT_STYLES = ("hidden", "compact", "full")
+
+
+def normalize_tool_output_style(value: Any, default: str = "compact") -> str:
+    """Normalize persisted tool-result display preference."""
+    candidate = str(value or "").strip().lower()
+    if candidate in SUPPORTED_TOOL_OUTPUT_STYLES:
+        return candidate
+    return default
+
+
+def normalize_thinking_output_style(value: Any, default: str = "full") -> str:
+    """Normalize persisted reasoning/think-trace display preference."""
+    candidate = str(value or "").strip().lower()
+    if candidate in SUPPORTED_THINKING_OUTPUT_STYLES:
+        return candidate
+    return default
 
 
 def _escape_invalid_json_string_control_chars(raw: str) -> tuple[str, bool]:
@@ -480,6 +498,8 @@ class Config:
     stream_responses: bool = True
     auto_index: bool = True
     show_status_line: bool = True
+    tool_output_style: str = "compact"
+    thinking_output_style: str = "full"
     config_version: str = CONFIG_VERSION  # Config file version for migration
     
     # Workspace isolation settings
@@ -570,6 +590,8 @@ class Config:
             'stream_responses': self.stream_responses,
             'auto_index': self.auto_index,
             'show_status_line': self.show_status_line,
+            'tool_output_style': normalize_tool_output_style(self.tool_output_style),
+            'thinking_output_style': normalize_thinking_output_style(self.thinking_output_style),
             'writer_mode': normalize_writer_mode_config(self.writer_mode),
             'gamer_mode': normalize_gamer_mode_config(self.gamer_mode),
             'config_version': self.config_version,
@@ -631,6 +653,8 @@ class Config:
             stream_responses=data.get('stream_responses', True),
             auto_index=data.get('auto_index', True),
             show_status_line=data.get('show_status_line', True),
+            tool_output_style=normalize_tool_output_style(data.get('tool_output_style', 'compact')),
+            thinking_output_style=normalize_thinking_output_style(data.get('thinking_output_style', 'full')),
             writer_mode=normalize_writer_mode_config(data.get('writer_mode', {})),
             gamer_mode=normalize_gamer_mode_config(data.get('gamer_mode', {})),
             config_version=data.get('config_version', CONFIG_VERSION),
@@ -1198,6 +1222,16 @@ class ConfigManager:
             if field not in data:
                 needs_update = True
                 break
+
+        if 'tool_output_style' not in data:
+            needs_update = True
+        elif normalize_tool_output_style(data.get('tool_output_style', 'compact')) != str(data.get('tool_output_style', '')).strip().lower():
+            needs_update = True
+
+        if 'thinking_output_style' not in data:
+            needs_update = True
+        elif normalize_thinking_output_style(data.get('thinking_output_style', 'full')) != str(data.get('thinking_output_style', '')).strip().lower():
+            needs_update = True
 
         # Check if active_model_source field is missing/invalid
         active_model_source = str(data.get('active_model_source', '')).strip().lower()

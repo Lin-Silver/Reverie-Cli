@@ -77,6 +77,8 @@ Common top-level keys:
   "stream_responses": true,
   "auto_index": true,
   "show_status_line": true,
+  "tool_output_style": "compact",
+  "thinking_output_style": "full",
   "use_workspace_config": false,
   "text_to_image": {},
   "qwencode": {},
@@ -224,6 +226,8 @@ Useful non-provider keys:
 - `stream_responses`
 - `auto_index`
 - `show_status_line`
+- `tool_output_style`
+- `thinking_output_style`
 - `api_max_retries`
 - `api_initial_backoff`
 - `api_timeout`

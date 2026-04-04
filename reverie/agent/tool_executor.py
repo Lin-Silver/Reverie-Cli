@@ -524,7 +524,7 @@ class ToolExecutor:
 
         return normalized
     
-    def execute(self, tool_name: str, arguments: Dict[str, Any]) -> ToolResult:
+    def execute(self, tool_name: str, arguments: Dict[str, Any], tool_call_id: str = "") -> ToolResult:
         """
         Execute a tool with given arguments.
         
@@ -548,11 +548,22 @@ class ToolExecutor:
         if validation_error:
             return ToolResult.fail(f"Parameter validation failed: {validation_error}")
         
+        previous_tool_name = self.context.get("active_tool_name")
+        previous_tool_args = self.context.get("active_tool_arguments")
+        previous_tool_call_id = self.context.get("active_tool_call_id")
+        self.context["active_tool_name"] = tool_name
+        self.context["active_tool_arguments"] = dict(normalized_arguments)
+        self.context["active_tool_call_id"] = str(tool_call_id or "")
+
         try:
             result = tool.execute(**normalized_arguments)
             return self._apply_result_budget(tool, result)
         except Exception as e:
             return ToolResult.fail(f"Tool execution error: {str(e)}")
+        finally:
+            self.context["active_tool_name"] = previous_tool_name
+            self.context["active_tool_arguments"] = previous_tool_args
+            self.context["active_tool_call_id"] = previous_tool_call_id
     
     def get_tool_schemas(self, mode: str = "reverie") -> List[Dict]:
         """

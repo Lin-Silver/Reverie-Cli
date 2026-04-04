@@ -11,6 +11,28 @@ Reverie CLI is a context-engine-powered AI coding assistant for large repositori
 - **Workspace Safety** — file-access sandboxing, audited command execution, archive extraction hardening
 - **Game Tooling** — built-in `Reverie Engine` runtime, a prompt-to-vertical-slice Reverie-Gamer workflow, and a built-in Ashfox MCP modeling flow that works with manual Blockbench + Ashfox plugin installs
 
+## Latest Update
+
+Current repository version: `v2.1.21`.
+
+- Streaming and tool execution were refactored for much faster simple-task handling, including shared SSE parsing, cleaner provider streaming state, and better Windows command execution.
+- The terminal UI now supports a live tool-output panel, a `Ctrl+T` task drawer, more compact tool-result cards, and less noisy streaming formatting.
+- Settings gained `/settings`, `/setting tool-output ...`, and `/setting thinking ...`, with automatic `config.json` upgrades for the new display preferences.
+
+For the full release notes, see [docs/changelog.md](docs/changelog.md).
+
+## Reverie-Gamer Roadmap
+
+Reverie-Gamer is currently aimed at: `prompt -> blueprint -> scaffold -> first playable vertical slice -> iterative expansion`.
+
+Current delivery estimate as of **2026-04-04**:
+
+- **2026-04-11 to 2026-04-18**: next focused update for playable-slice stability and prompt-to-project flow polish
+- **Late April 2026**: stronger asset-pipeline and validation-loop integration
+- **May 2026**: deeper long-running project continuation and richer generated world/runtime expansion
+
+The longer-term assessment lives in [docs/reverie_gamer_3d_game_generation_assessment.md](docs/reverie_gamer_3d_game_generation_assessment.md).
+
 ## Installation
 
 Python `3.10` to `3.14` is supported. `3.10` or `3.11` is the safest default for local development.
@@ -128,6 +150,7 @@ The packaged `dist/reverie.exe` now includes the built-in Reverie-Gamer runtime 
 - [Development Guide](docs/DEVELOPMENT.md)
 - [Reverie Engine User Guide](docs/engine/reverie_engine_user_guide.md)
 - [Reverie-Gamer Modeling Guide](docs/engine/reverie_gamer_modeling_pipeline.md)
+- [Reverie-Gamer 3D Roadmap](docs/reverie_gamer_3d_game_generation_assessment.md)
 - [Changelog](docs/changelog.md)
 
 ## License

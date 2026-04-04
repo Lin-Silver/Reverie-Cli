@@ -78,12 +78,12 @@ class BaseParser(ABC):
     
     def read_file(self, file_path: Path) -> Optional[str]:
         """Read file content with encoding detection"""
-        encodings = ['utf-8', 'utf-8-sig', 'latin-1', 'cp1252']
+        encodings = ['utf-8-sig', 'utf-8', 'latin-1', 'cp1252']
         
         for encoding in encodings:
             try:
                 with open(file_path, 'r', encoding=encoding) as f:
-                    return f.read()
+                    return f.read().lstrip('\ufeff')
             except UnicodeDecodeError:
                 continue
             except Exception:

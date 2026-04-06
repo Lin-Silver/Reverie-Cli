@@ -12,10 +12,21 @@
 | [Configuration Guide](CONFIGURATION.md) | Runtime storage layout, profile selection, model sources, TTI config, Atlas settings |
 | [CLI Command Reference](CLI_COMMANDS.md) | Full command catalog: core, models, providers, tools, settings, sessions, game workflow |
 | [Development Guide](DEVELOPMENT.md) | Local setup, testing, packaging, and documentation maintenance rules |
-| [Reverie Engine User Guide](engine/reverie_engine_user_guide.md) | Built-in runtime architecture, content model, CLI workflow, AI authoring |
-| [Reverie-Gamer Modeling Guide](engine/reverie_gamer_modeling_pipeline.md) | Built-in Ashfox MCP integration for Reverie-Gamer, model workspace layout, import flow, and `/modeling` command usage |
-| [Reverie-Gamer 3D Roadmap](reverie_gamer_3d_game_generation_assessment.md) | Current capability assessment, upgrade path, and expected delivery windows for larger game-creation workflows |
 | [Changelog](changelog.md) | Release history and version notes |
+
+## Gamer and Engine Guides
+
+| Document | Description |
+| --- | --- |
+| [Reverie Engine User Guide](engine/reverie_engine_user_guide.md) | Built-in runtime architecture, content model, CLI workflow, and authoring expectations |
+| [Reverie-Gamer Modeling Guide](engine/reverie_gamer_modeling_pipeline.md) | Built-in Ashfox MCP integration, model workspace layout, import flow, and `/modeling` usage |
+| [Reverie-Gamer Upgrade Plan](reverie_gamer_3d_game_generation_assessment.md) | Next-stage roadmap for evolving Gamer from vertical-slice generation into long-running 3D game production |
+
+## Documentation Structure
+
+- Top-level `docs/*.md` files are the canonical product, configuration, developer, and roadmap documents.
+- `docs/engine/` contains runtime-specific guides for Reverie Engine and Gamer production tooling.
+- The old top-level `docs/reverie_modeling_pipeline.md` path has been retired in favor of `docs/engine/reverie_gamer_modeling_pipeline.md`.
 
 ## Source of Truth
 

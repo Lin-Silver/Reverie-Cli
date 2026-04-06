@@ -535,6 +535,7 @@ Switch between Reverie's non-desktop-control modes when another workflow is clea
 - Another mode has a meaningfully better workflow or tool surface
 - A phased mode is better for the current job than generic execution
 - The task would benefit from a specialized planning or verification loop before more implementation work
+- The current specialist mode is heavier than the request, and a focused task should be downgraded back to `reverie`
 
 **Never use this tool**:
 - To switch into Computer Controller mode
@@ -851,7 +852,8 @@ def _get_mode_tool_workflow(mode: str) -> str:
 
 - Prioritize narrative or document continuity first, then use generic tools when file work is required.
 - Use file and retrieval tools to keep manuscripts, notes, and lore consistent.
-- Ask for clarification when intent, tone, or canon constraints are ambiguous.
+- Use `ask_clarification` early when tone, genre, audience, canon, POV, tense, or length expectations are ambiguous.
+- Use `userInput` when you need explicit outline approval or writing-direction confirmation from the user.
 """
 
     if normalized == "reverie-atlas":
@@ -870,6 +872,7 @@ def _get_mode_tool_workflow(mode: str) -> str:
 - Treat `continue` or similar user follow-ups as a directive to advance the next unfinished slice unless the user explicitly asked for a status update.
 - Before any final-style summary, run `atlas_delivery_orchestrator(action="assess_completion")` and keep going if the contract is still open.
 - Before any risky long-running slice, record the delivery state so Atlas can resume cleanly if automatic rotation occurs.
+- If the request is a simple, bounded implementation task that does not benefit from Atlas's document contract, switch to `reverie` proactively instead of keeping Atlas in the lead.
 - If the task becomes primarily game design, gameplay systems, runtime work, content pipelines, balance work, or playtest iteration, switch to `reverie-gamer` proactively.
         """
 

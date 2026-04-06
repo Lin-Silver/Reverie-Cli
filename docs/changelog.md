@@ -1,3 +1,35 @@
+## Unreleased
+
+### CLI and Prompt Execution
+
+* Added one-shot prompt execution through `reverie -p "<task>"`, optional `--mode`, and packaged `Reverie.exe -p "<task>"`.
+* Added headless prompt-mode report output support so non-interactive runs can persist a structured execution report.
+* Improved packaged Windows execution so the current `dist/reverie.exe` build can run the new one-shot path directly.
+
+### Mode Behavior
+
+* Updated `Reverie-Atlas` so obviously simple Tier 1 tasks should switch back to base `Reverie` instead of forcing the full document-driven workflow.
+* Updated `Writer` so it treats style, tone, audience, length, point of view, tense, and similar brief details as first-class inputs and prefers asking the user before expanding into long-form creative output.
+* Added one-shot follow-up handling for `Spec-Driven` and `Writer` so non-interactive runs can still finish more cleanly without stalling on avoidable confirmation loops.
+
+### Runtime and Config
+
+* Added a more forgiving NVIDIA config fallback for computer-control environments that already have local model/runtime settings.
+* Tightened prompt-mode output handling so sanitized headless runs do not leak internal thinking markers.
+
+### Tests
+
+* Added prompt-mode coverage in `tests/test_batch_prompt_mode.py`.
+* Expanded prompt-upgrade tests around Atlas downgrade behavior and Writer brief-calibration behavior.
+
+### Docs
+
+* Cleaned up the documentation index and retired the old top-level `docs/reverie_modeling_pipeline.md` path in favor of `docs/engine/reverie_gamer_modeling_pipeline.md`.
+* Replaced the previous Gamer assessment note with a new upgrade roadmap focused on the next production-stage plan for large 3D game workflows.
+* Updated the root README and Chinese README to document prompt mode, current roadmap priorities, and the current Gamer documentation structure.
+
+---
+
 ## Reverie CLI v2.1.21 - TUI Performance, Streaming Controls, and Settings Upgrade
 
 **Release Date:** 2026-04-04

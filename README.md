@@ -13,25 +13,27 @@ Reverie CLI is a context-engine-powered AI coding assistant for large repositori
 
 ## Latest Update
 
-Current repository version: `v2.1.21`.
+Current stable repository version: `v2.1.21`.
 
-- Streaming and tool execution were refactored for much faster simple-task handling, including shared SSE parsing, cleaner provider streaming state, and better Windows command execution.
-- The terminal UI now supports a live tool-output panel, a `Ctrl+T` task drawer, more compact tool-result cards, and less noisy streaming formatting.
-- Settings gained `/settings`, `/setting tool-output ...`, and `/setting thinking ...`, with automatic `config.json` upgrades for the new display preferences.
+- Recent unreleased work adds one-shot prompt execution through `reverie -p "<task>"`, `--mode`, and packaged `Reverie.exe -p "<task>"`.
+- `Reverie-Atlas` now downgrades simple Tier 1 tasks back to base `Reverie`, and `Writer` now asks for missing style/brief details more deliberately before long-form generation.
+- The docs were cleaned up around the engine/gamer workflow, and the old Gamer assessment note was replaced by a next-stage upgrade roadmap.
 
 For the full release notes, see [docs/changelog.md](docs/changelog.md).
 
 ## Reverie-Gamer Roadmap
 
-Reverie-Gamer is currently aimed at: `prompt -> blueprint -> scaffold -> first playable vertical slice -> iterative expansion`.
+Reverie-Gamer is currently aimed at:
 
-Current delivery estimate as of **2026-04-04**:
+`one prompt -> structured request -> blueprint -> runtime-aware project foundation -> verified playable vertical slice -> iterative expansion`
 
-- **2026-04-11 to 2026-04-18**: next focused update for playable-slice stability and prompt-to-project flow polish
-- **Late April 2026**: stronger asset-pipeline and validation-loop integration
-- **May 2026**: deeper long-running project continuation and richer generated world/runtime expansion
+Current strategic rollout as of **2026-04-06**:
 
-The longer-term assessment lives in [docs/reverie_gamer_3d_game_generation_assessment.md](docs/reverie_gamer_3d_game_generation_assessment.md).
+- **2026-04-06 to 2026-04-20**: project-program compiler outputs, milestone planning, and stronger artifact generation from a single prompt
+- **2026-04-20 to 2026-05-11**: asset-pipeline automation, gameplay-system packet upgrades, and runtime delivery polish
+- **2026-05-11 to 2026-06-08**: world-scale expansion, autonomous continuation, and richer validation loops for longer-running 3D projects
+
+The current upgrade plan lives in [docs/reverie_gamer_3d_game_generation_assessment.md](docs/reverie_gamer_3d_game_generation_assessment.md).
 
 ## Installation
 
@@ -62,8 +64,12 @@ reverie                      # launch in current directory
 reverie /path/to/project     # launch targeting a specific project
 reverie --index-only         # build index and exit
 reverie --no-index           # skip indexing on startup
+reverie -p "fix failing tests"   # run one prompt non-interactively and exit
+reverie /path/to/project -p "add a health check" --mode reverie-atlas
 reverie --version            # print version
 ```
+
+For the packaged Windows build, the same one-shot flow works with `dist\reverie.exe -p "<task>"`. On Windows paths and executable names are case-insensitive, so `Reverie.exe -p "<task>"` works the same way.
 
 On first run, configure at least one model source. Reverie supports:
 
@@ -115,6 +121,10 @@ reverie/
 ├── agent/                   # agent prompts, tool execution, orchestration
 ├── cli/                     # command handling, TUI, display helpers
 ├── context_engine/          # indexing, retrieval, semantic analysis, graph data
+├── gamer/                   # Gamer production pipeline and runtime generation
+│   ├── runtime_adapters/    # built-in runtime targets such as Godot / Reverie Engine / O3DE
+│   ├── system_generators/   # combat, quest, progression, save/load, and world packets
+│   └── verification/        # slice scoring and quality-gate helpers
 ├── session/                 # sessions, checkpoints, rollback, archives, memory
 ├── tools/                   # tool implementations exposed to the agent
 ├── engine/                  # canonical public built-in engine API
@@ -150,7 +160,7 @@ The packaged `dist/reverie.exe` now includes the built-in Reverie-Gamer runtime 
 - [Development Guide](docs/DEVELOPMENT.md)
 - [Reverie Engine User Guide](docs/engine/reverie_engine_user_guide.md)
 - [Reverie-Gamer Modeling Guide](docs/engine/reverie_gamer_modeling_pipeline.md)
-- [Reverie-Gamer 3D Roadmap](docs/reverie_gamer_3d_game_generation_assessment.md)
+- [Reverie-Gamer Upgrade Plan](docs/reverie_gamer_3d_game_generation_assessment.md)
 - [Changelog](docs/changelog.md)
 
 ## License

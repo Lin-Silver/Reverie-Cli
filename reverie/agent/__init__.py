@@ -10,6 +10,7 @@ The AI Agent that orchestrates tool usage and conversation:
 
 from .agent import (
     ReverieAgent,
+    HIDDEN_STREAM_TOKEN,
     THINKING_START_MARKER,
     THINKING_END_MARKER,
     STREAM_EVENT_MARKER,
@@ -21,6 +22,7 @@ from .tool_executor import ToolExecutor
 
 __all__ = [
     'ReverieAgent',
+    'HIDDEN_STREAM_TOKEN',
     'THINKING_START_MARKER',
     'THINKING_END_MARKER',
     'STREAM_EVENT_MARKER',

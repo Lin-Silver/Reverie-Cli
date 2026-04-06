@@ -38,7 +38,9 @@ from .nvidia import (
     build_nvidia_computer_controller_runtime_model_data,
     build_nvidia_runtime_model_data,
     default_nvidia_config,
+    is_nvidia_api_url,
     normalize_nvidia_config,
+    resolve_nvidia_api_key,
 )
 from .modes import normalize_mode
 from .version import CONFIG_VERSION, __version__
@@ -524,13 +526,30 @@ class Config:
 
     # Gamer mode specific settings
     gamer_mode: Dict[str, Any] = field(default_factory=default_gamer_mode_config)
+
+    def _resolved_nvidia_config(self) -> Dict[str, Any]:
+        """Return NVIDIA config augmented with fallback credentials from standard models."""
+        cfg = normalize_nvidia_config(self.nvidia)
+        if resolve_nvidia_api_key(cfg):
+            return cfg
+
+        for model in self.models:
+            if not isinstance(model, ModelConfig):
+                continue
+            api_key = str(getattr(model, "api_key", "") or "").strip()
+            base_url = str(getattr(model, "base_url", "") or "").strip()
+            if api_key and is_nvidia_api_url(base_url):
+                cfg["api_key"] = api_key
+                break
+        return cfg
     
     @property
     def active_model(self) -> Optional[ModelConfig]:
         source = str(self.active_model_source).lower()
+        runtime_nvidia_config = self._resolved_nvidia_config()
 
         if normalize_mode(self.mode) == "computer-controller":
-            runtime_nvidia_model = build_nvidia_computer_controller_runtime_model_data(self.nvidia)
+            runtime_nvidia_model = build_nvidia_computer_controller_runtime_model_data(runtime_nvidia_config)
             if runtime_nvidia_model:
                 return ModelConfig.from_dict(runtime_nvidia_model)
             return None
@@ -552,7 +571,7 @@ class Config:
                 return ModelConfig.from_dict(runtime_codex_model)
 
         if source == "nvidia":
-            runtime_nvidia_model = build_nvidia_runtime_model_data(self.nvidia)
+            runtime_nvidia_model = build_nvidia_runtime_model_data(runtime_nvidia_config)
             if runtime_nvidia_model:
                 return ModelConfig.from_dict(runtime_nvidia_model)
 

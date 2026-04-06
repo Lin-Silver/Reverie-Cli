@@ -14,6 +14,7 @@ import threading
 import _thread
 import json
 import re
+from datetime import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -57,6 +58,7 @@ from ..skills_manager import SkillsManager
 from ..session import SessionManager
 from ..agent import (
     ReverieAgent,
+    HIDDEN_STREAM_TOKEN,
     STREAM_EVENT_MARKER,
     THINKING_START_MARKER,
     THINKING_END_MARKER,
@@ -81,6 +83,10 @@ _MARKDOWN_FENCE_RE = re.compile(r"^\s*(```+|~~~+)")
 _TABLE_ROW_RE = re.compile(r"^\s*\|(.+)\|\s*$")
 _TABLE_SEPARATOR_RE = re.compile(r"^\s*\|?\s*(:?-+:?)\s*(\|\s*(:?-+:?)\s*)+\|?\s*$")
 _TASK_CHECKLIST_LINE_RE = re.compile(r"^(?P<indent>\s*)\[(?P<state> |/|x|-)\]\s+(?P<name>.+?)\s*$")
+_PROMPT_APPROVAL_RE = re.compile(
+    r"(?is)\b(approve|approval|proceed to|should i proceed|would you like any adjustments|provide feedback)\b"
+)
+_PROMPT_FILE_REFERENCE_RE = re.compile(r"(?<!\w)([A-Za-z0-9_./\\-]+\.[A-Za-z0-9_-]+)")
 _TOOL_MARKUP_PREFIXES = (
     "[bold #ffb8d1]✧",
     "[bold #ff5252]",
@@ -363,6 +369,153 @@ def _configure_stdio_for_terminal_output() -> None:
             pass
 
 
+def _sanitize_prompt_output_text(output_text: str, thinking_text: str) -> str:
+    """Strip leaked `<think>` blocks or duplicated reasoning from batch prompt output."""
+    cleaned = str(output_text or "").strip()
+    if not cleaned:
+        return ""
+
+    cleaned = re.sub(r"(?is)<think>.*?</think>", "", cleaned).strip()
+
+    normalized_thinking = str(thinking_text or "").replace(HIDDEN_STREAM_TOKEN, "").strip()
+    if normalized_thinking and cleaned.startswith(normalized_thinking):
+        cleaned = cleaned[len(normalized_thinking):].lstrip()
+
+    if cleaned.lower().startswith("</think>"):
+        cleaned = cleaned[len("</think>"):].lstrip()
+    elif "</think>" in cleaned:
+        tail = cleaned.rsplit("</think>", 1)[-1].strip()
+        if tail:
+            cleaned = tail
+
+    return cleaned.strip()
+
+
+def _build_batch_prompt_rules() -> str:
+    """Runtime-only rules for one-shot `-p/--prompt` execution."""
+    return """
+## Non-Interactive Prompt Mode
+- This run was started through Reverie's one-shot prompt mode. There will be no follow-up turn.
+- Treat the user's prompt as authorization to complete the requested deliverable in one pass whenever it is feasible and safe.
+- Do not pause for approvals, confirmation checkpoints, or review requests that would normally require a second turn.
+- Avoid `userInput` and similar follow-up tools unless the task is impossible or unsafe without a clarifying answer.
+- For document-driven modes, continue through the requested document chain inside this same run when the prompt already authorizes the work.
+- Keep the final user-facing response compact. Prefer a short outcome-and-verification summary over long file inventories or repeated artifact descriptions.
+- For small bounded tasks, avoid extra files, checklists, or narrative detours beyond what the request needs.
+""".strip()
+
+
+def _prompt_requests_followup_approval(output_text: str) -> bool:
+    """Heuristic for prompt-mode responses that stop for approval instead of finishing."""
+    return bool(_PROMPT_APPROVAL_RE.search(str(output_text or "")))
+
+
+def _extract_requested_file_names(prompt_text: str) -> List[str]:
+    """Extract file-like tokens from the original user prompt."""
+    seen: set[str] = set()
+    requested: List[str] = []
+    for match in _PROMPT_FILE_REFERENCE_RE.findall(str(prompt_text or "")):
+        normalized = str(match).strip().strip('"\'.')
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        requested.append(normalized)
+    return requested
+
+
+def _latest_spec_dir(project_root: Path) -> Optional[Path]:
+    """Return the newest spec directory under artifacts/specs, if any."""
+    specs_root = Path(project_root) / "artifacts" / "specs"
+    if not specs_root.exists():
+        return None
+
+    candidates = []
+    for path in specs_root.iterdir():
+        if not path.is_dir():
+            continue
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            mtime = 0.0
+        candidates.append((mtime, path))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return candidates[0][1]
+
+
+def _missing_spec_documents(project_root: Path) -> List[str]:
+    """Return missing spec artifact names for spec-driven prompt mode."""
+    required = ["requirements.md", "design.md", "tasks.md"]
+    spec_dir = _latest_spec_dir(project_root)
+    if spec_dir is None:
+        return required
+    return [name for name in required if not (spec_dir / name).exists()]
+
+
+def _missing_prompt_requested_files(project_root: Path, prompt_text: str) -> List[str]:
+    """Return prompt-mentioned files that are still missing from disk."""
+    missing: List[str] = []
+    for name in _extract_requested_file_names(prompt_text):
+        if not (Path(project_root) / Path(name)).exists():
+            missing.append(name)
+    return missing
+
+
+def _build_prompt_followup_message(
+    mode: str,
+    original_prompt: str,
+    latest_output: str,
+    project_root: Path,
+) -> Optional[str]:
+    """Generate an internal approval/continue turn for one-shot prompt mode when a mode stalls."""
+    normalized_mode = normalize_mode(mode)
+    output_text = str(latest_output or "").strip()
+
+    if normalized_mode == "spec-driven":
+        missing_docs = _missing_spec_documents(project_root)
+        if not missing_docs:
+            return None
+        missing_text = ", ".join(missing_docs)
+        return (
+            "Approved. Continue through the remaining spec phases right now and finish the full spec package in this same run. "
+            f"Create any missing documents ({missing_text}) under artifacts/specs. "
+            "Stay in spec-only scope, do not implement code, and do not ask for more approvals unless a real safety blocker exists."
+        )
+
+    if normalized_mode == "writer":
+        missing_files = _missing_prompt_requested_files(project_root, original_prompt)
+        if not missing_files and not _prompt_requests_followup_approval(output_text):
+            return None
+        if missing_files:
+            missing_text = ", ".join(missing_files)
+            deliverable_text = f"create the requested files on disk ({missing_text})"
+        else:
+            deliverable_text = "create the remaining writing deliverables on disk"
+        scope_hint = ""
+        lowered_prompt = str(original_prompt or "").lower()
+        if "short" in lowered_prompt or "sample" in lowered_prompt:
+            scope_hint = (
+                " Keep this to a short-sample scale: make the main chapter substantial but bounded, "
+                "not novel-length, and keep the outline and continuity note concise."
+            )
+        return (
+            "Approved. Continue now and "
+            f"{deliverable_text}. "
+            "Do not stop at an outline or chat-only draft, and do not ask for more approvals. "
+            f"{scope_hint}"
+            "Finish with a short completion summary after the files are written."
+        )
+
+    if _prompt_requests_followup_approval(output_text):
+        return (
+            "Approved. Continue and complete the requested deliverable in this same run. "
+            "Do not ask for more approvals unless a real safety blocker exists."
+        )
+
+    return None
+
+
 class StatusLine:
     """Dynamic status line that updates on every render with dreamy styling"""
     def __init__(self, interface):
@@ -427,6 +580,51 @@ class StreamInputState:
             self.active = False
 
 
+@dataclass
+class PromptRunResult:
+    """Structured result for one non-interactive prompt execution."""
+
+    success: bool
+    prompt: str
+    output_text: str
+    mode: str
+    project_root: str
+    model_display_name: str = ""
+    provider_label: str = ""
+    session_id: str = ""
+    session_name: str = ""
+    started_at: str = ""
+    ended_at: str = ""
+    duration_seconds: float = 0.0
+    thinking_text: str = ""
+    error: str = ""
+    context_engine_initialized: bool = False
+    auto_followup_count: int = 0
+    activity_events: List[Dict[str, Any]] = field(default_factory=list)
+    ui_events: List[Dict[str, Any]] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "success": self.success,
+            "prompt": self.prompt,
+            "output_text": self.output_text,
+            "mode": self.mode,
+            "project_root": self.project_root,
+            "model_display_name": self.model_display_name,
+            "provider_label": self.provider_label,
+            "session_id": self.session_id,
+            "session_name": self.session_name,
+            "started_at": self.started_at,
+            "ended_at": self.ended_at,
+            "duration_seconds": self.duration_seconds,
+            "thinking_text": self.thinking_text,
+            "error": self.error,
+            "context_engine_initialized": self.context_engine_initialized,
+            "activity_events": list(self.activity_events),
+            "ui_events": list(self.ui_events),
+        }
+
+
 class StreamingFooter:
     """Dynamic footer shown while the model is actively streaming."""
 
@@ -440,13 +638,16 @@ class StreamingFooter:
 class ReverieInterface:
     """Main interactive interface for Reverie Cli with Dreamscape theme"""
     
-    def __init__(self, project_root: Path):
+    def __init__(self, project_root: Path, *, headless: bool = False):
         self.project_root = project_root
+        self.headless = bool(headless)
         _configure_stdio_for_terminal_output()
-        self.console = Console(width=None, force_terminal=True)  # Auto-detect width and force terminal mode
+        self.console = Console(width=None, force_terminal=not self.headless)
         self.display = DisplayComponents(self.console)
         self.theme = THEME
         self.deco = DECO
+        self._runtime_config_override: Optional[Config] = None
+        self._captured_activity_events: List[Dict[str, Any]] = []
         
         # Initialize managers
         self.config_manager = ConfigManager(project_root)
@@ -497,6 +698,16 @@ class ReverieInterface:
         self._assistant_render_started = False
         self._assistant_blank_line_pending = False
 
+    def _clone_config(self, config: Config) -> Config:
+        """Return a deep-ish copy of config through the canonical serializer."""
+        return Config.from_dict(config.to_dict())
+
+    def _load_active_runtime_config(self) -> Config:
+        """Load the config currently in effect for this runtime."""
+        if self._runtime_config_override is not None:
+            return self._clone_config(self._runtime_config_override)
+        return self.config_manager.load()
+
     def _ensure_builtin_mcp_servers(self) -> None:
         """Ensure Reverie's built-in Ashfox MCP server entry exists."""
         try:
@@ -532,7 +743,7 @@ class ReverieInterface:
 
     def _init_workspace_services(self) -> None:
         """Initialize cache/session/rollback services for the active runtime scope."""
-        config = self.config_manager.load()
+        config = self._load_active_runtime_config()
         runtime_scope = "computer-controller" if normalize_mode(getattr(config, "mode", "reverie")) == "computer-controller" else "workspace"
         self._runtime_scope = runtime_scope
         self.project_data_dir = (
@@ -569,7 +780,7 @@ class ReverieInterface:
 
     def _runtime_scope_for_config(self, config: Optional[Config] = None) -> str:
         """Return the active runtime scope for the supplied config."""
-        active_config = config or self.config_manager.load()
+        active_config = config or self._load_active_runtime_config()
         return "computer-controller" if normalize_mode(getattr(active_config, "mode", "reverie")) == "computer-controller" else "workspace"
 
     def _ensure_runtime_services_for_config(self, config: Config) -> bool:
@@ -1045,7 +1256,7 @@ class ReverieInterface:
 
     def _apply_display_preferences(self, config: Optional[Config] = None) -> None:
         """Sync persisted UI preferences onto the display layer."""
-        active_config = config or self.config_manager.load()
+        active_config = config or self._load_active_runtime_config()
         self.display.set_tool_output_style(
             normalize_tool_output_style(getattr(active_config, "tool_output_style", "compact"))
         )
@@ -1286,6 +1497,17 @@ class ReverieInterface:
         meta: str = "",
     ) -> None:
         """Render a system/session activity event with the shared timeline style."""
+        self._captured_activity_events.append(
+            {
+                "category": str(category or "Activity"),
+                "message": str(message or "").strip(),
+                "status": str(status or "info"),
+                "detail": str(detail or "").strip(),
+                "meta": str(meta or "").strip(),
+            }
+        )
+        if self.headless:
+            return
         self.display.show_activity_event(
             category=category,
             message=message,
@@ -1849,7 +2071,7 @@ class ReverieInterface:
                 detail="Lazy-loading the core retrieval services for this workspace.",
             )
         self.indexer = CodebaseIndexer(project_root=self.project_root, cache_dir=cache_dir)
-        config = self.config_manager.load()
+        config = self._load_active_runtime_config()
         cached = self.indexer.load_cache()
         if not cached and config.auto_index:
             self._show_activity_event(
@@ -1886,7 +2108,7 @@ class ReverieInterface:
         """Refresh additional rules/system prompt after lazy services change."""
         if not self.agent:
             return
-        config = self.config_manager.load()
+        config = self._load_active_runtime_config()
         self.agent.config = config
         self.agent.additional_rules = self._build_additional_rules_with_tti(config)
         prompt_phase = "EXECUTION" if getattr(self.agent, "ant_phase", "PLANNING") in {"EXECUTION", "VERIFICATION"} else "PLANNING"
@@ -1904,6 +2126,26 @@ class ReverieInterface:
 
         result_holder: dict[str, object] = {"result": None}
         self._indexing_in_progress = True
+
+        if self.headless:
+            try:
+                result_holder["result"] = self.indexer.full_index()
+            except Exception as exc:
+                self._show_activity_event(
+                    "Context Engine",
+                    "Indexing failed unexpectedly.",
+                    status="error",
+                    detail=str(exc),
+                )
+                result_holder["result"] = None
+            finally:
+                self._indexing_in_progress = False
+
+            result = result_holder["result"]
+            if result is not None:
+                self._refresh_command_context()
+                self._sync_agent_context_engine()
+            return result
 
         with Progress(
             SpinnerColumn(style=self.theme.PURPLE_SOFT),
@@ -1995,8 +2237,13 @@ class ReverieInterface:
         self._refresh_command_context()
         return True
 
-    def _init_agent(self) -> None:
-        config = self.config_manager.load()
+    def _init_agent(
+        self,
+        config_override: Optional[Config] = None,
+        *,
+        persist_config_changes: bool = True,
+    ) -> None:
+        config = self._clone_config(config_override) if config_override is not None else self._load_active_runtime_config()
         self.mcp_runtime.set_project_root(self.project_root)
         self.runtime_plugin_manager.scan()
         scope_changed = self._ensure_runtime_services_for_config(config)
@@ -2020,7 +2267,8 @@ class ReverieInterface:
             config.nvidia = normalize_nvidia_config(nvidia_cfg)
             if str(getattr(config, "active_model_source", "standard")).lower() != "nvidia":
                 config.active_model_source = "nvidia"
-            self.config_manager.save(config)
+            if persist_config_changes:
+                self.config_manager.save(config)
         model = config.active_model
         if not model:
             self.agent = None
@@ -2029,16 +2277,21 @@ class ReverieInterface:
 
         # Check for missing max_context_tokens
         if model.max_context_tokens is None:
-            self.console.print(f"\n[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Context window size not configured for model: {model.model_display_name}[/{self.theme.AMBER_GLOW}]")
-            val = Prompt.ask("Enter max context tokens for this model", default="128000")
-            try:
-                model.max_context_tokens = int(val)
-            except ValueError:
+            if not self.headless:
+                self.console.print(f"\n[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Context window size not configured for model: {model.model_display_name}[/{self.theme.AMBER_GLOW}]")
+                val = Prompt.ask("Enter max context tokens for this model", default="128000")
+                try:
+                    model.max_context_tokens = int(val)
+                except ValueError:
+                    model.max_context_tokens = 128000
+            else:
                 model.max_context_tokens = 128000
             
             # Save back to config
-            config.models[config.active_model_index] = model
-            self.config_manager.save(config)
+            if 0 <= getattr(config, "active_model_index", -1) < len(getattr(config, "models", []) or []):
+                config.models[config.active_model_index] = model
+            if persist_config_changes:
+                self.config_manager.save(config)
             self._show_activity_event(
                 "Config",
                 "Model context window updated",
@@ -2111,6 +2364,216 @@ class ReverieInterface:
         self._refresh_command_context()
         if scope_changed:
             self._init_session()
+
+    def run_prompt_once(
+        self,
+        message: str,
+        *,
+        mode_override: Optional[str] = None,
+        stream: Optional[bool] = None,
+        no_index: bool = False,
+        fresh_session: bool = True,
+    ) -> PromptRunResult:
+        """Run one prompt non-interactively and return a structured result."""
+        prompt_text = str(message or "").strip()
+        started_at = datetime.now()
+        self._captured_activity_events = []
+
+        if not prompt_text:
+            return PromptRunResult(
+                success=False,
+                prompt=prompt_text,
+                output_text="",
+                mode=normalize_mode(mode_override or "reverie"),
+                project_root=str(self.project_root),
+                started_at=started_at.isoformat(),
+                ended_at=datetime.now().isoformat(),
+                error="Prompt text is empty.",
+            )
+
+        base_config = self._clone_config(self.config_manager.load())
+        if mode_override:
+            base_config.mode = normalize_mode(mode_override)
+        if stream is not None:
+            base_config.stream_responses = bool(stream)
+        if no_index:
+            base_config.auto_index = False
+
+        previous_override = self._runtime_config_override
+        self._runtime_config_override = self._clone_config(base_config)
+        ui_events: List[Dict[str, Any]] = []
+
+        try:
+            self._init_agent(config_override=base_config, persist_config_changes=False)
+            if not self.agent:
+                return PromptRunResult(
+                    success=False,
+                    prompt=prompt_text,
+                    output_text="",
+                    mode=normalize_mode(base_config.mode),
+                    project_root=str(self.project_root),
+                    started_at=started_at.isoformat(),
+                    ended_at=datetime.now().isoformat(),
+                    error="No active model is configured.",
+                    activity_events=list(self._captured_activity_events),
+                )
+
+            prompt_phase = "EXECUTION" if getattr(self.agent, "ant_phase", "PLANNING") in {"EXECUTION", "VERIFICATION"} else "PLANNING"
+            self.agent.additional_rules = "\n\n".join(
+                part for part in [self.agent.additional_rules, _build_batch_prompt_rules()] if str(part).strip()
+            )
+            self.agent.system_prompt = build_system_prompt(
+                model_name=self.agent.model_display_name,
+                additional_rules=self.agent.additional_rules,
+                mode=self.agent.mode,
+                ant_phase=prompt_phase,
+            )
+
+            def _capture_ui_event(event: Dict[str, Any]) -> None:
+                if not isinstance(event, dict):
+                    return
+                ui_events.append(dict(event))
+
+            self.agent.tool_executor.update_context('ui_event_handler', _capture_ui_event)
+            self.agent.tool_executor.update_context('get_status_live', lambda: None)
+            self.agent.tool_executor.update_context('pause_stream_input_capture', lambda: None)
+            self.agent.tool_executor.update_context('resume_stream_input_capture', lambda: None)
+
+            if fresh_session:
+                session = self.session_manager.create_session(
+                    name=f"Prompt Run {started_at.strftime('%Y-%m-%d %H:%M:%S')}"
+                )
+            else:
+                session, _ = self.session_manager.ensure_session()
+            self._captured_activity_events = [
+                event
+                for event in self._captured_activity_events
+                if str((event or {}).get("category", "") or "") != "Session"
+            ]
+            self._show_activity_event(
+                "Session",
+                f"Started session {session.name}",
+                status="success",
+                detail="A fresh prompt-mode session is ready for this workspace." if fresh_session else "Using the current prompt-mode session.",
+                meta=session.id,
+            )
+            self._sync_workspace_memory_message(session)
+            self.agent.set_history(session.messages)
+
+            context_initialized = self.ensure_context_engine(announce=False)
+            thinking_parts: List[str] = []
+            output_text = ""
+            error_text = ""
+            auto_followup_count = 0
+
+            def _run_prompt_turn(turn_text: str) -> tuple[str, str, str]:
+                output_chunks: List[str] = []
+                thinking_chunks: List[str] = []
+                in_thinking_mode = False
+
+                response_stream = self.agent.process_message(
+                    turn_text,
+                    stream=base_config.stream_responses,
+                    session_id=session.id,
+                    user_display_text=turn_text,
+                )
+                for chunk in response_stream:
+                    if chunk == THINKING_START_MARKER:
+                        in_thinking_mode = True
+                        continue
+                    if chunk == THINKING_END_MARKER:
+                        in_thinking_mode = False
+                        continue
+                    decoded_event = decode_stream_event(chunk) if chunk.startswith(STREAM_EVENT_MARKER) else None
+                    if decoded_event is not None:
+                        ui_events.append(decoded_event)
+                        continue
+                    if in_thinking_mode:
+                        thinking_chunks.append(chunk)
+                    else:
+                        output_chunks.append(chunk)
+
+                turn_thinking = "".join(thinking_chunks).strip()
+                turn_output = _sanitize_prompt_output_text("".join(output_chunks).strip(), turn_thinking)
+                turn_error = turn_output if turn_output.startswith("Error processing message:") else ""
+                return turn_output, turn_thinking, turn_error
+
+            active_prompt = prompt_text
+            while True:
+                turn_output, turn_thinking, turn_error = _run_prompt_turn(active_prompt)
+                if turn_thinking:
+                    thinking_parts.append(turn_thinking)
+                if turn_output:
+                    output_text = turn_output
+                if turn_error:
+                    error_text = turn_error
+                    break
+
+                if auto_followup_count >= 3:
+                    break
+
+                followup_message = _build_prompt_followup_message(
+                    base_config.mode,
+                    prompt_text,
+                    output_text,
+                    self.project_root,
+                )
+                if not followup_message:
+                    break
+
+                auto_followup_count += 1
+                self._show_activity_event(
+                    "Prompt Mode",
+                    "Continuing automatically through an approval checkpoint",
+                    status="info",
+                    detail=f"Auto-followup #{auto_followup_count} was injected to finish the one-shot run.",
+                )
+                active_prompt = followup_message
+
+            thinking_text = "\n\n".join(part for part in thinking_parts if part).strip()
+
+            try:
+                self.session_manager.update_messages(self.agent.get_history())
+                current_session = self.session_manager.get_current_session()
+                if current_session and self.memory_indexer:
+                    self.memory_indexer.refresh_session(current_session.id)
+                    self._sync_workspace_memory_message(current_session)
+                    self.agent.set_history(current_session.messages)
+                if current_session:
+                    self.workspace_stats_manager.update_session_snapshot(
+                        current_session.id,
+                        session_name=current_session.name,
+                        message_count=len(current_session.messages),
+                    )
+                    self.workspace_stats_manager.flush()
+            except Exception as session_error:
+                if not error_text:
+                    error_text = f"Failed to persist session state: {session_error}"
+
+            ended_at = datetime.now()
+            current_session = self.session_manager.get_current_session()
+            return PromptRunResult(
+                success=not bool(error_text),
+                prompt=prompt_text,
+                output_text=output_text,
+                mode=normalize_mode(base_config.mode),
+                project_root=str(self.project_root),
+                model_display_name=getattr(self.agent, "model_display_name", ""),
+                provider_label=self._resolve_provider_label(base_config),
+                session_id=str(getattr(current_session, "id", "") or ""),
+                session_name=str(getattr(current_session, "name", "") or ""),
+                started_at=started_at.isoformat(),
+                ended_at=ended_at.isoformat(),
+                duration_seconds=max((ended_at - started_at).total_seconds(), 0.0),
+                thinking_text=thinking_text,
+                error=error_text,
+                context_engine_initialized=context_initialized,
+                auto_followup_count=auto_followup_count,
+                activity_events=list(self._captured_activity_events),
+                ui_events=ui_events,
+            )
+        finally:
+            self._runtime_config_override = previous_override
 
     def _build_additional_rules_with_tti(self, config: Config) -> str:
         """Append TTI model metadata from config.json into model context."""

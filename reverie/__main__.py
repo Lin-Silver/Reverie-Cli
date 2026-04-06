@@ -7,6 +7,7 @@ Or: reverie (if installed)
 
 import sys
 import argparse
+import json
 from pathlib import Path
 
 from rich.console import Console
@@ -20,6 +21,29 @@ except ImportError:  # PyInstaller may execute this file as a top-level script.
     if package_root_text not in sys.path:
         sys.path.insert(0, package_root_text)
     from reverie.version import __version__
+
+
+def _configure_stdio_for_safe_output() -> None:
+    """Best-effort stdio reconfigure for Windows prompt-mode output."""
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        if stream is None or not hasattr(stream, "reconfigure"):
+            continue
+        try:
+            stream.reconfigure(errors="replace")
+        except Exception:
+            pass
+
+
+def _safe_output_text(value: str) -> str:
+    """Return text that can be printed on the current stdout encoding."""
+    text = str(value or "")
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    try:
+        text.encode(encoding)
+        return text
+    except Exception:
+        return text.encode(encoding, errors="replace").decode(encoding, errors="replace")
 
 
 def main():
@@ -52,6 +76,21 @@ def main():
         '--no-index',
         action='store_true',
         help='Skip automatic indexing on startup'
+    )
+
+    parser.add_argument(
+        '--prompt', '-p',
+        help='Run a single prompt non-interactively and exit'
+    )
+
+    parser.add_argument(
+        '--mode', '-m',
+        help='Temporarily override the active mode for this run'
+    )
+
+    parser.add_argument(
+        '--report-file',
+        help='Write structured JSON output for prompt mode'
     )
     
     args = parser.parse_args()
@@ -131,6 +170,35 @@ def main():
             for err in result.errors[:10]:
                 print(f"  - {err}")
         
+        return 0 if result.success else 1
+
+    if args.prompt:
+        from reverie.cli.interface import ReverieInterface
+
+        _configure_stdio_for_safe_output()
+        interface = ReverieInterface(project_root, headless=True)
+        result = interface.run_prompt_once(
+            args.prompt,
+            mode_override=args.mode,
+            no_index=bool(args.no_index),
+        )
+
+        output_text = str(result.output_text or "").strip()
+        if output_text:
+            print(_safe_output_text(output_text))
+        elif result.error:
+            print(_safe_output_text(result.error))
+
+        if args.report_file:
+            report_path = Path(args.report_file).expanduser()
+            if not report_path.is_absolute():
+                report_path = (Path.cwd() / report_path).resolve()
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text(
+                json.dumps(result.to_dict(), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
         return 0 if result.success else 1
     
     # Run interactive CLI

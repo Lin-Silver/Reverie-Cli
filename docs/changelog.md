@@ -30,6 +30,24 @@
 
 ---
 
+## Reverie CLI v2.1.24 - TUI Stability and Build Flow Cleanup
+
+**Release Date:** 2026-04-09
+
+### CLI and TUI
+
+* Fixed the selector live view so TUI panels render in a stable window without duplicating while navigating in Windows terminals.
+* Kept the selector redraw behavior stable across the interactive model pickers used by the CLI.
+
+### Runtime and Build
+
+* Bumped the canonical Reverie CLI version to `2.1.24`.
+* Fixed `build.bat` so PyInstaller no longer receives the invalid `--specpath` option when building from `reverie.spec`.
+* Kept build output, PyInstaller work files, caches, and runtime temp data inside the project root instead of spilling into the system temp directory on `C:`.
+* Made `build.bat` pause on both success and failure so the window does not close immediately when launched by double-clicking.
+
+---
+
 ## Reverie CLI v2.1.21 - TUI Performance, Streaming Controls, and Settings Upgrade
 
 **Release Date:** 2026-04-04

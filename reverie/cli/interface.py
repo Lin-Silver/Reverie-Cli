@@ -48,6 +48,7 @@ from ..config import (
     normalize_thinking_output_style,
     normalize_tool_output_style,
     normalize_tti_models,
+    normalize_tti_source,
     resolve_tti_default_display_name,
 )
 from ..atlas import build_atlas_additional_rules, normalize_atlas_mode_config
@@ -971,6 +972,7 @@ class ReverieInterface:
             "gemini-cli": "Gemini",
             "codex": "Codex",
             "nvidia": "NVIDIA",
+            "web": "Web",
         }
         source_labels = {
             "standard": "config.json",
@@ -978,6 +980,7 @@ class ReverieInterface:
             "geminicli": "Gemini CLI",
             "codex": "Codex",
             "nvidia": "NVIDIA",
+            "web": "Web",
         }
         return source_labels.get(source_name, "") or provider_labels.get(provider_name, provider_name or "provider")
     
@@ -2586,24 +2589,51 @@ class ReverieInterface:
             legacy_model_paths=tti_cfg.get("model_paths", []),
         )
         default_display_name = resolve_tti_default_display_name(tti_cfg)
+        active_tti_source = normalize_tti_source(tti_cfg.get("active_source", "local"))
 
         lines = [
             "## TTI Models (from config.json)",
             f"- Tool: `text_to_image`",
-            f"- Selection rule: use `model` parameter with configured `display_name` (not raw path).",
-            f"- Default model: {default_display_name if default_display_name else '(none)'}",
+            f"- Source selection: use `source` parameter with `local` or `web`, or switch in CLI with `/tti source`.",
+            f"- Active source: {active_tti_source}",
+            f"- Local selection rule: use configured local `display_name` values (not raw paths).",
+            f"- Default local model: {default_display_name if default_display_name else '(none)'}",
         ]
 
         if not tti_models:
-            lines.append("- Configured models: (none)")
+            lines.append("- Configured local models: (none)")
         else:
-            lines.append("- Configured models:")
+            lines.append("- Configured local models:")
             for idx, item in enumerate(tti_models):
                 intro = item.get("introduction", "")
                 intro_text = intro if intro else "(empty)"
                 lines.append(
                     f"  [{idx}] display_name={item['display_name']}; path={item['path']}; introduction={intro_text}"
                 )
+
+        try:
+            from ..web import get_web_model_catalog, normalize_web_config, resolve_web_image_model
+
+            web_cfg = normalize_web_config(getattr(config, "web", {}))
+            web_models = get_web_model_catalog(model_type="image", enabled_adapters=web_cfg.get("enabled_adapters"))
+            default_web_model = resolve_web_image_model(web_cfg, tti_cfg)
+            lines.append(
+                f"- Default Web model: {default_web_model['display_name']} ({default_web_model['id']})"
+                if default_web_model
+                else "- Default Web model: (none)"
+            )
+            if not web_models:
+                lines.append("- Available Web image models: (none)")
+            else:
+                lines.append("- Available Web image models:")
+                for idx, item in enumerate(web_models[:20]):
+                    lines.append(
+                        f"  [{idx}] display_name={item['display_name']}; id={item['id']}; description={item.get('description', '')}"
+                    )
+                if len(web_models) > 20:
+                    lines.append(f"  ... plus {len(web_models) - 20} more")
+        except Exception:
+            lines.append("- Available Web image models: (lookup unavailable)")
 
         memory_title = "Computer Controller History" if normalized_mode == "computer-controller" else "Workspace Global Memory"
         memory_label = "computer-control history archive" if normalized_mode == "computer-controller" else "workspace global memory"

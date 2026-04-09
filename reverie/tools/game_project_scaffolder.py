@@ -16,6 +16,7 @@ from ..engine import canonical_engine_name, create_project_skeleton, is_builtin_
 from ..gamer.prompt_compiler import compile_game_prompt
 from ..gamer.production_plan import build_blueprint_from_request
 from ..gamer.runtime_registry import select_runtime_profile
+from ..gamer.system_generators import build_system_packet_bundle
 from ..gamer.vertical_slice_builder import build_vertical_slice_project
 
 
@@ -40,6 +41,8 @@ class GameProjectScaffolderTool(BaseTool):
                     "create_foundation",
                     "create_from_request",
                     "generate_vertical_slice",
+                    "upgrade_runtime_project",
+                    "apply_system_packet",
                     "generate_module_map",
                     "generate_content_pipeline",
                 ],
@@ -127,6 +130,10 @@ class GameProjectScaffolderTool(BaseTool):
                 return self._create_from_request(output_dir, request_path, kwargs)
             if action == "generate_vertical_slice":
                 return self._generate_vertical_slice(output_dir, request_path, kwargs)
+            if action == "upgrade_runtime_project":
+                return self._upgrade_runtime_project(output_dir, request_path, kwargs)
+            if action == "apply_system_packet":
+                return self._apply_system_packet(output_dir, request_path, kwargs)
             if action == "generate_module_map":
                 output_path = self._resolve_path(kwargs.get("output_path", str(output_dir / "artifacts/module_map.json")))
                 return self._generate_module_map(output_dir, output_path, kwargs)
@@ -207,6 +214,13 @@ class GameProjectScaffolderTool(BaseTool):
             runtime_profile=runtime_selection["profile"],
             overrides=kwargs.get("data") or {},
         )
+        reference_intelligence = dict(runtime_selection.get("reference_intelligence", {}) or {})
+        if reference_intelligence:
+            blueprint.setdefault("technical_strategy", {})["reference_strategy"] = {
+                "reference_root": reference_intelligence.get("reference_root", ""),
+                "recommended_stack": list(reference_intelligence.get("recommended_reference_stack", []) or []),
+                "legal_guardrails": list(reference_intelligence.get("legal_guardrails", []) or []),
+            }
         merged_kwargs = dict(kwargs)
         merged_kwargs["project_name"] = blueprint.get("meta", {}).get("project_name", kwargs.get("project_name", "Untitled Game"))
         merged_kwargs["engine"] = runtime_selection["selected_runtime"]
@@ -233,6 +247,7 @@ class GameProjectScaffolderTool(BaseTool):
                 "request_path": str(request_path.relative_to(self.project_root)),
                 "blueprint_path": str(blueprint_path.relative_to(self.project_root)),
                 "runtime": runtime_selection["selected_runtime"],
+                "reference_intelligence": reference_intelligence,
             }
         )
         return ToolResult.ok(output, data)
@@ -272,6 +287,84 @@ class GameProjectScaffolderTool(BaseTool):
                 "expansion_backlog": result.get("expansion_backlog", {}),
                 "resume_state": result.get("resume_state", {}),
                 "modeling_workspace": result.get("modeling_workspace", {}),
+                "reference_intelligence": result.get("reference_intelligence", {}),
+            },
+        )
+
+    def _upgrade_runtime_project(self, output_dir: Path, request_path: Path, kwargs: Dict[str, Any]) -> ToolResult:
+        game_request = self._load_or_compile_request(request_path, kwargs, output_dir=output_dir)
+        blueprint_path = self._resolve_path(kwargs.get("blueprint_path", str(output_dir / "artifacts/game_blueprint.json")))
+        blueprint = self._load_blueprint(str(blueprint_path))
+        if not blueprint:
+            runtime_selection = select_runtime_profile(
+                game_request,
+                project_root=output_dir,
+                requested_runtime=kwargs.get("requested_runtime", ""),
+                existing_runtime=kwargs.get("existing_runtime", ""),
+            )
+            blueprint = build_blueprint_from_request(
+                game_request,
+                runtime_profile=runtime_selection["profile"],
+                overrides=kwargs.get("data") or {},
+            )
+        result = build_vertical_slice_project(
+            output_dir,
+            game_request=game_request,
+            blueprint=blueprint,
+            project_name=kwargs.get("project_name", ""),
+            requested_runtime=kwargs.get("requested_runtime", ""),
+            existing_runtime=kwargs.get("existing_runtime", ""),
+            overwrite=kwargs.get("overwrite", False),
+            app_root=self.project_root,
+        )
+        return ToolResult.ok(
+            f"Upgraded runtime project in {output_dir}\nRuntime: {result['runtime']}\nArtifacts: {len(result.get('written_artifacts', []))}",
+            {
+                "project_root": result["project_root"],
+                "runtime": result["runtime"],
+                "written_artifacts": result.get("written_artifacts", []),
+                "runtime_files": result.get("runtime_files", []),
+                "reference_intelligence": result.get("reference_intelligence", {}),
+            },
+        )
+
+    def _apply_system_packet(self, output_dir: Path, request_path: Path, kwargs: Dict[str, Any]) -> ToolResult:
+        system_name = str(kwargs.get("system_name") or "").strip()
+        if not system_name:
+            return ToolResult.fail("system_name is required for apply_system_packet")
+        game_request = self._load_or_compile_request(request_path, kwargs, output_dir=output_dir)
+        runtime_selection = select_runtime_profile(
+            game_request,
+            project_root=output_dir,
+            requested_runtime=kwargs.get("requested_runtime", ""),
+            existing_runtime=kwargs.get("existing_runtime", ""),
+        )
+        blueprint_path = self._resolve_path(kwargs.get("blueprint_path", str(output_dir / "artifacts/game_blueprint.json")))
+        blueprint = self._load_blueprint(str(blueprint_path)) or build_blueprint_from_request(
+            game_request,
+            runtime_profile=runtime_selection["profile"],
+            overrides=kwargs.get("data") or {},
+        )
+        system_bundle = build_system_packet_bundle(
+            game_request,
+            blueprint,
+            runtime_profile=runtime_selection["profile"],
+        )
+        packet_id = str(system_bundle.get("coverage", {}).get(system_name, system_name)).strip()
+        packet = dict(system_bundle.get("packets", {}).get(packet_id, {}) or {})
+        if not packet:
+            return ToolResult.fail(f"System packet not found for {system_name}")
+        output_path = self._resolve_path(
+            kwargs.get("output_path", str(output_dir / "artifacts" / "applied_packets" / f"{packet_id}.json"))
+        )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(packet, indent=2, ensure_ascii=False), encoding="utf-8")
+        return ToolResult.ok(
+            f"Applied system packet '{packet_id}' to artifact staging at {output_path}",
+            {
+                "output_path": str(output_path.relative_to(self.project_root)),
+                "packet_id": packet_id,
+                "packet": packet,
             },
         )
 

@@ -169,10 +169,22 @@ def build_task_graph(
 
     tasks: List[Dict[str, Any]] = [
         {
+            "id": "compile_program",
+            "title": "Compile the durable game program and milestone artifacts",
+            "lane": "program_compilation",
+            "depends_on": [],
+            "outputs": [
+                "artifacts/game_program.json",
+                "artifacts/feature_matrix.json",
+                "artifacts/milestone_board.json",
+                "artifacts/risk_register.json",
+            ],
+        },
+        {
             "id": "compile_request",
             "title": "Compile the single prompt into a structured request",
             "lane": "request_compilation",
-            "depends_on": [],
+            "depends_on": ["compile_program"],
             "outputs": ["artifacts/game_request.json", "artifacts/game_blueprint.json"],
         },
         {
@@ -182,6 +194,8 @@ def build_task_graph(
             "depends_on": ["compile_request"],
             "outputs": [
                 "artifacts/runtime_registry.json",
+                "artifacts/runtime_capability_graph.json",
+                "artifacts/runtime_delivery_plan.json",
                 "artifacts/production_plan.json",
                 "artifacts/system_specs.json",
                 "artifacts/task_graph.json",
@@ -194,6 +208,10 @@ def build_task_graph(
             "depends_on": ["runtime_foundation"],
             "outputs": [
                 "artifacts/asset_pipeline.json",
+                "artifacts/character_kits.json",
+                "artifacts/environment_kits.json",
+                "artifacts/animation_plan.json",
+                "artifacts/asset_budget.json",
                 "data/models/model_registry.yaml",
                 "assets/models/source/*",
                 "assets/models/runtime/*",
@@ -233,6 +251,11 @@ def build_task_graph(
                 "encounter content",
                 "objective chain",
                 "reward integration",
+                "artifacts/world_program.json",
+                "artifacts/region_kits.json",
+                "artifacts/faction_graph.json",
+                "artifacts/questline_program.json",
+                "artifacts/save_migration_plan.json",
             ],
         }
     )
@@ -247,7 +270,10 @@ def build_task_graph(
             "outputs": [
                 "playtest/test_plan.md",
                 "playtest/quality_gates.json",
+                "playtest/performance_budget.json",
+                "playtest/combat_feel_report.json",
                 "playtest/slice_score.json",
+                "playtest/continuation_recommendations.md",
             ],
         }
     )
@@ -273,6 +299,7 @@ def build_task_graph(
         "lanes": plan_lanes,
         "resume_order": [task["id"] for task in tasks],
         "critical_path": [
+            "compile_program",
             "compile_request",
             "runtime_foundation",
             "asset_pipeline_seed",

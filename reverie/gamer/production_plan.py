@@ -234,15 +234,30 @@ def build_production_plan(
         "runtime": runtime_profile or {"id": blueprint.get("meta", {}).get("target_engine", "reverie_engine")},
         "lanes": [
             {
+                "name": "program_compilation",
+                "goal": "turn one prompt into a durable game program, feature matrix, milestone board, and risk register",
+                "outputs": [
+                    "artifacts/game_program.json",
+                    "artifacts/game_bible.md",
+                    "artifacts/feature_matrix.json",
+                    "artifacts/content_matrix.json",
+                    "artifacts/milestone_board.json",
+                    "artifacts/risk_register.json",
+                ],
+            },
+            {
                 "name": "request_compilation",
                 "goal": "stabilize one structured request and keep it aligned with delivered code",
                 "outputs": ["artifacts/game_request.json", "artifacts/game_blueprint.json"],
             },
             {
                 "name": "runtime_foundation",
-                "goal": "create a bootable game foundation with explicit runtime choice and data contracts",
+                "goal": "create a bootable game foundation with explicit runtime choice, local reference intelligence, and data contracts",
                 "outputs": [
                     "artifacts/runtime_registry.json",
+                    "artifacts/reference_intelligence.json",
+                    "artifacts/runtime_capability_graph.json",
+                    "artifacts/runtime_delivery_plan.json",
                     "artifacts/production_plan.json",
                     "artifacts/system_specs.json",
                     "artifacts/task_graph.json",
@@ -253,6 +268,10 @@ def build_production_plan(
                 "goal": "seed the modeling workspace, registry, import rules, and first authored-asset queue before content breadth expands",
                 "outputs": [
                     "artifacts/asset_pipeline.json",
+                    "artifacts/character_kits.json",
+                    "artifacts/environment_kits.json",
+                    "artifacts/animation_plan.json",
+                    "artifacts/asset_budget.json",
                     "data/models/model_registry.yaml",
                     "assets/models/source/*",
                     "assets/models/runtime/*",
@@ -271,7 +290,17 @@ def build_production_plan(
             {
                 "name": "slice_content",
                 "goal": "package one polished world slice with encounter and reward pacing",
-                "outputs": ["main scene", "slice objective chain", "HUD", "encounter content"],
+                "outputs": [
+                    "main scene",
+                    "slice objective chain",
+                    "HUD",
+                    "encounter content",
+                    "artifacts/world_program.json",
+                    "artifacts/region_kits.json",
+                    "artifacts/faction_graph.json",
+                    "artifacts/questline_program.json",
+                    "artifacts/save_migration_plan.json",
+                ],
             },
             {
                 "name": "verification",
@@ -280,7 +309,10 @@ def build_production_plan(
                     "playtest/test_plan.md",
                     "telemetry/schema.json",
                     "playtest/quality_gates.json",
+                    "playtest/performance_budget.json",
+                    "playtest/combat_feel_report.json",
                     "playtest/slice_score.json",
+                    "playtest/continuation_recommendations.md",
                 ],
             },
             {

@@ -1227,12 +1227,12 @@ class ReverieAgent:
             # For request provider, we don't need a client object
             # We'll use requests library directly
             self._client = None
-        elif self.provider in ("gemini-cli", "codex"):
+        elif self.provider in ("gemini-cli", "codex", "web-direct"):
             self._client = None
         else:
             raise ValueError(
                 f"Unknown provider: {self.provider}. "
-                f"Supported providers: openai-sdk, request, anthropic, gemini-cli, codex"
+                f"Supported providers: openai-sdk, request, anthropic, gemini-cli, codex, web-direct"
             )
 
     def _should_use_openai_http_fallback(self) -> bool:
@@ -2045,10 +2045,10 @@ class ReverieAgent:
         messages.append(tool_result_message)
 
     def _process_streaming_native_provider(self, provider_name: str, session_id: str = "default") -> Generator[str, None, None]:
-        """Process streaming responses for native Gemini CLI / Codex providers."""
+        """Process streaming responses for native Gemini CLI / Codex / Web providers."""
         import requests
 
-        tools = self.get_visible_tool_schemas()
+        tools = [] if provider_name == "web-direct" else self.get_visible_tool_schemas()
 
         max_continuations = self._completion_continuation_limit()
         continuation_count = 0
@@ -2058,6 +2058,35 @@ class ReverieAgent:
             messages = _sanitize_messages_for_relay(self._build_messages())
             request_messages = list(messages)
             parser_state: Dict[str, Any] = {}
+
+            if provider_name == "web-direct":
+                from ..web import normalize_web_config, run_web_direct_completion
+
+                cfg = normalize_web_config(getattr(self.config, "web", {}))
+                result = run_web_direct_completion(cfg, self.model, messages)
+                error_text = str(result.get("error", "") or "").strip()
+                if error_text:
+                    raise ValueError(error_text)
+
+                state = _StreamingTurnState()
+                reasoning_text = _coerce_text_fragments(result.get("reasoning")).strip()
+                content_text = _coerce_text_fragments(result.get("text")).strip()
+                if reasoning_text:
+                    yield from self._apply_stream_event(state, {"type": "reasoning", "text": reasoning_text})
+                if content_text:
+                    yield from self._apply_stream_event(state, {"type": "content", "text": content_text})
+                state.set_finish_reason("stop")
+
+                for chunk in state.flush():
+                    yield chunk
+
+                self._commit_stream_state(
+                    state=state,
+                    request_messages=request_messages,
+                    messages=messages,
+                    session_id=session_id,
+                )
+                break
 
             if provider_name == "gemini-cli":
                 from ..geminicli import (
@@ -2358,6 +2387,8 @@ class ReverieAgent:
             yield from self._process_streaming_native_provider("gemini-cli", session_id=session_id)
         elif self.provider == "codex":
             yield from self._process_streaming_native_provider("codex", session_id=session_id)
+        elif self.provider == "web-direct":
+            yield from self._process_streaming_native_provider("web-direct", session_id=session_id)
         else:
             raise ValueError(f"Unknown provider: {self.provider}")
     
@@ -2648,6 +2679,8 @@ class ReverieAgent:
             return self._process_non_streaming_native_provider("gemini-cli", session_id=session_id)
         elif self.provider == "codex":
             return self._process_non_streaming_native_provider("codex", session_id=session_id)
+        elif self.provider == "web-direct":
+            return self._process_non_streaming_native_provider("web-direct", session_id=session_id)
         else:
             raise ValueError(f"Unknown provider: {self.provider}")
     

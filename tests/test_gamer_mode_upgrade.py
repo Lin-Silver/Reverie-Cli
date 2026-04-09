@@ -5,31 +5,124 @@ from reverie.agent.system_prompt import build_system_prompt
 from reverie.agent.tool_descriptions import get_tool_descriptions_for_mode
 from reverie.modes import get_mode_metadata, get_mode_tool_discovery_profile
 from reverie.tools.game_design_orchestrator import GameDesignOrchestratorTool
+from reverie.tools.game_playtest_lab import GamePlaytestLabTool
 from reverie.tools.game_project_scaffolder import GameProjectScaffolderTool
+
+
+def _seed_reference_workspace(root: Path) -> None:
+    references_root = root / "references"
+    (references_root / "godot-tps-demo" / "player").mkdir(parents=True, exist_ok=True)
+    (references_root / "godot-tps-demo" / "enemies" / "red_robot").mkdir(parents=True, exist_ok=True)
+    (references_root / "godot-demo-projects" / "mono" / "squash_the_creeps").mkdir(parents=True, exist_ok=True)
+    (references_root / "o3de-multiplayersample" / "Documentation").mkdir(parents=True, exist_ok=True)
+    (references_root / "o3de-multiplayersample" / "ExportScripts").mkdir(parents=True, exist_ok=True)
+    (references_root / "o3de-multiplayersample-assets" / "Gems" / "character_mps").mkdir(parents=True, exist_ok=True)
+    (references_root / "o3de-multiplayersample-assets" / "Gems" / "kb3d_mps").mkdir(parents=True, exist_ok=True)
+    (references_root / "o3de-multiplayersample-assets" / "Guides").mkdir(parents=True, exist_ok=True)
+    for repo_name in ("blender", "blockbench", "blockbench-plugins", "gltf-validator", "gltf-blender-io", "gltf-sample-assets"):
+        (references_root / repo_name).mkdir(parents=True, exist_ok=True)
+
+    (references_root / "godot-tps-demo" / "project.godot").write_text("config_version=5\n", encoding="utf-8")
+    (references_root / "godot-tps-demo" / "player" / "player.gd").write_text(
+        "extends CharacterBody3D\nif multiplayer.is_server():\n    pass\n",
+        encoding="utf-8",
+    )
+    (references_root / "godot-tps-demo" / "player" / "player_input.gd").write_text(
+        "extends MultiplayerSynchronizer\nfunc rotate_camera(move):\n    pass\n",
+        encoding="utf-8",
+    )
+    (references_root / "godot-tps-demo" / "enemies" / "red_robot" / "red_robot.gd").write_text(
+        "extends CharacterBody3D\n",
+        encoding="utf-8",
+    )
+    (references_root / "godot-demo-projects" / "mono" / "squash_the_creeps" / "project.godot").write_text(
+        "config_version=5\n",
+        encoding="utf-8",
+    )
+    (references_root / "godot-demo-projects" / "mono" / "squash_the_creeps" / "Main.tscn").write_text(
+        "[gd_scene format=3]\n",
+        encoding="utf-8",
+    )
+
+    (references_root / "o3de-multiplayersample" / "README.md").write_text(
+        "Support for 1 to 10 players\nteleporters\nshield\n",
+        encoding="utf-8",
+    )
+    (references_root / "o3de-multiplayersample" / "project.json").write_text(
+        json.dumps({"gem_names": ["character_mps", "props_mps"]}),
+        encoding="utf-8",
+    )
+    (references_root / "o3de-multiplayersample" / "Documentation" / "GamplayConfiguration.md").write_text(
+        "teleporter\njump pads\n",
+        encoding="utf-8",
+    )
+    (references_root / "o3de-multiplayersample" / "ExportScripts" / "export_mps.py").write_text(
+        "print('export')\n",
+        encoding="utf-8",
+    )
+    (references_root / "o3de-multiplayersample-assets" / "readme.md").write_text(
+        "Asset Gems\n",
+        encoding="utf-8",
+    )
+    (references_root / "o3de-multiplayersample-assets" / "Guides" / "GettingStarted.md").write_text(
+        "DCC bootstrap\n",
+        encoding="utf-8",
+    )
+    (references_root / "o3de-multiplayersample-assets" / "Gems" / "character_mps" / "gem.json").write_text(
+        json.dumps({"name": "character_mps", "requirements": "Mixamo-derived assets"}),
+        encoding="utf-8",
+    )
+    (references_root / "o3de-multiplayersample-assets" / "Gems" / "kb3d_mps" / "gem.json").write_text(
+        json.dumps({"name": "kb3d_mps", "requirements": "Kitbash3D restricted"}),
+        encoding="utf-8",
+    )
 
 
 def test_reverie_gamer_prompt_targets_prompt_to_vertical_slice_delivery() -> None:
     prompt = build_system_prompt(model_name="Test Model", mode="reverie-gamer")
 
-    assert "prompt -> structured request -> blueprint -> engine-aware project foundation" in prompt
+    assert "prompt -> game program -> structured request -> blueprint -> engine-aware project foundation" in prompt
+    assert "artifacts/game_program.json" in prompt
+    assert "artifacts/game_bible.md" in prompt
+    assert "artifacts/feature_matrix.json" in prompt
+    assert "artifacts/content_matrix.json" in prompt
+    assert "artifacts/milestone_board.json" in prompt
+    assert "artifacts/risk_register.json" in prompt
     assert "artifacts/game_request.json" in prompt
     assert "artifacts/game_blueprint.json" in prompt
     assert "artifacts/runtime_registry.json" in prompt
+    assert "artifacts/reference_intelligence.json" in prompt
+    assert "artifacts/runtime_capability_graph.json" in prompt
+    assert "artifacts/runtime_delivery_plan.json" in prompt
     assert "artifacts/production_plan.json" in prompt
     assert "artifacts/system_specs.json" in prompt
     assert "artifacts/task_graph.json" in prompt
     assert "artifacts/content_expansion.json" in prompt
     assert "artifacts/asset_pipeline.json" in prompt
+    assert "artifacts/world_program.json" in prompt
+    assert "artifacts/region_kits.json" in prompt
+    assert "artifacts/faction_graph.json" in prompt
+    assert "artifacts/questline_program.json" in prompt
+    assert "artifacts/save_migration_plan.json" in prompt
     assert "artifacts/expansion_backlog.json" in prompt
     assert "artifacts/resume_state.json" in prompt
     assert "artifacts/vertical_slice_plan.md" in prompt
+    assert "playtest/quality_gates.json" in prompt
+    assert "playtest/performance_budget.json" in prompt
+    assert "playtest/combat_feel_report.json" in prompt
     assert "playtest/slice_score.json" in prompt
+    assert "playtest/continuation_recommendations.md" in prompt
     assert "automatically reduce it to the smallest credible prototype, first playable, or vertical slice" in prompt
+    assert 'game_design_orchestrator(action="compile_program")' in prompt
     assert 'game_design_orchestrator(action="compile_request")' in prompt
     assert 'game_design_orchestrator(action="plan_production")' in prompt
     assert 'game_design_orchestrator(action="generate_vertical_slice")' in prompt
     assert 'game_project_scaffolder(action="generate_vertical_slice")' in prompt
+    assert 'game_project_scaffolder(action="upgrade_runtime_project")' in prompt
     assert 'game_playtest_lab(action="create_test_plan")' in prompt
+    assert 'game_playtest_lab(action="run_quality_gates")' in prompt
+    assert 'game_playtest_lab(action="score_combat_feel")' in prompt
+    assert 'game_playtest_lab(action="plan_next_iteration")' in prompt
 
 
 def test_reverie_gamer_workflow_and_discovery_profile_bias_toward_slice_execution() -> None:
@@ -38,8 +131,13 @@ def test_reverie_gamer_workflow_and_discovery_profile_bias_toward_slice_executio
     profile = get_mode_tool_discovery_profile("reverie-gamer")
 
     assert "prompt-to-production flow" in workflow
+    assert 'game_design_orchestrator(action="compile_program")' in workflow
     assert 'game_design_orchestrator(action="compile_request")' in workflow
     assert 'game_project_scaffolder(action="generate_vertical_slice")' in workflow
+    assert "artifacts/game_program.json" in workflow
+    assert "artifacts/reference_intelligence.json" in workflow
+    assert "artifacts/runtime_capability_graph.json" in workflow
+    assert "artifacts/runtime_delivery_plan.json" in workflow
     assert "artifacts/system_specs.json" in workflow
     assert "playtest/slice_score.json" in workflow
     assert "artifacts/asset_pipeline.json" in workflow
@@ -76,6 +174,7 @@ def test_compile_request_reduces_ambitious_3d_prompt_to_vertical_slice(tmp_path:
 
 
 def test_plan_production_emits_system_specs_and_task_graph(tmp_path: Path) -> None:
+    _seed_reference_workspace(tmp_path)
     tool = GameDesignOrchestratorTool({"project_root": tmp_path})
 
     result = tool.execute(
@@ -85,27 +184,51 @@ def test_plan_production_emits_system_specs_and_task_graph(tmp_path: Path) -> No
     )
 
     assert result.success is True
+    game_program_path = tmp_path / "artifacts" / "game_program.json"
+    milestone_board_path = tmp_path / "artifacts" / "milestone_board.json"
+    reference_intelligence_path = tmp_path / "artifacts" / "reference_intelligence.json"
+    runtime_capability_graph_path = tmp_path / "artifacts" / "runtime_capability_graph.json"
+    runtime_delivery_plan_path = tmp_path / "artifacts" / "runtime_delivery_plan.json"
     system_specs_path = tmp_path / "artifacts" / "system_specs.json"
     task_graph_path = tmp_path / "artifacts" / "task_graph.json"
     content_expansion_path = tmp_path / "artifacts" / "content_expansion.json"
     asset_pipeline_path = tmp_path / "artifacts" / "asset_pipeline.json"
+    world_program_path = tmp_path / "artifacts" / "world_program.json"
+    region_kits_path = tmp_path / "artifacts" / "region_kits.json"
+    faction_graph_path = tmp_path / "artifacts" / "faction_graph.json"
     expansion_backlog_path = tmp_path / "artifacts" / "expansion_backlog.json"
     resume_state_path = tmp_path / "artifacts" / "resume_state.json"
+    assert game_program_path.exists()
+    assert milestone_board_path.exists()
+    assert reference_intelligence_path.exists()
+    assert runtime_capability_graph_path.exists()
+    assert runtime_delivery_plan_path.exists()
     assert system_specs_path.exists()
     assert task_graph_path.exists()
     assert content_expansion_path.exists()
     assert asset_pipeline_path.exists()
+    assert world_program_path.exists()
+    assert region_kits_path.exists()
+    assert faction_graph_path.exists()
     assert expansion_backlog_path.exists()
     assert resume_state_path.exists()
 
+    game_program = json.loads(game_program_path.read_text(encoding="utf-8"))
+    reference_intelligence = json.loads(reference_intelligence_path.read_text(encoding="utf-8"))
+    runtime_capability_graph = json.loads(runtime_capability_graph_path.read_text(encoding="utf-8"))
     system_specs = json.loads(system_specs_path.read_text(encoding="utf-8"))
     task_graph = json.loads(task_graph_path.read_text(encoding="utf-8"))
     content_expansion = json.loads(content_expansion_path.read_text(encoding="utf-8"))
     asset_pipeline = json.loads(asset_pipeline_path.read_text(encoding="utf-8"))
     resume_state = json.loads(resume_state_path.read_text(encoding="utf-8"))
+    assert game_program["target_class"] == "large_scale_3d_action_rpg_base"
+    assert any(item["id"] == "godot-tps-demo" for item in reference_intelligence["detected_repositories"])
+    assert any(item["runtime_id"] == "godot" for item in reference_intelligence["runtime_alignment"])
+    assert runtime_capability_graph["selected_runtime"] == "godot"
     assert "character_controller" in system_specs["packets"]
     assert "combat" in system_specs["packets"]
     assert "world_structure" in system_specs["packets"]
+    assert "compile_program" in task_graph["resume_order"]
     assert "asset_pipeline_seed" in task_graph["resume_order"]
     assert "verification_loop" in task_graph["resume_order"]
     assert "continuity_snapshot" in task_graph["resume_order"]
@@ -114,11 +237,101 @@ def test_plan_production_emits_system_specs_and_task_graph(tmp_path: Path) -> No
     assert asset_pipeline["modeling_workspace"]["registry_path"] == "data/models/model_registry.yaml"
     assert any(item["id"] == "player_avatar" for item in asset_pipeline["modeling_seed"])
     assert asset_pipeline["import_profile"]["runtime"] == "godot"
+    assert "artifacts/game_program.json" in resume_state["artifacts_to_open_first"]
+    assert "artifacts/reference_intelligence.json" in resume_state["artifacts_to_open_first"]
     assert "artifacts/asset_pipeline.json" in resume_state["artifacts_to_open_first"]
     assert "artifacts/resume_state.json" in resume_state["artifacts_to_open_first"]
 
 
+def test_compile_program_emits_program_and_factory_artifacts(tmp_path: Path) -> None:
+    _seed_reference_workspace(tmp_path)
+    tool = GameDesignOrchestratorTool({"project_root": tmp_path})
+
+    result = tool.execute(
+        action="compile_program",
+        prompt="Build a large-scale 3D action RPG with shrine regions, faction conflict, progression, and a future boss arc.",
+        project_name="Program First Slice",
+    )
+
+    assert result.success is True
+    assert (tmp_path / "artifacts" / "game_program.json").exists()
+    assert (tmp_path / "artifacts" / "game_bible.md").exists()
+    assert (tmp_path / "artifacts" / "feature_matrix.json").exists()
+    assert (tmp_path / "artifacts" / "reference_intelligence.json").exists()
+    assert (tmp_path / "artifacts" / "runtime_capability_graph.json").exists()
+    assert (tmp_path / "artifacts" / "runtime_delivery_plan.json").exists()
+    assert (tmp_path / "artifacts" / "gameplay_factory.json").exists()
+    assert (tmp_path / "artifacts" / "boss_arc.json").exists()
+
+
+def test_reference_intelligence_influences_runtime_delivery_and_guardrails(tmp_path: Path) -> None:
+    _seed_reference_workspace(tmp_path)
+    tool = GameDesignOrchestratorTool({"project_root": tmp_path})
+
+    result = tool.execute(
+        action="plan_production",
+        prompt="Build a large-scale 3D action RPG with third-person combat, open-world exploration, and future multiplayer expansion.",
+        project_name="Reference Driven Slice",
+    )
+
+    assert result.success is True
+    reference_intelligence = json.loads((tmp_path / "artifacts" / "reference_intelligence.json").read_text(encoding="utf-8"))
+    runtime_delivery_plan = json.loads((tmp_path / "artifacts" / "runtime_delivery_plan.json").read_text(encoding="utf-8"))
+    runtime_registry = json.loads((tmp_path / "artifacts" / "runtime_registry.json").read_text(encoding="utf-8"))
+
+    assert any(item["reference_id"] == "o3de-multiplayersample" for item in reference_intelligence["recommended_reference_stack"])
+    assert any(item["policy"] == "do_not_redistribute" for item in reference_intelligence["legal_guardrails"])
+    assert runtime_delivery_plan["reference_inputs"]["recommended_stack"]
+    assert runtime_registry["reference_alignment"]["godot"]["reference_fit_score"] >= 0
+
+
+def test_game_playtest_lab_runs_quality_gates_and_iteration_plan(tmp_path: Path) -> None:
+    scaffold = GameProjectScaffolderTool({"project_root": tmp_path})
+    scaffold.execute(
+        action="generate_vertical_slice",
+        output_dir="lab_slice",
+        prompt="Create a 3D action RPG slice with shrine combat and progression reward.",
+        requested_runtime="reverie_engine",
+        project_name="Lab Slice",
+    )
+
+    tool = GamePlaytestLabTool({"project_root": tmp_path / "lab_slice"})
+
+    gates = tool.execute(action="run_quality_gates")
+    combat = tool.execute(action="score_combat_feel")
+    nxt = tool.execute(action="plan_next_iteration")
+
+    assert gates.success is True
+    assert combat.success is True
+    assert nxt.success is True
+    assert (tmp_path / "lab_slice" / "playtest" / "quality_gates.json").exists()
+    assert (tmp_path / "lab_slice" / "playtest" / "performance_budget.json").exists()
+    assert (tmp_path / "lab_slice" / "playtest" / "combat_feel_report.json").exists()
+    assert (tmp_path / "lab_slice" / "playtest" / "continuation_recommendations.md").exists()
+
+
+def test_scaffolder_can_upgrade_runtime_project_and_apply_system_packet(tmp_path: Path) -> None:
+    tool = GameProjectScaffolderTool({"project_root": tmp_path})
+
+    generated = tool.execute(
+        action="generate_vertical_slice",
+        output_dir="upgrade_slice",
+        prompt="Create a 3D action RPG slice with combat, quest flow, and save support.",
+        requested_runtime="reverie_engine",
+        project_name="Upgrade Slice",
+    )
+    assert generated.success is True
+
+    upgraded = tool.execute(action="upgrade_runtime_project", output_dir="upgrade_slice")
+    applied = tool.execute(action="apply_system_packet", output_dir="upgrade_slice", system_name="combat")
+
+    assert upgraded.success is True
+    assert applied.success is True
+    assert (tmp_path / "upgrade_slice" / "artifacts" / "applied_packets" / "combat.json").exists()
+
+
 def test_generate_vertical_slice_builds_verified_reverie_engine_project(tmp_path: Path) -> None:
+    _seed_reference_workspace(tmp_path)
     tool = GameProjectScaffolderTool({"project_root": tmp_path})
 
     result = tool.execute(
@@ -135,14 +348,24 @@ def test_generate_vertical_slice_builds_verified_reverie_engine_project(tmp_path
     assert result.data["slice_score"]["score"] >= 70
 
     slice_root = tmp_path / "builtin_slice"
+    assert (slice_root / "artifacts" / "game_program.json").exists()
+    assert (slice_root / "artifacts" / "reference_intelligence.json").exists()
+    assert (slice_root / "artifacts" / "runtime_capability_graph.json").exists()
+    assert (slice_root / "artifacts" / "runtime_delivery_plan.json").exists()
     assert (slice_root / "artifacts" / "game_request.json").exists()
     assert (slice_root / "artifacts" / "runtime_registry.json").exists()
     assert (slice_root / "artifacts" / "production_plan.json").exists()
     assert (slice_root / "artifacts" / "system_specs.json").exists()
     assert (slice_root / "artifacts" / "task_graph.json").exists()
     assert (slice_root / "artifacts" / "asset_pipeline.json").exists()
+    assert (slice_root / "artifacts" / "world_program.json").exists()
+    assert (slice_root / "artifacts" / "region_kits.json").exists()
+    assert (slice_root / "artifacts" / "faction_graph.json").exists()
     assert (slice_root / "playtest" / "quality_gates.json").exists()
+    assert (slice_root / "playtest" / "performance_budget.json").exists()
+    assert (slice_root / "playtest" / "combat_feel_report.json").exists()
     assert (slice_root / "playtest" / "slice_score.json").exists()
+    assert (slice_root / "playtest" / "continuation_recommendations.md").exists()
     assert (slice_root / "data" / "models" / "model_registry.yaml").exists()
     assert (slice_root / "assets" / "models" / "source" / "player_avatar.bbmodel").exists()
     assert (slice_root / "data" / "content" / "encounters.yaml").exists()
@@ -162,6 +385,7 @@ def test_generate_vertical_slice_builds_verified_reverie_engine_project(tmp_path
 
 
 def test_generate_vertical_slice_builds_godot_foundation(tmp_path: Path) -> None:
+    _seed_reference_workspace(tmp_path)
     tool = GameProjectScaffolderTool({"project_root": tmp_path})
 
     result = tool.execute(
@@ -291,10 +515,20 @@ def test_generate_vertical_slice_builds_godot_foundation(tmp_path: Path) -> None
     assert combat_payload["player_actions"]["dash_i_frames_seconds"] > 0
 
     artifact_root = tmp_path / "godot_slice" / "artifacts"
+    assert (artifact_root / "game_program.json").exists()
+    assert (artifact_root / "reference_intelligence.json").exists()
+    assert (artifact_root / "runtime_capability_graph.json").exists()
+    assert (artifact_root / "runtime_delivery_plan.json").exists()
     assert (artifact_root / "system_specs.json").exists()
     assert (artifact_root / "task_graph.json").exists()
     assert (artifact_root / "content_expansion.json").exists()
     assert (artifact_root / "asset_pipeline.json").exists()
+    assert (artifact_root / "world_program.json").exists()
+    assert (artifact_root / "region_kits.json").exists()
+    assert (artifact_root / "faction_graph.json").exists()
     assert (artifact_root / "expansion_backlog.json").exists()
     assert (artifact_root / "resume_state.json").exists()
+    assert (tmp_path / "godot_slice" / "playtest" / "quality_gates.json").exists()
+    assert (tmp_path / "godot_slice" / "playtest" / "performance_budget.json").exists()
+    assert (tmp_path / "godot_slice" / "playtest" / "combat_feel_report.json").exists()
     assert (tmp_path / "godot_slice" / "playtest" / "slice_score.json").exists()

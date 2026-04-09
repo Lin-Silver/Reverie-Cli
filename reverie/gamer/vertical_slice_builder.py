@@ -15,14 +15,31 @@ from ..engine import (
     sync_model_registry,
 )
 from .asset_pipeline import build_asset_pipeline_plan, asset_pipeline_markdown
+from .asset_budgeting import build_asset_budget
+from .animation_pipeline import build_animation_plan
+from .character_factory import build_character_kits
+from .content_lattice import build_content_matrix
+from .continuation_director import (
+    build_continuation_recommendations,
+    continuation_recommendations_markdown,
+)
+from .environment_factory import build_environment_kits
 from .production_plan import (
     build_blueprint_from_request,
     build_production_plan,
     production_plan_markdown,
     vertical_slice_markdown,
 )
+from .faction_graph import build_faction_graph
+from .gameplay_factory import build_boss_arc, build_gameplay_factory
+from .milestone_planner import build_feature_matrix, build_milestone_board, build_risk_register
+from .program_compiler import build_game_program, game_bible_markdown
 from .prompt_compiler import compile_game_prompt
+from .region_expander import build_region_kits
+from .runtime_capability_graph import build_runtime_capability_graph
+from .runtime_delivery import build_runtime_delivery_plan
 from .runtime_registry import select_runtime_profile
+from .save_migration import build_save_migration_plan
 from .expansion_planner import (
     build_content_expansion_plan,
     build_expansion_backlog,
@@ -37,7 +54,14 @@ from .system_generators import (
     system_packet_markdown,
     task_graph_markdown,
 )
-from .verification import evaluate_slice_score, slice_score_markdown
+from .verification import (
+    build_combat_feel_report,
+    build_performance_budget,
+    build_quality_gate_report,
+    evaluate_slice_score,
+    slice_score_markdown,
+)
+from .world_program import build_questline_program, build_world_program
 
 
 def _write_json(path: Path, payload: Dict[str, Any], overwrite: bool) -> bool:
@@ -1521,6 +1545,7 @@ def build_vertical_slice_project(
         requested_runtime=requested_runtime,
         existing_runtime=existing_runtime,
     )
+    reference_intelligence = dict(selection.get("reference_intelligence", {}) or {})
     runtime_profile = selection["profile"]
     selected_runtime = selection["selected_runtime"]
     adapter = selection["adapter"]
@@ -1532,6 +1557,12 @@ def build_vertical_slice_project(
             runtime_profile=runtime_profile,
         )
     )
+    if reference_intelligence:
+        built_blueprint.setdefault("technical_strategy", {})["reference_strategy"] = {
+            "reference_root": reference_intelligence.get("reference_root", ""),
+            "recommended_stack": list(reference_intelligence.get("recommended_reference_stack", []) or []),
+            "legal_guardrails": list(reference_intelligence.get("legal_guardrails", []) or []),
+        }
     production_plan = build_production_plan(
         compiled_request,
         built_blueprint,
@@ -1556,6 +1587,118 @@ def build_vertical_slice_project(
         runtime_profile=runtime_profile,
     )
     asset_pipeline = build_asset_pipeline_plan(
+        compiled_request,
+        built_blueprint,
+        system_bundle,
+        content_expansion,
+        runtime_profile=runtime_profile,
+    )
+    if reference_intelligence:
+        asset_pipeline["reference_stack"] = list(reference_intelligence.get("recommended_reference_stack", []) or [])
+        asset_pipeline["reference_guardrails"] = list(reference_intelligence.get("legal_guardrails", []) or [])
+    game_program = build_game_program(
+        compiled_request,
+        built_blueprint,
+        runtime_profile=runtime_profile,
+    )
+    feature_matrix = build_feature_matrix(
+        compiled_request,
+        built_blueprint,
+        system_bundle,
+        runtime_profile=runtime_profile,
+    )
+    content_matrix = build_content_matrix(
+        compiled_request,
+        built_blueprint,
+        content_expansion,
+        asset_pipeline,
+        runtime_profile=runtime_profile,
+    )
+    milestone_board = build_milestone_board(
+        compiled_request,
+        built_blueprint,
+        production_plan,
+        runtime_profile=runtime_profile,
+    )
+    risk_register = build_risk_register(
+        compiled_request,
+        built_blueprint,
+        runtime_profile=runtime_profile,
+    )
+    runtime_capability_graph = build_runtime_capability_graph(compiled_request, selection)
+    runtime_delivery_plan = build_runtime_delivery_plan(
+        compiled_request,
+        built_blueprint,
+        selection,
+        runtime_capability_graph,
+        system_bundle=system_bundle,
+    )
+    character_kits = build_character_kits(
+        compiled_request,
+        built_blueprint,
+        content_expansion,
+        asset_pipeline,
+        runtime_profile=runtime_profile,
+    )
+    environment_kits = build_environment_kits(
+        compiled_request,
+        built_blueprint,
+        content_expansion,
+        asset_pipeline,
+        runtime_profile=runtime_profile,
+    )
+    animation_plan = build_animation_plan(
+        compiled_request,
+        built_blueprint,
+        system_bundle,
+        runtime_profile=runtime_profile,
+    )
+    asset_budget = build_asset_budget(
+        compiled_request,
+        built_blueprint,
+        asset_pipeline,
+        content_expansion,
+        runtime_profile=runtime_profile,
+    )
+    world_program = build_world_program(
+        compiled_request,
+        built_blueprint,
+        content_expansion,
+        runtime_profile=runtime_profile,
+    )
+    region_kits = build_region_kits(
+        compiled_request,
+        built_blueprint,
+        content_expansion,
+        world_program,
+    )
+    faction_graph = build_faction_graph(
+        compiled_request,
+        built_blueprint,
+        content_expansion,
+        runtime_profile=runtime_profile,
+    )
+    questline_program = build_questline_program(
+        compiled_request,
+        built_blueprint,
+        content_expansion,
+        runtime_profile=runtime_profile,
+    )
+    save_migration_plan = build_save_migration_plan(
+        compiled_request,
+        built_blueprint,
+        system_bundle,
+        content_expansion,
+        runtime_profile=runtime_profile,
+    )
+    gameplay_factory = build_gameplay_factory(
+        compiled_request,
+        built_blueprint,
+        system_bundle,
+        content_expansion,
+        runtime_profile=runtime_profile,
+    )
+    boss_arc = build_boss_arc(
         compiled_request,
         built_blueprint,
         system_bundle,
@@ -1592,12 +1735,32 @@ def build_vertical_slice_project(
             "reason": selection["reason"],
             "fallback_reason": selection["fallback_reason"],
             "profiles": selection["profiles"],
+            "reference_alignment": selection.get("reference_alignment", {}),
         },
+        root / "artifacts" / "reference_intelligence.json": reference_intelligence,
         root / "artifacts" / "production_plan.json": production_plan,
         root / "artifacts" / "system_specs.json": system_bundle,
         root / "artifacts" / "task_graph.json": task_graph,
+        root / "artifacts" / "game_program.json": game_program,
+        root / "artifacts" / "feature_matrix.json": feature_matrix,
+        root / "artifacts" / "content_matrix.json": content_matrix,
+        root / "artifacts" / "milestone_board.json": milestone_board,
+        root / "artifacts" / "risk_register.json": risk_register,
+        root / "artifacts" / "runtime_capability_graph.json": runtime_capability_graph,
+        root / "artifacts" / "runtime_delivery_plan.json": runtime_delivery_plan,
         root / "artifacts" / "content_expansion.json": content_expansion,
         root / "artifacts" / "asset_pipeline.json": asset_pipeline,
+        root / "artifacts" / "character_kits.json": character_kits,
+        root / "artifacts" / "environment_kits.json": environment_kits,
+        root / "artifacts" / "animation_plan.json": animation_plan,
+        root / "artifacts" / "asset_budget.json": asset_budget,
+        root / "artifacts" / "world_program.json": world_program,
+        root / "artifacts" / "region_kits.json": region_kits,
+        root / "artifacts" / "faction_graph.json": faction_graph,
+        root / "artifacts" / "questline_program.json": questline_program,
+        root / "artifacts" / "save_migration_plan.json": save_migration_plan,
+        root / "artifacts" / "gameplay_factory.json": gameplay_factory,
+        root / "artifacts" / "boss_arc.json": boss_arc,
         root / "artifacts" / "telemetry_schema.json": _telemetry_schema(compiled_request, built_blueprint),
     }
     for path, payload in artifact_payloads.items():
@@ -1611,15 +1774,12 @@ def build_vertical_slice_project(
         root / "artifacts" / "task_graph.md": task_graph_markdown(task_graph),
         root / "artifacts" / "content_expansion.md": content_expansion_markdown(content_expansion),
         root / "artifacts" / "asset_pipeline.md": asset_pipeline_markdown(asset_pipeline),
+        root / "artifacts" / "game_bible.md": game_bible_markdown(game_program),
         root / "playtest" / "test_plan.md": _playtest_plan_markdown(compiled_request, built_blueprint),
     }
     for path, payload in artifact_texts.items():
         if _write_text(path, payload, overwrite):
             written_artifacts.append(str(path))
-
-    quality_path = root / "playtest" / "quality_gates.json"
-    if _write_json(quality_path, _quality_gates(compiled_request, built_blueprint, system_bundle), overwrite):
-        written_artifacts.append(str(quality_path))
 
     extra_runtime_files: list[str] = []
     if selected_runtime == "reverie_engine":
@@ -1672,7 +1832,43 @@ def build_vertical_slice_project(
         verification=verification,
         slice_score=slice_score,
     )
+    quality_gates = build_quality_gate_report(
+        compiled_request,
+        built_blueprint,
+        system_bundle,
+        runtime_profile=runtime_profile,
+        verification=verification,
+        slice_score=slice_score,
+        asset_pipeline=asset_pipeline,
+    )
+    performance_budget = build_performance_budget(
+        compiled_request,
+        built_blueprint,
+        asset_pipeline,
+        runtime_profile=runtime_profile,
+    )
+    combat_feel_report = build_combat_feel_report(
+        compiled_request,
+        built_blueprint,
+        system_bundle,
+        slice_score=slice_score,
+    )
+    continuation_recommendations = build_continuation_recommendations(
+        compiled_request,
+        built_blueprint,
+        production_plan,
+        task_graph,
+        expansion_backlog,
+        resume_state,
+        slice_score=slice_score,
+        quality_gates=quality_gates,
+        world_program=world_program,
+        reference_intelligence=reference_intelligence,
+    )
     score_payloads = {
+        root / "playtest" / "quality_gates.json": quality_gates,
+        root / "playtest" / "performance_budget.json": performance_budget,
+        root / "playtest" / "combat_feel_report.json": combat_feel_report,
         root / "playtest" / "slice_score.json": slice_score,
         root / "artifacts" / "expansion_backlog.json": expansion_backlog,
         root / "artifacts" / "resume_state.json": resume_state,
@@ -1685,6 +1881,7 @@ def build_vertical_slice_project(
         root / "playtest" / "slice_score.md": slice_score_markdown(slice_score),
         root / "artifacts" / "expansion_backlog.md": expansion_backlog_markdown(expansion_backlog),
         root / "artifacts" / "resume_state.md": resume_state_markdown(resume_state),
+        root / "playtest" / "continuation_recommendations.md": continuation_recommendations_markdown(continuation_recommendations),
     }
     for path, payload in score_texts.items():
         if _write_text(path, payload, overwrite):
@@ -1703,8 +1900,31 @@ def build_vertical_slice_project(
         "task_graph": task_graph,
         "content_expansion": content_expansion,
         "asset_pipeline": asset_pipeline,
+        "game_program": game_program,
+        "feature_matrix": feature_matrix,
+        "content_matrix": content_matrix,
+        "milestone_board": milestone_board,
+        "risk_register": risk_register,
+        "reference_intelligence": reference_intelligence,
+        "runtime_capability_graph": runtime_capability_graph,
+        "runtime_delivery_plan": runtime_delivery_plan,
+        "character_kits": character_kits,
+        "environment_kits": environment_kits,
+        "animation_plan": animation_plan,
+        "asset_budget": asset_budget,
+        "world_program": world_program,
+        "region_kits": region_kits,
+        "faction_graph": faction_graph,
+        "questline_program": questline_program,
+        "save_migration_plan": save_migration_plan,
+        "gameplay_factory": gameplay_factory,
+        "boss_arc": boss_arc,
         "expansion_backlog": expansion_backlog,
         "resume_state": resume_state,
+        "quality_gates": quality_gates,
+        "performance_budget": performance_budget,
+        "combat_feel_report": combat_feel_report,
+        "continuation_recommendations": continuation_recommendations,
         "slice_score": slice_score,
         "modeling_workspace": modeling_workspace,
         "written_artifacts": written_artifacts,

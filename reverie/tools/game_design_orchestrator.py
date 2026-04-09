@@ -15,6 +15,15 @@ import json
 from .base import BaseTool, ToolResult
 from ..engine import canonical_engine_name, is_builtin_engine_name
 from ..gamer.asset_pipeline import build_asset_pipeline_plan, asset_pipeline_markdown
+from ..gamer.asset_budgeting import build_asset_budget
+from ..gamer.animation_pipeline import build_animation_plan
+from ..gamer.character_factory import build_character_kits
+from ..gamer.content_lattice import build_content_matrix
+from ..gamer.continuation_director import (
+    build_continuation_recommendations,
+    continuation_recommendations_markdown,
+)
+from ..gamer.environment_factory import build_environment_kits
 from ..gamer.expansion_planner import (
     build_content_expansion_plan,
     build_expansion_backlog,
@@ -23,6 +32,10 @@ from ..gamer.expansion_planner import (
     expansion_backlog_markdown,
     resume_state_markdown,
 )
+from ..gamer.faction_graph import build_enemy_faction_packet, build_faction_graph
+from ..gamer.gameplay_factory import build_boss_arc, build_gameplay_factory
+from ..gamer.milestone_planner import build_feature_matrix, build_milestone_board, build_risk_register
+from ..gamer.program_compiler import build_game_program, game_bible_markdown
 from ..gamer.prompt_compiler import compile_game_prompt
 from ..gamer.production_plan import (
     build_blueprint_from_request,
@@ -30,13 +43,23 @@ from ..gamer.production_plan import (
     build_vertical_slice_plan,
     vertical_slice_markdown,
 )
+from ..gamer.region_expander import build_region_expansion_plan, build_region_kits
+from ..gamer.runtime_capability_graph import build_runtime_capability_graph
+from ..gamer.runtime_delivery import build_runtime_delivery_plan
 from ..gamer.runtime_registry import discover_runtime_profiles, select_runtime_profile
+from ..gamer.save_migration import build_save_migration_plan
 from ..gamer.system_generators import (
     build_system_packet_bundle,
     build_task_graph,
     system_packet_markdown,
     task_graph_markdown,
 )
+from ..gamer.verification import (
+    build_combat_feel_report,
+    build_performance_budget,
+    build_quality_gate_report,
+)
+from ..gamer.world_program import build_questline_program, build_world_program
 
 
 class GameDesignOrchestratorTool(BaseTool):
@@ -57,9 +80,15 @@ class GameDesignOrchestratorTool(BaseTool):
                 "type": "string",
                 "enum": [
                     "compile_request",
+                    "compile_program",
                     "create_blueprint",
                     "plan_production",
                     "expand_system",
+                    "generate_gameplay_factory",
+                    "plan_boss_arc",
+                    "expand_region",
+                    "generate_character_kit",
+                    "build_enemy_faction",
                     "generate_vertical_slice",
                     "analyze_scope",
                     "export_markdown",
@@ -118,6 +147,18 @@ class GameDesignOrchestratorTool(BaseTool):
                 "type": "string",
                 "description": "System name for expand_system",
             },
+            "region_id": {
+                "type": "string",
+                "description": "Region id for expand_region",
+            },
+            "faction_id": {
+                "type": "string",
+                "description": "Faction id for build_enemy_faction",
+            },
+            "character_id": {
+                "type": "string",
+                "description": "Character or kit id for generate_character_kit",
+            },
             "pillars": {
                 "type": "array",
                 "items": {"type": "string"},
@@ -152,6 +193,11 @@ class GameDesignOrchestratorTool(BaseTool):
         try:
             if action == "compile_request":
                 return self._compile_request(request_path, kwargs)
+            if action == "compile_program":
+                output_path = self._resolve_path(
+                    kwargs.get("output_path", "artifacts/production_plan.json")
+                )
+                return self._compile_program(request_path, blueprint_path, output_path, kwargs)
             if action == "create_blueprint":
                 return self._create_blueprint(request_path, blueprint_path, kwargs)
             if action == "plan_production":
@@ -164,6 +210,21 @@ class GameDesignOrchestratorTool(BaseTool):
                 if not system_name:
                     return ToolResult.fail("system_name is required for expand_system")
                 return self._expand_system(blueprint_path, system_name, kwargs.get("data") or {})
+            if action == "generate_gameplay_factory":
+                output_path = self._resolve_path(kwargs.get("output_path", "artifacts/gameplay_factory.json"))
+                return self._generate_gameplay_factory(request_path, blueprint_path, output_path, kwargs)
+            if action == "plan_boss_arc":
+                output_path = self._resolve_path(kwargs.get("output_path", "artifacts/boss_arc.json"))
+                return self._plan_boss_arc(request_path, blueprint_path, output_path, kwargs)
+            if action == "expand_region":
+                output_path = self._resolve_path(kwargs.get("output_path", "artifacts/region_expansion.json"))
+                return self._expand_region(request_path, blueprint_path, output_path, kwargs)
+            if action == "generate_character_kit":
+                output_path = self._resolve_path(kwargs.get("output_path", "artifacts/character_kits.json"))
+                return self._generate_character_kit(request_path, blueprint_path, output_path, kwargs)
+            if action == "build_enemy_faction":
+                output_path = self._resolve_path(kwargs.get("output_path", "artifacts/enemy_faction.json"))
+                return self._build_enemy_faction(request_path, blueprint_path, output_path, kwargs)
             if action == "generate_vertical_slice":
                 output_path = self._resolve_path(
                     kwargs.get("output_path", "artifacts/vertical_slice_plan.md")
@@ -206,55 +267,15 @@ class GameDesignOrchestratorTool(BaseTool):
             },
         )
 
-    def _create_blueprint(self, request_path: Path, blueprint_path: Path, kwargs: Dict[str, Any]) -> ToolResult:
-        overwrite = kwargs.get("overwrite", False)
-        if blueprint_path.exists() and not overwrite:
-            return ToolResult.fail(
-                f"Blueprint already exists at {blueprint_path}. Use overwrite=true to replace it."
-            )
+    def _write_json_doc(self, path: Path, payload: Dict[str, Any]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
-        if request_path.exists() or kwargs.get("prompt"):
-            game_request = self._load_or_compile_request(request_path, kwargs)
-            runtime_selection = select_runtime_profile(
-                game_request,
-                project_root=self.project_root,
-                requested_runtime=kwargs.get("requested_runtime", ""),
-                existing_runtime=kwargs.get("existing_runtime", ""),
-            )
-            blueprint = build_blueprint_from_request(
-                game_request,
-                runtime_profile=runtime_selection["profile"],
-                overrides=kwargs.get("data") or {},
-            )
-        else:
-            blueprint = self._deep_merge(self._default_blueprint(kwargs), kwargs.get("data") or {})
-        blueprint_path.parent.mkdir(parents=True, exist_ok=True)
-        blueprint_path.write_text(json.dumps(blueprint, indent=2, ensure_ascii=False), encoding="utf-8")
+    def _write_text_doc(self, path: Path, payload: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(payload, encoding="utf-8")
 
-        systems = blueprint.get("gameplay_blueprint", {}).get("systems", {})
-        output = (
-            f"Created game blueprint at {blueprint_path}\n"
-            f"Project: {blueprint['meta']['project_name']}\n"
-            f"Genre: {blueprint['meta']['genre']}\n"
-            f"Dimension: {blueprint['meta']['dimension']}\n"
-            f"Engine: {blueprint['meta']['target_engine']}\n"
-            f"Defined systems: {len(systems)}"
-        )
-        return ToolResult.ok(
-            output,
-            {
-                "blueprint_path": str(blueprint_path.relative_to(self.project_root)),
-                "blueprint": blueprint,
-            },
-        )
-
-    def _plan_production(
-        self,
-        request_path: Path,
-        blueprint_path: Path,
-        output_path: Path,
-        kwargs: Dict[str, Any],
-    ) -> ToolResult:
+    def _collect_production_context(self, request_path: Path, kwargs: Dict[str, Any]) -> Dict[str, Any]:
         game_request = self._load_or_compile_request(request_path, kwargs)
         runtime_selection = select_runtime_profile(
             game_request,
@@ -267,6 +288,13 @@ class GameDesignOrchestratorTool(BaseTool):
             runtime_profile=runtime_selection["profile"],
             overrides=kwargs.get("data") or {},
         )
+        reference_intelligence = dict(runtime_selection.get("reference_intelligence", {}) or {})
+        if reference_intelligence:
+            blueprint.setdefault("technical_strategy", {})["reference_strategy"] = {
+                "reference_root": reference_intelligence.get("reference_root", ""),
+                "recommended_stack": list(reference_intelligence.get("recommended_reference_stack", []) or []),
+                "legal_guardrails": list(reference_intelligence.get("legal_guardrails", []) or []),
+            }
         production_plan = build_production_plan(
             game_request,
             blueprint,
@@ -296,6 +324,9 @@ class GameDesignOrchestratorTool(BaseTool):
             content_expansion,
             runtime_profile=runtime_selection["profile"],
         )
+        if reference_intelligence:
+            asset_pipeline["reference_stack"] = list(reference_intelligence.get("recommended_reference_stack", []) or [])
+            asset_pipeline["reference_guardrails"] = list(reference_intelligence.get("legal_guardrails", []) or [])
         expansion_backlog = build_expansion_backlog(
             game_request,
             blueprint,
@@ -311,61 +342,347 @@ class GameDesignOrchestratorTool(BaseTool):
             expansion_backlog,
             runtime_profile=runtime_selection["profile"],
         )
+        return {
+            "game_request": game_request,
+            "runtime_selection": runtime_selection,
+            "blueprint": blueprint,
+            "production_plan": production_plan,
+            "system_bundle": system_bundle,
+            "task_graph": task_graph,
+            "content_expansion": content_expansion,
+            "asset_pipeline": asset_pipeline,
+            "expansion_backlog": expansion_backlog,
+            "resume_state": resume_state,
+        }
 
-        request_path.parent.mkdir(parents=True, exist_ok=True)
-        request_path.write_text(json.dumps(game_request, indent=2, ensure_ascii=False), encoding="utf-8")
+    def _collect_extended_artifacts(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        game_request = context["game_request"]
+        blueprint = context["blueprint"]
+        runtime_selection = context["runtime_selection"]
+        production_plan = context["production_plan"]
+        system_bundle = context["system_bundle"]
+        task_graph = context["task_graph"]
+        content_expansion = context["content_expansion"]
+        asset_pipeline = context["asset_pipeline"]
+        expansion_backlog = context["expansion_backlog"]
+        resume_state = context["resume_state"]
+        reference_intelligence = dict(runtime_selection.get("reference_intelligence", {}) or {})
+
+        game_program = build_game_program(
+            game_request,
+            blueprint,
+            runtime_profile=runtime_selection["profile"],
+        )
+        feature_matrix = build_feature_matrix(
+            game_request,
+            blueprint,
+            system_bundle,
+            runtime_profile=runtime_selection["profile"],
+        )
+        content_matrix = build_content_matrix(
+            game_request,
+            blueprint,
+            content_expansion,
+            asset_pipeline,
+            runtime_profile=runtime_selection["profile"],
+        )
+        milestone_board = build_milestone_board(
+            game_request,
+            blueprint,
+            production_plan,
+            runtime_profile=runtime_selection["profile"],
+        )
+        risk_register = build_risk_register(
+            game_request,
+            blueprint,
+            runtime_profile=runtime_selection["profile"],
+        )
+        runtime_capability_graph = build_runtime_capability_graph(game_request, runtime_selection)
+        runtime_delivery_plan = build_runtime_delivery_plan(
+            game_request,
+            blueprint,
+            runtime_selection,
+            runtime_capability_graph,
+            system_bundle=system_bundle,
+        )
+        character_kits = build_character_kits(
+            game_request,
+            blueprint,
+            content_expansion,
+            asset_pipeline,
+            runtime_profile=runtime_selection["profile"],
+        )
+        environment_kits = build_environment_kits(
+            game_request,
+            blueprint,
+            content_expansion,
+            asset_pipeline,
+            runtime_profile=runtime_selection["profile"],
+        )
+        animation_plan = build_animation_plan(
+            game_request,
+            blueprint,
+            system_bundle,
+            runtime_profile=runtime_selection["profile"],
+        )
+        asset_budget = build_asset_budget(
+            game_request,
+            blueprint,
+            asset_pipeline,
+            content_expansion,
+            runtime_profile=runtime_selection["profile"],
+        )
+        world_program = build_world_program(
+            game_request,
+            blueprint,
+            content_expansion,
+            runtime_profile=runtime_selection["profile"],
+        )
+        region_kits = build_region_kits(
+            game_request,
+            blueprint,
+            content_expansion,
+            world_program,
+        )
+        faction_graph = build_faction_graph(
+            game_request,
+            blueprint,
+            content_expansion,
+            runtime_profile=runtime_selection["profile"],
+        )
+        questline_program = build_questline_program(
+            game_request,
+            blueprint,
+            content_expansion,
+            runtime_profile=runtime_selection["profile"],
+        )
+        save_migration_plan = build_save_migration_plan(
+            game_request,
+            blueprint,
+            system_bundle,
+            content_expansion,
+            runtime_profile=runtime_selection["profile"],
+        )
+        gameplay_factory = build_gameplay_factory(
+            game_request,
+            blueprint,
+            system_bundle,
+            content_expansion,
+            runtime_profile=runtime_selection["profile"],
+        )
+        boss_arc = build_boss_arc(
+            game_request,
+            blueprint,
+            system_bundle,
+            content_expansion,
+            runtime_profile=runtime_selection["profile"],
+        )
+        quality_gates = build_quality_gate_report(
+            game_request,
+            blueprint,
+            system_bundle,
+            runtime_profile=runtime_selection["profile"],
+            asset_pipeline=asset_pipeline,
+        )
+        performance_budget = build_performance_budget(
+            game_request,
+            blueprint,
+            asset_pipeline,
+            runtime_profile=runtime_selection["profile"],
+        )
+        combat_feel_report = build_combat_feel_report(
+            game_request,
+            blueprint,
+            system_bundle,
+        )
+        continuation_recommendations = build_continuation_recommendations(
+            game_request,
+            blueprint,
+            production_plan,
+            task_graph,
+            expansion_backlog,
+            resume_state,
+            quality_gates=quality_gates,
+            world_program=world_program,
+            reference_intelligence=reference_intelligence,
+        )
+        return {
+            "game_program": game_program,
+            "feature_matrix": feature_matrix,
+            "content_matrix": content_matrix,
+            "milestone_board": milestone_board,
+            "risk_register": risk_register,
+            "reference_intelligence": reference_intelligence,
+            "runtime_capability_graph": runtime_capability_graph,
+            "runtime_delivery_plan": runtime_delivery_plan,
+            "character_kits": character_kits,
+            "environment_kits": environment_kits,
+            "animation_plan": animation_plan,
+            "asset_budget": asset_budget,
+            "world_program": world_program,
+            "region_kits": region_kits,
+            "faction_graph": faction_graph,
+            "questline_program": questline_program,
+            "save_migration_plan": save_migration_plan,
+            "gameplay_factory": gameplay_factory,
+            "boss_arc": boss_arc,
+            "quality_gates": quality_gates,
+            "performance_budget": performance_budget,
+            "combat_feel_report": combat_feel_report,
+            "continuation_recommendations": continuation_recommendations,
+        }
+
+    def _compile_program(
+        self,
+        request_path: Path,
+        blueprint_path: Path,
+        output_path: Path,
+        kwargs: Dict[str, Any],
+    ) -> ToolResult:
+        result = self._plan_production(request_path, blueprint_path, output_path, kwargs)
+        if not result.success:
+            return result
+        return ToolResult.ok(
+            result.output.replace("Planned production", "Compiled program and planned production"),
+            result.data,
+        )
+
+    def _create_blueprint(self, request_path: Path, blueprint_path: Path, kwargs: Dict[str, Any]) -> ToolResult:
+        overwrite = kwargs.get("overwrite", False)
+        if blueprint_path.exists() and not overwrite:
+            return ToolResult.fail(
+                f"Blueprint already exists at {blueprint_path}. Use overwrite=true to replace it."
+            )
+
+        if request_path.exists() or kwargs.get("prompt"):
+            game_request = self._load_or_compile_request(request_path, kwargs)
+            runtime_selection = select_runtime_profile(
+                game_request,
+                project_root=self.project_root,
+                requested_runtime=kwargs.get("requested_runtime", ""),
+                existing_runtime=kwargs.get("existing_runtime", ""),
+            )
+            blueprint = build_blueprint_from_request(
+                game_request,
+                runtime_profile=runtime_selection["profile"],
+                overrides=kwargs.get("data") or {},
+            )
+            reference_intelligence = dict(runtime_selection.get("reference_intelligence", {}) or {})
+            if reference_intelligence:
+                blueprint.setdefault("technical_strategy", {})["reference_strategy"] = {
+                    "reference_root": reference_intelligence.get("reference_root", ""),
+                    "recommended_stack": list(reference_intelligence.get("recommended_reference_stack", []) or []),
+                    "legal_guardrails": list(reference_intelligence.get("legal_guardrails", []) or []),
+                }
+        else:
+            blueprint = self._deep_merge(self._default_blueprint(kwargs), kwargs.get("data") or {})
         blueprint_path.parent.mkdir(parents=True, exist_ok=True)
         blueprint_path.write_text(json.dumps(blueprint, indent=2, ensure_ascii=False), encoding="utf-8")
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(json.dumps(production_plan, indent=2, ensure_ascii=False), encoding="utf-8")
+
+        systems = blueprint.get("gameplay_blueprint", {}).get("systems", {})
+        output = (
+            f"Created game blueprint at {blueprint_path}\n"
+            f"Project: {blueprint['meta']['project_name']}\n"
+            f"Genre: {blueprint['meta']['genre']}\n"
+            f"Dimension: {blueprint['meta']['dimension']}\n"
+            f"Engine: {blueprint['meta']['target_engine']}\n"
+            f"Defined systems: {len(systems)}"
+        )
+        return ToolResult.ok(
+            output,
+            {
+                "blueprint_path": str(blueprint_path.relative_to(self.project_root)),
+                "blueprint": blueprint,
+            },
+        )
+
+    def _plan_production(
+        self,
+        request_path: Path,
+        blueprint_path: Path,
+        output_path: Path,
+        kwargs: Dict[str, Any],
+    ) -> ToolResult:
+        context = self._collect_production_context(request_path, kwargs)
+        game_request = context["game_request"]
+        runtime_selection = context["runtime_selection"]
+        blueprint = context["blueprint"]
+        production_plan = context["production_plan"]
+        system_bundle = context["system_bundle"]
+        task_graph = context["task_graph"]
+        content_expansion = context["content_expansion"]
+        asset_pipeline = context["asset_pipeline"]
+        expansion_backlog = context["expansion_backlog"]
+        resume_state = context["resume_state"]
+        extended = self._collect_extended_artifacts(context)
+
+        self._write_json_doc(request_path, game_request)
+        self._write_json_doc(blueprint_path, blueprint)
+        self._write_json_doc(output_path, production_plan)
 
         system_specs_path = self._resolve_path("artifacts/system_specs.json")
-        system_specs_path.parent.mkdir(parents=True, exist_ok=True)
-        system_specs_path.write_text(json.dumps(system_bundle, indent=2, ensure_ascii=False), encoding="utf-8")
+        self._write_json_doc(system_specs_path, system_bundle)
 
         system_specs_markdown_path = self._resolve_path("artifacts/system_specs.md")
-        system_specs_markdown_path.parent.mkdir(parents=True, exist_ok=True)
-        system_specs_markdown_path.write_text(system_packet_markdown(system_bundle), encoding="utf-8")
+        self._write_text_doc(system_specs_markdown_path, system_packet_markdown(system_bundle))
 
         task_graph_path = self._resolve_path("artifacts/task_graph.json")
-        task_graph_path.parent.mkdir(parents=True, exist_ok=True)
-        task_graph_path.write_text(json.dumps(task_graph, indent=2, ensure_ascii=False), encoding="utf-8")
+        self._write_json_doc(task_graph_path, task_graph)
 
         task_graph_markdown_path = self._resolve_path("artifacts/task_graph.md")
-        task_graph_markdown_path.parent.mkdir(parents=True, exist_ok=True)
-        task_graph_markdown_path.write_text(task_graph_markdown(task_graph), encoding="utf-8")
+        self._write_text_doc(task_graph_markdown_path, task_graph_markdown(task_graph))
 
         content_expansion_path = self._resolve_path("artifacts/content_expansion.json")
-        content_expansion_path.parent.mkdir(parents=True, exist_ok=True)
-        content_expansion_path.write_text(json.dumps(content_expansion, indent=2, ensure_ascii=False), encoding="utf-8")
+        self._write_json_doc(content_expansion_path, content_expansion)
 
         content_expansion_markdown_path = self._resolve_path("artifacts/content_expansion.md")
-        content_expansion_markdown_path.parent.mkdir(parents=True, exist_ok=True)
-        content_expansion_markdown_path.write_text(content_expansion_markdown(content_expansion), encoding="utf-8")
+        self._write_text_doc(content_expansion_markdown_path, content_expansion_markdown(content_expansion))
 
         asset_pipeline_path = self._resolve_path("artifacts/asset_pipeline.json")
-        asset_pipeline_path.parent.mkdir(parents=True, exist_ok=True)
-        asset_pipeline_path.write_text(json.dumps(asset_pipeline, indent=2, ensure_ascii=False), encoding="utf-8")
+        self._write_json_doc(asset_pipeline_path, asset_pipeline)
 
         asset_pipeline_markdown_path = self._resolve_path("artifacts/asset_pipeline.md")
-        asset_pipeline_markdown_path.parent.mkdir(parents=True, exist_ok=True)
-        asset_pipeline_markdown_path.write_text(asset_pipeline_markdown(asset_pipeline), encoding="utf-8")
+        self._write_text_doc(asset_pipeline_markdown_path, asset_pipeline_markdown(asset_pipeline))
 
         expansion_backlog_path = self._resolve_path("artifacts/expansion_backlog.json")
-        expansion_backlog_path.parent.mkdir(parents=True, exist_ok=True)
-        expansion_backlog_path.write_text(json.dumps(expansion_backlog, indent=2, ensure_ascii=False), encoding="utf-8")
+        self._write_json_doc(expansion_backlog_path, expansion_backlog)
 
         expansion_backlog_markdown_path = self._resolve_path("artifacts/expansion_backlog.md")
-        expansion_backlog_markdown_path.parent.mkdir(parents=True, exist_ok=True)
-        expansion_backlog_markdown_path.write_text(expansion_backlog_markdown(expansion_backlog), encoding="utf-8")
+        self._write_text_doc(expansion_backlog_markdown_path, expansion_backlog_markdown(expansion_backlog))
 
         resume_state_path = self._resolve_path("artifacts/resume_state.json")
-        resume_state_path.parent.mkdir(parents=True, exist_ok=True)
-        resume_state_path.write_text(json.dumps(resume_state, indent=2, ensure_ascii=False), encoding="utf-8")
+        self._write_json_doc(resume_state_path, resume_state)
 
         resume_state_markdown_path = self._resolve_path("artifacts/resume_state.md")
-        resume_state_markdown_path.parent.mkdir(parents=True, exist_ok=True)
-        resume_state_markdown_path.write_text(resume_state_markdown(resume_state), encoding="utf-8")
+        self._write_text_doc(resume_state_markdown_path, resume_state_markdown(resume_state))
+
+        self._write_json_doc(self._resolve_path("artifacts/game_program.json"), extended["game_program"])
+        self._write_text_doc(self._resolve_path("artifacts/game_bible.md"), game_bible_markdown(extended["game_program"]))
+        self._write_json_doc(self._resolve_path("artifacts/feature_matrix.json"), extended["feature_matrix"])
+        self._write_json_doc(self._resolve_path("artifacts/content_matrix.json"), extended["content_matrix"])
+        self._write_json_doc(self._resolve_path("artifacts/milestone_board.json"), extended["milestone_board"])
+        self._write_json_doc(self._resolve_path("artifacts/risk_register.json"), extended["risk_register"])
+        self._write_json_doc(self._resolve_path("artifacts/reference_intelligence.json"), extended["reference_intelligence"])
+        self._write_json_doc(self._resolve_path("artifacts/runtime_capability_graph.json"), extended["runtime_capability_graph"])
+        self._write_json_doc(self._resolve_path("artifacts/runtime_delivery_plan.json"), extended["runtime_delivery_plan"])
+        self._write_json_doc(self._resolve_path("artifacts/character_kits.json"), extended["character_kits"])
+        self._write_json_doc(self._resolve_path("artifacts/environment_kits.json"), extended["environment_kits"])
+        self._write_json_doc(self._resolve_path("artifacts/animation_plan.json"), extended["animation_plan"])
+        self._write_json_doc(self._resolve_path("artifacts/asset_budget.json"), extended["asset_budget"])
+        self._write_json_doc(self._resolve_path("artifacts/world_program.json"), extended["world_program"])
+        self._write_json_doc(self._resolve_path("artifacts/region_kits.json"), extended["region_kits"])
+        self._write_json_doc(self._resolve_path("artifacts/faction_graph.json"), extended["faction_graph"])
+        self._write_json_doc(self._resolve_path("artifacts/questline_program.json"), extended["questline_program"])
+        self._write_json_doc(self._resolve_path("artifacts/save_migration_plan.json"), extended["save_migration_plan"])
+        self._write_json_doc(self._resolve_path("artifacts/gameplay_factory.json"), extended["gameplay_factory"])
+        self._write_json_doc(self._resolve_path("artifacts/boss_arc.json"), extended["boss_arc"])
+        self._write_json_doc(self._resolve_path("playtest/quality_gates.json"), extended["quality_gates"])
+        self._write_json_doc(self._resolve_path("playtest/performance_budget.json"), extended["performance_budget"])
+        self._write_json_doc(self._resolve_path("playtest/combat_feel_report.json"), extended["combat_feel_report"])
+        self._write_text_doc(
+            self._resolve_path("playtest/continuation_recommendations.md"),
+            continuation_recommendations_markdown(extended["continuation_recommendations"]),
+        )
 
         runtime_registry_path = self._resolve_path("artifacts/runtime_registry.json")
         runtime_registry_payload = {
@@ -373,6 +690,7 @@ class GameDesignOrchestratorTool(BaseTool):
             "reason": runtime_selection["reason"],
             "fallback_reason": runtime_selection["fallback_reason"],
             "profiles": discover_runtime_profiles(self.project_root),
+            "reference_alignment": runtime_selection.get("reference_alignment", {}),
         }
         runtime_registry_path.parent.mkdir(parents=True, exist_ok=True)
         runtime_registry_path.write_text(
@@ -395,6 +713,7 @@ class GameDesignOrchestratorTool(BaseTool):
                 "blueprint_path": str(blueprint_path.relative_to(self.project_root)),
                 "output_path": str(output_path.relative_to(self.project_root)),
                 "runtime_registry_path": str(runtime_registry_path.relative_to(self.project_root)),
+                "reference_intelligence_path": "artifacts/reference_intelligence.json",
                 "system_specs_path": str(system_specs_path.relative_to(self.project_root)),
                 "task_graph_path": str(task_graph_path.relative_to(self.project_root)),
                 "content_expansion_path": str(content_expansion_path.relative_to(self.project_root)),
@@ -408,6 +727,24 @@ class GameDesignOrchestratorTool(BaseTool):
                 "asset_pipeline": asset_pipeline,
                 "expansion_backlog": expansion_backlog,
                 "resume_state": resume_state,
+                "game_program": extended["game_program"],
+                "reference_intelligence": extended["reference_intelligence"],
+                "runtime_capability_graph": extended["runtime_capability_graph"],
+                "runtime_delivery_plan": extended["runtime_delivery_plan"],
+                "character_kits": extended["character_kits"],
+                "environment_kits": extended["environment_kits"],
+                "animation_plan": extended["animation_plan"],
+                "asset_budget": extended["asset_budget"],
+                "world_program": extended["world_program"],
+                "region_kits": extended["region_kits"],
+                "faction_graph": extended["faction_graph"],
+                "questline_program": extended["questline_program"],
+                "save_migration_plan": extended["save_migration_plan"],
+                "gameplay_factory": extended["gameplay_factory"],
+                "boss_arc": extended["boss_arc"],
+                "quality_gates": extended["quality_gates"],
+                "performance_budget": extended["performance_budget"],
+                "combat_feel_report": extended["combat_feel_report"],
             },
         )
 
@@ -433,6 +770,121 @@ class GameDesignOrchestratorTool(BaseTool):
                 "blueprint_path": str(blueprint_path.relative_to(self.project_root)),
                 "system_key": system_key,
                 "system": system_spec,
+            },
+        )
+
+    def _generate_gameplay_factory(
+        self,
+        request_path: Path,
+        blueprint_path: Path,
+        output_path: Path,
+        kwargs: Dict[str, Any],
+    ) -> ToolResult:
+        context = self._collect_production_context(request_path, kwargs)
+        extended = self._collect_extended_artifacts(context)
+        self._write_json_doc(output_path, extended["gameplay_factory"])
+        return ToolResult.ok(
+            f"Generated gameplay factory at {output_path}",
+            {
+                "output_path": str(output_path.relative_to(self.project_root)),
+                "gameplay_factory": extended["gameplay_factory"],
+            },
+        )
+
+    def _plan_boss_arc(
+        self,
+        request_path: Path,
+        blueprint_path: Path,
+        output_path: Path,
+        kwargs: Dict[str, Any],
+    ) -> ToolResult:
+        context = self._collect_production_context(request_path, kwargs)
+        extended = self._collect_extended_artifacts(context)
+        self._write_json_doc(output_path, extended["boss_arc"])
+        return ToolResult.ok(
+            f"Generated boss arc at {output_path}",
+            {
+                "output_path": str(output_path.relative_to(self.project_root)),
+                "boss_arc": extended["boss_arc"],
+            },
+        )
+
+    def _expand_region(
+        self,
+        request_path: Path,
+        blueprint_path: Path,
+        output_path: Path,
+        kwargs: Dict[str, Any],
+    ) -> ToolResult:
+        region_id = str(kwargs.get("region_id") or "").strip()
+        if not region_id:
+            return ToolResult.fail("region_id is required for expand_region")
+        context = self._collect_production_context(request_path, kwargs)
+        extended = self._collect_extended_artifacts(context)
+        expansion = build_region_expansion_plan(
+            region_id,
+            extended["region_kits"],
+            extended["world_program"],
+        )
+        self._write_json_doc(output_path, expansion)
+        return ToolResult.ok(
+            f"Generated region expansion at {output_path}",
+            {
+                "output_path": str(output_path.relative_to(self.project_root)),
+                "region_expansion": expansion,
+            },
+        )
+
+    def _generate_character_kit(
+        self,
+        request_path: Path,
+        blueprint_path: Path,
+        output_path: Path,
+        kwargs: Dict[str, Any],
+    ) -> ToolResult:
+        character_id = str(kwargs.get("character_id") or "").strip()
+        context = self._collect_production_context(request_path, kwargs)
+        extended = self._collect_extended_artifacts(context)
+        payload = extended["character_kits"]
+        if character_id:
+            selected = None
+            if character_id == "player_avatar":
+                selected = payload.get("hero_kit")
+            else:
+                for item in payload.get("npc_kits", []) + payload.get("enemy_kits", []):
+                    if str(item.get("id", "")).strip() == character_id:
+                        selected = item
+                        break
+            if selected is not None:
+                payload = {"selected_kit": selected, "character_kits": extended["character_kits"]}
+        self._write_json_doc(output_path, payload)
+        return ToolResult.ok(
+            f"Generated character kit data at {output_path}",
+            {
+                "output_path": str(output_path.relative_to(self.project_root)),
+                "character_kits": payload,
+            },
+        )
+
+    def _build_enemy_faction(
+        self,
+        request_path: Path,
+        blueprint_path: Path,
+        output_path: Path,
+        kwargs: Dict[str, Any],
+    ) -> ToolResult:
+        faction_id = str(kwargs.get("faction_id") or "").strip()
+        if not faction_id:
+            return ToolResult.fail("faction_id is required for build_enemy_faction")
+        context = self._collect_production_context(request_path, kwargs)
+        extended = self._collect_extended_artifacts(context)
+        payload = build_enemy_faction_packet(faction_id, extended["faction_graph"])
+        self._write_json_doc(output_path, payload)
+        return ToolResult.ok(
+            f"Generated enemy faction packet at {output_path}",
+            {
+                "output_path": str(output_path.relative_to(self.project_root)),
+                "enemy_faction": payload,
             },
         )
 

@@ -618,18 +618,26 @@ Use this tool to move from one prompt to a compiled request, structured blueprin
 
 **Actions**:
 - `compile_request`
+- `compile_program`
 - `create_blueprint`
 - `plan_production`
 - `expand_system`
+- `generate_gameplay_factory`
+- `plan_boss_arc`
+- `expand_region`
+- `generate_character_kit`
+- `build_enemy_faction`
 - `generate_vertical_slice`
 - `analyze_scope`
 - `export_markdown`
 
 **Best uses**:
+- Compile a raw game prompt into `artifacts/game_program.json`, `game_bible.md`, `feature_matrix.json`, `milestone_board.json`, and `reference_intelligence.json`
 - Compile a raw game prompt into `artifacts/game_request.json`
 - Create a real blueprint before broad game implementation
-- Generate a production plan, runtime decision packet, system specs, task graph, and durable continuity artifacts before scaffolding
+- Generate a production plan, runtime decision packet, local-reference intelligence packet, capability graph, world program, system specs, task graph, and durable continuity artifacts before scaffolding
 - Expand one system into verbs, states, resources, tuning knobs, telemetry, and tests
+- Generate gameplay factories, boss arcs, region-expansion packets, character kits, and enemy-faction packets for follow-up production turns
 - Generate a vertical-slice plan before scaling content scope
 - Analyze scope and risk when the request implies a large or multi-genre game
 """
@@ -640,20 +648,24 @@ def get_game_project_scaffolder_description() -> str:
     return """
 ## Game Project Scaffolder Tool (game_project_scaffolder)
 
-Use this tool to plan or create an engine-aware project foundation, and to materialize a request-backed vertical slice.
+Use this tool to plan or create an engine-aware project foundation, upgrade an existing runtime project, apply one system packet, and materialize a request-backed vertical slice.
 
 **Actions**:
 - `plan_structure`
 - `create_foundation`
 - `create_from_request`
 - `generate_vertical_slice`
+- `upgrade_runtime_project`
+- `apply_system_packet`
 - `generate_module_map`
 - `generate_content_pipeline`
 
 **Best uses**:
 - Choose a practical structure for 2D, 2.5D, or 3D projects
 - Create a repeatable foundation for runtime, data, tests, and playtest folders
-- Turn a compiled request directly into artifacts, runtime selection, system specs, task graph, content expansion seeds, resume state, slice score, and a bootable slice scaffold
+- Turn a compiled request directly into artifacts, local-reference intelligence, runtime selection, system specs, task graph, content expansion seeds, resume state, slice score, and a bootable slice scaffold
+- Refresh a long-running project foundation without restarting the whole planning flow
+- Stage one system packet into runtime-facing artifact output when the project is growing subsystem by subsystem
 - Generate module and content-pipeline docs before major implementation expands
 """
 
@@ -669,12 +681,16 @@ Use this tool to build the feedback and verification loop for game projects.
 - `create_test_plan`
 - `generate_telemetry_schema`
 - `create_quality_gates`
+- `run_quality_gates`
+- `score_combat_feel`
+- `plan_next_iteration`
 - `analyze_session_log`
 - `synthesize_feedback`
 
 **Best uses**:
 - Define playtest goals before content and balancing work scale up
 - Generate telemetry and quality gates for first playable and vertical-slice milestones
+- Turn current project artifacts into performance budgets, combat-feel reports, and next-iteration prompt packs
 - Analyze session logs and synthesize tester feedback into clear next actions
 """
 
@@ -881,16 +897,18 @@ def _get_mode_tool_workflow(mode: str) -> str:
 ## Reverie-Gamer Mode Tool Workflow
 
 - Start with retrieval; if the right tool or schema is unclear, use `tool_catalog` before guessing.
-- Treat substantial requests as a prompt-to-production flow: compile the request, define the blueprint, choose scope, choose the runtime, scaffold the runtime, build the first playable, then verify the slice.
-- Use `game_design_orchestrator(action="compile_request")` first for one-prompt game requests, then `create_blueprint`, `plan_production`, and `generate_vertical_slice`.
-- Expect `plan_production` to emit `artifacts/system_specs.json`, `artifacts/task_graph.json`, `artifacts/content_expansion.json`, `artifacts/asset_pipeline.json`, and `artifacts/resume_state.json`, and expect `generate_vertical_slice` to emit `playtest/slice_score.json`.
+- Treat substantial requests as a prompt-to-production flow: compile the program, compile the request, define the blueprint, choose scope, choose the runtime, scaffold the runtime, build the first playable, verify the slice, then plan continuation.
+- Use `game_design_orchestrator(action="compile_program")` first for fresh large-scale game requests, then `game_design_orchestrator(action="compile_request")`, `game_design_orchestrator(action="create_blueprint")`, `game_design_orchestrator(action="plan_production")`, and `game_design_orchestrator(action="generate_vertical_slice")`.
+- Expect `plan_production` to emit `artifacts/game_program.json`, `artifacts/reference_intelligence.json`, `artifacts/runtime_capability_graph.json`, `artifacts/runtime_delivery_plan.json`, `artifacts/world_program.json`, `artifacts/region_kits.json`, `artifacts/system_specs.json`, `artifacts/task_graph.json`, `artifacts/content_expansion.json`, `artifacts/asset_pipeline.json`, and `artifacts/resume_state.json`, and expect `generate_vertical_slice` to emit `playtest/slice_score.json`.
 - For large 3D, open-world, or "AAA-like" requests, automatically reduce scope to the first credible playable slice and record deferred systems explicitly.
+- When `references/` exists, treat local engine, sample-project, and asset-pipeline repos as first-class planning inputs and keep `artifacts/reference_intelligence.json` current.
 - Use `game_project_scaffolder(action="generate_vertical_slice")` when the user wants the repository to turn a compiled request into a real slice scaffold and artifact set.
+- Use `game_design_orchestrator(action="generate_gameplay_factory")`, `plan_boss_arc`, `expand_region`, `generate_character_kit`, and `build_enemy_faction` for specialized follow-up production passes.
 - Default to the repository's existing runtime; otherwise prefer `reverie_engine` for the fastest runnable slice and keep external-engine choices explicit.
 - For extensible 3D action RPG foundations, allow the runtime registry to select `godot` and materialize the Godot scaffold under `engine/godot/`.
 - Prefer `reverie_engine`; accept `reverie_engine_lite` as a compatibility alias for existing projects.
 - Treat the built-in Blockbench plus Ashfox MCP flow as the preferred Reverie-Gamer modeling path when the project needs authored models.
-- Bring `game_playtest_lab` in early enough to define quality gates and telemetry before the project sprawls.
+- Bring `game_playtest_lab` in early enough to define quality gates and telemetry before the project sprawls, and use `game_playtest_lab(action="run_quality_gates")`, `game_playtest_lab(action="score_combat_feel")`, and `game_playtest_lab(action="plan_next_iteration")` once the slice exists.
 - Treat implementation, balance simulation, runtime testing, playtests, telemetry, and content iteration as one loop.
 - Do not stop at documents alone when the user asked to build a game; push through to runnable implementation and verification.
 """
@@ -984,10 +1002,10 @@ def _get_compact_tool_surface(mode: str) -> str:
         lines.extend(
             [
                 "- `game_design_orchestrator`: compile raw prompts into `game_request.json`, create blueprints, analyze scope, plan production, expand systems, and generate vertical-slice plans.",
-                "- `game_project_scaffolder`: plan or create the runtime, data, tests, playtest, and content-pipeline foundation, or directly generate a request-backed vertical slice.",
+                "- `game_project_scaffolder`: plan or create the runtime, data, tests, playtest, and content-pipeline foundation, upgrade an existing runtime project, apply one system packet, or directly generate a request-backed vertical slice.",
                 "- `reverie_engine` / `reverie_engine_lite`: create, inspect, validate, benchmark, and smoke-test Reverie's built-in runtime projects.",
                 "- `game_modeling_workbench`: manage the built-in Blockbench plus Ashfox MCP pipeline, model stubs, registry sync, and runtime imports.",
-                "- `game_playtest_lab`: generate telemetry schemas, quality gates, playtest plans, and feedback analysis artifacts.",
+                "- `game_playtest_lab`: generate telemetry schemas, quality gates, playtest plans, performance budgets, combat-feel reports, continuation plans, and feedback analysis artifacts.",
                 "- Other Gamer tools such as `game_gdd_manager`, `level_design`, `game_asset_manager`, `game_balance_analyzer`, `game_math_simulator`, `game_stats_analyzer`, and `story_design` remain available through `tool_catalog`.",
             ]
         )

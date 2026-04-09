@@ -42,20 +42,14 @@ from .nvidia import (
     normalize_nvidia_config,
     resolve_nvidia_api_key,
 )
-from .web import (
-    build_web_runtime_model_data,
-    default_web_config,
-    normalize_web_config,
-    resolve_web_image_model,
-)
 from .modes import normalize_mode
 from .version import CONFIG_VERSION, __version__
 
-EXTERNAL_MODEL_SOURCES = ("qwencode", "geminicli", "codex", "nvidia", "web")
+EXTERNAL_MODEL_SOURCES = ("qwencode", "geminicli", "codex", "nvidia")
 SUPPORTED_ACTIVE_MODEL_SOURCES = ("standard",) + EXTERNAL_MODEL_SOURCES
 SUPPORTED_TOOL_OUTPUT_STYLES = ("compact", "condensed", "full")
 SUPPORTED_THINKING_OUTPUT_STYLES = ("hidden", "compact", "full")
-SUPPORTED_TTI_SOURCES = ("local", "web")
+SUPPORTED_TTI_SOURCES = ("local",)
 
 
 def normalize_tool_output_style(value: Any, default: str = "compact") -> str:
@@ -164,8 +158,6 @@ def default_text_to_image_config() -> Dict[str, Any]:
         "active_source": "local",
         "models": [],
         "default_model_display_name": "",
-        "web_default_model_id": "",
-        "web_default_model_display_name": "",
         "default_width": 512,
         "default_height": 512,
         "default_steps": 20,
@@ -511,7 +503,7 @@ class Config:
     """Main configuration"""
     models: List[ModelConfig] = field(default_factory=list)
     active_model_index: int = 0
-    active_model_source: str = "standard"  # standard | qwencode | geminicli | codex | nvidia | web
+    active_model_source: str = "standard"  # standard | qwencode | geminicli | codex | nvidia
     mode: str = "reverie"
     theme: str = "default"
     max_context_tokens: int = 128000
@@ -537,7 +529,6 @@ class Config:
     geminicli: Dict[str, Any] = field(default_factory=dict)
     codex: Dict[str, Any] = field(default_factory=dict)
     nvidia: Dict[str, Any] = field(default_factory=default_nvidia_config)
-    web: Dict[str, Any] = field(default_factory=default_web_config)
     atlas_mode: Dict[str, Any] = field(default_factory=default_atlas_mode_config)
     
     # Writer mode specific settings
@@ -594,11 +585,6 @@ class Config:
             if runtime_nvidia_model:
                 return ModelConfig.from_dict(runtime_nvidia_model)
 
-        if source == "web":
-            runtime_web_model = build_web_runtime_model_data(self.web)
-            if runtime_web_model:
-                return ModelConfig.from_dict(runtime_web_model)
-
         if 0 <= self.active_model_index < len(self.models):
             return self.models[self.active_model_index]
         return None
@@ -611,8 +597,6 @@ class Config:
             legacy_model_paths=text_to_image.get('model_paths', [])
         )
         text_to_image['default_model_display_name'] = resolve_tti_default_display_name(text_to_image)
-        text_to_image['web_default_model_id'] = str(text_to_image.get('web_default_model_id', '') or '').strip()
-        text_to_image['web_default_model_display_name'] = str(text_to_image.get('web_default_model_display_name', '') or '').strip()
         text_to_image.pop('model_paths', None)
         text_to_image.pop('default_model_index', None)
         tti_models = text_to_image['models']
@@ -621,12 +605,7 @@ class Config:
         geminicli = normalize_geminicli_config(self.geminicli)
         codex = normalize_codex_config(self.codex)
         nvidia = normalize_nvidia_config(self.nvidia)
-        web = normalize_web_config(self.web)
         atlas_mode = normalize_atlas_mode_config(self.atlas_mode)
-        selected_web_image = resolve_web_image_model(web, text_to_image)
-        if selected_web_image:
-            text_to_image['web_default_model_id'] = selected_web_image['id']
-            text_to_image['web_default_model_display_name'] = selected_web_image['display_name']
         active_model_source = self.active_model_source.lower()
         if active_model_source not in SUPPORTED_ACTIVE_MODEL_SOURCES:
             active_model_source = "standard"
@@ -656,7 +635,6 @@ class Config:
             'geminicli': geminicli,
             'codex': codex,
             'nvidia': nvidia,
-            'web': web,
             'atlas_mode': atlas_mode,
         }
     
@@ -679,8 +657,6 @@ class Config:
         )
         text_to_image['active_source'] = normalize_tti_source(text_to_image.get('active_source', 'local'))
         text_to_image['default_model_display_name'] = resolve_tti_default_display_name(text_to_image)
-        text_to_image['web_default_model_id'] = str(text_to_image.get('web_default_model_id', '') or '').strip()
-        text_to_image['web_default_model_display_name'] = str(text_to_image.get('web_default_model_display_name', '') or '').strip()
         text_to_image.pop('model_paths', None)
         text_to_image.pop('default_model_index', None)
         raw_qwencode = data.get('qwencode', {})
@@ -692,14 +668,8 @@ class Config:
         codex = normalize_codex_config(raw_codex)
         raw_nvidia = data.get('nvidia', {})
         nvidia = normalize_nvidia_config(raw_nvidia)
-        raw_web = data.get('web', {})
-        web = normalize_web_config(raw_web)
         raw_atlas_mode = data.get('atlas_mode', {})
         atlas_mode = normalize_atlas_mode_config(raw_atlas_mode)
-        selected_web_image = resolve_web_image_model(web, text_to_image)
-        if selected_web_image:
-            text_to_image['web_default_model_id'] = selected_web_image['id']
-            text_to_image['web_default_model_display_name'] = selected_web_image['display_name']
         active_model_source = str(data.get('active_model_source', 'standard')).strip().lower()
         if active_model_source not in SUPPORTED_ACTIVE_MODEL_SOURCES:
             active_model_source = 'standard'
@@ -729,7 +699,6 @@ class Config:
             geminicli=geminicli,
             codex=codex,
             nvidia=nvidia,
-            web=web,
             atlas_mode=atlas_mode,
         )
 
@@ -1337,17 +1306,6 @@ class ConfigManager:
                     needs_update = True
                     break
 
-        # Check if web section is missing
-        if 'web' not in data:
-            needs_update = True
-        elif not isinstance(data.get('web'), dict):
-            needs_update = True
-        else:
-            for field_name in default_web_config().keys():
-                if field_name not in data.get('web', {}):
-                    needs_update = True
-                    break
-
         # Check if atlas_mode section is missing
         if 'atlas_mode' not in data:
             needs_update = True
@@ -1460,8 +1418,6 @@ class ConfigManager:
             return True
         if normalize_codex_config(getattr(config, "codex", {})).get("selected_model_id"):
             return True
-        if normalize_web_config(getattr(config, "web", {})).get("selected_model_id"):
-            return True
         nvidia = normalize_nvidia_config(getattr(config, "nvidia", {}))
         if normalize_mode(getattr(config, "mode", "reverie")) == "computer-controller":
             if build_nvidia_computer_controller_runtime_model_data(nvidia):
@@ -1496,8 +1452,6 @@ class ConfigManager:
                     config.active_model_source = "codex"
                 elif build_nvidia_runtime_model_data(getattr(config, "nvidia", {})):
                     config.active_model_source = "nvidia"
-                elif normalize_web_config(getattr(config, "web", {})).get("selected_model_id"):
-                    config.active_model_source = "web"
             self.save(config)
             return True
         return False

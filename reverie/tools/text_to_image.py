@@ -1,9 +1,7 @@
 """
 Text-to-Image Tool
 
-Generate images from text prompts using either:
-- Local Comfy/generate_image.py
-- WebAI2API-backed browser models configured through Reverie
+Generate images from text prompts using the local Comfy runtime.
 """
 
 from __future__ import annotations
@@ -15,7 +13,6 @@ import sys
 import shutil
 import os
 import re
-import requests
 
 from .base import BaseTool, ToolResult
 from ..config import (
@@ -26,18 +23,10 @@ from ..config import (
     sanitize_tti_path,
 )
 from ..security_utils import is_path_within_workspace
-from ..web import (
-    ensure_web_service_running,
-    get_web_model_catalog,
-    normalize_web_config,
-    resolve_web_image_model,
-    resolve_web_request_url,
-    save_data_url_to_file,
-)
 
 
 class TextToImageTool(BaseTool):
-    """Generate images via local Comfy or WebAI2API-backed browser models."""
+    """Generate images via the local Comfy runtime."""
 
     name = "text_to_image"
     aliases = ("generate_image", "tti")
@@ -45,13 +34,12 @@ class TextToImageTool(BaseTool):
     tool_category = "image-generation"
     tool_tags = ("image", "generate", "art", "asset", "comfy", "prompt")
 
-    description = """Generate images from text prompts using configured local or Web models.
+    description = """Generate images from text prompts using configured local models.
 
 Supports:
 - List configured text-to-image models from config.json
 - Generate images by selecting configured model display name
 - Local Comfy parameter tuning
-- Web model routing through the bundled WebAI2API relay
 
 Examples:
 - List models: {"action": "list_models"}
@@ -69,7 +57,7 @@ Examples:
             },
             "source": {
                 "type": "string",
-                "description": "Optional source override: local or web. Defaults to text_to_image.active_source.",
+                "description": "Optional source override. Only local is supported.",
             },
             "prompt": {"type": "string", "description": "Positive prompt for image generation"},
             "negative_prompt": {"type": "string", "description": "Negative prompt override"},
@@ -162,8 +150,6 @@ Examples:
         source = normalize_tti_source(kwargs.get("source"), default="local")
         if action == "list_models":
             return f"Listing {source} text-to-image models"
-        if source == "web":
-            return "Generating image with Web text-to-image model"
         return "Generating image with local text-to-image model"
 
     def execute(self, **kwargs) -> ToolResult:
@@ -188,9 +174,6 @@ Examples:
 
         if not config.get("enabled", True):
             return ToolResult.fail("text_to_image is disabled in config.json (text_to_image.enabled=false)")
-
-        if source == "web":
-            return self._generate_web(config=config, prompt=prompt, **kwargs)
 
         script_path = self._resolve_script_path(config=config, script_override=None)
         if not script_path.exists():
@@ -389,8 +372,6 @@ Examples:
         )
         cfg["active_source"] = normalize_tti_source(cfg.get("active_source", "local"))
         cfg["default_model_display_name"] = resolve_tti_default_display_name(cfg)
-        cfg["web_default_model_id"] = str(cfg.get("web_default_model_id", "") or "").strip()
-        cfg["web_default_model_display_name"] = str(cfg.get("web_default_model_display_name", "") or "").strip()
         cfg.pop("model_paths", None)
         cfg.pop("default_model_index", None)
         # Migrate legacy default output dir from old versions.
@@ -406,42 +387,6 @@ Examples:
     def _list_models(self, source: str = "local") -> ToolResult:
         config = self._get_t2i_config()
         source = normalize_tti_source(source or config.get("active_source", "local"))
-        if source == "web":
-            root_config = self._load_root_config()
-            web_cfg = normalize_web_config(getattr(root_config, "web", {})) if root_config else normalize_web_config({})
-            catalog = get_web_model_catalog(model_type="image", enabled_adapters=web_cfg.get("enabled_adapters"))
-            selected = resolve_web_image_model(web_cfg, config)
-            selected_id = str(selected.get("id", "")).strip().lower() if selected else ""
-
-            if not catalog:
-                return ToolResult.ok(
-                    "No Web image models are currently available.\n"
-                    "Check /web status, /web settings, or ensure the bundled WebAI2API adapters were discovered.",
-                    data={"models": [], "source": "web"},
-                )
-
-            rows = []
-            data_rows = []
-            for idx, item in enumerate(catalog):
-                marker = "*" if str(item.get("id", "")).strip().lower() == selected_id else " "
-                rows.append(
-                    f"{marker}[{idx}] {item['display_name']} | {item['id']} | {item.get('description', '')}"
-                )
-                data_rows.append(
-                    {
-                        "index": idx,
-                        "id": item["id"],
-                        "display_name": item["display_name"],
-                        "description": item.get("description", ""),
-                        "is_default": str(item.get("id", "")).strip().lower() == selected_id,
-                    }
-                )
-
-            return ToolResult.ok(
-                "Configured Web text-to-image models:\n" + "\n".join(rows),
-                data={"models": data_rows, "source": "web"},
-            )
-
         models = config.get("models", [])
         default_display_name = str(config.get("default_model_display_name", "")).strip()
 
@@ -481,176 +426,6 @@ Examples:
         return ToolResult.ok(
             "Configured text-to-image models:\n" + "\n".join(rows),
             data={"models": data_rows, "source": "local"},
-        )
-
-    def _load_root_config(self):
-        manager = self.context.get("config_manager")
-        if manager is None:
-            return None
-        try:
-            return manager.load()
-        except Exception:
-            return None
-
-    def _get_web_t2i_model_catalog(self) -> tuple[Dict[str, Any], List[Dict[str, Any]], Dict[str, Any]]:
-        root_config = self._load_root_config()
-        web_cfg = normalize_web_config(getattr(root_config, "web", {})) if root_config else normalize_web_config({})
-        tti_cfg = self._get_t2i_config()
-        catalog = get_web_model_catalog(model_type="image", enabled_adapters=web_cfg.get("enabled_adapters"))
-        selected = resolve_web_image_model(web_cfg, tti_cfg) or {}
-        return web_cfg, catalog, selected
-
-    def _select_web_model(
-        self,
-        *,
-        model_display_name: Optional[str],
-        model_index: Optional[int],
-    ) -> Optional[Dict[str, Any]]:
-        _web_cfg, catalog, selected = self._get_web_t2i_model_catalog()
-        if not catalog:
-            return None
-
-        if model_display_name:
-            wanted = str(model_display_name).strip().lower()
-            for item in catalog:
-                item_id = str(item.get("id", "")).strip().lower()
-                item_name = str(item.get("display_name", "")).strip().lower()
-                if wanted == item_id or wanted == item_name:
-                    return item
-            for item in catalog:
-                item_id = str(item.get("id", "")).strip().lower()
-                item_name = str(item.get("display_name", "")).strip().lower()
-                if wanted and (wanted in item_id or wanted in item_name):
-                    return item
-            return None
-
-        if model_index is not None:
-            try:
-                idx = int(model_index)
-            except (TypeError, ValueError):
-                return None
-            if idx < 0 or idx >= len(catalog):
-                return None
-            return catalog[idx]
-
-        if selected:
-            return selected
-        return catalog[0]
-
-    def _generate_web(self, *, config: Dict[str, Any], prompt: str, **kwargs) -> ToolResult:
-        root_config = self._load_root_config()
-        web_cfg = normalize_web_config(getattr(root_config, "web", {})) if root_config else normalize_web_config({})
-        if not web_cfg.get("enabled", True):
-            return ToolResult.fail("web source is disabled in config.json (web.enabled=false)")
-
-        selected_model = self._select_web_model(
-            model_display_name=kwargs.get("display_name") or kwargs.get("model"),
-            model_index=kwargs.get("model_index"),
-        )
-        if selected_model is None:
-            return ToolResult.fail(
-                "No Web image model is available. Use /web image-model or /tti models after switching source to web."
-            )
-
-        output_override = kwargs.get("output_path")
-        try:
-            output_path = self._resolve_output_path(
-                output_override=output_override,
-                configured_output=str(config.get("output_dir", ".")),
-            )
-        except ValueError as exc:
-            return ToolResult.fail(str(exc))
-
-        service_status = ensure_web_service_running(
-            web_cfg,
-            start_if_needed=bool(web_cfg.get("auto_start", True)),
-        )
-        if not service_status.get("running"):
-            return ToolResult.fail(
-                f"WebAI2API is not ready: {service_status.get('error', 'unknown error')}"
-            )
-
-        negative_prompt = kwargs.get("negative_prompt")
-        if negative_prompt is None:
-            negative_prompt = str(config.get("default_negative_prompt", ""))
-
-        prompt_lines = [prompt]
-        if str(negative_prompt or "").strip():
-            prompt_lines.append(f"Negative prompt: {negative_prompt}")
-
-        width = kwargs.get("width")
-        height = kwargs.get("height")
-        if width or height:
-            try:
-                width_text = str(int(width or config.get("default_width", 512)))
-                height_text = str(int(height or config.get("default_height", 512)))
-                prompt_lines.append(f"Preferred size: {width_text}x{height_text}")
-            except (TypeError, ValueError):
-                pass
-
-        payload = {
-            "model": selected_model["id"],
-            "messages": [
-                {
-                    "role": "user",
-                    "content": "\n".join(prompt_lines),
-                }
-            ],
-            "stream": False,
-        }
-
-        timeout_seconds = kwargs.get("timeout_seconds", web_cfg.get("timeout", 1200))
-        try:
-            timeout_seconds = int(timeout_seconds)
-        except (TypeError, ValueError):
-            return ToolResult.fail("timeout_seconds must be an integer")
-        if timeout_seconds <= 0:
-            return ToolResult.fail("timeout_seconds must be a positive integer")
-
-        headers = {"Content-Type": "application/json"}
-        auth_token = str(web_cfg.get("auth_token", "") or "").strip()
-        if auth_token:
-            headers["Authorization"] = f"Bearer {auth_token}"
-
-        try:
-            response = requests.post(
-                resolve_web_request_url(web_cfg),
-                headers=headers,
-                json=payload,
-                timeout=timeout_seconds,
-            )
-            response.raise_for_status()
-            body = response.json() if response.content else {}
-        except Exception as exc:
-            return ToolResult.fail(f"Web image generation request failed: {exc}")
-
-        image_content = self._extract_web_image_content(body)
-        if not image_content:
-            return ToolResult.fail("Web image generation succeeded but no image payload was returned.")
-
-        try:
-            if image_content.startswith("data:image"):
-                saved_path = save_data_url_to_file(image_content, output_path)
-            else:
-                saved_path = self._save_web_image_url(image_content, output_path)
-        except Exception as exc:
-            return ToolResult.fail(f"Failed to save generated Web image: {exc}")
-
-        return ToolResult.ok(
-            "\n".join(
-                [
-                    f"Source: web",
-                    f"Model: {selected_model['display_name']} ({selected_model['id']})",
-                    f"Saved image: {saved_path}",
-                ]
-            ),
-            data={
-                "saved_images": [str(saved_path)],
-                "model_display_name": selected_model["display_name"],
-                "model_id": selected_model["id"],
-                "output_path": str(saved_path),
-                "source": "web",
-            },
         )
 
     def _select_model(
@@ -794,47 +569,6 @@ Examples:
             return self.resolve_workspace_path(out_path, purpose="write generated images")
 
         return self.resolve_workspace_path(out_path, purpose="write generated images")
-
-    @staticmethod
-    def _extract_web_image_content(body: Any) -> str:
-        if not isinstance(body, dict):
-            return ""
-        choices = body.get("choices", [])
-        if not isinstance(choices, list) or not choices:
-            return ""
-        message = choices[0].get("message", {})
-        content = message.get("content", "")
-        if isinstance(content, str):
-            return content.strip()
-        if isinstance(content, list):
-            parts: List[str] = []
-            for item in content:
-                if isinstance(item, dict):
-                    text = str(item.get("text", "") or item.get("content", "")).strip()
-                    if text:
-                        parts.append(text)
-                elif isinstance(item, str):
-                    text = item.strip()
-                    if text:
-                        parts.append(text)
-            return "\n".join(parts).strip()
-        return ""
-
-    def _save_web_image_url(self, url: str, output_path: Path) -> Path:
-        destination = Path(output_path)
-        extension = Path(url.split("?", 1)[0]).suffix or ".png"
-        if destination.suffix:
-            final_path = destination
-            final_path.parent.mkdir(parents=True, exist_ok=True)
-        else:
-            destination.mkdir(parents=True, exist_ok=True)
-            timestamp = Path(f"web_image_{int(__import__('time').time())}{extension}")
-            final_path = destination / timestamp
-
-        response = requests.get(url, timeout=120)
-        response.raise_for_status()
-        final_path.write_bytes(response.content)
-        return final_path
 
     def _is_trusted_runtime_script(self, script_path: Path) -> bool:
         bundled_dir = self._get_bundled_comfy_dir()

@@ -972,7 +972,6 @@ class ReverieInterface:
             "gemini-cli": "Gemini",
             "codex": "Codex",
             "nvidia": "NVIDIA",
-            "web": "Web",
         }
         source_labels = {
             "standard": "config.json",
@@ -980,7 +979,6 @@ class ReverieInterface:
             "geminicli": "Gemini CLI",
             "codex": "Codex",
             "nvidia": "NVIDIA",
-            "web": "Web",
         }
         return source_labels.get(source_name, "") or provider_labels.get(provider_name, provider_name or "provider")
     
@@ -2594,7 +2592,7 @@ class ReverieInterface:
         lines = [
             "## TTI Models (from config.json)",
             f"- Tool: `text_to_image`",
-            f"- Source selection: use `source` parameter with `local` or `web`, or switch in CLI with `/tti source`.",
+            f"- Source selection: use `source=local` when overriding the default local TTI runtime.",
             f"- Active source: {active_tti_source}",
             f"- Local selection rule: use configured local `display_name` values (not raw paths).",
             f"- Default local model: {default_display_name if default_display_name else '(none)'}",
@@ -2610,30 +2608,6 @@ class ReverieInterface:
                 lines.append(
                     f"  [{idx}] display_name={item['display_name']}; path={item['path']}; introduction={intro_text}"
                 )
-
-        try:
-            from ..web import get_web_model_catalog, normalize_web_config, resolve_web_image_model
-
-            web_cfg = normalize_web_config(getattr(config, "web", {}))
-            web_models = get_web_model_catalog(model_type="image", enabled_adapters=web_cfg.get("enabled_adapters"))
-            default_web_model = resolve_web_image_model(web_cfg, tti_cfg)
-            lines.append(
-                f"- Default Web model: {default_web_model['display_name']} ({default_web_model['id']})"
-                if default_web_model
-                else "- Default Web model: (none)"
-            )
-            if not web_models:
-                lines.append("- Available Web image models: (none)")
-            else:
-                lines.append("- Available Web image models:")
-                for idx, item in enumerate(web_models[:20]):
-                    lines.append(
-                        f"  [{idx}] display_name={item['display_name']}; id={item['id']}; description={item.get('description', '')}"
-                    )
-                if len(web_models) > 20:
-                    lines.append(f"  ... plus {len(web_models) - 20} more")
-        except Exception:
-            lines.append("- Available Web image models: (lookup unavailable)")
 
         memory_title = "Computer Controller History" if normalized_mode == "computer-controller" else "Workspace Global Memory"
         memory_label = "computer-control history archive" if normalized_mode == "computer-controller" else "workspace global memory"

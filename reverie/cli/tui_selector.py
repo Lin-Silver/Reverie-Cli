@@ -216,12 +216,15 @@ class TUISelector:
         
         # Initial render
         content = self._build_content()
+        use_alt_screen = bool(getattr(self.console, "is_terminal", False))
         
         with Live(
             content,
             console=self.console,
             auto_refresh=False,
-            vertical_overflow="visible",
+            screen=use_alt_screen,
+            transient=use_alt_screen,
+            vertical_overflow="crop",
         ) as live:
             last_size = (self._console_width(), self._console_height())
             while True:

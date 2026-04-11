@@ -90,6 +90,10 @@ class GamePlaytestLabTool(BaseTool):
                 "type": "string",
                 "description": "Optional world program path (default: artifacts/world_program.json)",
             },
+            "production_directive_path": {
+                "type": "string",
+                "description": "Optional production directive path (default: artifacts/production_directive.json)",
+            },
             "output_path": {
                 "type": "string",
                 "description": "Path for generated plan/schema output",
@@ -305,6 +309,7 @@ class GamePlaytestLabTool(BaseTool):
         game_request = self._load_json_artifact(kwargs.get("request_path"), default_relative="artifacts/game_request.json")
         system_bundle = self._load_json_artifact(kwargs.get("system_specs_path"), default_relative="artifacts/system_specs.json")
         asset_pipeline = self._load_json_artifact(kwargs.get("asset_pipeline_path"), default_relative="artifacts/asset_pipeline.json")
+        design_intelligence = self._load_json_artifact("artifacts/design_intelligence.json", default_relative="artifacts/design_intelligence.json")
         slice_score = self._load_json_artifact("playtest/slice_score.json", default_relative="playtest/slice_score.json")
         quality_gates = build_quality_gate_report(
             game_request,
@@ -312,11 +317,13 @@ class GamePlaytestLabTool(BaseTool):
             system_bundle,
             slice_score=slice_score,
             asset_pipeline=asset_pipeline,
+            design_intelligence=design_intelligence,
         )
         performance_budget = build_performance_budget(
             game_request,
             blueprint,
             asset_pipeline,
+            design_intelligence=design_intelligence,
         )
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(json.dumps(quality_gates, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -337,12 +344,14 @@ class GamePlaytestLabTool(BaseTool):
         blueprint = self._load_blueprint(kwargs.get("blueprint_path")) or self._load_json_artifact("artifacts/game_blueprint.json")
         game_request = self._load_json_artifact(kwargs.get("request_path"), default_relative="artifacts/game_request.json")
         system_bundle = self._load_json_artifact(kwargs.get("system_specs_path"), default_relative="artifacts/system_specs.json")
+        design_intelligence = self._load_json_artifact("artifacts/design_intelligence.json", default_relative="artifacts/design_intelligence.json")
         slice_score = self._load_json_artifact("playtest/slice_score.json", default_relative="playtest/slice_score.json")
         report = build_combat_feel_report(
             game_request,
             blueprint,
             system_bundle,
             slice_score=slice_score,
+            design_intelligence=design_intelligence,
         )
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -366,6 +375,18 @@ class GamePlaytestLabTool(BaseTool):
             kwargs.get("reference_intelligence_path"),
             default_relative="artifacts/reference_intelligence.json",
         )
+        production_directive = self._load_json_artifact(
+            kwargs.get("production_directive_path"),
+            default_relative="artifacts/production_directive.json",
+        )
+        design_intelligence = self._load_json_artifact("artifacts/design_intelligence.json", default_relative="artifacts/design_intelligence.json")
+        campaign_program = self._load_json_artifact("artifacts/campaign_program.json", default_relative="artifacts/campaign_program.json")
+        roster_strategy = self._load_json_artifact("artifacts/roster_strategy.json", default_relative="artifacts/roster_strategy.json")
+        live_ops_plan = self._load_json_artifact("artifacts/live_ops_plan.json", default_relative="artifacts/live_ops_plan.json")
+        production_operating_model = self._load_json_artifact(
+            "artifacts/production_operating_model.json",
+            default_relative="artifacts/production_operating_model.json",
+        )
         quality_gates = self._load_json_artifact("playtest/quality_gates.json", default_relative="playtest/quality_gates.json")
         slice_score = self._load_json_artifact("playtest/slice_score.json", default_relative="playtest/slice_score.json")
         plan = build_continuation_recommendations(
@@ -379,6 +400,12 @@ class GamePlaytestLabTool(BaseTool):
             quality_gates=quality_gates,
             world_program=world_program,
             reference_intelligence=reference_intelligence,
+            production_directive=production_directive,
+            campaign_program=campaign_program,
+            roster_strategy=roster_strategy,
+            live_ops_plan=live_ops_plan,
+            production_operating_model=production_operating_model,
+            design_intelligence=design_intelligence,
         )
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(continuation_recommendations_markdown(plan), encoding="utf-8")

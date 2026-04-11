@@ -251,6 +251,24 @@ def build_production_plan(
                 "outputs": ["artifacts/game_request.json", "artifacts/game_blueprint.json"],
             },
             {
+                "name": "experience_design",
+                "goal": "default-initialize personas, onboarding, difficulty, feedback, balance, accessibility, and runtime scaling guardrails",
+                "outputs": [
+                    "artifacts/design_intelligence.json",
+                    "artifacts/design_playbook.md",
+                ],
+            },
+            {
+                "name": "large_scale_direction",
+                "goal": "translate ambitious project scale into durable campaign, roster, live-ops, and operating-model artifacts before content sprawl takes over",
+                "outputs": [
+                    "artifacts/campaign_program.json",
+                    "artifacts/roster_strategy.json",
+                    "artifacts/live_ops_plan.json",
+                    "artifacts/production_operating_model.json",
+                ],
+            },
+            {
                 "name": "runtime_foundation",
                 "goal": "create a bootable game foundation with explicit runtime choice, local reference intelligence, and data contracts",
                 "outputs": [

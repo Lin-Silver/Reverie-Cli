@@ -1861,13 +1861,15 @@ func _process(_delta: float) -> void:
         GameState.get_active_encounter_summary(),
         GameState.get_dash_iframe_seconds(),
     ]
-    _expansion_label.text = "Region: %s (%d)   Arc: %s   Goal: %s   Next Region: %s   NPC Anchors: %d" % [
+    _expansion_label.text = "Region: %s (%d)   Arc: %s   Goal: %s   Party: %s   Affinity: %s   Stream: %s   Commissions: %s" % [
         GameState.get_current_region_title(),
         GameState.get_discovered_region_count(),
         GameState.get_active_arc_title() + " (" + GameState.get_active_arc_progress_text() + ")",
         GameState.get_current_region_objective_summary(),
-        GameState.get_next_region_name(),
-        GameState.get_npc_anchor_specs().size(),
+        GameState.get_party_summary_text(),
+        GameState.get_affinity_summary_text(),
+        GameState.get_streaming_summary_text(),
+        GameState.get_commission_summary_text(),
     ]
 """
 GAME_STATE_GD = """extends Node
@@ -1889,6 +1891,10 @@ const ALERT_NETWORKS_PATH := "res://data/alert_networks.json"
 const WORLD_GRAPH_PATH := "res://data/world_graph.json"
 const NPC_ROSTER_PATH := "res://data/npc_roster.json"
 const QUEST_ARCS_PATH := "res://data/quest_arcs.json"
+const PARTY_ROSTER_PATH := "res://data/party_roster.json"
+const ELEMENTAL_MATRIX_PATH := "res://data/elemental_matrix.json"
+const WORLD_STREAMING_PATH := "res://data/world_streaming.json"
+const COMMISSION_BOARD_PATH := "res://data/commission_board.json"
 
 var max_health: int = 100
 var health: int = 100
@@ -1920,6 +1926,10 @@ var alert_network_specs: Array = []
 var world_graph: Dictionary = {}
 var npc_roster: Array = []
 var quest_arcs: Array = []
+var party_roster_config: Dictionary = {}
+var elemental_matrix: Dictionary = {}
+var world_streaming_plan: Dictionary = {}
+var commission_board: Dictionary = {}
 var active_arc: Dictionary = {}
 var player_spawn_point: Vector3 = Vector3(0.0, 1.1, 8.0)
 var shrine_position: Vector3 = Vector3(0.0, 0.0, -12.0)
@@ -1982,6 +1992,10 @@ func ensure_runtime_data() -> void:
     var world_graph_payload := _load_json_resource(WORLD_GRAPH_PATH, _default_world_graph())
     var npc_payload := _load_json_resource(NPC_ROSTER_PATH, _default_npc_roster())
     var quest_arc_payload := _load_json_resource(QUEST_ARCS_PATH, _default_quest_arcs())
+    var party_roster_payload := _load_json_resource(PARTY_ROSTER_PATH, _default_party_roster())
+    var elemental_matrix_payload := _load_json_resource(ELEMENTAL_MATRIX_PATH, _default_elemental_matrix())
+    var world_streaming_payload := _load_json_resource(WORLD_STREAMING_PATH, _default_world_streaming())
+    var commission_board_payload := _load_json_resource(COMMISSION_BOARD_PATH, _default_commission_board())
     save_schema = _load_json_resource(SAVE_SCHEMA_PATH, _default_save_schema())
 
     combat_config = combat
@@ -2002,6 +2016,10 @@ func ensure_runtime_data() -> void:
     world_graph = world_graph_payload
     npc_roster = npc_payload.get("npcs", _default_npc_roster().get("npcs", []))
     quest_arcs = quest_arc_payload.get("quest_arcs", _default_quest_arcs().get("quest_arcs", []))
+    party_roster_config = party_roster_payload
+    elemental_matrix = elemental_matrix_payload
+    world_streaming_plan = world_streaming_payload
+    commission_board = commission_board_payload
     if landmark_specs.is_empty():
         landmark_specs = _default_manifest().get("landmarks", [])
     if enemy_specs.is_empty():
@@ -2032,6 +2050,14 @@ func ensure_runtime_data() -> void:
         npc_roster = _default_npc_roster().get("npcs", [])
     if quest_arcs.is_empty():
         quest_arcs = _default_quest_arcs().get("quest_arcs", [])
+    if party_roster_config.is_empty():
+        party_roster_config = manifest.get("party_roster", _default_party_roster())
+    if elemental_matrix.is_empty():
+        elemental_matrix = manifest.get("elemental_matrix", _default_elemental_matrix())
+    if world_streaming_plan.is_empty():
+        world_streaming_plan = manifest.get("world_streaming", _default_world_streaming())
+    if commission_board.is_empty():
+        commission_board = manifest.get("commission_board", _default_commission_board())
 
     player_spawn_point = _to_vector3(manifest.get("spawn_point", [0.0, 1.1, 8.0]), Vector3(0.0, 1.1, 8.0))
     shrine_position = _to_vector3(manifest.get("shrine_position", [0.0, 0.0, -12.0]), Vector3(0.0, 0.0, -12.0))
@@ -2175,6 +2201,64 @@ func get_npc_roster() -> Array:
 
 func get_quest_arcs() -> Array:
     return quest_arcs
+
+
+func get_party_roster() -> Dictionary:
+    return party_roster_config
+
+
+func get_active_party_slot_ids() -> Array:
+    return party_roster_config.get("active_party_slot_ids", [])
+
+
+func get_party_summary_text() -> String:
+    var active_slot_ids := get_active_party_slot_ids()
+    var labels: Array = []
+    for slot in party_roster_config.get("party_slots", []):
+        if str(slot.get("slot_id", "")) in active_slot_ids:
+            labels.append(str(slot.get("display_name", slot.get("hero_id", "Hero"))))
+    if labels.is_empty():
+        labels.append("Solo Lead")
+    return ", ".join(labels)
+
+
+func get_elemental_matrix() -> Dictionary:
+    return elemental_matrix
+
+
+func get_affinity_summary_text() -> String:
+    var affinities := elemental_matrix.get("starter_affinities", [])
+    if affinities.is_empty():
+        affinities = elemental_matrix.get("affinity_order", [])
+    if affinities.is_empty():
+        return "steel"
+    return ", ".join(affinities)
+
+
+func get_world_streaming_plan() -> Dictionary:
+    return world_streaming_plan
+
+
+func get_streaming_summary_text() -> String:
+    var loaded_regions := world_streaming_plan.get("loaded_region_ids", [get_root_region_id()])
+    return "%s / %s" % [
+        str(world_streaming_plan.get("strategy", "single_slice_lane")),
+        ", ".join(loaded_regions),
+    ]
+
+
+func get_commission_board() -> Dictionary:
+    return commission_board
+
+
+func get_commission_summary_text() -> String:
+    var active_commissions := commission_board.get("active_commission_ids", [])
+    if active_commissions.is_empty():
+        return "no active commissions"
+    return "%d active / %s" % [
+        active_commissions.size(),
+        str(commission_board.get("service_model", "boxed_release_plus_expansions")),
+    ]
 
 
 func get_encounter_specs() -> Array:
@@ -3432,6 +3516,73 @@ func _default_quest_arcs() -> Dictionary:
     }
 
 
+func _default_party_roster() -> Dictionary:
+    return {
+        "party_model": "single_hero_focus",
+        "swap_style": "single_hero_mastery",
+        "starter_party_size": 1,
+        "active_party_slot_ids": ["slot_01"],
+        "party_slots": [
+            {
+                "slot_id": "slot_01",
+                "hero_id": "player_avatar",
+                "display_name": "Player Avatar",
+                "combat_role": "vanguard",
+                "combat_affinity": "steel",
+                "release_window": "launch",
+                "signature_job": "hold the default mastery lane",
+            },
+        ],
+    }
+
+
+func _default_elemental_matrix() -> Dictionary:
+    return {
+        "system_enabled": false,
+        "affinity_order": ["steel", "arc", "guard", "rush"],
+        "starter_affinities": ["steel"],
+        "reaction_rules": [
+            {"input": ["steel", "guard"], "result": "break_guard", "combat_use": "open a short punish window on armored targets"},
+            {"input": ["rush", "arc"], "result": "tempo_surge", "combat_use": "reward aggressive routing with faster cooldown cycling"},
+        ],
+    }
+
+
+func _default_world_streaming() -> Dictionary:
+    return {
+        "strategy": "single_slice_lane",
+        "launch_region_target": 1,
+        "active_region_id": "starter_ruins",
+        "loaded_region_ids": ["starter_ruins"],
+        "stream_cells": [
+            {
+                "cell_id": "starter_ruins_cell",
+                "region_id": "starter_ruins",
+                "load_priority": "critical",
+                "stream_budget_class": "slice_core",
+                "entry_gateway_ids": [],
+            },
+        ],
+    }
+
+
+func _default_commission_board() -> Dictionary:
+    return {
+        "service_model": "boxed_release_plus_expansions",
+        "content_cadence": "major_expansion_packs",
+        "active_commission_ids": ["starter_route_clear"],
+        "commission_slots": [
+            {
+                "id": "starter_route_clear",
+                "region_id": "starter_ruins",
+                "title": "Clear the Starter Route",
+                "goal": "Re-run the shrine route and stabilize the onboarding lane.",
+                "reward_type": "upgrade_materials",
+            },
+        ],
+    }
+
+
 func _default_manifest() -> Dictionary:
     return {
         "spawn_point": [0.0, 1.1, 8.0],
@@ -3472,6 +3623,10 @@ func _default_manifest() -> Dictionary:
         "patrol_routes": _default_patrol_routes().get("routes", []),
         "alert_networks": _default_alert_networks().get("networks", []),
         "world_graph": _default_world_graph(),
+        "party_roster": _default_party_roster(),
+        "elemental_matrix": _default_elemental_matrix(),
+        "world_streaming": _default_world_streaming(),
+        "commission_board": _default_commission_board(),
         "encounters": [
             {"id": "ruin_intro_skirmish", "region_id": "starter_ruins", "label": "Intro Skirmish", "enemy_ids": ["sentinel_melee", "sentinel_ranged"], "start_position": [0.0, 1.0, -1.5], "activation_radius": 8.5, "hint": "Lock on, break the ranged line, and stabilize the route."},
             {"id": "overlook_elite_detour", "region_id": "starter_ruins", "label": "Overlook Elite Detour", "enemy_ids": ["sentinel_elite"], "start_position": [9.5, 1.0, -7.5], "activation_radius": 6.8, "hint": "Break the elite and claim the optional cache.", "reward_site_id": "overlook_cache"},
@@ -3553,6 +3708,7 @@ What it includes:
 - alert-network contracts that let nearby defenders converge, search, and split squad response roles when one guard makes contact
 - data-driven slice manifests under `engine/godot/data/`
 - region, NPC, and quest-arc expansion seeds for continued multi-region growth
+- large-scale runtime contracts for party roster, elemental reactions, world streaming, and commission cadence
 - interactable NPC anchors and region gateways that preview the next expansion lanes in-runtime
 - autoloaded `GameState` and `SaveService` singletons for quest flow, progression, and persistence
 
@@ -3714,6 +3870,10 @@ class GodotRuntimeAdapter(BaseRuntimeAdapter):
             {"name": "world_graph", "ok": (runtime_root / "data" / "world_graph.json").exists()},
             {"name": "npc_roster", "ok": (runtime_root / "data" / "npc_roster.json").exists()},
             {"name": "quest_arcs", "ok": (runtime_root / "data" / "quest_arcs.json").exists()},
+            {"name": "party_roster", "ok": (runtime_root / "data" / "party_roster.json").exists()},
+            {"name": "elemental_matrix", "ok": (runtime_root / "data" / "elemental_matrix.json").exists()},
+            {"name": "world_streaming", "ok": (runtime_root / "data" / "world_streaming.json").exists()},
+            {"name": "commission_board", "ok": (runtime_root / "data" / "commission_board.json").exists()},
         ]
         return {
             "valid": all(item["ok"] for item in checks),

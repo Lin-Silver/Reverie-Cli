@@ -26,6 +26,9 @@ def build_content_matrix(
     npcs = list(content_expansion.get("npc_roster", []) or [])
     quest_arcs = list(content_expansion.get("quest_arcs", []) or [])
     queue = list(asset_pipeline.get("production_queue", []) or [])
+    production = dict(game_request.get("production", {}) or {})
+    large_scale_profile = dict(production.get("large_scale_profile", {}) or {})
+    playable_roster = list(asset_pipeline.get("content_sets", {}).get("playable_roster", []) or [])
     entries: List[Dict[str, Any]] = []
     for region in regions:
         region_id = str(region.get("id", "region")).strip() or "region"
@@ -70,4 +73,16 @@ def build_content_matrix(
             "asset replacement cadence",
             "world landmark readability",
         ],
+        "release_forecast": {
+            "project_shape": str(large_scale_profile.get("project_shape", "regional_action_rpg")),
+            "launch_region_count": int(large_scale_profile.get("launch_region_target", max(len(entries), 1)) or max(len(entries), 1)),
+            "post_launch_region_count": int(
+                large_scale_profile.get("post_launch_region_target", max(len(entries) + 1, 2)) or max(len(entries) + 1, 2)
+            ),
+            "starter_party_size": int(large_scale_profile.get("starter_party_size", max(len(playable_roster), 1)) or max(len(playable_roster), 1)),
+            "active_region_count": len(entries),
+            "quest_arc_count": len(quest_arcs),
+            "npc_count": len(npcs),
+            "asset_queue_count": len(queue),
+        },
     }

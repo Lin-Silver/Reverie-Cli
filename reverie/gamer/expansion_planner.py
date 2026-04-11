@@ -242,12 +242,16 @@ def build_expansion_backlog(
     content_expansion: Dict[str, Any],
     *,
     slice_score: Dict[str, Any] | None = None,
+    production_directive: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """Build a resumable backlog aligned to the current slice and future scale-up."""
 
     score = dict(slice_score or {})
+    directive = dict(production_directive or {})
     blockers = [str(item).strip() for item in score.get("blockers", []) if str(item).strip()]
     recommendations = [str(item).strip() for item in score.get("recommendations", []) if str(item).strip()]
+    live_service_enabled = bool(game_request.get("production", {}).get("live_service_profile", {}).get("enabled", False))
+    party_model = str(game_request.get("experience", {}).get("party_model", "single_hero_focus")).strip()
 
     items: List[Dict[str, Any]] = [
         {
@@ -299,6 +303,38 @@ def build_expansion_backlog(
             ],
         },
     ]
+    if party_model != "single_hero_focus":
+        items.append(
+            {
+                "id": "launch_roster_wave",
+                "priority": "next",
+                "status": "queued",
+                "lane": "roster_scale",
+                "goal": "Grow the verified slice into a role-complete starter roster that supports party swap, boss counterplay, and future content waves.",
+                "depends_on": ["stabilize_current_slice", "combat_depth_upgrade"],
+                "acceptance": [
+                    "starter roster roles cover vanguard, breaker, support, and controller jobs",
+                    "character kits, gameplay factory, and boss arc stay aligned",
+                    "new roster drops unlock quest, boss, or region utility instead of collection-only value",
+                ],
+            }
+        )
+    if live_service_enabled:
+        items.append(
+            {
+                "id": "service_cadence_seed",
+                "priority": "later",
+                "status": "seeded",
+                "lane": "live_ops",
+                "goal": "Lock the first live-service release train so roster, event, and region updates all map back to the same project memory.",
+                "depends_on": ["multi_region_content_wave", "launch_roster_wave"] if party_model != "single_hero_focus" else ["multi_region_content_wave"],
+                "acceptance": [
+                    "version cadence is defined for launch plus at least one follow-up update",
+                    "economy, event, and endgame hooks are tied to existing systems",
+                    "service beats respect slice score and quality-gate promotion rules",
+                ],
+            }
+        )
 
     for index, phase in enumerate(content_expansion.get("expansion_phases", []), start=1):
         items.append(
@@ -313,6 +349,15 @@ def build_expansion_backlog(
             }
         )
 
+    recommended_focus = items[0]["id"]
+    operations = set(directive.get("operations", []) or [])
+    if "expand_region" in operations:
+        recommended_focus = "multi_region_content_wave"
+    elif "plan_boss_arc" in operations or "upgrade_gameplay_factory" in operations:
+        recommended_focus = "combat_depth_upgrade"
+    elif "refresh_content_expansion" in operations and party_model != "single_hero_focus":
+        recommended_focus = "launch_roster_wave"
+
     return {
         "schema_version": "reverie.expansion_backlog/1",
         "project_name": project_name(game_request, blueprint),
@@ -320,7 +365,7 @@ def build_expansion_backlog(
         "slice_verdict": score.get("verdict", "planning_only"),
         "release_recommendation": score.get("release_recommendation", "iterate_then_expand"),
         "blocker_count": len(blockers),
-        "recommended_focus": items[0]["id"],
+        "recommended_focus": recommended_focus,
         "items": items,
     }
 
@@ -336,11 +381,13 @@ def build_resume_state(
     runtime_profile: Dict[str, Any] | None = None,
     verification: Dict[str, Any] | None = None,
     slice_score: Dict[str, Any] | None = None,
+    production_directive: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """Build the durable state a future session should reopen first."""
 
     verification = dict(verification or {})
     slice_score = dict(slice_score or {})
+    production_directive = dict(production_directive or {})
 
     return {
         "schema_version": "reverie.resume_state/1",
@@ -355,7 +402,13 @@ def build_resume_state(
             "release_recommendation": slice_score.get("release_recommendation", "iterate_then_expand"),
         },
         "artifacts_to_open_first": [
+            "artifacts/production_directive.json",
             "artifacts/game_program.json",
+            "artifacts/design_intelligence.json",
+            "artifacts/campaign_program.json",
+            "artifacts/roster_strategy.json",
+            "artifacts/live_ops_plan.json",
+            "artifacts/production_operating_model.json",
             "artifacts/milestone_board.json",
             "artifacts/reference_intelligence.json",
             "artifacts/runtime_delivery_plan.json",
@@ -365,11 +418,17 @@ def build_resume_state(
             "playtest/slice_score.json",
         ],
         "completed_artifacts": [
+            "artifacts/production_directive.json",
             "artifacts/game_request.json",
             "artifacts/game_blueprint.json",
             "artifacts/game_program.json",
             "artifacts/feature_matrix.json",
             "artifacts/content_matrix.json",
+            "artifacts/design_intelligence.json",
+            "artifacts/campaign_program.json",
+            "artifacts/roster_strategy.json",
+            "artifacts/live_ops_plan.json",
+            "artifacts/production_operating_model.json",
             "artifacts/milestone_board.json",
             "artifacts/risk_register.json",
             "artifacts/runtime_registry.json",
@@ -397,6 +456,8 @@ def build_resume_state(
         "next_actions": [
             expansion_backlog.get("recommended_focus", "stabilize_current_slice"),
             "review playtest/slice_score.json and artifacts/expansion_backlog.json together before adding scope",
+            "keep design-intelligence, campaign, roster, live-ops, and operating-model artifacts aligned with the next backlog item",
+            "keep campaign, roster, live-ops, and operating-model artifacts aligned with the next backlog item",
             "continue from the first queued backlog item rather than re-planning from scratch",
         ],
         "continuity_memory": {
@@ -404,9 +465,14 @@ def build_resume_state(
             "deferred_features": list(game_request.get("production", {}).get("deferred_features", [])),
             "expansion_phase_ids": [phase.get("id") for phase in content_expansion.get("expansion_phases", [])],
             "backlog_item_ids": [item.get("id") for item in expansion_backlog.get("items", [])],
+            "live_service_enabled": bool(game_request.get("production", {}).get("live_service_profile", {}).get("enabled", False)),
+            "party_model": game_request.get("experience", {}).get("party_model", "single_hero_focus"),
+            "design_capability_ids": list(game_request.get("production", {}).get("default_design_capabilities", []) or []),
+            "latest_operations": list(production_directive.get("operations", []) or []),
         },
         "resume_instruction": (
-            "Read artifacts/game_program.json, artifacts/milestone_board.json, artifacts/reference_intelligence.json, "
+            "Read artifacts/production_directive.json, artifacts/game_program.json, artifacts/design_intelligence.json, artifacts/campaign_program.json, artifacts/roster_strategy.json, "
+            "artifacts/live_ops_plan.json, artifacts/production_operating_model.json, artifacts/milestone_board.json, artifacts/reference_intelligence.json, "
             "artifacts/runtime_delivery_plan.json, artifacts/content_expansion.json, artifacts/asset_pipeline.json, artifacts/resume_state.json, "
             "and playtest/slice_score.json first, then continue from the recommended backlog item without re-deriving the project."
         ),

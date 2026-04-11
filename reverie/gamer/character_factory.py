@@ -34,6 +34,19 @@ def build_character_kits(
         for seed in modeling_seed
         if str(seed.get("category", "")) == "enemy"
     ]
+    hero_kits = [
+        {
+            "id": str(seed.get("id", "")),
+            "movement_model": str(game_request.get("experience", {}).get("movement_model", "third_person_action")),
+            "combat_model": str(game_request.get("experience", {}).get("combat_model", "ability_action")),
+            "combat_role": str(seed.get("combat_role", "vanguard")),
+            "combat_affinity": str(seed.get("combat_affinity", "steel")),
+            "source_stub": str(seed.get("source_stub", "")),
+            "runtime_target": str(seed.get("runtime_target", "")),
+        }
+        for seed in modeling_seed
+        if str(seed.get("category", "")) == "character" and bool(seed.get("playable", False))
+    ]
     npc_kits = [
         {
             "id": str(npc.get("id", "")),
@@ -47,13 +60,16 @@ def build_character_kits(
         "project_name": project_name(game_request, blueprint),
         "generated_at": _utc_now(),
         "runtime": target_runtime(blueprint, runtime_profile),
-        "hero_kit": {
+        "hero_kit": hero_kits[0]
+        if hero_kits
+        else {
             "id": "player_avatar",
             "movement_model": str(game_request.get("experience", {}).get("movement_model", "third_person_action")),
             "combat_model": str(game_request.get("experience", {}).get("combat_model", "ability_action")),
             "source_stub": "assets/models/source/player_avatar.bbmodel",
             "runtime_target": "assets/models/runtime/player_avatar.gltf",
         },
+        "hero_kits": hero_kits,
         "npc_kits": npc_kits,
         "enemy_kits": enemy_kits,
     }

@@ -27,14 +27,23 @@ def build_quality_gate_report(
     verification: Dict[str, Any] | None = None,
     slice_score: Dict[str, Any] | None = None,
     asset_pipeline: Dict[str, Any] | None = None,
+    design_intelligence: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """Build a quality gate report from planning and verification artifacts."""
 
     verification = dict(verification or {})
     slice_score = dict(slice_score or {})
     asset_pipeline = dict(asset_pipeline or {})
+    design_intelligence = dict(design_intelligence or {})
     packet_ids = list(system_bundle.get("packets", {}).keys())
     queue = list(asset_pipeline.get("production_queue", []) or [])
+    personas = list(design_intelligence.get("player_personas", []) or [])
+    onboarding_ladder = list(design_intelligence.get("onboarding_ladder", []) or [])
+    accessibility_features = list(design_intelligence.get("accessibility_baseline", {}).get("required_features", []) or [])
+    balance_probes = list(design_intelligence.get("balance_lab", {}).get("doubling_halving_probes", []) or [])
+    scalability_patterns = list(design_intelligence.get("runtime_guardrails", {}).get("scalability_patterns", []) or [])
+    large_scale_profile = dict(game_request.get("production", {}).get("large_scale_profile", {}) or {})
+    runtime_contracts = list(large_scale_profile.get("runtime_contracts", []) or [])
     gate_sets: List[Dict[str, Any]] = [
         {
             "id": "runtime_boot",
@@ -59,6 +68,42 @@ def build_quality_gate_report(
             "status": _status(bool(queue), review=True),
             "summary": "Asset queue and import rules are defined",
             "evidence": {"production_queue_count": len(queue)},
+        },
+        {
+            "id": "design_intelligence",
+            "status": _status(len(personas) >= 2 and len(onboarding_ladder) >= 4, review=bool(personas) or bool(onboarding_ladder)),
+            "summary": "Default player personas, onboarding beats, and design intelligence exist for the slice.",
+            "evidence": {
+                "persona_count": len(personas),
+                "onboarding_beat_count": len(onboarding_ladder),
+            },
+        },
+        {
+            "id": "accessibility_baseline",
+            "status": _status(len(accessibility_features) >= 6, review=len(accessibility_features) >= 3),
+            "summary": "Accessibility defaults are planned before content scale increases.",
+            "evidence": {"required_feature_count": len(accessibility_features)},
+        },
+        {
+            "id": "balance_probe_coverage",
+            "status": _status(len(balance_probes) >= 3, review=len(balance_probes) >= 2),
+            "summary": "The slice has concrete balance probes for fast tuning passes.",
+            "evidence": {"balance_probe_count": len(balance_probes)},
+        },
+        {
+            "id": "runtime_scalability",
+            "status": _status(len(scalability_patterns) >= 3, review=bool(scalability_patterns)),
+            "summary": "Large-scene scalability guardrails are attached to the project.",
+            "evidence": {"scalability_pattern_count": len(scalability_patterns)},
+        },
+        {
+            "id": "large_scale_contracts",
+            "status": _status(len(runtime_contracts) >= 3, review=bool(runtime_contracts)),
+            "summary": "Large-scale runtime contracts are explicit for party, region, and continuation growth.",
+            "evidence": {
+                "contract_ids": runtime_contracts,
+                "project_shape": str(large_scale_profile.get("project_shape", "regional_action_rpg")),
+            },
         },
         {
             "id": "slice_readiness",

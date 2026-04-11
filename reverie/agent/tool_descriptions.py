@@ -632,10 +632,10 @@ Use this tool to move from one prompt to a compiled request, structured blueprin
 - `export_markdown`
 
 **Best uses**:
-- Compile a raw game prompt into `artifacts/game_program.json`, `game_bible.md`, `feature_matrix.json`, `milestone_board.json`, and `reference_intelligence.json`
+- Compile a raw game prompt into `artifacts/game_program.json`, `game_bible.md`, `feature_matrix.json`, `design_intelligence.json`, `design_playbook.md`, `milestone_board.json`, and `reference_intelligence.json`
 - Compile a raw game prompt into `artifacts/game_request.json`
 - Create a real blueprint before broad game implementation
-- Generate a production plan, runtime decision packet, local-reference intelligence packet, capability graph, world program, system specs, task graph, and durable continuity artifacts before scaffolding
+- Generate a production plan, runtime decision packet, design-intelligence packet, local-reference intelligence packet, capability graph, world program, system specs, task graph, and durable continuity artifacts before scaffolding
 - Expand one system into verbs, states, resources, tuning knobs, telemetry, and tests
 - Generate gameplay factories, boss arcs, region-expansion packets, character kits, and enemy-faction packets for follow-up production turns
 - Generate a vertical-slice plan before scaling content scope
@@ -899,8 +899,9 @@ def _get_mode_tool_workflow(mode: str) -> str:
 - Start with retrieval; if the right tool or schema is unclear, use `tool_catalog` before guessing.
 - Treat substantial requests as a prompt-to-production flow: compile the program, compile the request, define the blueprint, choose scope, choose the runtime, scaffold the runtime, build the first playable, verify the slice, then plan continuation.
 - Use `game_design_orchestrator(action="compile_program")` first for fresh large-scale game requests, then `game_design_orchestrator(action="compile_request")`, `game_design_orchestrator(action="create_blueprint")`, `game_design_orchestrator(action="plan_production")`, and `game_design_orchestrator(action="generate_vertical_slice")`.
-- Expect `plan_production` to emit `artifacts/game_program.json`, `artifacts/reference_intelligence.json`, `artifacts/runtime_capability_graph.json`, `artifacts/runtime_delivery_plan.json`, `artifacts/world_program.json`, `artifacts/region_kits.json`, `artifacts/system_specs.json`, `artifacts/task_graph.json`, `artifacts/content_expansion.json`, `artifacts/asset_pipeline.json`, and `artifacts/resume_state.json`, and expect `generate_vertical_slice` to emit `playtest/slice_score.json`.
+- Expect `plan_production` to emit `artifacts/game_program.json`, `artifacts/design_intelligence.json`, `artifacts/campaign_program.json`, `artifacts/roster_strategy.json`, `artifacts/live_ops_plan.json`, `artifacts/production_operating_model.json`, `artifacts/reference_intelligence.json`, `artifacts/runtime_capability_graph.json`, `artifacts/runtime_delivery_plan.json`, `artifacts/world_program.json`, `artifacts/region_kits.json`, `artifacts/system_specs.json`, `artifacts/task_graph.json`, `artifacts/content_expansion.json`, `artifacts/asset_pipeline.json`, and `artifacts/resume_state.json`, and expect `generate_vertical_slice` to emit `playtest/slice_score.json`.
 - For large 3D, open-world, or "AAA-like" requests, automatically reduce scope to the first credible playable slice and record deferred systems explicitly.
+- Keep `artifacts/design_intelligence.json` current so personas, onboarding, difficulty, balance probes, accessibility, and large-scene guardrails survive across sessions.
 - When `references/` exists, treat local engine, sample-project, and asset-pipeline repos as first-class planning inputs and keep `artifacts/reference_intelligence.json` current.
 - Use `game_project_scaffolder(action="generate_vertical_slice")` when the user wants the repository to turn a compiled request into a real slice scaffold and artifact set.
 - Use `game_design_orchestrator(action="generate_gameplay_factory")`, `plan_boss_arc`, `expand_region`, `generate_character_kit`, and `build_enemy_faction` for specialized follow-up production passes.

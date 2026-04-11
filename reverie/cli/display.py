@@ -1327,12 +1327,14 @@ class DisplayComponents:
         error: str = "",
         arguments: Optional[Dict[str, Any]] = None,
         tool_call_id: str = "",
+        had_live_progress: bool = False,
     ) -> None:
         """Render compact Gemini-like tool completion rows with optional previews."""
         pending = self._pending_tool_events.pop(tool_call_id, {}) if tool_call_id else {}
         merged_tool_name = str(pending.get("tool_name") or tool_name or "tool")
         merged_arguments = arguments if isinstance(arguments, dict) and arguments else pending.get("arguments")
         output_style = self._normalize_tool_output_style(self.tool_output_style)
+        live_progress_seen = bool(had_live_progress or pending.get("had_live_progress"))
 
         if output_style == "full":
             self._render_full_tool_result_card(
@@ -1351,6 +1353,8 @@ class DisplayComponents:
                 output,
                 merged_arguments if isinstance(merged_arguments, dict) else None,
             )
+            if live_progress_seen and str(merged_tool_name).strip().lower() == "command_exec":
+                preview_lines = []
             self._render_compact_tool_event(
                 tool_name=merged_tool_name,
                 arguments=merged_arguments if isinstance(merged_arguments, dict) else None,
@@ -1387,6 +1391,7 @@ class DisplayComponents:
                 error=str(event.get("error", "") or "").strip(),
                 arguments=event.get("arguments") if isinstance(event.get("arguments"), dict) else None,
                 tool_call_id=str(event.get("tool_call_id", "") or "").strip(),
+                had_live_progress=bool(event.get("had_live_progress")),
             )
             return True
         return False

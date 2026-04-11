@@ -30,6 +30,37 @@
 
 ---
 
+## Reverie CLI v2.2.0 - Large-Scale 3D Game Generation Upgrade
+
+**Release Date:** 2026-04-11
+
+### Reverie-Gamer
+
+* Upgraded the prompt compiler so one-sentence large-scale 3D prompts now emit a stronger production profile with launch-region targets, party size, world-cell strategy, content cadence, signature systems, and explicit runtime contracts.
+* Upgraded the program compiler and production artifacts so prompt-to-project planning now produces a richer large-scale blueprint, vertical-slice proof contract, and release forecast for region-by-region continuation.
+* Expanded runtime delivery planning with `delivery_tracks` and `runtime_data_contracts`, making party roster, elemental matrix, world streaming, commissions, and regional objectives first-class generated contracts.
+* Strengthened the Godot vertical-slice generator so generated projects now include runtime data for `party_roster.json`, `elemental_matrix.json`, `world_streaming.json`, and `commission_board.json`.
+* Expanded the generated Godot `GameState` and HUD runtime so slices expose party summary, affinity summary, streaming summary, and commission summary data immediately from generated contracts.
+* Added large-scale quality-gate and performance-budget checks covering starter party scale, launch-region expectations, runtime contract coverage, and transition budget targets.
+
+### Performance
+
+* Added caching for local `references/` intelligence scans so repeated large-project planning passes reuse the previous catalog when the reference workspace has not changed.
+* Reduced unnecessary heavy rescans during Gamer planning and slice generation, which improves iteration speed when the local open-source reference corpus is large.
+
+### CLI and Logging
+
+* Fixed duplicate live log output in the streaming tool surface by deduplicating repeated progress chunks before they are appended to the active tool panel.
+* Fixed duplicate command-log echo in condensed transcript mode by skipping the finished preview block when the same command output was already streamed live.
+
+### Validation
+
+* Expanded `tests/test_gamer_mode_upgrade.py` with coverage for large-scale production artifacts and generated Godot runtime contracts.
+* Added regression coverage for reference-scan caching and duplicate live-tool log suppression in `tests/test_runtime_optimizations.py`.
+* Verified the release with `python -m pytest tests -q`.
+
+---
+
 ## Reverie CLI v2.1.24 - TUI Stability and Build Flow Cleanup
 
 **Release Date:** 2026-04-09

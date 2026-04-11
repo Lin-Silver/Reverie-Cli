@@ -23,18 +23,32 @@ from .continuation_director import (
     build_continuation_recommendations,
     continuation_recommendations_markdown,
 )
+from .design_intelligence import build_design_intelligence, design_playbook_markdown
 from .environment_factory import build_environment_kits
+from .project_director import (
+    build_or_update_blueprint,
+    build_or_update_game_request,
+    evolve_boss_arc,
+    evolve_content_expansion,
+    evolve_gameplay_factory,
+    evolve_world_program,
+    load_existing_artifacts,
+)
 from .production_plan import (
-    build_blueprint_from_request,
     build_production_plan,
     production_plan_markdown,
     vertical_slice_markdown,
 )
 from .faction_graph import build_faction_graph
 from .gameplay_factory import build_boss_arc, build_gameplay_factory
+from .large_scale_director import (
+    build_campaign_program,
+    build_live_ops_plan,
+    build_production_operating_model,
+    build_roster_strategy,
+)
 from .milestone_planner import build_feature_matrix, build_milestone_board, build_risk_register
 from .program_compiler import build_game_program, game_bible_markdown
-from .prompt_compiler import compile_game_prompt
 from .region_expander import build_region_kits
 from .runtime_capability_graph import build_runtime_capability_graph
 from .runtime_delivery import build_runtime_delivery_plan
@@ -495,10 +509,14 @@ def _augment_reverie_engine_slice(
 
 def _augment_godot_slice(
     output_dir: Path,
+    game_request: Dict[str, Any],
     system_bundle: Dict[str, Any],
     content_expansion: Dict[str, Any],
     asset_pipeline: Dict[str, Any],
     *,
+    roster_strategy: Dict[str, Any] | None = None,
+    live_ops_plan: Dict[str, Any] | None = None,
+    runtime_delivery_plan: Dict[str, Any] | None = None,
     overwrite: bool,
 ) -> list[str]:
     files: list[str] = []
@@ -512,6 +530,16 @@ def _augment_godot_slice(
     region_seeds = list(content_expansion.get("region_seeds", []))
     npc_roster = list(content_expansion.get("npc_roster", []))
     quest_arcs = list(content_expansion.get("quest_arcs", []))
+    roster_strategy = dict(roster_strategy or {})
+    live_ops_plan = dict(live_ops_plan or {})
+    runtime_delivery_plan = dict(runtime_delivery_plan or {})
+    party_model = str(game_request.get("experience", {}).get("party_model", "single_hero_focus")).strip() or "single_hero_focus"
+    specialized = {
+        str(item).strip()
+        for item in game_request.get("systems", {}).get("specialized", []) or []
+        if str(item).strip()
+    }
+    large_scale_profile = dict(game_request.get("production", {}).get("large_scale_profile", {}) or {})
     starter_region_id = str(region_seeds[0].get("id", "starter_ruins")) if region_seeds else "starter_ruins"
     second_region_id = str(region_seeds[1].get("id", "cloudstep_basin")) if len(region_seeds) > 1 else "cloudstep_basin"
     third_region_id = str(region_seeds[2].get("id", "echo_watch")) if len(region_seeds) > 2 else "echo_watch"
@@ -1164,6 +1192,157 @@ def _augment_godot_slice(
             },
         ],
     }
+    playable_roster = list(asset_pipeline.get("content_sets", {}).get("playable_roster", []) or [])
+    starter_team = list(roster_strategy.get("starter_team", []) or [])
+    starter_party_size = max(int(large_scale_profile.get("starter_party_size", len(starter_team) or len(playable_roster) or 1) or 1), 1)
+    party_slots = []
+    for index, hero in enumerate(starter_team, start=1):
+        slot_id = f"slot_{index:02d}"
+        fallback_seed = next(
+            (
+                dict(seed)
+                for seed in playable_roster
+                if str(seed.get("combat_role", "")).strip() == str(hero.get("combat_role", "")).strip()
+            ),
+            dict(playable_roster[index - 1]) if len(playable_roster) >= index else {},
+        )
+        hero_id = str(fallback_seed.get("id", hero.get("id", f"starter_hero_{index}"))).strip() or f"starter_hero_{index}"
+        party_slots.append(
+            {
+                "slot_id": slot_id,
+                "hero_id": hero_id,
+                "display_name": str(fallback_seed.get("label", hero_id.replace("_", " ").title())),
+                "combat_role": str(hero.get("combat_role", fallback_seed.get("combat_role", "vanguard"))),
+                "combat_affinity": str(hero.get("combat_affinity", fallback_seed.get("combat_affinity", "steel"))),
+                "release_window": str(hero.get("release_window", "launch")),
+                "signature_job": str(hero.get("signature_job", "cover the core fantasy cleanly")),
+            }
+        )
+    if not party_slots:
+        for index, hero in enumerate(playable_roster[:starter_party_size], start=1):
+            party_slots.append(
+                {
+                    "slot_id": f"slot_{index:02d}",
+                    "hero_id": str(hero.get("id", f"starter_hero_{index}")),
+                    "display_name": str(hero.get("label", f"Starter Hero {index}")),
+                    "combat_role": str(hero.get("combat_role", "vanguard")),
+                    "combat_affinity": str(hero.get("combat_affinity", "steel")),
+                    "release_window": "launch",
+                    "signature_job": "cover the core fantasy cleanly",
+                }
+            )
+    active_party_slot_ids = [slot["slot_id"] for slot in party_slots[:starter_party_size]]
+    active_affinities = []
+    for slot in party_slots:
+        affinity = str(slot.get("combat_affinity", "")).strip()
+        if affinity and affinity not in active_affinities:
+            active_affinities.append(affinity)
+
+    if "elemental_reaction" in specialized:
+        reaction_rules = [
+            {"input": ["flare", "tide"], "result": "steam_burst", "combat_use": "widen stagger windows and splash pressure"},
+            {"input": ["volt", "tide"], "result": "chain_current", "combat_use": "spread crowd control across grouped enemies"},
+            {"input": ["gale", "flare"], "result": "wildfire_lift", "combat_use": "launch clustered enemies into aerial follow-ups"},
+            {"input": ["frost", "terra"], "result": "crystal_lock", "combat_use": "pin elite targets before burst conversion"},
+        ]
+    else:
+        reaction_rules = [
+            {"input": ["steel", "guard"], "result": "break_guard", "combat_use": "open a short punish window on armored targets"},
+            {"input": ["rush", "arc"], "result": "tempo_surge", "combat_use": "reward aggressive routing with faster cooldown cycling"},
+        ]
+    party_roster_payload = {
+        "party_model": party_model,
+        "swap_style": "fast_swap_combo_chain" if party_model != "single_hero_focus" else "single_hero_mastery",
+        "swap_cooldown_seconds": 1.2 if party_model != "single_hero_focus" else 0.0,
+        "starter_party_size": starter_party_size,
+        "active_party_slot_ids": active_party_slot_ids,
+        "party_slots": party_slots,
+        "signature_roles": [str(slot.get("combat_role", "")) for slot in party_slots if str(slot.get("combat_role", "")).strip()],
+    }
+    elemental_matrix_payload = {
+        "system_enabled": "elemental_reaction" in specialized,
+        "affinity_order": active_affinities or list(roster_strategy.get("combat_affinities", []) or ["steel", "arc", "guard", "rush"]),
+        "starter_affinities": active_affinities or ["steel"],
+        "reaction_rules": reaction_rules,
+    }
+    world_streaming_payload = {
+        "strategy": str(large_scale_profile.get("world_cell_strategy", "single_slice_lane")),
+        "launch_region_target": int(large_scale_profile.get("launch_region_target", max(len(region_layouts), 1)) or max(len(region_layouts), 1)),
+        "active_region_id": starter_region_id,
+        "loaded_region_ids": [starter_region_id],
+        "stream_cells": [
+            {
+                "cell_id": f"{layout.get('id', 'region')}_cell",
+                "region_id": layout.get("id", "starter_ruins"),
+                "load_priority": "critical" if index == 0 else "frontier",
+                "stream_budget_class": "slice_core" if index == 0 else "preview_frontier",
+                "entry_gateway_ids": [
+                    str(gateway.get("id", ""))
+                    for gateway in region_gateway_specs
+                    if str(gateway.get("target_region", "")) == str(layout.get("id", ""))
+                ],
+            }
+            for index, layout in enumerate(region_layouts)
+        ],
+        "transition_budget_seconds": 4.0 if party_model != "single_hero_focus" else 3.0,
+        "runtime_delivery_track": dict(runtime_delivery_plan.get("delivery_tracks", {}) or {}),
+    }
+    commission_board_payload = {
+        "service_model": str(live_ops_plan.get("service_model", "boxed_release_plus_expansions")),
+        "content_cadence": str(
+            live_ops_plan.get(
+                "cadence",
+                large_scale_profile.get("content_cadence", "major_expansion_packs"),
+            )
+        ),
+        "active_commission_ids": ["starter_route_clear", "cloudstep_relay_support"],
+        "commission_slots": [
+            {
+                "id": "starter_route_clear",
+                "region_id": starter_region_id,
+                "title": "Clear the Starter Route",
+                "goal": "Re-run the shrine route and stabilize the onboarding lane.",
+                "reward_type": "upgrade_materials",
+            },
+            {
+                "id": "cloudstep_relay_support",
+                "region_id": second_region_id,
+                "title": "Support the Cloudstep Relay",
+                "goal": "Stabilize the basin relay and keep the first frontier route open.",
+                "reward_type": "region_progress",
+            },
+            {
+                "id": "echo_watch_signal",
+                "region_id": third_region_id,
+                "title": "Restore the Echo Signal",
+                "goal": "Hold the observatory lane and recalibrate the signal spire.",
+                "reward_type": "boss_material",
+            },
+        ],
+        "rotation_rules": [
+            "Always keep one starter-route commission available for short re-entry sessions.",
+            "Promote one frontier commission per newly active region before widening the pool.",
+            "Map every commission back to the same region, party, and milestone memory artifacts.",
+        ],
+    }
+    slice_manifest["party_roster"] = {
+        "party_model": party_roster_payload["party_model"],
+        "active_party_slot_ids": party_roster_payload["active_party_slot_ids"],
+        "starter_party_size": party_roster_payload["starter_party_size"],
+    }
+    slice_manifest["elemental_matrix"] = {
+        "system_enabled": elemental_matrix_payload["system_enabled"],
+        "starter_affinities": elemental_matrix_payload["starter_affinities"],
+    }
+    slice_manifest["world_streaming"] = {
+        "strategy": world_streaming_payload["strategy"],
+        "active_region_id": world_streaming_payload["active_region_id"],
+        "loaded_region_ids": world_streaming_payload["loaded_region_ids"],
+    }
+    slice_manifest["commission_board"] = {
+        "service_model": commission_board_payload["service_model"],
+        "active_commission_ids": commission_board_payload["active_commission_ids"],
+    }
     payloads = {
         runtime_root / "data" / "system_specs.json": system_bundle,
         runtime_root / "data" / "combat.json": {
@@ -1488,6 +1667,10 @@ def _augment_godot_slice(
         runtime_root / "data" / "world_graph.json": slice_manifest["world_graph"],
         runtime_root / "data" / "npc_roster.json": {"npcs": npc_roster},
         runtime_root / "data" / "quest_arcs.json": {"quest_arcs": quest_arcs},
+        runtime_root / "data" / "party_roster.json": party_roster_payload,
+        runtime_root / "data" / "elemental_matrix.json": elemental_matrix_payload,
+        runtime_root / "data" / "world_streaming.json": world_streaming_payload,
+        runtime_root / "data" / "commission_board.json": commission_board_payload,
     }
     for path, payload in payloads.items():
         if _write_json(path, payload, overwrite):
@@ -1505,6 +1688,7 @@ def _augment_godot_slice(
             "- wire save schema to a real persistence service",
             "- grow region_seeds, npc_roster, and quest_arcs into multi-region content",
             "- expand the world slice into multiple streamed combat spaces",
+            "- promote party_roster, elemental_matrix, world_streaming, and commission_board into authored runtime systems",
             "",
         ]
     )
@@ -1529,14 +1713,14 @@ def build_vertical_slice_project(
     """Compile a prompt, pick a runtime, and materialize a vertical-slice project."""
 
     root = Path(output_dir)
-    compiled_request = dict(
-        game_request
-        or compile_game_prompt(
-            prompt,
-            project_name=project_name or root.name or "Untitled Reverie Slice",
-            requested_runtime=requested_runtime,
-            existing_runtime=existing_runtime,
-        )
+    existing_artifacts = load_existing_artifacts(root)
+    compiled_request, production_directive = build_or_update_game_request(
+        prompt,
+        project_name=project_name or root.name or "Untitled Reverie Slice",
+        requested_runtime=requested_runtime,
+        existing_runtime=existing_runtime,
+        base_request=game_request or existing_artifacts.get("artifacts/game_request.json", {}),
+        existing_artifacts=existing_artifacts,
     )
     selection = select_runtime_profile(
         compiled_request,
@@ -1550,12 +1734,11 @@ def build_vertical_slice_project(
     selected_runtime = selection["selected_runtime"]
     adapter = selection["adapter"]
 
-    built_blueprint = dict(
-        blueprint
-        or build_blueprint_from_request(
-            compiled_request,
-            runtime_profile=runtime_profile,
-        )
+    built_blueprint = build_or_update_blueprint(
+        compiled_request,
+        runtime_profile=runtime_profile,
+        base_blueprint=blueprint or existing_artifacts.get("artifacts/game_blueprint.json", {}),
+        production_directive=production_directive,
     )
     if reference_intelligence:
         built_blueprint.setdefault("technical_strategy", {})["reference_strategy"] = {
@@ -1585,6 +1768,13 @@ def build_vertical_slice_project(
         compiled_request,
         built_blueprint,
         runtime_profile=runtime_profile,
+    )
+    content_expansion = evolve_content_expansion(
+        content_expansion,
+        game_request=compiled_request,
+        blueprint=built_blueprint,
+        production_directive=production_directive,
+        existing_plan=existing_artifacts.get("artifacts/content_expansion.json", {}),
     )
     asset_pipeline = build_asset_pipeline_plan(
         compiled_request,
@@ -1666,6 +1856,12 @@ def build_vertical_slice_project(
         content_expansion,
         runtime_profile=runtime_profile,
     )
+    world_program = evolve_world_program(
+        world_program,
+        content_expansion=content_expansion,
+        production_directive=production_directive,
+        existing_program=existing_artifacts.get("artifacts/world_program.json", {}),
+    )
     region_kits = build_region_kits(
         compiled_request,
         built_blueprint,
@@ -1691,18 +1887,75 @@ def build_vertical_slice_project(
         content_expansion,
         runtime_profile=runtime_profile,
     )
+    design_intelligence = build_design_intelligence(
+        compiled_request,
+        built_blueprint,
+        system_bundle,
+        content_expansion,
+        runtime_delivery_plan,
+        reference_intelligence=reference_intelligence,
+        runtime_profile=runtime_profile,
+    )
     gameplay_factory = build_gameplay_factory(
         compiled_request,
         built_blueprint,
         system_bundle,
         content_expansion,
+        design_intelligence=design_intelligence,
         runtime_profile=runtime_profile,
+    )
+    gameplay_factory = evolve_gameplay_factory(
+        gameplay_factory,
+        production_directive=production_directive,
+        game_request=compiled_request,
+        blueprint=built_blueprint,
+        content_expansion=content_expansion,
+        existing_factory=existing_artifacts.get("artifacts/gameplay_factory.json", {}),
     )
     boss_arc = build_boss_arc(
         compiled_request,
         built_blueprint,
         system_bundle,
         content_expansion,
+        design_intelligence=design_intelligence,
+        runtime_profile=runtime_profile,
+    )
+    boss_arc = evolve_boss_arc(
+        boss_arc,
+        production_directive=production_directive,
+        content_expansion=content_expansion,
+        existing_arc=existing_artifacts.get("artifacts/boss_arc.json", {}),
+    )
+    campaign_program = build_campaign_program(
+        compiled_request,
+        built_blueprint,
+        content_expansion,
+        world_program,
+        faction_graph,
+        runtime_profile=runtime_profile,
+    )
+    roster_strategy = build_roster_strategy(
+        compiled_request,
+        built_blueprint,
+        gameplay_factory,
+        character_kits,
+        runtime_profile=runtime_profile,
+    )
+    live_ops_plan = build_live_ops_plan(
+        compiled_request,
+        built_blueprint,
+        campaign_program,
+        roster_strategy,
+        runtime_delivery_plan,
+        runtime_profile=runtime_profile,
+    )
+    production_operating_model = build_production_operating_model(
+        compiled_request,
+        built_blueprint,
+        selection,
+        runtime_delivery_plan,
+        asset_pipeline,
+        reference_intelligence=reference_intelligence,
         runtime_profile=runtime_profile,
     )
 
@@ -1728,6 +1981,7 @@ def build_vertical_slice_project(
 
     written_artifacts: list[str] = []
     artifact_payloads = {
+        root / "artifacts" / "production_directive.json": production_directive,
         root / "artifacts" / "game_request.json": compiled_request,
         root / "artifacts" / "game_blueprint.json": built_blueprint,
         root / "artifacts" / "runtime_registry.json": {
@@ -1744,6 +1998,11 @@ def build_vertical_slice_project(
         root / "artifacts" / "game_program.json": game_program,
         root / "artifacts" / "feature_matrix.json": feature_matrix,
         root / "artifacts" / "content_matrix.json": content_matrix,
+        root / "artifacts" / "design_intelligence.json": design_intelligence,
+        root / "artifacts" / "campaign_program.json": campaign_program,
+        root / "artifacts" / "roster_strategy.json": roster_strategy,
+        root / "artifacts" / "live_ops_plan.json": live_ops_plan,
+        root / "artifacts" / "production_operating_model.json": production_operating_model,
         root / "artifacts" / "milestone_board.json": milestone_board,
         root / "artifacts" / "risk_register.json": risk_register,
         root / "artifacts" / "runtime_capability_graph.json": runtime_capability_graph,
@@ -1764,7 +2023,7 @@ def build_vertical_slice_project(
         root / "artifacts" / "telemetry_schema.json": _telemetry_schema(compiled_request, built_blueprint),
     }
     for path, payload in artifact_payloads.items():
-        if _write_json(path, payload, overwrite):
+        if _write_json(path, payload, True):
             written_artifacts.append(str(path))
 
     artifact_texts = {
@@ -1775,10 +2034,11 @@ def build_vertical_slice_project(
         root / "artifacts" / "content_expansion.md": content_expansion_markdown(content_expansion),
         root / "artifacts" / "asset_pipeline.md": asset_pipeline_markdown(asset_pipeline),
         root / "artifacts" / "game_bible.md": game_bible_markdown(game_program),
+        root / "artifacts" / "design_playbook.md": design_playbook_markdown(design_intelligence),
         root / "playtest" / "test_plan.md": _playtest_plan_markdown(compiled_request, built_blueprint),
     }
     for path, payload in artifact_texts.items():
-        if _write_text(path, payload, overwrite):
+        if _write_text(path, payload, True):
             written_artifacts.append(str(path))
 
     extra_runtime_files: list[str] = []
@@ -1798,9 +2058,13 @@ def build_vertical_slice_project(
         extra_runtime_files.extend(
             _augment_godot_slice(
                 root,
+                compiled_request,
                 system_bundle,
                 content_expansion,
                 asset_pipeline,
+                roster_strategy=roster_strategy,
+                live_ops_plan=live_ops_plan,
+                runtime_delivery_plan=runtime_delivery_plan,
                 overwrite=overwrite,
             )
         )
@@ -1820,6 +2084,7 @@ def build_vertical_slice_project(
         task_graph,
         content_expansion,
         slice_score=slice_score,
+        production_directive=production_directive,
     )
     resume_state = build_resume_state(
         compiled_request,
@@ -1831,6 +2096,7 @@ def build_vertical_slice_project(
         runtime_profile=runtime_profile,
         verification=verification,
         slice_score=slice_score,
+        production_directive=production_directive,
     )
     quality_gates = build_quality_gate_report(
         compiled_request,
@@ -1840,11 +2106,13 @@ def build_vertical_slice_project(
         verification=verification,
         slice_score=slice_score,
         asset_pipeline=asset_pipeline,
+        design_intelligence=design_intelligence,
     )
     performance_budget = build_performance_budget(
         compiled_request,
         built_blueprint,
         asset_pipeline,
+        design_intelligence=design_intelligence,
         runtime_profile=runtime_profile,
     )
     combat_feel_report = build_combat_feel_report(
@@ -1852,6 +2120,7 @@ def build_vertical_slice_project(
         built_blueprint,
         system_bundle,
         slice_score=slice_score,
+        design_intelligence=design_intelligence,
     )
     continuation_recommendations = build_continuation_recommendations(
         compiled_request,
@@ -1864,6 +2133,12 @@ def build_vertical_slice_project(
         quality_gates=quality_gates,
         world_program=world_program,
         reference_intelligence=reference_intelligence,
+        production_directive=production_directive,
+        campaign_program=campaign_program,
+        roster_strategy=roster_strategy,
+        live_ops_plan=live_ops_plan,
+        production_operating_model=production_operating_model,
+        design_intelligence=design_intelligence,
     )
     score_payloads = {
         root / "playtest" / "quality_gates.json": quality_gates,
@@ -1874,7 +2149,7 @@ def build_vertical_slice_project(
         root / "artifacts" / "resume_state.json": resume_state,
     }
     for path, payload in score_payloads.items():
-        if _write_json(path, payload, overwrite):
+        if _write_json(path, payload, True):
             written_artifacts.append(str(path))
 
     score_texts = {
@@ -1884,7 +2159,7 @@ def build_vertical_slice_project(
         root / "playtest" / "continuation_recommendations.md": continuation_recommendations_markdown(continuation_recommendations),
     }
     for path, payload in score_texts.items():
-        if _write_text(path, payload, overwrite):
+        if _write_text(path, payload, True):
             written_artifacts.append(str(path))
 
     return {
@@ -1893,6 +2168,7 @@ def build_vertical_slice_project(
         "runtime_profile": runtime_profile,
         "runtime_result": runtime_result,
         "verification": verification,
+        "production_directive": production_directive,
         "game_request": compiled_request,
         "blueprint": built_blueprint,
         "production_plan": production_plan,
@@ -1903,6 +2179,11 @@ def build_vertical_slice_project(
         "game_program": game_program,
         "feature_matrix": feature_matrix,
         "content_matrix": content_matrix,
+        "design_intelligence": design_intelligence,
+        "campaign_program": campaign_program,
+        "roster_strategy": roster_strategy,
+        "live_ops_plan": live_ops_plan,
+        "production_operating_model": production_operating_model,
         "milestone_board": milestone_board,
         "risk_register": risk_register,
         "reference_intelligence": reference_intelligence,

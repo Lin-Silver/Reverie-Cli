@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 
 from rich.console import Console
@@ -11,9 +12,10 @@ from reverie.agent.agent import (
     _StreamingTurnState,
 )
 from reverie.cli.display import DisplayComponents
-from reverie.cli.interface import _load_task_drawer_snapshot
+from reverie.cli.interface import ReverieInterface, _load_task_drawer_snapshot
 from reverie.context_engine.parsers.python_parser import PythonParser
 from reverie.context_engine.symbol_table import Symbol, SymbolKind, SymbolTable
+from reverie.gamer import reference_intelligence as gamer_reference_intelligence
 from reverie.sse import iter_sse_data_strings
 from reverie.tools.command_exec import CommandExecTool
 
@@ -245,6 +247,33 @@ def test_display_full_tool_output_style_keeps_expanded_result_block() -> None:
     assert "done" in rendered.lower()
 
 
+def test_display_condensed_command_result_skips_preview_after_live_progress() -> None:
+    console = Console(record=True, force_terminal=False, width=120)
+    display = DisplayComponents(console)
+    display.set_tool_output_style("condensed")
+
+    display.show_tool_result_card(
+        tool_name="command_exec",
+        success=True,
+        output=(
+            "$ git status\n"
+            "Working directory: .\n"
+            "Executor: subprocess\n"
+            "Policy: workspace_blacklist\n"
+            "Exit code: 0\n"
+            "Duration: 12ms\n\n"
+            "--- STDOUT ---\n"
+            "clean tree"
+        ),
+        arguments={"command": "git status"},
+        had_live_progress=True,
+    )
+
+    rendered = console.export_text()
+    assert "Exit 0 in 12ms" in rendered
+    assert "clean tree" not in rendered
+
+
 def test_command_exec_emits_incremental_ui_progress(tmp_path: Path) -> None:
     events = []
     tool = CommandExecTool(
@@ -262,3 +291,63 @@ def test_command_exec_emits_incremental_ui_progress(tmp_path: Path) -> None:
     assert result.success is True
     assert any(event.get("kind") == "tool_progress" and "alpha" in event.get("text", "") for event in events)
     assert any(event.get("kind") == "tool_progress" and "beta" in event.get("text", "") for event in events)
+
+
+def test_reference_catalog_scan_uses_cache_on_repeated_workspace_reads(tmp_path: Path) -> None:
+    gamer_reference_intelligence._REFERENCE_SCAN_CACHE.clear()
+    references_root = tmp_path / "references"
+    (references_root / "godot-tps-demo" / "player").mkdir(parents=True, exist_ok=True)
+    (references_root / "godot-tps-demo" / "enemies" / "red_robot").mkdir(parents=True, exist_ok=True)
+    (references_root / "godot-demo-projects" / "mono" / "squash_the_creeps").mkdir(parents=True, exist_ok=True)
+
+    (references_root / "godot-tps-demo" / "project.godot").write_text("config_version=5\n", encoding="utf-8")
+    (references_root / "godot-tps-demo" / "player" / "player.gd").write_text(
+        "extends CharacterBody3D\n",
+        encoding="utf-8",
+    )
+    (references_root / "godot-tps-demo" / "player" / "player_input.gd").write_text(
+        "extends MultiplayerSynchronizer\n",
+        encoding="utf-8",
+    )
+    (references_root / "godot-tps-demo" / "enemies" / "red_robot" / "red_robot.gd").write_text(
+        "extends CharacterBody3D\n",
+        encoding="utf-8",
+    )
+    (references_root / "godot-demo-projects" / "mono" / "squash_the_creeps" / "project.godot").write_text(
+        "config_version=5\n",
+        encoding="utf-8",
+    )
+    (references_root / "godot-demo-projects" / "mono" / "squash_the_creeps" / "Main.tscn").write_text(
+        "[gd_scene format=3]\n",
+        encoding="utf-8",
+    )
+
+    first = gamer_reference_intelligence.scan_reference_catalog(project_root=tmp_path)
+    second = gamer_reference_intelligence.scan_reference_catalog(project_root=tmp_path)
+
+    assert first["cache_status"] == "miss"
+    assert second["cache_status"] == "hit"
+    assert second["summary"]["repository_count"] >= 2
+
+
+def test_interface_deduplicates_repeated_live_tool_progress_chunks() -> None:
+    interface = ReverieInterface.__new__(ReverieInterface)
+    interface._active_tool_details = {}
+    interface._active_tool_lock = threading.Lock()
+
+    payload = {
+        "tool_call_id": "call_progress",
+        "tool_name": "command_exec",
+        "stream": "stdout",
+        "text": "alpha\n",
+    }
+    interface._append_active_tool_progress(payload)
+    interface._append_active_tool_progress(payload)
+    interface._append_active_tool_progress({**payload, "text": "beta\n"})
+
+    current = interface._active_tool_details["call_progress"]
+    assert current["stdout"] == "alpha\nbeta\n"
+    assert current["progress_event_count"] == 2
+
+    summary = interface._clear_active_tool("call_progress")
+    assert summary["had_live_progress"] is True

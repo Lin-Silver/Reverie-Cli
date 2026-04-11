@@ -93,6 +93,23 @@ def build_milestone_board(
                 "exit_criteria": ["runtime capability graph exists", "runtime delivery plan exists"],
             },
             {
+                "id": "experience_design",
+                "title": "Experience Design",
+                "goal": "Lock the player personas, onboarding, difficulty, feedback, balance, and accessibility defaults early.",
+                "exit_criteria": ["design_intelligence exists"],
+            },
+            {
+                "id": "large_scale_direction",
+                "title": "Large-Scale Direction",
+                "goal": "Lock the campaign, roster, live-ops, and production operating model before scope fans out.",
+                "exit_criteria": [
+                    "campaign_program exists",
+                    "roster_strategy exists",
+                    "live_ops_plan exists",
+                    "production_operating_model exists",
+                ],
+            },
+            {
                 "id": "first_playable",
                 "title": "First Playable",
                 "goal": "Reach one complete route from entry to objective to reward.",
@@ -124,6 +141,7 @@ def build_risk_register(
 
     production = dict(game_request.get("production", {}) or {})
     runtime = str(target_runtime(blueprint, runtime_profile))
+    live_service_enabled = bool(game_request.get("production", {}).get("live_service_profile", {}).get("enabled", False))
     risks = [
         {
             "id": "scope_pressure",
@@ -154,6 +172,26 @@ def build_risk_register(
             "mitigation": "Record capability graph blockers and keep a fallback delivery path visible.",
         },
     ]
+    if live_service_enabled:
+        risks.append(
+            {
+                "id": "service_cadence_burn",
+                "severity": "high",
+                "area": "live_ops",
+                "summary": "Roster, event, and region cadence can outpace validated combat and content quality.",
+                "mitigation": "Tie every release wave to slice score, quality gates, and the operating-model workstreams before promotion.",
+            }
+        )
+    if str(blueprint.get("meta", {}).get("dimension", "3D")) == "3D":
+        risks.append(
+            {
+                "id": "readability_accessibility_drift",
+                "severity": "medium",
+                "area": "experience_design",
+                "summary": "Combat readability, onboarding, and accessibility can drift as effects, enemies, and content density increase.",
+                "mitigation": "Keep design_intelligence and quality gates current, and re-run balance probes before scaling content density.",
+            }
+        )
     return {
         "schema_version": "reverie.risk_register/1",
         "project_name": project_name(game_request, blueprint),

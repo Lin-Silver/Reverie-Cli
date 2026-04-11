@@ -37,6 +37,44 @@ def build_runtime_delivery_plan(
         ),
         {},
     )
+    alternate_scale_reference = next(
+        (
+            dict(item)
+            for item in sorted(
+                reference_intelligence.get("runtime_alignment", []),
+                key=lambda entry: int(entry.get("reference_fit_score", 0)),
+                reverse=True,
+            )
+            if str(item.get("runtime_id", "")).strip() != selected_runtime
+        ),
+        {},
+    )
+    live_service_enabled = bool(game_request.get("production", {}).get("live_service_profile", {}).get("enabled", False))
+    large_scale_profile = dict(game_request.get("production", {}).get("large_scale_profile", {}) or {})
+    runtime_contract_ids = [
+        str(item).strip()
+        for item in large_scale_profile.get("runtime_contracts", []) or []
+        if str(item).strip()
+    ]
+    runtime_data_contracts = []
+    if runtime_contract_ids:
+        runtime_root_hint = "engine/godot/data" if selected_runtime == "godot" else "data/content"
+        for contract_id in runtime_contract_ids:
+            file_stem = contract_id
+            extension = ".json" if selected_runtime == "godot" else ".yaml"
+            runtime_data_contracts.append(
+                {
+                    "id": contract_id,
+                    "runtime_path": f"{runtime_root_hint}/{file_stem}{extension}",
+                    "purpose": {
+                        "party_roster": "keep starter roster, active slots, and party-role coverage durable across sessions",
+                        "elemental_matrix": "record elemental or affinity reactions for combat routing and future hero design",
+                        "world_streaming": "stage region cells, streaming budgets, and landmark activation rules",
+                        "commission_board": "keep short-session commissions or district objectives tied to the same project memory",
+                        "regional_objectives": "preserve regional goals and objective handoffs as runtime-visible contracts",
+                    }.get(contract_id, "preserve large-scale runtime state as a first-class artifact"),
+                }
+            )
 
     return {
         "schema_version": "reverie.runtime_delivery_plan/1",
@@ -74,6 +112,48 @@ def build_runtime_delivery_plan(
             "recommended_stack": list(reference_intelligence.get("recommended_reference_stack", []) or []),
             "legal_guardrails": list(reference_intelligence.get("legal_guardrails", []) or []),
         },
+        "scale_up_stages": [
+            {
+                "id": "verified_slice",
+                "runtime": selected_runtime,
+                "goal": "Ship a runnable, measurable, and high-signal first vertical slice.",
+                "reference_support": list(selected_alignment.get("supporting_references", []) or []),
+            },
+            {
+                "id": "multi_region_growth",
+                "runtime": selected_runtime,
+                "goal": "Expand regions, questlines, and reusable systems without breaking the runtime contract.",
+                "reference_support": list(selected_alignment.get("supporting_references", []) or []),
+            },
+            {
+                "id": "service_scale" if live_service_enabled else "post_launch_expansion",
+                "runtime": selected_runtime,
+                "goal": (
+                    "Promote the project into a versioned content cadence with stronger release governance."
+                    if live_service_enabled
+                    else "Promote the verified slice into premium-style expansion packs and campaign chapters."
+                ),
+                "reference_support": list(alternate_scale_reference.get("supporting_references", []) or [])
+                or list(selected_alignment.get("supporting_references", []) or []),
+            },
+        ],
+        "future_runtime_references": {
+            "selected_runtime": selected_runtime,
+            "alternate_scale_reference": alternate_scale_reference,
+        },
+        "delivery_tracks": {
+            "runtime_readiness": "scaffold_ready" if runtime_selection.get("profile", {}).get("can_scaffold") else "planning_only",
+            "world_scale_track": str(large_scale_profile.get("world_cell_strategy", "single_slice_lane")),
+            "launch_region_target": int(large_scale_profile.get("launch_region_target", 1) or 1),
+            "starter_party_size": int(large_scale_profile.get("starter_party_size", 1) or 1),
+            "content_cadence": str(
+                large_scale_profile.get(
+                    "content_cadence",
+                    "major_expansion_packs" if not live_service_enabled else "six_week_content_cycles",
+                )
+            ),
+        },
+        "runtime_data_contracts": runtime_data_contracts,
         "asset_contract": {
             "runtime_root": runtime_root,
             "import_path": str(selected.get("asset_import_path", "project_level_registry")),

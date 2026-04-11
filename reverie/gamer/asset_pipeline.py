@@ -166,6 +166,7 @@ def _model_seed(
 
 
 def _budget_profile(
+    playable_character_count: int,
     content_expansion: Dict[str, Any],
     combat_packet: Dict[str, Any],
     quest_packet: Dict[str, Any],
@@ -179,7 +180,7 @@ def _budget_profile(
     objective_count = len(quest_packet.get("slice_objectives", []) or [])
     return {
         "slice_targets": {
-            "playable_character_kits": 1,
+            "playable_character_kits": max(1, playable_character_count),
             "npc_kits": max(1, min(npc_count, 4)),
             "enemy_kits": max(2, enemy_count),
             "region_landmark_kits": max(3, region_count),
@@ -200,6 +201,48 @@ def _budget_profile(
             "Treat UI, VFX, audio, and landmark kits as first-class production lanes instead of leaving them as unnamed polish debt.",
         ],
     }
+
+
+def _starter_hero_model_seeds(
+    game_request: Dict[str, Any],
+    regions: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    party_model = str(game_request.get("experience", {}).get("party_model", "single_hero_focus")).strip()
+    if party_model == "single_hero_focus":
+        return []
+
+    specialized = {
+        str(item).strip()
+        for item in game_request.get("systems", {}).get("specialized", []) or []
+        if str(item).strip()
+    }
+    affinities = ["steel", "arc", "guard", "rush"]
+    if "elemental_reaction" in specialized:
+        affinities = ["flare", "tide", "volt", "gale"]
+
+    role_specs = [
+        ("starter_breaker", "Starter Breaker Proxy", "breaker"),
+        ("starter_support", "Starter Support Proxy", "support"),
+        ("starter_controller", "Starter Controller Proxy", "controller"),
+    ]
+    seeds: List[Dict[str, Any]] = []
+    home_region = str(regions[0].get("id", "starter_ruins")) if regions else "starter_ruins"
+    for index, (asset_id, label, combat_role) in enumerate(role_specs):
+        seed = _model_seed(
+            asset_id=asset_id,
+            label=label,
+            category="character",
+            primitive="box",
+            region_id=home_region,
+            width=0.9,
+            height=1.85,
+            depth=0.8,
+        )
+        seed["playable"] = True
+        seed["combat_role"] = combat_role
+        seed["combat_affinity"] = affinities[index % len(affinities)]
+        seeds.append(seed)
+    return seeds
 
 
 def build_asset_pipeline_plan(
@@ -223,6 +266,7 @@ def build_asset_pipeline_plan(
     landmarks = [str(item).strip() for item in world_packet.get("landmarks", []) if str(item).strip()]
     enemy_archetypes = list(combat_packet.get("enemy_archetypes", []) or [])
 
+    hero_seeds = _starter_hero_model_seeds(game_request, regions)
     modeling_seed: List[Dict[str, Any]] = [
         _model_seed(
             asset_id="player_avatar",
@@ -235,6 +279,10 @@ def build_asset_pipeline_plan(
             depth=0.8,
         )
     ]
+    modeling_seed[0]["playable"] = True
+    modeling_seed[0]["combat_role"] = "vanguard"
+    modeling_seed[0]["combat_affinity"] = hero_seeds[0].get("combat_affinity", "steel") if hero_seeds else "steel"
+    modeling_seed.extend(hero_seeds)
     if npcs:
         first_npc = npcs[0]
         modeling_seed.append(
@@ -317,6 +365,16 @@ def build_asset_pipeline_plan(
             }
             for arc in quest_arcs
         ],
+        "playable_roster": [
+            {
+                "id": str(seed.get("id", "")),
+                "label": _display_name(seed.get("id", ""), "Playable Hero"),
+                "combat_role": str(seed.get("combat_role", "vanguard")),
+                "combat_affinity": str(seed.get("combat_affinity", "steel")),
+            }
+            for seed in modeling_seed
+            if bool(seed.get("playable", False))
+        ],
     }
 
     production_queue: List[Dict[str, Any]] = []
@@ -388,13 +446,20 @@ def build_asset_pipeline_plan(
         },
         "import_profile": _import_profile(runtime),
         "validation_rules": _validation_rules(runtime, world_packet),
-        "budget_profile": _budget_profile(content_expansion, combat_packet, quest_packet, world_packet),
+        "budget_profile": _budget_profile(
+            len([seed for seed in modeling_seed if bool(seed.get("playable", False))]),
+            content_expansion,
+            combat_packet,
+            quest_packet,
+            world_packet,
+        ),
         "content_sets": {
             "regions": registry_seed["regions"],
             "npc_cast": registry_seed["npc_cast"],
             "enemy_families": registry_seed["enemy_families"],
             "quest_arcs": registry_seed["quest_arcs"],
             "landmarks": landmarks,
+            "playable_roster": registry_seed["playable_roster"],
         },
         "registry_seed": registry_seed,
         "modeling_seed": modeling_seed,

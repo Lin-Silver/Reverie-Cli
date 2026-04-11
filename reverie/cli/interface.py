@@ -1284,6 +1284,9 @@ class ReverieInterface:
                     "arguments": payload.get("arguments") if isinstance(payload.get("arguments"), dict) else current.get("arguments"),
                     "stdout": str(current.get("stdout", "") or ""),
                     "stderr": str(current.get("stderr", "") or ""),
+                    "progress_event_count": int(current.get("progress_event_count", 0) or 0),
+                    "last_stdout_chunk": str(current.get("last_stdout_chunk", "") or ""),
+                    "last_stderr_chunk": str(current.get("last_stderr_chunk", "") or ""),
                 }
             )
             self._active_tool_details[key] = current
@@ -1306,19 +1309,34 @@ class ReverieInterface:
             current.setdefault("arguments", current.get("arguments"))
             current["stdout"] = str(current.get("stdout", "") or "")
             current["stderr"] = str(current.get("stderr", "") or "")
+            current["progress_event_count"] = int(current.get("progress_event_count", 0) or 0)
+            current["last_stdout_chunk"] = str(current.get("last_stdout_chunk", "") or "")
+            current["last_stderr_chunk"] = str(current.get("last_stderr_chunk", "") or "")
             if stream_name == "stderr":
+                if current["last_stderr_chunk"] == text:
+                    return
                 current["stderr"] += text
+                current["last_stderr_chunk"] = text
             else:
+                if current["last_stdout_chunk"] == text:
+                    return
                 current["stdout"] += text
+                current["last_stdout_chunk"] = text
+            current["progress_event_count"] += 1
             self._active_tool_details[key] = current
 
-    def _clear_active_tool(self, tool_call_id: str) -> None:
-        """Remove one live tool surface entry after completion."""
+    def _clear_active_tool(self, tool_call_id: str) -> Dict[str, Any]:
+        """Remove one live tool surface entry after completion and return its progress summary."""
         key = str(tool_call_id or "").strip()
         if not key:
-            return
+            return {}
         with self._active_tool_lock:
-            self._active_tool_details.pop(key, None)
+            removed = dict(self._active_tool_details.pop(key, {}) or {})
+        return {
+            "had_live_progress": bool(int(removed.get("progress_event_count", 0) or 0) > 0),
+            "stdout_chars": len(str(removed.get("stdout", "") or "")),
+            "stderr_chars": len(str(removed.get("stderr", "") or "")),
+        }
 
     def _handle_stream_tool_event(self, event: Dict[str, Any]) -> None:
         """Update live tool surfaces from streamed tool start/result events."""
@@ -1328,7 +1346,9 @@ class ReverieInterface:
             self._refresh_streaming_footer()
             return
         if event_type == "tool_result":
-            self._clear_active_tool(str(event.get("tool_call_id", "") or ""))
+            completion_summary = self._clear_active_tool(str(event.get("tool_call_id", "") or ""))
+            if completion_summary:
+                event["had_live_progress"] = bool(completion_summary.get("had_live_progress"))
             self._refresh_streaming_footer()
 
     def _get_live_tool_panel(self):

@@ -2,10 +2,26 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 import json
+
+
+_REFERENCE_SCAN_CACHE: Dict[str, Dict[str, Any]] = {}
+_REFERENCE_REPOSITORIES = (
+    "godot-tps-demo",
+    "godot-demo-projects",
+    "o3de-multiplayersample",
+    "o3de-multiplayersample-assets",
+    "blender",
+    "blockbench",
+    "blockbench-plugins",
+    "gltf-blender-io",
+    "gltf-validator",
+    "gltf-sample-assets",
+)
 
 
 def _utc_now() -> str:
@@ -71,6 +87,22 @@ def _repo_root(*, project_root: Path | None = None, app_root: Path | None = None
         if candidate.exists():
             return candidate
     return ordered[0] if ordered else Path("references").resolve()
+
+
+def _reference_fingerprint(reference_root: Path) -> str:
+    root = Path(reference_root).resolve()
+    parts = [str(root)]
+    for repo_name in _REFERENCE_REPOSITORIES:
+        candidate = root / repo_name
+        if not candidate.exists():
+            parts.append(f"{repo_name}:missing")
+            continue
+        try:
+            stat = candidate.stat()
+            parts.append(f"{repo_name}:{stat.st_mtime_ns}:{stat.st_size}")
+        except OSError:
+            parts.append(f"{repo_name}:unreadable")
+    return "|".join(parts)
 
 
 def _entry(
@@ -409,6 +441,13 @@ def scan_reference_catalog(
     """Scan the local references workspace and return a compact catalog."""
 
     reference_root = _repo_root(project_root=project_root, app_root=app_root)
+    fingerprint = _reference_fingerprint(reference_root)
+    cached = _REFERENCE_SCAN_CACHE.get(str(reference_root))
+    if cached and cached.get("fingerprint") == fingerprint:
+        payload = deepcopy(cached.get("payload", {}))
+        payload["cache_status"] = "hit"
+        return payload
+
     entries = [
         _analyze_godot_tps_demo(reference_root),
         _analyze_godot_demo_projects(reference_root),
@@ -480,7 +519,7 @@ def scan_reference_catalog(
         counts_by_engine[entry["engine"]] = counts_by_engine.get(entry["engine"], 0) + 1
         counts_by_category[entry["category"]] = counts_by_category.get(entry["category"], 0) + 1
 
-    return {
+    payload = {
         "reference_root": str(reference_root),
         "available": reference_root.exists(),
         "detected_repositories": detected,
@@ -490,7 +529,13 @@ def scan_reference_catalog(
             "categories": counts_by_category,
         },
         "legal_guardrails": guardrails,
+        "cache_status": "miss",
     }
+    _REFERENCE_SCAN_CACHE[str(reference_root)] = {
+        "fingerprint": fingerprint,
+        "payload": deepcopy(payload),
+    }
+    return payload
 
 
 def _request_profile(game_request: Dict[str, Any]) -> Dict[str, Any]:

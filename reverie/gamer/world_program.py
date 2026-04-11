@@ -29,6 +29,8 @@ def build_world_program(
         "runtime": target_runtime(blueprint, runtime_profile),
         "world_model": content_expansion.get("target_scale", "regional_arpg_base"),
         "region_order": [str(region.get("id", "")) for region in regions if str(region.get("id", ""))],
+        "active_region_id": str(content_expansion.get("active_region_id", "")).strip(),
+        "boss_priority_region_id": str(content_expansion.get("boss_priority_region_id", "")).strip(),
         "regional_rules": [
             "Each region should teach or stress one new traversal, combat, or quest idea.",
             "Every region needs a signature landmark, one critical-path route, and one optional detour reward.",

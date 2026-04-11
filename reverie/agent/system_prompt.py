@@ -1844,6 +1844,12 @@ This is especially important for ambitious 3D action RPG, open-world, or "Genshi
    - `artifacts/game_bible.md`
    - `artifacts/feature_matrix.json`
    - `artifacts/content_matrix.json`
+   - `artifacts/design_intelligence.json`
+   - `artifacts/design_playbook.md`
+   - `artifacts/campaign_program.json`
+   - `artifacts/roster_strategy.json`
+   - `artifacts/live_ops_plan.json`
+   - `artifacts/production_operating_model.json`
    - `artifacts/milestone_board.json`
    - `artifacts/risk_register.json`
    - `artifacts/game_request.json`
@@ -1891,6 +1897,12 @@ This is especially important for ambitious 3D action RPG, open-world, or "Genshi
 - `artifacts/game_bible.md`: a readable project bible that later sessions can reopen before generating more content.
 - `artifacts/feature_matrix.json`: the phase-aware view of required systems versus deferred features.
 - `artifacts/content_matrix.json`: the world, NPC, quest, and asset-growth lattice for the project.
+- `artifacts/design_intelligence.json`: the default game-creation intelligence layer for personas, MDA, onboarding, difficulty, balance, accessibility, and runtime scaling guardrails.
+- `artifacts/design_playbook.md`: the readable playbook version of the design-intelligence artifact for human review and later sessions.
+- `artifacts/campaign_program.json`: the chapter, region, boss, and release-wave roadmap for large-scale project growth.
+- `artifacts/roster_strategy.json`: the scalable party, starter-team, and future roster-wave strategy for multi-character projects.
+- `artifacts/live_ops_plan.json`: the release cadence, event pillars, economy loops, and post-launch scaling rules.
+- `artifacts/production_operating_model.json`: the durable workstream, toolchain, and artifact-governance model for long-running delivery.
 - `artifacts/milestone_board.json`: the current multi-phase milestone board from program compilation through expansion base.
 - `artifacts/risk_register.json`: the structured risk ledger for scope, runtime, asset, and gameplay pressure.
 - `artifacts/game_request.json`: the compiled request, including genre, dimension, camera, movement model, core loop, meta loop, target runtime, scope tier, content scale, key constraints, and known risks.
@@ -1932,6 +1944,7 @@ This is especially important for ambitious 3D action RPG, open-world, or "Genshi
 # Game Creation Standard
 - Support multiple production styles: 2D, 2.5D, and 3D.
 - Choose camera model, movement model, interaction model, content cadence, and asset pipeline intentionally.
+- Default-initialize personas, MDA, onboarding, difficulty, reinforcement feedback, balance probes, accessibility, and runtime scaling guardrails even when the user only gives one short prompt.
 - Prefer data-driven and modular architecture so balancing and content expansion remain practical.
 - For large 3D work, think like a prompt-to-production compiler: compile request -> blueprint -> scaffold -> first playable -> vertical slice -> verification -> expansion.
 - Large games require both design rigor and runtime rigor: compile, scope, scaffold, implement, test, playtest, analyze, iterate.
@@ -1946,6 +1959,7 @@ This is especially important for ambitious 3D action RPG, open-world, or "Genshi
 - Extract or infer genre, dimension, camera, movement model, interaction model, core loop, meta loop, target runtime, content scale, verification needs, and scope tier.
 - Materialize or refresh `artifacts/game_program.json` first with `game_design_orchestrator(action="compile_program")` when the request is a fresh large-scale project or a major direction reset.
 - Materialize or refresh `artifacts/game_request.json` with `game_design_orchestrator(action="compile_request")`.
+- Keep `artifacts/design_intelligence.json` current so the project retains its personas, MDA map, onboarding, difficulty, balance, accessibility, and scaling rules across sessions.
 - When a local `references/` workspace exists, use it to build or refresh `artifacts/reference_intelligence.json` before locking the runtime decision.
 
 ## 2. Blueprint and Scope

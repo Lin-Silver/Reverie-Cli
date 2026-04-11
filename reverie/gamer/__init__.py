@@ -9,6 +9,7 @@ from .continuation_director import (
     build_continuation_recommendations,
     continuation_recommendations_markdown,
 )
+from .design_intelligence import build_design_intelligence, design_playbook_markdown
 from .environment_factory import build_environment_kits
 from .expansion_planner import (
     build_content_expansion_plan,
@@ -20,6 +21,12 @@ from .expansion_planner import (
 )
 from .faction_graph import build_enemy_faction_packet, build_faction_graph
 from .gameplay_factory import build_boss_arc, build_gameplay_factory
+from .large_scale_director import (
+    build_campaign_program,
+    build_live_ops_plan,
+    build_production_operating_model,
+    build_roster_strategy,
+)
 from .milestone_planner import build_feature_matrix, build_milestone_board, build_risk_register
 from .production_plan import (
     build_blueprint_from_request,
@@ -61,10 +68,12 @@ __all__ = [
     "build_blueprint_from_request",
     "build_boss_arc",
     "build_character_kits",
+    "build_campaign_program",
     "build_combat_feel_report",
     "build_content_expansion_plan",
     "build_content_matrix",
     "build_continuation_recommendations",
+    "build_design_intelligence",
     "build_enemy_faction_packet",
     "build_environment_kits",
     "build_expansion_backlog",
@@ -72,9 +81,11 @@ __all__ = [
     "build_faction_graph",
     "build_game_program",
     "build_gameplay_factory",
+    "build_live_ops_plan",
     "build_milestone_board",
     "build_performance_budget",
     "build_production_plan",
+    "build_production_operating_model",
     "build_quality_gate_report",
     "build_questline_program",
     "build_reference_intelligence",
@@ -82,6 +93,7 @@ __all__ = [
     "build_region_kits",
     "build_risk_register",
     "build_resume_state",
+    "build_roster_strategy",
     "build_runtime_capability_graph",
     "build_runtime_delivery_plan",
     "build_save_migration_plan",
@@ -96,6 +108,7 @@ __all__ = [
     "estimate_scope",
     "continuation_recommendations_markdown",
     "content_expansion_markdown",
+    "design_playbook_markdown",
     "expansion_backlog_markdown",
     "game_bible_markdown",
     "production_plan_markdown",

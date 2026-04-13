@@ -102,6 +102,12 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         "OpenAI SDK transport.",
         context_length=204800,
     ),
+    _openai_model(
+        "minimaxai/minimax-m2.7",
+        "MiniMax M2.7",
+        "OpenAI SDK transport.",
+        context_length=204800,
+    ),
     _request_model(
         "qwen/qwen3.5-397b-a17b",
         "Qwen3.5 397B A17B",
@@ -470,7 +476,15 @@ def _build_openai_nemotron_options() -> Dict[str, Any]:
     }
 
 
-def _build_openai_minimax_options() -> Dict[str, Any]:
+def _build_openai_minimax_m25_options() -> Dict[str, Any]:
+    return {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "max_tokens": 8192,
+    }
+
+
+def _build_openai_minimax_m27_options() -> Dict[str, Any]:
     return {
         "temperature": 1.0,
         "top_p": 0.95,
@@ -510,7 +524,8 @@ def _build_openai_gpt_oss_options() -> Dict[str, Any]:
 
 _NVIDIA_OPENAI_OPTION_BUILDERS = {
     "nvidia/nemotron-3-super-120b-a12b": _build_openai_nemotron_options,
-    "minimaxai/minimax-m2.5": _build_openai_minimax_options,
+    "minimaxai/minimax-m2.5": _build_openai_minimax_m25_options,
+    "minimaxai/minimax-m2.7": _build_openai_minimax_m27_options,
     "z-ai/glm5": _build_openai_glm5_options,
     "stepfun-ai/step-3.5-flash": _build_openai_step_flash_options,
     "openai/gpt-oss-120b": _build_openai_gpt_oss_options,

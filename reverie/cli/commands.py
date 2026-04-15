@@ -25,6 +25,7 @@ from rich.markup import escape
 from .help_catalog import HELP_SECTION_ORDER, HELP_TOPICS, normalize_help_topic
 from .markdown_formatter import MarkdownFormatter, format_markdown
 from .theme import THEME, DECO, DREAM
+from ..harness import build_harness_capability_report
 from ..modes import (
     get_mode_description,
     get_mode_display_name,
@@ -60,6 +61,8 @@ class CommandHandler:
             'nvidia': self.cmd_nvidia,
             'mode': self.cmd_mode,
             'status': self.cmd_status,
+            'doctor': self.cmd_doctor,
+            'harness': self.cmd_doctor,
             'search': self.cmd_search,
             'sessions': self.cmd_sessions,
             'history': self.cmd_history,
@@ -3828,6 +3831,257 @@ class CommandHandler:
         
         self.console.print(table)
         self.console.print()
+        return True
+
+    def cmd_doctor(self, args: str) -> bool:
+        """Audit Reverie's current harness readiness for the active workspace."""
+        raw = str(args or "").strip().lower()
+        if raw not in ("", "json", "--json", "history", "runs"):
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /doctor, /doctor json, or /doctor history[/{self.theme.AMBER_GLOW}]"
+            )
+            return True
+
+        project_root = Path(self.app.get("project_root") or Path.cwd()).resolve()
+        config_manager = self.app.get("config_manager")
+        config = config_manager.load() if config_manager else None
+        project_data_dir = self.app.get("project_data_dir") or getattr(config_manager, "project_data_dir", None)
+        agent = self.app.get("agent")
+        mode = normalize_mode(
+            getattr(agent, "mode", "")
+            or getattr(config, "mode", "")
+            or "reverie"
+        )
+
+        report = build_harness_capability_report(
+            project_root,
+            project_data_dir=project_data_dir,
+            mode=mode,
+            agent=agent,
+            indexer=self.app.get("indexer"),
+            ensure_context_engine=self.app.get("ensure_context_engine"),
+            git_integration=self.app.get("git_integration"),
+            ensure_git_integration=self.app.get("ensure_git_integration"),
+            lsp_manager=self.app.get("lsp_manager"),
+            ensure_lsp_manager=self.app.get("ensure_lsp_manager"),
+            session_manager=self.app.get("session_manager"),
+            memory_indexer=self.app.get("memory_indexer"),
+            operation_history=self.app.get("operation_history"),
+            rollback_manager=self.app.get("rollback_manager"),
+            runtime_plugin_manager=self.app.get("runtime_plugin_manager"),
+            skills_manager=self.app.get("skills_manager"),
+            mcp_runtime=self.app.get("mcp_runtime"),
+        )
+
+        if raw in ("json", "--json"):
+            self._show_command_panel(
+                "Harness Doctor",
+                subtitle="Structured harness audit for the current workspace.",
+                accent=self.theme.BLUE_SOFT,
+                meta=str(project_root),
+            )
+            self.console.print(
+                Syntax(
+                    json.dumps(report, ensure_ascii=False, indent=2),
+                    "json",
+                    word_wrap=True,
+                    line_numbers=False,
+                )
+            )
+            self.console.print()
+            return True
+
+        summary = report.get("summary", {})
+        history_summary = report.get("history_summary", {}) or {}
+        self._show_command_panel(
+            "Harness Doctor",
+            subtitle="Audit the goal, context, tools, execution, memory, evaluation, and recovery layers around the model.",
+            accent=self.theme.BLUE_SOFT,
+            meta=str(project_root),
+        )
+
+        panels = [
+            self._build_metric_panel(
+                "Harness Score",
+                report.get("overall_score", 0),
+                accent=self.theme.MINT_VIBRANT,
+                detail=f"mode {report.get('mode', mode)}",
+            ),
+            self._build_metric_panel(
+                "Visible Tools",
+                summary.get("visible_tools", 0),
+                accent=self.theme.BLUE_SOFT,
+                detail="current mode surface",
+            ),
+            self._build_metric_panel(
+                "Verification",
+                summary.get("verification_commands", 0),
+                accent=self.theme.PURPLE_SOFT,
+                detail="explicit checks seen",
+            ),
+            self._build_metric_panel(
+                "Recent Runs",
+                summary.get("prompt_runs", 0),
+                accent=self.theme.AMBER_GLOW,
+                detail=history_summary.get("score_trend_label", "no history yet"),
+            ),
+        ]
+        self.console.print(Columns(panels, expand=True, equal=True))
+        self.console.print()
+
+        artifacts = report.get("artifacts", {})
+        tasks = artifacts.get("tasks", {})
+        audit = artifacts.get("command_audit", {})
+        verification = artifacts.get("verification", {})
+        operations = artifacts.get("operation_history", {})
+        checkpoints = artifacts.get("checkpoints", {})
+        sessions = artifacts.get("sessions", {})
+        self.console.print(
+            self._build_key_value_table(
+                [
+                    ("Workspace", report.get("workspace_root", "")),
+                    ("Project Cache", report.get("project_data_dir", "")),
+                    ("Task Source", tasks.get("source", "missing")),
+                    ("Tasks", f"{tasks.get('completed', 0)}/{tasks.get('total', 0)} completed"),
+                    ("Operations", f"{operations.get('operations', 0)} tracked"),
+                    ("Command Audit", f"{audit.get('entries', 0)} event(s)"),
+                    ("Checkpoints", f"{checkpoints.get('count', 0)} recorded"),
+                    ("Sessions", f"{sessions.get('count', 0)} total"),
+                    ("Recent Success", f"{history_summary.get('recent_success_rate', 0)}%"),
+                    ("Verification Coverage", f"{history_summary.get('recent_verification_coverage', 0)}%"),
+                ]
+            )
+        )
+        self.console.print()
+
+        if raw in ("history", "runs"):
+            run_table = Table(
+                title=f"[bold {self.theme.BLUE_SOFT}]{self.deco.CRYSTAL} Recent Harness Runs[/bold {self.theme.BLUE_SOFT}]",
+                box=box.ROUNDED,
+                border_style=self.theme.BORDER_PRIMARY,
+                expand=True,
+            )
+            run_table.add_column("Ended", style=f"bold {self.theme.BLUE_SOFT}", width=20)
+            run_table.add_column("Mode", style=self.theme.TEXT_PRIMARY, width=14)
+            run_table.add_column("Score", style=self.theme.TEXT_SECONDARY, justify="right", width=7)
+            run_table.add_column("Verified", style=self.theme.TEXT_SECONDARY, justify="right", width=9)
+            run_table.add_column("Status", style=self.theme.TEXT_SECONDARY, width=10)
+            run_table.add_column("Task", style=self.theme.TEXT_PRIMARY, ratio=1)
+            for item in history_summary.get("recent_runs", []) or []:
+                timestamp = str(item.get("timestamp", "") or "")[:19].replace("T", " ")
+                run_table.add_row(
+                    escape(timestamp or "(unknown)"),
+                    escape(str(item.get("mode", "") or "(none)")),
+                    str(int(item.get("overall_score", 0) or 0)),
+                    str(int(item.get("verification_commands", 0) or 0)),
+                    "success" if item.get("success") else "failed",
+                    escape(str(item.get("task_active", "") or "(none)")),
+                )
+            if not (history_summary.get("recent_runs", []) or []):
+                run_table.add_row("(none)", "-", "0", "0", "-", "No prompt runs recorded yet")
+            self.console.print(run_table)
+            self.console.print()
+            return True
+
+        category_table = Table(
+            title=f"[bold {self.theme.PINK_SOFT}]{self.deco.CRYSTAL} Harness Layers[/bold {self.theme.PINK_SOFT}]",
+            box=box.ROUNDED,
+            border_style=self.theme.BORDER_PRIMARY,
+            expand=True,
+        )
+        category_table.add_column("Layer", style=f"bold {self.theme.BLUE_SOFT}", width=14)
+        category_table.add_column("Score", style=self.theme.TEXT_SECONDARY, width=8, justify="right")
+        category_table.add_column("Highlights", style=self.theme.TEXT_PRIMARY, ratio=1)
+        for name, payload in (report.get("categories", {}) or {}).items():
+            highlights = "; ".join(str(item) for item in payload.get("highlights", []) if str(item).strip())
+            category_table.add_row(
+                name.title(),
+                f"{int(payload.get('score', 0))}",
+                escape(highlights or "(none)"),
+            )
+        self.console.print(category_table)
+        self.console.print()
+
+        verification_lines = [
+            f"Explicit verification commands: {int(verification.get('explicit_commands', 0) or 0)}",
+            f"Successful verification commands: {int(verification.get('successful_commands', 0) or 0)}",
+            f"Failed verification commands: {int(verification.get('failed_commands', 0) or 0)}",
+            f"Detected categories: {', '.join((verification.get('categories', {}) or {}).keys()) or '(none)'}",
+        ]
+        examples = verification.get("examples", []) or []
+        if examples:
+            verification_lines.append(f"Recent examples: {', '.join(str(item) for item in examples[:3])}")
+        self.console.print(
+            Panel(
+                Text("\n".join(verification_lines), style=self.theme.TEXT_SECONDARY),
+                title=f"[bold {self.theme.PURPLE_SOFT}]{self.deco.CRYSTAL} Verification Posture[/bold {self.theme.PURPLE_SOFT}]",
+                border_style=self.theme.BORDER_SECONDARY,
+                box=box.ROUNDED,
+                padding=(0, 1),
+            )
+        )
+        self.console.print()
+
+        recommendations = report.get("recommendations", []) or []
+        if recommendations:
+            lines = [
+                f"{index}. {item}"
+                for index, item in enumerate(recommendations, start=1)
+            ]
+            self.console.print(
+                Panel(
+                    Text("\n".join(lines), style=self.theme.TEXT_SECONDARY),
+                    title=f"[bold {self.theme.AMBER_GLOW}]{self.deco.SPARKLE} Recommended Next Steps[/bold {self.theme.AMBER_GLOW}]",
+                    border_style=self.theme.BORDER_SECONDARY,
+                    box=box.ROUNDED,
+                    padding=(0, 1),
+                )
+            )
+            self.console.print()
+
+        run_history = history_summary.get("recent_runs", []) or []
+        if run_history:
+            run_table = Table(
+                title=f"[bold {self.theme.BLUE_SOFT}]{self.deco.CRYSTAL} Recent Harness Runs[/bold {self.theme.BLUE_SOFT}]",
+                box=box.ROUNDED,
+                border_style=self.theme.BORDER_SECONDARY,
+                expand=True,
+            )
+            run_table.add_column("Ended", style=f"bold {self.theme.BLUE_SOFT}", width=20)
+            run_table.add_column("Mode", style=self.theme.TEXT_PRIMARY, width=14)
+            run_table.add_column("Score", style=self.theme.TEXT_SECONDARY, justify="right", width=7)
+            run_table.add_column("Verified", style=self.theme.TEXT_SECONDARY, justify="right", width=9)
+            run_table.add_column("Status", style=self.theme.TEXT_SECONDARY, width=10)
+            for item in run_history:
+                timestamp = str(item.get("timestamp", "") or "")[:19].replace("T", " ")
+                run_table.add_row(
+                    escape(timestamp or "(unknown)"),
+                    escape(str(item.get("mode", "") or "(none)")),
+                    str(int(item.get("overall_score", 0) or 0)),
+                    str(int(item.get("verification_commands", 0) or 0)),
+                    "success" if item.get("success") else "failed",
+                )
+            self.console.print(run_table)
+            self.console.print()
+
+        top_commands = audit.get("top_commands", []) or []
+        if top_commands:
+            command_table = Table(
+                title=f"[bold {self.theme.MINT_SOFT}]{self.deco.CRYSTAL} Recent Command Surface[/bold {self.theme.MINT_SOFT}]",
+                box=box.ROUNDED,
+                border_style=self.theme.BORDER_SECONDARY,
+                expand=True,
+            )
+            command_table.add_column("Command", style=f"bold {self.theme.BLUE_SOFT}")
+            command_table.add_column("Count", style=self.theme.TEXT_SECONDARY, justify="right", width=8)
+            for item in top_commands:
+                command_table.add_row(
+                    escape(str(item.get("command", "") or "")),
+                    str(int(item.get("count", 0) or 0)),
+                )
+            self.console.print(command_table)
+            self.console.print()
+
         return True
 
     def cmd_skills(self, args: str) -> bool:

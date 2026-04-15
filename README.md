@@ -65,9 +65,12 @@ reverie /path/to/project     # launch targeting a specific project
 reverie --index-only         # build index and exit
 reverie --no-index           # skip indexing on startup
 reverie -p "fix failing tests"   # run one prompt non-interactively and exit
+reverie -p "fix failing tests" --report-file artifacts/prompt_report.json
 reverie /path/to/project -p "add a health check" --mode reverie-atlas
 reverie --version            # print version
 ```
+
+`--report-file` writes structured JSON for prompt runs, including the final output, activity events, UI events, and a harness report that summarizes tasks, checkpoints, command audit evidence, verification posture, and recent run-history trends. Prompt-mode runs now also persist lightweight harness snapshots in the project cache so `/doctor` can show score and verification drift over time.
 
 For the packaged Windows build, the same one-shot flow works with `dist\reverie.exe -p "<task>"`. On Windows paths and executable names are case-insensitive, so `Reverie.exe -p "<task>"` works the same way.
 
@@ -84,6 +87,7 @@ Use `/model` to add presets or `/qwencode`, `/Geminicli`, `/codex`, `/nvidia` fo
 | --- | --- |
 | `/help` | Browse the live command catalog |
 | `/status` | Show active model, source, session, and health |
+| `/doctor` | Audit the current workspace harness, including verification posture and recent run trends |
 | `/model` | Manage standard model presets |
 | `/mode` | Show or switch operating modes |
 | `/codex` | Activate Codex and choose model/reasoning |
@@ -155,6 +159,7 @@ The packaged `dist/reverie.exe` now includes the built-in Reverie-Gamer runtime 
 
 - [Documentation Index](docs/README.md)
 - [Chinese README / 中文 README](docs/README.zh-CN.md)
+- [Harness Engineering Notes](docs/HARNESS_ENGINEERING.md)
 - [Configuration Guide](docs/CONFIGURATION.md)
 - [CLI Command Reference](docs/CLI_COMMANDS.md)
 - [Development Guide](docs/DEVELOPMENT.md)

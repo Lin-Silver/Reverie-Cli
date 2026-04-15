@@ -41,6 +41,21 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
         ],
         "examples": ["/status"],
     },
+    "doctor": {
+        "command": "/doctor",
+        "section": "Core",
+        "summary": "Audit the active workspace's harness readiness across goals, context, tools, execution, memory, evaluation, and recovery.",
+        "detail": "This is the harness-level health check inspired by execution-first coding CLIs. It summarizes the task ledger, tool surface, command audit history, operation history, checkpoints, sessions, and recommendations for tightening the workflow shell around the model.",
+        "overview": "doctor, json, history",
+        "aliases": ["/harness"],
+        "subcommands": [
+            {"usage": "/doctor", "description": "Show the formatted harness audit dashboard for the current workspace."},
+            {"usage": "/doctor json", "description": "Print the same harness audit as structured JSON."},
+            {"usage": "/doctor history", "description": "Show recent prompt-run harness history and score/verification trends."},
+            {"usage": "/harness", "description": "Alias of `/doctor`."},
+        ],
+        "examples": ["/doctor", "/doctor json", "/doctor history", "/harness"],
+    },
     "clear": {
         "command": "/clear",
         "section": "Core",
@@ -606,6 +621,7 @@ def normalize_help_topic(value: str) -> str:
         "context": "ce",
         "settings": "setting",
         "quit": "exit",
+        "harness": "doctor",
         "bp": "blueprint",
         "pt": "playtest",
     }

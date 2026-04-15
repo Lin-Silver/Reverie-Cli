@@ -9,6 +9,11 @@ from reverie.agent.tool_executor import ToolExecutor
 from reverie.cli.commands import CommandHandler
 from reverie.cli.help_catalog import normalize_help_topic
 from reverie.config import ConfigManager
+from reverie.harness import (
+    build_harness_capability_report,
+    build_harness_prompt_guidance,
+    summarize_prompt_harness_history,
+)
 from reverie.skills_manager import SkillsManager
 from reverie.tools.mcp_resource_tools import ListMcpResourcesTool, ReadMcpResourceTool
 from reverie.tools.skill_lookup import SkillLookupTool
@@ -476,6 +481,188 @@ def test_setting_tool_output_rejects_invalid_values(tmp_path: Path, monkeypatch)
 
 def test_help_topic_normalizes_settings_alias() -> None:
     assert normalize_help_topic("settings") == "setting"
+    assert normalize_help_topic("harness") == "doctor"
+
+
+def test_doctor_command_renders_harness_audit(tmp_path: Path, monkeypatch) -> None:
+    app_root = tmp_path / "app"
+    project_root = tmp_path / "project"
+    project_root.mkdir(parents=True, exist_ok=True)
+    (project_root / "artifacts").mkdir(parents=True, exist_ok=True)
+    (project_root / "artifacts" / "Tasks.md").write_text("[/] Audit harness\n[x] Add report\n", encoding="utf-8")
+
+    monkeypatch.setattr("reverie.config.get_app_root", lambda: app_root)
+    monkeypatch.setattr("reverie.config.get_launcher_root", lambda: app_root)
+
+    config_manager = ConfigManager(project_root)
+    audit_dir = config_manager.project_data_dir / "security"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    (audit_dir / "command_audit.jsonl").write_text(
+        '{"timestamp":"2026-04-13T10:00:00+00:00","event":"command_result","command":"pytest","normalized_command":"pytest -q","exit_code":0}\n',
+        encoding="utf-8",
+    )
+
+    console = Console(record=True, force_terminal=False, width=120)
+    handler = CommandHandler(console, {"config_manager": config_manager, "project_root": project_root})
+
+    assert handler.handle("/doctor") is True
+
+    output = console.export_text()
+    assert "Harness Doctor" in output
+    assert "Harness Layers" in output
+    assert "Verification Posture" in output
+    assert "Recent Command Surface" in output
+    assert "Recovery" in output
+
+
+def test_doctor_command_json_alias_outputs_report(tmp_path: Path, monkeypatch) -> None:
+    app_root = tmp_path / "app"
+    project_root = tmp_path / "project"
+    project_root.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr("reverie.config.get_app_root", lambda: app_root)
+    monkeypatch.setattr("reverie.config.get_launcher_root", lambda: app_root)
+
+    config_manager = ConfigManager(project_root)
+    console = Console(record=True, force_terminal=False, width=120)
+    handler = CommandHandler(console, {"config_manager": config_manager, "project_root": project_root})
+
+    assert handler.handle("/harness json") is True
+
+    output = console.export_text()
+    assert '"overall_score"' in output
+    assert '"workspace_root"' in output
+
+
+def test_doctor_history_outputs_recent_runs(tmp_path: Path, monkeypatch) -> None:
+    app_root = tmp_path / "app"
+    project_root = tmp_path / "project"
+    project_root.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr("reverie.config.get_app_root", lambda: app_root)
+    monkeypatch.setattr("reverie.config.get_launcher_root", lambda: app_root)
+
+    config_manager = ConfigManager(project_root)
+    history_dir = config_manager.project_data_dir / "harness"
+    history_dir.mkdir(parents=True, exist_ok=True)
+    (history_dir / "prompt_runs.jsonl").write_text(
+        "\n".join(
+            [
+                '{"timestamp":"2026-04-15T10:00:00","mode":"reverie","success":true,"duration_seconds":12.0,"overall_score":82,"verification_commands":1,"verification_categories":["test"],"task_active":"Audit harness","auto_followup_count":0}',
+                '{"timestamp":"2026-04-15T10:05:00","mode":"reverie","success":false,"duration_seconds":7.0,"overall_score":76,"verification_commands":0,"verification_categories":[],"task_active":"Tighten recovery","auto_followup_count":1}',
+            ]
+        ) + "\n",
+        encoding="utf-8",
+    )
+
+    console = Console(record=True, force_terminal=False, width=120)
+    handler = CommandHandler(console, {"config_manager": config_manager, "project_root": project_root})
+
+    assert handler.handle("/doctor history") is True
+
+    output = console.export_text()
+    assert "Recent Harness Runs" in output
+    assert "Tighten recovery" in output
+    assert "Audit harness" in output
+
+
+def test_harness_capability_report_uses_goal_to_recovery_layers(tmp_path: Path, monkeypatch) -> None:
+    app_root = tmp_path / "app"
+    project_root = tmp_path / "project"
+    project_root.mkdir(parents=True, exist_ok=True)
+    artifacts_dir = project_root / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    (artifacts_dir / "Tasks.md").write_text("[/] Audit harness\n[x] Add report\n", encoding="utf-8")
+
+    monkeypatch.setattr("reverie.config.get_app_root", lambda: app_root)
+    monkeypatch.setattr("reverie.config.get_launcher_root", lambda: app_root)
+
+    config_manager = ConfigManager(project_root)
+    audit_dir = config_manager.project_data_dir / "security"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    (audit_dir / "command_audit.jsonl").write_text(
+        '{"timestamp":"2026-04-13T10:00:00+00:00","event":"command_result","command":"pytest","normalized_command":"pytest -q","exit_code":0}\n',
+        encoding="utf-8",
+    )
+
+    report = build_harness_capability_report(
+        project_root,
+        project_data_dir=config_manager.project_data_dir,
+        mode="reverie",
+        operation_history=object(),
+        rollback_manager=object(),
+    )
+
+    assert set(report["categories"].keys()) == {
+        "goals",
+        "context",
+        "tools",
+        "execution",
+        "memory",
+        "evaluation",
+        "recovery",
+    }
+    assert report["task_snapshot"]["active"] == "Audit harness"
+    assert report["runtime"]["automatic_checkpoints"] is True
+    assert report["artifacts"]["verification"]["explicit_commands"] == 1
+    assert report["summary"]["verification_commands"] == 1
+
+
+def test_harness_prompt_guidance_mentions_task_ledger_and_recovery(tmp_path: Path, monkeypatch) -> None:
+    app_root = tmp_path / "app"
+    project_root = tmp_path / "project"
+    project_root.mkdir(parents=True, exist_ok=True)
+    artifacts_dir = project_root / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    (artifacts_dir / "Tasks.md").write_text("[/] Audit harness\n[ ] Tighten recovery loop\n", encoding="utf-8")
+
+    monkeypatch.setattr("reverie.config.get_app_root", lambda: app_root)
+    monkeypatch.setattr("reverie.config.get_launcher_root", lambda: app_root)
+
+    config_manager = ConfigManager(project_root)
+    guidance = build_harness_prompt_guidance(
+        project_root,
+        project_data_dir=config_manager.project_data_dir,
+        mode="reverie",
+        operation_history=object(),
+        rollback_manager=object(),
+    )
+
+    assert "Harness Runtime" in guidance
+    assert "prompt engineering clarifies the ask" in guidance
+    assert "Audit harness" in guidance
+    assert "automatic checkpoints before user turns and tool calls" in guidance
+    assert "Verification trail:" in guidance
+    assert "Recent harness runs:" in guidance
+
+
+def test_summarize_prompt_harness_history_tracks_trend(tmp_path: Path, monkeypatch) -> None:
+    app_root = tmp_path / "app"
+    project_root = tmp_path / "project"
+    project_root.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr("reverie.config.get_app_root", lambda: app_root)
+    monkeypatch.setattr("reverie.config.get_launcher_root", lambda: app_root)
+
+    config_manager = ConfigManager(project_root)
+    history_dir = config_manager.project_data_dir / "harness"
+    history_dir.mkdir(parents=True, exist_ok=True)
+    (history_dir / "prompt_runs.jsonl").write_text(
+        "\n".join(
+            [
+                '{"timestamp":"2026-04-15T10:00:00","mode":"reverie","success":true,"duration_seconds":12.0,"overall_score":72,"verification_commands":0,"verification_categories":[],"task_active":"Draft audit","auto_followup_count":0}',
+                '{"timestamp":"2026-04-15T10:05:00","mode":"reverie","success":true,"duration_seconds":10.0,"overall_score":83,"verification_commands":2,"verification_categories":["test","lint"],"task_active":"Close gaps","auto_followup_count":0}',
+            ]
+        ) + "\n",
+        encoding="utf-8",
+    )
+
+    summary = summarize_prompt_harness_history(config_manager.project_data_dir, limit=8)
+
+    assert summary["total_runs"] == 2
+    assert summary["recent_success_rate"] == 100
+    assert summary["recent_verification_coverage"] == 50
+    assert summary["score_trend"] == "improving"
 
 
 def test_setting_thinking_output_updates_config_and_applies_display_preferences(tmp_path: Path, monkeypatch) -> None:

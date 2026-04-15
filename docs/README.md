@@ -9,6 +9,7 @@
 
 | Document | Description |
 | --- | --- |
+| [Harness Engineering Notes](HARNESS_ENGINEERING.md) | Prompt/context/harness framing, Reverie capability audit, and the runtime harness upgrades inspired by Claude Code patterns and recent Harness Engineering practice |
 | [Configuration Guide](CONFIGURATION.md) | Runtime storage layout, profile selection, model sources, TTI config, Atlas settings |
 | [CLI Command Reference](CLI_COMMANDS.md) | Full command catalog: core, models, providers, tools, settings, sessions, game workflow |
 | [Development Guide](DEVELOPMENT.md) | Local setup, testing, packaging, and documentation maintenance rules |

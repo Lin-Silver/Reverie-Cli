@@ -51,6 +51,7 @@ from ..config import (
     normalize_tti_source,
     resolve_tti_default_display_name,
 )
+from ..harness import build_harness_prompt_guidance, build_prompt_harness_report, persist_prompt_harness_run
 from ..atlas import build_atlas_additional_rules, normalize_atlas_mode_config
 from ..mcp import MCPConfigManager, MCPRuntime
 from ..engine_lite.modeling import ASHFOX_DEFAULT_ENDPOINT, ASHFOX_MCP_SERVER_NAME
@@ -603,6 +604,7 @@ class PromptRunResult:
     auto_followup_count: int = 0
     activity_events: List[Dict[str, Any]] = field(default_factory=list)
     ui_events: List[Dict[str, Any]] = field(default_factory=list)
+    harness_report: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -621,8 +623,10 @@ class PromptRunResult:
             "thinking_text": self.thinking_text,
             "error": self.error,
             "context_engine_initialized": self.context_engine_initialized,
+            "auto_followup_count": self.auto_followup_count,
             "activity_events": list(self.activity_events),
             "ui_events": list(self.ui_events),
+            "harness_report": dict(self.harness_report),
         }
 
 
@@ -2573,7 +2577,7 @@ class ReverieInterface:
 
             ended_at = datetime.now()
             current_session = self.session_manager.get_current_session()
-            return PromptRunResult(
+            result = PromptRunResult(
                 success=not bool(error_text),
                 prompt=prompt_text,
                 output_text=output_text,
@@ -2593,6 +2597,35 @@ class ReverieInterface:
                 activity_events=list(self._captured_activity_events),
                 ui_events=ui_events,
             )
+            result.harness_report = build_prompt_harness_report(
+                self.project_root,
+                project_data_dir=self.project_data_dir,
+                prompt_result=result,
+                operation_history=self.operation_history,
+                rollback_manager=self.rollback_manager,
+                agent=self.agent,
+                indexer=self.indexer,
+                ensure_context_engine=self.ensure_context_engine,
+                git_integration=self.git_integration,
+                ensure_git_integration=self.ensure_git_integration,
+                lsp_manager=self.lsp_manager,
+                ensure_lsp_manager=self.ensure_lsp_manager,
+                session_manager=self.session_manager,
+                memory_indexer=self.memory_indexer,
+                runtime_plugin_manager=self.runtime_plugin_manager,
+                skills_manager=self.skills_manager,
+                mcp_runtime=self.mcp_runtime,
+            )
+            history_summary = persist_prompt_harness_run(
+                self.project_data_dir,
+                prompt_result=result,
+                harness_report=result.harness_report,
+            )
+            result.harness_report["run_history"] = history_summary
+            workspace_audit = result.harness_report.get("workspace_audit")
+            if isinstance(workspace_audit, dict):
+                workspace_audit["history_summary"] = history_summary
+            return result
         finally:
             self._runtime_config_override = previous_override
 
@@ -2666,6 +2699,25 @@ class ReverieInterface:
             for tti_block in [
                 "\n".join(lines),
                 "\n".join(lsp_lines),
+                build_harness_prompt_guidance(
+                    self.project_root,
+                    project_data_dir=self.project_data_dir,
+                    mode=normalized_mode,
+                    agent=self.agent,
+                    indexer=self.indexer,
+                    ensure_context_engine=self.ensure_context_engine,
+                    git_integration=self.git_integration,
+                    ensure_git_integration=self.ensure_git_integration,
+                    lsp_manager=self.lsp_manager,
+                    ensure_lsp_manager=self.ensure_lsp_manager,
+                    session_manager=self.session_manager,
+                    memory_indexer=self.memory_indexer,
+                    operation_history=self.operation_history,
+                    rollback_manager=self.rollback_manager,
+                    runtime_plugin_manager=self.runtime_plugin_manager,
+                    skills_manager=self.skills_manager,
+                    mcp_runtime=self.mcp_runtime,
+                ),
                 self.mcp_runtime.describe_for_prompt(),
                 self.runtime_plugin_manager.describe_for_prompt(),
                 self.skills_manager.describe_for_prompt(force_refresh=True),

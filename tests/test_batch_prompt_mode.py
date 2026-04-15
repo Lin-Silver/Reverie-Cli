@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from reverie.agent.agent import THINKING_END_MARKER, THINKING_START_MARKER
@@ -124,6 +125,18 @@ def test_run_prompt_once_collects_output_and_events(tmp_path, monkeypatch):
     assert result.session_id
     assert result.ui_events
     assert result.ui_events[0]["kind"] == "tool_progress"
+    assert result.harness_report["auto_followup_count"] == 0
+    assert result.harness_report["ui_events"]["by_kind"]["tool_progress"] == 1
+    assert result.harness_report["workspace_audit"]["summary"]["visible_tools"] >= 0
+    assert result.harness_report["run_history"]["total_runs"] >= 1
+    history_path = interface.project_data_dir / "harness" / "prompt_runs.jsonl"
+    assert history_path.exists()
+    history_entries = [json.loads(line) for line in history_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert history_entries[-1]["mode"] == "writer"
+    assert history_entries[-1]["success"] is True
+    serialized = result.to_dict()
+    assert serialized["auto_followup_count"] == 0
+    assert "harness_report" in serialized
 
 
 def test_active_model_reuses_standard_nvidia_key_for_computer_controller():
@@ -203,6 +216,7 @@ def test_run_prompt_once_auto_continues_spec_driven(tmp_path, monkeypatch):
     assert result.success is True
     assert result.auto_followup_count == 1
     assert result.output_text == "Created design.md and tasks.md //END//"
+    assert result.harness_report["auto_followup_count"] == 1
     assert (tmp_path / "artifacts" / "specs" / "sample-feature" / "requirements.md").exists()
     assert (tmp_path / "artifacts" / "specs" / "sample-feature" / "design.md").exists()
     assert (tmp_path / "artifacts" / "specs" / "sample-feature" / "tasks.md").exists()

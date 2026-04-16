@@ -15,6 +15,11 @@ That framing was derived from two local references:
 
 The important takeaway is that strong agent behavior does not come only from a better model or a better prompt. It comes from the shell around the model: task tracking, tool gating, execution rails, memory, evaluation, and recovery.
 
+The video also makes two practical points that matter for coding agents:
+
+- harness work is about continuous observation, correction, and convergence, not a prettier one-shot prompt
+- self-verification needs real surfaces such as browser checks, log or metric inspection, and isolated execution lanes for risky work
+
 The video also frames the evolution clearly:
 
 - Prompt engineering asks whether the model understood the request.
@@ -116,6 +121,33 @@ The harness layer derives a compact task snapshot from `task_list.json` or `Task
 
 This is a small change with large behavioral impact: long-running agent quality often depends on whether the system has a clear execution lane right now.
 
+### 6. Reverie Now Has An Explicit Closure Gate
+
+The harness report now derives a separate completion gate with three states:
+
+- `ready`
+- `continue`
+- `blocked`
+
+That gate is intentionally independent from the main generation loop. It uses task-lane state, verification evidence, command failures, tool-call mismatch signals, and git workspace state to answer a narrower question:
+
+- is this run actually ready to close, or does the shell itself think more execution or recovery is still required?
+
+`/doctor`, prompt-mode reports, and prompt-run history now surface that gate directly.
+
+### 7. Recovery Playbooks Are Now Generated From Real Failure Signals
+
+Reverie now derives recovery playbooks for common failure classes, including:
+
+- failing verification
+- tool-schema mismatch
+- multiple active lanes
+- verification gaps
+- missing checkpoints
+- recent harness regression
+
+This is closer to the spirit of modern execution-first coding systems: the harness should not only report that something is wrong, it should prescribe the next stabilizing move.
+
 ## Claude Code Patterns Reflected Here
 
 The Claude Code source tree is strong not because of one feature, but because it keeps the execution shell visible and structured. The Reverie upgrade above intentionally follows the same direction:
@@ -133,10 +165,9 @@ This update does not attempt to clone Claude Code. It adapts the most relevant h
 
 The next meaningful upgrades are now clearer:
 
-1. Add an explicit evaluator path that can validate the executor's output independently, instead of relying mostly on the same loop that produced the result.
-2. Add optional isolated execution lanes for risky work, ideally with a worktree-style model for larger coding tasks.
-3. Add richer recovery playbooks for common failure classes such as flaky tests, partial edits, or tool-schema mismatch.
-4. Add more explicit context-refresh and handoff transitions for very long runs, similar to the clean handoff patterns seen in advanced coding-agent systems.
+1. Add optional isolated execution lanes for risky work, ideally with a worktree-style model for larger coding tasks.
+2. Add more explicit context-refresh and handoff transitions for very long runs, similar to the clean handoff patterns seen in advanced coding-agent systems.
+3. Expand the recovery playbooks from heuristic guidance into action-ready automation for cases like flaky tests or partial edits.
 
 ## Practical Reading
 

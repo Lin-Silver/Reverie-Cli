@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import base64
+from types import SimpleNamespace
 
 from rich.console import Console
 
@@ -511,6 +512,8 @@ def test_doctor_command_renders_harness_audit(tmp_path: Path, monkeypatch) -> No
     assert "Harness Doctor" in output
     assert "Harness Layers" in output
     assert "Verification Posture" in output
+    assert "Closure Gate" in output
+    assert "Recovery Playbooks" in output
     assert "Recent Command Surface" in output
     assert "Recovery" in output
 
@@ -606,6 +609,8 @@ def test_harness_capability_report_uses_goal_to_recovery_layers(tmp_path: Path, 
     assert report["runtime"]["automatic_checkpoints"] is True
     assert report["artifacts"]["verification"]["explicit_commands"] == 1
     assert report["summary"]["verification_commands"] == 1
+    assert report["completion_gate"]["status"] == "continue"
+    assert report["recovery_playbooks"]
 
 
 def test_harness_prompt_guidance_mentions_task_ledger_and_recovery(tmp_path: Path, monkeypatch) -> None:
@@ -634,6 +639,46 @@ def test_harness_prompt_guidance_mentions_task_ledger_and_recovery(tmp_path: Pat
     assert "automatic checkpoints before user turns and tool calls" in guidance
     assert "Verification trail:" in guidance
     assert "Recent harness runs:" in guidance
+    assert "Closure gate:" in guidance
+    assert "Recovery playbooks:" in guidance
+
+
+def test_harness_report_surfaces_schema_mismatch_playbook(tmp_path: Path, monkeypatch) -> None:
+    app_root = tmp_path / "app"
+    project_root = tmp_path / "project"
+    project_root.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr("reverie.config.get_app_root", lambda: app_root)
+    monkeypatch.setattr("reverie.config.get_launcher_root", lambda: app_root)
+
+    config_manager = ConfigManager(project_root)
+    operation_history = SimpleNamespace(
+        operations=[
+            SimpleNamespace(
+                operation_type=SimpleNamespace(value="tool_call"),
+                tool_call=SimpleNamespace(
+                    tool_name="task_manager",
+                    arguments={},
+                    result="",
+                    success=False,
+                    error="Missing required parameter: operation",
+                ),
+                file_operation=None,
+                timestamp="2026-04-15T10:00:00",
+            )
+        ]
+    )
+
+    report = build_harness_capability_report(
+        project_root,
+        project_data_dir=config_manager.project_data_dir,
+        mode="reverie",
+        operation_history=operation_history,
+    )
+
+    playbook_ids = {item["id"] for item in report["recovery_playbooks"]}
+    assert "tool_schema_mismatch" in playbook_ids
+    assert report["completion_gate"]["status"] == "blocked"
 
 
 def test_summarize_prompt_harness_history_tracks_trend(tmp_path: Path, monkeypatch) -> None:

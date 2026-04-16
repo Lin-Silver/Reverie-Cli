@@ -1,5 +1,11 @@
 ## Unreleased
 
+### Harness
+
+* Added a harness closure gate so `/doctor`, prompt-mode reports, and prompt-run history can distinguish `ready`, `continue`, and `blocked` execution states instead of relying on raw score alone.
+* Added generated recovery playbooks for common harness failure classes such as failing verification, tool-schema mismatch, missing checkpoints, multi-lane drift, and recent run regression.
+* Added git workspace state to the harness report so the runtime shell can factor dirty-path awareness into recovery guidance.
+
 ---
 
 ## Reverie CLI v2.3.0 - Harness Runtime Audit and Prompt-Run Stability Upgrade

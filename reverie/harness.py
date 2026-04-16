@@ -93,6 +93,53 @@ _VERIFICATION_HINTS = {
         "make build",
     ],
 }
+_TOOL_FAILURE_HINTS = {
+    "schema_mismatch": [
+        "parameter validation failed",
+        "missing required parameter",
+        "must be a string",
+        "must be an integer",
+        "must be a boolean",
+        "must be an array",
+        "unknown action",
+        "unknown operation",
+        "unknown query type",
+        "unknown lsp_action",
+        "unknown command",
+        "unsupported action",
+        "action is required",
+        "query is required",
+        "path is required",
+        "prompt is required",
+        "tool_name is required",
+    ],
+    "workspace_boundary": [
+        "outside the active workspace",
+        "permission denied",
+        "blocked ",
+        "working directory not found",
+        "working directory is not a directory",
+    ],
+    "missing_dependency": [
+        "not available",
+        "missing dependencies",
+        "disabled in config",
+        "command executable not found",
+        "tool not found",
+        "symbol '",
+        "file not found",
+    ],
+    "timeout": [
+        "timed out",
+        "timeout",
+    ],
+}
+_PLAYBOOK_SEVERITY_ORDER = {
+    "critical": 0,
+    "high": 1,
+    "medium": 2,
+    "low": 3,
+}
 
 
 def _task_paths(project_root: Path) -> tuple[Path, Path]:
@@ -145,6 +192,13 @@ def _normalize_command_text(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip()).lower()
 
 
+def _compact_text(value: Any, limit: int = 180) -> str:
+    text = re.sub(r"\s+", " ", str(value or "").strip())
+    if len(text) <= limit:
+        return text
+    return f"{text[: max(limit - 3, 1)].rstrip()}..."
+
+
 def _classify_verification_command(command_name: Any) -> List[str]:
     normalized = _normalize_command_text(command_name)
     if not normalized:
@@ -186,6 +240,9 @@ def _compact_history_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
         "verification_categories": list(entry.get("verification_categories", []) or []),
         "task_active": str(entry.get("task_active", "") or ""),
         "auto_followup_count": _int_or_zero(entry.get("auto_followup_count")),
+        "completion_gate_status": str(entry.get("completion_gate_status", "") or ""),
+        "completion_gate_label": str(entry.get("completion_gate_label", "") or ""),
+        "recovery_playbooks": _int_or_zero(entry.get("recovery_playbooks")),
     }
 
 
@@ -378,10 +435,27 @@ def summarize_command_audit(
     }
 
 
+def _classify_tool_failure(error_text: Any, result_text: Any = "") -> str:
+    normalized = _normalize_command_text(f"{error_text or ''} {result_text or ''}")
+    if not normalized:
+        return "other"
+
+    for category, hints in _TOOL_FAILURE_HINTS.items():
+        if any(hint in normalized for hint in hints):
+            return category
+    return "other"
+
+
 def summarize_operation_history(operation_history: Any) -> Dict[str, Any]:
     operations = list(getattr(operation_history, "operations", []) or [])
     by_type = Counter()
     tools = Counter()
+    tool_failures = 0
+    tool_failures_by_class = Counter()
+    file_operations = Counter()
+    touched_files: List[str] = []
+    recent_failures: List[Dict[str, Any]] = []
+
     for operation in operations:
         operation_type = getattr(getattr(operation, "operation_type", None), "value", "")
         if operation_type:
@@ -390,11 +464,54 @@ def summarize_operation_history(operation_history: Any) -> Dict[str, Any]:
         tool_name = str(getattr(tool_call, "tool_name", "") or "").strip()
         if tool_name:
             tools[tool_name] += 1
+            tool_error = str(getattr(tool_call, "error", "") or "").strip()
+            tool_result = str(getattr(tool_call, "result", "") or "").strip()
+            tool_success = bool(getattr(tool_call, "success", False))
+            if (not tool_success) or tool_error:
+                tool_failures += 1
+                failure_class = _classify_tool_failure(tool_error, tool_result)
+                tool_failures_by_class[failure_class] += 1
+
+        file_operation = getattr(operation, "file_operation", None)
+        file_path = str(getattr(file_operation, "file_path", "") or "").strip()
+        file_kind = str(getattr(file_operation, "operation", "") or "").strip().lower()
+        if file_kind:
+            file_operations[file_kind] += 1
+        if file_path and file_path not in touched_files:
+            touched_files.append(file_path)
+
+    for operation in reversed(operations):
+        tool_call = getattr(operation, "tool_call", None)
+        if tool_call is None:
+            continue
+        tool_name = str(getattr(tool_call, "tool_name", "") or "").strip()
+        tool_error = str(getattr(tool_call, "error", "") or "").strip()
+        tool_result = str(getattr(tool_call, "result", "") or "").strip()
+        tool_success = bool(getattr(tool_call, "success", False))
+        if tool_success and not tool_error:
+            continue
+        recent_failures.append(
+            {
+                "tool": tool_name,
+                "classification": _classify_tool_failure(tool_error, tool_result),
+                "error": _compact_text(tool_error or tool_result, limit=220),
+                "timestamp": str(getattr(operation, "timestamp", "") or ""),
+            }
+        )
+        if len(recent_failures) >= 5:
+            break
 
     return {
         "operations": len(operations),
         "by_type": dict(sorted(by_type.items())),
         "tool_calls": sum(tools.values()),
+        "tool_failures": tool_failures,
+        "tool_failures_by_class": dict(sorted(tool_failures_by_class.items())),
+        "file_operations": sum(file_operations.values()),
+        "file_operations_by_kind": dict(sorted(file_operations.items())),
+        "files_touched": len(touched_files),
+        "touched_files": touched_files[:8],
+        "recent_failures": recent_failures,
         "top_tools": [
             {"tool": name, "count": count}
             for name, count in tools.most_common(5)
@@ -442,6 +559,53 @@ def summarize_sessions(session_manager: Any) -> Dict[str, Any]:
         "count": len(sessions),
         "current_session_id": str(getattr(current_session, "id", "") or ""),
         "current_session_name": str(getattr(current_session, "name", "") or ""),
+    }
+
+
+def summarize_git_workspace(git_integration: Any) -> Dict[str, Any]:
+    if git_integration is None or not bool(getattr(git_integration, "is_available", False)):
+        return {
+            "available": False,
+            "branch": "",
+            "is_dirty": False,
+            "dirty_files": 0,
+            "modified": 0,
+            "added": 0,
+            "deleted": 0,
+            "untracked": 0,
+            "sample_paths": [],
+        }
+
+    try:
+        changes = dict(git_integration.get_uncommitted_changes() or {})
+    except Exception:
+        changes = {}
+
+    modified = list(changes.get("modified", []) or [])
+    added = list(changes.get("added", []) or [])
+    deleted = list(changes.get("deleted", []) or [])
+    untracked = list(changes.get("untracked", []) or [])
+    seen: set[str] = set()
+    sample_paths: List[str] = []
+    for path in modified + added + deleted + untracked:
+        text = str(path or "").strip()
+        if not text or text in seen:
+            continue
+        sample_paths.append(text)
+        seen.add(text)
+        if len(sample_paths) >= 6:
+            break
+
+    return {
+        "available": True,
+        "branch": str(getattr(git_integration, "get_current_branch", lambda: "")() or ""),
+        "is_dirty": bool(modified or added or deleted or untracked),
+        "dirty_files": len(set(modified + added + deleted + untracked)),
+        "modified": len(modified),
+        "added": len(added),
+        "deleted": len(deleted),
+        "untracked": len(untracked),
+        "sample_paths": sample_paths,
     }
 
 
@@ -514,6 +678,8 @@ def persist_prompt_harness_run(
     task_snapshot = dict(workspace_audit.get("task_snapshot", {}) or {})
     checkpoints = dict(harness_report.get("checkpoints", {}) or {})
     operation_history = dict(harness_report.get("operation_history", {}) or {})
+    completion_gate = dict(workspace_audit.get("completion_gate", {}) or harness_report.get("completion_gate", {}) or {})
+    recovery_playbooks = list(workspace_audit.get("recovery_playbooks", []) or harness_report.get("recovery_playbooks", []) or [])
 
     entry = {
         "timestamp": str(getattr(prompt_result, "ended_at", "") or ""),
@@ -532,6 +698,14 @@ def persist_prompt_harness_run(
         "verification_categories": list((verification.get("categories", {}) or {}).keys()),
         "task_active": str(task_snapshot.get("active", "") or ""),
         "task_next": str(task_snapshot.get("next", "") or ""),
+        "completion_gate_status": str(completion_gate.get("status", "") or ""),
+        "completion_gate_label": str(completion_gate.get("label", "") or ""),
+        "recovery_playbooks": len(recovery_playbooks),
+        "recovery_playbook_ids": [
+            str(item.get("id", "") or "")
+            for item in recovery_playbooks
+            if str(item.get("id", "") or "").strip()
+        ][:6],
         "session_id": str(getattr(prompt_result, "session_id", "") or ""),
         "session_name": str(getattr(prompt_result, "session_name", "") or ""),
         "error": str(getattr(prompt_result, "error", "") or ""),
@@ -674,6 +848,264 @@ def summarize_task_snapshot(task_summary: Dict[str, Any], limit: int = 5) -> Dic
     }
 
 
+def _build_playbook(
+    *,
+    playbook_id: str,
+    title: str,
+    severity: str,
+    why: str,
+    evidence: Iterable[Any],
+    actions: Iterable[Any],
+) -> Dict[str, Any]:
+    return {
+        "id": str(playbook_id or "").strip(),
+        "title": str(title or "").strip(),
+        "severity": str(severity or "medium").strip().lower() or "medium",
+        "why": _compact_text(why, limit=220),
+        "evidence": [
+            _compact_text(item, limit=200)
+            for item in evidence
+            if _compact_text(item, limit=200)
+        ][:4],
+        "actions": [
+            _compact_text(item, limit=220)
+            for item in actions
+            if _compact_text(item, limit=220)
+        ][:4],
+    }
+
+
+def build_recovery_playbooks(
+    *,
+    task_summary: Dict[str, Any],
+    task_snapshot: Dict[str, Any],
+    audit_summary: Dict[str, Any],
+    verification_summary: Dict[str, Any],
+    operation_summary: Dict[str, Any],
+    checkpoint_summary: Dict[str, Any],
+    history_summary: Dict[str, Any],
+    git_workspace: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    playbooks: List[Dict[str, Any]] = []
+
+    if audit_summary.get("failed_commands", 0) > 0 or verification_summary.get("failed_commands", 0) > 0:
+        playbooks.append(
+            _build_playbook(
+                playbook_id="failed_checks",
+                title="Stabilize failing verification before closing",
+                severity="critical" if verification_summary.get("failed_commands", 0) > 0 else "high",
+                why="The harness is still seeing failing command results, so the execution loop has not converged yet.",
+                evidence=[
+                    f"{audit_summary.get('failed_commands', 0)} failed command(s) in the audit trail.",
+                    f"{verification_summary.get('failed_commands', 0)} failed verification command(s).",
+                    f"Recent verification categories: {', '.join((verification_summary.get('categories', {}) or {}).keys()) or '(none)'}",
+                ],
+                actions=[
+                    "Re-run the exact failing command first and fix the first broken assertion, compile error, or runtime failure it reports.",
+                    "Do not widen scope until the same targeted check is green again.",
+                    "Only mark the active task complete after the previously failing command passes or a real blocker is recorded.",
+                ],
+            )
+        )
+
+    if int((operation_summary.get("tool_failures_by_class", {}) or {}).get("schema_mismatch", 0) or 0) > 0:
+        recent_schema_failures = [
+            item.get("error", "")
+            for item in operation_summary.get("recent_failures", []) or []
+            if str(item.get("classification", "") or "") == "schema_mismatch"
+        ]
+        playbooks.append(
+            _build_playbook(
+                playbook_id="tool_schema_mismatch",
+                title="Recover from tool-schema mismatch",
+                severity="medium",
+                why="Recent tool failures look like parameter-shape or required-field mistakes rather than real product defects.",
+                evidence=[
+                    f"{int((operation_summary.get('tool_failures_by_class', {}) or {}).get('schema_mismatch', 0) or 0)} schema-related tool failure(s).",
+                    *recent_schema_failures[:2],
+                ],
+                actions=[
+                    "Inspect the live tool schema with tool_catalog before retrying.",
+                    "Use exact field names and required parameters instead of near-miss aliases or guessed payload shapes.",
+                    "Retry once with a validated payload instead of brute-forcing repeated invalid calls.",
+                ],
+            )
+        )
+
+    if task_snapshot.get("multiple_in_progress"):
+        playbooks.append(
+            _build_playbook(
+                playbook_id="lane_conflict",
+                title="Collapse to one active execution lane",
+                severity="medium",
+                why="More than one task is currently marked IN_PROGRESS, which makes the harness more likely to thrash instead of converge.",
+                evidence=[
+                    f"{task_summary.get('in_progress', 0)} tasks are currently IN_PROGRESS.",
+                    f"Active task: {task_snapshot.get('active', '(none)')}",
+                    f"Next task: {task_snapshot.get('next', '(none)')}",
+                ],
+                actions=[
+                    "Pick the single task that owns the next concrete step and move all others back to NOT_STARTED or BLOCKED.",
+                    "Use one batch task_manager update so the ledger reflects one clear lane.",
+                    "Run verification for the active lane before switching to the next one.",
+                ],
+            )
+        )
+
+    needs_verification_recovery = (
+        verification_summary.get("explicit_commands", 0) == 0
+        and (
+            bool(task_snapshot.get("active"))
+            or bool(git_workspace.get("is_dirty"))
+            or audit_summary.get("entries", 0) > 0
+        )
+    )
+    if needs_verification_recovery:
+        playbooks.append(
+            _build_playbook(
+                playbook_id="verification_gap",
+                title="Close the verification gap",
+                severity="high" if task_snapshot.get("active") else "medium",
+                why="The current lane has execution evidence, but no explicit test/build/lint/browser verification has been recorded yet.",
+                evidence=[
+                    f"{audit_summary.get('entries', 0)} audited command event(s) and {verification_summary.get('explicit_commands', 0)} explicit verification command(s).",
+                    f"Dirty git paths: {git_workspace.get('dirty_files', 0)}" if git_workspace.get("available") else "",
+                    f"Active task: {task_snapshot.get('active', '(none)')}",
+                ],
+                actions=[
+                    "Run the smallest meaningful test, build, lint, or browser check that proves the active change path.",
+                    "Prefer command_exec-backed checks so the harness keeps auditable evidence.",
+                    "If verification is impossible right now, record the exact blocker instead of implying completion.",
+                ],
+            )
+        )
+
+    if checkpoint_summary.get("count", 0) == 0 and (
+        bool(task_snapshot.get("active"))
+        or audit_summary.get("entries", 0) > 0
+    ):
+        playbooks.append(
+            _build_playbook(
+                playbook_id="checkpoint_gap",
+                title="Add a recovery anchor before the next risky step",
+                severity="low",
+                why="The session has started doing real work without leaving behind a rollback anchor.",
+                evidence=[
+                    f"{checkpoint_summary.get('count', 0)} checkpoints recorded.",
+                    f"{audit_summary.get('entries', 0)} audited command event(s).",
+                ],
+                actions=[
+                    "Create a checkpoint before the next risky refactor, migration, or broad command.",
+                    "Use rollback as a deliberate recovery rail rather than waiting for a bad state to accumulate.",
+                ],
+            )
+        )
+
+    if history_summary.get("score_trend") == "falling" or history_summary.get("recent_success_rate", 100) < 50:
+        playbooks.append(
+            _build_playbook(
+                playbook_id="run_regression",
+                title="Investigate recent harness regression",
+                severity="medium",
+                why="Recent prompt-mode runs show lower stability than the previous baseline.",
+                evidence=[
+                    f"Trend: {history_summary.get('score_trend_label', 'n/a')}",
+                    f"Recent success rate: {history_summary.get('recent_success_rate', 0)}%",
+                    f"Recent verification coverage: {history_summary.get('recent_verification_coverage', 0)}%",
+                ],
+                actions=[
+                    "Compare the latest runs and identify which layer regressed: goals, context, tools, execution, memory, evaluation, or recovery.",
+                    "Tighten the first regressed layer before widening scope again.",
+                ],
+            )
+        )
+
+    playbooks.sort(
+        key=lambda item: (
+            _PLAYBOOK_SEVERITY_ORDER.get(str(item.get("severity", "medium") or "medium"), 99),
+            str(item.get("title", "")).lower(),
+        )
+    )
+    return playbooks
+
+
+def build_completion_gate(
+    *,
+    task_summary: Dict[str, Any],
+    task_snapshot: Dict[str, Any],
+    audit_summary: Dict[str, Any],
+    verification_summary: Dict[str, Any],
+    operation_summary: Dict[str, Any],
+    git_workspace: Dict[str, Any],
+) -> Dict[str, Any]:
+    reasons: List[str] = []
+    next_actions: List[str] = []
+    status = "ready"
+    label = "Ready to close"
+    confidence = 85
+
+    if audit_summary.get("failed_commands", 0) > 0:
+        status = "blocked"
+        label = "Blocked by failing checks"
+        confidence = 92
+        reasons.append(f"{audit_summary.get('failed_commands', 0)} audited command(s) are still failing.")
+        next_actions.append("Fix the failing command path and rerun the same verification step.")
+
+    schema_failures = int((operation_summary.get("tool_failures_by_class", {}) or {}).get("schema_mismatch", 0) or 0)
+    if status != "blocked" and schema_failures > 0:
+        status = "blocked"
+        label = "Blocked by tool-call mismatch"
+        confidence = 84
+        reasons.append(f"{schema_failures} recent tool failure(s) look like schema or parameter mismatches.")
+        next_actions.append("Inspect the tool schema and retry with an exact payload.")
+
+    if status == "ready" and task_snapshot.get("multiple_in_progress"):
+        status = "continue"
+        label = "Continue implementation"
+        confidence = 78
+        reasons.append("Multiple tasks are in progress, so the active lane is still ambiguous.")
+        next_actions.append("Collapse the task ledger to one active lane before closing.")
+
+    if status == "ready" and task_snapshot.get("active"):
+        status = "continue"
+        label = "Continue implementation"
+        confidence = 82
+        reasons.append(f"Active task still open: {task_snapshot.get('active')}.")
+        next_actions.append("Finish or explicitly block the active task before treating the run as done.")
+
+    verification_gap = (
+        verification_summary.get("explicit_commands", 0) == 0
+        and (
+            bool(task_snapshot.get("active"))
+            or bool(git_workspace.get("is_dirty"))
+            or audit_summary.get("entries", 0) > 0
+        )
+    )
+    if status == "ready" and verification_gap:
+        status = "continue"
+        label = "Needs explicit verification"
+        confidence = 74
+        reasons.append("No explicit verification evidence is visible for the current execution lane.")
+        next_actions.append("Run a focused test, build, lint, or browser check before closing.")
+
+    if status == "ready" and task_summary.get("total", 0) == 0 and audit_summary.get("entries", 0) == 0:
+        confidence = 60
+        reasons.append("No active task ledger or command evidence is present, so this gate is informational rather than authoritative.")
+
+    if status == "ready" and verification_summary.get("explicit_commands", 0) > 0:
+        reasons.append(
+            f"Explicit verification is present across {', '.join((verification_summary.get('categories', {}) or {}).keys()) or 'at least one category'}."
+        )
+
+    return {
+        "status": status,
+        "label": label,
+        "confidence": confidence,
+        "reasons": reasons[:4],
+        "next_actions": next_actions[:3],
+    }
+
+
 def _resolve_tool_surface(agent: Any, mode: str) -> Dict[str, Any]:
     normalized_mode = normalize_mode(mode or "reverie")
     if agent is not None:
@@ -797,6 +1229,7 @@ def build_harness_capability_report(
     checkpoint_summary = summarize_checkpoints(rollback_manager)
     sessions_summary = summarize_sessions(session_manager)
     history_summary = summarize_prompt_harness_history(resolved_project_data_dir)
+    git_workspace = summarize_git_workspace(git_integration)
     tool_surface = _resolve_tool_surface(agent, normalized_mode)
     visible_tool_names = _tool_name_set(tool_surface)
 
@@ -863,6 +1296,24 @@ def build_harness_capability_report(
         "operation_history": operation_history is not None,
         "run_history": history_summary.get("total_runs", 0) > 0,
     }
+    completion_gate = build_completion_gate(
+        task_summary=task_summary,
+        task_snapshot=task_snapshot,
+        audit_summary=audit_summary,
+        verification_summary=verification_summary,
+        operation_summary=operation_summary,
+        git_workspace=git_workspace,
+    )
+    recovery_playbooks = build_recovery_playbooks(
+        task_summary=task_summary,
+        task_snapshot=task_snapshot,
+        audit_summary=audit_summary,
+        verification_summary=verification_summary,
+        operation_summary=operation_summary,
+        checkpoint_summary=checkpoint_summary,
+        history_summary=history_summary,
+        git_workspace=git_workspace,
+    )
 
     categories = {
         "goals": {
@@ -881,6 +1332,7 @@ def build_harness_capability_report(
                 "context engine ready" if indexer is not None else "context engine lazy/on-demand",
                 "git available" if getattr(git_integration, "is_available", False) else "git on demand or unavailable",
                 "memory indexer enabled" if memory_indexer is not None else "memory indexer unavailable",
+                f"{git_workspace.get('dirty_files', 0)} dirty git paths" if git_workspace.get("available") else "git workspace state unavailable",
             ],
         },
         "tools": {
@@ -899,6 +1351,7 @@ def build_harness_capability_report(
                 "operation history active" if operation_history is not None else "operation history unavailable",
                 "task_manager visible" if "task_manager" in visible_tool_names else "task_manager hidden",
                 f"{operation_summary.get('tool_calls', 0)} recorded tool calls",
+                completion_gate.get("label", ""),
             ],
         },
         "memory": {
@@ -941,6 +1394,7 @@ def build_harness_capability_report(
         "rollback_available": rollback_manager is not None,
         "automatic_checkpoints": rollback_manager is not None,
         "session_continuity_available": session_manager is not None,
+        "git_workspace_available": git_workspace.get("available", False),
     }
 
     recommendations = _recommendations_from_audit(
@@ -981,10 +1435,15 @@ def build_harness_capability_report(
             "prompt_runs": history_summary.get("total_runs", 0),
             "recent_success_rate": history_summary.get("recent_success_rate", 0),
             "recent_verification_coverage": history_summary.get("recent_verification_coverage", 0),
+            "dirty_files": git_workspace.get("dirty_files", 0),
+            "recovery_playbooks": len(recovery_playbooks),
+            "completion_gate_status": completion_gate.get("status", ""),
         },
         "categories": categories,
         "task_snapshot": task_snapshot,
         "runtime": runtime,
+        "completion_gate": completion_gate,
+        "recovery_playbooks": recovery_playbooks,
         "artifacts": {
             "tasks": task_summary,
             "command_audit": audit_summary,
@@ -993,6 +1452,7 @@ def build_harness_capability_report(
             "checkpoints": checkpoint_summary,
             "sessions": sessions_summary,
             "prompt_runs": history_summary,
+            "git_workspace": git_workspace,
         },
         "integrations": {
             "skills": skills_summary,
@@ -1047,8 +1507,11 @@ def build_harness_prompt_guidance(
     summary = report.get("summary", {})
     runtime = report.get("runtime", {})
     task_snapshot = report.get("task_snapshot", {})
+    completion_gate = report.get("completion_gate", {}) or {}
+    recovery_playbooks = report.get("recovery_playbooks", []) or []
     audit = (report.get("artifacts", {}) or {}).get("command_audit", {})
     verification = (report.get("artifacts", {}) or {}).get("verification", {})
+    git_workspace = (report.get("artifacts", {}) or {}).get("git_workspace", {})
     history_summary = report.get("history_summary", {}) or {}
     integrations = report.get("integrations", {})
     tool_surface = _limited_names(_resolve_tool_surface(agent, normalize_mode(mode or "reverie")).get("names", []), limit=8)
@@ -1098,6 +1561,17 @@ def build_harness_prompt_guidance(
     else:
         lines.append("- Recent harness runs: no prompt-mode history has been recorded yet for this workspace.")
 
+    if git_workspace.get("available"):
+        branch = str(git_workspace.get("branch", "") or "").strip() or "(detached)"
+        lines.append(
+            f"- Git workspace: branch `{branch}`, {git_workspace.get('dirty_files', 0)} dirty path(s)."
+        )
+
+    lines.append(
+        f"- Closure gate: {completion_gate.get('label', 'No gate yet')} "
+        f"(status `{completion_gate.get('status', 'unknown')}`, confidence {completion_gate.get('confidence', 0)}%)."
+    )
+
     continuity_parts: List[str] = []
     if runtime.get("workspace_memory_available"):
         continuity_parts.append("workspace memory")
@@ -1107,6 +1581,8 @@ def build_harness_prompt_guidance(
         continuity_parts.append("automatic checkpoints before user turns and tool calls")
     if runtime.get("rollback_available"):
         continuity_parts.append("rollback recovery")
+    if runtime.get("git_workspace_available"):
+        continuity_parts.append("git workspace state")
     if continuity_parts:
         lines.append(f"- Continuity and recovery: {', '.join(continuity_parts)} are available.")
 
@@ -1117,6 +1593,13 @@ def build_harness_prompt_guidance(
     )
     lines.append("- Keep the loop explicit: understand -> gather missing context -> act -> verify -> update task state -> continue or recover.")
     lines.append("- If checks fail or tool results conflict with the plan, treat that as a recovery step rather than a finish state.")
+
+    if recovery_playbooks:
+        lines.append("- Recovery playbooks:")
+        for item in recovery_playbooks[:2]:
+            lines.append(
+                f"  - {item.get('title', '')}: {item.get('why', '')}"
+            )
 
     recommendations = report.get("recommendations", []) or []
     if recommendations:
@@ -1194,4 +1677,6 @@ def build_prompt_harness_report(
         "activity": activity_summary,
         "ui_events": ui_summary,
         "workspace_audit": workspace_audit,
+        "completion_gate": dict(workspace_audit.get("completion_gate", {}) or {}),
+        "recovery_playbooks": list(workspace_audit.get("recovery_playbooks", []) or []),
     }

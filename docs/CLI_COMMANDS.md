@@ -8,7 +8,7 @@ This reference is aligned with `reverie/cli/help_catalog.py`, which is the sourc
 | --- | --- |
 | `/help` | Open the interactive help browser, or show `/help <command>` / `/help all` |
 | `/status` | Show active model, provider source, session, and runtime health |
-| `/doctor` | Audit the current workspace harness across goals, context, tools, execution, memory, evaluation, and recovery, with verification and run-history trends |
+| `/doctor` | Audit the current workspace harness across goals, context, tools, execution, memory, evaluation, and recovery, including a closure gate, recovery playbooks, and run-history trends |
 | `/clear` | Clear the terminal output without touching session state |
 | `/clean` | Delete the current workspace project cache, checkpoints, and command audit history |
 | `/exit` | Exit Reverie with confirmation |

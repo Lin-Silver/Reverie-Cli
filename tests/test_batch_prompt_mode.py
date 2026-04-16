@@ -134,6 +134,7 @@ def test_run_prompt_once_collects_output_and_events(tmp_path, monkeypatch):
     history_entries = [json.loads(line) for line in history_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     assert history_entries[-1]["mode"] == "writer"
     assert history_entries[-1]["success"] is True
+    assert "completion_gate_status" in history_entries[-1]
     serialized = result.to_dict()
     assert serialized["auto_followup_count"] == 0
     assert "harness_report" in serialized

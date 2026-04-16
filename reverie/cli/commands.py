@@ -3936,6 +3936,9 @@ class CommandHandler:
         operations = artifacts.get("operation_history", {})
         checkpoints = artifacts.get("checkpoints", {})
         sessions = artifacts.get("sessions", {})
+        git_workspace = artifacts.get("git_workspace", {})
+        completion_gate = report.get("completion_gate", {}) or {}
+        recovery_playbooks = report.get("recovery_playbooks", []) or []
         self.console.print(
             self._build_key_value_table(
                 [
@@ -3949,6 +3952,8 @@ class CommandHandler:
                     ("Sessions", f"{sessions.get('count', 0)} total"),
                     ("Recent Success", f"{history_summary.get('recent_success_rate', 0)}%"),
                     ("Verification Coverage", f"{history_summary.get('recent_verification_coverage', 0)}%"),
+                    ("Git Workspace", f"{git_workspace.get('dirty_files', 0)} dirty path(s)"),
+                    ("Closure Gate", completion_gate.get("label", "n/a")),
                 ]
             )
         )
@@ -3965,6 +3970,7 @@ class CommandHandler:
             run_table.add_column("Mode", style=self.theme.TEXT_PRIMARY, width=14)
             run_table.add_column("Score", style=self.theme.TEXT_SECONDARY, justify="right", width=7)
             run_table.add_column("Verified", style=self.theme.TEXT_SECONDARY, justify="right", width=9)
+            run_table.add_column("Gate", style=self.theme.TEXT_SECONDARY, width=12)
             run_table.add_column("Status", style=self.theme.TEXT_SECONDARY, width=10)
             run_table.add_column("Task", style=self.theme.TEXT_PRIMARY, ratio=1)
             for item in history_summary.get("recent_runs", []) or []:
@@ -3974,11 +3980,12 @@ class CommandHandler:
                     escape(str(item.get("mode", "") or "(none)")),
                     str(int(item.get("overall_score", 0) or 0)),
                     str(int(item.get("verification_commands", 0) or 0)),
+                    escape(str(item.get("completion_gate_status", "") or "-")),
                     "success" if item.get("success") else "failed",
                     escape(str(item.get("task_active", "") or "(none)")),
                 )
             if not (history_summary.get("recent_runs", []) or []):
-                run_table.add_row("(none)", "-", "0", "0", "-", "No prompt runs recorded yet")
+                run_table.add_row("(none)", "-", "0", "0", "-", "-", "No prompt runs recorded yet")
             self.console.print(run_table)
             self.console.print()
             return True
@@ -4022,6 +4029,51 @@ class CommandHandler:
         )
         self.console.print()
 
+        closure_lines = [
+            f"Status: {completion_gate.get('label', 'n/a')}",
+            f"Confidence: {int(completion_gate.get('confidence', 0) or 0)}%",
+        ]
+        for reason in completion_gate.get("reasons", []) or []:
+            closure_lines.append(f"Reason: {reason}")
+        for action in completion_gate.get("next_actions", []) or []:
+            closure_lines.append(f"Next: {action}")
+        self.console.print(
+            Panel(
+                Text("\n".join(closure_lines), style=self.theme.TEXT_SECONDARY),
+                title=f"[bold {self.theme.BLUE_SOFT}]{self.deco.CRYSTAL} Closure Gate[/bold {self.theme.BLUE_SOFT}]",
+                border_style=self.theme.BORDER_SECONDARY,
+                box=box.ROUNDED,
+                padding=(0, 1),
+            )
+        )
+        self.console.print()
+
+        if recovery_playbooks:
+            playbook_lines = []
+            for item in recovery_playbooks[:3]:
+                title = str(item.get("title", "") or "(untitled)")
+                severity = str(item.get("severity", "medium") or "medium").upper()
+                why = str(item.get("why", "") or "").strip()
+                playbook_lines.append(f"[{severity}] {title}")
+                if why:
+                    playbook_lines.append(f"Why: {why}")
+                actions = item.get("actions", []) or []
+                if actions:
+                    playbook_lines.append(f"Next: {actions[0]}")
+                playbook_lines.append("")
+            while playbook_lines and not playbook_lines[-1].strip():
+                playbook_lines.pop()
+            self.console.print(
+                Panel(
+                    Text("\n".join(playbook_lines), style=self.theme.TEXT_SECONDARY),
+                    title=f"[bold {self.theme.MINT_SOFT}]{self.deco.CRYSTAL} Recovery Playbooks[/bold {self.theme.MINT_SOFT}]",
+                    border_style=self.theme.BORDER_SECONDARY,
+                    box=box.ROUNDED,
+                    padding=(0, 1),
+                )
+            )
+            self.console.print()
+
         recommendations = report.get("recommendations", []) or []
         if recommendations:
             lines = [
@@ -4051,6 +4103,7 @@ class CommandHandler:
             run_table.add_column("Mode", style=self.theme.TEXT_PRIMARY, width=14)
             run_table.add_column("Score", style=self.theme.TEXT_SECONDARY, justify="right", width=7)
             run_table.add_column("Verified", style=self.theme.TEXT_SECONDARY, justify="right", width=9)
+            run_table.add_column("Gate", style=self.theme.TEXT_SECONDARY, width=12)
             run_table.add_column("Status", style=self.theme.TEXT_SECONDARY, width=10)
             for item in run_history:
                 timestamp = str(item.get("timestamp", "") or "")[:19].replace("T", " ")
@@ -4059,6 +4112,7 @@ class CommandHandler:
                     escape(str(item.get("mode", "") or "(none)")),
                     str(int(item.get("overall_score", 0) or 0)),
                     str(int(item.get("verification_commands", 0) or 0)),
+                    escape(str(item.get("completion_gate_status", "") or "-")),
                     "success" if item.get("success") else "failed",
                 )
             self.console.print(run_table)

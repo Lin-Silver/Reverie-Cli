@@ -1,5 +1,9 @@
 ## Unreleased
 
+### Runtime
+
+* Added NVIDIA catalog support for `z-ai/glm-5.1` with GLM thinking template defaults.
+
 ### Harness
 
 * Added a harness closure gate so `/doctor`, prompt-mode reports, and prompt-run history can distinguish `ready`, `continue`, and `blocked` execution states instead of relying on raw score alone.

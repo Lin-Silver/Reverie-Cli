@@ -124,6 +124,13 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         context_length=205000,
     ),
     _openai_model(
+        "z-ai/glm-5.1",
+        "GLM-5.1",
+        "OpenAI SDK transport with clear_thinking=False.",
+        thinking=True,
+        context_length=205000,
+    ),
+    _openai_model(
         "stepfun-ai/step-3.5-flash",
         "Step-3.5-Flash",
         "OpenAI SDK transport.",
@@ -527,6 +534,7 @@ _NVIDIA_OPENAI_OPTION_BUILDERS = {
     "minimaxai/minimax-m2.5": _build_openai_minimax_m25_options,
     "minimaxai/minimax-m2.7": _build_openai_minimax_m27_options,
     "z-ai/glm5": _build_openai_glm5_options,
+    "z-ai/glm-5.1": _build_openai_glm5_options,
     "stepfun-ai/step-3.5-flash": _build_openai_step_flash_options,
     "openai/gpt-oss-120b": _build_openai_gpt_oss_options,
 }

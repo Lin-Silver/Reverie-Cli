@@ -47,6 +47,7 @@ from .token_counter import TokenCounterTool
 from .mode_switch import ModeSwitchTool
 from .computer_control import ComputerControlTool
 from .mcp_resource_tools import ListMcpResourcesTool, ReadMcpResourceTool
+from .subagent import SubagentTool
 
 
 ToolClass = Type[BaseTool]
@@ -185,6 +186,7 @@ def _register_builtin_tools() -> None:
     register_tool_class(WebSearchTool)
     register_tool_class(ToolCatalogTool)
     register_tool_class(TaskManagerTool, include_modes=("reverie", "reverie-gamer"))
+    register_tool_class(SubagentTool, include_modes=("reverie",))
     register_tool_class(ContextManagementTool, expose_schema=False)
     register_tool_class(CreateFileTool)
     register_tool_class(UserInputTool)

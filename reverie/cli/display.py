@@ -1068,6 +1068,8 @@ class DisplayComponents:
         summary: str = "",
         preview_lines: Optional[List[str]] = None,
         state: str = "success",
+        agent_id: str = "",
+        agent_color: str = "",
     ) -> None:
         """Render a single compact tool activity row with optional preview lines."""
         state_key = str(state or "success").strip().lower()
@@ -1087,6 +1089,10 @@ class DisplayComponents:
 
         line = Text()
         line.append(f"{icon} ", style=accent)
+        if agent_id and str(agent_id).strip().lower() != "main":
+            line.append(f"{agent_id} ", style=f"bold {agent_color or self.theme.BLUE_SOFT}")
+            line.append(self._safe_separator(), style=self.theme.TEXT_DIM)
+            line.append(" ", style=self.theme.TEXT_DIM)
         line.append(label, style=f"bold {self.theme.TEXT_PRIMARY}")
         if subject:
             line.append("  ", style=self.theme.TEXT_DIM)
@@ -1118,10 +1124,15 @@ class DisplayComponents:
         error: str = "",
         arguments: Optional[Dict[str, Any]] = None,
         tool_call_id: str = "",
+        agent_id: str = "",
+        agent_color: str = "",
     ) -> None:
         """Render the complete post-tool transcript block without collapsing."""
         accent = self._resolve_tool_color(tool_name) if success else self.theme.CORAL_VIBRANT
         title_body = "Computer Controller" if str(tool_name or "").strip().lower() == "computer_control" else tool_name
+        if agent_id and str(agent_id).strip().lower() != "main":
+            title_body = f"{agent_id}  {self._safe_separator()}  {title_body}"
+            accent = agent_color or accent
         argument_summary = self._format_tool_argument_summary(arguments)
         separator = self._safe_separator()
 
@@ -1300,12 +1311,16 @@ class DisplayComponents:
         message: str,
         arguments: Optional[Dict[str, Any]] = None,
         tool_call_id: str = "",
+        agent_id: str = "",
+        agent_color: str = "",
     ) -> None:
         """Buffer tool-start metadata so the final result prints as one compact row."""
         payload = {
             "tool_name": tool_name,
             "message": str(message or "").strip(),
             "arguments": dict(arguments or {}),
+            "agent_id": str(agent_id or "").strip(),
+            "agent_color": str(agent_color or "").strip(),
         }
         if tool_call_id:
             self._pending_tool_events[tool_call_id] = payload
@@ -1317,6 +1332,8 @@ class DisplayComponents:
             arguments=arguments,
             summary=fallback_summary,
             state="pending",
+            agent_id=agent_id,
+            agent_color=agent_color,
         )
 
     def show_tool_result_card(
@@ -1328,11 +1345,15 @@ class DisplayComponents:
         arguments: Optional[Dict[str, Any]] = None,
         tool_call_id: str = "",
         had_live_progress: bool = False,
+        agent_id: str = "",
+        agent_color: str = "",
     ) -> None:
         """Render compact Gemini-like tool completion rows with optional previews."""
         pending = self._pending_tool_events.pop(tool_call_id, {}) if tool_call_id else {}
         merged_tool_name = str(pending.get("tool_name") or tool_name or "tool")
         merged_arguments = arguments if isinstance(arguments, dict) and arguments else pending.get("arguments")
+        merged_agent_id = str(agent_id or pending.get("agent_id") or "").strip()
+        merged_agent_color = str(agent_color or pending.get("agent_color") or "").strip()
         output_style = self._normalize_tool_output_style(self.tool_output_style)
         live_progress_seen = bool(had_live_progress or pending.get("had_live_progress"))
 
@@ -1344,6 +1365,8 @@ class DisplayComponents:
                 error=error,
                 arguments=merged_arguments if isinstance(merged_arguments, dict) else None,
                 tool_call_id=tool_call_id,
+                agent_id=merged_agent_id,
+                agent_color=merged_agent_color,
             )
             return
 
@@ -1361,6 +1384,8 @@ class DisplayComponents:
                 summary=summary,
                 preview_lines=preview_lines if output_style == "condensed" else [],
                 state="success",
+                agent_id=merged_agent_id,
+                agent_color=merged_agent_color,
             )
             return
 
@@ -1370,6 +1395,8 @@ class DisplayComponents:
             arguments=merged_arguments if isinstance(merged_arguments, dict) else None,
             summary=message,
             state="error",
+            agent_id=merged_agent_id,
+            agent_color=merged_agent_color,
         )
 
     def show_stream_event(self, event: Dict[str, Any]) -> bool:
@@ -1381,6 +1408,8 @@ class DisplayComponents:
                 message=str(event.get("message", "") or "").strip(),
                 arguments=event.get("arguments") if isinstance(event.get("arguments"), dict) else None,
                 tool_call_id=str(event.get("tool_call_id", "") or "").strip(),
+                agent_id=str(event.get("agent_id", "") or "").strip(),
+                agent_color=str(event.get("agent_color", "") or "").strip(),
             )
             return True
         if event_type == "tool_result":
@@ -1392,6 +1421,8 @@ class DisplayComponents:
                 arguments=event.get("arguments") if isinstance(event.get("arguments"), dict) else None,
                 tool_call_id=str(event.get("tool_call_id", "") or "").strip(),
                 had_live_progress=bool(event.get("had_live_progress")),
+                agent_id=str(event.get("agent_id", "") or "").strip(),
+                agent_color=str(event.get("agent_color", "") or "").strip(),
             )
             return True
         return False
@@ -1457,8 +1488,14 @@ class DisplayComponents:
             message = str(item.get("message", "") or "").strip()
             stdout_text = str(item.get("stdout", "") or "")
             stderr_text = str(item.get("stderr", "") or "")
+            agent_id = str(item.get("agent_id", "") or "").strip()
+            agent_color = str(item.get("agent_color", "") or "").strip()
 
             header = Text()
+            if agent_id and agent_id.lower() != "main":
+                header.append(f"{agent_id} ", style=f"bold {agent_color or self.theme.BLUE_SOFT}")
+                header.append(self._safe_separator(), style=self.theme.TEXT_DIM)
+                header.append(" ", style=self.theme.TEXT_DIM)
             header.append(self._tool_display_label(tool_name, arguments), style=f"bold {self.theme.TEXT_PRIMARY}")
             subject = self._tool_subject(tool_name, arguments)
             if subject:

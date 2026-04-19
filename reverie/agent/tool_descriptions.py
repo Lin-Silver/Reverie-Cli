@@ -996,6 +996,9 @@ def _get_compact_tool_surface(mode: str) -> str:
     if normalized in {"reverie", "reverie-gamer"}:
         lines.append("- `task_manager`: use for larger multi-step work; skip it for tiny fixes and short greenfield scaffolds.")
 
+    if normalized == "reverie":
+        lines.append("- `subagent`: delegate clear, bounded development subtasks to user-configured Subagents when parallel investigation or implementation would help.")
+
     if normalized == "reverie-atlas":
         lines.append("- `atlas_delivery_orchestrator`: keep Atlas contracts, slice state, blockers, checkpoints, and closure checks durable under `artifacts/atlas/`.")
 

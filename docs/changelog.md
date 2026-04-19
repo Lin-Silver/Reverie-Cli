@@ -8,6 +8,30 @@
 
 ---
 
+## Reverie CLI v2.3.1 - Base Reverie Subagents
+
+**Release Date:** 2026-04-19
+
+### Subagents
+
+* Added base `reverie` mode Subagents that store only an ID, selected default model, stable color, and lifecycle metadata.
+* Added `/subagent` and `/subagents` command flows for roster browsing, model-backed creation, model changes, deletion, direct delegated runs, and status inspection.
+* Added the `subagent` tool so the main agent can list configured Subagents and delegate bounded development tasks to them.
+* Ensured delegated Subagents inherit the active base-Reverie system prompt, rules, tool surface, MCP runtime, runtime plugins, skills, and workspace services while using the user-selected default model.
+* Blocked nested Subagent delegation and gated the feature so it is available only in base `reverie` mode.
+
+### CLI and Logging
+
+* Added per-Subagent `agent_id` and `agent_color` metadata to streamed tool events.
+* Updated live and completed tool output rendering so Subagent tool activity is prefixed with a colored Subagent ID.
+
+### Docs and Validation
+
+* Added `docs/SUBAGENT_UPGRADE.md` with the configuration shape, TUI flow, runtime behavior, log paths, and validation notes.
+* Added a real local OpenAI-compatible Subagent test that delegates a small task, invokes Reverie's actual `create_file` tool, and verifies the produced workspace file.
+
+---
+
 ## Reverie CLI v2.3.0 - Harness Runtime Audit and Prompt-Run Stability Upgrade
 
 **Release Date:** 2026-04-15

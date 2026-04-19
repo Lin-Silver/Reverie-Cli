@@ -11,6 +11,7 @@ Tools available to the AI Agent:
 - web_search: Search the web
 - tool_catalog: Search and inspect the currently visible tool surface
 - task_manager: Organize complex work
+- subagent: Delegate bounded Reverie-mode work to configured Subagents
 - skill_lookup: Inspect discovered SKILL.md instructions
 - list_mcp_resources/read_mcp_resource: Inspect MCP resources exposed by connected servers
 - nexus: Large-scale project development with 24+ hour support
@@ -28,6 +29,7 @@ from .command_exec import CommandExecTool
 from .web_search import WebSearchTool
 from .tool_catalog import ToolCatalogTool
 from .task_manager import TaskManagerTool
+from .subagent import SubagentTool
 from .context_management import ContextManagementTool
 from .create_file import CreateFileTool
 from .user_input import UserInputTool
@@ -75,6 +77,7 @@ __all__ = [
     'WebSearchTool',
     'ToolCatalogTool',
     'TaskManagerTool',
+    "SubagentTool",
     "ContextManagementTool",
     "CreateFileTool",
     "UserInputTool",

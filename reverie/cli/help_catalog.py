@@ -106,6 +106,23 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
         ],
         "examples": ["/model", "/model add", "/model delete 2"],
     },
+    "subagent": {
+        "command": "/subagent",
+        "section": "Models & Modes",
+        "summary": "Create, inspect, and run base-Reverie Subagents with a selected default model.",
+        "detail": "Subagents are only enabled in base `reverie` mode. Each Subagent is identified by its ID, stores a selected default model, and inherits the active Reverie prompt, tools, plugins, MCP surface, and skills when the main agent delegates a task.",
+        "overview": "selector, create, list, model <id>, run <id> <task>, delete <id>",
+        "aliases": ["/subagents"],
+        "subcommands": [
+            {"usage": "/subagent", "description": "Open the configured Subagent roster TUI."},
+            {"usage": "/subagent create", "description": "Open the model selector and create a new Subagent with that default model."},
+            {"usage": "/subagent list", "description": "Show configured Subagents, colors, model sources, and IDs."},
+            {"usage": "/subagent model <id>", "description": "Open the model selector and update one Subagent's default model."},
+            {"usage": "/subagent run <id> <task>", "description": "Run a direct delegated task through a configured Subagent."},
+            {"usage": "/subagent delete <id>", "description": "Delete a configured Subagent."},
+        ],
+        "examples": ["/subagent create", "/subagent list", "/subagent run subagent-001 create a short test file"],
+    },
     "mode": {
         "command": "/mode",
         "section": "Models & Modes",

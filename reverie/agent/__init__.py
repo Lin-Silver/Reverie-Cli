@@ -19,6 +19,7 @@ from .agent import (
 )
 from .system_prompt import build_system_prompt, get_tool_definitions
 from .tool_executor import ToolExecutor
+from .subagents import SubagentManager, SubagentRun, SubagentSpec
 
 __all__ = [
     'ReverieAgent',
@@ -31,4 +32,7 @@ __all__ = [
     'build_system_prompt',
     'get_tool_definitions',
     'ToolExecutor',
+    'SubagentManager',
+    'SubagentRun',
+    'SubagentSpec',
 ]

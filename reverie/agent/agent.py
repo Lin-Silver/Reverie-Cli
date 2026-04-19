@@ -1074,13 +1074,19 @@ class ReverieAgent:
         custom_headers: Optional[Dict[str, str]] = None,
         operation_history=None,
         rollback_manager=None,
-        config=None
+        config=None,
+        agent_id: str = "main",
+        agent_color: str = "",
+        parent_agent_id: str = "",
     ):
         self.base_url = base_url
         self.api_key = api_key
         self.model = model
         self.model_display_name = model_display_name or model
         self.project_root = project_root or Path.cwd()
+        self.agent_id = str(agent_id or "main").strip() or "main"
+        self.agent_color = str(agent_color or "").strip()
+        self.parent_agent_id = str(parent_agent_id or "").strip()
         self.additional_rules = additional_rules
         self.mode = mode
         self.ant_phase = "PLANNING"
@@ -1646,6 +1652,26 @@ class ReverieAgent:
             plain = f"{plain} [{payload['meta']}]"
         print(f"\n{plain}\n")
 
+    def _emit_tool_stream_event(self, event_type: str, **payload: Any) -> None:
+        """Forward non-streaming tool lifecycle events to the same UI surface."""
+        handler = None
+        try:
+            handler = self.tool_executor.context.get("ui_event_handler")
+        except Exception:
+            handler = None
+        if not callable(handler):
+            return
+
+        event = {
+            "kind": "stream_event",
+            "event": str(event_type or "").strip().lower(),
+            **payload,
+        }
+        try:
+            handler(event)
+        except Exception:
+            logger.debug("Failed to emit non-streaming tool event", exc_info=True)
+
     def _build_qwencode_request_headers(self, stream: bool) -> Dict[str, str]:
         """Build Qwen OAuth request headers from the current in-memory request state."""
         from ..qwencode import get_qwencode_request_headers
@@ -2001,6 +2027,8 @@ class ReverieAgent:
             message=exec_msg,
             arguments=args,
             tool_call_id=str(tool_call.get("id", "")).strip(),
+            agent_id=self.agent_id,
+            agent_color=self.agent_color,
         )
 
         result = self.tool_executor.execute(
@@ -2034,6 +2062,8 @@ class ReverieAgent:
             output=str(result.output or ""),
             error=str(result.error or ""),
             status=str(getattr(result.status, "value", "success")),
+            agent_id=self.agent_id,
+            agent_color=self.agent_color,
         )
 
         tool_result_message = {
@@ -2764,10 +2794,32 @@ class ReverieAgent:
                     self._check_tool_side_effects(tool_name, args)
                     
                     exec_msg = tool.get_execution_message(**args) if tool else f"Executing {tool_name}..."
+                    self._emit_tool_stream_event(
+                        "tool_start",
+                        tool_name=tool_name,
+                        message=exec_msg,
+                        arguments=args,
+                        tool_call_id=str(tool_call.id or ""),
+                        agent_id=self.agent_id,
+                        agent_color=self.agent_color,
+                    )
                     
                     all_content.append(f"[bold #ffb8d1]✧[/bold #ffb8d1] [bold #e4b0ff]{rich_escape(exec_msg)}[/bold #e4b0ff]")
                     
                     result = self.tool_executor.execute(tool_name, args, tool_call_id=str(tool_call.id or ""))
+                    self._emit_tool_stream_event(
+                        "tool_result",
+                        tool_name=tool_name,
+                        message=exec_msg,
+                        arguments=args,
+                        tool_call_id=str(tool_call.id or ""),
+                        success=bool(result.success),
+                        output=str(result.output or ""),
+                        error=str(result.error or ""),
+                        status=str(getattr(result.status, "value", "success")),
+                        agent_id=self.agent_id,
+                        agent_color=self.agent_color,
+                    )
                     
                     if result.success:
                         all_content.append(f"[bold #66bb6a]   ✔ Success[/bold #66bb6a]")
@@ -2932,12 +2984,34 @@ class ReverieAgent:
                     self._check_tool_side_effects(tool_name, args)
                     
                     exec_msg = tool.get_execution_message(**args) if tool else f"Executing {tool_name}..."
+                    self._emit_tool_stream_event(
+                        "tool_start",
+                        tool_name=tool_name,
+                        message=exec_msg,
+                        arguments=args,
+                        tool_call_id=str(tool_call.get("id", "")).strip(),
+                        agent_id=self.agent_id,
+                        agent_color=self.agent_color,
+                    )
                     all_content.append(f"[bold #ffb8d1]✧[/bold #ffb8d1] [bold #e4b0ff]{rich_escape(exec_msg)}[/bold #e4b0ff]")
                     
                     result = self.tool_executor.execute(
                         tool_name,
                         args,
                         tool_call_id=str(tool_call.get("id", "")).strip(),
+                    )
+                    self._emit_tool_stream_event(
+                        "tool_result",
+                        tool_name=tool_name,
+                        message=exec_msg,
+                        arguments=args,
+                        tool_call_id=str(tool_call.get("id", "")).strip(),
+                        success=bool(result.success),
+                        output=str(result.output or ""),
+                        error=str(result.error or ""),
+                        status=str(getattr(result.status, "value", "success")),
+                        agent_id=self.agent_id,
+                        agent_color=self.agent_color,
                     )
                     
                     if result.success:
@@ -3084,12 +3158,34 @@ class ReverieAgent:
                     self._check_tool_side_effects(tool_name, args)
                     
                     exec_msg = tool.get_execution_message(**args) if tool else f"Executing {tool_name}..."
+                    self._emit_tool_stream_event(
+                        "tool_start",
+                        tool_name=tool_name,
+                        message=exec_msg,
+                        arguments=args,
+                        tool_call_id=str(tool_call.get("id", "")).strip(),
+                        agent_id=self.agent_id,
+                        agent_color=self.agent_color,
+                    )
                     all_content.append(f"[bold #ffb8d1]✧[/bold #ffb8d1] [bold #e4b0ff]{rich_escape(exec_msg)}[/bold #e4b0ff]")
                     
                     result = self.tool_executor.execute(
                         tool_name,
                         args,
                         tool_call_id=str(tool_call.get("id", "")).strip(),
+                    )
+                    self._emit_tool_stream_event(
+                        "tool_result",
+                        tool_name=tool_name,
+                        message=exec_msg,
+                        arguments=args,
+                        tool_call_id=str(tool_call.get("id", "")).strip(),
+                        success=bool(result.success),
+                        output=str(result.output or ""),
+                        error=str(result.error or ""),
+                        status=str(getattr(result.status, "value", "success")),
+                        agent_id=self.agent_id,
+                        agent_color=self.agent_color,
                     )
                     
                     if result.success:

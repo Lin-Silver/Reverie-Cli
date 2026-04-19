@@ -67,6 +67,7 @@ from ..agent import (
     build_system_prompt,
     decode_stream_event,
 )
+from ..agent.subagents import SubagentManager
 from ..context_engine import CodebaseIndexer, ContextRetriever, GitIntegration
 from ..context_engine import LSPManager
 from ..modes import normalize_mode
@@ -673,6 +674,7 @@ class ReverieInterface:
         self.git_integration: Optional[GitIntegration] = None
         self.lsp_manager: Optional[LSPManager] = None
         self.agent: Optional[ReverieAgent] = None
+        self.subagent_manager = SubagentManager(self)
 
         self.total_active_time = 0.0
         self.current_task_start: Optional[float] = None
@@ -1291,6 +1293,8 @@ class ReverieInterface:
                     "progress_event_count": int(current.get("progress_event_count", 0) or 0),
                     "last_stdout_chunk": str(current.get("last_stdout_chunk", "") or ""),
                     "last_stderr_chunk": str(current.get("last_stderr_chunk", "") or ""),
+                    "agent_id": str(payload.get("agent_id", current.get("agent_id", "")) or "").strip(),
+                    "agent_color": str(payload.get("agent_color", current.get("agent_color", "")) or "").strip(),
                 }
             )
             self._active_tool_details[key] = current
@@ -1545,7 +1549,15 @@ class ReverieInterface:
         """Receive structured agent events and render them through the display layer."""
         if not isinstance(event, dict):
             return
-        if str(event.get("kind", "") or "").strip().lower() == "tool_progress":
+        kind = str(event.get("kind", "") or "").strip().lower()
+        if kind == "stream_event":
+            stream_event = dict(event)
+            stream_event.pop("kind", None)
+            self._handle_stream_tool_event(stream_event)
+            if not self.headless:
+                self.display.show_stream_event(stream_event)
+            return
+        if kind == "tool_progress":
             self._append_active_tool_progress(event)
             self._refresh_streaming_footer()
             return
@@ -2380,6 +2392,9 @@ class ReverieInterface:
         self.agent.tool_executor.update_context('pause_stream_input_capture', self._pause_stream_input_capture)
         self.agent.tool_executor.update_context('resume_stream_input_capture', self._resume_stream_input_capture)
         self.agent.tool_executor.update_context('ui_event_handler', self._handle_agent_ui_event)
+        self.agent.tool_executor.update_context('subagent_manager', self.subagent_manager)
+        self.agent.tool_executor.update_context('is_subagent', False)
+        self.agent.tool_executor.update_context('subagent_id', 'main')
         self._show_activity_event(
             "Agent",
             f"Agent ready with {model.model_display_name}",
@@ -2820,6 +2835,7 @@ class ReverieInterface:
             'lsp_manager': self.lsp_manager, 'memory_indexer': self.memory_indexer,
             'workspace_stats_manager': self.workspace_stats_manager,
             'project_data_dir': self.project_data_dir,
+            'subagent_manager': self.subagent_manager,
             'agent': self.agent, 'start_time': self.start_time, 
             'total_active_time': self.total_active_time,
             'current_task_start': self.current_task_start,

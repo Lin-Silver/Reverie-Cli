@@ -55,6 +55,8 @@ class CommandHandler:
         self.commands = {
             'help': self.cmd_help,
             'model': self.cmd_model,
+            'subagent': self.cmd_subagent,
+            'subagents': self.cmd_subagent,
             'qwencode': self.cmd_qwencode,
             'geminicli': self.cmd_geminicli,
             'codex': self.cmd_codex,
@@ -5951,6 +5953,236 @@ class CommandHandler:
             except (ValueError, IndexError):
                 self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid selection[/{self.theme.CORAL_SOFT}]")
         
+        return True
+
+    def _require_subagent_mode(self) -> bool:
+        if self._current_mode_name() == "reverie":
+            return True
+        self.console.print(
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Subagents are only available in base Reverie mode. Switch with `/mode reverie`.[/{self.theme.AMBER_GLOW}]"
+        )
+        return False
+
+    def _subagent_manager(self):
+        manager = self.app.get("subagent_manager")
+        if manager is None:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Subagent manager is not available.[/{self.theme.CORAL_SOFT}]")
+        return manager
+
+    def _print_subagent_usage(self) -> None:
+        self.console.print(
+            Panel(
+                Text.from_markup(
+                    f"[bold {self.theme.BLUE_SOFT}]/subagent[/bold {self.theme.BLUE_SOFT}] open the Subagent roster TUI\n"
+                    f"[bold {self.theme.BLUE_SOFT}]/subagent create[/bold {self.theme.BLUE_SOFT}] choose a model and create a Subagent\n"
+                    f"[bold {self.theme.BLUE_SOFT}]/subagent list[/bold {self.theme.BLUE_SOFT}] show configured Subagents\n"
+                    f"[bold {self.theme.BLUE_SOFT}]/subagent model <id>[/bold {self.theme.BLUE_SOFT}] change a Subagent model\n"
+                    f"[bold {self.theme.BLUE_SOFT}]/subagent run <id> <task>[/bold {self.theme.BLUE_SOFT}] run a direct delegated task"
+                ),
+                title=f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Subagents[/bold {self.theme.PINK_SOFT}]",
+                border_style=self.theme.BORDER_PRIMARY,
+                box=box.ROUNDED,
+                padding=(1, 2),
+            )
+        )
+
+    def _build_subagent_table(self, specs: List[Any]) -> Table:
+        table = Table(
+            title=f"[bold {self.theme.PINK_SOFT}]{self.deco.CRYSTAL} Reverie Subagents[/bold {self.theme.PINK_SOFT}]",
+            box=box.ROUNDED,
+            border_style=self.theme.BORDER_PRIMARY,
+            show_lines=True,
+            expand=True,
+        )
+        table.add_column("ID", style=f"bold {self.theme.BLUE_SOFT}", no_wrap=True)
+        table.add_column("Model", style=self.theme.TEXT_PRIMARY)
+        table.add_column("Source", style=self.theme.TEXT_SECONDARY, width=12)
+        table.add_column("Color", style=self.theme.TEXT_SECONDARY, width=12)
+        table.add_column("Status", style=self.theme.TEXT_SECONDARY, width=10)
+        for spec in specs:
+            ref = dict(getattr(spec, "model_ref", {}) or {})
+            model = str(ref.get("display_name") or ref.get("model") or "(unresolved)")
+            source = str(ref.get("source") or "standard")
+            status = "enabled" if getattr(spec, "enabled", True) else "disabled"
+            color = str(getattr(spec, "color", "") or "")
+            table.add_row(
+                str(getattr(spec, "id", "")),
+                model,
+                source,
+                Text(color or "(auto)", style=color or self.theme.TEXT_DIM),
+                status,
+            )
+        return table
+
+    def _print_subagent_list(self, manager: Any) -> None:
+        specs = manager.list_specs()
+        self.console.print()
+        if not specs:
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} No Subagents configured yet. Use `/subagent create` to choose a model and create one.[/{self.theme.TEXT_DIM}]"
+            )
+            return
+        self.console.print(self._build_subagent_table(specs))
+        self.console.print()
+
+    def _resolve_subagent_model_choice(self, manager: Any, query: str = "") -> Optional[Dict[str, Any]]:
+        choices = manager.available_model_refs()
+        if not choices:
+            self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} No configured models are available for Subagents.[/{self.theme.AMBER_GLOW}]")
+            return None
+
+        wanted = str(query or "").strip().lower()
+        if wanted:
+            for choice in choices:
+                ref = dict(choice.get("model_ref") or {})
+                values = {
+                    str(choice.get("id") or "").lower(),
+                    str(choice.get("name") or "").lower(),
+                    str(ref.get("model") or "").lower(),
+                    str(ref.get("display_name") or "").lower(),
+                }
+                if wanted in values:
+                    return dict(ref)
+
+        from .tui_selector import ModelSelector, SelectorAction
+
+        selector = ModelSelector(console=self.console, models=choices)
+        result = selector.run()
+        if result.action != SelectorAction.SELECT or not result.selected_item:
+            return None
+        ref = result.selected_item.metadata.get("model_ref") if isinstance(result.selected_item.metadata, dict) else None
+        return dict(ref or {})
+
+    def _show_selected_subagent(self, spec: Any) -> None:
+        ref = dict(getattr(spec, "model_ref", {}) or {})
+        rows = [
+            ("ID", getattr(spec, "id", "")),
+            ("Model", ref.get("display_name") or ref.get("model") or "(unresolved)"),
+            ("Source", ref.get("source") or "standard"),
+            ("Color", getattr(spec, "color", "")),
+            ("Status", "enabled" if getattr(spec, "enabled", True) else "disabled"),
+        ]
+        self.console.print()
+        self.console.print(
+            Panel(
+                self._build_key_value_table(rows),
+                title=f"[bold {getattr(spec, 'color', '') or self.theme.BLUE_SOFT}]{escape(getattr(spec, 'id', 'Subagent'))}[/bold {getattr(spec, 'color', '') or self.theme.BLUE_SOFT}]",
+                border_style=getattr(spec, "color", "") or self.theme.BORDER_PRIMARY,
+                box=box.ROUNDED,
+                padding=(1, 2),
+            )
+        )
+        self.console.print()
+
+    def cmd_subagent(self, args: str) -> bool:
+        """Manage base Reverie Subagents and run delegated tasks."""
+        if not self._require_subagent_mode():
+            return True
+        manager = self._subagent_manager()
+        if manager is None:
+            return True
+
+        raw_args = str(args or "").strip()
+        parts = self._split_command_args(raw_args)
+        action = str(parts[0] if parts else "").strip().lower()
+
+        if not action:
+            specs = manager.list_specs()
+            if not specs:
+                self._print_subagent_usage()
+                return True
+            from .tui_selector import SelectorAction, SubagentSelector
+
+            selector = SubagentSelector(self.console, [spec.to_dict() for spec in specs])
+            result = selector.run()
+            if result.action == SelectorAction.SELECT and result.selected_item:
+                spec = manager.get_spec(result.selected_item.id)
+                if spec:
+                    self._show_selected_subagent(spec)
+            return True
+
+        if action in {"help", "-h", "--help"}:
+            self._print_subagent_usage()
+            return True
+
+        if action in {"list", "ls"}:
+            self._print_subagent_list(manager)
+            return True
+
+        if action == "create":
+            model_query = parts[1] if len(parts) > 1 else ""
+            model_ref = self._resolve_subagent_model_choice(manager, model_query)
+            if not model_ref:
+                return True
+            try:
+                spec = manager.create_subagent(model_ref)
+            except Exception as exc:
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Failed to create Subagent: {escape(str(exc))}[/{self.theme.CORAL_SOFT}]")
+                return True
+            self.console.print(
+                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Created {spec.id} with model {escape(model_ref.get('display_name') or model_ref.get('model') or 'selected model')}.[/{self.theme.MINT_VIBRANT}]"
+            )
+            return True
+
+        if action in {"delete", "remove"}:
+            if len(parts) < 2:
+                self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /subagent delete <id>[/{self.theme.AMBER_GLOW}]")
+                return True
+            subagent_id = parts[1]
+            if Confirm.ask(f"Delete Subagent {subagent_id}?"):
+                if manager.delete_subagent(subagent_id):
+                    self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Deleted {subagent_id}.[/{self.theme.MINT_VIBRANT}]")
+                else:
+                    self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Unknown Subagent: {escape(subagent_id)}[/{self.theme.CORAL_SOFT}]")
+            return True
+
+        if action == "model":
+            if len(parts) < 2:
+                self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /subagent model <id>[/{self.theme.AMBER_GLOW}]")
+                return True
+            subagent_id = parts[1]
+            model_ref = self._resolve_subagent_model_choice(manager, parts[2] if len(parts) > 2 else "")
+            if not model_ref:
+                return True
+            spec = manager.set_model(subagent_id, model_ref)
+            if not spec:
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Unknown Subagent: {escape(subagent_id)}[/{self.theme.CORAL_SOFT}]")
+                return True
+            self.console.print(
+                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Updated {spec.id} model to {escape(model_ref.get('display_name') or model_ref.get('model') or 'selected model')}.[/{self.theme.MINT_VIBRANT}]"
+            )
+            return True
+
+        if action == "run":
+            if len(parts) < 3:
+                self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /subagent run <id> <task>[/{self.theme.AMBER_GLOW}]")
+                return True
+            subagent_id = parts[1]
+            task = raw_args.split(subagent_id, 1)[1].strip() if subagent_id in raw_args else " ".join(parts[2:])
+            try:
+                run = manager.run_task(subagent_id, task, stream=False)
+            except Exception as exc:
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Subagent run failed: {escape(str(exc))}[/{self.theme.CORAL_SOFT}]")
+                return True
+            if run.status == "completed":
+                self._show_activity_event(
+                    "Subagent",
+                    f"{run.subagent_id} completed {run.run_id}",
+                    status="success",
+                    detail=run.summary[:240],
+                    meta=run.log_path,
+                )
+            else:
+                self._show_activity_event(
+                    "Subagent",
+                    f"{run.subagent_id} failed {run.run_id}",
+                    status="error",
+                    detail=run.error,
+                    meta=run.log_path,
+                )
+            return True
+
+        self._print_subagent_usage()
         return True
 
     def cmd_mode(self, args: str) -> bool:

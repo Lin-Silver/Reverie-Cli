@@ -26,6 +26,12 @@ Notes:
 | `/model` | Open the standard model selector |
 | `/model add` | Add a standard model preset |
 | `/model delete <number>` | Delete a standard model preset |
+| `/subagent` | Open the base-Reverie Subagent roster TUI |
+| `/subagent create` | Select a model and create a Subagent identified by ID |
+| `/subagent list` | Show configured Subagents, model sources, colors, and status |
+| `/subagent model <id>` | Change a Subagent's default model |
+| `/subagent run <id> <task>` | Run a direct delegated task through a Subagent |
+| `/subagent delete <id>` | Delete a configured Subagent |
 | `/mode` | Show current mode and available modes. All modes share Context Engine; the selected mode changes the workflow and specialized tools. |
 | `/mode reverie` | Switch to the general-purpose coding mode |
 | `/mode reverie-atlas` | Switch to the document-driven spec development mode |
@@ -35,6 +41,8 @@ Notes:
 | `/mode spec-vibe` | Switch to the lighter spec implementation mode |
 | `/mode writer` | Switch to the writing and narrative continuity mode |
 | `/mode computer-controller` | Switch to the pinned NVIDIA desktop-autopilot mode |
+
+Subagents are enabled only in base `reverie` mode. They inherit the active Reverie system prompt, tool/plugin/MCP/skill surface, and workspace context, but each configured Subagent stores only its ID, color, and selected default model.
 
 ## Providers
 

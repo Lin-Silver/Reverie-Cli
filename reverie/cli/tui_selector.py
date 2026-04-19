@@ -614,6 +614,35 @@ class ModelSelector(TUISelector):
         self.scroll_offset = max(0, self.selected_index - self.max_visible + 1)
 
 
+class SubagentSelector(TUISelector):
+    """Specialized selector for configured Subagents."""
+
+    def __init__(self, console: Console, subagents: List[Dict[str, Any]]):
+        items = []
+        for subagent in subagents:
+            model_ref = subagent.get("model_ref", {}) if isinstance(subagent.get("model_ref"), dict) else {}
+            display_name = str(model_ref.get("display_name") or model_ref.get("model") or "(unresolved)")
+            source = str(model_ref.get("source") or "standard")
+            status = "enabled" if subagent.get("enabled", True) else "disabled"
+            items.append(
+                SelectorItem(
+                    id=str(subagent.get("id") or ""),
+                    title=str(subagent.get("name") or subagent.get("id") or "Subagent"),
+                    description=f"{display_name} ({source}) - {status}",
+                    metadata=subagent,
+                )
+            )
+
+        super().__init__(
+            console=console,
+            title="Subagents",
+            items=items,
+            allow_search=True,
+            allow_cancel=True,
+            show_descriptions=True,
+        )
+
+
 class SettingsSelector(TUISelector):
     """Specialized selector for settings configuration"""
     

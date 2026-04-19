@@ -215,6 +215,99 @@ def default_gamer_mode_config() -> Dict[str, Any]:
     }
 
 
+_SUBAGENT_COLOR_PALETTE = (
+    "#ff8a80",
+    "#82b1ff",
+    "#b9f6ca",
+    "#ffd180",
+    "#ea80fc",
+    "#80deea",
+    "#ffff8d",
+    "#cf93d9",
+)
+
+
+def default_subagent_config() -> Dict[str, Any]:
+    """Default configuration for base Reverie subagents."""
+    return {
+        "schema_version": 1,
+        "enabled": True,
+        "agents": [],
+    }
+
+
+def _subagent_color_for_id(subagent_id: str) -> str:
+    """Return a stable display color for a subagent ID."""
+    normalized_id = str(subagent_id or "").strip() or "subagent"
+    digest = hashlib.sha1(normalized_id.encode("utf-8")).hexdigest()
+    return _SUBAGENT_COLOR_PALETTE[int(digest[:8], 16) % len(_SUBAGENT_COLOR_PALETTE)]
+
+
+def normalize_subagent_config(raw_config: Any) -> Dict[str, Any]:
+    """Normalize persisted subagent config into the canonical shape."""
+    defaults = default_subagent_config()
+    if not isinstance(raw_config, dict):
+        return defaults
+
+    normalized = dict(defaults)
+    normalized["enabled"] = bool(raw_config.get("enabled", defaults["enabled"]))
+
+    raw_agents = raw_config.get("agents", [])
+    if isinstance(raw_agents, dict):
+        raw_agents = [
+            {"id": agent_id, **(agent_data if isinstance(agent_data, dict) else {})}
+            for agent_id, agent_data in raw_agents.items()
+        ]
+    if not isinstance(raw_agents, list):
+        raw_agents = []
+
+    seen_ids: set[str] = set()
+    agents: List[Dict[str, Any]] = []
+    for index, raw_agent in enumerate(raw_agents, start=1):
+        if not isinstance(raw_agent, dict):
+            continue
+
+        subagent_id = str(raw_agent.get("id") or raw_agent.get("name") or f"subagent-{index:03d}").strip()
+        if not subagent_id:
+            subagent_id = f"subagent-{index:03d}"
+        base_id = subagent_id
+        suffix = 2
+        while subagent_id in seen_ids:
+            subagent_id = f"{base_id}-{suffix}"
+            suffix += 1
+        seen_ids.add(subagent_id)
+
+        raw_model_ref = raw_agent.get("model_ref", {})
+        model_ref = raw_model_ref if isinstance(raw_model_ref, dict) else {}
+        source = str(model_ref.get("source", "standard") or "standard").strip().lower()
+        if source not in SUPPORTED_ACTIVE_MODEL_SOURCES:
+            source = "standard"
+        try:
+            model_index = int(model_ref.get("index", 0))
+        except (TypeError, ValueError):
+            model_index = 0
+
+        agents.append(
+            {
+                "id": subagent_id,
+                "name": str(raw_agent.get("name") or subagent_id).strip() or subagent_id,
+                "enabled": bool(raw_agent.get("enabled", True)),
+                "color": str(raw_agent.get("color") or _subagent_color_for_id(subagent_id)).strip(),
+                "created_at": str(raw_agent.get("created_at") or "").strip(),
+                "updated_at": str(raw_agent.get("updated_at") or "").strip(),
+                "model_ref": {
+                    "source": source,
+                    "index": max(0, model_index),
+                    "model": str(model_ref.get("model") or "").strip(),
+                    "display_name": str(model_ref.get("display_name") or "").strip(),
+                },
+            }
+        )
+
+    normalized["agents"] = agents
+    return normalized
+
+
 def _merge_dict_defaults(raw: Any, defaults: Dict[str, Any]) -> Dict[str, Any]:
     """Merge a partially-populated config section onto its canonical defaults."""
     merged = dict(defaults)
@@ -530,6 +623,7 @@ class Config:
     codex: Dict[str, Any] = field(default_factory=dict)
     nvidia: Dict[str, Any] = field(default_factory=default_nvidia_config)
     atlas_mode: Dict[str, Any] = field(default_factory=default_atlas_mode_config)
+    subagents: Dict[str, Any] = field(default_factory=default_subagent_config)
     
     # Writer mode specific settings
     writer_mode: Dict[str, Any] = field(default_factory=default_writer_mode_config)
@@ -606,6 +700,7 @@ class Config:
         codex = normalize_codex_config(self.codex)
         nvidia = normalize_nvidia_config(self.nvidia)
         atlas_mode = normalize_atlas_mode_config(self.atlas_mode)
+        subagents = normalize_subagent_config(self.subagents)
         active_model_source = self.active_model_source.lower()
         if active_model_source not in SUPPORTED_ACTIVE_MODEL_SOURCES:
             active_model_source = "standard"
@@ -636,6 +731,7 @@ class Config:
             'codex': codex,
             'nvidia': nvidia,
             'atlas_mode': atlas_mode,
+            'subagents': subagents,
         }
     
     @classmethod
@@ -670,6 +766,8 @@ class Config:
         nvidia = normalize_nvidia_config(raw_nvidia)
         raw_atlas_mode = data.get('atlas_mode', {})
         atlas_mode = normalize_atlas_mode_config(raw_atlas_mode)
+        raw_subagents = data.get('subagents', {})
+        subagents = normalize_subagent_config(raw_subagents)
         active_model_source = str(data.get('active_model_source', 'standard')).strip().lower()
         if active_model_source not in SUPPORTED_ACTIVE_MODEL_SOURCES:
             active_model_source = 'standard'
@@ -700,6 +798,7 @@ class Config:
             codex=codex,
             nvidia=nvidia,
             atlas_mode=atlas_mode,
+            subagents=subagents,
         )
 
 
@@ -1316,6 +1415,11 @@ class ConfigManager:
                 if field_name not in data.get('atlas_mode', {}):
                     needs_update = True
                     break
+
+        if 'subagents' not in data:
+            needs_update = True
+        elif normalize_subagent_config(data.get('subagents')) != data.get('subagents'):
+            needs_update = True
 
         # Check if gamer_mode field is missing
         if 'gamer_mode' not in data:

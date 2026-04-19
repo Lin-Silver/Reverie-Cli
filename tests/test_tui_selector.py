@@ -1,6 +1,6 @@
 from rich.console import Console
 
-from reverie.cli.tui_selector import SelectorAction, SelectorItem, TUISelector
+from reverie.cli.tui_selector import SelectorAction, SelectorItem, SubagentSelector, TUISelector
 
 
 def test_selector_uses_cropped_live_screen(monkeypatch) -> None:
@@ -39,3 +39,25 @@ def test_selector_uses_cropped_live_screen(monkeypatch) -> None:
     assert captured["screen"] is True
     assert captured["transient"] is True
     assert captured["vertical_overflow"] == "crop"
+
+
+def test_subagent_selector_builds_model_descriptions() -> None:
+    selector = SubagentSelector(
+        Console(force_terminal=True, width=120, height=40),
+        [
+            {
+                "id": "subagent-001",
+                "name": "subagent-001",
+                "enabled": True,
+                "color": "#82b1ff",
+                "model_ref": {
+                    "source": "standard",
+                    "model": "fake-model",
+                    "display_name": "Fake Model",
+                },
+            }
+        ],
+    )
+
+    assert selector.items[0].id == "subagent-001"
+    assert "Fake Model" in selector.items[0].description

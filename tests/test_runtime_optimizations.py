@@ -295,6 +295,7 @@ def test_command_exec_emits_incremental_ui_progress(tmp_path: Path) -> None:
 
 def test_reference_catalog_scan_uses_cache_on_repeated_workspace_reads(tmp_path: Path) -> None:
     gamer_reference_intelligence._REFERENCE_SCAN_CACHE.clear()
+    gamer_reference_intelligence._REFERENCE_MANIFEST_CACHE.clear()
     references_root = tmp_path / "references"
     (references_root / "godot-tps-demo" / "player").mkdir(parents=True, exist_ok=True)
     (references_root / "godot-tps-demo" / "enemies" / "red_robot").mkdir(parents=True, exist_ok=True)
@@ -328,6 +329,7 @@ def test_reference_catalog_scan_uses_cache_on_repeated_workspace_reads(tmp_path:
     assert first["cache_status"] == "miss"
     assert second["cache_status"] == "hit"
     assert second["summary"]["repository_count"] >= 2
+    assert second["summary"]["total_files"] >= 4
 
 
 def test_interface_deduplicates_repeated_live_tool_progress_chunks() -> None:

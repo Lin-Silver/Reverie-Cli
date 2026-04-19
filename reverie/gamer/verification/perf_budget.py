@@ -29,6 +29,9 @@ def build_performance_budget(
     large_scale_profile = dict(game_request.get("production", {}).get("large_scale_profile", {}) or {})
     starter_party_size = int(large_scale_profile.get("starter_party_size", 1) or 1)
     launch_region_target = int(large_scale_profile.get("launch_region_target", 1) or 1)
+    active_ai_agents = 8 if dimension == "3D" else 16
+    streamed_regions = 2 if dimension == "3D" else 1
+    streaming_cells = 3 if world_structure in {"open_world_regions", "hub_and_districts"} else 1
     return {
         "schema_version": "reverie.performance_budget/1",
         "project_name": blueprint.get("meta", {}).get("project_name", "Untitled Reverie Slice"),
@@ -38,19 +41,40 @@ def build_performance_budget(
         "budgets": {
             "cpu_frame_ms": 16.6 if target_fps >= 60 else 33.3,
             "gpu_frame_ms": 16.6 if target_fps >= 60 else 33.3,
-            "streamed_regions": 2 if dimension == "3D" else 1,
-            "streaming_cells": 3 if world_structure in {"open_world_regions", "hub_and_districts"} else 1,
-            "active_ai_agents": 8 if dimension == "3D" else 16,
+            "streamed_regions": streamed_regions,
+            "streaming_cells": streaming_cells,
+            "active_ai_agents": active_ai_agents,
             "projectiles": 12 if dimension == "3D" else 24,
             "vfx_emitters": 24 if queue_count >= 8 else 12,
             "active_party_members": starter_party_size,
             "launch_region_target": launch_region_target,
             "region_transition_seconds": 4.0 if world_structure in {"open_world_regions", "hub_and_districts"} else 2.0,
         },
+        "subsystem_budgets": {
+            "world_streaming": {
+                "active_regions": streamed_regions,
+                "active_cells": streaming_cells,
+                "transition_budget_seconds": 4.0 if world_structure in {"open_world_regions", "hub_and_districts"} else 2.0,
+            },
+            "combat": {
+                "active_ai_agents": active_ai_agents,
+                "projectiles": 12 if dimension == "3D" else 24,
+                "vfx_emitters": 24 if queue_count >= 8 else 12,
+            },
+            "party_and_progression": {
+                "active_party_members": starter_party_size,
+                "launch_region_target": launch_region_target,
+            },
+        },
         "large_scale_checks": [
             "keep party swap, projectiles, and VFX within budget during peak encounter density",
             "stabilize region transitions before widening the launch region count",
             "treat active-party size, streamed cells, and AI density as one shared frame-budget problem",
+        ],
+        "optimization_passes": [
+            "streaming and visibility discipline before map-size expansion",
+            "combat VFX and projectile pressure tuning before adding more enemies per wave",
+            "asset import validation and placeholder replacement tracking before art-fidelity escalation",
         ],
         "checks": [
             "controller, camera, and combat should hold target fps on the critical path",

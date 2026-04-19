@@ -1,13 +1,44 @@
 {
+  "schema_version": "2.0",
   "id": "godot",
   "display_name": "Godot Runtime Plugin",
   "runtime_family": "engine",
   "version": "0.2.0",
+  "delivery": "python-exe",
+  "template": "runtime_python_exe",
   "description": "Reverie CLI plugin wrapper for Godot runtime detection, installation, and project operations.",
   "entry": {
-    "windows": "plugin.py",
-    "linux": "plugin.py",
-    "darwin": "plugin.py",
-    "default": "plugin.py"
+    "preferred": {
+      "windows": "dist/reverie-godot.exe",
+      "linux": "dist/reverie-godot",
+      "darwin": "dist/reverie-godot"
+    },
+    "fallbacks": {
+      "windows": "plugin.py",
+      "linux": "plugin.py",
+      "darwin": "plugin.py",
+      "default": "plugin.py"
+    },
+    "strategy": "prefer-packaged",
+    "allow_source_fallback": true
+  },
+  "packaging": {
+    "format": "pyinstaller-onefile",
+    "compiled": {
+      "windows": "dist/reverie-godot.exe",
+      "linux": "dist/reverie-godot",
+      "darwin": "dist/reverie-godot"
+    },
+    "source": {
+      "default": "plugin.py"
+    },
+    "build": {
+      "windows": [
+        "build.bat"
+      ],
+      "default": [
+        "python -m PyInstaller --noconfirm --clean --onefile --name reverie-godot plugin.py"
+      ]
+    }
   }
 }

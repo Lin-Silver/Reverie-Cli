@@ -235,7 +235,7 @@ def build_production_plan(
         "lanes": [
             {
                 "name": "program_compilation",
-                "goal": "turn one prompt into a durable game program, feature matrix, milestone board, and risk register",
+                "goal": "turn one prompt into a durable game program, product strategy, feature matrix, milestone board, and risk register",
                 "outputs": [
                     "artifacts/game_program.json",
                     "artifacts/game_bible.md",

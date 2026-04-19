@@ -170,7 +170,6 @@ def default_text_to_image_config() -> Dict[str, Any]:
         "auto_install_max_missing_deps": 6,
     }
 
-
 def default_writer_mode_config() -> Dict[str, Any]:
     """Default configuration for writer mode."""
     return {

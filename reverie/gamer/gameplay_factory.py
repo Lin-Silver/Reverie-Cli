@@ -12,6 +12,82 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def _character_archetypes(
+    game_request: Dict[str, Any],
+    content_expansion: Dict[str, Any],
+) -> list[Dict[str, Any]]:
+    party_model = str(game_request.get("experience", {}).get("party_model", "single_hero_focus"))
+    archetypes = [
+        {
+            "id": "vanguard_driver",
+            "role": "frontline pressure and route ownership",
+        }
+    ]
+    if party_model != "single_hero_focus":
+        archetypes.extend(
+            [
+                {"id": "breaker_specialist", "role": "stagger, punish windows, and boss break conversion"},
+                {"id": "support_stabilizer", "role": "buffs, sustain, and tempo recovery"},
+                {"id": "controller_setup", "role": "spacing, crowd control, and ranged setup"},
+            ]
+        )
+    return archetypes
+
+
+def _elemental_matrix(game_request: Dict[str, Any]) -> Dict[str, Any]:
+    specialized = {
+        str(item).strip()
+        for item in game_request.get("systems", {}).get("specialized", []) or []
+        if str(item).strip()
+    }
+    if "elemental_reaction" not in specialized:
+        return {
+            "enabled": False,
+            "starter_affinities": ["steel", "guard", "arc"],
+            "reaction_rules": [],
+        }
+    return {
+        "enabled": True,
+        "starter_affinities": ["flare", "tide", "volt", "gale"],
+        "reaction_rules": [
+            {"id": "flare_plus_tide", "result": "steam_burst"},
+            {"id": "volt_plus_tide", "result": "electro_surge"},
+            {"id": "gale_plus_flare", "result": "firestorm_pull"},
+        ],
+    }
+
+
+def _encounter_templates(
+    content_expansion: Dict[str, Any],
+    encounter_grammar: list[str],
+) -> list[Dict[str, Any]]:
+    regions = [str(item.get("id", "")).strip() for item in content_expansion.get("region_seeds", []) or [] if str(item.get("id", "")).strip()]
+    templates = []
+    for index, region_id in enumerate(regions[:3], start=1):
+        templates.append(
+            {
+                "id": f"{region_id}_route_template",
+                "region_id": region_id,
+                "beats": encounter_grammar[: min(len(encounter_grammar), 4 + (1 if index > 1 else 0))],
+            }
+        )
+    return templates
+
+
+def _boss_phase_templates(game_request: Dict[str, Any]) -> list[Dict[str, Any]]:
+    phases = [
+        {"id": "telegraphed_opener", "focus": "teach one dodge, guard, or spacing rule clearly"},
+        {"id": "mobility_exam", "focus": "stress route commitment, camera control, and punish timing"},
+        {"id": "burst_finale", "focus": "reward mastery with a visible high-payoff punish window"},
+    ]
+    if str(game_request.get("experience", {}).get("party_model", "single_hero_focus")) != "single_hero_focus":
+        phases.insert(
+            2,
+            {"id": "swap_synergy_check", "focus": "encourage role handoffs and cross-character punish routing"},
+        )
+    return phases
+
+
 def build_gameplay_factory(
     game_request: Dict[str, Any],
     blueprint: Dict[str, Any],
@@ -62,6 +138,7 @@ def build_gameplay_factory(
         encounter_grammar.insert(1, "landmark-driven route commit")
     if experience.get("party_model", "single_hero_focus") != "single_hero_focus":
         encounter_grammar.insert(3, "tag-synergy punish window")
+    elemental_matrix = _elemental_matrix(game_request)
     return {
         "schema_version": "reverie.gameplay_factory/1",
         "project_name": project_name(game_request, blueprint),
@@ -73,13 +150,13 @@ def build_gameplay_factory(
             "starter": ["light_attack", "dodge", "skill"],
             "growth": growth,
         },
+        "character_archetypes": _character_archetypes(game_request, content_expansion),
+        "elemental_matrix": elemental_matrix,
         "enemy_families": enemy_archetypes,
         "encounter_grammar": encounter_grammar,
-        "boss_phase_seeds": [
-            "telegraphed opener",
-            "mobility punish",
-            "high-pressure finale",
-        ],
+        "encounter_templates": _encounter_templates(content_expansion, encounter_grammar),
+        "boss_phase_seeds": [item["focus"] for item in _boss_phase_templates(game_request)],
+        "boss_phase_templates": _boss_phase_templates(game_request),
         "experience_design": {
             "aesthetic_targets": list(design_intelligence.get("mda_map", {}).get("aesthetics", []) or []),
             "session_hooks": session_hooks,
@@ -92,6 +169,18 @@ def build_gameplay_factory(
             "regions": [str(item.get("id", "")) for item in content_expansion.get("region_seeds", []) if str(item.get("id", ""))],
             "beats": ["arrival", "goal reveal", "challenge", "reward", "handoff"],
             "onboarding_beats": [str(item.get("id", "")).strip() for item in onboarding_ladder[:3] if str(item.get("id", "")).strip()],
+        },
+        "party_rotation_grammar": {
+            "enabled": experience.get("party_model", "single_hero_focus") != "single_hero_focus",
+            "rules": (
+                [
+                    "open with a route owner or vanguard",
+                    "swap into breaker or controller when the enemy exposes a punish state",
+                    "use support handoffs to preserve tempo and readability",
+                ]
+                if experience.get("party_model", "single_hero_focus") != "single_hero_focus"
+                else ["treat movement, defense, and skill cadence as one hero mastery loop"]
+            ),
         },
     }
 

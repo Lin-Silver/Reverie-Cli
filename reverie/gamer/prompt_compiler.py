@@ -350,6 +350,79 @@ def _build_quality_targets(
     }
 
 
+def _infer_target_quality(
+    text: str,
+    tokens: set[str],
+    *,
+    overrides: Dict[str, Any],
+    reference_titles: list[str],
+    dimension: str,
+    world_structure: str,
+) -> str:
+    explicit = str(overrides.get("target_quality") or "").strip().lower()
+    if explicit in {"aaa", "aa", "indie"}:
+        return explicit
+    if _matches_any(text, tokens, {"aaa", "console quality", "4k", "cross platform", "voice acting"}):
+        return "aaa"
+    if str(dimension).upper() == "3D" and (
+        world_structure in {"open_world_regions", "hub_and_districts"}
+        or bool({item.lower() for item in reference_titles} & {"genshin impact", "wuthering waves", "zenless zone zero"})
+    ):
+        return "aaa"
+    if str(dimension).upper() == "3D":
+        return "aa"
+    return "indie"
+
+
+def _apply_quality_profile(
+    base: Dict[str, Any],
+    *,
+    target_quality: str,
+    live_service_profile: Dict[str, Any],
+    party_model: str,
+) -> Dict[str, Any]:
+    quality = dict(base or {})
+    if target_quality == "aaa":
+        quality.update(
+            {
+                "target_resolution": "4K",
+                "target_platforms": ["PC", "PS5", "Xbox Series X", "Mobile"] if live_service_profile.get("enabled") else ["PC", "PS5", "Xbox Series X"],
+                "graphics_quality": "AAA",
+                "animation_quality": "motion_captured_or_hand_keyed_hero_quality",
+                "audio_quality": "orchestral_plus_voice_acting",
+                "world_size": "large_open_world_or_multi_district_service_map",
+                "content_hours": "80_plus_hours_with_live_growth" if live_service_profile.get("enabled") else "40_plus_hours_with_expansions",
+                "target_concurrency_profile": "daily_return_sessions" if live_service_profile.get("enabled") else "campaign_completion_sessions",
+            }
+        )
+    elif target_quality == "aa":
+        quality.update(
+            {
+                "target_resolution": "1440p",
+                "target_platforms": ["PC", "Console"],
+                "graphics_quality": "AA",
+                "animation_quality": "stylized_action_quality",
+                "audio_quality": "full_mix_with_select_voice",
+                "world_size": "regional_3d_action_game",
+                "content_hours": "20_to_40_hours",
+            }
+        )
+    else:
+        quality.update(
+            {
+                "target_resolution": "1080p",
+                "target_platforms": ["PC"],
+                "graphics_quality": "indie",
+                "animation_quality": "readable_placeholder_to_stylized",
+                "audio_quality": "essential_mix",
+                "world_size": "focused_slice_or_small_world",
+                "content_hours": "5_to_20_hours",
+            }
+        )
+    quality["party_scale_target"] = 4 if party_model == "character_swap_party" else 3 if party_model == "small_squad_fast_swap" else 1
+    return quality
+
+
 def _infer_runtime_preferences(
     text: str,
     tokens: set[str],
@@ -579,11 +652,24 @@ def compile_game_prompt(
 
     compiled_project_name = str(project_name or override_map.get("project_name") or "").strip() or "Untitled Reverie Slice"
 
-    quality_targets = _build_quality_targets(
-        dimension,
-        scope["delivery_tier"],
-        world_structure,
-        live_service_profile,
+    target_quality = _infer_target_quality(
+        text,
+        tokens,
+        overrides=override_map,
+        reference_titles=reference_titles,
+        dimension=dimension,
+        world_structure=world_structure,
+    )
+    quality_targets = _apply_quality_profile(
+        _build_quality_targets(
+            dimension,
+            scope["delivery_tier"],
+            world_structure,
+            live_service_profile,
+        ),
+        target_quality=target_quality,
+        live_service_profile=live_service_profile,
+        party_model=party_model,
     )
 
     return {
@@ -646,12 +732,18 @@ def compile_game_prompt(
             "requested_scope": scope["requested_tier"],
             "delivery_scope": scope["delivery_tier"],
             "complexity_score": scope["complexity_score"],
+            "target_quality": target_quality,
             "content_scale": _content_scale(text, tokens, scope["delivery_tier"], world_structure),
             "deferred_features": scope["deferred_features"],
             "known_risks": scope["known_risks"],
             "slice_targets": scope["slice_targets"],
             "continuation_ready": True,
             "one_prompt_goal": "prompt -> game program -> runtime foundation -> verified 3d slice -> continuity pack",
+            "full_game_aspiration": (
+                "multi-region, cross-platform, content-expanding 3D action production base"
+                if target_quality == "aaa"
+                else "credible production-ready action game foundation"
+            ),
             "live_service_profile": live_service_profile,
             "large_scale_profile": large_scale_profile,
             "default_design_capabilities": _default_design_capabilities(

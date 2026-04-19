@@ -4213,13 +4213,32 @@ class CommandHandler:
             )
             return True
 
-        query = str(args or "").strip().lower()
+        raw_query = str(args or "").strip()
+        query = raw_query.lower()
         if query in ("", "status", "list"):
             force_refresh = False
         elif query in ("rescan", "reload", "refresh"):
             force_refresh = True
         elif query.startswith("inspect "):
-            return self._cmd_plugins_inspect(args.strip()[8:].strip())
+            return self._cmd_plugins_inspect(raw_query[8:].strip())
+        elif query == "scaffold":
+            return self._cmd_plugins_scaffold("")
+        elif query.startswith("scaffold "):
+            return self._cmd_plugins_scaffold(raw_query[9:].strip())
+        elif query == "validate":
+            return self._cmd_plugins_validate("")
+        elif query.startswith("validate "):
+            return self._cmd_plugins_validate(raw_query[9:].strip())
+        elif query == "build":
+            return self._cmd_plugins_build("")
+        elif query.startswith("build "):
+            return self._cmd_plugins_build(raw_query[6:].strip())
+        elif query in ("template", "templates"):
+            return self._cmd_plugins_templates("")
+        elif query.startswith("template "):
+            return self._cmd_plugins_templates(raw_query[9:].strip())
+        elif query.startswith("templates "):
+            return self._cmd_plugins_templates(raw_query[10:].strip())
         elif query == "path":
             summary = runtime_plugin_manager.get_status_summary()
             self._show_command_panel(
@@ -4230,8 +4249,10 @@ class CommandHandler:
             self.console.print(
                 self._build_key_value_table(
                     [
+                        ("Source Root", summary.get("source_root", "")),
                         ("Install Root", summary.get("install_root", "")),
                         ("Catalog Code", summary.get("catalog_root", "")),
+                        ("Template Root", summary.get("template_root", "")),
                     ]
                 )
             )
@@ -4239,7 +4260,7 @@ class CommandHandler:
             return True
         else:
             self.console.print(
-                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /plugins [status|rescan|path|inspect <plugin-id>][/{self.theme.AMBER_GLOW}]"
+                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /plugins [status|rescan|path|inspect <plugin-id>|scaffold <plugin-id>|validate <plugin-id>|build <plugin-id>|templates|template inspect <template-id>][/{self.theme.AMBER_GLOW}]"
             )
             return True
 
@@ -4264,6 +4285,7 @@ class CommandHandler:
                 ("RC Ready", str(summary.get("protocol_ready_count", 0))),
                 ("Noncompliant", str(summary.get("noncompliant_count", 0))),
                 ("RC Tools", str(summary.get("tool_count", 0))),
+                ("Templates", str(summary.get("template_count", 0))),
                 ("Ready Plugins", summary.get("ready_names", "") or "(none)"),
                 ("RC Plugins", summary.get("protocol_names", "") or "(none)"),
             ]
@@ -4286,6 +4308,7 @@ class CommandHandler:
         )
         table.add_column("Runtime", style=f"bold {self.theme.BLUE_SOFT}", width=20)
         table.add_column("Type", style=self.theme.TEXT_SECONDARY, width=12)
+        table.add_column("Delivery", style=self.theme.TEXT_SECONDARY, width=14)
         table.add_column("Status", style=self.theme.TEXT_SECONDARY, width=16)
         table.add_column("Protocol", style=self.theme.TEXT_SECONDARY, width=14)
         table.add_column("Tools", style=self.theme.TEXT_SECONDARY, width=6)
@@ -4317,6 +4340,7 @@ class CommandHandler:
             table.add_row(
                 row.get("name", ""),
                 row.get("family", ""),
+                row.get("delivery", ""),
                 f"[{status_color}]{escape(row.get('status_label', ''))}[/{status_color}]",
                 f"[{protocol_color}]{escape(row.get('protocol_label', ''))}[/{protocol_color}]",
                 row.get("tool_count", "0"),
@@ -4327,6 +4351,515 @@ class CommandHandler:
 
         self.console.print(table)
         self.console.print()
+        return True
+
+    def _parse_plugins_action_tokens(self, args: str) -> tuple[List[str], Dict[str, str], set[str]]:
+        """Split plugin subcommand args into positional tokens, key/value options, and flags."""
+        tokens = self._split_command_args(args)
+        positional: List[str] = []
+        options: Dict[str, str] = {}
+        flags: set[str] = set()
+        for token in tokens:
+            text = str(token or "").strip()
+            if not text:
+                continue
+            lowered = text.lower()
+            if lowered.startswith("--"):
+                lowered = lowered[2:]
+            if "=" in lowered:
+                key, value = lowered.split("=", 1)
+                options[key.strip()] = text.split("=", 1)[1].strip().strip('"').strip("'")
+                continue
+            if lowered in {"overwrite", "install"}:
+                flags.add(lowered)
+                continue
+            positional.append(text)
+        return positional, options, flags
+
+    def _cmd_plugins_scaffold(self, args: str) -> bool:
+        """Create a new source plugin tree from a bundled template."""
+        runtime_plugin_manager = self.app.get('runtime_plugin_manager')
+        if not runtime_plugin_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Runtime plugin manager is not available.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        positional, options, flags = self._parse_plugins_action_tokens(args)
+        plugin_id = positional[0] if positional else ""
+        if not plugin_id:
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /plugins scaffold <plugin-id> [template=<template-id>] [family=<runtime-family>] [name=<display-name>] [description=<text>] [command=<primary-command>] [overwrite][/{self.theme.AMBER_GLOW}]"
+            )
+            return True
+
+        template_id = options.get("template") or (positional[1] if len(positional) > 1 else "runtime_python_exe")
+        runtime_family = options.get("family") or options.get("runtime_family") or "runtime"
+        display_name = options.get("name") or options.get("display_name") or ""
+        description = options.get("description") or ""
+        command_name = options.get("command") or options.get("tool") or "run_task"
+
+        result = runtime_plugin_manager.scaffold_source_plugin(
+            template_id=template_id,
+            plugin_id=plugin_id,
+            display_name=display_name,
+            runtime_family=runtime_family,
+            description=description,
+            command_name=command_name,
+            overwrite="overwrite" in flags,
+        )
+
+        source_dir = result.get("source_dir")
+        self._show_command_panel(
+            "Plugin Scaffold",
+            subtitle="Generate a source plugin workspace from a bundled runtime-plugin template.",
+            accent=self.theme.BLUE_SOFT,
+            meta=str(source_dir or runtime_plugin_manager.source_root),
+        )
+
+        if not result.get("success", False):
+            self._show_activity_event(
+                "Plugins",
+                "Source plugin scaffold failed.",
+                status="error",
+                detail=str(result.get("error") or ""),
+            )
+            self.console.print()
+            return True
+
+        validation = result.get("validation", {}) or {}
+        self.console.print(
+            self._build_key_value_table(
+                [
+                    ("Plugin ID", validation.get("plugin_id", plugin_id)),
+                    ("Template", result.get("template_id", template_id)),
+                    ("Runtime Family", validation.get("runtime_family", runtime_family)),
+                    ("Delivery", validation.get("delivery", "(unknown)")),
+                    ("Source Dir", source_dir or "(none)"),
+                ]
+            )
+        )
+        self.console.print()
+
+        created = [str(item) for item in result.get("files_created", []) if str(item).strip()]
+        overwritten = [str(item) for item in result.get("files_overwritten", []) if str(item).strip()]
+        self.console.print(
+            Panel(
+                "\n".join(created[:12]) if created else "(none)",
+                title=f"[bold {self.theme.MINT_VIBRANT}]Created Files[/bold {self.theme.MINT_VIBRANT}]",
+                border_style=self.theme.MINT_VIBRANT,
+                box=box.ROUNDED,
+            )
+        )
+        if overwritten:
+            self.console.print()
+            self.console.print(
+                Panel(
+                    "\n".join(overwritten[:12]),
+                    title=f"[bold {self.theme.AMBER_GLOW}]Overwritten Files[/bold {self.theme.AMBER_GLOW}]",
+                    border_style=self.theme.AMBER_GLOW,
+                    box=box.ROUNDED,
+                )
+            )
+
+        warnings = [str(item) for item in validation.get("warnings", []) if str(item).strip()]
+        if warnings:
+            self.console.print()
+            self.console.print(
+                Panel(
+                    "\n".join(f"- {item}" for item in warnings[:10]),
+                    title=f"[bold {self.theme.AMBER_GLOW}]Validation Notes[/bold {self.theme.AMBER_GLOW}]",
+                    border_style=self.theme.AMBER_GLOW,
+                    box=box.ROUNDED,
+                )
+            )
+
+        self.console.print()
+        return True
+
+    def _cmd_plugins_validate(self, args: str) -> bool:
+        """Validate one source plugin tree and summarize manifest/build health."""
+        runtime_plugin_manager = self.app.get('runtime_plugin_manager')
+        if not runtime_plugin_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Runtime plugin manager is not available.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        positional, _options, _flags = self._parse_plugins_action_tokens(args)
+        plugin_id = positional[0] if positional else ""
+        if not plugin_id:
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /plugins validate <plugin-id>[/{self.theme.AMBER_GLOW}]"
+            )
+            return True
+
+        validation = runtime_plugin_manager.validate_source_plugin(plugin_id)
+        self._show_command_panel(
+            f"Validate {plugin_id}",
+            subtitle="Check source plugin manifest health, runtime handshake readiness, and build prerequisites.",
+            accent=self.theme.BLUE_SOFT,
+            meta=str(validation.get("source_dir", "")),
+        )
+
+        self.console.print(
+            self._build_key_value_table(
+                [
+                    ("Plugin ID", validation.get("plugin_id", plugin_id)),
+                    ("Runtime Family", validation.get("runtime_family", "(unknown)")),
+                    ("Delivery", validation.get("delivery", "(unknown)")),
+                    ("Template", validation.get("template_id", "(none)") or "(none)"),
+                    ("Entry Strategy", validation.get("entry_strategy", "(none)") or "(none)"),
+                    ("Packaging", validation.get("packaging_format", "(none)") or "(none)"),
+                    ("Protocol", "RC Ready" if validation.get("protocol_supported") else validation.get("protocol_status", "unknown")),
+                    ("Entry", validation.get("entry_path", "(none)") or "(none)"),
+                ]
+            )
+        )
+        self.console.print()
+
+        errors = [str(item) for item in validation.get("errors", []) if str(item).strip()]
+        warnings = [str(item) for item in validation.get("warnings", []) if str(item).strip()]
+        unresolved = [str(item) for item in validation.get("unresolved_tokens", []) if str(item).strip()]
+
+        if errors:
+            self.console.print(
+                Panel(
+                    "\n".join(f"- {item}" for item in errors),
+                    title=f"[bold {self.theme.CORAL_SOFT}]Errors[/bold {self.theme.CORAL_SOFT}]",
+                    border_style=self.theme.CORAL_SOFT,
+                    box=box.ROUNDED,
+                )
+            )
+            self.console.print()
+
+        if warnings:
+            self.console.print(
+                Panel(
+                    "\n".join(f"- {item}" for item in warnings[:12]),
+                    title=f"[bold {self.theme.AMBER_GLOW}]Warnings[/bold {self.theme.AMBER_GLOW}]",
+                    border_style=self.theme.AMBER_GLOW,
+                    box=box.ROUNDED,
+                )
+            )
+            self.console.print()
+
+        if unresolved:
+            self.console.print(
+                Panel(
+                    "\n".join(unresolved[:12]),
+                    title=f"[bold {self.theme.PURPLE_SOFT}]Unresolved Tokens[/bold {self.theme.PURPLE_SOFT}]",
+                    border_style=self.theme.PURPLE_SOFT,
+                    box=box.ROUNDED,
+                )
+            )
+            self.console.print()
+
+        build_commands = [str(item) for item in validation.get("build_commands", []) if str(item).strip()]
+        if build_commands:
+            self.console.print(
+                Panel(
+                    "\n".join(build_commands),
+                    title=f"[bold {self.theme.BLUE_SOFT}]Build Commands[/bold {self.theme.BLUE_SOFT}]",
+                    border_style=self.theme.BORDER_PRIMARY,
+                    box=box.ROUNDED,
+                )
+            )
+            self.console.print()
+
+        return True
+
+    def _cmd_plugins_build(self, args: str) -> bool:
+        """Build one source plugin and optionally install it into `.reverie/plugins`."""
+        runtime_plugin_manager = self.app.get('runtime_plugin_manager')
+        if not runtime_plugin_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Runtime plugin manager is not available.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        positional, _options, flags = self._parse_plugins_action_tokens(args)
+        plugin_id = positional[0] if positional else ""
+        if not plugin_id:
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /plugins build <plugin-id> [install] [overwrite][/{self.theme.AMBER_GLOW}]"
+            )
+            return True
+
+        result = runtime_plugin_manager.build_source_plugin(
+            plugin_id,
+            install="install" in flags,
+            overwrite_install="overwrite" in flags,
+        )
+        validation = result.get("validation", {}) or {}
+
+        self._show_command_panel(
+            f"Build {plugin_id}",
+            subtitle="Run the declared plugin build commands and optionally sync the result into the runtime install root.",
+            accent=self.theme.BLUE_SOFT,
+            meta=str(validation.get("source_dir", runtime_plugin_manager.source_root)),
+        )
+
+        commands = result.get("commands", []) or []
+        if not result.get("success", False):
+            self._show_activity_event(
+                "Plugins",
+                "Plugin build failed.",
+                status="error",
+                detail=str(result.get("error") or ""),
+            )
+        else:
+            self._show_activity_event(
+                "Plugins",
+                "Plugin build completed.",
+                status="success",
+                detail="Compiled entry resolved and validation passed.",
+            )
+
+        self.console.print()
+        self.console.print(
+            self._build_key_value_table(
+                [
+                    ("Plugin ID", validation.get("plugin_id", plugin_id)),
+                    ("Compiled Entry", validation.get("compiled_entry_path", "(none)") or "(none)"),
+                    ("Source Fallback", validation.get("source_entry_path", "(none)") or "(none)"),
+                    ("Install Requested", "yes" if "install" in flags else "no"),
+                    (
+                        "Install Target",
+                        ((result.get("install_result", {}) or {}).get("target_dir") if isinstance(result.get("install_result"), dict) else "")
+                        or "(none)",
+                    ),
+                ]
+            )
+        )
+        self.console.print()
+
+        if commands:
+            command_table = Table(
+                title=f"[bold {self.theme.PINK_SOFT}]{self.deco.CRYSTAL} Build Steps[/bold {self.theme.PINK_SOFT}]",
+                box=box.ROUNDED,
+                border_style=self.theme.BORDER_PRIMARY,
+                expand=True,
+            )
+            command_table.add_column("Command", style=f"bold {self.theme.BLUE_SOFT}", ratio=2)
+            command_table.add_column("Status", style=self.theme.TEXT_SECONDARY, width=10)
+            command_table.add_column("Detail", style=self.theme.TEXT_DIM, ratio=3)
+            for item in commands:
+                success = bool(item.get("success", False))
+                status_color = self.theme.MINT_SOFT if success else self.theme.CORAL_SOFT
+                detail = str(item.get("error") or item.get("stderr") or item.get("stdout") or "").strip()
+                command_table.add_row(
+                    str(item.get("command", "")),
+                    f"[{status_color}]{'ok' if success else 'failed'}[/{status_color}]",
+                    escape(self._truncate_middle(detail, 120) or "(no output)"),
+                )
+            self.console.print(command_table)
+            self.console.print()
+
+        if not result.get("success", False):
+            return True
+
+        warnings = [str(item) for item in validation.get("warnings", []) if str(item).strip()]
+        if warnings:
+            self.console.print(
+                Panel(
+                    "\n".join(f"- {item}" for item in warnings[:12]),
+                    title=f"[bold {self.theme.AMBER_GLOW}]Warnings[/bold {self.theme.AMBER_GLOW}]",
+                    border_style=self.theme.AMBER_GLOW,
+                    box=box.ROUNDED,
+                )
+            )
+            self.console.print()
+        return True
+
+    def _cmd_plugins_templates(self, args: str) -> bool:
+        """Inspect available source templates for runtime plugins."""
+        runtime_plugin_manager = self.app.get('runtime_plugin_manager')
+        if not runtime_plugin_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Runtime plugin manager is not available.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        query = str(args or "").strip()
+        lowered = query.lower()
+        if lowered.startswith("inspect "):
+            return self._cmd_plugins_template_inspect(query[8:].strip())
+        if query and lowered not in {"", "list", "status"}:
+            return self._cmd_plugins_template_inspect(query)
+
+        rows = runtime_plugin_manager.list_template_rows(force_refresh=False)
+        summary = runtime_plugin_manager.get_status_summary(force_refresh=False)
+
+        self._show_command_panel(
+            "Plugin Templates",
+            subtitle="Source templates for authoring compiled runtime plugins with Reverie CLI protocol support.",
+            accent=self.theme.BLUE_SOFT,
+            meta=str(summary.get("template_root", "")),
+        )
+
+        self.console.print(
+            self._build_key_value_table(
+                [
+                    ("Template Root", summary.get("template_root", "")),
+                    ("Template Count", str(summary.get("template_count", 0))),
+                    ("Recommended", "runtime_python_exe"),
+                ]
+            )
+        )
+        self.console.print()
+
+        if not rows:
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} No plugin templates are currently available.[/{self.theme.TEXT_DIM}]"
+            )
+            self.console.print()
+            return True
+
+        table = Table(
+            title=f"[bold {self.theme.PINK_SOFT}]{self.deco.CRYSTAL} Runtime Plugin Templates[/bold {self.theme.PINK_SOFT}]",
+            box=box.ROUNDED,
+            border_style=self.theme.BORDER_PRIMARY,
+            expand=True,
+        )
+        table.add_column("Template", style=f"bold {self.theme.BLUE_SOFT}", width=24)
+        table.add_column("Delivery", style=self.theme.TEXT_SECONDARY, width=14)
+        table.add_column("Entry", style=self.theme.TEXT_SECONDARY, width=18)
+        table.add_column("Manifest", style=self.theme.TEXT_SECONDARY, width=18)
+        table.add_column("Build", style=self.theme.TEXT_DIM, width=22)
+        table.add_column("Description", style=self.theme.TEXT_PRIMARY, ratio=3)
+
+        for row in rows:
+            table.add_row(
+                row.get("id", ""),
+                row.get("delivery", ""),
+                row.get("entry_template", "-"),
+                row.get("manifest_template", "-"),
+                self._truncate_middle(row.get("build_hint", ""), 22) or "-",
+                row.get("description", ""),
+            )
+
+        self.console.print(table)
+        self.console.print()
+        self.console.print(
+            Panel(
+                Text.from_markup(
+                    f"[bold {self.theme.BLUE_SOFT}]/plugins templates[/bold {self.theme.BLUE_SOFT}] list available templates\n"
+                    f"[bold {self.theme.BLUE_SOFT}]/plugins template inspect runtime_python_exe[/bold {self.theme.BLUE_SOFT}] inspect one template"
+                ),
+                title=f"[bold {self.theme.PURPLE_SOFT}]{self.deco.DIAMOND} Shortcuts[/bold {self.theme.PURPLE_SOFT}]",
+                border_style=self.theme.BORDER_SUBTLE,
+                box=box.ROUNDED,
+                padding=(0, 1),
+            )
+        )
+        self.console.print()
+        return True
+
+    def _cmd_plugins_template_inspect(self, template_id: str) -> bool:
+        """Inspect one runtime-plugin authoring template."""
+        runtime_plugin_manager = self.app.get('runtime_plugin_manager')
+        if not runtime_plugin_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Runtime plugin manager is not available.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        wanted = str(template_id or "").strip()
+        if not wanted:
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /plugins template inspect <template-id>[/{self.theme.AMBER_GLOW}]"
+            )
+            return True
+
+        record = runtime_plugin_manager.get_template(wanted, force_refresh=False)
+        if record is None:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Runtime plugin template not found: {escape(wanted)}[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        self._show_command_panel(
+            f"Template {record.display_name}",
+            subtitle="Reusable source template for Reverie CLI runtime plugins.",
+            accent=self.theme.BLUE_SOFT,
+            meta=str(record.template_dir),
+        )
+
+        overview = self._build_key_value_table(
+            [
+                ("Template ID", record.template_id),
+                ("Delivery", record.delivery),
+                ("Entry Template", record.entry_template or "(none)"),
+                ("Manifest Template", record.manifest_template or "(none)"),
+                ("Build Hint", record.build_hint or "(none)"),
+                ("Template Dir", record.template_dir),
+            ]
+        )
+        self.console.print(overview)
+        self.console.print()
+
+        if record.description:
+            self.console.print(
+                Panel(
+                    escape(record.description),
+                    title=f"[bold {self.theme.PINK_SOFT}]Description[/bold {self.theme.PINK_SOFT}]",
+                    border_style=self.theme.BORDER_SUBTLE,
+                    box=box.ROUNDED,
+                )
+            )
+            self.console.print()
+
+        files_table = Table(
+            title=f"[bold {self.theme.PURPLE_SOFT}]{self.deco.CRYSTAL} Template Files[/bold {self.theme.PURPLE_SOFT}]",
+            box=box.ROUNDED,
+            border_style=self.theme.BORDER_SUBTLE,
+            expand=True,
+        )
+        files_table.add_column("Path", style=f"bold {self.theme.BLUE_SOFT}", ratio=2)
+        files_table.add_column("Kind", style=self.theme.TEXT_SECONDARY, width=16)
+        files_table.add_column("Bytes", style=self.theme.TEXT_DIM, width=10)
+
+        template_files = sorted(
+            [item for item in record.template_dir.rglob("*") if item.is_file()],
+            key=lambda path: str(path.relative_to(record.template_dir)).lower(),
+        )
+        for item in template_files:
+            relative_path = str(item.relative_to(record.template_dir))
+            kind = item.suffix.lstrip(".") or "file"
+            try:
+                size_text = str(item.stat().st_size)
+            except Exception:
+                size_text = "?"
+            files_table.add_row(relative_path, kind, size_text)
+        self.console.print(files_table)
+        self.console.print()
+
+        previews: list[tuple[str, str, str]] = []
+        manifest_path = record.template_dir / record.manifest_template
+        if manifest_path.is_file():
+            previews.append(("Manifest Preview", str(manifest_path), "json"))
+        entry_path = record.template_dir / record.entry_template
+        if entry_path.is_file():
+            previews.append(("Entry Preview", str(entry_path), "python"))
+
+        for title, path_text, language in previews:
+            try:
+                content = Path(path_text).read_text(encoding="utf-8")
+            except Exception as exc:
+                content = f"Failed to read template preview: {exc}"
+                language = "text"
+            self.console.print(
+                Panel(
+                    Syntax(content, language, theme="monokai", line_numbers=False, word_wrap=False),
+                    title=f"[bold {self.theme.BLUE_SOFT}]{escape(title)}[/bold {self.theme.BLUE_SOFT}]",
+                    subtitle=self._truncate_middle(path_text, 88),
+                    border_style=self.theme.BORDER_PRIMARY,
+                    box=box.ROUNDED,
+                    padding=(0, 1),
+                )
+            )
+            self.console.print()
         return True
 
     def _cmd_plugins_inspect(self, plugin_id: str) -> bool:
@@ -4363,15 +4896,36 @@ class CommandHandler:
             [
                 ("Plugin ID", record.plugin_id),
                 ("Runtime Type", record.runtime_family),
+                ("Delivery", record.delivery_label),
                 ("Entry Status", record.status_label),
                 ("Protocol", record.protocol_label),
                 ("Entry", record.entry_display),
+                ("Compiled Entry", record.compiled_entry_display),
+                ("Source Fallback", record.source_entry_display),
+                ("Entry Strategy", record.entry_strategy or "(default)"),
+                ("Packaging", record.packaging_format or "(default)"),
+                ("Manifest Schema", record.manifest_schema_version or "(legacy)"),
+                ("Template", record.template_id or "(none)"),
+                ("Build Commands", ", ".join(record.build_commands) if record.build_commands else "(none)"),
                 ("Version", record.version or "(none)"),
+                ("Manifest", record.manifest_path or "(none)"),
                 ("Install Dir", record.install_display),
             ]
         )
         self.console.print(overview)
         self.console.print()
+
+        if record.manifest_warnings:
+            warning_lines = "\n".join(f"- {item}" for item in record.manifest_warnings)
+            self.console.print(
+                Panel(
+                    warning_lines,
+                    title=f"[bold {self.theme.AMBER_GLOW}]Manifest Warnings[/bold {self.theme.AMBER_GLOW}]",
+                    border_style=self.theme.AMBER_GLOW,
+                    box=box.ROUNDED,
+                )
+            )
+            self.console.print()
 
         if record.protocol is None:
             message = record.protocol_error or "This runtime has not responded to the Reverie CLI `-RC` handshake yet."

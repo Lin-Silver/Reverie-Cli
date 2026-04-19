@@ -76,6 +76,33 @@ def _capability_summary(profile: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _scale_fit(summary: Dict[str, Any], game_request: Dict[str, Any]) -> Dict[str, Any]:
+    production = dict(game_request.get("production", {}) or {})
+    large_scale_profile = dict(production.get("large_scale_profile", {}) or {})
+    live_service_enabled = bool(production.get("live_service_profile", {}).get("enabled", False))
+    runtime_contract_count = len(large_scale_profile.get("runtime_contracts", []) or [])
+    reference_fit_score = int(summary.get("reference_fit_score", 0) or 0)
+    score = 45 + min(reference_fit_score // 4, 20)
+    if summary.get("world_streaming_capability") == "regional_streaming_ready":
+        score += 15
+    if summary.get("combat_capability_profile") in {"third_person_action_base", "future_large_scale_combat_base"}:
+        score += 10
+    if runtime_contract_count >= 4:
+        score += 5
+    if live_service_enabled:
+        score += 5
+    score = max(0, min(100, score))
+    verdict = "slice_first_large_scale_candidate" if score >= 70 else "credible_slice_runtime" if score >= 55 else "prototype_bias"
+    return {
+        "score": score,
+        "verdict": verdict,
+        "notes": [
+            "Prefer runtimes that can scaffold a verified slice now while preserving future region and roster contracts.",
+            "Reference fit can raise planning confidence, but scaffold readiness still decides whether the runtime can ship the first slice here.",
+        ],
+    }
+
+
 def build_runtime_capability_graph(
     game_request: Dict[str, Any],
     runtime_selection: Dict[str, Any],
@@ -97,6 +124,7 @@ def build_runtime_capability_graph(
         summary["reference_fit"] = str(alignment.get("fit", "unknown"))
         summary["reference_execution_readiness"] = str(alignment.get("execution_readiness", "unknown"))
         summary["reference_support"] = list(alignment.get("supporting_references", []) or [])
+        summary["scale_fit"] = _scale_fit(summary, game_request)
     selected_summary = next(
         (summary for summary in summaries if summary["runtime_id"] == selected_runtime),
         _capability_summary(dict(runtime_selection.get("profile", {}) or {"id": selected_runtime})),
@@ -127,6 +155,15 @@ def build_runtime_capability_graph(
             for ref_id in alignment.get("supporting_references", []) or []
         ],
         "selected_summary": selected_summary,
+        "risk_nodes": [
+            {
+                "id": f"{summary['runtime_id']}_validation_risk",
+                "runtime_id": summary["runtime_id"],
+                "severity": "medium" if summary.get("reference_execution_readiness") == "scaffold_ready" else "high",
+                "summary": "Runtime validation and scale-up discipline must stay attached to the same project memory.",
+            }
+            for summary in summaries
+        ],
         "reference_sources": [
             {
                 "id": item.get("id", ""),

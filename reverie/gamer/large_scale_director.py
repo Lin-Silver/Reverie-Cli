@@ -361,6 +361,8 @@ def build_production_operating_model(
 
     reference_intelligence = dict(reference_intelligence or runtime_selection.get("reference_intelligence", {}) or {})
     reference_stack = list(reference_intelligence.get("recommended_reference_stack", []) or [])
+    toolchain_matrix = list(reference_intelligence.get("toolchain_matrix", []) or [])
+    adoption_plan = list(reference_intelligence.get("adoption_plan", []) or [])
     live_service = _live_service_enabled(game_request)
     runtime = str(runtime_delivery_plan.get("runtime", target_runtime(blueprint, runtime_profile)))
 
@@ -441,6 +443,18 @@ def build_production_operating_model(
                 ],
             }
         )
+    if toolchain_matrix:
+        workstreams.append(
+            {
+                "id": "reference_and_toolchain",
+                "goal": "Keep runtime templates, DCC tooling, and asset validation references aligned with the active production lane.",
+                "artifacts": [
+                    "artifacts/reference_intelligence.json",
+                    "artifacts/asset_pipeline.json",
+                    "artifacts/runtime_delivery_plan.json",
+                ],
+            }
+        )
 
     validation_stack = [
         "runtime validation",
@@ -461,6 +475,8 @@ def build_production_operating_model(
         "toolchain": {
             "runtime_root": str(runtime_delivery_plan.get("runtime_root", ".")),
             "reference_stack": reference_stack,
+            "toolchain_matrix": toolchain_matrix,
+            "adoption_plan": adoption_plan,
             "dcc_stack": [
                 item.get("reference_id", "")
                 for item in reference_stack

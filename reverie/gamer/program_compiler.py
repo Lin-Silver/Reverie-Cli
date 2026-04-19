@@ -85,11 +85,166 @@ def _signature_systems(game_request: Dict[str, Any]) -> List[str]:
     return list(dict.fromkeys(systems))
 
 
+def _platform_strategy(game_request: Dict[str, Any], runtime_profile: Dict[str, Any] | None) -> Dict[str, Any]:
+    quality = dict(game_request.get("quality_targets", {}) or {})
+    experience = dict(game_request.get("experience", {}) or {})
+    production = dict(game_request.get("production", {}) or {})
+    large_scale_profile = dict(production.get("large_scale_profile", {}) or {})
+    explicit_targets = [
+        str(item).strip()
+        for item in quality.get("target_platforms", []) or []
+        if str(item).strip()
+    ]
+    if not explicit_targets:
+        explicit_targets = ["PC"]
+        if str(experience.get("dimension", "3D")).upper() == "3D":
+            explicit_targets.append("Console")
+        if production.get("live_service_profile", {}).get("enabled"):
+            explicit_targets.append("Mobile")
+    runtime_id = str((runtime_profile or {}).get("id", "") or game_request.get("runtime_preferences", {}).get("preferred_runtime", "reverie_engine"))
+    return {
+        "target_platforms": explicit_targets,
+        "primary_runtime": runtime_id,
+        "rendering_priority": (
+            "stylized_high_readability_3d"
+            if str(experience.get("dimension", "3D")).upper() == "3D"
+            else "fast_iteration_readability"
+        ),
+        "input_profiles": ["controller", "keyboard_mouse"] + (["touch_fallback"] if "Mobile" in explicit_targets else []),
+        "optimization_bias": (
+            "cross_platform_streaming_and_vfx_discipline"
+            if int(large_scale_profile.get("launch_region_target", 1) or 1) >= 3
+            else "slice_boot_speed_and_combat_feel"
+        ),
+    }
+
+
+def _production_scale(
+    game_request: Dict[str, Any],
+    *,
+    large_scale_signal: bool,
+) -> Dict[str, Any]:
+    production = dict(game_request.get("production", {}) or {})
+    large_scale_profile = dict(production.get("large_scale_profile", {}) or {})
+    live_service_profile = dict(production.get("live_service_profile", {}) or {})
+    return {
+        "project_scale": "large_scale" if large_scale_signal else "regional",
+        "launch_region_target": int(large_scale_profile.get("launch_region_target", 1) or 1),
+        "post_launch_region_target": int(large_scale_profile.get("post_launch_region_target", 2) or 2),
+        "starter_party_size": int(large_scale_profile.get("starter_party_size", 1) or 1),
+        "world_cell_strategy": str(large_scale_profile.get("world_cell_strategy", "single_slice_lane")),
+        "content_cadence": str(
+            large_scale_profile.get(
+                "content_cadence",
+                live_service_profile.get("cadence", "major_expansion_packs"),
+            )
+        ),
+        "delivery_mode": "slice_first_then_live_growth" if live_service_profile.get("enabled") else "slice_first_then_campaign_growth",
+    }
+
+
+def _content_operating_model(game_request: Dict[str, Any]) -> Dict[str, Any]:
+    production = dict(game_request.get("production", {}) or {})
+    experience = dict(game_request.get("experience", {}) or {})
+    live_service_profile = dict(production.get("live_service_profile", {}) or {})
+    party_model = str(experience.get("party_model", "single_hero_focus"))
+    tracks = [
+        "main_chapter_delivery",
+        "regional_route_and_landmark_kits",
+        "boss_and_elite_progression",
+        "questline_and_commission_refresh",
+        "combat_balance_and_telegraph_polish",
+    ]
+    if party_model != "single_hero_focus":
+        tracks.append("roster_wave_and_team_synergy_delivery")
+    if live_service_profile.get("enabled"):
+        tracks.append("event_and_version_cadence")
+    return {
+        "delivery_tracks": tracks,
+        "authoring_lanes": [
+            "design_program_and_risk",
+            "runtime_and_systems",
+            "world_and_quest",
+            "character_and_roster",
+            "environment_and_landmarks",
+            "playtest_and_optimization",
+        ],
+        "release_train": {
+            "launch": ["verified_slice", "starter_region_pack", "first_boss_arc"],
+            "post_launch": (
+                ["region_update", "character_wave", "event_story"]
+                if live_service_profile.get("enabled")
+                else ["campaign_expansion", "new_region", "boss_rematch_pack"]
+            ),
+        },
+    }
+
+
+def _technical_guardrails(
+    game_request: Dict[str, Any],
+    reference_intelligence: Dict[str, Any] | None,
+    runtime_capability_graph: Dict[str, Any] | None,
+) -> Dict[str, Any]:
+    production = dict(game_request.get("production", {}) or {})
+    quality = dict(game_request.get("quality_targets", {}) or {})
+    large_scale_profile = dict(production.get("large_scale_profile", {}) or {})
+    selected_summary = dict((runtime_capability_graph or {}).get("selected_summary", {}) or {})
+    adoption_plan = list((reference_intelligence or {}).get("adoption_plan", []) or [])
+    return {
+        "runtime_contracts": [
+            str(item).strip()
+            for item in large_scale_profile.get("runtime_contracts", []) or []
+            if str(item).strip()
+        ],
+        "selected_runtime_root": str(selected_summary.get("runtime_root", ".")),
+        "performance_target": {
+            "target_fps": int(quality.get("target_fps", 60) or 60),
+            "target_load_time_seconds": int(quality.get("target_load_time_seconds", 12) or 12),
+        },
+        "authoring_rules": [
+            "Protect readable silhouettes, encounter telegraphs, and landmark clarity before raw content breadth.",
+            "Treat streaming, VFX density, AI density, and party size as one shared performance problem.",
+            "Do not widen region count until the current slice keeps validation, combat feel, and asset import health stable together.",
+        ],
+        "reference_adoption": [str(item.get("id", "")).strip() for item in adoption_plan if str(item.get("id", "")).strip()],
+    }
+
+
+def _continuation_contract(
+    game_request: Dict[str, Any],
+    reference_intelligence: Dict[str, Any] | None,
+) -> Dict[str, Any]:
+    production = dict(game_request.get("production", {}) or {})
+    return {
+        "continuation_ready": bool(production.get("continuation_ready", False)),
+        "resume_priority": [
+            "artifacts/game_program.json",
+            "artifacts/runtime_delivery_plan.json",
+            "artifacts/world_program.json",
+            "artifacts/gameplay_factory.json",
+            "playtest/slice_score.json",
+        ],
+        "next_turn_operations": [
+            "expand_region",
+            "plan_boss_arc",
+            "upgrade_gameplay_factory",
+            "run_quality_gates",
+        ],
+        "reference_reopen_order": [
+            str(item.get("id", "")).strip()
+            for item in (reference_intelligence or {}).get("adoption_plan", []) or []
+            if str(item.get("id", "")).strip()
+        ],
+    }
+
+
 def build_game_program(
     game_request: Dict[str, Any],
     blueprint: Dict[str, Any],
     *,
     runtime_profile: Dict[str, Any] | None = None,
+    reference_intelligence: Dict[str, Any] | None = None,
+    runtime_capability_graph: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """Compile a durable project program from the request and blueprint."""
 
@@ -128,6 +283,14 @@ def build_game_program(
         if str(item).strip()
     ]
     signature_systems = _signature_systems(game_request)
+    aaa_product_profile: Dict[str, Any] = {}
+    if str(production.get("target_quality", "")).strip().lower() == "aaa" or large_scale_signal:
+        try:
+            from .aaa_game_compiler import build_aaa_product_profile
+
+            aaa_product_profile = build_aaa_product_profile(game_request)
+        except Exception:
+            aaa_product_profile = {}
 
     return {
         "schema_version": "reverie.game_program/1",
@@ -207,6 +370,22 @@ def build_game_program(
                 )
             ),
         },
+        "production_scale": _production_scale(game_request, large_scale_signal=large_scale_signal),
+        "platform_strategy": _platform_strategy(game_request, runtime_profile),
+        "product_strategy": {
+            "target_quality": str(production.get("target_quality", "aa")),
+            "vision_statement": str(aaa_product_profile.get("vision_statement", "")),
+            "target_audience": dict(aaa_product_profile.get("target_audience", {}) or {}),
+            "unique_selling_points": list(aaa_product_profile.get("unique_selling_points", []) or []),
+            "monetization_strategy": dict(aaa_product_profile.get("monetization_strategy", {}) or {}),
+            "live_service_plan": dict(aaa_product_profile.get("live_service_plan", {}) or {}),
+        },
+        "world_fantasy": {
+            "world_design": dict(aaa_product_profile.get("world_design", {}) or {}),
+            "narrative_framework": dict(aaa_product_profile.get("narrative_framework", {}) or {}),
+            "content_targets": dict(aaa_product_profile.get("content_targets", {}) or {}),
+        },
+        "content_operating_model": _content_operating_model(game_request),
         "design_operating_system": _design_operating_system(game_request),
         "scale_tracks": {
             "campaign_track": "multi_region_chapter_growth" if large_scale_signal else "single_slice_to_frontier_growth",
@@ -228,6 +407,11 @@ def build_game_program(
                 "artifacts/production_operating_model.json",
             ],
         },
+        "technical_guardrails": _technical_guardrails(
+            game_request,
+            reference_intelligence,
+            runtime_capability_graph,
+        ),
         "production_contract": {
             "requested_scope": production.get("requested_scope", "vertical_slice"),
             "delivery_scope": production.get("delivery_scope", "vertical_slice"),
@@ -242,12 +426,14 @@ def build_game_program(
                 production.get("one_prompt_goal", "prompt -> game program -> runtime foundation -> verified 3d slice -> continuity pack")
             ),
         },
+        "continuation_contract": _continuation_contract(game_request, reference_intelligence),
         "success_criteria": {
             "target_fps": int(quality.get("target_fps", 60) or 60),
             "target_load_time_seconds": int(quality.get("target_load_time_seconds", 12) or 12),
             "slice_playable_minutes": int(quality.get("slice_playable_minutes", 20) or 20),
             "must_have": list(quality.get("must_have", []) or []),
         },
+        "aaa_product_profile": aaa_product_profile,
     }
 
 
@@ -281,6 +467,58 @@ def game_bible_markdown(program: Dict[str, Any]) -> str:
     for key, value in program.get("world_direction", {}).items():
         lines.append(f"- {key}: {value}")
     lines.append("")
+    lines.append("## Platform Strategy")
+    for key, value in program.get("platform_strategy", {}).items():
+        if isinstance(value, list):
+            lines.append(f"- {key}:")
+            for item in value:
+                lines.append(f"  - {item}")
+        elif isinstance(value, dict):
+            lines.append(f"- {key}:")
+            for item_key, item_value in value.items():
+                lines.append(f"  - {item_key}: {item_value}")
+        else:
+            lines.append(f"- {key}: {value}")
+    lines.append("")
+    lines.append("## Product Strategy")
+    for key, value in program.get("product_strategy", {}).items():
+        if isinstance(value, list):
+            lines.append(f"- {key}:")
+            for item in value:
+                lines.append(f"  - {item}")
+        elif isinstance(value, dict):
+            lines.append(f"- {key}:")
+            for item_key, item_value in value.items():
+                lines.append(f"  - {item_key}: {item_value}")
+        else:
+            lines.append(f"- {key}: {value}")
+    lines.append("")
+    lines.append("## World Fantasy")
+    for key, value in program.get("world_fantasy", {}).items():
+        if isinstance(value, list):
+            lines.append(f"- {key}:")
+            for item in value:
+                lines.append(f"  - {item}")
+        elif isinstance(value, dict):
+            lines.append(f"- {key}:")
+            for item_key, item_value in value.items():
+                lines.append(f"  - {item_key}: {item_value}")
+        else:
+            lines.append(f"- {key}: {value}")
+    lines.append("")
+    lines.append("## Content Operating Model")
+    for key, value in program.get("content_operating_model", {}).items():
+        if isinstance(value, list):
+            lines.append(f"- {key}:")
+            for item in value:
+                lines.append(f"  - {item}")
+        elif isinstance(value, dict):
+            lines.append(f"- {key}:")
+            for item_key, item_value in value.items():
+                lines.append(f"  - {item_key}: {item_value}")
+        else:
+            lines.append(f"- {key}: {value}")
+    lines.append("")
     lines.append("## Design Operating System")
     for key, value in program.get("design_operating_system", {}).items():
         if isinstance(value, list):
@@ -290,8 +528,30 @@ def game_bible_markdown(program: Dict[str, Any]) -> str:
         else:
             lines.append(f"- {key}: {value}")
     lines.append("")
+    lines.append("## Technical Guardrails")
+    for key, value in program.get("technical_guardrails", {}).items():
+        if isinstance(value, list):
+            lines.append(f"- {key}:")
+            for item in value:
+                lines.append(f"  - {item}")
+        elif isinstance(value, dict):
+            lines.append(f"- {key}:")
+            for item_key, item_value in value.items():
+                lines.append(f"  - {item_key}: {item_value}")
+        else:
+            lines.append(f"- {key}: {value}")
+    lines.append("")
     lines.append("## Scale Tracks")
     for key, value in program.get("scale_tracks", {}).items():
+        if isinstance(value, list):
+            lines.append(f"- {key}:")
+            for item in value:
+                lines.append(f"  - {item}")
+        else:
+            lines.append(f"- {key}: {value}")
+    lines.append("")
+    lines.append("## Continuation Contract")
+    for key, value in program.get("continuation_contract", {}).items():
         if isinstance(value, list):
             lines.append(f"- {key}:")
             for item in value:

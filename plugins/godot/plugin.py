@@ -22,7 +22,28 @@ try:
 except ImportError:  # pragma: no cover - non-Windows fallback
     winreg = None
 
-_SDK_DIR = Path(__file__).resolve().parents[1] / "_sdk"
+def _resolve_sdk_dir() -> Path:
+    candidates: list[Path] = []
+    bundle_root = getattr(sys, "_MEIPASS", "")
+    if bundle_root:
+        candidates.append(Path(str(bundle_root)).resolve(strict=False) / "_sdk")
+
+    here = Path(__file__).resolve()
+    candidates.append(here.parents[1] / "_sdk")
+    candidates.append(here.parent / "_sdk")
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        normalized = str(candidate).lower()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        if candidate.exists():
+            return candidate
+    return candidates[0]
+
+
+_SDK_DIR = _resolve_sdk_dir()
 if str(_SDK_DIR) not in sys.path:
     sys.path.insert(0, str(_SDK_DIR))
 

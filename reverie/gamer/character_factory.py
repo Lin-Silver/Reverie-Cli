@@ -43,6 +43,11 @@ def build_character_kits(
             "combat_affinity": str(seed.get("combat_affinity", "steel")),
             "source_stub": str(seed.get("source_stub", "")),
             "runtime_target": str(seed.get("runtime_target", "")),
+            "production_role": (
+                "starter_party_core"
+                if str(seed.get("combat_role", "vanguard")) == "vanguard"
+                else "starter_party_extension"
+            ),
         }
         for seed in modeling_seed
         if str(seed.get("category", "")) == "character" and bool(seed.get("playable", False))
@@ -72,4 +77,8 @@ def build_character_kits(
         "hero_kits": hero_kits,
         "npc_kits": npc_kits,
         "enemy_kits": enemy_kits,
+        "roster_rules": [
+            "Starter hero kits should cover route ownership, boss punish conversion, sustain, and spacing control before adding rarer variants.",
+            "Hero kit ids and combat roles should stay stable so future region and boss waves can target them safely.",
+        ],
     }

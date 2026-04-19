@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 import json
@@ -69,10 +70,39 @@ def compile_aaa_game_program(
     }
 
 
+def build_aaa_product_profile(game_request: Dict[str, Any]) -> Dict[str, Any]:
+    """Build a reusable AAA product profile from an existing compiled request."""
+
+    prompt = str(game_request.get("source_prompt", "") or "")
+    enhanced_request = _enhance_for_aaa(deepcopy(game_request), prompt)
+    game_program = _generate_game_program(enhanced_request, prompt)
+    return {
+        "schema_version": "reverie.aaa_product_profile/1",
+        "generated_at": _utc_now(),
+        "project_name": enhanced_request.get("meta", {}).get("project_name", "Untitled AAA Game"),
+        "target_quality": str(enhanced_request.get("production", {}).get("target_quality", "aaa")),
+        "vision_statement": game_program.get("vision_statement", ""),
+        "core_pillars": list(game_program.get("core_pillars", []) or []),
+        "target_audience": dict(game_program.get("target_audience", {}) or {}),
+        "unique_selling_points": list(game_program.get("unique_selling_points", []) or []),
+        "gameplay_pillars": dict(game_program.get("gameplay_pillars", {}) or {}),
+        "world_design": dict(game_program.get("world_design", {}) or {}),
+        "narrative_framework": dict(game_program.get("narrative_framework", {}) or {}),
+        "monetization_strategy": dict(game_program.get("monetization_strategy", {}) or {}),
+        "live_service_plan": dict(game_program.get("live_service_plan", {}) or {}),
+        "feature_targets": dict(_generate_feature_matrix(enhanced_request, game_program) or {}),
+        "content_targets": dict(_generate_content_matrix(enhanced_request, game_program) or {}),
+        "milestone_targets": dict(_generate_milestone_board(enhanced_request, game_program) or {}),
+        "risk_targets": dict(_generate_risk_register(enhanced_request, game_program) or {}),
+        "quality_targets": dict(enhanced_request.get("quality_targets", {}) or {}),
+        "genshin_features": dict(enhanced_request.get("genshin_features", {}) or {}),
+    }
+
+
 def _enhance_for_aaa(game_request: Dict[str, Any], prompt: str) -> Dict[str, Any]:
     """Enhance game request with AAA-quality features."""
     
-    enhanced = dict(game_request)
+    enhanced = deepcopy(game_request)
     source_prompt = prompt.lower()
     
     # Detect if this is a Genshin/Wuthering-like game
@@ -124,7 +154,9 @@ def _enhance_for_aaa(game_request: Dict[str, Any], prompt: str) -> Dict[str, Any
         "world_size": "Large Open World (10+ km²)",
         "content_hours": "100+ hours",
     })
+    quality_targets["world_size"] = "Large Open World (10+ km2)"
     enhanced["quality_targets"] = quality_targets
+    enhanced.setdefault("production", {})["target_quality"] = "aaa"
     
     return enhanced
 
@@ -132,7 +164,7 @@ def _enhance_for_aaa(game_request: Dict[str, Any], prompt: str) -> Dict[str, Any
 def _enhance_for_genshin_like(game_request: Dict[str, Any], prompt: str) -> Dict[str, Any]:
     """Enhance for Genshin Impact / Wuthering Waves style games."""
     
-    enhanced = dict(game_request)
+    enhanced = deepcopy(game_request)
     
     # Add Genshin-specific systems
     enhanced["genshin_features"] = {

@@ -220,7 +220,9 @@ def test_compile_request_understands_chinese_large_scale_action_prompt(tmp_path:
     assert payload["experience"]["party_model"] == "character_swap_party"
     assert payload["production"]["delivery_scope"] == "vertical_slice"
     assert payload["production"]["continuation_ready"] is True
+    assert payload["production"]["target_quality"] == "aaa"
     assert "verified 3d slice" in payload["production"]["one_prompt_goal"]
+    assert "multi-region" in payload["production"]["full_game_aspiration"]
     assert payload["production"]["live_service_profile"]["enabled"] is True
     assert "anime_action_service_grammar" in payload["production"]["default_design_capabilities"]
     assert large_scale_profile["project_shape"] == "anime_action_open_world"
@@ -237,6 +239,8 @@ def test_compile_request_understands_chinese_large_scale_action_prompt(tmp_path:
     assert "elemental_reaction" in payload["systems"]["specialized"]
     assert "open_world_exploration" in payload["systems"]["specialized"]
     assert payload["runtime_preferences"]["preferred_runtime"] == "godot"
+    assert "PC" in payload["quality_targets"]["target_platforms"]
+    assert payload["quality_targets"]["graphics_quality"] == "AAA"
     assert directive["mode"] == "fresh_project"
     assert "expand_region" in directive["operations"]
     assert "refresh_content_expansion" in directive["operations"]
@@ -337,11 +341,22 @@ def test_plan_production_emits_system_specs_and_task_graph(tmp_path: Path) -> No
     asset_pipeline = json.loads(asset_pipeline_path.read_text(encoding="utf-8"))
     character_kits = json.loads(character_kits_path.read_text(encoding="utf-8"))
     gameplay_factory = json.loads(gameplay_factory_path.read_text(encoding="utf-8"))
+    world_program = json.loads(world_program_path.read_text(encoding="utf-8"))
     resume_state = json.loads(resume_state_path.read_text(encoding="utf-8"))
     assert game_program["target_class"] == "large_scale_3d_action_rpg_base"
     assert game_program["large_scale_blueprint"]["project_shape"] == "regional_action_rpg"
     assert game_program["large_scale_blueprint"]["launch_region_target"] >= 1
     assert game_program["large_scale_blueprint"]["starter_party_size"] >= 4
+    assert game_program["production_scale"]["project_scale"] == "large_scale"
+    assert "PC" in game_program["platform_strategy"]["target_platforms"]
+    assert game_program["product_strategy"]["target_quality"] == "aaa"
+    assert game_program["product_strategy"]["vision_statement"]
+    assert game_program["product_strategy"]["unique_selling_points"]
+    assert game_program["world_fantasy"]["world_design"]
+    assert game_program["aaa_product_profile"]["feature_targets"]["total_count"] >= 1
+    assert "runtime_and_systems" in game_program["content_operating_model"]["authoring_lanes"]
+    assert game_program["technical_guardrails"]["reference_adoption"]
+    assert game_program["continuation_contract"]["continuation_ready"] is True
     assert "party_roster" in game_program["vertical_slice_contract"]["runtime_contracts"]
     assert "world_streaming" in game_program["vertical_slice_contract"]["runtime_contracts"]
     assert game_program["design_operating_system"]["feedback_model"] == "telegraph_confirm_payoff"
@@ -358,10 +373,15 @@ def test_plan_production_emits_system_specs_and_task_graph(tmp_path: Path) -> No
     assert any(item["id"] == "character_roster" for item in production_operating_model["workstreams"])
     assert any(item["id"] == "godot-tps-demo" for item in reference_intelligence["detected_repositories"])
     assert any(item["runtime_id"] == "godot" for item in reference_intelligence["runtime_alignment"])
+    assert reference_intelligence["toolchain_matrix"]
+    assert any(item["id"] == "slice_bootstrap" for item in reference_intelligence["adoption_plan"])
     assert runtime_capability_graph["selected_runtime"] == "godot"
+    assert runtime_capability_graph["selected_summary"]["scale_fit"]["score"] >= 0
     assert runtime_delivery_plan["delivery_tracks"]["world_scale_track"] == "single_slice_lane"
     assert runtime_delivery_plan["delivery_tracks"]["launch_region_target"] >= 1
     assert runtime_delivery_plan["delivery_tracks"]["starter_party_size"] >= 4
+    assert runtime_delivery_plan["reference_inputs"]["adoption_plan"]
+    assert runtime_delivery_plan["optimization_backlog"]
     assert any(item["id"] == "party_roster" for item in runtime_delivery_plan["runtime_data_contracts"])
     assert any(item["id"] == "world_streaming" for item in runtime_delivery_plan["runtime_data_contracts"])
     assert any(item["id"] == "commission_board" for item in runtime_delivery_plan["runtime_data_contracts"])
@@ -375,6 +395,8 @@ def test_plan_production_emits_system_specs_and_task_graph(tmp_path: Path) -> No
     assert content_matrix["release_forecast"]["project_shape"] == "regional_action_rpg"
     assert content_matrix["release_forecast"]["launch_region_count"] >= 1
     assert content_matrix["release_forecast"]["starter_party_size"] >= 4
+    assert content_matrix["release_forecast"]["target_quality"] == "aaa"
+    assert "PC" in content_matrix["release_forecast"]["target_platforms"]
     assert len(content_expansion["region_seeds"]) >= 3
     assert len(asset_pipeline["production_queue"]) >= 6
     assert asset_pipeline["modeling_workspace"]["registry_path"] == "data/models/model_registry.yaml"
@@ -382,6 +404,12 @@ def test_plan_production_emits_system_specs_and_task_graph(tmp_path: Path) -> No
     assert any(item["id"] == "starter_support" for item in asset_pipeline["modeling_seed"])
     assert len(character_kits["hero_kits"]) >= 4
     assert asset_pipeline["import_profile"]["runtime"] == "godot"
+    assert world_program["world_topology"]["nodes"]
+    assert world_program["streaming_plan"]["streaming_model"]
+    assert world_program["live_ops_surfaces"]
+    assert gameplay_factory["character_archetypes"]
+    assert "starter_affinities" in gameplay_factory["elemental_matrix"]
+    assert gameplay_factory["boss_phase_templates"]
     assert "artifacts/game_program.json" in resume_state["artifacts_to_open_first"]
     assert "artifacts/design_intelligence.json" in resume_state["artifacts_to_open_first"]
     assert "artifacts/campaign_program.json" in resume_state["artifacts_to_open_first"]
@@ -480,9 +508,30 @@ def test_reference_intelligence_influences_runtime_delivery_and_guardrails(tmp_p
 
     assert any(item["reference_id"] == "o3de-multiplayersample" for item in reference_intelligence["recommended_reference_stack"])
     assert any(item["policy"] == "do_not_redistribute" for item in reference_intelligence["legal_guardrails"])
+    assert any(item["id"] == "asset_interchange" for item in reference_intelligence["toolchain_matrix"])
+    assert any(item["id"] == "scale_architecture" for item in reference_intelligence["adoption_plan"])
     assert runtime_delivery_plan["reference_inputs"]["recommended_stack"]
+    assert runtime_delivery_plan["reference_inputs"]["toolchain_matrix"]
     assert len(runtime_delivery_plan["scale_up_stages"]) >= 3
+    assert runtime_delivery_plan["optimization_backlog"]
     assert runtime_registry["reference_alignment"]["godot"]["reference_fit_score"] >= 0
+
+
+def test_compile_request_sets_aaa_quality_profile_for_large_scale_prompt(tmp_path: Path) -> None:
+    tool = GameDesignOrchestratorTool({"project_root": tmp_path})
+
+    result = tool.execute(
+        action="compile_request",
+        prompt="Build an AAA cross-platform open world 3D action RPG with character swaps, live updates, and a huge exploration map.",
+        project_name="AAA Frontier",
+    )
+
+    assert result.success is True
+    payload = json.loads((tmp_path / "artifacts" / "game_request.json").read_text(encoding="utf-8"))
+    assert payload["production"]["target_quality"] == "aaa"
+    assert payload["quality_targets"]["target_resolution"] == "4K"
+    assert "PC" in payload["quality_targets"]["target_platforms"]
+    assert payload["quality_targets"]["content_hours"]
 
 
 def test_game_playtest_lab_runs_quality_gates_and_iteration_plan(tmp_path: Path) -> None:
@@ -508,6 +557,9 @@ def test_game_playtest_lab_runs_quality_gates_and_iteration_plan(tmp_path: Path)
     assert (tmp_path / "lab_slice" / "playtest" / "performance_budget.json").exists()
     assert (tmp_path / "lab_slice" / "playtest" / "combat_feel_report.json").exists()
     assert (tmp_path / "lab_slice" / "playtest" / "continuation_recommendations.md").exists()
+    perf_budget = json.loads((tmp_path / "lab_slice" / "playtest" / "performance_budget.json").read_text(encoding="utf-8"))
+    assert perf_budget["subsystem_budgets"]["world_streaming"]["active_regions"] >= 1
+    assert perf_budget["optimization_passes"]
     continuation_text = (tmp_path / "lab_slice" / "playtest" / "continuation_recommendations.md").read_text(encoding="utf-8")
     assert "Service Model:" in continuation_text
     assert "Design Probes" in continuation_text

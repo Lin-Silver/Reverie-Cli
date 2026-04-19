@@ -1,5 +1,6 @@
 """Core single-prompt game-compilation pipeline for Reverie-Gamer."""
 
+from .aaa_game_compiler import build_aaa_product_profile, compile_aaa_game_program
 from .animation_pipeline import build_animation_plan
 from .asset_pipeline import build_asset_pipeline_plan, asset_pipeline_markdown
 from .asset_budgeting import build_asset_budget
@@ -62,6 +63,7 @@ from .world_program import build_questline_program, build_world_program
 
 __all__ = [
     "build_animation_plan",
+    "build_aaa_product_profile",
     "asset_pipeline_markdown",
     "build_asset_budget",
     "build_asset_pipeline_plan",
@@ -102,6 +104,7 @@ __all__ = [
     "build_vertical_slice_plan",
     "build_vertical_slice_project",
     "build_world_program",
+    "compile_aaa_game_program",
     "compile_game_prompt",
     "discover_runtime_profiles",
     "evaluate_slice_score",

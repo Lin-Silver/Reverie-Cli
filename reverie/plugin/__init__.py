@@ -14,6 +14,7 @@ from .runtime_manager import (
     RuntimePluginRecord,
     RuntimePluginSnapshot,
     RuntimePluginSpec,
+    RuntimePluginTemplateRecord,
 )
 
 __all__ = [
@@ -26,6 +27,7 @@ __all__ = [
     "RuntimePluginRecord",
     "RuntimePluginSnapshot",
     "RuntimePluginSpec",
+    "RuntimePluginTemplateRecord",
     "build_runtime_tool_name",
     "normalize_runtime_handshake",
 ]

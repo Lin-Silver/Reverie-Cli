@@ -1786,11 +1786,6 @@ def build_vertical_slice_project(
     if reference_intelligence:
         asset_pipeline["reference_stack"] = list(reference_intelligence.get("recommended_reference_stack", []) or [])
         asset_pipeline["reference_guardrails"] = list(reference_intelligence.get("legal_guardrails", []) or [])
-    game_program = build_game_program(
-        compiled_request,
-        built_blueprint,
-        runtime_profile=runtime_profile,
-    )
     feature_matrix = build_feature_matrix(
         compiled_request,
         built_blueprint,
@@ -1822,6 +1817,13 @@ def build_vertical_slice_project(
         selection,
         runtime_capability_graph,
         system_bundle=system_bundle,
+    )
+    game_program = build_game_program(
+        compiled_request,
+        built_blueprint,
+        runtime_profile=runtime_profile,
+        reference_intelligence=reference_intelligence,
+        runtime_capability_graph=runtime_capability_graph,
     )
     character_kits = build_character_kits(
         compiled_request,

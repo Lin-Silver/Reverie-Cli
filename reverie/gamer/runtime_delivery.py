@@ -75,6 +75,8 @@ def build_runtime_delivery_plan(
                     }.get(contract_id, "preserve large-scale runtime state as a first-class artifact"),
                 }
             )
+    toolchain_matrix = list(reference_intelligence.get("toolchain_matrix", []) or [])
+    adoption_plan = list(reference_intelligence.get("adoption_plan", []) or [])
 
     return {
         "schema_version": "reverie.runtime_delivery_plan/1",
@@ -110,8 +112,24 @@ def build_runtime_delivery_plan(
         "reference_inputs": {
             "selected_runtime_alignment": selected_alignment,
             "recommended_stack": list(reference_intelligence.get("recommended_reference_stack", []) or []),
+            "adoption_plan": adoption_plan,
+            "toolchain_matrix": toolchain_matrix,
             "legal_guardrails": list(reference_intelligence.get("legal_guardrails", []) or []),
         },
+        "delivery_lanes": [
+            {
+                "id": "runtime_bootstrap",
+                "focus": "boot path, save path, and data-contract loading",
+            },
+            {
+                "id": "content_runtime_binding",
+                "focus": "map region, quest, boss, and roster artifacts into runtime-visible data",
+            },
+            {
+                "id": "performance_and_validation",
+                "focus": "stabilize streaming, combat responsiveness, and asset-import health before widening scope",
+            },
+        ],
         "scale_up_stages": [
             {
                 "id": "verified_slice",
@@ -154,6 +172,11 @@ def build_runtime_delivery_plan(
             ),
         },
         "runtime_data_contracts": runtime_data_contracts,
+        "optimization_backlog": [
+            "profile region transitions and tighten loaded-cell counts before widening the active region budget",
+            "keep combat VFX, projectile counts, and AI density inside one shared frame budget",
+            "promote only validated assets into runtime import lanes so placeholder swaps do not regress load times",
+        ],
         "asset_contract": {
             "runtime_root": runtime_root,
             "import_path": str(selected.get("asset_import_path", "project_level_registry")),

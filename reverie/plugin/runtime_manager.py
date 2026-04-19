@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Iterable, Optional
 import json
 import platform
+import re
+import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -16,6 +19,7 @@ from .protocol import (
     RuntimePluginHandshake,
     build_runtime_tool_name,
     normalize_runtime_handshake,
+    sanitize_plugin_identifier,
 )
 
 
@@ -34,6 +38,20 @@ def _stable_json_signature(payload: Any) -> str:
         return json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
     except Exception:
         return repr(payload)
+
+
+def _normalize_string_tuple(raw_value: Any) -> tuple[str, ...]:
+    if isinstance(raw_value, str):
+        value = raw_value.strip()
+        return (value,) if value else tuple()
+    if not isinstance(raw_value, list):
+        return tuple()
+    values: list[str] = []
+    for item in raw_value:
+        text = str(item or "").strip()
+        if text:
+            values.append(text)
+    return tuple(values)
 
 
 @dataclass(frozen=True)
@@ -72,6 +90,14 @@ class RuntimePluginRecord:
     protocol_status: str = "no-entry"
     protocol_error: str = ""
     protocol: Optional[RuntimePluginHandshake] = None
+    manifest_schema_version: str = ""
+    packaging_format: str = ""
+    entry_strategy: str = ""
+    template_id: str = ""
+    compiled_entry_path: Optional[Path] = None
+    source_entry_path: Optional[Path] = None
+    build_commands: tuple[str, ...] = ()
+    manifest_warnings: tuple[str, ...] = ()
 
     @property
     def is_ready(self) -> bool:
@@ -127,6 +153,29 @@ class RuntimePluginRecord:
             return str(self.entry_path.relative_to(self.install_dir))
         except ValueError:
             return str(self.entry_path)
+
+    @property
+    def compiled_entry_display(self) -> str:
+        if not self.compiled_entry_path:
+            return "-"
+        try:
+            return str(self.compiled_entry_path.relative_to(self.install_dir))
+        except ValueError:
+            return str(self.compiled_entry_path)
+
+    @property
+    def source_entry_display(self) -> str:
+        if not self.source_entry_path:
+            return "-"
+        try:
+            return str(self.source_entry_path.relative_to(self.install_dir))
+        except ValueError:
+            return str(self.source_entry_path)
+
+    @property
+    def delivery_label(self) -> str:
+        value = str(self.delivery or "").strip() or "plugin-exe"
+        return value.replace("_", "-")
 
     @property
     def install_display(self) -> str:
@@ -213,6 +262,20 @@ class RuntimePluginSnapshot:
         return ", ".join(visible)
 
 
+@dataclass(frozen=True)
+class RuntimePluginTemplateRecord:
+    """One local source template for runtime plugin authoring."""
+
+    template_id: str
+    display_name: str
+    description: str
+    delivery: str
+    template_dir: Path
+    entry_template: str = ""
+    manifest_template: str = ""
+    build_hint: str = ""
+
+
 DEFAULT_RUNTIME_PLUGIN_CATALOG: tuple[RuntimePluginSpec, ...] = (
         RuntimePluginSpec(
             plugin_id="godot",
@@ -281,11 +344,14 @@ class RuntimePluginManager:
     # they emit the lightweight `-RC` handshake.
     PROTOCOL_TIMEOUT_SECONDS = 30.0
     TOOL_TIMEOUT_SECONDS = 1200.0
+    BUILD_TIMEOUT_SECONDS = 1800.0
 
     def __init__(self, app_root: Path, *, catalog: Iterable[RuntimePluginSpec] | None = None) -> None:
         self.app_root = Path(app_root).resolve()
+        self.source_root = self.app_root / "plugins"
         self.install_root = self.app_root / ".reverie" / "plugins"
         self.catalog_root = Path(__file__).resolve().parent
+        self.template_root = self.source_root / "_templates"
         self._platform = _platform_key()
         catalog_items = tuple(catalog or DEFAULT_RUNTIME_PLUGIN_CATALOG)
         self.catalog = {item.plugin_id: item for item in catalog_items}
@@ -294,11 +360,16 @@ class RuntimePluginManager:
         self._tool_lookup: dict[str, dict[str, Any]] = {}
         self._tool_signature = ""
         self._generation = 0
+        self._template_catalog: tuple[RuntimePluginTemplateRecord, ...] = tuple()
         self.ensure_install_root()
 
     def ensure_install_root(self) -> None:
         """Create the plugin install directory if needed."""
         self.install_root.mkdir(parents=True, exist_ok=True)
+
+    def ensure_source_root(self) -> None:
+        """Create the plugin source directory if needed."""
+        self.source_root.mkdir(parents=True, exist_ok=True)
 
     def get_snapshot(self, *, force_refresh: bool = False) -> RuntimePluginSnapshot:
         """Return the cached scan result, rescanning when requested."""
@@ -329,9 +400,9 @@ class RuntimePluginManager:
     def get_record(self, plugin_id: str, *, force_refresh: bool = False) -> Optional[RuntimePluginRecord]:
         """Return one plugin record by id."""
         snapshot = self.get_snapshot(force_refresh=force_refresh)
-        wanted = str(plugin_id or "").strip().lower()
+        wanted = sanitize_plugin_identifier(plugin_id or "")
         for record in snapshot.records:
-            if record.plugin_id.lower() == wanted:
+            if sanitize_plugin_identifier(record.plugin_id) == wanted:
                 return record
         return None
 
@@ -377,9 +448,12 @@ class RuntimePluginManager:
     def get_status_summary(self, *, force_refresh: bool = False) -> dict[str, Any]:
         """Build a small summary payload for UI surfaces."""
         snapshot = self.get_snapshot(force_refresh=force_refresh)
+        templates = self.list_templates(force_refresh=force_refresh)
         return {
+            "source_root": self.source_root,
             "install_root": snapshot.install_root,
             "catalog_root": snapshot.catalog_root,
+            "template_root": self.template_root,
             "detected_count": snapshot.detected_count,
             "catalog_count": snapshot.catalog_count,
             "ready_count": snapshot.ready_count,
@@ -388,10 +462,269 @@ class RuntimePluginManager:
             "protocol_ready_count": snapshot.protocol_ready_count,
             "noncompliant_count": snapshot.noncompliant_count,
             "tool_count": snapshot.tool_count,
+            "template_count": len(templates),
             "summary_label": snapshot.summary_label(),
             "ready_names": snapshot.ready_names(),
             "protocol_names": snapshot.protocol_names(),
         }
+
+    def list_templates(self, *, force_refresh: bool = False) -> tuple[RuntimePluginTemplateRecord, ...]:
+        """Return local runtime-plugin source templates."""
+        if force_refresh or not self._template_catalog:
+            self._template_catalog = self._scan_templates()
+        return self._template_catalog
+
+    def get_template(self, template_id: str, *, force_refresh: bool = False) -> Optional[RuntimePluginTemplateRecord]:
+        """Return one runtime-plugin template by id."""
+        wanted = str(template_id or "").strip().lower()
+        if not wanted:
+            return None
+        for record in self.list_templates(force_refresh=force_refresh):
+            if record.template_id.lower() == wanted:
+                return record
+        return None
+
+    def source_plugin_dir(self, plugin_id: str) -> Path:
+        """Return the default source tree path for one plugin."""
+        normalized = sanitize_plugin_identifier(plugin_id or "")
+        return self.source_root / normalized
+
+    def scaffold_source_plugin(
+        self,
+        *,
+        template_id: str,
+        plugin_id: str,
+        display_name: str = "",
+        runtime_family: str = "runtime",
+        description: str = "",
+        command_name: str = "run_task",
+        overwrite: bool = False,
+    ) -> dict[str, Any]:
+        """Create a new source plugin tree from a local template."""
+        template = self.get_template(template_id, force_refresh=False)
+        if template is None:
+            return {
+                "success": False,
+                "error": f"Runtime plugin template not found: {template_id}",
+                "source_dir": None,
+                "files_created": [],
+                "files_overwritten": [],
+            }
+
+        normalized_plugin_id = sanitize_plugin_identifier(plugin_id or "")
+        if not normalized_plugin_id:
+            return {
+                "success": False,
+                "error": "Plugin id is required.",
+                "source_dir": None,
+                "files_created": [],
+                "files_overwritten": [],
+            }
+
+        self.ensure_source_root()
+        target_dir = self.source_plugin_dir(normalized_plugin_id)
+        replacements = self._template_replacements(
+            plugin_id=normalized_plugin_id,
+            display_name=display_name,
+            runtime_family=runtime_family,
+            description=description,
+            command_name=command_name,
+        )
+
+        template_files = [
+            item
+            for item in sorted(template.template_dir.rglob("*"), key=lambda path: str(path.relative_to(template.template_dir)).lower())
+            if item.is_file() and item.name != "template.json"
+        ]
+        existing = [target_dir / item.relative_to(template.template_dir) for item in template_files if (target_dir / item.relative_to(template.template_dir)).exists()]
+        if existing and not overwrite:
+            return {
+                "success": False,
+                "error": "Target source plugin already exists. Pass overwrite=True to refresh template-managed files.",
+                "source_dir": target_dir,
+                "files_created": [],
+                "files_overwritten": [str(item.relative_to(target_dir)) for item in existing[:12]],
+            }
+
+        target_dir.mkdir(parents=True, exist_ok=True)
+        files_created: list[str] = []
+        files_overwritten: list[str] = []
+
+        for source_path in template_files:
+            relative_path = source_path.relative_to(template.template_dir)
+            destination = target_dir / relative_path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            existed_before = destination.exists()
+            self._copy_template_file(source_path, destination, replacements)
+            relative_text = str(relative_path)
+            if existed_before:
+                files_overwritten.append(relative_text)
+            else:
+                files_created.append(relative_text)
+
+        validation = self.validate_source_plugin(normalized_plugin_id)
+        return {
+            "success": bool(validation.get("success", False)),
+            "error": "" if validation.get("success", False) else "; ".join(validation.get("errors", []) or ["Template scaffold validation failed."]),
+            "source_dir": target_dir,
+            "template_id": template.template_id,
+            "files_created": files_created,
+            "files_overwritten": files_overwritten,
+            "validation": validation,
+        }
+
+    def validate_source_plugin(self, plugin_id: str) -> dict[str, Any]:
+        """Validate a source plugin tree under `plugins/<plugin-id>`."""
+        source_dir = self.source_plugin_dir(plugin_id)
+        return self._validate_source_plugin_dir(source_dir)
+
+    def build_source_plugin(
+        self,
+        plugin_id: str,
+        *,
+        install: bool = False,
+        overwrite_install: bool = False,
+    ) -> dict[str, Any]:
+        """Run declared build commands for one source plugin and optionally install it."""
+        validation = self.validate_source_plugin(plugin_id)
+        if not validation.get("success"):
+            return {
+                "success": False,
+                "error": "; ".join(validation.get("errors", []) or ["Source plugin validation failed."]),
+                "validation": validation,
+                "commands": [],
+            }
+
+        source_dir = validation.get("source_dir")
+        if not isinstance(source_dir, Path):
+            return {
+                "success": False,
+                "error": "Source plugin directory could not be resolved.",
+                "validation": validation,
+                "commands": [],
+            }
+
+        build_commands = [str(item).strip() for item in validation.get("build_commands", []) if str(item).strip()]
+        if not build_commands:
+            return {
+                "success": False,
+                "error": "This plugin does not declare any build commands.",
+                "validation": validation,
+                "commands": [],
+            }
+
+        command_results: list[dict[str, Any]] = []
+        for command_text in build_commands:
+            result = self._run_build_command(source_dir, command_text)
+            command_results.append(result)
+            if not result.get("success", False):
+                return {
+                    "success": False,
+                    "error": str(result.get("error") or f"Build command failed: {command_text}"),
+                    "validation": validation,
+                    "commands": command_results,
+                }
+
+        post_validation = self.validate_source_plugin(plugin_id)
+        if post_validation.get("delivery") in {"python-exe", "plugin-exe"} and post_validation.get("compiled_entry_path") is None:
+            return {
+                "success": False,
+                "error": "Build completed, but no packaged entry was produced at the manifest-declared compiled path.",
+                "validation": post_validation,
+                "commands": command_results,
+            }
+
+        install_result: Optional[dict[str, Any]] = None
+        if install:
+            install_result = self.install_source_plugin(plugin_id, overwrite=overwrite_install)
+            if not install_result.get("success", False):
+                return {
+                    "success": False,
+                    "error": str(install_result.get("error") or "Plugin install failed after build."),
+                    "validation": post_validation,
+                    "commands": command_results,
+                    "install_result": install_result,
+                }
+
+        return {
+            "success": bool(post_validation.get("success", False)),
+            "error": "" if post_validation.get("success", False) else "; ".join(post_validation.get("errors", []) or ["Post-build validation failed."]),
+            "validation": post_validation,
+            "commands": command_results,
+            "install_result": install_result,
+        }
+
+    def install_source_plugin(self, plugin_id: str, *, overwrite: bool = False) -> dict[str, Any]:
+        """Sync one source plugin tree into `.reverie/plugins/<plugin-id>`."""
+        validation = self.validate_source_plugin(plugin_id)
+        if not validation.get("success"):
+            return {
+                "success": False,
+                "error": "; ".join(validation.get("errors", []) or ["Source plugin validation failed."]),
+                "validation": validation,
+            }
+
+        source_dir = validation.get("source_dir")
+        if not isinstance(source_dir, Path):
+            return {"success": False, "error": "Source plugin directory could not be resolved.", "validation": validation}
+
+        normalized_plugin_id = sanitize_plugin_identifier(validation.get("plugin_id") or plugin_id)
+        target_dir = (self.install_root / normalized_plugin_id).resolve()
+        self.ensure_install_root()
+
+        if target_dir.exists():
+            if not overwrite:
+                return {
+                    "success": False,
+                    "error": f"Install target already exists: {target_dir}. Pass overwrite=True to replace it.",
+                    "target_dir": target_dir,
+                    "validation": validation,
+                }
+            self._safe_remove_tree(self.install_root, target_dir)
+
+        shutil.copytree(
+            source_dir,
+            target_dir,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", ".pytest_cache", ".mypy_cache", ".ruff_cache", "build"),
+        )
+
+        sdk_dir = self.source_root / "_sdk"
+        if sdk_dir.exists() and sdk_dir.is_dir():
+            shutil.copytree(
+                sdk_dir,
+                target_dir / "_sdk",
+                dirs_exist_ok=True,
+                ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"),
+            )
+
+        self.scan()
+        installed_record = self.get_record(normalized_plugin_id, force_refresh=False)
+        return {
+            "success": True,
+            "error": "",
+            "source_dir": source_dir,
+            "target_dir": target_dir,
+            "validation": validation,
+            "record": installed_record,
+        }
+
+    def list_template_rows(self, *, force_refresh: bool = False) -> list[dict[str, str]]:
+        """Return normalized rows for CLI rendering."""
+        rows: list[dict[str, str]] = []
+        for record in self.list_templates(force_refresh=force_refresh):
+            rows.append(
+                {
+                    "id": record.template_id,
+                    "name": record.display_name,
+                    "delivery": record.delivery,
+                    "entry_template": record.entry_template or "-",
+                    "manifest_template": record.manifest_template or "-",
+                    "build_hint": record.build_hint or "",
+                    "template_dir": str(record.template_dir),
+                    "description": record.description,
+                }
+            )
+        return rows
 
     def list_display_rows(self, *, force_refresh: bool = False) -> list[dict[str, str]]:
         """Return normalized rows for CLI rendering."""
@@ -401,6 +734,8 @@ class RuntimePluginManager:
             notes = record.detail.strip()
             if record.protocol_error:
                 notes = record.protocol_error
+            elif record.manifest_warnings:
+                notes = " | ".join(record.manifest_warnings[:2])
             elif not notes and record.version:
                 notes = f"Version {record.version}"
             elif not notes and record.source_repo_hint:
@@ -410,6 +745,7 @@ class RuntimePluginManager:
                     "id": record.plugin_id,
                     "name": record.display_name,
                     "family": record.runtime_family,
+                    "delivery": record.delivery_label,
                     "status": record.status,
                     "status_label": record.status_label,
                     "protocol_status": record.protocol_status,
@@ -564,16 +900,21 @@ class RuntimePluginManager:
         version = str(raw_manifest.get("version") or "").strip()
         source_repo_hint = str(raw_manifest.get("source_repo_hint") or "").strip()
         capabilities = self._normalize_capabilities(raw_manifest.get("capabilities"))
-
-        entry_path = self._resolve_manifest_entry(raw_manifest, install_dir)
+        entry_bundle = self._resolve_manifest_entry_bundle(raw_manifest, install_dir)
+        entry_path = entry_bundle.get("entry_path")
         source = "manifest"
         if entry_path is None and spec is not None:
             entry_path = self._resolve_from_candidates(install_dir, spec.entry_candidates)
             if entry_path is not None:
                 source = "manifest+catalog"
 
+        if source == "manifest+catalog" and entry_bundle.get("compiled_entry_path") is None:
+            entry_bundle["compiled_entry_path"] = entry_path
+
         status = "ready" if entry_path is not None else "entry-missing"
-        detail = "Entry executable detected." if status == "ready" else "plugin.json exists but no valid entry executable was found."
+        detail = str(entry_bundle.get("detail") or "").strip()
+        if not detail:
+            detail = "Entry executable detected." if status == "ready" else "plugin.json exists but no valid manifest entry or fallback was found."
 
         return RuntimePluginRecord(
             plugin_id=plugin_id,
@@ -591,6 +932,14 @@ class RuntimePluginManager:
             source_repo_hint=source_repo_hint or (spec.source_repo_hint if spec else ""),
             capabilities=capabilities or (spec.capabilities if spec else tuple()),
             catalog_managed=spec is not None,
+            manifest_schema_version=str(entry_bundle.get("manifest_schema_version") or ""),
+            packaging_format=str(entry_bundle.get("packaging_format") or delivery),
+            entry_strategy=str(entry_bundle.get("entry_strategy") or ""),
+            template_id=str(entry_bundle.get("template_id") or ""),
+            compiled_entry_path=entry_bundle.get("compiled_entry_path"),
+            source_entry_path=entry_bundle.get("source_entry_path"),
+            build_commands=tuple(entry_bundle.get("build_commands") or ()),
+            manifest_warnings=tuple(entry_bundle.get("manifest_warnings") or ()),
         )
 
     def _record_from_catalog_dir(self, spec: RuntimePluginSpec, install_dir: Path) -> RuntimePluginRecord:
@@ -618,6 +967,9 @@ class RuntimePluginManager:
             source_repo_hint=spec.source_repo_hint,
             capabilities=spec.capabilities,
             catalog_managed=True,
+            packaging_format=spec.delivery,
+            entry_strategy="catalog-auto-detect",
+            compiled_entry_path=entry_path,
         )
 
     def _record_from_generic_directory(self, install_dir: Path) -> RuntimePluginRecord:
@@ -654,74 +1006,49 @@ class RuntimePluginManager:
             detail=detail,
             entry_path=entry_path,
             delivery="plugin-exe",
+            packaging_format="plugin-exe",
+            entry_strategy="directory-auto-detect",
+            compiled_entry_path=entry_path,
         )
 
     def _merge_catalog_defaults(self, record: RuntimePluginRecord, spec: RuntimePluginSpec) -> RuntimePluginRecord:
         if record.entry_path is None:
             detected_entry = self._resolve_from_candidates(record.install_dir, spec.entry_candidates)
             if detected_entry is not None:
-                return RuntimePluginRecord(
-                    plugin_id=record.plugin_id,
+                return replace(
+                    record,
                     display_name=record.display_name or spec.display_name,
                     runtime_family=record.runtime_family or spec.runtime_family,
                     status="ready",
-                    install_dir=record.install_dir,
                     source="manifest+catalog" if record.source == "manifest" else "auto-detect",
                     detail="Entry executable detected.",
                     description=record.description or spec.description,
-                    version=record.version,
-                    manifest_path=record.manifest_path,
                     entry_path=detected_entry,
                     delivery=record.delivery or spec.delivery,
                     source_repo_hint=record.source_repo_hint or spec.source_repo_hint,
                     capabilities=record.capabilities or spec.capabilities,
                     catalog_managed=True,
-                    protocol_status=record.protocol_status,
-                    protocol_error=record.protocol_error,
-                    protocol=record.protocol,
+                    packaging_format=record.packaging_format or spec.delivery,
+                    entry_strategy=record.entry_strategy or "catalog-auto-detect",
+                    compiled_entry_path=record.compiled_entry_path or detected_entry,
                 )
 
-        return RuntimePluginRecord(
-            plugin_id=record.plugin_id,
+        return replace(
+            record,
             display_name=record.display_name or spec.display_name,
             runtime_family=record.runtime_family or spec.runtime_family,
-            status=record.status,
-            install_dir=record.install_dir,
-            source=record.source,
             detail=record.detail or spec.description,
             description=record.description or spec.description,
-            version=record.version,
-            manifest_path=record.manifest_path,
-            entry_path=record.entry_path,
             delivery=record.delivery or spec.delivery,
             source_repo_hint=record.source_repo_hint or spec.source_repo_hint,
             capabilities=record.capabilities or spec.capabilities,
             catalog_managed=True,
-            protocol_status=record.protocol_status,
-            protocol_error=record.protocol_error,
-            protocol=record.protocol,
+            packaging_format=record.packaging_format or spec.delivery,
         )
 
     def _attach_protocol(self, record: RuntimePluginRecord) -> RuntimePluginRecord:
         if not record.is_ready or record.entry_path is None:
-            return RuntimePluginRecord(
-                plugin_id=record.plugin_id,
-                display_name=record.display_name,
-                runtime_family=record.runtime_family,
-                status=record.status,
-                install_dir=record.install_dir,
-                source=record.source,
-                detail=record.detail,
-                description=record.description,
-                version=record.version,
-                manifest_path=record.manifest_path,
-                entry_path=record.entry_path,
-                delivery=record.delivery,
-                source_repo_hint=record.source_repo_hint,
-                capabilities=record.capabilities,
-                catalog_managed=record.catalog_managed,
-                protocol_status="no-entry",
-            )
+            return replace(record, protocol_status="no-entry", protocol_error="", protocol=None)
 
         probe = self._probe_runtime_protocol(record)
         protocol = probe.get("protocol")
@@ -738,22 +1065,12 @@ class RuntimePluginManager:
                 description = protocol.description
             if protocol.version:
                 version = protocol.version
-        return RuntimePluginRecord(
-            plugin_id=record.plugin_id,
+        return replace(
+            record,
             display_name=display_name,
             runtime_family=runtime_family,
-            status=record.status,
-            install_dir=record.install_dir,
-            source=record.source,
-            detail=record.detail,
             description=description,
             version=version,
-            manifest_path=record.manifest_path,
-            entry_path=record.entry_path,
-            delivery=record.delivery,
-            source_repo_hint=record.source_repo_hint,
-            capabilities=record.capabilities,
-            catalog_managed=record.catalog_managed,
             protocol_status=str(probe.get("status", "unsupported")),
             protocol_error=str(probe.get("error", "") or "").strip(),
             protocol=protocol,
@@ -930,6 +1247,421 @@ class RuntimePluginManager:
             return payload if isinstance(payload, dict) else None
         except Exception:
             return None
+
+    def _manifest_entry_candidates(self, raw_value: Any) -> tuple[str, ...]:
+        if isinstance(raw_value, str):
+            value = raw_value.strip()
+            return (value,) if value else tuple()
+        if isinstance(raw_value, list):
+            return _normalize_string_tuple(raw_value)
+        if isinstance(raw_value, dict):
+            preferred = raw_value.get(self._platform)
+            default = raw_value.get("default")
+            candidates = list(_normalize_string_tuple(preferred))
+            for item in _normalize_string_tuple(default):
+                if item not in candidates:
+                    candidates.append(item)
+            path_value = str(raw_value.get("path") or "").strip()
+            if path_value and path_value not in candidates:
+                candidates.append(path_value)
+            return tuple(candidates)
+        return tuple()
+
+    def _resolve_entry_candidates(self, install_dir: Path, candidates: Iterable[str]) -> Optional[Path]:
+        for candidate in candidates:
+            resolved = self._resolve_relative_entry(install_dir, candidate)
+            if resolved is not None:
+                return resolved
+        return None
+
+    def _resolve_manifest_entry_bundle(self, raw_manifest: dict[str, Any], install_dir: Path) -> dict[str, Any]:
+        entry = raw_manifest.get("entry")
+        packaging = raw_manifest.get("packaging") if isinstance(raw_manifest.get("packaging"), dict) else {}
+        delivery = str(raw_manifest.get("delivery") or raw_manifest.get("distribution") or "").strip() or "plugin-exe"
+        manifest_schema_version = str(raw_manifest.get("schema_version") or "").strip()
+        packaging_format = str(packaging.get("format") or delivery).strip() or delivery
+        template_id = str(raw_manifest.get("template") or packaging.get("template") or "").strip()
+
+        legacy_entry_candidates: tuple[str, ...] = tuple()
+        preferred_candidates: tuple[str, ...] = tuple()
+        fallback_candidates: tuple[str, ...] = tuple()
+        strategy = str(packaging.get("entry_strategy") or "").strip().lower()
+        allow_source_fallback = False
+
+        if isinstance(entry, dict) and any(key in entry for key in ("preferred", "fallbacks", "strategy", "allow_source_fallback")):
+            preferred_candidates = self._manifest_entry_candidates(entry.get("preferred"))
+            fallback_candidates = self._manifest_entry_candidates(entry.get("fallbacks"))
+            strategy = str(entry.get("strategy") or strategy).strip().lower()
+            allow_source_fallback = bool(entry.get("allow_source_fallback", False))
+        else:
+            legacy_entry_candidates = self._manifest_entry_candidates(entry)
+
+        compiled_candidates = list(self._manifest_entry_candidates(packaging.get("compiled")))
+        source_candidates = list(self._manifest_entry_candidates(packaging.get("source")))
+
+        executable_candidates = self._manifest_entry_candidates(raw_manifest.get("executable"))
+        for candidate in executable_candidates:
+            if candidate not in compiled_candidates:
+                compiled_candidates.append(candidate)
+
+        if not strategy:
+            if delivery in {"python-exe", "plugin-exe"} or compiled_candidates:
+                strategy = "prefer-packaged"
+            else:
+                strategy = "direct"
+
+        if strategy == "direct" and legacy_entry_candidates:
+            preferred_runtime_candidates = list(legacy_entry_candidates)
+        else:
+            preferred_runtime_candidates = list(preferred_candidates)
+            for candidate in compiled_candidates:
+                if candidate not in preferred_runtime_candidates:
+                    preferred_runtime_candidates.append(candidate)
+            if strategy == "direct":
+                for candidate in legacy_entry_candidates:
+                    if candidate not in preferred_runtime_candidates:
+                        preferred_runtime_candidates.append(candidate)
+
+        fallback_runtime_candidates = list(fallback_candidates)
+        for candidate in source_candidates:
+            if candidate not in fallback_runtime_candidates:
+                fallback_runtime_candidates.append(candidate)
+        if strategy != "direct":
+            for candidate in legacy_entry_candidates:
+                if candidate not in fallback_runtime_candidates:
+                    fallback_runtime_candidates.append(candidate)
+
+        compiled_entry = self._resolve_entry_candidates(install_dir, preferred_runtime_candidates)
+        source_entry = self._resolve_entry_candidates(install_dir, fallback_runtime_candidates)
+        selected_entry = compiled_entry
+        selected_mode = "packaged" if compiled_entry is not None else ""
+        detail = "Entry executable detected."
+        warnings: list[str] = []
+
+        if selected_entry is None:
+            if source_entry is not None and (allow_source_fallback or strategy != "direct" or not preferred_runtime_candidates):
+                selected_entry = source_entry
+                selected_mode = "source-fallback"
+                detail = "Packaged entry missing; using Python/script source fallback."
+            elif source_entry is not None and strategy == "direct":
+                selected_entry = source_entry
+                selected_mode = "source"
+                detail = "Manifest entry detected."
+        elif source_entry is not None and selected_entry == source_entry and strategy == "direct":
+            selected_mode = "source"
+            detail = "Manifest entry detected."
+
+        build_commands = tuple(_normalize_string_tuple((packaging.get("build") or {}).get(self._platform) if isinstance(packaging.get("build"), dict) else packaging.get("build")))
+        if not build_commands and isinstance(packaging.get("build"), dict):
+            build_commands = tuple(_normalize_string_tuple(packaging.get("build", {}).get("default")))
+
+        if delivery == "python-exe" and source_entry is None:
+            warnings.append("python-exe plugin has no source fallback entry defined.")
+        if delivery == "python-exe" and not build_commands:
+            warnings.append("python-exe plugin does not declare build commands in plugin.json packaging.build.")
+        if selected_entry is None:
+            detail = "plugin.json exists but no valid manifest entry or fallback was found."
+
+        return {
+            "entry_path": selected_entry,
+            "compiled_entry_path": compiled_entry if selected_mode == "packaged" else None,
+            "source_entry_path": source_entry,
+            "entry_strategy": strategy or "direct",
+            "manifest_schema_version": manifest_schema_version,
+            "packaging_format": packaging_format,
+            "template_id": template_id,
+            "build_commands": build_commands,
+            "detail": detail,
+            "manifest_warnings": tuple(warnings),
+        }
+
+    def _scan_templates(self) -> tuple[RuntimePluginTemplateRecord, ...]:
+        root = self.template_root
+        if not root.exists():
+            return tuple()
+
+        records: list[RuntimePluginTemplateRecord] = []
+        for candidate in sorted([item for item in root.iterdir() if item.is_dir()], key=lambda path: path.name.lower()):
+            template_json = candidate / "template.json"
+            payload: dict[str, Any] = {}
+            if template_json.exists():
+                loaded, _ = self._load_manifest(template_json)
+                if isinstance(loaded, dict):
+                    payload = loaded
+            template_id = str(payload.get("id") or candidate.name).strip() or candidate.name
+            records.append(
+                RuntimePluginTemplateRecord(
+                    template_id=template_id,
+                    display_name=str(payload.get("display_name") or template_id).strip() or template_id,
+                    description=str(payload.get("description") or "").strip(),
+                    delivery=str(payload.get("delivery") or "plugin-exe").strip() or "plugin-exe",
+                    template_dir=candidate,
+                    entry_template=str(payload.get("entry_template") or "plugin.py").strip(),
+                    manifest_template=str(payload.get("manifest_template") or "plugin.json").strip(),
+                    build_hint=str(payload.get("build_hint") or "").strip(),
+                )
+            )
+        return tuple(records)
+
+    def _template_replacements(
+        self,
+        *,
+        plugin_id: str,
+        display_name: str,
+        runtime_family: str,
+        description: str,
+        command_name: str,
+    ) -> dict[str, str]:
+        readable_name = str(display_name or "").strip() or plugin_id.replace("_", " ").replace("-", " ").title()
+        normalized_family = str(runtime_family or "runtime").strip() or "runtime"
+        normalized_command = sanitize_plugin_identifier(command_name or "run_task")
+        normalized_description = str(description or "").strip() or f"Reverie runtime plugin for {readable_name}."
+        return {
+            "{{plugin_id}}": plugin_id,
+            "{{plugin_name}}": readable_name,
+            "{{plugin_runtime_family}}": normalized_family,
+            "{{plugin_description}}": normalized_description,
+            "{{plugin_tool_name}}": normalized_command,
+            "{{plugin_binary_name}}": f"reverie-{plugin_id}",
+        }
+
+    def _copy_template_file(self, source_path: Path, destination: Path, replacements: dict[str, str]) -> None:
+        try:
+            content = source_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            shutil.copy2(source_path, destination)
+            return
+
+        for placeholder, value in replacements.items():
+            content = content.replace(placeholder, value)
+        destination.write_text(content, encoding="utf-8")
+
+    def _validate_source_plugin_dir(self, source_dir: Path) -> dict[str, Any]:
+        resolved_source_dir = Path(source_dir).resolve()
+        errors: list[str] = []
+        warnings: list[str] = []
+        manifest_path = resolved_source_dir / "plugin.json"
+
+        if not resolved_source_dir.exists() or not resolved_source_dir.is_dir():
+            return {
+                "success": False,
+                "plugin_id": resolved_source_dir.name,
+                "source_dir": resolved_source_dir,
+                "manifest_path": manifest_path,
+                "errors": [f"Source plugin directory not found: {resolved_source_dir}"],
+                "warnings": [],
+                "build_commands": [],
+                "unresolved_tokens": [],
+            }
+
+        if not manifest_path.exists():
+            errors.append("plugin.json is missing from the source plugin directory.")
+            return {
+                "success": False,
+                "plugin_id": resolved_source_dir.name,
+                "source_dir": resolved_source_dir,
+                "manifest_path": manifest_path,
+                "errors": errors,
+                "warnings": warnings,
+                "build_commands": [],
+                "unresolved_tokens": [],
+            }
+
+        record = self._attach_protocol(self._record_from_manifest(resolved_source_dir, manifest_path))
+        unresolved_tokens = self._collect_unresolved_tokens(resolved_source_dir)
+        if unresolved_tokens:
+            errors.append("Unresolved template placeholders remain in the source plugin files.")
+
+        warnings.extend(record.manifest_warnings)
+        template_id = record.template_id
+        if template_id and self.get_template(template_id, force_refresh=False) is None:
+            warnings.append(f"Template `{template_id}` is referenced by plugin.json but is not available under plugins/_templates.")
+
+        build_commands = list(record.build_commands)
+        for command_text in build_commands:
+            missing_script = self._detect_missing_local_command(command_text, resolved_source_dir)
+            if missing_script:
+                warnings.append(f"Build helper not found in source tree: {missing_script}")
+
+        if record.delivery in {"python-exe", "plugin-exe"} and not build_commands:
+            errors.append("No build commands are declared for this packaged runtime plugin.")
+        if record.status == "invalid-manifest":
+            errors.append(record.detail or "plugin.json is invalid.")
+        if record.entry_path is None:
+            errors.append("No valid source or packaged entry could be resolved from plugin.json.")
+
+        return {
+            "success": not errors,
+            "plugin_id": record.plugin_id,
+            "display_name": record.display_name,
+            "runtime_family": record.runtime_family,
+            "delivery": record.delivery,
+            "source_dir": resolved_source_dir,
+            "manifest_path": manifest_path,
+            "entry_path": record.entry_path,
+            "compiled_entry_path": record.compiled_entry_path,
+            "source_entry_path": record.source_entry_path,
+            "build_commands": build_commands,
+            "protocol_status": record.protocol_status,
+            "protocol_supported": record.protocol_supported,
+            "template_id": template_id,
+            "packaging_format": record.packaging_format,
+            "entry_strategy": record.entry_strategy,
+            "errors": errors,
+            "warnings": warnings,
+            "unresolved_tokens": unresolved_tokens,
+            "record": record,
+        }
+
+    def _collect_unresolved_tokens(self, source_dir: Path) -> list[str]:
+        token_pattern = re.compile(r"\{\{[a-zA-Z0-9_]+\}\}")
+        matches: list[str] = []
+        for item in sorted(source_dir.rglob("*"), key=lambda path: str(path).lower()):
+            if not item.is_file():
+                continue
+            if item.name == "template.json":
+                continue
+            if item.suffix.lower() not in {".py", ".json", ".md", ".txt", ".bat", ".cmd", ".sh", ".ps1", ".yaml", ".yml"}:
+                continue
+            try:
+                content = item.read_text(encoding="utf-8")
+            except Exception:
+                continue
+            for token in token_pattern.findall(content):
+                matches.append(f"{item.relative_to(source_dir)}: {token}")
+                if len(matches) >= 32:
+                    return matches
+        return matches
+
+    def _detect_missing_local_command(self, command_text: str, working_dir: Path) -> str:
+        parts = self._tokenize_command(command_text)
+        if not parts:
+            return ""
+        first = str(parts[0] or "").strip()
+        if not first:
+            return ""
+        candidate = Path(first)
+        looks_local = candidate.is_absolute() or any(separator in first for separator in ("/", "\\")) or candidate.suffix.lower() in {".bat", ".cmd", ".ps1", ".py", ".sh"}
+        if not looks_local:
+            return ""
+        resolved = candidate if candidate.is_absolute() else (working_dir / candidate)
+        return first if not resolved.exists() else ""
+
+    def _run_build_command(self, working_dir: Path, command_text: str) -> dict[str, Any]:
+        command = self._build_external_command(command_text, working_dir)
+        if not command:
+            return {
+                "success": False,
+                "command": command_text,
+                "stdout": "",
+                "stderr": "",
+                "returncode": 1,
+                "error": "Build command is empty.",
+            }
+
+        startupinfo = None
+        creationflags = 0
+        if sys.platform.startswith("win"):
+            creationflags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 1)
+            startupinfo.wShowWindow = 0
+
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=str(working_dir),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=self.BUILD_TIMEOUT_SECONDS,
+                startupinfo=startupinfo,
+                creationflags=creationflags,
+                shell=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            return {
+                "success": False,
+                "command": command_text,
+                "stdout": str(getattr(exc, "stdout", "") or ""),
+                "stderr": str(getattr(exc, "stderr", "") or ""),
+                "returncode": None,
+                "error": "Build command timed out.",
+            }
+        except Exception as exc:
+            return {
+                "success": False,
+                "command": command_text,
+                "stdout": "",
+                "stderr": "",
+                "returncode": None,
+                "error": str(exc),
+            }
+
+        stdout = str(completed.stdout or "")
+        stderr = str(completed.stderr or "")
+        success = int(completed.returncode) == 0
+        error = "" if success else (stderr.strip() or stdout.strip() or f"Exit code {completed.returncode}")
+        return {
+            "success": success,
+            "command": command_text,
+            "stdout": stdout,
+            "stderr": stderr,
+            "returncode": int(completed.returncode),
+            "error": error,
+        }
+
+    def _tokenize_command(self, command_text: str) -> list[str]:
+        raw = str(command_text or "").strip()
+        if not raw:
+            return []
+        try:
+            return [part for part in shlex.split(raw, posix=not sys.platform.startswith("win")) if str(part).strip()]
+        except ValueError:
+            return [part for part in raw.split() if str(part).strip()]
+
+    def _build_external_command(self, command_text: str, working_dir: Path) -> list[str]:
+        parts = self._tokenize_command(command_text)
+        if not parts:
+            return []
+
+        raw_program = str(parts[0] or "").strip()
+        remaining = parts[1:]
+        resolved_program = self._resolve_local_command_path(raw_program, working_dir)
+        program = str(resolved_program or raw_program)
+        suffix = Path(program).suffix.lower()
+
+        if suffix in {".cmd", ".bat"}:
+            return ["cmd.exe", "/d", "/c", program, *remaining]
+        if suffix == ".ps1":
+            return ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", program, *remaining]
+        if suffix == ".py":
+            return [sys.executable, program, *remaining]
+        return [program, *remaining]
+
+    def _resolve_local_command_path(self, raw_program: str, working_dir: Path) -> Optional[Path]:
+        text = str(raw_program or "").strip()
+        if not text:
+            return None
+        candidate = Path(text)
+        if candidate.is_absolute():
+            return candidate if candidate.exists() else None
+        looks_local = any(separator in text for separator in ("/", "\\")) or candidate.suffix.lower() in {".cmd", ".bat", ".ps1", ".py", ".sh"}
+        if not looks_local:
+            return None
+        resolved = (working_dir / candidate).resolve(strict=False)
+        return resolved if resolved.exists() else None
+
+    def _safe_remove_tree(self, root_dir: Path, target_dir: Path) -> None:
+        resolved_root = Path(root_dir).resolve(strict=False)
+        resolved_target = Path(target_dir).resolve(strict=False)
+        try:
+            resolved_target.relative_to(resolved_root)
+        except ValueError as exc:
+            raise RuntimeError(f"Refusing to remove a directory outside the intended root: {resolved_target}") from exc
+        if resolved_target.exists():
+            shutil.rmtree(resolved_target)
 
     def _load_manifest(self, manifest_path: Path) -> tuple[Optional[dict[str, Any]], str]:
         try:

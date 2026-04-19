@@ -34,6 +34,7 @@ def build_environment_kits(
                 "id": str(region.get("id", "")),
                 "biome": str(region.get("biome", "")),
                 "landmark": str(region.get("signature_landmark", "")),
+                "purpose": str(region.get("purpose", "")),
                 "landmark_asset_ids": [
                     str(seed.get("id", ""))
                     for seed in modeling_seed
@@ -41,5 +42,9 @@ def build_environment_kits(
                 ],
             }
             for region in regions
+        ],
+        "authoring_rules": [
+            "Every region kit must ship one long-range landmark, one combat pocket, and one route-reading prop family.",
+            "Environment kit ids should remain stable so region streaming, quest beats, and boss anchors can reference them safely.",
         ],
     }

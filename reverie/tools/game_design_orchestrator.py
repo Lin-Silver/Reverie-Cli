@@ -411,11 +411,6 @@ class GameDesignOrchestratorTool(BaseTool):
         existing_artifacts = context.get("existing_artifacts", {})
         reference_intelligence = dict(runtime_selection.get("reference_intelligence", {}) or {})
 
-        game_program = build_game_program(
-            game_request,
-            blueprint,
-            runtime_profile=runtime_selection["profile"],
-        )
         feature_matrix = build_feature_matrix(
             game_request,
             blueprint,
@@ -447,6 +442,13 @@ class GameDesignOrchestratorTool(BaseTool):
             runtime_selection,
             runtime_capability_graph,
             system_bundle=system_bundle,
+        )
+        game_program = build_game_program(
+            game_request,
+            blueprint,
+            runtime_profile=runtime_selection["profile"],
+            reference_intelligence=reference_intelligence,
+            runtime_capability_graph=runtime_capability_graph,
         )
         character_kits = build_character_kits(
             game_request,

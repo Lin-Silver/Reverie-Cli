@@ -1,0 +1,9 @@
+{
+  "id": "runtime_python_exe",
+  "display_name": "Runtime Python EXE",
+  "description": "Template for a Reverie runtime plugin authored in Python, packaged as a compiled executable, with a Python source fallback for development.",
+  "delivery": "python-exe",
+  "entry_template": "plugin.py",
+  "manifest_template": "plugin.json",
+  "build_hint": "build.bat"
+}

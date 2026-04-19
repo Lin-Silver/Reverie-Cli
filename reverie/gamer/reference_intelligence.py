@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, timezone
+from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 import json
+import os
 
 
 _REFERENCE_SCAN_CACHE: Dict[str, Dict[str, Any]] = {}
+_REFERENCE_MANIFEST_CACHE: Dict[str, Dict[str, Any]] = {}
 _REFERENCE_REPOSITORIES = (
     "godot-tps-demo",
     "godot-demo-projects",
@@ -48,14 +51,110 @@ def _read_json(path: Path) -> Dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
-def _count_files(root: Path, pattern: str, *, limit: int = 2000) -> int:
-    if not root.exists():
+def _normalize_path(value: str) -> str:
+    return str(value or "").replace("\\", "/").strip("/")
+
+
+def _manifest_fingerprint(repo_root: Path) -> str:
+    try:
+        stat = repo_root.stat()
+    except OSError:
+        return f"{repo_root.resolve()}:unreadable"
+    return f"{repo_root.resolve()}:{stat.st_mtime_ns}:{stat.st_size}"
+
+
+def _build_repo_manifest(repo_root: Path) -> Dict[str, Any]:
+    suffix_counts: Dict[str, int] = {}
+    name_counts: Dict[str, int] = {}
+    subtree_suffix_counts: Dict[str, Dict[str, int]] = {}
+    file_count = 0
+    dir_count = 0
+
+    if not repo_root.exists():
+        return {
+            "repo_root": str(repo_root),
+            "fingerprint": _manifest_fingerprint(repo_root),
+            "file_count": 0,
+            "dir_count": 0,
+            "suffix_counts": {},
+            "name_counts": {},
+            "subtree_suffix_counts": {},
+        }
+
+    for current_root, dirnames, filenames in os.walk(repo_root):
+        dir_count += len(dirnames)
+        current_path = Path(current_root)
+        rel_dir = _normalize_path(_rel(current_path, repo_root))
+        for filename in filenames:
+            file_count += 1
+            name_counts[filename] = name_counts.get(filename, 0) + 1
+            suffix = Path(filename).suffix.lower()
+            if suffix:
+                suffix_counts[suffix] = suffix_counts.get(suffix, 0) + 1
+                subtree_key = rel_dir or "."
+                subtree_counts = subtree_suffix_counts.setdefault(subtree_key, {})
+                subtree_counts[suffix] = subtree_counts.get(suffix, 0) + 1
+
+    return {
+        "repo_root": str(repo_root),
+        "fingerprint": _manifest_fingerprint(repo_root),
+        "file_count": file_count,
+        "dir_count": dir_count,
+        "suffix_counts": suffix_counts,
+        "name_counts": name_counts,
+        "subtree_suffix_counts": subtree_suffix_counts,
+    }
+
+
+def _repo_manifest(repo_root: Path) -> Dict[str, Any]:
+    repo_root = Path(repo_root)
+    cache_key = str(repo_root.resolve())
+    fingerprint = _manifest_fingerprint(repo_root)
+    cached = _REFERENCE_MANIFEST_CACHE.get(cache_key)
+    if cached and cached.get("fingerprint") == fingerprint:
+        return deepcopy(cached["manifest"])
+
+    manifest = _build_repo_manifest(repo_root)
+    _REFERENCE_MANIFEST_CACHE[cache_key] = {
+        "fingerprint": fingerprint,
+        "manifest": deepcopy(manifest),
+    }
+    return manifest
+
+
+def _count_repo_files(repo_root: Path, pattern: str, *, subdir: str = "", limit: int = 2000) -> int:
+    repo_root = Path(repo_root)
+    if not repo_root.exists():
+        return 0
+
+    manifest = _repo_manifest(repo_root)
+    normalized_subdir = _normalize_path(subdir)
+    normalized_pattern = str(pattern or "").strip()
+
+    if not normalized_subdir and normalized_pattern.startswith("*.") and "*" not in normalized_pattern[1:]:
+        count = int(manifest.get("suffix_counts", {}).get(normalized_pattern[1:].lower(), 0))
+        return min(count, limit)
+    if not normalized_subdir and "*" not in normalized_pattern and "?" not in normalized_pattern:
+        count = int(manifest.get("name_counts", {}).get(normalized_pattern, 0))
+        return min(count, limit)
+    if normalized_subdir and normalized_pattern.startswith("*.") and "*" not in normalized_pattern[1:]:
+        suffix_key = normalized_pattern[1:].lower()
+        count = 0
+        for subtree_key, subtree_counts in manifest.get("subtree_suffix_counts", {}).items():
+            normalized_key = _normalize_path(subtree_key)
+            if normalized_key == normalized_subdir or normalized_key.startswith(f"{normalized_subdir}/"):
+                count += int(subtree_counts.get(suffix_key, 0) or 0)
+        return min(count, limit)
+
+    target_root = repo_root / normalized_subdir if normalized_subdir else repo_root
+    if not target_root.exists():
         return 0
     count = 0
-    for _ in root.rglob(pattern):
-        count += 1
-        if count >= limit:
-            return limit
+    for candidate in target_root.rglob("*"):
+        if candidate.is_file() and fnmatch(candidate.name, normalized_pattern):
+            count += 1
+            if count >= limit:
+                return limit
     return count
 
 
@@ -200,9 +299,10 @@ def _analyze_godot_tps_demo(reference_root: Path) -> Dict[str, Any] | None:
             },
         ],
         stats={
-            "scene_files": _count_files(repo, "*.tscn"),
-            "gdscript_files": _count_files(repo, "*.gd"),
-            "model_files": _count_files(repo, "*.glb"),
+            "scene_files": _count_repo_files(repo, "*.tscn"),
+            "gdscript_files": _count_repo_files(repo, "*.gd"),
+            "model_files": _count_repo_files(repo, "*.glb"),
+            "total_files": _repo_manifest(repo).get("file_count", 0),
         },
         runtime_affinity={"godot": 0.96, "reverie_engine": 0.42, "o3de": 0.18},
     )
@@ -244,9 +344,10 @@ def _analyze_godot_demo_projects(reference_root: Path) -> Dict[str, Any] | None:
             },
         ],
         stats={
-            "project_files": _count_files(repo, "project.godot"),
-            "scene_files": _count_files(repo, "*.tscn"),
-            "script_files": _count_files(repo, "*.gd") + _count_files(repo, "*.cs"),
+            "project_files": _count_repo_files(repo, "project.godot"),
+            "scene_files": _count_repo_files(repo, "*.tscn"),
+            "script_files": _count_repo_files(repo, "*.gd") + _count_repo_files(repo, "*.cs"),
+            "total_files": _repo_manifest(repo).get("file_count", 0),
         },
         runtime_affinity={"godot": 0.68, "reverie_engine": 0.22, "o3de": 0.1},
     )
@@ -316,8 +417,9 @@ def _analyze_o3de_multiplayersample(reference_root: Path) -> Dict[str, Any] | No
         ],
         stats={
             "gem_count": len(gem_names),
-            "seed_list_files": _count_files(repo / "AssetBundling" / "SeedLists", "*.seed"),
-            "prefab_files": _count_files(repo, "*.prefab"),
+            "seed_list_files": _count_repo_files(repo, "*.seed", subdir="AssetBundling/SeedLists"),
+            "prefab_files": _count_repo_files(repo, "*.prefab"),
+            "total_files": _repo_manifest(repo).get("file_count", 0),
         },
         runtime_affinity={"o3de": 0.95, "godot": 0.24, "reverie_engine": 0.18},
     )
@@ -391,6 +493,7 @@ def _analyze_o3de_multiplayersample_assets(reference_root: Path) -> Dict[str, An
         stats={
             "asset_gem_count": len(gem_paths),
             "documented_asset_packs": len(gem_paths),
+            "total_files": _repo_manifest(repo).get("file_count", 0),
         },
         runtime_affinity={"o3de": 0.84, "godot": 0.38, "reverie_engine": 0.34},
         guardrails=guardrails,
@@ -428,6 +531,10 @@ def _analyze_cross_runtime_tool(
                 "note": "The repository is present locally and can inform the authoring or validation stack.",
             }
         ],
+        stats={
+            "total_files": _repo_manifest(repo).get("file_count", 0),
+            "directory_count": _repo_manifest(repo).get("dir_count", 0),
+        },
         runtime_affinity=runtime_affinity or {"godot": 0.32, "o3de": 0.32, "reverie_engine": 0.32},
         reuse_policy="workflow_reference",
     )
@@ -515,9 +622,13 @@ def scan_reference_catalog(
 
     counts_by_engine: Dict[str, int] = {}
     counts_by_category: Dict[str, int] = {}
+    total_files = 0
+    total_directories = 0
     for entry in detected:
         counts_by_engine[entry["engine"]] = counts_by_engine.get(entry["engine"], 0) + 1
         counts_by_category[entry["category"]] = counts_by_category.get(entry["category"], 0) + 1
+        total_files += int(entry.get("stats", {}).get("total_files", 0) or 0)
+        total_directories += int(entry.get("stats", {}).get("directory_count", 0) or 0)
 
     payload = {
         "reference_root": str(reference_root),
@@ -527,6 +638,8 @@ def scan_reference_catalog(
             "repository_count": len(detected),
             "engines": counts_by_engine,
             "categories": counts_by_category,
+            "total_files": total_files,
+            "total_directories": total_directories,
         },
         "legal_guardrails": guardrails,
         "cache_status": "miss",
@@ -761,6 +874,130 @@ def _gameplay_patterns(
     return patterns
 
 
+def _toolchain_matrix(detected_repositories: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    repo_map = {entry["id"]: entry for entry in detected_repositories}
+    lanes: List[Dict[str, Any]] = []
+
+    def add(lane_id: str, capability: str, references: Iterable[str], outcomes: Iterable[str]) -> None:
+        chosen = [reference_id for reference_id in references if reference_id in repo_map]
+        if not chosen:
+            return
+        lanes.append(
+            {
+                "id": lane_id,
+                "capability": capability,
+                "status": "ready",
+                "references": chosen,
+                "outcomes": [str(item).strip() for item in outcomes if str(item).strip()],
+            }
+        )
+
+    add(
+        "runtime_templates",
+        "execution-ready runtime patterns",
+        ("godot-tps-demo", "godot-demo-projects", "o3de-multiplayersample"),
+        (
+            "seed a third-person 3D action project foundation",
+            "borrow project layout and scene conventions",
+            "shape future large-scale runtime architecture choices",
+        ),
+    )
+    add(
+        "dcc_authoring",
+        "source asset authoring and graybox iteration",
+        ("blender", "blockbench", "blockbench-plugins"),
+        (
+            "graybox characters, landmarks, and encounter props quickly",
+            "promote approved source assets into the runtime import lane",
+        ),
+    )
+    add(
+        "asset_interchange",
+        "glTF interchange and validation",
+        ("gltf-blender-io", "gltf-validator", "gltf-sample-assets"),
+        (
+            "keep authored assets exportable and validator-friendly",
+            "test renderer assumptions with neutral sample assets",
+        ),
+    )
+    add(
+        "modular_asset_packs",
+        "region, character, and material pack structuring",
+        ("o3de-multiplayersample-assets",),
+        (
+            "package region kits and character kits as modular content waves",
+            "keep restricted third-party assets in pattern-only territory",
+        ),
+    )
+    return lanes
+
+
+def _adoption_plan(
+    request_profile: Dict[str, Any],
+    detected_repositories: List[Dict[str, Any]],
+    runtime_alignment: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    repo_map = {entry["id"]: entry for entry in detected_repositories}
+    alignment_map = {
+        str(item.get("runtime_id", "")).strip(): dict(item)
+        for item in runtime_alignment
+        if str(item.get("runtime_id", "")).strip()
+    }
+    flags = set(request_profile.get("active_flags", []))
+    phases: List[Dict[str, Any]] = []
+
+    slice_references = [item for item in ("godot-tps-demo", "godot-demo-projects") if item in repo_map]
+    if slice_references:
+        phases.append(
+            {
+                "id": "slice_bootstrap",
+                "goal": "Stand up a playable third-person 3D action slice from one prompt.",
+                "references": slice_references,
+                "adoption_mode": "runtime_pattern",
+                "runtime_bias": alignment_map.get("godot", {}),
+            }
+        )
+
+    if flags & {"large_scale", "open_world", "multiplayer"} and "o3de-multiplayersample" in repo_map:
+        phases.append(
+            {
+                "id": "scale_architecture",
+                "goal": "Extract multi-region, packaging, and future-scale architecture patterns without blocking slice delivery.",
+                "references": ["o3de-multiplayersample"],
+                "adoption_mode": "architecture_reference",
+                "runtime_bias": alignment_map.get("o3de", {}),
+            }
+        )
+
+    asset_references = [
+        item
+        for item in ("o3de-multiplayersample-assets", "blender", "blockbench", "gltf-blender-io", "gltf-validator")
+        if item in repo_map
+    ]
+    if asset_references:
+        phases.append(
+            {
+                "id": "asset_and_dcc_lane",
+                "goal": "Keep source-asset authoring, interchange, and runtime validation aligned as content scale grows.",
+                "references": asset_references,
+                "adoption_mode": "pipeline_reference",
+                "runtime_bias": alignment_map.get("godot", {}),
+            }
+        )
+
+    if not phases:
+        phases.append(
+            {
+                "id": "minimal_reference_mode",
+                "goal": "Proceed with repo-native patterns only until stronger references become available.",
+                "references": [],
+                "adoption_mode": "fallback",
+                "runtime_bias": alignment_map.get("reverie_engine", {}),
+            }
+        )
+    return phases
+
+
 def build_reference_intelligence(
     game_request: Dict[str, Any],
     *,
@@ -773,6 +1010,14 @@ def build_reference_intelligence(
     catalog = scan_reference_catalog(project_root=project_root, app_root=app_root)
     request_profile = _request_profile(game_request)
     alignments = _runtime_alignment(request_profile, catalog["detected_repositories"], runtime_profiles)
+    recommended_stack = _recommended_reference_stack(
+        request_profile,
+        catalog["detected_repositories"],
+    )
+    gameplay_patterns = _gameplay_patterns(
+        request_profile,
+        catalog["detected_repositories"],
+    )
 
     return {
         "schema_version": "reverie.reference_intelligence/1",
@@ -784,14 +1029,10 @@ def build_reference_intelligence(
         "catalog_summary": catalog["summary"],
         "detected_repositories": catalog["detected_repositories"],
         "runtime_alignment": alignments,
-        "recommended_reference_stack": _recommended_reference_stack(
-            request_profile,
-            catalog["detected_repositories"],
-        ),
-        "gameplay_patterns": _gameplay_patterns(
-            request_profile,
-            catalog["detected_repositories"],
-        ),
+        "recommended_reference_stack": recommended_stack,
+        "gameplay_patterns": gameplay_patterns,
+        "toolchain_matrix": _toolchain_matrix(catalog["detected_repositories"]),
+        "adoption_plan": _adoption_plan(request_profile, catalog["detected_repositories"], alignments),
         "legal_guardrails": catalog["legal_guardrails"],
         "notes": [
             "Use local references to guide runtime shape, system seams, and asset-pipeline structure, not to justify copying shipped game content wholesale.",

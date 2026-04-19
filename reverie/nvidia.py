@@ -20,6 +20,11 @@ NVIDIA_COMPUTER_CONTROLLER_MODEL_DISPLAY_NAME = NVIDIA_DEFAULT_MODEL_DISPLAY_NAM
 NVIDIA_API_KEY_HINT_URL = "https://build.nvidia.com/settings/api-keys"
 NVIDIA_DEFAULT_IMAGE_TOKEN_ESTIMATE = 1024
 NVIDIA_DEFAULT_CONTEXT_TOKENS = 262_144
+NVIDIA_NEMOTRON_3_SUPER_CONTEXT_TOKENS = 1_000_000
+NVIDIA_MINIMAX_CONTEXT_TOKENS = 204_800
+NVIDIA_GLM_CONTEXT_TOKENS = 205_000
+NVIDIA_STEP_FLASH_CONTEXT_TOKENS = 256_000
+NVIDIA_GPT_OSS_120B_CONTEXT_TOKENS = 128_000
 
 
 def _request_model(
@@ -92,21 +97,21 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
     _openai_model(
         "nvidia/nemotron-3-super-120b-a12b",
         "Nemotron 3 Super 120B",
-        "OpenAI SDK transport with reasoning_budget. Supports up to 1M context; default serving is 256k.",
+        "OpenAI SDK transport with reasoning_budget. Supports up to 1M context.",
         thinking=True,
-        context_length=NVIDIA_DEFAULT_CONTEXT_TOKENS,
+        context_length=NVIDIA_NEMOTRON_3_SUPER_CONTEXT_TOKENS,
     ),
     _openai_model(
         "minimaxai/minimax-m2.5",
         "MiniMax M2.5",
         "OpenAI SDK transport.",
-        context_length=204800,
+        context_length=NVIDIA_MINIMAX_CONTEXT_TOKENS,
     ),
     _openai_model(
         "minimaxai/minimax-m2.7",
         "MiniMax M2.7",
         "OpenAI SDK transport.",
-        context_length=204800,
+        context_length=NVIDIA_MINIMAX_CONTEXT_TOKENS,
     ),
     _request_model(
         "qwen/qwen3.5-397b-a17b",
@@ -121,21 +126,21 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         "GLM-5",
         "OpenAI SDK transport with clear_thinking=False.",
         thinking=True,
-        context_length=205000,
+        context_length=NVIDIA_GLM_CONTEXT_TOKENS,
     ),
     _openai_model(
         "z-ai/glm-5.1",
         "GLM-5.1",
         "OpenAI SDK transport with clear_thinking=False.",
         thinking=True,
-        context_length=205000,
+        context_length=NVIDIA_GLM_CONTEXT_TOKENS,
     ),
     _openai_model(
         "stepfun-ai/step-3.5-flash",
         "Step-3.5-Flash",
         "OpenAI SDK transport.",
         thinking=True,
-        context_length=256000,
+        context_length=NVIDIA_STEP_FLASH_CONTEXT_TOKENS,
     ),
     _request_model(
         "moonshotai/kimi-k2.5",
@@ -157,7 +162,7 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         "GPT-OSS-120B",
         "OpenAI SDK transport.",
         thinking=True,
-        context_length=128000,
+        context_length=NVIDIA_GPT_OSS_120B_CONTEXT_TOKENS,
     ),
 ]
 

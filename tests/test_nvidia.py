@@ -1,6 +1,7 @@
 from reverie.nvidia import (
     build_nvidia_openai_options,
     build_nvidia_runtime_model_data,
+    get_nvidia_model_catalog,
     get_nvidia_model_metadata,
 )
 
@@ -43,6 +44,29 @@ def test_nvidia_runtime_model_data_uses_sdk_base_url_for_minimax_m27():
     assert runtime["provider"] == "openai-sdk"
     assert runtime["base_url"] == "https://integrate.api.nvidia.com/v1"
     assert runtime["max_context_tokens"] == 204800
+
+
+def test_nvidia_catalog_context_lengths_match_model_cards():
+    expected_context_lengths = {
+        "mistralai/mistral-small-4-119b-2603": 262144,
+        "qwen/qwen3.5-122b-a10b": 262144,
+        "nvidia/nemotron-3-super-120b-a12b": 1000000,
+        "minimaxai/minimax-m2.5": 204800,
+        "minimaxai/minimax-m2.7": 204800,
+        "qwen/qwen3.5-397b-a17b": 262144,
+        "z-ai/glm5": 205000,
+        "z-ai/glm-5.1": 205000,
+        "stepfun-ai/step-3.5-flash": 256000,
+        "moonshotai/kimi-k2.5": 262144,
+        "mistralai/mistral-large-3-675b-instruct-2512": 262144,
+        "openai/gpt-oss-120b": 128000,
+    }
+    catalog_by_id = {item["id"]: item for item in get_nvidia_model_catalog()}
+
+    assert set(expected_context_lengths) == set(catalog_by_id)
+    for model_id, context_length in expected_context_lengths.items():
+        assert catalog_by_id[model_id]["context_length"] == context_length
+        assert get_nvidia_model_metadata(model_id)["context_length"] == context_length
 
 
 def test_nvidia_catalog_contains_glm_51():

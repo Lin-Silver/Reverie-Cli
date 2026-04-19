@@ -70,7 +70,7 @@ from ..agent import (
 from ..agent.subagents import SubagentManager
 from ..context_engine import CodebaseIndexer, ContextRetriever, GitIntegration
 from ..context_engine import LSPManager
-from ..modes import normalize_mode
+from ..modes import get_mode_display_name, normalize_mode
 from ..nvidia import (
     build_nvidia_computer_controller_runtime_model_data,
     normalize_nvidia_config,
@@ -1664,7 +1664,8 @@ class ReverieInterface:
         self._reset_assistant_render_state()
         response_model_name = getattr(config.active_model, "model_display_name", "Reverie")
         response_provider_label = self._resolve_provider_label(config)
-        response_mode = config.mode
+        response_mode = config.mode or "reverie"
+        response_mode_label = get_mode_display_name(response_mode).upper()
         parsed_inline = parse_inline_image_mentions(message, self.project_root)
         inline_attachments = parsed_inline.get("attachments", []) if isinstance(parsed_inline, dict) else []
         inline_warnings = parsed_inline.get("warnings", []) if isinstance(parsed_inline, dict) else []
@@ -1802,7 +1803,10 @@ class ReverieInterface:
                         ensure_response_header()
                         in_thinking_mode = True
                         if self._current_thinking_output_style() != "hidden":
-                            self.display.show_thinking_banner(response_model_name)
+                            self.display.show_thinking_banner(
+                                response_model_name,
+                                mode_name=response_mode_label,
+                            )
                         continue
                     
                     if chunk == THINKING_END_MARKER:

@@ -218,12 +218,13 @@ class DisplayComponents:
             footer="prompt queued",
         )
 
-    def show_thinking_banner(self, model_name: str = "") -> None:
+    def show_thinking_banner(self, model_name: str = "", mode_name: str = "") -> None:
         """Render a lightweight thinking marker before streamed reasoning."""
         separator = self._safe_separator()
         footer = self._truncate_text(model_name, 28) if model_name else "reasoning stream open"
+        label = self._truncate_text(str(mode_name or "Assistant").strip() or "Assistant", 28)
         self._show_timeline_block(
-            title=f"Assistant  {separator}  thinking",
+            title=f"{label}  {separator}  thinking",
             accent=self.theme.THINKING_MEDIUM,
             body=Text("Reasoning in progress", style=f"italic {self.theme.THINKING_MEDIUM}"),
             footer=footer,

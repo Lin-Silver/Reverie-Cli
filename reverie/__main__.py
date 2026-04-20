@@ -8,6 +8,7 @@ Or: reverie (if installed)
 import sys
 import argparse
 import json
+import locale
 from pathlib import Path
 
 from rich.console import Console
@@ -24,8 +25,8 @@ except ImportError:  # PyInstaller may execute this file as a top-level script.
 
 
 def _configure_stdio_for_safe_output() -> None:
-    """Best-effort stdio reconfigure for Windows prompt-mode output."""
-    for stream_name in ("stdout", "stderr"):
+    """Best-effort stdio reconfigure for Windows prompt-mode text I/O."""
+    for stream_name in ("stdin", "stdout", "stderr"):
         stream = getattr(sys, stream_name, None)
         if stream is None or not hasattr(stream, "reconfigure"):
             continue
@@ -44,6 +45,87 @@ def _safe_output_text(value: str) -> str:
         return text
     except Exception:
         return text.encode(encoding, errors="replace").decode(encoding, errors="replace")
+
+
+def _decode_prompt_bytes(data: bytes) -> str:
+    """Decode prompt bytes from common encodings without failing on long files."""
+    def _normalize_newlines(text: str) -> str:
+        return text.replace("\r\n", "\n").replace("\r", "\n")
+
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        try:
+            return _normalize_newlines(data.decode("utf-16"))
+        except UnicodeError:
+            pass
+
+    encodings = ["utf-8-sig", "gb18030"]
+    preferred = locale.getpreferredencoding(False)
+    if preferred:
+        encodings.append(preferred)
+
+    seen = set()
+    for encoding in encodings:
+        normalized = str(encoding or "").lower()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        try:
+            return _normalize_newlines(data.decode(encoding))
+        except UnicodeError:
+            continue
+
+    return _normalize_newlines(data.decode("utf-8", errors="replace"))
+
+
+def _resolve_prompt_file_path(path_value: str, project_root: Path) -> Path:
+    """Resolve prompt files relative to cwd first, then the target workspace."""
+    raw_path = Path(str(path_value or "").strip()).expanduser()
+    if raw_path.is_absolute():
+        return raw_path
+
+    cwd_candidate = (Path.cwd() / raw_path).resolve()
+    project_candidate = (project_root / raw_path).resolve()
+    if cwd_candidate.exists() or not project_candidate.exists():
+        return cwd_candidate
+    return project_candidate
+
+
+def _read_prompt_file(path_value: str, project_root: Path) -> str:
+    """Read a prompt file using tolerant text decoding."""
+    prompt_path = _resolve_prompt_file_path(path_value, project_root)
+    return _decode_prompt_bytes(prompt_path.read_bytes())
+
+
+def _read_prompt_stdin() -> str:
+    """Read prompt text from stdin, preserving long multiline input."""
+    buffer = getattr(sys.stdin, "buffer", None)
+    if buffer is not None:
+        return _decode_prompt_bytes(buffer.read())
+    return str(sys.stdin.read() or "")
+
+
+def _resolve_prompt_text(args: argparse.Namespace, project_root: Path) -> str | None:
+    """Resolve prompt text from direct args, files, @file shorthand, or stdin."""
+    prompt_file = getattr(args, "prompt_file", None)
+    if prompt_file:
+        return _read_prompt_file(prompt_file, project_root)
+
+    if bool(getattr(args, "prompt_stdin", False)):
+        return _read_prompt_stdin()
+
+    prompt = getattr(args, "prompt", None)
+    if prompt is None:
+        return None
+
+    prompt_text = str(prompt)
+    if prompt_text == "-":
+        return _read_prompt_stdin()
+    if prompt_text.startswith("@") and len(prompt_text) > 1:
+        prompt_path = _resolve_prompt_file_path(prompt_text[1:], project_root)
+        if prompt_path.is_file():
+            return _decode_prompt_bytes(prompt_path.read_bytes())
+
+    return prompt_text
 
 
 def main():
@@ -78,9 +160,21 @@ def main():
         help='Skip automatic indexing on startup'
     )
 
-    parser.add_argument(
+    prompt_group = parser.add_mutually_exclusive_group()
+    prompt_group.add_argument(
         '--prompt', '-p',
-        help='Run a single prompt non-interactively and exit'
+        help='Run a single prompt non-interactively and exit. Use -p @file or -p - for long input.'
+    )
+
+    prompt_group.add_argument(
+        '--prompt-file',
+        help='Read a single prompt from a UTF-8/locale-encoded text file and exit'
+    )
+
+    prompt_group.add_argument(
+        '--prompt-stdin',
+        action='store_true',
+        help='Read a single prompt from standard input and exit'
     )
 
     parser.add_argument(
@@ -172,13 +266,19 @@ def main():
         
         return 0 if result.success else 1
 
-    if args.prompt:
+    try:
+        prompt_text = _resolve_prompt_text(args, project_root)
+    except Exception as exc:
+        print(_safe_output_text(f"Error reading prompt input: {exc}"))
+        return 1
+
+    if prompt_text is not None:
         from reverie.cli.interface import ReverieInterface
 
         _configure_stdio_for_safe_output()
         interface = ReverieInterface(project_root, headless=True)
         result = interface.run_prompt_once(
-            args.prompt,
+            prompt_text,
             mode_override=args.mode,
             no_index=bool(args.no_index),
         )

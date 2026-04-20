@@ -65,12 +65,16 @@ reverie /path/to/project     # launch targeting a specific project
 reverie --index-only         # build index and exit
 reverie --no-index           # skip indexing on startup
 reverie -p "fix failing tests"   # run one prompt non-interactively and exit
+reverie --prompt-file task.md    # run a long prompt from a file
+Get-Content task.md | reverie --prompt-stdin  # run a long prompt from stdin
 reverie -p "fix failing tests" --report-file artifacts/prompt_report.json
 reverie /path/to/project -p "add a health check" --mode reverie-atlas
 reverie --version            # print version
 ```
 
 `--report-file` writes structured JSON for prompt runs, including the final output, activity events, UI events, and a harness report that summarizes tasks, checkpoints, command audit evidence, verification posture, and recent run-history trends. Prompt-mode runs now also persist lightweight harness snapshots in the project cache so `/doctor` can show score and verification drift over time.
+
+For long prompts, use `--prompt-file <path>`, pipe text with `--prompt-stdin`, or use the shorthand `-p @task.md` / `-p -`. Prompt files are decoded as UTF-8 first, then common locale encodings, with replacement fallback instead of aborting on invalid bytes.
 
 For the packaged Windows build, the same one-shot flow works with `dist\reverie.exe -p "<task>"`. On Windows paths and executable names are case-insensitive, so `Reverie.exe -p "<task>"` works the same way.
 

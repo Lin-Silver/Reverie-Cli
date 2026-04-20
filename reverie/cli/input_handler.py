@@ -118,7 +118,7 @@ class InputHandler:
         Get input from user with multiline support.
         
         Multiline modes:
-        - Paste detection: Rapidly entered lines are combined into one line
+        - Paste detection: Rapidly entered lines are preserved as one message
         - End line with \\ to continue on next line
         - Use triple quotes for block input
         
@@ -143,8 +143,8 @@ class InputHandler:
                 
                 line = input("")
                 
-                # Paste detection: Check if more input is immediately available in buffer
-                # This handles "convert to one line input" for pasted content
+                # Paste detection: Check if more input is immediately available in buffer.
+                # Preserve pasted newlines so long specs, logs, and code blocks remain intact.
                 # Only trigger if there's significant buffered content (more than just the enter key)
                 if not in_multiline and msvcrt.kbhit():
                     # Small delay to let the buffer fill if it's a real paste
@@ -161,9 +161,7 @@ class InputHandler:
                             except (EOFError, KeyboardInterrupt):
                                 break
                         
-                        # Combine pasted lines into one single line input
-                        # Replace newlines with spaces as requested ("convert to one line")
-                        combined_input = " ".join(pasted_lines)
+                        combined_input = "\n".join(pasted_lines)
                         
                         # If we detected a paste, we usually return immediately unless it ended with continuation char
                         if combined_input.strip():

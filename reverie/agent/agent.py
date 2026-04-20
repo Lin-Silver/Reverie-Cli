@@ -450,7 +450,10 @@ class _StreamingTurnState:
             tool_call["function"]["name"] = normalized_name
 
         if arguments is not None:
-            argument_text = str(arguments or "")
+            if isinstance(arguments, (dict, list)):
+                argument_text = json.dumps(arguments, ensure_ascii=False)
+            else:
+                argument_text = str(arguments or "")
             if append_arguments:
                 tool_call["function"]["arguments"] += argument_text
             else:
@@ -617,6 +620,232 @@ def validate_and_sanitize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         raise
 
 
+def _decode_jsonish_escapes(value: str) -> str:
+    """Decode common JSON escapes without corrupting literal non-ASCII text."""
+    if "\\" not in value:
+        return value
+
+    def _replace_unicode(match: re.Match[str]) -> str:
+        try:
+            return chr(int(match.group(1), 16))
+        except Exception:
+            return match.group(0)
+
+    decoded = re.sub(r"\\u([0-9a-fA-F]{4})", _replace_unicode, value)
+    replacements = {
+        r"\\": "\\",
+        r"\"": '"',
+        r"\'": "'",
+        r"\/": "/",
+        r"\n": "\n",
+        r"\r": "\r",
+        r"\t": "\t",
+        r"\b": "\b",
+        r"\f": "\f",
+    }
+    return re.sub(
+        r"\\[\\\"'\/nrtbf]",
+        lambda match: replacements.get(match.group(0), match.group(0)),
+        decoded,
+    )
+
+
+def _decode_jsonish_string(body: str, quote: str) -> str:
+    """Decode a string value from strict JSON or a relaxed JSON-like payload."""
+    if quote == '"':
+        try:
+            return json.loads(f'"{body}"')
+        except Exception:
+            pass
+    return _decode_jsonish_escapes(body)
+
+
+_JSONISH_ARGUMENT_BOUNDARY_KEYS = {
+    "action",
+    "allow_cancel",
+    "body",
+    "command",
+    "confirm_delete",
+    "content",
+    "contents",
+    "default_value",
+    "destination",
+    "dest",
+    "dest_path",
+    "file",
+    "file_path",
+    "file_text",
+    "filename",
+    "insert_line",
+    "markdown",
+    "max_results",
+    "multiline",
+    "new_str",
+    "old_str",
+    "operation",
+    "overwrite",
+    "path",
+    "query",
+    "question",
+    "reason",
+    "text",
+    "url",
+    "view_range",
+}
+
+
+def _next_property_name(raw: str, index: int) -> str:
+    """Return the next quoted object property name after a comma."""
+    match = re.match(r"\s*['\"]([^'\"]+)['\"]\s*:", raw[index:])
+    return str(match.group(1) or "").strip() if match else ""
+
+
+def _has_later_string_boundary(raw: str, start: int, quote: str) -> bool:
+    """Return whether a later quote is a stronger closing-boundary candidate."""
+    escaped = False
+    i = start
+    while i < len(raw):
+        char = raw[i]
+        if escaped:
+            escaped = False
+            i += 1
+            continue
+        if char == "\\":
+            escaped = True
+            i += 1
+            continue
+        if char != quote:
+            i += 1
+            continue
+
+        j = i + 1
+        while j < len(raw) and raw[j].isspace():
+            j += 1
+        if j >= len(raw) or raw[j] == "}":
+            return True
+        if raw[j] == "," and _next_property_name(raw, j + 1).lower() in _JSONISH_ARGUMENT_BOUNDARY_KEYS:
+            return True
+        i += 1
+    return False
+
+
+def _scan_jsonish_string(
+    raw: str,
+    start: int,
+    quote: str,
+    *,
+    tolerate_embedded_quotes: bool = False,
+) -> tuple[str, int, bool]:
+    """Read a possibly long JSON-like string, preserving malformed long text."""
+    pieces: List[str] = []
+    escaped = False
+    i = start
+
+    while i < len(raw):
+        char = raw[i]
+        if escaped:
+            pieces.append("\\" + char)
+            escaped = False
+            i += 1
+            continue
+
+        if char == "\\":
+            escaped = True
+            i += 1
+            continue
+
+        if char == quote:
+            if tolerate_embedded_quotes:
+                j = i + 1
+                while j < len(raw) and raw[j].isspace():
+                    j += 1
+                is_boundary = j >= len(raw) or raw[j] == "}"
+                if j < len(raw) and raw[j] == ",":
+                    next_key = _next_property_name(raw, j + 1).lower()
+                    if next_key not in _JSONISH_ARGUMENT_BOUNDARY_KEYS:
+                        pieces.append(char)
+                        i += 1
+                        continue
+                    is_boundary = True
+                if j < len(raw) and raw[j] not in {",", "}"}:
+                    pieces.append(char)
+                    i += 1
+                    continue
+                if is_boundary and _has_later_string_boundary(raw, i + 1, quote):
+                    pieces.append(char)
+                    i += 1
+                    continue
+
+            return "".join(pieces), i + 1, True
+
+        pieces.append(char)
+        i += 1
+
+    if escaped:
+        pieces.append("\\")
+    return "".join(pieces), len(raw), False
+
+
+def _parse_jsonish_primitive(token: str) -> Any:
+    """Parse a relaxed JSON primitive."""
+    stripped = token.strip()
+    lowered = stripped.lower()
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+    if lowered == "null":
+        return None
+    try:
+        return int(stripped)
+    except ValueError:
+        pass
+    try:
+        return float(stripped)
+    except ValueError:
+        return stripped
+
+
+def _parse_jsonish_arguments(raw: str) -> Dict[str, Any]:
+    """Salvage key/value pairs from malformed or very large tool arguments."""
+    args: Dict[str, Any] = {}
+    i = 0
+    long_text_keys = {"content", "file_text", "new_str", "old_str", "text", "body", "contents"}
+
+    while i < len(raw):
+        match = re.search(r"(['\"])([^'\"]+)\1\s*:", raw[i:])
+        if not match:
+            break
+
+        key = match.group(2).strip()
+        value_start = i + match.end()
+        while value_start < len(raw) and raw[value_start].isspace():
+            value_start += 1
+
+        if value_start >= len(raw):
+            break
+
+        first = raw[value_start]
+        if first in {"'", '"'}:
+            body, next_index, _closed = _scan_jsonish_string(
+                raw,
+                value_start + 1,
+                first,
+                tolerate_embedded_quotes=key.lower() in long_text_keys,
+            )
+            args[key] = _decode_jsonish_string(body, first)
+            i = max(next_index, value_start + 1)
+            continue
+
+        end = value_start
+        while end < len(raw) and raw[end] not in ",}":
+            end += 1
+        args[key] = _parse_jsonish_primitive(raw[value_start:end])
+        i = max(end + 1, value_start + 1)
+
+    return args
+
+
 def parse_tool_arguments(raw: str) -> Dict[str, Any]:
     """Robustly parse a tool 'arguments' string into a dict.
 
@@ -624,8 +853,13 @@ def parse_tool_arguments(raw: str) -> Dict[str, Any]:
     JSON fragments won't cause the whole tool call to fail. Returns an empty
     dict on unrecoverable parse errors.
     """
+    if isinstance(raw, dict):
+        return dict(raw)
+
     if not raw:
         return {}
+
+    raw = str(raw)
 
     # Fast path: valid JSON
     try:
@@ -649,13 +883,6 @@ def parse_tool_arguments(raw: str) -> Dict[str, Any]:
     # This salvages common malformed JSON without hardcoding specific tools.
     generic_args: Dict[str, Any] = {}
 
-    def _decode_quoted_value(token: str) -> str:
-        body = token[1:-1]
-        try:
-            return bytes(body, "utf-8").decode("unicode_escape")
-        except Exception:
-            return body
-
     for m in re.finditer(
         r'["\']([^"\']+)["\']\s*:\s*("([^"\\]*(?:\\.[^"\\]*)*)"|\'([^\'\\]*(?:\\.[^\'\\]*)*)\'|true|false|null|-?\d+(?:\.\d+)?)',
         raw,
@@ -670,7 +897,7 @@ def parse_tool_arguments(raw: str) -> Dict[str, Any]:
         elif token.lower() == "null":
             generic_args[key] = None
         elif (token.startswith('"') and token.endswith('"')) or (token.startswith("'") and token.endswith("'")):
-            generic_args[key] = _decode_quoted_value(token)
+            generic_args[key] = _decode_jsonish_string(token[1:-1], token[0])
         else:
             try:
                 generic_args[key] = int(token)
@@ -696,10 +923,7 @@ def parse_tool_arguments(raw: str) -> Dict[str, Any]:
         m = re.search(r"'content'\s*:\s*'([\s\S]*?)'(?=,\s*'|\s*\})", raw)
     if m:
         content_val = m.group(1)
-        try:
-            content_val = bytes(content_val, "utf-8").decode("unicode_escape")
-        except Exception:
-            pass
+        content_val = _decode_jsonish_string(content_val, '"' if raw[m.start()] == '"' else "'")
         args['content'] = content_val
 
     # overwrite
@@ -710,6 +934,21 @@ def parse_tool_arguments(raw: str) -> Dict[str, Any]:
     # Merge generic fallback only for keys not already parsed by targeted heuristics.
     for key, value in generic_args.items():
         args.setdefault(key, value)
+
+    # Scanner fallback: preserves long multiline values containing quotes, code
+    # fences, or incomplete closing braces that regex-based salvage can miss.
+    long_text_keys = {"content", "file_text", "new_str", "old_str", "text", "body", "contents"}
+    for key, value in _parse_jsonish_arguments(raw).items():
+        existing = args.get(key)
+        if key not in args:
+            args[key] = value
+        elif (
+            key.lower() in long_text_keys
+            and isinstance(value, str)
+            and isinstance(existing, str)
+            and len(value) > len(existing)
+        ):
+            args[key] = value
 
     if not args:
         logger.debug("Tool arguments were not valid strict JSON; returning empty dict (preview: %s)", raw[:200])

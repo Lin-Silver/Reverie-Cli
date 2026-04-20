@@ -10,6 +10,7 @@ from reverie.agent.agent import (
     THINKING_END_MARKER,
     THINKING_START_MARKER,
     _StreamingTurnState,
+    parse_tool_arguments,
 )
 from reverie.cli.display import DisplayComponents
 from reverie.cli.interface import ReverieInterface, _load_task_drawer_snapshot
@@ -124,6 +125,33 @@ def test_streaming_turn_state_accumulates_tool_call_arguments() -> None:
             },
         }
     ]
+
+
+def test_parse_tool_arguments_preserves_long_malformed_file_content() -> None:
+    body = (
+        '# 技术方案 "Vulkan"\n'
+        "```json\n"
+        '{"path":"demo.md","content":"example","pipeline":"deferred","layers":3}\n'
+        "```\n"
+        + "长文本段落\n" * 200
+    )
+    raw = '{"path":"task.md","content":"' + body + '","overwrite":true}'
+
+    args = parse_tool_arguments(raw)
+
+    assert args["path"] == "task.md"
+    assert args["content"] == body
+    assert args["overwrite"] is True
+
+
+def test_parse_tool_arguments_salvages_unterminated_long_content() -> None:
+    body = "# Draft\n" + ("details\n" * 500)
+    raw = '{"path":"task.md","content":"' + body
+
+    args = parse_tool_arguments(raw)
+
+    assert args["path"] == "task.md"
+    assert args["content"] == body
 
 
 def test_command_exec_builds_powershell_for_pipelines_and_cmdlets(tmp_path: Path) -> None:

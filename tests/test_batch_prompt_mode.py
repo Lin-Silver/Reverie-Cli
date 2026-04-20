@@ -1,7 +1,9 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from reverie.agent.agent import THINKING_END_MARKER, THINKING_START_MARKER
+from reverie.__main__ import _decode_prompt_bytes, _resolve_prompt_text
 from reverie.cli.interface import ReverieInterface, _sanitize_prompt_output_text
 from reverie.config import Config, ModelConfig
 
@@ -163,6 +165,28 @@ def test_active_model_reuses_standard_nvidia_key_for_computer_controller():
 
     assert active_model is not None
     assert active_model.api_key == "nvapi-test"
+
+
+def test_prompt_file_helpers_decode_long_locale_text(tmp_path: Path) -> None:
+    prompt_text = ("第一行\n第二行\n" * 200).strip() + "\n"
+    prompt_file = tmp_path / "prompt.txt"
+    prompt_file.write_bytes(prompt_text.encode("gb18030"))
+
+    args = SimpleNamespace(prompt=None, prompt_file=str(prompt_file), prompt_stdin=False)
+
+    assert _resolve_prompt_text(args, tmp_path) == prompt_text
+
+
+def test_prompt_at_file_shorthand_reads_multiline_text(tmp_path: Path, monkeypatch) -> None:
+    prompt_text = "# Task\n\n" + ("Preserve this line.\n" * 50)
+    prompt_file = tmp_path / "task.md"
+    prompt_file.write_text(prompt_text, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    args = SimpleNamespace(prompt="@task.md", prompt_file=None, prompt_stdin=False)
+
+    assert _resolve_prompt_text(args, tmp_path) == prompt_text
+    assert _decode_prompt_bytes(prompt_text.encode("utf-8")) == prompt_text
 
 
 def test_sanitize_prompt_output_text_removes_leaked_thinking():

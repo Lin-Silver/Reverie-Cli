@@ -49,6 +49,15 @@ class ToolExecutor:
         "worker": "fetch_workers",
         "filepath": "path",
         "file": "path",
+        "filename": "path",
+        "dest": "path",
+        "destination": "path",
+        "dest_path": "path",
+        "text": "content",
+        "body": "content",
+        "contents": "content",
+        "file_text": "content",
+        "markdown": "content",
     }
     WRAPPER_KEYS = {"args", "arguments", "parameters", "input", "payload"}
     DEFAULT_MAX_RESULT_CHARS = 50_000

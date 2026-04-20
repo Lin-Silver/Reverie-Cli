@@ -295,6 +295,13 @@ def test_tool_executor_alias_resolution_and_large_output_budget(tmp_path: Path) 
     assert Path(result.data["output_saved_to"]).exists()
     assert "Full output saved to:" in result.output
 
+    create_result = executor.execute(
+        "create_file",
+        {"path": "alias-content.txt", "text": "hello via alias", "overwrite": "true"},
+    )
+    assert create_result.success is True
+    assert (tmp_path / "alias-content.txt").read_text(encoding="utf-8") == "hello via alias"
+
 
 def test_tool_catalog_recommendation_adapts_to_mode_profile(tmp_path: Path) -> None:
     tools = [

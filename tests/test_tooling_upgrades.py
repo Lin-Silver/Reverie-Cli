@@ -389,9 +389,11 @@ def test_command_handler_tools_views_are_mode_aware(tmp_path: Path) -> None:
     overview_handler = CommandHandler(overview_console, {"agent": agent, "project_root": tmp_path})
     assert overview_handler.handle("/tools --mode reverie-gamer") is True
     overview_text = overview_console.export_text()
-    assert "Mode Quick Picks" in overview_text
+    assert "Available Reverie CLI tools:" in overview_text
     assert "game_design_orchestrator" in overview_text
-    assert "Tool Browser Shortcuts" in overview_text
+    assert "All tools:" in overview_text
+    assert "Total:" in overview_text
+    assert "Mode Quick Picks" not in overview_text
 
     search_console = Console(record=True, force_terminal=False, width=120)
     search_handler = CommandHandler(search_console, {"agent": agent, "project_root": tmp_path})

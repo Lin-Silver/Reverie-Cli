@@ -701,7 +701,7 @@ class ReverieInterface:
         self._indexing_in_progress = False
         self._git_integration_ready = False
         self._lsp_manager_ready = False
-        self._runtime_scope = ""
+        self._last_footer_refresh_time = 0.0
         self._assistant_render_started = False
         self._assistant_blank_line_pending = False
 
@@ -978,6 +978,7 @@ class ReverieInterface:
             "gemini-cli": "Gemini",
             "codex": "Codex",
             "nvidia": "NVIDIA",
+            "modelscope": "ModelScope",
         }
         source_labels = {
             "standard": "config.json",
@@ -985,6 +986,7 @@ class ReverieInterface:
             "geminicli": "Gemini CLI",
             "codex": "Codex",
             "nvidia": "NVIDIA",
+            "modelscope": "ModelScope",
         }
         return source_labels.get(source_name, "") or provider_labels.get(provider_name, provider_name or "provider")
     
@@ -1001,7 +1003,8 @@ class ReverieInterface:
             
             self._init_agent()
             self.command_handler = CommandHandler(self.console, self._get_app_context())
-            self._init_session()
+            if not self.session_manager.get_current_session():
+                self._init_session()
             
             self.main_loop()
             
@@ -1021,20 +1024,11 @@ class ReverieInterface:
         mode_label = str(getattr(config, "mode", "reverie") or "reverie").upper()
         theme_label = str(getattr(config, "theme", "default") or "default").strip() or "default"
         source_label = str(getattr(config, "active_model_source", "standard") or "standard").strip() or "standard"
-        detail = "\n".join(
-            [
-                f"version: v{__version__}",
-                f"mode: {mode_label}",
-                f"theme: {theme_label}",
-                f"source: {source_label}",
-                f"workspace: {self.project_root}",
-            ]
-        )
         self._show_activity_event(
             "Startup",
-            "Configuration loaded",
+            f"v{__version__} | {mode_label} | {source_label}",
             status="info",
-            detail=detail,
+            detail=f"theme: {theme_label} | workspace: {self.project_root}",
         )
 
     def _get_status_line(self):
@@ -1351,13 +1345,13 @@ class ReverieInterface:
         event_type = str(event.get("event", "") or "").strip().lower()
         if event_type == "tool_start":
             self._upsert_active_tool(event)
-            self._refresh_streaming_footer()
+            self._refresh_streaming_footer(force=True)
             return
         if event_type == "tool_result":
             completion_summary = self._clear_active_tool(str(event.get("tool_call_id", "") or ""))
             if completion_summary:
                 event["had_live_progress"] = bool(completion_summary.get("had_live_progress"))
-            self._refresh_streaming_footer()
+            self._refresh_streaming_footer(force=True)
 
     def _get_live_tool_panel(self):
         """Return the active tool details panel for the streaming footer."""
@@ -1367,18 +1361,24 @@ class ReverieInterface:
             return None
         return self.display.build_live_tool_panel(active_items)
 
-    def _refresh_streaming_footer(self) -> None:
+    def _refresh_streaming_footer(self, *, force: bool = False) -> None:
         """Request a live footer refresh after local UI state changes."""
         live = self._status_live
         if live is None:
             return
+        now = time.monotonic()
         try:
-            live.update(self.streaming_footer, refresh=True)
+            live.update(self.streaming_footer, refresh=False)
+            if force or now - self._last_footer_refresh_time >= 0.12:
+                live.refresh()
+                self._last_footer_refresh_time = now
             return
         except Exception:
             pass
         try:
-            live.refresh()
+            if force or now - self._last_footer_refresh_time >= 0.12:
+                live.refresh()
+                self._last_footer_refresh_time = now
         except Exception:
             pass
 
@@ -1387,7 +1387,7 @@ class ReverieInterface:
         self._task_drawer_visible = not self._task_drawer_visible
         self._task_drawer_cache_key = None
         self._task_drawer_cache_renderable = None
-        self._refresh_streaming_footer()
+        self._refresh_streaming_footer(force=True)
 
     def _get_streaming_footer(self):
         """Compose the live footer shown during streaming output."""
@@ -1772,6 +1772,7 @@ class ReverieInterface:
             )
             footer_live.start()
             self._status_live = footer_live
+            self._last_footer_refresh_time = 0.0
             self._start_stream_input_capture()
 
             def ensure_response_header() -> None:

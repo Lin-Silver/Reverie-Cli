@@ -7,6 +7,7 @@ Handles all commands starting with / with dreamy pink-purple-blue aesthetics
 from typing import Optional, Callable, Dict, Any, List
 from pathlib import Path
 import json
+import re
 import shlex
 import time
 
@@ -29,7 +30,6 @@ from ..harness import build_harness_capability_report
 from ..modes import (
     get_mode_description,
     get_mode_display_name,
-    get_mode_tool_discovery_profile,
     list_modes,
     normalize_mode,
 )
@@ -61,6 +61,7 @@ class CommandHandler:
             'geminicli': self.cmd_geminicli,
             'codex': self.cmd_codex,
             'nvidia': self.cmd_nvidia,
+            'modelscope': self.cmd_modelscope,
             'mode': self.cmd_mode,
             'status': self.cmd_status,
             'doctor': self.cmd_doctor,
@@ -1847,28 +1848,6 @@ class CommandHandler:
             kwargs["tool_name"] = tool_name
         return tool.execute(**kwargs)
 
-    def _default_tools_query(self, mode: str) -> str:
-        """Derive a stable quick-pick query from the mode discovery profile."""
-        profile = get_mode_tool_discovery_profile(mode)
-        raw_tokens: List[str] = []
-        raw_tokens.extend(str(item) for item in (profile.get("domain_tokens", ()) or ()))
-        raw_tokens.extend(str(item).replace("-", " ") for item in (profile.get("focus_categories", ()) or ()))
-
-        ordered: List[str] = []
-        seen: set[str] = set()
-        for token in raw_tokens:
-            cleaned = " ".join(str(token).strip().replace("_", " ").split()).lower()
-            if not cleaned or cleaned in seen:
-                continue
-            ordered.append(cleaned)
-            seen.add(cleaned)
-            if len(ordered) >= 6:
-                break
-
-        if not ordered:
-            ordered = [mode.replace("-", " "), "tooling"]
-        return " ".join(ordered)
-
     def _build_tool_items_table(
         self,
         items: List[Dict[str, Any]],
@@ -1955,6 +1934,101 @@ class CommandHandler:
             accent=self.theme.BORDER_SECONDARY,
         )
 
+    _TOOL_LIST_LABELS: Dict[str, tuple[str, str]] = {
+        "codebase-retrieval": ("Search Code", "codebase-retrieval"),
+        "command_exec": ("Shell", "command_exec"),
+        "count_tokens": ("Count Tokens", "count_tokens"),
+        "create_file": ("WriteFile", "create_file"),
+        "delete_file": ("DeleteFile", "delete_file"),
+        "file_ops": ("File Ops", "file_ops"),
+        "git-commit-retrieval": ("Search Git History", "git-commit-retrieval"),
+        "list_mcp_resources": ("List MCP Resources", "list_mcp_resources"),
+        "read_mcp_resource": ("Read MCP Resource", "read_mcp_resource"),
+        "skill_lookup": ("Activate Skill", "skill_lookup"),
+        "str_replace_editor": ("Edit", "str_replace_editor"),
+        "subagent": ("Invoke Subagent", "subagent"),
+        "switch_mode": ("Switch Mode", "switch_mode"),
+        "task_manager": ("WriteTodos", "task_manager"),
+        "text_to_image": ("Generate Image", "text_to_image"),
+        "tool_catalog": ("List Tools", "tool_catalog"),
+        "userInput": ("Ask User", "ask_user"),
+        "vision_upload": ("Vision Upload", "vision_upload"),
+        "web_search": ("WebSearch", "web_search"),
+    }
+
+    def _get_tool_records_for_cli(self, agent: Any, mode: str) -> List[Dict[str, Any]]:
+        """Fetch normalized tool records without building heavyweight catalog text."""
+        tool = ToolCatalogTool({"agent": agent, "project_root": self.app.get("project_root")})
+        try:
+            return tool.list_visible_records(mode)
+        except Exception:
+            result = self._execute_tool_catalog(agent, operation="list", mode=mode, max_results=200)
+            data = result.data if result.success and isinstance(result.data, dict) else {}
+            return list(data.get("items", []) or [])
+
+    def _get_total_tool_count_for_cli(self, agent: Any, fallback: int) -> int:
+        """Return loaded tool count across all modes for compact totals."""
+        executor = getattr(agent, "tool_executor", None)
+        if executor and callable(getattr(executor, "list_tools", None)):
+            try:
+                return max(len(executor.list_tools(mode=None)), fallback)
+            except Exception:
+                return fallback
+        return fallback
+
+    def _format_cli_tool_name(self, item: Dict[str, Any]) -> tuple[str, str]:
+        """Return the concise display label and invocation name for `/tools`."""
+        name = str(item.get("name", "") or "").strip()
+        label, invocation = self._TOOL_LIST_LABELS.get(name, ("", ""))
+        if not label:
+            label = re.sub(r"[^A-Za-z0-9]+", " ", name).strip().title().replace(" ", "") or name or "Tool"
+        if not invocation:
+            invocation = name
+        return label, invocation
+
+    def _build_tools_plain_list(
+        self,
+        items: List[Dict[str, Any]],
+        *,
+        mode: str,
+        total_tool_count: int,
+    ) -> Group:
+        """Build the simplified `/tools` list."""
+        body = Text()
+        body.append("Available Reverie CLI tools:\n", style=f"bold {self.theme.TEXT_PRIMARY}")
+
+        formatted: List[tuple[str, str]] = []
+        seen: set[str] = set()
+        for item in items:
+            label, invocation = self._format_cli_tool_name(item)
+            key = f"{label}\0{invocation}".lower()
+            if key in seen:
+                continue
+            formatted.append((label, invocation))
+            seen.add(key)
+
+        formatted.sort(key=lambda pair: (pair[0].lower(), pair[1].lower()))
+        if not formatted:
+            body.append("\n  - No tools are currently visible in this mode.\n", style=self.theme.TEXT_DIM)
+        else:
+            for label, invocation in formatted:
+                body.append("\n  - ", style=self.theme.TEXT_DIM)
+                body.append(label, style=f"bold {self.theme.TEXT_PRIMARY}")
+                body.append(f" ({invocation})", style=self.theme.TEXT_SECONDARY)
+            body.append("\n")
+
+        current_count = len(formatted)
+        total_count = max(int(total_tool_count or 0), current_count)
+        footer = Text()
+        footer.append("All tools: ", style=f"bold {self.theme.TEXT_PRIMARY}")
+        footer.append(f"{current_count} listed for {get_mode_display_name(mode)}", style=self.theme.TEXT_SECONDARY)
+        footer.append("\n")
+        footer.append("Total: ", style=f"bold {self.theme.TEXT_PRIMARY}")
+        footer.append(f"{current_count}/{total_count} tools available in current mode", style=self.theme.TEXT_SECONDARY)
+        footer.append("\n")
+        footer.append("Use /tools search <query>, /tools inspect <tool>, or /tools --mode <mode> for narrower views.", style=self.theme.TEXT_DIM)
+        return Group(body, Text(""), footer)
+
     def _render_tools_overview(self, agent: Any, mode: str) -> bool:
         """Render the default `/tools` overview page."""
         self._show_command_panel(
@@ -1964,141 +2038,20 @@ class CommandHandler:
             meta=f"{get_mode_display_name(mode)}  {self.deco.DOT_MEDIUM}  {mode}",
         )
 
-        list_result = self._execute_tool_catalog(agent, operation="list", mode=mode, max_results=12)
-        if not list_result.success:
+        try:
+            items = self._get_tool_records_for_cli(agent, mode)
+        except Exception as exc:
             self._show_activity_event(
                 "Tools",
                 "Tool catalog could not load the visible tool surface.",
                 status="error",
-                detail=str(list_result.error or ""),
+                detail=str(exc),
             )
             self.console.print()
             return True
 
-        groups_result = self._execute_tool_catalog(agent, operation="groups", mode=mode)
-        quick_query = self._default_tools_query(mode)
-        recommend_result = self._execute_tool_catalog(
-            agent,
-            operation="recommend",
-            mode=mode,
-            query=quick_query,
-            max_results=5,
-        )
-
-        list_data = list_result.data if isinstance(list_result.data, dict) else {}
-        groups_data = groups_result.data if groups_result.success and isinstance(groups_result.data, dict) else {}
-        recommend_data = recommend_result.data if recommend_result.success and isinstance(recommend_result.data, dict) else {}
-        items = list_data.get("items", []) or []
-        quick_items = recommend_data.get("items", []) or []
-        category_map = groups_data.get("by_category", {}) or {}
-
-        self.console.print(
-            Columns(
-                [
-                    self._build_metric_panel(
-                        "Visible",
-                        list_data.get("count", 0),
-                        accent=self.theme.MINT_VIBRANT,
-                        detail="tools exposed in this mode",
-                    ),
-                    self._build_metric_panel(
-                        "Categories",
-                        len(category_map),
-                        accent=self.theme.BLUE_SOFT,
-                        detail="discovery groups",
-                    ),
-                    self._build_metric_panel(
-                        "Quick Picks",
-                        len(quick_items),
-                        accent=self.theme.PURPLE_SOFT,
-                        detail="mode-prioritized suggestions",
-                    ),
-                ],
-                equal=True,
-                expand=True,
-            )
-        )
-        self.console.print()
-
-        self.console.print(
-            Panel(
-                Group(
-                    Text(get_mode_description(mode), style=self.theme.TEXT_PRIMARY),
-                    Text(f"Quick-pick profile: {quick_query}", style=self.theme.TEXT_DIM),
-                ),
-                title=f"[bold {self.theme.BLUE_SOFT}]{self.deco.DIAMOND} Mode Lens[/bold {self.theme.BLUE_SOFT}]",
-                border_style=self.theme.BORDER_SUBTLE,
-                box=box.ROUNDED,
-                padding=(0, 1),
-            )
-        )
-        self.console.print()
-
-        if quick_items:
-            self.console.print(
-                self._build_tool_items_table(
-                    quick_items,
-                    title="Mode Quick Picks",
-                    accent=self.theme.PURPLE_SOFT,
-                    detail_label="Why",
-                    detail_key="reasons",
-                )
-            )
-            self.console.print()
-
-        if items:
-            self.console.print(
-                self._build_tool_items_table(
-                    items,
-                    title="Visible Tools",
-                    accent=self.theme.BORDER_PRIMARY,
-                    detail_label="Aliases",
-                    detail_key="aliases",
-                )
-            )
-            total_count = int(list_data.get("count", len(items)))
-            if total_count > len(items):
-                self.console.print()
-                self._show_activity_event(
-                    "Tools",
-                    "The visible tool list is clipped for readability.",
-                    status="info",
-                    detail=f"Showing {len(items)} of {total_count}. Use `/tools search <query>` or `/tools inspect <tool>` for narrower views.",
-                )
-                self.console.print()
-        else:
-            self._show_activity_event(
-                "Tools",
-                "No tools are currently visible in this mode.",
-                status="warning",
-                detail="Check provider capabilities or try `/tools --mode reverie` to inspect the baseline coding surface.",
-            )
-            self.console.print()
-
-        if groups_data:
-            self.console.print(
-                Columns(
-                    [
-                        self._build_tool_group_table(
-                            groups_data.get("by_category", {}) or {},
-                            title="By Category",
-                            accent=self.theme.BLUE_SOFT,
-                            label="Category",
-                        ),
-                        self._build_tool_group_table(
-                            groups_data.get("by_kind", {}) or {},
-                            title="By Kind",
-                            accent=self.theme.PINK_SOFT,
-                            label="Kind",
-                        ),
-                    ],
-                    equal=True,
-                    expand=True,
-                )
-            )
-            self.console.print()
-
-        self.console.print(self._build_tools_shortcuts_table())
+        total_tool_count = self._get_total_tool_count_for_cli(agent, len(items))
+        self.console.print(self._build_tools_plain_list(items, mode=mode, total_tool_count=total_tool_count))
         self.console.print()
         return True
 
@@ -4993,6 +4946,7 @@ class CommandHandler:
             "geminicli": "Gemini CLI",
             "codex": "Codex",
             "nvidia": "NVIDIA",
+            "modelscope": "ModelScope",
         }
         return mapping.get(str(source or "").strip().lower(), "config.json")
 
@@ -6257,6 +6211,232 @@ class CommandHandler:
             return self._cmd_codex_thinking("")
 
         return True
+
+    def cmd_modelscope(self, args: str) -> bool:
+        """Manage ModelScope source settings."""
+        raw = args.strip()
+        if not raw:
+            return self._cmd_modelscope_status()
+
+        lowered = raw.lower()
+        if lowered in ("status", "check"):
+            return self._cmd_modelscope_status()
+        if lowered in ("key", "apikey", "api-key", "login"):
+            return self._cmd_modelscope_key()
+        if lowered in ("activate", "use"):
+            return self._cmd_modelscope_activate()
+        if lowered == "model":
+            return self._cmd_modelscope_model("")
+        if lowered.startswith("model "):
+            return self._cmd_modelscope_model(raw[6:].strip())
+        if lowered in ("endpoint", "url", "base-url", "baseurl"):
+            return self._cmd_modelscope_endpoint("")
+        if lowered.startswith("endpoint "):
+            return self._cmd_modelscope_endpoint(raw[9:].strip())
+        if lowered.startswith("url "):
+            return self._cmd_modelscope_endpoint(raw[4:].strip())
+        if lowered.startswith("base-url "):
+            return self._cmd_modelscope_endpoint(raw[9:].strip())
+        if lowered.startswith("baseurl "):
+            return self._cmd_modelscope_endpoint(raw[8:].strip())
+
+        self.console.print(
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /modelscope [status|key|activate|model|endpoint][/{self.theme.AMBER_GLOW}]"
+        )
+        return True
+
+    def _ensure_modelscope_configuration(self, config) -> bool:
+        """Prompt for ModelScope API key when needed and bind the source."""
+        from ..modelscope import (
+            MODELSCOPE_API_KEY_HINT_URL,
+            normalize_modelscope_config,
+            resolve_modelscope_api_key,
+        )
+
+        modelscope_cfg = normalize_modelscope_config(getattr(config, "modelscope", {}))
+        api_key = resolve_modelscope_api_key(modelscope_cfg)
+        if not api_key:
+            self.console.print()
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Get your ModelScope token here: {MODELSCOPE_API_KEY_HINT_URL}[/{self.theme.TEXT_DIM}]"
+            )
+            api_key = Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] ModelScope API Key",
+                password=True,
+            ).strip()
+            if not api_key:
+                self.console.print(
+                    f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} ModelScope API key is required to activate this source.[/{self.theme.CORAL_SOFT}]"
+                )
+                return False
+        modelscope_cfg["api_key"] = api_key
+        config.modelscope = normalize_modelscope_config(modelscope_cfg)
+        config.active_model_source = "modelscope"
+        return True
+
+    def _cmd_modelscope_status(self) -> bool:
+        from ..modelscope import (
+            MODELSCOPE_API_KEY_HINT_URL,
+            mask_secret,
+            normalize_modelscope_config,
+            resolve_modelscope_api_key,
+            resolve_modelscope_selected_model,
+        )
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        modelscope_cfg = normalize_modelscope_config(getattr(config, "modelscope", {}))
+        selected = resolve_modelscope_selected_model(modelscope_cfg)
+        effective_api_key = resolve_modelscope_api_key(modelscope_cfg)
+        key_origin = " (from environment)" if effective_api_key and not str(modelscope_cfg.get("api_key", "") or "").strip() else ""
+        model_source = str(getattr(config, "active_model_source", "standard") or "standard").strip().lower()
+
+        lines = [
+            f"[{self.theme.BLUE_SOFT}]Active model source:[/{self.theme.BLUE_SOFT}] {self._format_model_source_label(model_source)}",
+            f"[{self.theme.BLUE_SOFT}]Configured key:[/{self.theme.BLUE_SOFT}] {mask_secret(effective_api_key) if effective_api_key else '(not set)'}{key_origin}",
+            f"[{self.theme.BLUE_SOFT}]Anthropic base URL:[/{self.theme.BLUE_SOFT}] {escape(str(modelscope_cfg.get('api_url', '')))}",
+            f"[{self.theme.BLUE_SOFT}]Default max tokens:[/{self.theme.BLUE_SOFT}] {modelscope_cfg.get('max_tokens', 16384)}",
+            f"[{self.theme.BLUE_SOFT}]API key help:[/{self.theme.BLUE_SOFT}] {escape(MODELSCOPE_API_KEY_HINT_URL)}",
+        ]
+        if selected:
+            lines.insert(1, f"[{self.theme.BLUE_SOFT}]Selected model:[/{self.theme.BLUE_SOFT}] {escape(selected['display_name'])} ({escape(selected['id'])})")
+            lines.insert(2, f"[{self.theme.BLUE_SOFT}]Transport:[/{self.theme.BLUE_SOFT}] Anthropic SDK")
+            lines.insert(3, f"[{self.theme.BLUE_SOFT}]Context:[/{self.theme.BLUE_SOFT}] {int(selected.get('context_length') or 0):,} tokens")
+            lines.insert(4, f"[{self.theme.BLUE_SOFT}]Vision input:[/{self.theme.BLUE_SOFT}] {'YES' if bool(selected.get('vision')) else 'NO'}")
+
+        self.console.print()
+        self.console.print(
+            Panel(
+                Text.from_markup("\n".join(lines)),
+                title=f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} ModelScope Source {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]",
+                border_style=self.theme.BORDER_PRIMARY,
+                box=box.ROUNDED,
+                padding=(1, 2),
+            )
+        )
+        self.console.print()
+        return True
+
+    def _cmd_modelscope_key(self) -> bool:
+        from ..modelscope import MODELSCOPE_API_KEY_HINT_URL, normalize_modelscope_config
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        modelscope_cfg = normalize_modelscope_config(getattr(config, "modelscope", {}))
+        self.console.print(
+            f"[{self.theme.TEXT_DIM}]Get your ModelScope token here: {MODELSCOPE_API_KEY_HINT_URL}[/{self.theme.TEXT_DIM}]"
+        )
+        api_key = Prompt.ask(
+            f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] ModelScope API Key",
+            password=True,
+        ).strip()
+        if not api_key:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} ModelScope API key cannot be empty.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        modelscope_cfg["api_key"] = api_key
+        config.modelscope = normalize_modelscope_config(modelscope_cfg)
+        config_manager.save(config)
+
+        if self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} ModelScope API key saved.[/{self.theme.MINT_VIBRANT}]"
+        )
+        return True
+
+    def _cmd_modelscope_activate(self) -> bool:
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        if not self._ensure_modelscope_configuration(config):
+            return True
+        config.active_model_source = "modelscope"
+        config_manager.save(config)
+        if self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} ModelScope source activated.[/{self.theme.MINT_VIBRANT}]"
+        )
+        return True
+
+    def _cmd_modelscope_endpoint(self, endpoint_value: str) -> bool:
+        from ..modelscope import MODELSCOPE_DEFAULT_API_URL, normalize_modelscope_config
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        modelscope_cfg = normalize_modelscope_config(getattr(config, "modelscope", {}))
+        candidate = str(endpoint_value or "").strip()
+        if not candidate:
+            current_url = str(modelscope_cfg.get("api_url", MODELSCOPE_DEFAULT_API_URL)).strip()
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Current Anthropic base URL: {current_url}[/{self.theme.TEXT_DIM}]"
+            )
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Use 'clear' to restore the default. Do not include /v1 for the Anthropic SDK path.[/{self.theme.TEXT_DIM}]"
+            )
+            candidate = Prompt.ask(
+                "ModelScope Anthropic base URL",
+                default=current_url
+            ).strip()
+
+        if candidate.lower() in ("clear", "default", "none", "off"):
+            candidate = MODELSCOPE_DEFAULT_API_URL
+
+        if candidate and not candidate.startswith(("http://", "https://")):
+            candidate = f"https://{candidate}"
+
+        modelscope_cfg["api_url"] = candidate or MODELSCOPE_DEFAULT_API_URL
+        config.modelscope = normalize_modelscope_config(modelscope_cfg)
+        config_manager.save(config)
+
+        if self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+
+        self.console.print()
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} ModelScope Anthropic base URL set to: {escape(config.modelscope.get('api_url', MODELSCOPE_DEFAULT_API_URL))}[/{self.theme.MINT_VIBRANT}]"
+        )
+        self.console.print()
+        return True
+
+    def _cmd_modelscope_model(self, model_query: str) -> bool:
+        from ..modelscope import get_modelscope_model_catalog, normalize_modelscope_config
+
+        return self._select_external_provider_model(
+            config_attr="modelscope",
+            normalize_config=normalize_modelscope_config,
+            catalog=get_modelscope_model_catalog(),
+            provider_label="ModelScope",
+            active_source="modelscope",
+            model_query=model_query,
+        )
 
     def cmd_nvidia(self, args: str) -> bool:
         """Manage NVIDIA source settings."""

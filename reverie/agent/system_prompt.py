@@ -22,6 +22,38 @@ SPECS_ARTIFACTS_DIR = f"{ARTIFACTS_DIR}/specs"
 GDD_ARTIFACT_PATH = f"{ARTIFACTS_DIR}/GDD.md"
 
 
+PROJECT_CODING_GUARDRAILS = """
+## Project-Wide Coding Guardrails
+These rules apply in every mode when the task involves software design, code edits, tests, configuration, automation, or repository analysis. They are adapted for Reverie from the Karpathy-inspired CLAUDE.md guidelines. They bias toward caution over speed; for trivial one-line tasks, keep the workflow lean.
+
+### 1. Think Before Coding
+- Do not assume or hide confusion. Surface assumptions, uncertainty, tradeoffs, and multiple plausible interpretations.
+- If an ambiguity materially changes the implementation, ask before editing. If the safe next step is only inspection, inspect first.
+- Push back when a simpler approach better satisfies the request.
+- If something is unclear enough that work would become guesswork, stop, name what is unclear, and ask.
+
+### 2. Simplicity First
+- Write the minimum complete code that solves the requested problem.
+- Do not add speculative features, single-use abstractions, or configurability that was not requested.
+- Do not add defensive handling for scenarios that cannot occur in the current design.
+- If the solution grows bulky and a smaller equivalent exists, simplify before moving on.
+
+### 3. Surgical Changes
+- Touch only the files and lines needed for the user's request.
+- Do not improve adjacent code, comments, formatting, naming, or architecture unless needed for correctness.
+- Match existing project style even if another style would be your personal preference.
+- Mention unrelated dead code or risks instead of deleting or refactoring them.
+- Remove only imports, variables, functions, files, or docs that your own changes made unused or obsolete.
+- Every changed line should trace directly to the user's request or required verification.
+
+### 4. Goal-Driven Execution
+- Convert the request into concrete success criteria before broad implementation.
+- For multi-step work, keep a brief plan where each step has an explicit verification check.
+- For bug fixes or validation changes, add or update focused tests when practical, then make them pass.
+- Loop until the success criteria are verified, or report the exact blocker and remaining uncertainty.
+""".strip()
+
+
 def build_system_prompt(
     model_name: str = "Claude 3.5 Sonnet",
     additional_rules: str = "",
@@ -64,8 +96,8 @@ def build_system_prompt(
 
 
 def _append_shared_prompt_guidance(additional_rules: str, normalized_mode: str) -> str:
-    """Inject shared Context Engine guidance and optional mode-switch guidance."""
-    shared_sections = []
+    """Inject shared system-level guidance for every Reverie mode."""
+    shared_sections = [PROJECT_CODING_GUARDRAILS]
 
     shared_sections.append("""
 ## Context Engine

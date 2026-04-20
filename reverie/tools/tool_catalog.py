@@ -220,6 +220,10 @@ next in the active mode.
         normalized_records.sort(key=lambda item: (item["category"], item["kind"], item["name"].lower()))
         return normalized_records
 
+    def list_visible_records(self, mode: str) -> List[Dict[str, Any]]:
+        """Return normalized visible tool records for UI surfaces."""
+        return [dict(record) for record in self._visible_tool_records(mode)]
+
     def _iter_searchable_chunks(self, record: Dict[str, Any]) -> Iterable[str]:
         yield str(record.get("name", "") or "")
         yield str(record.get("kind", "") or "")
@@ -677,7 +681,7 @@ next in the active mode.
             max_results = int(max_results)
         except (TypeError, ValueError):
             return ToolResult.fail("max_results must be an integer")
-        max_results = max(1, min(max_results, 25))
+        max_results = max(1, min(max_results, 200))
 
         records = self._visible_tool_records(mode)
 

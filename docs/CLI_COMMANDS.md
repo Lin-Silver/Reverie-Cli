@@ -69,9 +69,15 @@ Subagents are enabled only in base `reverie` mode. They inherit the active Rever
 | `/nvidia activate` | Switch active source to NVIDIA |
 | `/nvidia model <model-id>` | Set the NVIDIA model |
 | `/nvidia endpoint <value>` | Set or clear NVIDIA endpoint override |
+| `/modelscope` | Show ModelScope configuration |
+| `/modelscope key` | Save the ModelScope token from modelscope.cn/my/access/token |
+| `/modelscope activate` | Switch active source to ModelScope |
+| `/modelscope model <model-id>` | Set the ModelScope model id |
+| `/modelscope endpoint <value>` | Set or clear the Anthropic SDK base URL |
 
 Request-based NVIDIA vision models can also consume inline chat attachments like `@image.png`.
 Reverie also reads `NVIDIA_API_KEY` automatically when it is present, and Computer Controller mode pins the runtime to `qwen/qwen3.5-397b-a17b`.
+ModelScope is called through the Anthropic SDK and reads `MODELSCOPE_API_KEY`, `MODELSCOPE_TOKEN`, or `MODELSCOPE_ACCESS_TOKEN` automatically when present. Its default model is `ZhipuAI/GLM-5.1`.
 
 ## Tools and Context
 

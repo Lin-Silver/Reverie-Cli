@@ -23,6 +23,26 @@ def test_reverie_prompt_adds_package_and_verification_loop_guidance() -> None:
     assert "Before a burst of related retrieval or command calls, briefly tell the user what you are checking and why." in prompt
 
 
+def test_shared_coding_guardrails_are_injected_into_all_modes() -> None:
+    for mode in (
+        "reverie",
+        "reverie-atlas",
+        "reverie-gamer",
+        "reverie-ant",
+        "spec-driven",
+        "spec-vibe",
+        "writer",
+        "computer-controller",
+    ):
+        prompt = build_system_prompt(model_name="Test Model", mode=mode)
+
+        assert "Project-Wide Coding Guardrails" in prompt
+        assert "Think Before Coding" in prompt
+        assert "Simplicity First" in prompt
+        assert "Surgical Changes" in prompt
+        assert "Goal-Driven Execution" in prompt
+
+
 def test_spec_driven_prompt_allows_one_shot_document_chain() -> None:
     prompt = build_system_prompt(
         model_name="Test Model",

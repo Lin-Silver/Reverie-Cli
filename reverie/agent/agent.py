@@ -33,6 +33,7 @@ from ..nvidia import (
     nvidia_model_allows_tools,
     nvidia_model_requires_system_message_first,
 )
+from ..modelscope import build_modelscope_anthropic_options
 
 # Special marker for thinking content (used in streaming)
 # This allows the interface to identify and style thinking content differently
@@ -316,6 +317,38 @@ def _build_anthropic_tool_result_block(tool_call_id: str, result: ToolResult) ->
         "content": str(_coerce_text_fragments(_tool_result_content(result)) or ""),
         "is_error": not bool(result.success),
     }
+
+
+def _convert_tools_to_anthropic_format(tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Convert OpenAI-format function tools into Anthropic tool schemas."""
+    converted: List[Dict[str, Any]] = []
+    for tool in tools or []:
+        if not isinstance(tool, dict):
+            continue
+        if "input_schema" in tool and "name" in tool:
+            converted.append(dict(tool))
+            continue
+
+        function = tool.get("function")
+        if not isinstance(function, dict):
+            continue
+
+        name = str(function.get("name", "") or "").strip()
+        if not name:
+            continue
+
+        input_schema = function.get("parameters")
+        if not isinstance(input_schema, dict):
+            input_schema = {"type": "object", "properties": {}}
+
+        converted.append(
+            {
+                "name": name,
+                "description": str(function.get("description", "") or "").strip() or name,
+                "input_schema": input_schema,
+            }
+        )
+    return converted
 
 
 @dataclass
@@ -1221,10 +1254,16 @@ class ReverieAgent:
         elif self.provider == "anthropic":
             try:
                 import anthropic
-                self._client = anthropic.Anthropic(
-                    api_key=self.api_key,
-                    base_url=self.base_url if self.base_url else None
-                )
+                client_kwargs: Dict[str, Any] = {
+                    "api_key": self.api_key,
+                    "base_url": self.base_url if self.base_url else None,
+                    "timeout": self._resolve_provider_timeout(),
+                }
+                try:
+                    self._client = anthropic.Anthropic(**client_kwargs)
+                except TypeError:
+                    client_kwargs.pop("timeout", None)
+                    self._client = anthropic.Anthropic(**client_kwargs)
             except ImportError:
                 raise ImportError(
                     "Anthropic SDK not installed. Run: pip install anthropic"
@@ -1403,6 +1442,14 @@ class ReverieAgent:
         if self._is_nvidia_request() or self._is_active_model_source("nvidia"):
             try:
                 cfg = getattr(config, "nvidia", {})
+                if isinstance(cfg, dict):
+                    return max(timeout_value, int(cfg.get("timeout", timeout_value)))
+            except Exception:
+                return timeout_value
+
+        if self.provider == "anthropic" and self._is_active_model_source("modelscope"):
+            try:
+                cfg = getattr(config, "modelscope", {})
                 if isinstance(cfg, dict):
                     return max(timeout_value, int(cfg.get("timeout", timeout_value)))
             except Exception:
@@ -1594,6 +1641,19 @@ class ReverieAgent:
         if self._is_nvidia_request():
             return "NVIDIA API"
         return "Request provider"
+
+    def _resolve_anthropic_max_tokens(self) -> int:
+        """Return max_tokens for Anthropic-compatible providers."""
+        max_tokens = 4096
+        if self._is_active_model_source("modelscope"):
+            try:
+                options = build_modelscope_anthropic_options(getattr(self.config, "modelscope", {}), self.model)
+                candidate = int(options.get("max_tokens", max_tokens))
+                if candidate > 0:
+                    return candidate
+            except Exception:
+                return max_tokens
+        return max_tokens
 
     def _completion_continuation_limit(self) -> int:
         """Return the continuation budget for a turn."""
@@ -2574,6 +2634,7 @@ class ReverieAgent:
     def _process_streaming_anthropic(self, session_id: str = "default") -> Generator[str, None, None]:
         """Process with streaming response using Anthropic SDK"""
         tools = self.get_visible_tool_schemas()
+        anthropic_tools = _convert_tools_to_anthropic_format(tools)
         
         max_continuations = self._completion_continuation_limit()
         continuation_count = 0
@@ -2587,15 +2648,15 @@ class ReverieAgent:
             kwargs = {
                 "model": self.model,
                 "messages": anthropic_messages,
-                "max_tokens": 4096,
+                "max_tokens": self._resolve_anthropic_max_tokens(),
                 "stream": True
             }
             
             if system_message:
                 kwargs["system"] = system_message
             
-            if tools:
-                kwargs["tools"] = tools
+            if anthropic_tools:
+                kwargs["tools"] = anthropic_tools
             
             # Make request
             with self._client.messages.stream(**kwargs) as stream:
@@ -3079,6 +3140,7 @@ class ReverieAgent:
     def _process_non_streaming_anthropic(self, session_id: str = "default") -> str:
         """Process without streaming using Anthropic SDK"""
         tools = self.get_visible_tool_schemas()
+        anthropic_tools = _convert_tools_to_anthropic_format(tools)
         
         all_content = []
         
@@ -3091,14 +3153,14 @@ class ReverieAgent:
             kwargs = {
                 "model": self.model,
                 "messages": anthropic_messages,
-                "max_tokens": 4096,
+                "max_tokens": self._resolve_anthropic_max_tokens(),
             }
             
             if system_message:
                 kwargs["system"] = system_message
             
-            if tools:
-                kwargs["tools"] = tools
+            if anthropic_tools:
+                kwargs["tools"] = anthropic_tools
             
             # Make request
             response = self._client.messages.create(**kwargs)

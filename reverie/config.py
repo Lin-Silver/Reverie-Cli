@@ -42,10 +42,15 @@ from .nvidia import (
     normalize_nvidia_config,
     resolve_nvidia_api_key,
 )
+from .modelscope import (
+    build_modelscope_runtime_model_data,
+    default_modelscope_config,
+    normalize_modelscope_config,
+)
 from .modes import normalize_mode
 from .version import CONFIG_VERSION, __version__
 
-EXTERNAL_MODEL_SOURCES = ("qwencode", "geminicli", "codex", "nvidia")
+EXTERNAL_MODEL_SOURCES = ("qwencode", "geminicli", "codex", "nvidia", "modelscope")
 SUPPORTED_ACTIVE_MODEL_SOURCES = ("standard",) + EXTERNAL_MODEL_SOURCES
 SUPPORTED_TOOL_OUTPUT_STYLES = ("compact", "condensed", "full")
 SUPPORTED_THINKING_OUTPUT_STYLES = ("hidden", "compact", "full")
@@ -595,7 +600,7 @@ class Config:
     """Main configuration"""
     models: List[ModelConfig] = field(default_factory=list)
     active_model_index: int = 0
-    active_model_source: str = "standard"  # standard | qwencode | geminicli | codex | nvidia
+    active_model_source: str = "standard"  # standard | qwencode | geminicli | codex | nvidia | modelscope
     mode: str = "reverie"
     theme: str = "default"
     max_context_tokens: int = 128000
@@ -621,6 +626,7 @@ class Config:
     geminicli: Dict[str, Any] = field(default_factory=dict)
     codex: Dict[str, Any] = field(default_factory=dict)
     nvidia: Dict[str, Any] = field(default_factory=default_nvidia_config)
+    modelscope: Dict[str, Any] = field(default_factory=default_modelscope_config)
     atlas_mode: Dict[str, Any] = field(default_factory=default_atlas_mode_config)
     subagents: Dict[str, Any] = field(default_factory=default_subagent_config)
     
@@ -678,6 +684,11 @@ class Config:
             if runtime_nvidia_model:
                 return ModelConfig.from_dict(runtime_nvidia_model)
 
+        if source == "modelscope":
+            runtime_modelscope_model = build_modelscope_runtime_model_data(self.modelscope)
+            if runtime_modelscope_model:
+                return ModelConfig.from_dict(runtime_modelscope_model)
+
         if 0 <= self.active_model_index < len(self.models):
             return self.models[self.active_model_index]
         return None
@@ -698,6 +709,7 @@ class Config:
         geminicli = normalize_geminicli_config(self.geminicli)
         codex = normalize_codex_config(self.codex)
         nvidia = normalize_nvidia_config(self.nvidia)
+        modelscope = normalize_modelscope_config(self.modelscope)
         atlas_mode = normalize_atlas_mode_config(self.atlas_mode)
         subagents = normalize_subagent_config(self.subagents)
         active_model_source = self.active_model_source.lower()
@@ -729,6 +741,7 @@ class Config:
             'geminicli': geminicli,
             'codex': codex,
             'nvidia': nvidia,
+            'modelscope': modelscope,
             'atlas_mode': atlas_mode,
             'subagents': subagents,
         }
@@ -763,6 +776,8 @@ class Config:
         codex = normalize_codex_config(raw_codex)
         raw_nvidia = data.get('nvidia', {})
         nvidia = normalize_nvidia_config(raw_nvidia)
+        raw_modelscope = data.get('modelscope', {})
+        modelscope = normalize_modelscope_config(raw_modelscope)
         raw_atlas_mode = data.get('atlas_mode', {})
         atlas_mode = normalize_atlas_mode_config(raw_atlas_mode)
         raw_subagents = data.get('subagents', {})
@@ -796,6 +811,7 @@ class Config:
             geminicli=geminicli,
             codex=codex,
             nvidia=nvidia,
+            modelscope=modelscope,
             atlas_mode=atlas_mode,
             subagents=subagents,
         )
@@ -1404,6 +1420,17 @@ class ConfigManager:
                     needs_update = True
                     break
 
+        # Check if modelscope section is missing
+        if 'modelscope' not in data:
+            needs_update = True
+        elif not isinstance(data.get('modelscope'), dict):
+            needs_update = True
+        else:
+            for field_name in default_modelscope_config().keys():
+                if field_name not in data.get('modelscope', {}):
+                    needs_update = True
+                    break
+
         # Check if atlas_mode section is missing
         if 'atlas_mode' not in data:
             needs_update = True
@@ -1521,6 +1548,8 @@ class ConfigManager:
             return True
         if normalize_codex_config(getattr(config, "codex", {})).get("selected_model_id"):
             return True
+        if build_modelscope_runtime_model_data(getattr(config, "modelscope", {})):
+            return True
         nvidia = normalize_nvidia_config(getattr(config, "nvidia", {}))
         if normalize_mode(getattr(config, "mode", "reverie")) == "computer-controller":
             if build_nvidia_computer_controller_runtime_model_data(nvidia):
@@ -1555,6 +1584,8 @@ class ConfigManager:
                     config.active_model_source = "codex"
                 elif build_nvidia_runtime_model_data(getattr(config, "nvidia", {})):
                     config.active_model_source = "nvidia"
+                elif build_modelscope_runtime_model_data(getattr(config, "modelscope", {})):
+                    config.active_model_source = "modelscope"
             self.save(config)
             return True
         return False

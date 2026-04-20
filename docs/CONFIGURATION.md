@@ -85,6 +85,7 @@ Common top-level keys:
   "geminicli": {},
   "codex": {},
   "nvidia": {},
+  "modelscope": {},
   "atlas_mode": {},
   "writer_mode": {},
   "gamer_mode": {}
@@ -116,6 +117,7 @@ Supported values for `active_model_source`:
 - `geminicli`
 - `codex`
 - `nvidia`
+- `modelscope`
 
 ### Qwen Code
 
@@ -152,6 +154,28 @@ The `nvidia` section stores the NVIDIA API key, selected model, transport-specif
 
 Get the API key from `https://build.nvidia.com/settings/api-keys`.
 Reverie also reads `NVIDIA_API_KEY` from the environment when it is present, and Computer Controller mode pins the runtime to `qwen/qwen3.5-397b-a17b`.
+
+### ModelScope
+
+The `modelscope` section stores the ModelScope token, selected ModelScope model id, Anthropic SDK base URL, timeout, context limit, and default max output tokens.
+
+ModelScope is called through the Anthropic SDK. Keep `api_url` as the provider root, usually `https://api-inference.modelscope.cn`; Reverie normalizes pasted `/v1` or `/v1/messages` URLs back to the root because the SDK appends the Messages path.
+
+Get the token from `https://www.modelscope.cn/my/access/token`.
+Reverie also reads `MODELSCOPE_API_KEY`, `MODELSCOPE_TOKEN`, or `MODELSCOPE_ACCESS_TOKEN` from the environment when present.
+
+Default model:
+
+- `ZhipuAI/GLM-5.1`
+
+Built-in ModelScope catalog:
+
+- `ZhipuAI/GLM-5.1` - GLM-5.1, 202,752 token context
+- `deepseek-ai/DeepSeek-V3.2` - DeepSeek V3.2, 128,000 token context
+- `ZhipuAI/GLM-5` - GLM-5, 202,752 token context
+- `moonshotai/Kimi-K2.5` - Kimi K2.5, 262,144 token context
+- `MiniMax/MiniMax-M2.7` - MiniMax M2.7, 204,800 token context
+- `Qwen/Qwen3.5-397B-A17B` - Qwen3.5 397B A17B, 262,144 token context
 
 ## Text-To-Image Configuration
 

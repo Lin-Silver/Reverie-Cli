@@ -6,7 +6,7 @@ Reverie CLI is a context-engine-powered AI coding assistant for large repositori
 
 - **Context Engine** — shared by every mode for symbol lookup, dependency tracking, semantic retrieval, commit-history learning, and workspace memory
 - **Multiple Workflow Modes** — `Reverie`, `Reverie-Atlas`, `Reverie-Gamer`, `Reverie-Ant`, `Spec-Driven`, `Spec-Vibe`, `Writer`, `Computer Controller`
-- **Multi-Provider** — standard OpenAI-compatible models plus `Qwen Code`, `Gemini CLI`, `Codex`, and `NVIDIA`
+- **Multi-Provider** — standard OpenAI-compatible models plus `Qwen Code`, `Gemini CLI`, `Codex`, `NVIDIA`, and `ModelScope`
 - **Rich TUI** — selectors, streaming output, help browser, status panels, session browsing, checkpoint rollback, command discovery
 - **Workspace Safety** — file-access sandboxing, audited command execution, archive extraction hardening
 - **Game Tooling** — built-in `Reverie Engine` runtime, a prompt-to-vertical-slice Reverie-Gamer workflow, and a built-in Ashfox MCP modeling flow that works with manual Blockbench + Ashfox plugin installs
@@ -77,9 +77,9 @@ For the packaged Windows build, the same one-shot flow works with `dist\reverie.
 On first run, configure at least one model source. Reverie supports:
 
 - Standard OpenAI-compatible endpoints (stored in `models`)
-- `Qwen Code`, `Gemini CLI`, `Codex`, `NVIDIA`
+- `Qwen Code`, `Gemini CLI`, `Codex`, `NVIDIA`, `ModelScope`
 
-Use `/model` to add presets or `/qwencode`, `/Geminicli`, `/codex`, `/nvidia` for provider-specific setup.
+Use `/model` to add presets or `/qwencode`, `/Geminicli`, `/codex`, `/nvidia`, `/modelscope` for provider-specific setup.
 
 ## Common Commands
 
@@ -91,6 +91,7 @@ Use `/model` to add presets or `/qwencode`, `/Geminicli`, `/codex`, `/nvidia` fo
 | `/model` | Manage standard model presets |
 | `/mode` | Show or switch operating modes |
 | `/codex` | Activate Codex and choose model/reasoning |
+| `/modelscope` | Activate ModelScope and choose Anthropic-SDK-backed models |
 | `/search <query>` | Run a web search |
 | `/index` | Rebuild the workspace index |
 | `/tools` | List tools visible to the active model/provider |
@@ -122,6 +123,7 @@ reverie/
 ├── modes.py                 # mode registry and aliases
 ├── atlas.py                 # Atlas mode config and rules
 ├── codex.py                 # Codex provider integration
+├── modelscope.py            # ModelScope provider integration
 ├── agent/                   # agent prompts, tool execution, orchestration
 ├── cli/                     # command handling, TUI, display helpers
 ├── context_engine/          # indexing, retrieval, semantic analysis, graph data

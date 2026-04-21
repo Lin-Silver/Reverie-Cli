@@ -6,10 +6,10 @@ Reverie CLI is a context-engine-powered AI coding assistant for large repositori
 
 - **Context Engine** — shared by every mode for symbol lookup, dependency tracking, semantic retrieval, commit-history learning, and workspace memory
 - **Multiple Workflow Modes** — `Reverie`, `Reverie-Atlas`, `Reverie-Gamer`, `Reverie-Ant`, `Spec-Driven`, `Spec-Vibe`, `Writer`, `Computer Controller`
-- **Multi-Provider** — standard OpenAI-compatible models plus `Qwen Code`, `Gemini CLI`, `Codex`, `NVIDIA`, and `ModelScope`
+- **Multi-Provider** — standard OpenAI-compatible models plus `Gemini CLI`, `Codex`, `NVIDIA`, and `ModelScope`
 - **Rich TUI** — selectors, streaming output, help browser, status panels, session browsing, checkpoint rollback, command discovery
 - **Workspace Safety** — file-access sandboxing, audited command execution, archive extraction hardening
-- **Game Tooling** — built-in `Reverie Engine` runtime, a prompt-to-vertical-slice Reverie-Gamer workflow, and a built-in Ashfox MCP modeling flow that works with manual Blockbench + Ashfox plugin installs
+- **Game Tooling** — built-in `Reverie Engine` runtime, a prompt-to-vertical-slice Reverie-Gamer workflow, direct built-in Blender authoring, and an Ashfox MCP modeling flow for Blockbench projects
 
 ## Latest Update
 
@@ -81,9 +81,9 @@ For the packaged Windows build, the same one-shot flow works with `dist\reverie.
 On first run, configure at least one model source. Reverie supports:
 
 - Standard OpenAI-compatible endpoints (stored in `models`)
-- `Qwen Code`, `Gemini CLI`, `Codex`, `NVIDIA`, `ModelScope`
+- `Gemini CLI`, `Codex`, `NVIDIA`, `ModelScope`
 
-Use `/model` to add presets or `/qwencode`, `/Geminicli`, `/codex`, `/nvidia`, `/modelscope` for provider-specific setup.
+Use `/model` to add presets or `/Geminicli`, `/codex`, `/nvidia`, `/modelscope` for provider-specific setup.
 
 ## Common Commands
 
@@ -99,6 +99,9 @@ Use `/model` to add presets or `/qwencode`, `/Geminicli`, `/codex`, `/nvidia`, `
 | `/search <query>` | Run a web search |
 | `/index` | Rebuild the workspace index |
 | `/tools` | List tools visible to the active model/provider |
+| `/tools all` | Show every loaded tool across modes with detailed parameters |
+| `/plugins deploy blender` | Auto-extract the bundled portable Blender plugin/runtime |
+| `/blender` | Create Blender scripts/assets through the built-in modeling workflow |
 | `/sessions` | Browse sessions |
 | `/rollback` | Restore earlier checkpoints or interaction states |
 | `/clean` | Clear current-workspace memory, cache, and audit data |
@@ -159,7 +162,7 @@ Windows executable packaging:
 .\build.bat --test-exe
 ```
 
-The packaged `dist/reverie.exe` now includes the built-in Reverie-Gamer runtime flows in one file, including `/engine video`, `/engine renpy`, and `/modeling primitive`. If `ffmpeg` is available during build, `build.bat` bundles it into the executable so `mp4` and `gif` export work without a separate system install. If not, frame-sequence export still works and encoded video falls back to an external `ffmpeg` at runtime.
+The packaged `dist/reverie.exe` now includes the built-in Reverie-Gamer runtime flows in one file, including `/engine video`, `/engine renpy`, `/modeling primitive`, and `/blender`. When `plugins/blender/blender-5.1.1-windows-x64.zip` is present, `build.bat` builds and installs the official `reverie-blender.exe` plugin with that portable Blender archive embedded inside the plugin executable; `/plugins deploy blender` or `rc_blender_ensure_runtime` can then unpack Blender beside the executable without requiring a separate zip in `dist`. If `ffmpeg` is available during build, `build.bat` bundles it into the executable so `mp4` and `gif` export work without a separate system install. If not, frame-sequence export still works and encoded video falls back to an external `ffmpeg` at runtime.
 
 ## Documentation
 

@@ -10,8 +10,8 @@ hiddenimports = ['rich', 'rich.console', 'rich.panel', 'rich.table', 'rich.synta
                  'pyglet', 'moderngl', 'glcontext',
                  'reverie.cli.input_handler', 'reverie.cli.commands', 'reverie.cli.display', 'reverie.cli.theme', 'reverie.cli.markdown_formatter', 'reverie.cli.session_ui',
                  'reverie.config', 'reverie.rules_manager', 'reverie.session', 'reverie.agent', 'reverie.context_engine',
-                 'reverie.engine_lite', 'reverie.engine_lite.video', 'reverie.engine_lite.renpy_import', 'reverie.engine_lite.procedural_assets',
-                 'reverie.tools.registry', 'reverie.tools.reverie_engine', 'reverie.tools.reverie_engine_lite', 'reverie.tools.game_modeling_workbench']
+                 'reverie.engine_lite', 'reverie.engine_lite.video', 'reverie.engine_lite.renpy_import', 'reverie.engine_lite.procedural_assets', 'reverie.engine_lite.blender_modeling',
+                 'reverie.tools.registry', 'reverie.tools.reverie_engine', 'reverie.tools.reverie_engine_lite', 'reverie.tools.game_modeling_workbench', 'reverie.tools.blender_modeling_workbench']
 
 
 def add_data_if_exists(source_path: Path, target_dir: str) -> None:
@@ -120,7 +120,7 @@ exe = EXE(
     strip=False,
     upx=True,
     upx_exclude=[],
-    runtime_tmpdir=os.path.join(".", ".reverie", "runtime_tmp"),
+    runtime_tmpdir=None,
     console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,

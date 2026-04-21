@@ -16,8 +16,7 @@ Current capabilities:
 Source-tree development install:
 
 1. Copy `plugin.py` and `plugin.json` to `.reverie/plugins/godot/`
-2. Copy `plugins/_sdk/runtime_host.py` to `.reverie/plugins/_sdk/runtime_host.py`
-3. Optional: set `REVERIE_GODOT_EXE` if Godot already exists elsewhere
+2. Optional: set `REVERIE_GODOT_EXE` if Godot already exists elsewhere
 
 Compiled delivery target:
 
@@ -25,6 +24,7 @@ Compiled delivery target:
 - The `-RC` handshake metadata is embedded in the executable output
 - Runtime state is persisted without `runtime_config.json`
 - The bundled Godot archive is unpacked into `.reverie/plugins/godot/runtime/` on first use
+- Godot `rc_*` commands are exposed to both Reverie and Reverie-Gamer modes.
 
 After installation, Reverie can expose:
 

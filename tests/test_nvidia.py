@@ -54,11 +54,10 @@ def test_nvidia_catalog_context_lengths_match_model_cards():
         "minimaxai/minimax-m2.5": 204800,
         "minimaxai/minimax-m2.7": 204800,
         "qwen/qwen3.5-397b-a17b": 262144,
-        "z-ai/glm5": 205000,
         "z-ai/glm-5.1": 205000,
         "stepfun-ai/step-3.5-flash": 256000,
-        "moonshotai/kimi-k2.5": 262144,
         "mistralai/mistral-large-3-675b-instruct-2512": 262144,
+        "moonshotai/kimi-k2-thinking": 256000,
         "openai/gpt-oss-120b": 128000,
     }
     catalog_by_id = {item["id"]: item for item in get_nvidia_model_catalog()}
@@ -77,6 +76,7 @@ def test_nvidia_catalog_contains_glm_51():
     assert metadata["display_name"] == "GLM-5.1"
     assert metadata["transport"] == "openai-sdk"
     assert metadata["thinking"] is True
+    assert metadata["thinking_control"] == "toggle"
 
 
 def test_nvidia_openai_options_for_glm_51_match_expected_defaults():
@@ -92,7 +92,94 @@ def test_nvidia_openai_options_for_glm_51_match_expected_defaults():
         "extra_body": {
             "chat_template_kwargs": {
                 "enable_thinking": True,
+                "thinking": True,
                 "clear_thinking": False,
             }
         },
     }
+
+
+def test_nvidia_openai_options_for_glm_51_can_disable_thinking_without_changing_sampling():
+    options = build_nvidia_openai_options(
+        {
+            "selected_model_id": "z-ai/glm-5.1",
+            "enable_thinking": False,
+        },
+        "z-ai/glm-5.1",
+    )
+
+    assert options == {
+        "temperature": 1.0,
+        "top_p": 1.0,
+        "max_tokens": 16384,
+        "extra_body": {
+            "chat_template_kwargs": {
+                "enable_thinking": False,
+                "thinking": False,
+                "clear_thinking": False,
+            }
+        },
+    }
+
+
+def test_nvidia_runtime_model_data_uses_selected_glm_thinking_toggle():
+    runtime = build_nvidia_runtime_model_data(
+        {
+            "enabled": True,
+            "api_key": "nvapi-test",
+            "selected_model_id": "z-ai/glm-5.1",
+            "enable_thinking": False,
+        }
+    )
+
+    assert runtime is not None
+    assert runtime["model"] == "z-ai/glm-5.1"
+    assert runtime["thinking_mode"] == "false"
+
+
+def test_nvidia_catalog_contains_kimi_k2_thinking_and_removed_legacy_models():
+    catalog_by_id = {item["id"]: item for item in get_nvidia_model_catalog()}
+
+    assert "z-ai/glm5" not in catalog_by_id
+    assert "moonshotai/kimi-k2.5" not in catalog_by_id
+    assert catalog_by_id["moonshotai/kimi-k2-thinking"]["thinking_control"] == "fixed"
+
+
+def test_nvidia_openai_options_for_step_flash_use_deepseek_reasoning_format():
+    options = build_nvidia_openai_options(
+        {"selected_model_id": "stepfun-ai/step-3.5-flash"},
+        "stepfun-ai/step-3.5-flash",
+    )
+
+    assert options == {
+        "temperature": 1.0,
+        "top_p": 0.9,
+        "max_tokens": 16384,
+        "extra_body": {
+            "reasoning_format": {"type": "deepseek-style"},
+        },
+    }
+
+
+def test_nvidia_openai_options_for_kimi_k2_thinking_match_provider_example():
+    options = build_nvidia_openai_options(
+        {"selected_model_id": "moonshotai/kimi-k2-thinking", "enable_thinking": False},
+        "moonshotai/kimi-k2-thinking",
+    )
+
+    assert options == {
+        "temperature": 1.0,
+        "top_p": 0.9,
+        "max_tokens": 16384,
+    }
+
+    runtime = build_nvidia_runtime_model_data(
+        {
+            "enabled": True,
+            "api_key": "nvapi-test",
+            "selected_model_id": "moonshotai/kimi-k2-thinking",
+            "enable_thinking": False,
+        }
+    )
+    assert runtime is not None
+    assert runtime["thinking_mode"] is None

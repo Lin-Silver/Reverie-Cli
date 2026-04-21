@@ -33,15 +33,15 @@ reverie --no-index
 
 ## Runtime Data During Development
 
-When running from source, Reverie treats the repository root as `app_root`. Project runtime data is written under:
+When running from source, Reverie treats the repository-local `dist/` folder as `app_root`. Project runtime data is written under:
 
 ```text
-.reverie/project_caches/<project-key>/
+<app_root>/.reverie/project_caches/<project-key>/
 ```
 
 That cache root holds the active project's config files, rules, indexes, sessions, checkpoints, specs, steering files, and related runtime artifacts.
 
-Legacy `.reverie` files may still be read for migration, but new writes should stay inside `.reverie/project_caches/`.
+Legacy project-root `.reverie` files may still be read for migration, but new writes should stay inside `<app_root>/.reverie/project_caches/`.
 
 ## Tests And Quality Checks
 

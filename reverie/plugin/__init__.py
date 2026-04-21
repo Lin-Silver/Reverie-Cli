@@ -1,6 +1,7 @@
-"""Plugin-style runtime infrastructure for Reverie."""
+"""Plugin SDK depot and optional runtime-tool infrastructure for Reverie."""
 
-from .dynamic_tool import RuntimePluginDynamicTool
+from typing import TYPE_CHECKING
+
 from .protocol import (
     RC_PROTOCOL_VERSION,
     RuntimePluginCommandSpec,
@@ -16,6 +17,18 @@ from .runtime_manager import (
     RuntimePluginSpec,
     RuntimePluginTemplateRecord,
 )
+
+if TYPE_CHECKING:
+    from .dynamic_tool import RuntimePluginDynamicTool
+
+
+def __getattr__(name: str):
+    if name == "RuntimePluginDynamicTool":
+        from .dynamic_tool import RuntimePluginDynamicTool
+
+        return RuntimePluginDynamicTool
+    raise AttributeError(name)
+
 
 __all__ = [
     "RC_PROTOCOL_VERSION",

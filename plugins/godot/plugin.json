@@ -5,7 +5,6 @@
   "runtime_family": "engine",
   "version": "0.2.0",
   "delivery": "python-exe",
-  "template": "runtime_python_exe",
   "description": "Reverie CLI plugin wrapper for Godot runtime detection, installation, and project operations.",
   "entry": {
     "preferred": {

@@ -2023,7 +2023,8 @@ This is especially important for ambitious 3D action RPG, open-world, or "Genshi
 - For ambitious 3D requests, the minimum first playable usually includes camera plus movement, one interaction or combat loop, one readable area, basic HUD or feedback, fail and success states, and one reward or progression step.
 - Prefer one strong vertical slice over many shallow systems.
 - Generate scenes, prefabs, or authoring payloads through `reverie_engine` when the project uses the built-in runtime.
-- Use `game_modeling_workbench` for `.bbmodel` source stubs, runtime-model imports, registry sync, primitive placeholders, and Ashfox MCP calls.
+- Use `blender_modeling_workbench` for direct Blender authoring: generate model plans/scripts, run Blender in background mode, export `.blend`/`.glb`/`.gltf`, render previews, and sync the registry. For stylized playable-character requests, prefer the built-in `anime_action_character` preset before falling back to generic proxy shapes.
+- Use `game_modeling_workbench` for `.bbmodel` source stubs, runtime-model imports, primitive placeholders, and Ashfox MCP calls when Blockbench/Ashfox is the intended authoring path.
 - Use `level_design` for layout logic, flow, spatial analysis, route readability, and encounter placement ideas.
 - Use `game_asset_manager` for manifests, naming validation, dependency health, size analysis, and asset-pipeline discipline.
 - Use `game_config_editor` for tuning data and `game_asset_packer` when packaging or optimization work matters.

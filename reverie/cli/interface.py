@@ -702,6 +702,7 @@ class ReverieInterface:
         self._git_integration_ready = False
         self._lsp_manager_ready = False
         self._last_footer_refresh_time = 0.0
+        self._last_footer_render_signature: Optional[tuple] = None
         self._assistant_render_started = False
         self._assistant_blank_line_pending = False
 
@@ -982,7 +983,6 @@ class ReverieInterface:
         }
         source_labels = {
             "standard": "config.json",
-            "qwencode": "Qwen Code",
             "geminicli": "Gemini CLI",
             "codex": "Codex",
             "nvidia": "NVIDIA",
@@ -1269,13 +1269,14 @@ class ReverieInterface:
         """Resolve the active streamed-thinking display style."""
         return normalize_thinking_output_style(getattr(self.display, "thinking_output_style", "full"))
 
-    def _upsert_active_tool(self, payload: Dict[str, Any]) -> None:
+    def _upsert_active_tool(self, payload: Dict[str, Any]) -> bool:
         """Create or update one live tool surface entry."""
         tool_call_id = str(payload.get("tool_call_id", "") or "").strip()
         tool_name = str(payload.get("tool_name", "") or "tool").strip() or "tool"
         key = tool_call_id or f"{tool_name}:{len(self._active_tool_details)}"
         with self._active_tool_lock:
             current = dict(self._active_tool_details.get(key, {}))
+            previous = dict(current)
             current.update(
                 {
                     "tool_call_id": key,
@@ -1292,14 +1293,15 @@ class ReverieInterface:
                 }
             )
             self._active_tool_details[key] = current
+        return current != previous
 
-    def _append_active_tool_progress(self, payload: Dict[str, Any]) -> None:
+    def _append_active_tool_progress(self, payload: Dict[str, Any]) -> bool:
         """Append incremental stdout/stderr content to the live tool surface."""
         tool_call_id = str(payload.get("tool_call_id", "") or "").strip()
         stream_name = str(payload.get("stream", "stdout") or "stdout").strip().lower()
         text = str(payload.get("text", "") or "")
         if not text:
-            return
+            return False
 
         tool_name = str(payload.get("tool_name", "") or "tool").strip() or "tool"
         key = tool_call_id or f"{tool_name}:live"
@@ -1316,16 +1318,17 @@ class ReverieInterface:
             current["last_stderr_chunk"] = str(current.get("last_stderr_chunk", "") or "")
             if stream_name == "stderr":
                 if current["last_stderr_chunk"] == text:
-                    return
+                    return False
                 current["stderr"] += text
                 current["last_stderr_chunk"] = text
             else:
                 if current["last_stdout_chunk"] == text:
-                    return
+                    return False
                 current["stdout"] += text
                 current["last_stdout_chunk"] = text
             current["progress_event_count"] += 1
             self._active_tool_details[key] = current
+        return True
 
     def _clear_active_tool(self, tool_call_id: str) -> Dict[str, Any]:
         """Remove one live tool surface entry after completion and return its progress summary."""
@@ -1344,8 +1347,8 @@ class ReverieInterface:
         """Update live tool surfaces from streamed tool start/result events."""
         event_type = str(event.get("event", "") or "").strip().lower()
         if event_type == "tool_start":
-            self._upsert_active_tool(event)
-            self._refresh_streaming_footer(force=True)
+            if self._upsert_active_tool(event):
+                self._refresh_streaming_footer(force=True)
             return
         if event_type == "tool_result":
             completion_summary = self._clear_active_tool(str(event.get("tool_call_id", "") or ""))
@@ -1366,12 +1369,16 @@ class ReverieInterface:
         live = self._status_live
         if live is None:
             return
+        signature = self._build_streaming_footer_signature()
+        if not force and signature == self._last_footer_render_signature:
+            return
         now = time.monotonic()
         try:
             live.update(self.streaming_footer, refresh=False)
             if force or now - self._last_footer_refresh_time >= 0.12:
                 live.refresh()
                 self._last_footer_refresh_time = now
+                self._last_footer_render_signature = signature
             return
         except Exception:
             pass
@@ -1379,8 +1386,33 @@ class ReverieInterface:
             if force or now - self._last_footer_refresh_time >= 0.12:
                 live.refresh()
                 self._last_footer_refresh_time = now
+                self._last_footer_render_signature = signature
         except Exception:
             pass
+
+    def _build_streaming_footer_signature(self) -> tuple:
+        """Build a lightweight signature so identical footer redraws can be skipped."""
+        with self._active_tool_lock:
+            active_tool_rows = tuple(
+                (
+                    str(item.get("tool_call_id", "") or ""),
+                    str(item.get("tool_name", "") or ""),
+                    str(item.get("message", "") or ""),
+                    len(str(item.get("stdout", "") or "")),
+                    len(str(item.get("stderr", "") or "")),
+                    int(item.get("progress_event_count", 0) or 0),
+                )
+                for item in self._active_tool_details.values()
+            )
+        stream_snapshot = self._stream_input_state.snapshot() if self._stream_input_state else {}
+        return (
+            bool(self._task_drawer_visible),
+            self._task_drawer_cache_key,
+            active_tool_rows,
+            str(stream_snapshot.get("buffer", "") or ""),
+            bool(stream_snapshot.get("paused")),
+            bool(stream_snapshot.get("interrupt_requested")),
+        )
 
     def _toggle_task_drawer_visibility(self) -> None:
         """Toggle the streaming task drawer and refresh the footer."""
@@ -1463,22 +1495,27 @@ class ReverieInterface:
                 continue
             if key == "\x1b":
                 state.request_interrupt()
+                self._refresh_streaming_footer(force=True)
                 _thread.interrupt_main()
                 return
             if key in ("\r", "\n"):
                 if state.request_submit():
+                    self._refresh_streaming_footer(force=True)
                     _thread.interrupt_main()
                     return
                 continue
             if key == "\x08":
                 state.backspace()
+                self._refresh_streaming_footer(force=True)
                 continue
             if key == "\x03":
                 state.request_interrupt()
+                self._refresh_streaming_footer(force=True)
                 _thread.interrupt_main()
                 return
             if key.isprintable():
                 state.append(key)
+                self._refresh_streaming_footer(force=True)
 
     def _start_stream_input_capture(self) -> None:
         """Start background capture for streaming-time follow-up input."""
@@ -1558,8 +1595,8 @@ class ReverieInterface:
                 self.display.show_stream_event(stream_event)
             return
         if kind == "tool_progress":
-            self._append_active_tool_progress(event)
-            self._refresh_streaming_footer()
+            if self._append_active_tool_progress(event):
+                self._refresh_streaming_footer()
             return
         self._show_activity_event(
             str(event.get("category", "") or "Activity"),
@@ -1767,12 +1804,14 @@ class ReverieInterface:
                 self.streaming_footer,
                 console=self.console,
                 refresh_per_second=6,
+                auto_refresh=False,
                 transient=True,
                 vertical_overflow="visible",
             )
             footer_live.start()
             self._status_live = footer_live
             self._last_footer_refresh_time = 0.0
+            self._last_footer_render_signature = None
             self._start_stream_input_capture()
 
             def ensure_response_header() -> None:
@@ -1889,6 +1928,7 @@ class ReverieInterface:
                 self._stream_input_state = None
                 footer_live.stop()
                 self._status_live = None
+                self._last_footer_render_signature = None
                 with self._active_tool_lock:
                     self._active_tool_details.clear()
                 

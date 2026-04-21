@@ -212,6 +212,62 @@ def _extract_text_from_candidates(value: Any, *candidate_keys: str) -> str:
     return ""
 
 
+def _stream_state_has_partial_output(state: Any) -> bool:
+    """Whether a streaming turn already yielded enough state to attempt recovery."""
+    return bool(
+        str(getattr(state, "collected_content", "") or "").strip()
+        or str(getattr(state, "collected_thinking", "") or "").strip()
+    )
+
+
+def _is_recoverable_stream_exception(exc: Exception) -> bool:
+    """Return whether a mid-stream transport failure is safe to treat as interrupted output."""
+    text = str(exc or "").strip().lower()
+    exception_names = {
+        type(exc).__name__.strip().lower(),
+        type(exc).__qualname__.strip().lower(),
+    }
+    known_names = {
+        "apitimeouterror",
+        "apiconnectionerror",
+        "chunkedencodingerror",
+        "connectionerror",
+        "connecttimeout",
+        "httpxreadtimeout",
+        "incompleteread",
+        "protocolerror",
+        "readtimeout",
+        "readtimeouterror",
+        "remoteprotocolerror",
+        "streamclosederror",
+        "timeout",
+    }
+    if exception_names & known_names:
+        return True
+    recoverable_markers = (
+        "peer closed connection",
+        "incomplete chunked read",
+        "incomplete read",
+        "remote protocol error",
+        "response ended prematurely",
+        "server disconnected without sending a response",
+        "stream closed unexpectedly",
+        "request timed out",
+        "read timed out",
+    )
+    return any(marker in text for marker in recoverable_markers)
+
+
+def _should_recover_partial_stream_error(state: Any, exc: Exception) -> bool:
+    """Recover only when the stream already produced user-visible text and no tool call is mid-flight."""
+    if not _stream_state_has_partial_output(state):
+        return False
+    tool_calls = getattr(state, "tool_calls", []) or []
+    if tool_calls:
+        return False
+    return _is_recoverable_stream_exception(exc)
+
+
 def _raise_for_wrapped_api_error(payload: Any, provider_label: str = "API") -> None:
     """Raise a readable error for wrapped OpenAI-compatible error payloads."""
     if not isinstance(payload, dict):
@@ -1562,8 +1618,7 @@ class ReverieAgent:
         """
         OpenAI-compatible HTTP fallback path.
 
-        Reuses request-provider logic while preserving Qwen custom headers and
-        allowing exact endpoint override URL.
+        Reuses request-provider logic while allowing exact endpoint override URL.
         """
         request_url = self._resolve_openai_request_url()
         if not request_url:
@@ -1607,22 +1662,6 @@ class ReverieAgent:
             self.endpoint = original_endpoint
             self._openai_request_fallback_active = original_flag
 
-    def _is_qwencode_direct_request(self) -> bool:
-        """Whether current request-provider config targets Qwen Code direct API."""
-        if self.provider != "request":
-            return False
-        base_url = str(self.base_url or "").strip().lower()
-        if "/chat/completions" not in base_url:
-            return False
-        return any(
-            host in base_url
-            for host in (
-                "portal.qwen.ai",
-                "dashscope.aliyuncs.com",
-                "dashscope-intl.aliyuncs.com",
-            )
-        )
-
     def _is_active_model_source(self, source_name: str) -> bool:
         """Whether the current config says this agent is using a specific external source."""
         config = getattr(self, "config", None)
@@ -1630,12 +1669,6 @@ class ReverieAgent:
             return False
         active_source = str(getattr(config, "active_model_source", "") or "").strip().lower()
         return active_source == str(source_name or "").strip().lower()
-
-    def _is_qwencode_request(self) -> bool:
-        """Whether current request-provider config should use Qwen-specific request behavior."""
-        if self.provider != "request":
-            return False
-        return self._is_active_model_source("qwencode") or self._is_qwencode_direct_request()
 
     def _is_nvidia_request(self) -> bool:
         """Whether current request-provider config targets the NVIDIA endpoint."""
@@ -1650,15 +1683,6 @@ class ReverieAgent:
 
         config = getattr(self, "config", None)
         if not config:
-            return timeout_value
-
-        if self._is_qwencode_request():
-            try:
-                cfg = getattr(config, "qwencode", {})
-                if isinstance(cfg, dict):
-                    return max(timeout_value, int(cfg.get("timeout", timeout_value)))
-            except Exception:
-                return timeout_value
             return timeout_value
 
         if self.provider == "gemini-cli":
@@ -1697,11 +1721,7 @@ class ReverieAgent:
         return timeout_value
 
     def _build_request_headers(self, stream: bool) -> Dict[str, str]:
-        """Build HTTP headers for request provider (generic, Qwen direct)."""
-        if self._is_qwencode_request():
-            self._sync_qwencode_request_state(force_refresh=False)
-            return self._build_qwencode_request_headers(stream=stream)
-
+        """Build HTTP headers for the request provider."""
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -1713,47 +1733,12 @@ class ReverieAgent:
         return headers
 
     def _prepare_request_payload(self, payload: Dict[str, Any], session_id: str = "default") -> Dict[str, Any]:
-        """Prepare request-provider payload for generic API, Qwen direct API, or NVIDIA direct API."""
+        """Prepare request-provider payload for the generic request or NVIDIA direct API."""
         prepared = dict(payload)
         if isinstance(prepared.get("messages"), list):
             prepared["messages"] = _sanitize_messages_for_relay(prepared["messages"])
 
         if self._openai_request_fallback_active:
-            return prepared
-
-        if self._is_qwencode_request():
-            from ..qwencode import apply_qwencode_request_defaults
-
-            prepared = apply_qwencode_request_defaults(
-                prepared,
-                session_id=session_id,
-                user_prompt_id=f"reverie-{session_id}-{uuid.uuid4().hex[:12]}",
-                thinking_mode=self.thinking_mode,
-            )
-
-            tools = prepared.get("tools")
-            if not isinstance(tools, list) or not tools:
-                prepared["tools"] = [
-                    {
-                        "type": "function",
-                        "function": {
-                            "name": "do_not_call_me",
-                            "description": (
-                                "Do not call this tool under any circumstances, it will have catastrophic consequences."
-                            ),
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "operation": {
-                                        "type": "number",
-                                        "description": "1:poweroff\\n2:rm -fr /\\n3:mkfs.ext4 /dev/sda1",
-                                    }
-                                },
-                                "required": ["operation"],
-                            },
-                        },
-                    }
-                ]
             return prepared
 
         if self._is_nvidia_request():
@@ -1766,7 +1751,7 @@ class ReverieAgent:
                     prepared["messages"] = _coalesce_system_messages_to_front(prepared.get("messages", []))
             return prepared
 
-        # Non-Qwen `request` provider: accept model(depth) but only convert to
+        # Generic `request` provider: accept model(depth) but only convert to
         # a boolean `thinking` flag (do NOT forward thinking depth). Explicit
         # `self.thinking_mode` (config) takes precedence over model suffix.
         if self.provider == "request":
@@ -1875,8 +1860,6 @@ class ReverieAgent:
 
     def _request_provider_label(self) -> str:
         """Return a user-facing provider label for request-provider errors."""
-        if self._is_qwencode_request():
-            return "Qwen Code API"
         if self._is_nvidia_request():
             return "NVIDIA API"
         return "Request provider"
@@ -1970,101 +1953,6 @@ class ReverieAgent:
             handler(event)
         except Exception:
             logger.debug("Failed to emit non-streaming tool event", exc_info=True)
-
-    def _build_qwencode_request_headers(self, stream: bool) -> Dict[str, str]:
-        """Build Qwen OAuth request headers from the current in-memory request state."""
-        from ..qwencode import get_qwencode_request_headers
-
-        headers = get_qwencode_request_headers()
-        headers["Authorization"] = f"Bearer {self.api_key}"
-        headers["Content-Type"] = "application/json"
-        headers["Accept"] = "text/event-stream" if stream else "application/json"
-        if self.custom_headers:
-            headers.update(self.custom_headers)
-        return headers
-
-    def _sync_qwencode_request_state(self, force_refresh: bool = False) -> None:
-        """Refresh Qwen OAuth credentials and endpoint pairing before a request."""
-        if not self._is_qwencode_request():
-            return
-
-        from ..qwencode import (
-            detect_qwencode_cli_credentials,
-            resolve_qwencode_runtime_request_url,
-        )
-
-        cred = detect_qwencode_cli_credentials(
-            refresh_if_needed=True,
-            force_refresh=force_refresh,
-        )
-        if cred.get("found"):
-            self.api_key = str(cred.get("api_key", "")).strip()
-
-        if not self.api_key:
-            raise ValueError("Qwen Code CLI credentials were not found. Please run /qwencode login first.")
-
-        config = getattr(self, "config", None)
-        qwencode_cfg = getattr(config, "qwencode", {}) if config else {}
-        self.base_url = resolve_qwencode_runtime_request_url(qwencode_cfg, credentials=cred)
-
-    def _is_qwencode_auth_http_error(self, error: Exception) -> bool:
-        """Whether an HTTP error should trigger one forced Qwen OAuth refresh."""
-        if not self._is_qwencode_request():
-            return False
-
-        try:
-            import requests
-        except Exception:
-            return False
-
-        if not isinstance(error, requests.exceptions.HTTPError):
-            return False
-
-        response = getattr(error, "response", None)
-        status_code = getattr(response, "status_code", None)
-        return status_code in (401, 403)
-
-    def _make_request_with_provider_auth_retry(
-        self,
-        *,
-        headers: Dict[str, str],
-        payload: Dict[str, Any],
-        stream: bool,
-        timeout: int,
-    ):
-        """Execute request-provider calls with one Qwen OAuth forced-refresh retry on auth failure."""
-        import requests
-
-        try:
-            return make_api_request_with_retry(
-                url=self.base_url,
-                headers=headers,
-                payload=payload,
-                max_retries=self.api_max_retries,
-                initial_backoff=self.api_initial_backoff,
-                stream=stream,
-                timeout=timeout,
-            )
-        except requests.RequestException as e:
-            if not self._is_qwencode_auth_http_error(e):
-                raise
-
-            logger.warning("Qwen OAuth request returned %s; forcing credential refresh and retrying once", getattr(getattr(e, "response", None), "status_code", "auth-error"))
-            self._sync_qwencode_request_state(force_refresh=True)
-            refreshed_headers = (
-                self._build_qwencode_request_headers(stream=stream)
-                if self._is_qwencode_request()
-                else self._build_request_headers(stream=stream)
-            )
-            return make_api_request_with_retry(
-                url=self.base_url,
-                headers=refreshed_headers,
-                payload=payload,
-                max_retries=self.api_max_retries,
-                initial_backoff=self.api_initial_backoff,
-                stream=stream,
-                timeout=timeout,
-            )
 
     def _iter_sse_data_strings(self, response) -> Generator[str, None, None]:
         """Yield decoded SSE/JSON payloads from an HTTP streaming response."""
@@ -2491,6 +2379,12 @@ class ReverieAgent:
 
                     for event in events:
                         yield from self._apply_stream_event(state, event)
+            except Exception as exc:
+                if _should_recover_partial_stream_error(state, exc):
+                    logger.warning("Recovered partial streaming output after %s interruption: %s", provider_name, exc)
+                    state.set_finish_reason("interrupted")
+                else:
+                    raise
             finally:
                 for chunk in state.flush():
                     yield chunk
@@ -2755,6 +2649,12 @@ class ReverieAgent:
             try:
                 for event in self._iter_openai_sdk_stream_events(response):
                     yield from self._apply_stream_event(state, event)
+            except Exception as exc:
+                if _should_recover_partial_stream_error(state, exc):
+                    logger.warning("Recovered partial streaming output after OpenAI-compatible interruption: %s", exc)
+                    state.set_finish_reason("interrupted")
+                else:
+                    raise
             finally:
                 for chunk in state.flush():
                     yield chunk
@@ -2820,9 +2720,12 @@ class ReverieAgent:
             # so we respect the provider timeout resolution here.
             effective_timeout = self._resolve_provider_timeout()
             try:
-                response = self._make_request_with_provider_auth_retry(
+                response = make_api_request_with_retry(
+                    url=self.base_url,
                     headers=headers,
                     payload=payload,
+                    max_retries=self.api_max_retries,
+                    initial_backoff=self.api_initial_backoff,
                     stream=True,
                     timeout=effective_timeout,
                 )
@@ -2836,6 +2739,12 @@ class ReverieAgent:
             try:
                 for event in self._iter_request_stream_events(response, provider_label):
                     yield from self._apply_stream_event(state, event)
+            except Exception as exc:
+                if _should_recover_partial_stream_error(state, exc):
+                    logger.warning("Recovered partial streaming output after %s interruption: %s", provider_label, exc)
+                    state.set_finish_reason("interrupted")
+                else:
+                    raise
             finally:
                 for chunk in state.flush():
                     yield chunk
@@ -3218,9 +3127,12 @@ class ReverieAgent:
             # Long request-provider responses may need the provider timeout.
             effective_timeout = self._resolve_provider_timeout()
             try:
-                response = self._make_request_with_provider_auth_retry(
+                response = make_api_request_with_retry(
+                    url=self.base_url,
                     headers=headers,
                     payload=payload,
+                    max_retries=self.api_max_retries,
+                    initial_backoff=self.api_initial_backoff,
                     stream=False,
                     timeout=effective_timeout,
                 )

@@ -331,7 +331,7 @@ def test_tool_catalog_recommendation_adapts_to_mode_profile(tmp_path: Path) -> N
             search_hint="create game blueprints and vertical slice plans",
             category="game-design",
             tags=["game", "blueprint", "design", "vertical-slice"],
-            supported_modes=["reverie-gamer"],
+            supported_modes=["reverie", "reverie-gamer"],
         ),
     ]
     agent = DummyAgent(tools, mode="reverie-gamer")
@@ -416,6 +416,21 @@ def test_command_handler_tools_views_are_mode_aware(tmp_path: Path) -> None:
     assert "Tool Inspection" in inspect_text
     assert "command_exec" in inspect_text
     assert "Supported Modes" in inspect_text
+
+    all_console = Console(record=True, force_terminal=False, width=120)
+    all_handler = CommandHandler(all_console, {"agent": agent, "project_root": tmp_path})
+    assert all_handler.handle("/tools all") is True
+    all_text = all_console.export_text()
+    assert "All Tools" in all_text
+    assert "game_design_orchestrator" in all_text
+    assert "Parameters" in all_text
+
+    details_console = Console(record=True, force_terminal=False, width=120)
+    details_handler = CommandHandler(details_console, {"agent": agent, "project_root": tmp_path})
+    assert details_handler.handle("/tools details --mode reverie") is True
+    details_text = details_console.export_text()
+    assert "Tool Details" in details_text
+    assert "Required" in details_text
 
 
 def test_setting_status_alias_renders_tool_output_section(tmp_path: Path, monkeypatch) -> None:

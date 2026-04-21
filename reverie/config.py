@@ -50,7 +50,7 @@ from .modelscope import (
 from .modes import normalize_mode
 from .version import CONFIG_VERSION, __version__
 
-EXTERNAL_MODEL_SOURCES = ("qwencode", "geminicli", "codex", "nvidia", "modelscope")
+EXTERNAL_MODEL_SOURCES = ("geminicli", "codex", "nvidia", "modelscope")
 SUPPORTED_ACTIVE_MODEL_SOURCES = ("standard",) + EXTERNAL_MODEL_SOURCES
 SUPPORTED_TOOL_OUTPUT_STYLES = ("compact", "condensed", "full")
 SUPPORTED_THINKING_OUTPUT_STYLES = ("hidden", "compact", "full")
@@ -209,6 +209,10 @@ def default_gamer_mode_config() -> Dict[str, Any]:
         "config_editing_enabled": True,
         "modeling_pipeline_enabled": True,
         "modeling_tools_enabled": True,
+        "blender_modeling_enabled": True,
+        "blender_path": "",
+        "blender_default_export_format": "glb",
+        "blender_timeout_seconds": 240,
         "ashfox_server_name": "ashfox",
         "ashfox_endpoint": "http://127.0.0.1:8787/mcp",
         "proactive_mode_switching": True,
@@ -499,11 +503,34 @@ def get_app_root() -> Path:
     """
     Get the application root directory.
 
-    Runtime data is stored relative to the physical executable or script entry
-    point so packaged builds keep their cache beside the executable, while
-    development runs keep their cache beside the source checkout / launcher.
+    Runtime data is stored relative to the physical executable for packaged
+    builds. Source-checkout runs use the local `dist/` depot so the repository
+    root is not polluted with a top-level `.reverie` directory.
     """
-    return get_launcher_root()
+    env_root = os.getenv("REVERIE_APP_ROOT")
+    if env_root:
+        return Path(env_root).expanduser().resolve()
+
+    launcher_root = get_launcher_root().resolve()
+    if getattr(sys, "frozen", False):
+        return launcher_root
+
+    try:
+        source_root = Path(__file__).resolve().parent.parent
+        is_source_checkout = (
+            (source_root / "reverie").exists()
+            and (
+                (source_root / ".git").exists()
+                or (source_root / "setup.py").exists()
+                or (source_root / "pyproject.toml").exists()
+            )
+        )
+        if is_source_checkout:
+            return (source_root / "dist").resolve()
+    except Exception:
+        pass
+
+    return launcher_root
 
 
 def get_computer_controller_data_dir(app_root: Optional[Path] = None) -> Path:
@@ -600,7 +627,7 @@ class Config:
     """Main configuration"""
     models: List[ModelConfig] = field(default_factory=list)
     active_model_index: int = 0
-    active_model_source: str = "standard"  # standard | qwencode | geminicli | codex | nvidia | modelscope
+    active_model_source: str = "standard"  # standard | geminicli | codex | nvidia | modelscope
     mode: str = "reverie"
     theme: str = "default"
     max_context_tokens: int = 128000
@@ -622,7 +649,6 @@ class Config:
     
     # Text-to-image settings
     text_to_image: Dict[str, Any] = field(default_factory=default_text_to_image_config)
-    qwencode: Dict[str, Any] = field(default_factory=dict)
     geminicli: Dict[str, Any] = field(default_factory=dict)
     codex: Dict[str, Any] = field(default_factory=dict)
     nvidia: Dict[str, Any] = field(default_factory=default_nvidia_config)
@@ -663,12 +689,6 @@ class Config:
                 return ModelConfig.from_dict(runtime_nvidia_model)
             return None
 
-        if source == "qwencode":
-            from .qwencode import build_qwencode_runtime_model_data
-            runtime_qwencode_model = build_qwencode_runtime_model_data(self.qwencode)
-            if runtime_qwencode_model:
-                return ModelConfig.from_dict(runtime_qwencode_model)
-
         if source == "geminicli":
             runtime_geminicli_model = build_geminicli_runtime_model_data(self.geminicli)
             if runtime_geminicli_model:
@@ -704,8 +724,6 @@ class Config:
         text_to_image.pop('model_paths', None)
         text_to_image.pop('default_model_index', None)
         tti_models = text_to_image['models']
-        from .qwencode import normalize_qwencode_config
-        qwencode = normalize_qwencode_config(self.qwencode)
         geminicli = normalize_geminicli_config(self.geminicli)
         codex = normalize_codex_config(self.codex)
         nvidia = normalize_nvidia_config(self.nvidia)
@@ -737,7 +755,6 @@ class Config:
             'api_timeout': self.api_timeout,
             'api_enable_debug_logging': self.api_enable_debug_logging,
             'text_to_image': text_to_image,
-            'qwencode': qwencode,
             'geminicli': geminicli,
             'codex': codex,
             'nvidia': nvidia,
@@ -767,9 +784,6 @@ class Config:
         text_to_image['default_model_display_name'] = resolve_tti_default_display_name(text_to_image)
         text_to_image.pop('model_paths', None)
         text_to_image.pop('default_model_index', None)
-        raw_qwencode = data.get('qwencode', {})
-        from .qwencode import normalize_qwencode_config
-        qwencode = normalize_qwencode_config(raw_qwencode)
         raw_geminicli = data.get('geminicli', {})
         geminicli = normalize_geminicli_config(raw_geminicli)
         raw_codex = data.get('codex', {})
@@ -807,7 +821,6 @@ class Config:
             api_timeout=data.get('api_timeout', 60),
             api_enable_debug_logging=data.get('api_enable_debug_logging', False),
             text_to_image=text_to_image,
-            qwencode=qwencode,
             geminicli=geminicli,
             codex=codex,
             nvidia=nvidia,
@@ -823,9 +836,9 @@ class ConfigManager:
 
     Configuration can be stored in two modes:
     1. Active/global profile: config.json in
-       .reverie/
+       <app_root>/.reverie/
     2. Workspace profile: config.json in
-       .reverie/project_caches/[project_key]/
+       <app_root>/.reverie/project_caches/[project_key]/
 
     Legacy per-project `config.global.json` files are still read for migration,
     but default writes now target the shared `.reverie/config.json` profile
@@ -869,10 +882,10 @@ class ConfigManager:
         else:
             self.config_path = self.global_config_path
 
-    def _get_legacy_mirror_path(self) -> Path:
+    def _get_legacy_mirror_path(self) -> Optional[Path]:
         """Return the compatibility config path for the current storage mode."""
         if self._use_workspace_config:
-            return self.legacy_workspace_config_path
+            return None
         return self.legacy_global_config_path
 
     def _read_json_dict(self, path: Path) -> Optional[Dict[str, Any]]:
@@ -996,6 +1009,8 @@ class ConfigManager:
     def _sync_legacy_mirror(self, serialized: Dict[str, Any]) -> None:
         """Best-effort compatibility sync for older launchers and visible legacy files."""
         legacy_path = self._get_legacy_mirror_path()
+        if legacy_path is None:
+            return
         if legacy_path.resolve(strict=False) == self.config_path.resolve(strict=False):
             return
         try:
@@ -1383,10 +1398,6 @@ class ConfigManager:
         if active_model_source not in SUPPORTED_ACTIVE_MODEL_SOURCES:
             needs_update = True
 
-        # Check if qwencode section is missing
-        if 'qwencode' not in data:
-            needs_update = True
-
         # Check if geminicli section is missing
         if 'geminicli' not in data:
             needs_update = True
@@ -1520,9 +1531,11 @@ class ConfigManager:
         if self._is_workspace_candidate_path(target_path):
             self._use_workspace_config = True
             self.config_path = self.workspace_config_path
+            target_path = self.workspace_config_path
         else:
             self._use_workspace_config = False
             self.config_path = self.global_config_path
+            target_path = self.global_config_path
 
         write_json_secure(target_path, serialized)
         self._loaded_config_path = target_path
@@ -1541,9 +1554,6 @@ class ConfigManager:
         if len(config.models) > 0:
             return True
 
-        from .qwencode import normalize_qwencode_config
-        if normalize_qwencode_config(getattr(config, "qwencode", {})).get("selected_model_id"):
-            return True
         if normalize_geminicli_config(getattr(config, "geminicli", {})).get("selected_model_id"):
             return True
         if normalize_codex_config(getattr(config, "codex", {})).get("selected_model_id"):
@@ -1574,11 +1584,7 @@ class ConfigManager:
                 config.active_model_index = max(0, len(config.models) - 1)
             # If standard models are empty but another external source is selected, keep that source active.
             if not config.models and config.active_model_source == "standard":
-                from .qwencode import normalize_qwencode_config
-
-                if normalize_qwencode_config(getattr(config, "qwencode", {})).get("selected_model_id"):
-                    config.active_model_source = "qwencode"
-                elif normalize_geminicli_config(getattr(config, "geminicli", {})).get("selected_model_id"):
+                if normalize_geminicli_config(getattr(config, "geminicli", {})).get("selected_model_id"):
                     config.active_model_source = "geminicli"
                 elif normalize_codex_config(getattr(config, "codex", {})).get("selected_model_id"):
                     config.active_model_source = "codex"

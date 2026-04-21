@@ -171,7 +171,12 @@ project cache so the agent receives a safe local path instead of raw base64.
 
     def _resource_cache_dir(self) -> Path:
         root = self.context.get("project_data_dir")
-        base_dir = Path(root) if root else self.get_project_root() / ".reverie"
+        if root:
+            base_dir = Path(root)
+        else:
+            from ..config import get_project_data_dir
+
+            base_dir = get_project_data_dir(self.get_project_root())
         cache_dir = base_dir / "mcp_resources"
         cache_dir.mkdir(parents=True, exist_ok=True)
         return cache_dir

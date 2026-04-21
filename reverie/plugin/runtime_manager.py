@@ -1,4 +1,4 @@
-"""Plugin-style external runtime discovery for Reverie."""
+"""SDK/runtime depot discovery for Reverie plugins."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import time
+import zipfile
 
 from .protocol import (
     RuntimePluginCommandSpec,
@@ -54,9 +55,21 @@ def _normalize_string_tuple(raw_value: Any) -> tuple[str, ...]:
     return tuple(values)
 
 
+def _unique_paths(paths: Iterable[Path]) -> list[Path]:
+    results: list[Path] = []
+    seen: set[str] = set()
+    for path in paths:
+        key = str(path).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        results.append(path)
+    return results
+
+
 @dataclass(frozen=True)
 class RuntimePluginSpec:
-    """Built-in catalog entry for a supported external runtime plugin."""
+    """Built-in catalog entry for a supported SDK/runtime plugin."""
 
     plugin_id: str
     display_name: str
@@ -66,6 +79,11 @@ class RuntimePluginSpec:
     delivery: str = "plugin-exe"
     capabilities: tuple[str, ...] = ()
     entry_candidates: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    sdk_dir_name: str = "runtime"
+    sdk_download_page: str = ""
+    sdk_archive_hint: str = ""
+    sdk_install_hint: str = ""
+    bundled_archive_candidates: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -130,6 +148,7 @@ class RuntimePluginRecord:
             "error": "RC Error",
             "timeout": "RC Timeout",
             "no-entry": "No Entry",
+            "sdk-only": "SDK Only",
         }
         return labels.get(self.protocol_status, self.protocol_status.replace("-", " ").title())
 
@@ -229,7 +248,7 @@ class RuntimePluginSnapshot:
 
     @property
     def noncompliant_count(self) -> int:
-        return sum(1 for record in self.records if not record.protocol_supported)
+        return sum(1 for record in self.records if record.protocol_status not in {"supported", "sdk-only", "no-entry"})
 
     @property
     def tool_count(self) -> int:
@@ -283,12 +302,16 @@ DEFAULT_RUNTIME_PLUGIN_CATALOG: tuple[RuntimePluginSpec, ...] = (
             runtime_family="engine",
             description="Primary 3D runtime/editor target for the first plugin-delivered pipeline.",
             source_repo_hint="references/godot",
+            delivery="sdk-runtime",
             capabilities=("editor", "3d", "scene-import", "gltf"),
             entry_candidates={
-                "windows": ("reverie-godot*.exe", "godot.exe", "godot*.exe", "Godot*.exe", "bin/Godot*.exe"),
-                "linux": ("Godot*", "godot*", "bin/Godot*"),
-                "darwin": ("Godot*.app", "Godot*", "bin/Godot*"),
+                "windows": ("runtime/reverie-godot*.exe", "runtime/godot.exe", "runtime/Godot*.exe", "reverie-godot*.exe", "godot.exe", "godot*.exe", "Godot*.exe", "bin/Godot*.exe"),
+                "linux": ("runtime/Godot*", "runtime/godot*", "Godot*", "godot*", "bin/Godot*"),
+                "darwin": ("runtime/Godot*.app", "Godot*.app", "Godot*", "bin/Godot*"),
             },
+            sdk_download_page="https://godotengine.org/download/windows/",
+            sdk_archive_hint="Unpack a portable Godot build into `.reverie/plugins/godot/runtime/`.",
+            sdk_install_hint="Expected entry: `.reverie/plugins/godot/runtime/Godot*.exe` or `godot.exe`.",
         ),
     RuntimePluginSpec(
         plugin_id="blender",
@@ -296,11 +319,18 @@ DEFAULT_RUNTIME_PLUGIN_CATALOG: tuple[RuntimePluginSpec, ...] = (
         runtime_family="dcc",
         description="Authoring/runtime-adjacent DCC for mesh processing, baking, and export automation.",
         source_repo_hint="references/blender",
+        delivery="sdk-runtime",
         capabilities=("mesh", "rigging", "bake", "export"),
         entry_candidates={
-            "windows": ("blender.exe", "Blender.exe", "bin/blender.exe"),
-            "linux": ("blender", "bin/blender"),
-            "darwin": ("Blender.app", "Blender*.app"),
+            "windows": ("runtime/blender.exe", "runtime/blender/blender.exe", "runtime/**/blender.exe", "blender.exe", "Blender.exe", "bin/blender.exe"),
+            "linux": ("runtime/blender", "runtime/blender/blender", "runtime/**/blender", "blender", "bin/blender"),
+            "darwin": ("runtime/Blender.app", "runtime/**/Blender.app", "Blender.app", "Blender*.app"),
+        },
+        sdk_download_page="https://www.blender.org/download/",
+        sdk_archive_hint="Unpack Blender Portable/ZIP into `.reverie/plugins/blender/runtime/`.",
+        sdk_install_hint="Expected entry: `.reverie/plugins/blender/runtime/blender.exe`.",
+        bundled_archive_candidates={
+            "windows": ("blender-5.1.1-windows-x64.zip", "blender-*-windows-x64.zip", "plugins/blender/*.zip"),
         },
     ),
     RuntimePluginSpec(
@@ -309,12 +339,16 @@ DEFAULT_RUNTIME_PLUGIN_CATALOG: tuple[RuntimePluginSpec, ...] = (
         runtime_family="dcc",
         description="Lightweight companion editor for fast modeling, previews, and MCP-assisted workflows.",
         source_repo_hint="references/blockbench",
+        delivery="sdk-runtime",
         capabilities=("modeling", "preview", "mcp"),
         entry_candidates={
-            "windows": ("Blockbench.exe", "blockbench.exe", "bin/Blockbench.exe"),
-            "linux": ("Blockbench", "blockbench", "bin/Blockbench"),
-            "darwin": ("Blockbench.app", "Blockbench*.app"),
+            "windows": ("runtime/Blockbench.exe", "Blockbench.exe", "blockbench.exe", "bin/Blockbench.exe"),
+            "linux": ("runtime/Blockbench", "Blockbench", "blockbench", "bin/Blockbench"),
+            "darwin": ("runtime/Blockbench.app", "Blockbench.app", "Blockbench*.app"),
         },
+        sdk_download_page="https://www.blockbench.net/downloads",
+        sdk_archive_hint="Unpack or install a portable Blockbench build under `.reverie/plugins/blockbench/runtime/`.",
+        sdk_install_hint="Expected entry: `.reverie/plugins/blockbench/runtime/Blockbench.exe`.",
     ),
     RuntimePluginSpec(
         plugin_id="gltf-validator",
@@ -322,17 +356,22 @@ DEFAULT_RUNTIME_PLUGIN_CATALOG: tuple[RuntimePluginSpec, ...] = (
         runtime_family="validator",
         description="Validation/runtime health tool for imported glTF assets before downstream engine ingestion.",
         source_repo_hint="references/gltf-validator",
+        delivery="sdk-runtime",
         capabilities=("validation", "gltf"),
         entry_candidates={
             "windows": (
+                "runtime/gltf-validator.exe",
                 "gltf-validator.exe",
                 "gltf-validator.cmd",
                 "gltf-validator.bat",
                 "bin/gltf-validator.exe",
             ),
-            "linux": ("gltf-validator", "bin/gltf-validator"),
-            "darwin": ("gltf-validator", "bin/gltf-validator"),
+            "linux": ("runtime/gltf-validator", "gltf-validator", "bin/gltf-validator"),
+            "darwin": ("runtime/gltf-validator", "gltf-validator", "bin/gltf-validator"),
         },
+        sdk_download_page="https://github.com/KhronosGroup/glTF-Validator/releases",
+        sdk_archive_hint="Place the validator binary under `.reverie/plugins/gltf-validator/runtime/`.",
+        sdk_install_hint="Expected entry: `.reverie/plugins/gltf-validator/runtime/gltf-validator.exe`.",
     ),
 )
 
@@ -340,15 +379,16 @@ DEFAULT_RUNTIME_PLUGIN_CATALOG: tuple[RuntimePluginSpec, ...] = (
 class RuntimePluginManager:
     """Discover Reverie CLI runtime plugins installed under `.reverie/plugins`."""
 
+    AI_TOOL_EXPOSURE_ENABLED = True
     # One-file plugin wrappers can spend noticeable time self-extracting before
     # they emit the lightweight `-RC` handshake.
     PROTOCOL_TIMEOUT_SECONDS = 30.0
     TOOL_TIMEOUT_SECONDS = 1200.0
     BUILD_TIMEOUT_SECONDS = 1800.0
 
-    def __init__(self, app_root: Path, *, catalog: Iterable[RuntimePluginSpec] | None = None) -> None:
+    def __init__(self, app_root: Path, *, catalog: Iterable[RuntimePluginSpec] | None = None, source_root: Path | None = None) -> None:
         self.app_root = Path(app_root).resolve()
-        self.source_root = self.app_root / "plugins"
+        self.source_root = Path(source_root).resolve() if source_root is not None else self._resolve_source_root()
         self.install_root = self.app_root / ".reverie" / "plugins"
         self.catalog_root = Path(__file__).resolve().parent
         self.template_root = self.source_root / "_templates"
@@ -361,7 +401,22 @@ class RuntimePluginManager:
         self._tool_signature = ""
         self._generation = 0
         self._template_catalog: tuple[RuntimePluginTemplateRecord, ...] = tuple()
-        self.ensure_install_root()
+
+    def _resolve_source_root(self) -> Path:
+        """Return the editable source-plugin tree for the current runtime."""
+        app_plugins = self.app_root / "plugins"
+        if app_plugins.exists():
+            return app_plugins
+
+        try:
+            repo_root = Path(__file__).resolve().parents[2]
+            repo_plugins = repo_root / "plugins"
+            if repo_plugins.exists():
+                return repo_plugins
+        except Exception:
+            pass
+
+        return app_plugins
 
     def ensure_install_root(self) -> None:
         """Create the plugin install directory if needed."""
@@ -385,6 +440,8 @@ class RuntimePluginManager:
         """Return dynamic tool metadata synthesized from `-RC` plugin handshakes."""
         if force_refresh or self._snapshot is None:
             self.scan()
+        if not self.AI_TOOL_EXPOSURE_ENABLED:
+            return []
         return [dict(item) for item in self._tool_catalog]
 
     def resolve_tool(self, synthetic_name: str) -> Optional[dict[str, Any]]:
@@ -408,17 +465,17 @@ class RuntimePluginManager:
 
     def scan(self) -> RuntimePluginSnapshot:
         """Rescan the install root and rebuild the runtime plugin snapshot."""
-        self.ensure_install_root()
-
         records_by_id: dict[str, RuntimePluginRecord] = {}
-        install_dirs = sorted(
-            [
-                candidate
-                for candidate in self.install_root.iterdir()
-                if candidate.is_dir() and not candidate.name.startswith(("_", "."))
-            ],
-            key=lambda path: path.name.lower(),
-        )
+        install_dirs = []
+        if self.install_root.exists():
+            install_dirs = sorted(
+                [
+                    candidate
+                    for candidate in self.install_root.iterdir()
+                    if candidate.is_dir() and not candidate.name.startswith(("_", "."))
+                ],
+                key=lambda path: path.name.lower(),
+            )
 
         for install_dir in install_dirs:
             manifest_path = install_dir / "plugin.json"
@@ -452,6 +509,7 @@ class RuntimePluginManager:
         return {
             "source_root": self.source_root,
             "install_root": snapshot.install_root,
+            "sdk_root": snapshot.install_root,
             "catalog_root": snapshot.catalog_root,
             "template_root": self.template_root,
             "detected_count": snapshot.detected_count,
@@ -488,6 +546,276 @@ class RuntimePluginManager:
         """Return the default source tree path for one plugin."""
         normalized = sanitize_plugin_identifier(plugin_id or "")
         return self.source_root / normalized
+
+    def sdk_package_status(self, plugin_id: str, *, force_refresh: bool = False) -> dict[str, Any]:
+        """Return SDK depot status for one catalog plugin."""
+        normalized = sanitize_plugin_identifier(plugin_id or "")
+        spec = self.catalog.get(normalized)
+        if spec is None:
+            return {
+                "success": False,
+                "error": f"Unknown SDK plugin id: {plugin_id}",
+                "plugin_id": normalized,
+            }
+
+        record = self.get_record(normalized, force_refresh=force_refresh)
+        install_dir = (record.install_dir if record is not None else self.install_root / normalized).resolve()
+        sdk_dir = (install_dir / (spec.sdk_dir_name or "runtime")).resolve()
+        manifest_path = install_dir / "sdk_manifest.json"
+        entry_path = self._resolve_from_candidates(install_dir, spec.entry_candidates)
+        archive_path = self._find_bundled_sdk_archive(spec)
+        status = "ready" if entry_path is not None else ("prepared" if manifest_path.exists() or sdk_dir.exists() else "missing")
+        return {
+            "success": True,
+            "error": "",
+            "plugin_id": spec.plugin_id,
+            "display_name": spec.display_name,
+            "runtime_family": spec.runtime_family,
+            "delivery": spec.delivery,
+            "status": status,
+            "entry_path": entry_path,
+            "install_dir": install_dir,
+            "sdk_dir": sdk_dir,
+            "manifest_path": manifest_path,
+            "download_page": spec.sdk_download_page,
+            "archive_hint": spec.sdk_archive_hint,
+            "install_hint": spec.sdk_install_hint,
+            "bundled_archive": archive_path,
+            "entry_candidates": list(spec.entry_candidates.get(self._platform, ()) or spec.entry_candidates.get("default", ())),
+        }
+
+    def list_sdk_package_rows(self, *, force_refresh: bool = False) -> list[dict[str, str]]:
+        """Return SDK depot rows for CLI rendering."""
+        rows: list[dict[str, str]] = []
+        for plugin_id in sorted(self.catalog):
+            status = self.sdk_package_status(plugin_id, force_refresh=force_refresh)
+            rows.append(
+                {
+                    "id": str(status.get("plugin_id", plugin_id)),
+                    "name": str(status.get("display_name", plugin_id)),
+                    "family": str(status.get("runtime_family", "")),
+                    "delivery": str(status.get("delivery", "")),
+                    "status": str(status.get("status", "missing")),
+                    "sdk_dir": str(status.get("sdk_dir", "")),
+                    "entry": str(status.get("entry_path") or "-"),
+                    "archive": str(status.get("bundled_archive") or ""),
+                    "download_page": str(status.get("download_page", "")),
+                    "hint": str(status.get("install_hint") or status.get("archive_hint") or ""),
+                }
+            )
+        return rows
+
+    def materialize_sdk_package(self, plugin_id: str, *, overwrite: bool = False) -> dict[str, Any]:
+        """Create the `.reverie/plugins/<plugin-id>/runtime` SDK depot skeleton."""
+        normalized = sanitize_plugin_identifier(plugin_id or "")
+        spec = self.catalog.get(normalized)
+        if spec is None:
+            return {
+                "success": False,
+                "error": f"Unknown SDK plugin id: {plugin_id}",
+                "plugin_id": normalized,
+            }
+
+        self.ensure_install_root()
+        install_dir = (self.install_root / normalized).resolve()
+        sdk_dir = install_dir / (spec.sdk_dir_name or "runtime")
+        manifest_path = install_dir / "sdk_manifest.json"
+        install_dir.mkdir(parents=True, exist_ok=True)
+        sdk_dir.mkdir(parents=True, exist_ok=True)
+
+        if manifest_path.exists() and not overwrite:
+            status = self.sdk_package_status(normalized, force_refresh=True)
+            return {
+                "success": True,
+                "error": "",
+                "created": False,
+                "manifest_path": manifest_path,
+                "sdk_dir": sdk_dir,
+                "status": status,
+            }
+
+        payload = {
+            "schema": "reverie.plugin_sdk_manifest.v1",
+            "plugin_id": spec.plugin_id,
+            "display_name": spec.display_name,
+            "runtime_family": spec.runtime_family,
+            "delivery": spec.delivery,
+            "role": "portable SDK/runtime depot",
+            "sdk_dir": str(sdk_dir),
+            "download_page": spec.sdk_download_page,
+            "archive_hint": spec.sdk_archive_hint,
+            "install_hint": spec.sdk_install_hint,
+            "entry_candidates": {
+                key: list(value)
+                for key, value in spec.entry_candidates.items()
+            },
+            "capabilities": list(spec.capabilities),
+        }
+        manifest_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        self.scan()
+        status = self.sdk_package_status(normalized, force_refresh=False)
+        return {
+            "success": True,
+            "error": "",
+            "created": True,
+            "manifest_path": manifest_path,
+            "sdk_dir": sdk_dir,
+            "status": status,
+        }
+
+    def deploy_sdk_package(
+        self,
+        plugin_id: str,
+        *,
+        archive_path: Any = "",
+        overwrite: bool = False,
+    ) -> dict[str, Any]:
+        """Extract a bundled portable SDK archive into `.reverie/plugins/<plugin-id>/runtime`."""
+        normalized = sanitize_plugin_identifier(plugin_id or "")
+        spec = self.catalog.get(normalized)
+        if spec is None:
+            return {
+                "success": False,
+                "error": f"Unknown SDK plugin id: {plugin_id}",
+                "plugin_id": normalized,
+            }
+
+        prepared = self.materialize_sdk_package(normalized, overwrite=False)
+        if not prepared.get("success", False):
+            return prepared
+
+        status = self.sdk_package_status(normalized, force_refresh=True)
+        if status.get("entry_path") is not None and not overwrite:
+            return {
+                "success": True,
+                "error": "",
+                "deployed": False,
+                "reason": "SDK entry already exists.",
+                "status": status,
+            }
+
+        archive = self._resolve_sdk_archive(spec, archive_path)
+        if archive is None:
+            protocol_deploy = self._deploy_sdk_with_plugin_protocol(
+                normalized,
+                overwrite=overwrite,
+                status=status,
+            )
+            if protocol_deploy is not None:
+                return protocol_deploy
+            return {
+                "success": False,
+                "error": f"No bundled archive found for {spec.display_name}. Expected: {', '.join(self._archive_patterns_for_platform(spec)) or '(none)'}",
+                "status": status,
+            }
+
+        sdk_dir = Path(status["sdk_dir"]).resolve()
+        if overwrite and sdk_dir.exists():
+            self._safe_remove_tree(Path(status["install_dir"]).resolve(), sdk_dir)
+            sdk_dir.mkdir(parents=True, exist_ok=True)
+
+        before_entries = set(str(item.relative_to(sdk_dir)) for item in sdk_dir.rglob("*")) if sdk_dir.exists() else set()
+        try:
+            extracted_count = self._safe_extract_zip(archive, sdk_dir)
+        except Exception as exc:
+            return {
+                "success": False,
+                "error": str(exc),
+                "archive_path": archive,
+                "status": status,
+            }
+
+        after_entries = set(str(item.relative_to(sdk_dir)) for item in sdk_dir.rglob("*")) if sdk_dir.exists() else set()
+        created_entries = sorted(after_entries - before_entries)
+        self.scan()
+        final_status = self.sdk_package_status(normalized, force_refresh=False)
+        return {
+            "success": final_status.get("entry_path") is not None,
+            "error": "" if final_status.get("entry_path") is not None else "Archive extracted, but no runnable SDK entry was detected.",
+            "deployed": True,
+            "archive_path": archive,
+            "sdk_dir": sdk_dir,
+            "extracted_count": extracted_count,
+            "created_entries": created_entries[:40],
+            "status": final_status,
+        }
+
+    def _deploy_sdk_with_plugin_protocol(
+        self,
+        plugin_id: str,
+        *,
+        overwrite: bool,
+        status: dict[str, Any],
+    ) -> Optional[dict[str, Any]]:
+        """Let a runtime plugin deploy an SDK/runtime it has embedded in its own executable."""
+        record = self.get_record(plugin_id, force_refresh=True)
+        if record is None or not record.protocol_supported or record.protocol is None:
+            return None
+        if self._find_protocol_command(record, "ensure_runtime") is None:
+            return None
+
+        try:
+            result = self.call_tool(plugin_id, "ensure_runtime", {"force": bool(overwrite)})
+        except Exception as exc:
+            return {
+                "success": False,
+                "error": str(exc),
+                "deployed": False,
+                "status": status,
+            }
+
+        self.scan()
+        final_status = self.sdk_package_status(plugin_id, force_refresh=False)
+        success = bool(result.get("success", False)) and final_status.get("entry_path") is not None
+        return {
+            "success": success,
+            "error": "" if success else str(result.get("error") or "Plugin runtime deployment did not produce a runnable SDK entry."),
+            "deployed": bool(result.get("data", {}).get("deployed", False)) if isinstance(result.get("data"), dict) else False,
+            "reason": str(result.get("data", {}).get("reason", "")) if isinstance(result.get("data"), dict) else "",
+            "protocol_result": result,
+            "status": final_status,
+        }
+
+    def run_sdk_package(
+        self,
+        plugin_id: str,
+        *,
+        args: Optional[list[str]] = None,
+        deploy_if_missing: bool = True,
+    ) -> dict[str, Any]:
+        """Launch a portable SDK plugin for the user."""
+        normalized = sanitize_plugin_identifier(plugin_id or "")
+        if deploy_if_missing:
+            deploy_result = self.deploy_sdk_package(normalized, overwrite=False)
+            if not deploy_result.get("success", False):
+                return deploy_result
+
+        status = self.sdk_package_status(normalized, force_refresh=True)
+        entry_path = status.get("entry_path")
+        if not isinstance(entry_path, Path):
+            return {
+                "success": False,
+                "error": f"No runnable entry found for SDK plugin: {plugin_id}",
+                "status": status,
+            }
+
+        command = self._build_launch_command(entry_path, list(args or []))
+        try:
+            process = subprocess.Popen(command, cwd=str(entry_path.parent), shell=False)
+        except Exception as exc:
+            return {
+                "success": False,
+                "error": str(exc),
+                "command": command,
+                "status": status,
+            }
+        return {
+            "success": True,
+            "error": "",
+            "command": command,
+            "pid": int(process.pid),
+            "status": status,
+        }
 
     def scaffold_source_plugin(
         self,
@@ -672,30 +1000,23 @@ class RuntimePluginManager:
         target_dir = (self.install_root / normalized_plugin_id).resolve()
         self.ensure_install_root()
 
+        merge_existing_sdk_depot = target_dir.exists() and normalized_plugin_id in self.catalog and not overwrite
         if target_dir.exists():
-            if not overwrite:
+            if not overwrite and not merge_existing_sdk_depot:
                 return {
                     "success": False,
                     "error": f"Install target already exists: {target_dir}. Pass overwrite=True to replace it.",
                     "target_dir": target_dir,
                     "validation": validation,
                 }
-            self._safe_remove_tree(self.install_root, target_dir)
+            if overwrite:
+                self._safe_remove_tree(self.install_root, target_dir)
 
-        shutil.copytree(
-            source_dir,
-            target_dir,
-            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", ".pytest_cache", ".mypy_cache", ".ruff_cache", "build"),
-        )
-
-        sdk_dir = self.source_root / "_sdk"
-        if sdk_dir.exists() and sdk_dir.is_dir():
-            shutil.copytree(
-                sdk_dir,
-                target_dir / "_sdk",
-                dirs_exist_ok=True,
-                ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"),
-            )
+        ignore_patterns = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", "*.spec", "*.zip", ".pytest_cache", ".mypy_cache", ".ruff_cache", "build")
+        if merge_existing_sdk_depot:
+            shutil.copytree(source_dir, target_dir, dirs_exist_ok=True, ignore=ignore_patterns)
+        else:
+            shutil.copytree(source_dir, target_dir, ignore=ignore_patterns)
 
         self.scan()
         installed_record = self.get_record(normalized_plugin_id, force_refresh=False)
@@ -704,6 +1025,7 @@ class RuntimePluginManager:
             "error": "",
             "source_dir": source_dir,
             "target_dir": target_dir,
+            "merged": merge_existing_sdk_depot,
             "validation": validation,
             "record": installed_record,
         }
@@ -761,51 +1083,24 @@ class RuntimePluginManager:
         return rows
 
     def describe_for_prompt(self) -> str:
-        """Return a compact system-prompt addendum for runtime-plugin tools."""
+        """Return a compact system-prompt addendum for plugin management."""
         snapshot = self.get_snapshot(force_refresh=False)
         lines = [
             "## Runtime Plugins",
-            "- Reverie may expose dynamic runtime-plugin tools whose names begin with `rc_`.",
-            "- These tools come from plugin executables installed under `.reverie/plugins`.",
-            "- Only currently detected plugin directories are shown; there are no fixed required slots.",
-            "- Prefer calling the exposed `rc_*` tool directly when a plugin advertises the capability.",
-            "- Do not invent plugin commands. Use only the discovered `rc_*` tools and their schemas.",
+            "- Plugins provide portable, plugin-local SDK/runtime environments under the app data `.reverie/plugins` directory.",
+            "- Protocol-ready plugins expose `rc_<plugin>_<command>` tools directly to the model when their command metadata allows the active mode.",
+            "- Use plugin tools for environment deployment, executable discovery, software launch, and runtime execution; use built-in authoring tools for planning and content generation.",
+            "- The official Blender plugin embeds Blender Portable in its plugin executable; call `rc_blender_ensure_runtime` before `rc_blender_run_script` when direct Blender execution is needed.",
         ]
-
         if not snapshot.records:
             lines.append("- No plugin directories are currently detected under `.reverie/plugins`.")
-            return "\n".join(lines)
-
-        ready_protocol_plugins = [record for record in snapshot.records if record.protocol_supported]
-        if not ready_protocol_plugins:
-            lines.append("- Plugins were detected, but none are Reverie CLI protocol-ready yet.")
-            return "\n".join(lines)
-
-        lines.append(f"- Ready protocol plugins: {', '.join(record.display_name for record in ready_protocol_plugins[:4])}")
-        if len(ready_protocol_plugins) > 4:
-            lines.append(f"- Additional protocol plugins not shown: {len(ready_protocol_plugins) - 4}")
-
-        for record in ready_protocol_plugins[:4]:
-            protocol = record.protocol
-            if protocol is None:
-                continue
-            tool_names = [
-                metadata["name"]
-                for metadata in self._tool_catalog
-                if str(metadata.get("plugin_id", "")).strip() == record.plugin_id
-            ]
-            lines.append(f"- Plugin `{record.plugin_id}` ({record.display_name})")
-            if protocol.system_prompt:
-                lines.append(f"  Guidance: {protocol.system_prompt}")
-            elif record.description:
-                lines.append(f"  Guidance: {record.description}")
-            if protocol.tool_call_hint:
-                lines.append(f"  Tool call hint: {protocol.tool_call_hint}")
-            if tool_names:
-                lines.append(f"  Exposed tools: {', '.join(tool_names[:6])}")
-            else:
-                lines.append("  Exposed tools: (none)")
-
+        else:
+            ready = [record for record in snapshot.records if record.protocol_supported and record.protocol_tool_count]
+            if ready:
+                preview = ", ".join(f"{record.plugin_id} ({record.protocol_tool_count} tools)" for record in ready[:5])
+                if len(ready) > 5:
+                    preview = f"{preview}, +{len(ready) - 5} more"
+                lines.append(f"- Protocol tool providers detected: {preview}.")
         return "\n".join(lines)
 
     def call_tool(self, plugin_id: str, command_name: str, arguments: Optional[dict[str, Any]] = None) -> dict[str, Any]:
@@ -1049,6 +1344,8 @@ class RuntimePluginManager:
     def _attach_protocol(self, record: RuntimePluginRecord) -> RuntimePluginRecord:
         if not record.is_ready or record.entry_path is None:
             return replace(record, protocol_status="no-entry", protocol_error="", protocol=None)
+        if record.delivery_label == "sdk-runtime" and record.manifest_path is None:
+            return replace(record, protocol_status="sdk-only", protocol_error="", protocol=None)
 
         probe = self._probe_runtime_protocol(record)
         protocol = probe.get("protocol")
@@ -1142,7 +1439,7 @@ class RuntimePluginManager:
                     ).strip(),
                     "parameters": dict(command.parameters),
                     "qualified_name": f"{record.plugin_id}.{command.name}",
-                    "include_modes": list(command.include_modes or ("reverie-gamer",)),
+                    "include_modes": list(command.include_modes),
                     "exclude_modes": list(command.exclude_modes),
                     "guidance": command.guidance,
                     "example": command.example,
@@ -1720,6 +2017,68 @@ class RuntimePluginManager:
         if not normalized:
             return []
         return sorted(install_dir.glob(normalized), key=lambda path: str(path).lower())
+
+    def _archive_patterns_for_platform(self, spec: RuntimePluginSpec) -> tuple[str, ...]:
+        patterns = list(spec.bundled_archive_candidates.get(self._platform, ()))
+        patterns.extend(pattern for pattern in spec.bundled_archive_candidates.get("default", ()) if pattern not in patterns)
+        return tuple(patterns)
+
+    def _find_bundled_sdk_archive(self, spec: RuntimePluginSpec) -> Optional[Path]:
+        patterns = self._archive_patterns_for_platform(spec)
+        if not patterns:
+            return None
+        roots = _unique_paths(
+            [
+                self.app_root,
+                self.install_root / spec.plugin_id,
+                self.install_root,
+                self.source_root,
+                self.source_root / spec.plugin_id,
+                self.app_root / "plugins",
+                Path.cwd(),
+                Path(sys.executable).resolve().parent,
+            ]
+        )
+        for root in roots:
+            if not root.exists():
+                continue
+            for pattern in patterns:
+                for match in sorted(root.glob(pattern), key=lambda path: str(path).lower()):
+                    if match.exists() and match.is_file() and match.suffix.lower() == ".zip":
+                        return match.resolve(strict=False)
+        return None
+
+    def _resolve_sdk_archive(self, spec: RuntimePluginSpec, archive_path: Any = "") -> Optional[Path]:
+        raw = str(archive_path or "").strip()
+        if raw:
+            candidate = Path(raw)
+            if not candidate.is_absolute():
+                candidate = self.app_root / candidate
+            try:
+                candidate = candidate.resolve(strict=False)
+            except Exception:
+                candidate = candidate.absolute()
+            return candidate if candidate.exists() and candidate.is_file() and candidate.suffix.lower() == ".zip" else None
+        return self._find_bundled_sdk_archive(spec)
+
+    def _safe_extract_zip(self, archive_path: Path, target_dir: Path) -> int:
+        """Extract a zip archive while keeping all paths inside target_dir."""
+        target = target_dir.resolve()
+        target.mkdir(parents=True, exist_ok=True)
+        count = 0
+        with zipfile.ZipFile(archive_path) as archive:
+            for member in archive.infolist():
+                name = str(member.filename or "").replace("\\", "/")
+                if not name or name.startswith("/") or re.match(r"^[A-Za-z]:", name):
+                    raise ValueError(f"Unsafe archive member path: {member.filename}")
+                destination = (target / name).resolve()
+                try:
+                    destination.relative_to(target)
+                except ValueError as exc:
+                    raise ValueError(f"Archive member escapes SDK target: {member.filename}") from exc
+                archive.extract(member, target)
+                count += 1
+        return count
 
     def _normalize_capabilities(self, raw_value: Any) -> tuple[str, ...]:
         if not isinstance(raw_value, list):

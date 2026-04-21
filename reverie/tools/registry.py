@@ -39,6 +39,7 @@ from .game_design_orchestrator import GameDesignOrchestratorTool
 from .game_project_scaffolder import GameProjectScaffolderTool
 from .game_playtest_lab import GamePlaytestLabTool
 from .game_modeling_workbench import GameModelingWorkbenchTool
+from .blender_modeling_workbench import BlenderModelingWorkbenchTool
 from .atlas_delivery_orchestrator import AtlasDeliveryOrchestratorTool
 from .reverie_engine import ReverieEngineTool
 from .reverie_engine_lite import ReverieEngineLiteTool
@@ -177,6 +178,8 @@ def get_supported_modes_for_tool(tool_name: str, *, include_hidden: bool = False
 
 
 def _register_builtin_tools() -> None:
+    reverie_game_modes = ("reverie", "reverie-gamer")
+
     register_tool_class(CodebaseRetrievalTool)
     register_tool_class(GitCommitRetrievalTool)
     register_tool_class(StrReplaceEditorTool)
@@ -200,22 +203,23 @@ def _register_builtin_tools() -> None:
     register_tool_class(NovelContextManagerTool, include_modes=("writer",))
     register_tool_class(ConsistencyCheckerTool, include_modes=("writer",))
     register_tool_class(PlotAnalyzerTool, include_modes=("writer",))
-    register_tool_class(GameAssetManagerTool, include_modes=("reverie-gamer",))
-    register_tool_class(GameBalanceAnalyzerTool, include_modes=("reverie-gamer",))
-    register_tool_class(LevelDesignTool, include_modes=("reverie-gamer",))
-    register_tool_class(GameConfigEditorTool, include_modes=("reverie-gamer",))
-    register_tool_class(GameAssetPackerTool, include_modes=("reverie-gamer",))
-    register_tool_class(GameGDDManagerTool, include_modes=("reverie-gamer",))
-    register_tool_class(StoryDesignTool, include_modes=("reverie-gamer",))
-    register_tool_class(GameMathSimulatorTool, include_modes=("reverie-gamer",))
-    register_tool_class(GameStatsAnalyzerTool, include_modes=("reverie-gamer",))
-    register_tool_class(GameDesignOrchestratorTool, include_modes=("reverie-gamer",))
-    register_tool_class(GameProjectScaffolderTool, include_modes=("reverie-gamer",))
-    register_tool_class(GamePlaytestLabTool, include_modes=("reverie-gamer",))
-    register_tool_class(GameModelingWorkbenchTool, include_modes=("reverie-gamer",))
+    register_tool_class(GameAssetManagerTool, include_modes=reverie_game_modes)
+    register_tool_class(GameBalanceAnalyzerTool, include_modes=reverie_game_modes)
+    register_tool_class(LevelDesignTool, include_modes=reverie_game_modes)
+    register_tool_class(GameConfigEditorTool, include_modes=reverie_game_modes)
+    register_tool_class(GameAssetPackerTool, include_modes=reverie_game_modes)
+    register_tool_class(GameGDDManagerTool, include_modes=reverie_game_modes)
+    register_tool_class(StoryDesignTool, include_modes=reverie_game_modes)
+    register_tool_class(GameMathSimulatorTool, include_modes=reverie_game_modes)
+    register_tool_class(GameStatsAnalyzerTool, include_modes=reverie_game_modes)
+    register_tool_class(GameDesignOrchestratorTool, include_modes=reverie_game_modes)
+    register_tool_class(GameProjectScaffolderTool, include_modes=reverie_game_modes)
+    register_tool_class(GamePlaytestLabTool, include_modes=reverie_game_modes)
+    register_tool_class(GameModelingWorkbenchTool, include_modes=reverie_game_modes)
+    register_tool_class(BlenderModelingWorkbenchTool, include_modes=reverie_game_modes)
     register_tool_class(AtlasDeliveryOrchestratorTool, include_modes=("reverie-atlas",))
-    register_tool_class(ReverieEngineTool, include_modes=("reverie-gamer",))
-    register_tool_class(ReverieEngineLiteTool, include_modes=("reverie-gamer",))
+    register_tool_class(ReverieEngineTool, include_modes=reverie_game_modes)
+    register_tool_class(ReverieEngineLiteTool, include_modes=reverie_game_modes)
     register_tool_class(VisionUploadTool)
     register_tool_class(TokenCounterTool)
     register_tool_class(ModeSwitchTool, exclude_modes=("computer-controller",))

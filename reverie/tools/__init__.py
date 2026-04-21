@@ -54,6 +54,7 @@ from .game_design_orchestrator import GameDesignOrchestratorTool
 from .game_project_scaffolder import GameProjectScaffolderTool
 from .game_playtest_lab import GamePlaytestLabTool
 from .game_modeling_workbench import GameModelingWorkbenchTool
+from .blender_modeling_workbench import BlenderModelingWorkbenchTool
 from .atlas_delivery_orchestrator import AtlasDeliveryOrchestratorTool
 from .reverie_engine import ReverieEngineTool
 from .reverie_engine_lite import ReverieEngineLiteTool
@@ -103,6 +104,7 @@ __all__ = [
     "GameProjectScaffolderTool",
     "GamePlaytestLabTool",
     "GameModelingWorkbenchTool",
+    "BlenderModelingWorkbenchTool",
     "AtlasDeliveryOrchestratorTool",
     "ReverieEngineTool",
     "ReverieEngineLiteTool",

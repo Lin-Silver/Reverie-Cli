@@ -25,6 +25,7 @@ NVIDIA_MINIMAX_CONTEXT_TOKENS = 204_800
 NVIDIA_GLM_CONTEXT_TOKENS = 205_000
 NVIDIA_STEP_FLASH_CONTEXT_TOKENS = 256_000
 NVIDIA_GPT_OSS_120B_CONTEXT_TOKENS = 128_000
+NVIDIA_KIMI_K2_THINKING_CONTEXT_TOKENS = 256_000
 
 
 def _request_model(
@@ -37,6 +38,7 @@ def _request_model(
     context_length: Optional[int] = None,
     tool_calling: bool = True,
     system_message_first: bool = True,
+    thinking_control: str = "none",
 ) -> Dict[str, Any]:
     # NVIDIA request-transport models in this catalog are treated as agentic
     # by default so tool loops stay enabled unless an entry opts out.
@@ -50,6 +52,7 @@ def _request_model(
         "context_length": context_length,
         "tool_calling": bool(tool_calling),
         "system_message_first": bool(system_message_first),
+        "thinking_control": str(thinking_control or ("toggle" if thinking else "none")).strip().lower(),
     }
 
 
@@ -63,6 +66,7 @@ def _openai_model(
     context_length: Optional[int] = None,
     tool_calling: bool = True,
     system_message_first: bool = True,
+    thinking_control: str = "none",
 ) -> Dict[str, Any]:
     return {
         "id": model_id,
@@ -74,6 +78,7 @@ def _openai_model(
         "context_length": context_length,
         "tool_calling": bool(tool_calling),
         "system_message_first": bool(system_message_first),
+        "thinking_control": str(thinking_control or ("toggle" if thinking else "none")).strip().lower(),
     }
 
 
@@ -84,6 +89,7 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         "Request transport, reasoning_effort=high.",
         vision=True,
         thinking=True,
+        thinking_control="toggle",
         context_length=NVIDIA_DEFAULT_CONTEXT_TOKENS,
     ),
     _request_model(
@@ -92,6 +98,7 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         "Request transport with enable_thinking.",
         vision=True,
         thinking=True,
+        thinking_control="toggle",
         context_length=NVIDIA_DEFAULT_CONTEXT_TOKENS,
     ),
     _openai_model(
@@ -122,17 +129,11 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         context_length=NVIDIA_DEFAULT_CONTEXT_TOKENS,
     ),
     _openai_model(
-        "z-ai/glm5",
-        "GLM-5",
-        "OpenAI SDK transport with clear_thinking=False.",
-        thinking=True,
-        context_length=NVIDIA_GLM_CONTEXT_TOKENS,
-    ),
-    _openai_model(
         "z-ai/glm-5.1",
         "GLM-5.1",
         "OpenAI SDK transport with clear_thinking=False.",
         thinking=True,
+        thinking_control="toggle",
         context_length=NVIDIA_GLM_CONTEXT_TOKENS,
     ),
     _openai_model(
@@ -143,19 +144,19 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         context_length=NVIDIA_STEP_FLASH_CONTEXT_TOKENS,
     ),
     _request_model(
-        "moonshotai/kimi-k2.5",
-        "Kimi K2.5",
-        "Request transport with chat_template_kwargs.thinking.",
-        vision=True,
-        thinking=True,
-        context_length=NVIDIA_DEFAULT_CONTEXT_TOKENS,
-    ),
-    _request_model(
         "mistralai/mistral-large-3-675b-instruct-2512",
         "Mistral Large 3 675B",
         "Request transport with instruct defaults.",
         vision=True,
         context_length=NVIDIA_DEFAULT_CONTEXT_TOKENS,
+    ),
+    _openai_model(
+        "moonshotai/kimi-k2-thinking",
+        "Kimi K2 Thinking",
+        "Dedicated thinking model; reasoning_content is always emitted by the provider.",
+        thinking=True,
+        thinking_control="fixed",
+        context_length=NVIDIA_KIMI_K2_THINKING_CONTEXT_TOKENS,
     ),
     _openai_model(
         "openai/gpt-oss-120b",
@@ -224,6 +225,18 @@ def nvidia_model_requires_system_message_first(model_id: Any) -> bool:
     if not metadata:
         return False
     return bool(metadata.get("system_message_first", True))
+
+
+def nvidia_model_supports_thinking_toggle(model_id: Any) -> bool:
+    """Whether this NVIDIA model supports user-selectable thinking on/off."""
+    metadata = get_nvidia_model_metadata(model_id)
+    return bool(metadata and metadata.get("thinking_control") == "toggle")
+
+
+def nvidia_model_has_fixed_thinking(model_id: Any) -> bool:
+    """Whether this NVIDIA model is a dedicated thinking/reasoning model."""
+    metadata = get_nvidia_model_metadata(model_id)
+    return bool(metadata and metadata.get("thinking_control") == "fixed")
 
 
 def is_nvidia_api_url(api_url: Any) -> bool:
@@ -404,7 +417,11 @@ def build_nvidia_runtime_model_data(nvidia_config: Any, model_id: Optional[str] 
         "api_key": api_key,
         "max_context_tokens": int(selected.get("context_length") or cfg.get("max_context_tokens", NVIDIA_DEFAULT_CONTEXT_TOKENS)),
         "provider": provider,
-        "thinking_mode": "true" if bool(cfg.get("enable_thinking", True)) else "false",
+        "thinking_mode": (
+            ("true" if bool(cfg.get("enable_thinking", True)) else "false")
+            if str(selected.get("thinking_control", "")).strip().lower() == "toggle"
+            else None
+        ),
         "endpoint": "" if provider != "request" else "",
         "custom_headers": {},
         "vision": bool(selected.get("vision", False)),
@@ -427,16 +444,18 @@ def _build_request_mistral_small_options() -> Dict[str, Any]:
     }
 
 
-def _build_request_qwen_122_options() -> Dict[str, Any]:
+def _build_request_qwen_122_options(nvidia_config: Any = None) -> Dict[str, Any]:
+    cfg = normalize_nvidia_config(nvidia_config)
     return {
         "max_tokens": 16384,
         "temperature": 0.60,
         "top_p": 0.95,
-        "chat_template_kwargs": {"enable_thinking": True},
+        "chat_template_kwargs": {"enable_thinking": bool(cfg.get("enable_thinking", True))},
     }
 
 
-def _build_request_qwen_397_options() -> Dict[str, Any]:
+def _build_request_qwen_397_options(nvidia_config: Any = None) -> Dict[str, Any]:
+    cfg = normalize_nvidia_config(nvidia_config)
     return {
         "max_tokens": 16384,
         "temperature": 0.60,
@@ -444,16 +463,7 @@ def _build_request_qwen_397_options() -> Dict[str, Any]:
         "top_k": 20,
         "presence_penalty": 0.0,
         "repetition_penalty": 1.0,
-        "chat_template_kwargs": {"enable_thinking": True},
-    }
-
-
-def _build_request_kimi_k25_options() -> Dict[str, Any]:
-    return {
-        "max_tokens": 16384,
-        "temperature": 1.00,
-        "top_p": 1.00,
-        "chat_template_kwargs": {"thinking": True},
+        "chat_template_kwargs": {"enable_thinking": bool(cfg.get("enable_thinking", True))},
     }
 
 
@@ -471,7 +481,6 @@ _NVIDIA_REQUEST_OPTION_BUILDERS = {
     "mistralai/mistral-small-4-119b-2603": _build_request_mistral_small_options,
     "qwen/qwen3.5-122b-a10b": _build_request_qwen_122_options,
     "qwen/qwen3.5-397b-a17b": _build_request_qwen_397_options,
-    "moonshotai/kimi-k2.5": _build_request_kimi_k25_options,
     "mistralai/mistral-large-3-675b-instruct-2512": _build_request_mistral_large_options,
 }
 
@@ -504,14 +513,16 @@ def _build_openai_minimax_m27_options() -> Dict[str, Any]:
     }
 
 
-def _build_openai_glm5_options() -> Dict[str, Any]:
+def _build_openai_glm5_options(nvidia_config: Any = None) -> Dict[str, Any]:
+    cfg = normalize_nvidia_config(nvidia_config)
     return {
         "temperature": 1.0,
         "top_p": 1.0,
         "max_tokens": 16384,
         "extra_body": {
             "chat_template_kwargs": {
-                "enable_thinking": True,
+                "enable_thinking": bool(cfg.get("enable_thinking", True)),
+                "thinking": bool(cfg.get("enable_thinking", True)),
                 "clear_thinking": False,
             }
         },
@@ -523,6 +534,9 @@ def _build_openai_step_flash_options() -> Dict[str, Any]:
         "temperature": 1.0,
         "top_p": 0.9,
         "max_tokens": 16384,
+        "extra_body": {
+            "reasoning_format": {"type": "deepseek-style"},
+        },
     }
 
 
@@ -534,13 +548,21 @@ def _build_openai_gpt_oss_options() -> Dict[str, Any]:
     }
 
 
+def _build_openai_kimi_k2_thinking_options() -> Dict[str, Any]:
+    return {
+        "temperature": 1.0,
+        "top_p": 0.9,
+        "max_tokens": 16384,
+    }
+
+
 _NVIDIA_OPENAI_OPTION_BUILDERS = {
     "nvidia/nemotron-3-super-120b-a12b": _build_openai_nemotron_options,
     "minimaxai/minimax-m2.5": _build_openai_minimax_m25_options,
     "minimaxai/minimax-m2.7": _build_openai_minimax_m27_options,
-    "z-ai/glm5": _build_openai_glm5_options,
     "z-ai/glm-5.1": _build_openai_glm5_options,
     "stepfun-ai/step-3.5-flash": _build_openai_step_flash_options,
+    "moonshotai/kimi-k2-thinking": _build_openai_kimi_k2_thinking_options,
     "openai/gpt-oss-120b": _build_openai_gpt_oss_options,
 }
 
@@ -568,7 +590,12 @@ def build_nvidia_request_defaults(nvidia_config: Any, model_id: Optional[str] = 
         return {}
 
     builder = _NVIDIA_REQUEST_OPTION_BUILDERS.get(str(selected["id"]).strip().lower())
-    return dict(builder() if callable(builder) else {})
+    if not callable(builder):
+        return {}
+    try:
+        return dict(builder(cfg))
+    except TypeError:
+        return dict(builder())
 
 
 def apply_nvidia_request_defaults(payload: Dict[str, Any], nvidia_config: Any) -> Dict[str, Any]:
@@ -599,7 +626,12 @@ def build_nvidia_openai_options(nvidia_config: Any, model_id: Optional[str] = No
         return {}
 
     builder = _NVIDIA_OPENAI_OPTION_BUILDERS.get(str(selected["id"]).strip().lower())
-    return dict(builder() if callable(builder) else {})
+    if not callable(builder):
+        return {}
+    try:
+        return dict(builder(cfg))
+    except TypeError:
+        return dict(builder())
 
 
 def build_nvidia_inline_image_notice(attachments: List[Dict[str, Any]]) -> str:

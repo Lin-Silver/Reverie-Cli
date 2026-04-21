@@ -6,6 +6,7 @@ import json
 import platform
 import stat
 import sys
+import zipfile
 
 from rich.console import Console
 
@@ -136,6 +137,14 @@ def _write_manifest(plugin_dir: Path, *, plugin_id: str, compiled_relative_path:
         },
     }
     (plugin_dir / "plugin.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def _create_portable_blender_zip(zip_path: Path) -> None:
+    entry_name = "blender.exe" if platform.system() == "Windows" else "blender"
+    archive_root = "blender-5.1.1-windows-x64" if platform.system() == "Windows" else "blender-5.1.1-portable"
+    zip_path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(zip_path, "w") as archive:
+        archive.writestr(f"{archive_root}/{entry_name}", "portable blender placeholder\n")
 
 
 def _create_template_tree(app_root: Path) -> None:
@@ -374,7 +383,7 @@ def test_runtime_plugin_manager_prefers_packaged_entry_when_available(tmp_path: 
     assert result["data"]["echo"] == "packaged-call"
 
 
-def test_runtime_plugin_templates_are_discoverable_from_repo() -> None:
+def test_runtime_plugin_templates_are_optional_in_repo_source_tree() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     manager = RuntimePluginManager(repo_root)
 
@@ -382,12 +391,9 @@ def test_runtime_plugin_templates_are_discoverable_from_repo() -> None:
     template = manager.get_template("runtime_python_exe", force_refresh=False)
     summary = manager.get_status_summary(force_refresh=False)
 
-    assert any(item.template_id == "runtime_python_exe" for item in templates)
-    assert template is not None
-    assert template.build_hint == "build.bat"
-    assert (template.template_dir / "plugin.json").is_file()
-    assert (template.template_dir / "plugin.py").is_file()
-    assert summary["template_count"] >= 1
+    assert templates == tuple()
+    assert template is None
+    assert summary["template_count"] == 0
 
 
 def test_runtime_plugin_manager_can_scaffold_build_and_install_source_plugin(tmp_path: Path) -> None:
@@ -498,6 +504,132 @@ def test_plugins_commands_render_delivery_and_template_surfaces(tmp_path: Path) 
     template_inspect_text = template_inspect_console.export_text()
     assert "Manifest Preview" in template_inspect_text
     assert "Entry Preview" in template_inspect_text
+
+
+def test_plugins_sdk_depot_prepares_portable_runtime_manifest(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    manager = RuntimePluginManager(app_root)
+
+    result = manager.materialize_sdk_package("blender")
+
+    assert result["success"] is True
+    manifest_path = app_root / ".reverie" / "plugins" / "blender" / "sdk_manifest.json"
+    sdk_dir = app_root / ".reverie" / "plugins" / "blender" / "runtime"
+    assert manifest_path.exists()
+    assert sdk_dir.exists()
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert payload["role"] == "portable SDK/runtime depot"
+    assert payload["plugin_id"] == "blender"
+
+    status = manager.sdk_package_status("blender", force_refresh=True)
+    assert status["status"] == "prepared"
+    assert status["download_page"] == "https://www.blender.org/download/"
+
+
+def test_sdk_runtime_entries_do_not_require_rc_handshake(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    manager = RuntimePluginManager(app_root)
+    result = manager.materialize_sdk_package("blender")
+    sdk_dir = Path(result["sdk_dir"])
+    entry_name = "blender.exe" if platform.system() == "Windows" else "blender"
+    entry_path = sdk_dir / entry_name
+    entry_path.write_text("portable blender placeholder\n", encoding="utf-8")
+    if platform.system() != "Windows":
+        entry_path.chmod(entry_path.stat().st_mode | stat.S_IXUSR)
+
+    record = manager.get_record("blender", force_refresh=True)
+
+    assert record is not None
+    assert record.status == "ready"
+    assert record.protocol_status == "sdk-only"
+
+
+def test_plugins_sdk_command_renders_depot_surface(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    manager = RuntimePluginManager(app_root)
+
+    sdk_console = Console(record=True, force_terminal=False, width=120)
+    sdk_handler = CommandHandler(
+        sdk_console,
+        {
+            "runtime_plugin_manager": manager,
+            "project_root": tmp_path,
+        },
+    )
+    assert sdk_handler.handle("/plugins sdk blender") is True
+    sdk_text = sdk_console.export_text()
+    assert "Plugin SDK blender" in sdk_text
+    assert "SDK depot prepared." in sdk_text
+    assert "www.blender.org/download" in sdk_text
+
+
+def test_runtime_plugin_manager_can_deploy_portable_blender_archive(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    archive_path = app_root / "blender-5.1.1-windows-x64.zip"
+    _create_portable_blender_zip(archive_path)
+    manager = RuntimePluginManager(app_root)
+
+    result = manager.deploy_sdk_package("blender")
+
+    assert result["success"] is True
+    status = result["status"]
+    assert status["plugin_id"] == "blender"
+    assert status["status"] == "ready"
+    assert status["bundled_archive"] == archive_path.resolve(strict=False)
+    entry_path = status["entry_path"]
+    assert isinstance(entry_path, Path)
+    assert entry_path.exists()
+    assert entry_path.name in {"blender.exe", "blender"}
+
+
+def test_sdk_archive_can_live_inside_installed_plugin_depot(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    archive_path = app_root / ".reverie" / "plugins" / "blender" / "blender-5.1.1-windows-x64.zip"
+    _create_portable_blender_zip(archive_path)
+    manager = RuntimePluginManager(app_root)
+
+    status = manager.sdk_package_status("blender", force_refresh=True)
+
+    assert status["bundled_archive"] == archive_path.resolve(strict=False)
+
+
+def test_sdk_status_ignores_optional_wrapper_entry_for_runtime_readiness(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    manager = RuntimePluginManager(app_root)
+    prepared = manager.materialize_sdk_package("blender")
+    plugin_dir = app_root / ".reverie" / "plugins" / "blender"
+    source_script = plugin_dir / "plugin.py"
+    source_script.write_text("print('wrapper')\n", encoding="utf-8")
+    wrapper_path = plugin_dir / _compiled_entry_name("blender")
+    _write_platform_wrapper(wrapper_path, source_script)
+    _write_manifest(plugin_dir, plugin_id="blender", compiled_relative_path=_compiled_entry_name("blender"))
+
+    status = manager.sdk_package_status("blender", force_refresh=True)
+
+    assert prepared["success"] is True
+    assert status["status"] == "prepared"
+    assert status["entry_path"] is None
+
+
+def test_plugins_deploy_command_extracts_portable_blender_archive(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    archive_path = app_root / "blender-5.1.1-windows-x64.zip"
+    _create_portable_blender_zip(archive_path)
+    manager = RuntimePluginManager(app_root)
+
+    deploy_console = Console(record=True, force_terminal=False, width=120)
+    deploy_handler = CommandHandler(
+        deploy_console,
+        {
+            "runtime_plugin_manager": manager,
+            "project_root": tmp_path,
+        },
+    )
+    assert deploy_handler.handle("/plugins deploy blender") is True
+    deploy_text = deploy_console.export_text()
+    assert "Deploy blender" in deploy_text
+    assert "Plugin deployment completed." in deploy_text
+    assert ".reverie\\plugins\\blender\\runtime" in deploy_text or ".reverie/plugins/blender/runtime" in deploy_text
 
 
 def test_plugins_commands_can_scaffold_validate_and_build(tmp_path: Path) -> None:

@@ -16,7 +16,7 @@ This reference is aligned with `reverie/cli/help_catalog.py`, which is the sourc
 
 Notes:
 
-- `/clean` removes the active project's cache root under `.reverie/project_caches/<project-key>/`.
+- `/clean` removes the active project's cache root under `<app_root>/.reverie/project_caches/<project-key>/`.
 - If legacy workspace-local `.reverie/context_cache` or `.reverie/security` folders still exist, `/clean` removes those too.
 
 ## Models and Modes
@@ -48,10 +48,6 @@ Subagents are enabled only in base `reverie` mode. They inherit the active Rever
 
 | Command | Description |
 | --- | --- |
-| `/qwencode` | Show Qwen Code status |
-| `/qwencode login` | Validate or refresh Qwen Code credentials |
-| `/qwencode model <model-id>` | Set the Qwen Code model |
-| `/qwencode endpoint <value>` | Set or clear Qwen endpoint override |
 | `/Geminicli` | Show Gemini CLI status |
 | `/Geminicli login` | Validate or refresh Gemini CLI credentials |
 | `/Geminicli model <model-id>` | Set the Gemini model |
@@ -68,6 +64,7 @@ Subagents are enabled only in base `reverie` mode. They inherit the active Rever
 | `/nvidia key` | Save the NVIDIA API key from build.nvidia.com/settings/api-keys |
 | `/nvidia activate` | Switch active source to NVIDIA |
 | `/nvidia model <model-id>` | Set the NVIDIA model |
+| `/nvidia fast on\|off` | Toggle the GLM-5.1 fast interactive profile |
 | `/nvidia endpoint <value>` | Set or clear NVIDIA endpoint override |
 | `/modelscope` | Show ModelScope configuration |
 | `/modelscope key` | Save the ModelScope token from modelscope.cn/my/access/token |
@@ -84,6 +81,12 @@ ModelScope is called through the Anthropic SDK and reads `MODELSCOPE_API_KEY`, `
 | Command | Description |
 | --- | --- |
 | `/tools` | Show tools visible to the active model/provider |
+| `/tools all` | Show every loaded tool across modes with required fields, parameters, and descriptions |
+| `/tools details` | Show detailed tool information for the current or selected mode |
+| `/plugins` | Inspect the portable SDK/runtime depot and optional RC plugin tools |
+| `/plugins sdk <plugin-id>` | Prepare `.reverie/plugins/<plugin-id>/runtime` and write an SDK manifest |
+| `/plugins deploy <plugin-id>` | Extract a bundled portable SDK archive into `.reverie/plugins/<plugin-id>/runtime` |
+| `/plugins run <plugin-id>` | Launch the detected portable SDK/runtime entry |
 | `/search <query>` | Run a web search |
 | `/index` | Rebuild the current workspace index |
 | `/CE` | Show Context Engine status |
@@ -204,6 +207,15 @@ Notes:
 | `/modeling ashfox validate` | Run Ashfox validation against the active model project |
 | `/modeling ashfox export <format> <dest_path>` | Ask Ashfox to export the active model |
 | `/modeling ashfox call <tool_name> <json_arguments>` | Call any Ashfox tool directly |
+| `/blender status` | Inspect the built-in Blender modeling stack |
+| `/blender setup` | Create Blender source/script/plan folders in the modeling workspace |
+| `/blender script <model_name> <brief>` | Generate an auditable Blender Python authoring script without running Blender |
+| `/blender script hero "Genshin / ZZZ style anime action character"` | Generate a richer stylized character blockout preset |
+| `/blender script hero "AAA final character asset with high poly sculpt, retopo, UV unwrap, texture bake, rigged animation"` | Generate the production character pipeline preset with high-poly, retopo, UV, texture, rig, and preview-action scaffolding |
+| `/blender create <model_name> <brief>` | Run Blender in background mode to save `.blend`, export `.glb`, render a preview, and sync the registry |
+| `/blender run <script_path>` | Run a workspace-local Blender Python script through the built-in Blender workflow |
+| `/blender validate <script_path>` | Validate a Blender script with Reverie's conservative static scan |
+| `/blender sync` | Regenerate the model registry after Blender authoring work |
 | `/playtest` or `/pt` | Create a playtest plan |
 | `/playtest telemetry` | Generate telemetry schema |
 | `/playtest gates` | Generate milestone quality gates |

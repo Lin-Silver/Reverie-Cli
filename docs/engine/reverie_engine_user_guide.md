@@ -22,7 +22,8 @@ The built-in engine now seeds a project with these key areas:
 - `data/content/`: gameplay data
 - `data/live2d/`: Live2D manifests
 - `data/models/`: modeling pipeline manifest plus generated model registry
-- `assets/models/source/`: authoring files such as `.bbmodel`
+- `assets/models/source/`: authoring files such as `.bbmodel` and `.blend`
+- `assets/models/source/blender/`: generated Blender plans and Python authoring scripts
 - `assets/models/runtime/`: runtime exports such as `.glb` or `.gltf`
 - `playtest/renders/models/`: previews or review renders
 
@@ -42,6 +43,8 @@ Use the CLI or in-chat tools around these core flows:
 - `/modeling sync`
 - `/modeling primitive`
 - `/modeling ashfox validate`
+- `/blender status`
+- `/blender create`
 
 ## Runtime Authoring Model
 
@@ -52,8 +55,7 @@ The built-in engine is data-driven:
 - content data is YAML or JSON
 - model assets are tracked through `data/models/model_registry.yaml`
 
-The runtime does not vendor the Blockbench editor itself.
-Instead, Reverie-Gamer ships the modeling workflow directly in the CLI, exposes Ashfox MCP as a built-in Gamer-only integration, and only leaves Blockbench desktop plus the Ashfox plugin as manual external installs.
+The main Reverie executable does not embed the full Blender or Blockbench applications. Instead, the official Blender plugin can embed Blender Portable inside `reverie-blender.exe` and unpack it into `.reverie/plugins/blender/runtime/` on demand. Blender authoring is handled by the built-in `blender_modeling_workbench` tool through background `bpy` scripts; portable SDK/runtime binaries live under `.reverie/plugins/<plugin-id>/runtime/`; Blockbench authoring remains available through the built-in Ashfox MCP integration when that editor/plugin pair is running.
 
 ## Modeling Integration
 
@@ -66,7 +68,7 @@ In short:
 3. Sync the generated registry
 4. Validate the pipeline before playtest or packaging
 
-For quick internal placeholders, `/modeling primitive` can generate a built-in runtime `.gltf` plus preview image directly into the standard project layout.
+For quick internal placeholders, `/modeling primitive` can generate a built-in runtime `.gltf` plus preview image directly into the standard project layout. For richer authored placeholders, `/blender create <model_name> <brief>` generates a `.blend` source, `.glb` runtime export, and preview render without configuring an external MCP server.
 
 ## Ren'Py And Video Integration
 
@@ -86,6 +88,7 @@ When content changes in a Reverie Engine project, the preferred baseline is:
 2. `/engine smoke`
 3. `/modeling sync` if model content changed
 4. `/engine renpy` if dialogue content came from a `.rpy` source
-5. `/modeling ashfox validate` when using the live Ashfox MCP workflow
+5. `/blender validate <script_path>` when reviewing generated or edited Blender scripts
+6. `/modeling ashfox validate` when using the live Ashfox MCP workflow
 
 That keeps the engine layout, content registry, and active model-authoring workflow in sync.

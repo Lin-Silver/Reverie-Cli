@@ -2,10 +2,15 @@
 
 ### Runtime
 
-* Added NVIDIA catalog support for `z-ai/glm-5.1` with GLM thinking template defaults.
+* Added NVIDIA catalog support for `z-ai/glm-5.1` with a fast interactive profile that disables GLM chat-template thinking by default and caps GLM fast output to reduce first-token latency and streaming stalls.
 * Added a ModelScope source backed by the Anthropic SDK, defaulting to `ZhipuAI/GLM-5.1`, with built-in catalogs for GLM, Kimi, MiniMax, Qwen, and DeepSeek models.
 * Added project-wide coding guardrails to every Reverie mode, adapted from the Karpathy-inspired CLAUDE.md guidance to favor assumptions checks, simplicity, surgical edits, and verifiable goals.
 * Simplified `/tools` into a lightweight English tool list with current-mode and total tool counts, and reduced startup/session log noise plus streaming footer refresh churn.
+* Added a first-party `blender_modeling_workbench` tool and `/blender` command so Reverie can generate auditable Blender authoring scripts, run Blender in background mode, save `.blend` sources, export `.glb`/`.gltf`, render previews, and sync the model registry without configuring an external MCP server or Skill.
+* Hardened streaming stability in the CLI so partial provider disconnects no longer spill transport errors into the middle of a partially rendered answer as often, and reduced duplicate live-footer redraws on Windows PowerShell by switching the streaming footer to manual refresh with deduplicated tool-progress updates.
+* Expanded the `production_character_pipeline` Blender preset with face shape-key placeholders, attachment sockets, and a preview turntable camera animation on top of the existing high-poly, retopo, UV, texture, rig, and action scaffolding.
+* Added the `anime_action_character` Blender preset for stylized playable-character blockouts with layered clothing, hair clumps, weapon silhouettes, rig markers, LOD markers, material IDs, and preview/export wiring.
+* Repositioned Plugins as a portable SDK/runtime depot under `.reverie/plugins/<plugin-id>/runtime`, with `/plugins sdk <plugin-id>` preparing SDK manifests and folders while optional `rc_*` wrappers remain available for model-callable automation.
 
 ### Harness
 
@@ -473,7 +478,7 @@
 
 ### Highlights
 * Refined the TUI without changing the Dreamscape palette: denser help/settings dashboards, richer tool cards and response headers, better selector layouts, stronger narrow-terminal fit, persistent stream-time input, `Esc` interruption, and the restored original banner.
-* Reworked Qwen Code, Gemini CLI, and Codex relay integration with cleaner model catalogs, endpoint overrides, safer request formatting, and Codex four-level reasoning mapped onto the supported GPT-5.x Codex lineup.
+* Reworked Gemini CLI and Codex relay integration with cleaner model catalogs, endpoint overrides, safer request formatting, and Codex four-level reasoning mapped onto the supported GPT-5.x Codex lineup.
 * Simplified command flow: `/help` is now a focused browser-plus-detail system, `/setting` is faster and more structured, `/codex` directly switches Reverie onto Codex, `/codex model` continues into reasoning selection, and redundant command surfaces were trimmed.
 * Strengthened session continuity: context compression now consolidates prior memory blocks, preserves stronger memory anchors and a larger recent interaction window, and session rotation carries a richer working-memory digest forward.
 * Hardened local secret handling and config persistence, including environment-based Gemini OAuth credentials and safer writes for local auth/config JSON.
@@ -499,8 +504,8 @@
 * Tightened prompt/tool-calling reliability and packaging checks
 
 ### Post-Release Updates (Still v2.1.0) - 2026-03-09
-* Reworked Qwen, Gemini CLI, and Codex relay integration with native commands and endpoint overrides
-* Fixed provider catalogs: Qwen now uses `coder-model` at 1M context, and Codex is limited to the supported GPT-5.x Codex models
+* Reworked Gemini CLI and Codex relay integration with native commands and endpoint overrides
+* Fixed provider catalogs: Codex is limited to the supported GPT-5.x Codex models
 * Added Codex reasoning-depth selection and extra message/tool-call sanitization to reduce relay format errors
 
 ### Post-Release Updates (Still v2.1.0) - 2026-03-10
@@ -522,14 +527,14 @@
 
 ---
 
-## 🚀 Reverie CLI v2.0.4 — Qwen Code Integration Fix & Enhancement
+## 🚀 Reverie CLI v2.0.4 — Provider Relay Fix & Enhancement
 
 **Release Date:** 2025-02-22
 
 ### 🔧 Critical Fixes
-* **Built-in Qwen Code Proxy**: Added native Qwen Code credential support with automatic endpoint detection
+* **Built-in Provider Proxy**: Added native credential support with automatic endpoint detection
 * **Dynamic Endpoint**: Reads `resource_url` from OAuth credentials for user-specific API endpoints
-* **Model Context Length**: Fixed all Qwen Code model context lengths (Qwen3.5-Plus: 262K, Qwen3-Coder-Plus: 32K, Qwen3-Coder-Flash: 8K, Qwen3-Vision: 32K)
+* **Model Context Length**: Fixed supported model context lengths (Qwen3.5-Plus: 262K, Qwen3-Coder-Plus: 32K, Qwen3-Coder-Flash: 8K, Qwen3-Vision: 32K)
 * **Token Display**: Real-time token counting with color-coded warnings (green/yellow/red)
 
 ### ✨ New Features
@@ -538,8 +543,8 @@
 
 ### 🔄 Technical Improvements
 * API endpoint now correctly uses DashScope compatible mode
-* Credential priority: `oauth_creds.json` > `qwen_accounts.json`
-* Full compatibility with qwen-code CLI v1.x and OAuth 2.0 device flow
+* Credential priority: local OAuth cache files take precedence over newer generated credentials when available
+* Full compatibility with the CLI v1.x and OAuth 2.0 device flow
 
 ---
 

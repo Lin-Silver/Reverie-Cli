@@ -4,12 +4,14 @@ import json
 import threading
 from pathlib import Path
 
+import requests
 from rich.console import Console
 
 from reverie.agent.agent import (
     THINKING_END_MARKER,
     THINKING_START_MARKER,
     _StreamingTurnState,
+    _should_recover_partial_stream_error,
     parse_tool_arguments,
 )
 from reverie.cli.display import DisplayComponents
@@ -30,6 +32,19 @@ class _FakeStreamingResponse:
         assert chunk_size >= 512
         for line in self._lines:
             yield line
+
+
+class _BrokenStreamingResponse:
+    def __init__(self, lines: list[str], error: Exception):
+        self._lines = list(lines)
+        self._error = error
+
+    def iter_lines(self, decode_unicode: bool = True, chunk_size: int = 0):
+        assert decode_unicode is True
+        assert chunk_size >= 512
+        for line in self._lines:
+            yield line
+        raise self._error
 
 
 def _symbol(name: str, qualified_name: str, file_path: str, line: int) -> Symbol:
@@ -86,6 +101,20 @@ def test_iter_sse_data_strings_handles_multiline_events_and_raw_json() -> None:
         '{"type":"content","text":"hello"}\n{"type":"content","text":" world"}',
         '{"choices":[{"delta":{"content":"tail"}}]}',
     ]
+
+
+def test_iter_sse_data_strings_tolerates_premature_close_after_partial_payload() -> None:
+    response = _BrokenStreamingResponse(
+        [
+            'data: {"type":"content","text":"hello"}',
+            "",
+        ],
+        requests.exceptions.ChunkedEncodingError("peer closed connection without sending complete message body"),
+    )
+
+    payloads = list(iter_sse_data_strings(response))
+
+    assert payloads == ['{"type":"content","text":"hello"}']
 
 
 def test_streaming_turn_state_hides_end_token_and_closes_thinking() -> None:
@@ -371,13 +400,40 @@ def test_interface_deduplicates_repeated_live_tool_progress_chunks() -> None:
         "stream": "stdout",
         "text": "alpha\n",
     }
-    interface._append_active_tool_progress(payload)
-    interface._append_active_tool_progress(payload)
-    interface._append_active_tool_progress({**payload, "text": "beta\n"})
+    first = interface._append_active_tool_progress(payload)
+    second = interface._append_active_tool_progress(payload)
+    third = interface._append_active_tool_progress({**payload, "text": "beta\n"})
 
     current = interface._active_tool_details["call_progress"]
+    assert first is True
+    assert second is False
+    assert third is True
     assert current["stdout"] == "alpha\nbeta\n"
     assert current["progress_event_count"] == 2
 
     summary = interface._clear_active_tool("call_progress")
     assert summary["had_live_progress"] is True
+
+
+def test_partial_stream_errors_are_recoverable_only_after_visible_output() -> None:
+    state = _StreamingTurnState()
+    state.add_content("partial answer")
+
+    assert _should_recover_partial_stream_error(
+        state,
+        RuntimeError("peer closed connection without sending complete message body (incomplete chunked read)"),
+    ) is True
+
+    empty_state = _StreamingTurnState()
+    assert _should_recover_partial_stream_error(
+        empty_state,
+        RuntimeError("peer closed connection without sending complete message body (incomplete chunked read)"),
+    ) is False
+
+    tool_state = _StreamingTurnState()
+    tool_state.add_content("prefix")
+    tool_state.update_tool_call(0, tool_call_id="call_1", name="shell", arguments='{"command":"dir"}')
+    assert _should_recover_partial_stream_error(
+        tool_state,
+        RuntimeError("peer closed connection without sending complete message body (incomplete chunked read)"),
+    ) is False

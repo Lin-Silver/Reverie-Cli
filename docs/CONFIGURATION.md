@@ -6,7 +6,7 @@ This document describes where Reverie CLI stores configuration and runtime state
 
 Reverie stores project runtime data under the app root, not in the directory where the command is launched.
 
-- When running from source, `app_root` is the repository root.
+- When running from source, `app_root` is the repository-local `dist/` depot.
 - In packaged Windows builds, `app_root` is the folder containing `reverie.exe`.
 
 For each project Reverie creates a cache directory:
@@ -60,7 +60,7 @@ Older builds stored configuration and some workspace state in `.reverie/`.
 - Legacy config files such as `<app_root>/.reverie/project_caches/<project-key>/config.global.json` and `<project_root>/.reverie/config.json` are still read for migration.
 - Legacy rules files such as `<app_root>/.reverie/rules.txt` are still read for migration.
 - Global writes now go to `<app_root>/.reverie/config.json`.
-- Workspace writes go to `.reverie/project_caches/<project-key>/config.json`.
+- Workspace writes go to `<app_root>/.reverie/project_caches/<project-key>/config.json`.
 - `/clean` removes the active project's cache and also cleans legacy workspace-local `.reverie/context_cache` or `.reverie/security` folders if they still exist.
 
 ## Top-Level Config Structure
@@ -81,7 +81,6 @@ Common top-level keys:
   "thinking_output_style": "full",
   "use_workspace_config": false,
   "text_to_image": {},
-  "qwencode": {},
   "geminicli": {},
   "codex": {},
   "nvidia": {},
@@ -108,20 +107,25 @@ Common top-level keys:
 
 When `active_model_source` is `standard`, Reverie uses `active_model_index` to choose from this list.
 
+## Gamer Modeling
+
+`gamer_mode` may include Blender and Blockbench/Ashfox modeling settings. Useful keys:
+
+- `blender_modeling_enabled`: enables the built-in Blender workflow.
+- `blender_path`: optional absolute path to `blender.exe`/`blender`; otherwise Reverie checks `REVERIE_BLENDER_PATH`, `BLENDER_PATH`, PATH, and common install folders.
+- `blender_default_export_format`: default runtime export format, normally `glb`.
+- `blender_timeout_seconds`: timeout for background Blender script runs.
+- `ashfox_server_name` and `ashfox_endpoint`: Blockbench/Ashfox integration settings.
+
 ## External Model Sources
 
 Supported values for `active_model_source`:
 
 - `standard`
-- `qwencode`
 - `geminicli`
 - `codex`
 - `nvidia`
 - `modelscope`
-
-### Qwen Code
-
-The `qwencode` section tracks the selected model and endpoint override for locally detected Qwen Code credentials.
 
 ### Gemini CLI
 
@@ -155,6 +159,16 @@ The `nvidia` section stores the NVIDIA API key, selected model, transport-specif
 Get the API key from `https://build.nvidia.com/settings/api-keys`.
 Reverie also reads `NVIDIA_API_KEY` from the environment when it is present, and Computer Controller mode pins the runtime to `qwen/qwen3.5-397b-a17b`.
 
+For NVIDIA-hosted `z-ai/glm-5.1`, Reverie enables a fast interactive profile by default because the hosted model is very slow when paired with large output budgets and chat-template thinking. The profile uses:
+
+- `glm_fast_mode`: default `true`
+- `glm_fast_max_tokens`: default `1024`
+- `glm_fast_temperature`: default `0.25`
+- `glm_fast_top_p`: default `0.90`
+
+Set `glm_fast_mode` to `false` only for deliberate deep-thinking runs where latency is acceptable.
+Use `/nvidia fast on` or `/nvidia fast off` to toggle this without editing JSON by hand.
+
 ### ModelScope
 
 The `modelscope` section stores the ModelScope token, selected ModelScope model id, Anthropic SDK base URL, timeout, context limit, and default max output tokens.
@@ -176,6 +190,27 @@ Built-in ModelScope catalog:
 - `moonshotai/Kimi-K2.5` - Kimi K2.5, 262,144 token context
 - `MiniMax/MiniMax-M2.7` - MiniMax M2.7, 204,800 token context
 - `Qwen/Qwen3.5-397B-A17B` - Qwen3.5 397B A17B, 262,144 token context
+
+## Plugin SDK Depot
+
+Plugins are the portable SDK/runtime depot under `.reverie/plugins`, not another Skill or MCP-style instruction layer. Use it for heavyweight local applications and binaries that should live beside the packaged executable.
+
+- SDK root: `.reverie/plugins/<plugin-id>/`
+- Portable payload root: `.reverie/plugins/<plugin-id>/runtime/`
+- SDK manifest: `.reverie/plugins/<plugin-id>/sdk_manifest.json`
+- Prepare a depot: `/plugins sdk <plugin-id>`
+- Deploy a bundled portable runtime: `/plugins deploy <plugin-id>`
+- Launch a deployed runtime: `/plugins run <plugin-id>`
+
+For Blender portable deployment, use:
+
+```text
+.reverie/plugins/blender/runtime/blender.exe
+```
+
+The official Blender plugin embeds `blender-5.1.1-windows-x64.zip` inside `reverie-blender.exe` at build time. `/plugins deploy blender` or the `rc_blender_ensure_runtime` tool asks that plugin executable to extract the portable runtime into the depot, so the installed `dist/.reverie/plugins/blender/` folder does not need to keep a separate zip file.
+
+The built-in Blender workflow also checks `REVERIE_BLENDER_PATH`, `BLENDER_PATH`, `PATH`, and common system install folders.
 
 ## Text-To-Image Configuration
 

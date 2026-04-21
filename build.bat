@@ -16,6 +16,8 @@ set "PYI_CONFIG_DIR=%LOCAL_BUILD_ROOT%\pyinstaller-config"
 set "PYI_WORK_DIR=%BUILD_DIR%\pyinstaller"
 set "PYI_DIST_DIR=%OUTPUT_DIR%"
 set "PYI_SPEC_DIR=%BUILD_DIR%\pyinstaller-spec"
+set "BLENDER_ARCHIVE_NAME=blender-5.1.1-windows-x64.zip"
+set "BLENDER_ARCHIVE_SOURCE="
 set "RECREATE_VENV=0"
 set "RUN_EXE_TEST=0"
 set "USER_FFMPEG_PATH=%REVERIE_FFMPEG_PATH%"
@@ -127,6 +129,26 @@ copy /Y "Comfy\generate_image.py" "%BUNDLE_RES_DIR%\comfy\generate_image.py" >nu
 copy /Y "Comfy\embedded_comfy.b64" "%BUNDLE_RES_DIR%\comfy\embedded_comfy.b64" >nul
 set "REVERIE_BUNDLE_RES_DIR=%BUNDLE_RES_DIR%"
 echo       Bundled resources: %REVERIE_BUNDLE_RES_DIR%\comfy
+if exist "%ROOT_DIR%\%BLENDER_ARCHIVE_NAME%" set "BLENDER_ARCHIVE_SOURCE=%ROOT_DIR%\%BLENDER_ARCHIVE_NAME%"
+if not defined BLENDER_ARCHIVE_SOURCE if exist "%ROOT_DIR%\plugins\blender\%BLENDER_ARCHIVE_NAME%" set "BLENDER_ARCHIVE_SOURCE=%ROOT_DIR%\plugins\blender\%BLENDER_ARCHIVE_NAME%"
+if defined BLENDER_ARCHIVE_SOURCE (
+    echo       Blender portable archive build input: %BLENDER_ARCHIVE_SOURCE%
+    echo       Building official Blender plugin with embedded portable archive...
+    call "%ROOT_DIR%\plugins\blender\build.bat"
+    if %ERRORLEVEL% neq 0 (
+        echo [ERROR] Failed to build Blender plugin executable.
+        set "BUILD_EXIT_CODE=1"
+        goto finish
+    )
+    python -c "from reverie.config import get_app_root; from reverie.plugin.runtime_manager import RuntimePluginManager; manager=RuntimePluginManager(get_app_root()); result=manager.install_source_plugin('blender', overwrite=False); print('      Blender plugin installed:', result.get('target_dir')); raise SystemExit(0 if result.get('success') else 1)"
+    if %ERRORLEVEL% neq 0 (
+        echo [ERROR] Failed to install Blender plugin into dist runtime depot.
+        set "BUILD_EXIT_CODE=1"
+        goto finish
+    )
+) else (
+    echo       Blender portable archive not found. Official Blender plugin build skipped.
+)
 
 echo.
 echo [5/6] Resolving optional ffmpeg and icon...

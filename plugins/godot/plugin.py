@@ -22,37 +22,74 @@ try:
 except ImportError:  # pragma: no cover - non-Windows fallback
     winreg = None
 
-def _resolve_sdk_dir() -> Path:
-    candidates: list[Path] = []
-    bundle_root = getattr(sys, "_MEIPASS", "")
-    if bundle_root:
-        candidates.append(Path(str(bundle_root)).resolve(strict=False) / "_sdk")
-
-    here = Path(__file__).resolve()
-    candidates.append(here.parents[1] / "_sdk")
-    candidates.append(here.parent / "_sdk")
-
-    seen: set[str] = set()
-    for candidate in candidates:
-        normalized = str(candidate).lower()
-        if normalized in seen:
-            continue
-        seen.add(normalized)
-        if candidate.exists():
-            return candidate
-    return candidates[0]
-
-
-_SDK_DIR = _resolve_sdk_dir()
-if str(_SDK_DIR) not in sys.path:
-    sys.path.insert(0, str(_SDK_DIR))
-
-from runtime_host import ReverieRuntimePluginHost
-
 
 PLUGIN_VERSION = "0.2.0"
 DEFAULT_GODOT_RELEASES_API = "https://api.github.com/repos/godotengine/godot/releases"
 WINDOWS_STATE_KEY = r"Software\Reverie\Plugins\Godot"
+
+
+class ReverieRuntimePluginHost:
+    """Small inlined host for Reverie CLI's fixed `-RC` plugin protocol."""
+
+    def build_handshake(self) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def handle_command(self, command_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def write_json(self, payload: dict[str, Any]) -> int:
+        sys.stdout.write(json.dumps(payload, ensure_ascii=False))
+        sys.stdout.flush()
+        return 0
+
+    def run(self, argv: list[str]) -> int:
+        if len(argv) >= 2 and argv[1] == "-RC":
+            return self.write_json(self.build_handshake())
+
+        if len(argv) >= 2 and argv[1] == "-RC-CALL":
+            if len(argv) < 4:
+                return self.write_json(
+                    {
+                        "success": False,
+                        "output": "",
+                        "error": "Usage: -RC-CALL <command> <json-payload>",
+                        "data": {},
+                    }
+                )
+
+            command_name = str(argv[2] or "").strip().lower()
+            raw_payload = str(argv[3] or "").strip()
+            try:
+                payload = json.loads(raw_payload) if raw_payload else {}
+            except Exception as exc:
+                return self.write_json(
+                    {
+                        "success": False,
+                        "output": "",
+                        "error": f"Invalid JSON payload: {exc}",
+                        "data": {},
+                    }
+                )
+
+            try:
+                result = self.handle_command(command_name, payload)
+            except Exception as exc:
+                result = {"success": False, "output": "", "error": str(exc), "data": {}}
+            if not isinstance(result, dict):
+                result = {
+                    "success": False,
+                    "output": "",
+                    "error": "Plugin command handler must return a JSON object.",
+                    "data": {},
+                }
+            result.setdefault("success", False)
+            result.setdefault("output", "")
+            result.setdefault("error", "")
+            result.setdefault("data", {})
+            return self.write_json(result)
+
+        sys.stderr.write("This runtime plugin only supports -RC and -RC-CALL.\n")
+        return 1
 
 
 class GodotRuntimePlugin(ReverieRuntimePluginHost):
@@ -101,7 +138,7 @@ class GodotRuntimePlugin(ReverieRuntimePluginHost):
                         "required": [],
                     },
                     "expose_as_tool": True,
-                    "include_modes": ["reverie-gamer"],
+                    "include_modes": ["reverie", "reverie-gamer"],
                     "guidance": "Call this before runtime-sensitive Godot actions to see whether the plugin already has a usable editor/runtime.",
                 },
                 {
@@ -118,7 +155,7 @@ class GodotRuntimePlugin(ReverieRuntimePluginHost):
                         "required": ["godot_executable"],
                     },
                     "expose_as_tool": True,
-                    "include_modes": ["reverie-gamer"],
+                    "include_modes": ["reverie", "reverie-gamer"],
                     "guidance": "Use this when Godot is already installed elsewhere on the machine and should become the preferred Reverie runtime.",
                 },
                 {
@@ -147,7 +184,7 @@ class GodotRuntimePlugin(ReverieRuntimePluginHost):
                         "required": [],
                     },
                     "expose_as_tool": True,
-                    "include_modes": ["reverie-gamer"],
+                    "include_modes": ["reverie", "reverie-gamer"],
                     "guidance": "Prefer this when the plugin should manage its own Godot runtime under .reverie/plugins/godot/runtime.",
                 },
                 {
@@ -164,7 +201,7 @@ class GodotRuntimePlugin(ReverieRuntimePluginHost):
                         "required": [],
                     },
                     "expose_as_tool": True,
-                    "include_modes": ["reverie-gamer"],
+                    "include_modes": ["reverie", "reverie-gamer"],
                     "guidance": "Call this first when the user asks to verify whether Godot is available on the machine.",
                     "example": 'rc_godot_detect_runtime(godot_executable="C:/Tools/Godot_v4.5-stable_win64.exe")',
                 },
@@ -182,7 +219,7 @@ class GodotRuntimePlugin(ReverieRuntimePluginHost):
                         "required": [],
                     },
                     "expose_as_tool": True,
-                    "include_modes": ["reverie-gamer"],
+                    "include_modes": ["reverie", "reverie-gamer"],
                 },
                 {
                     "name": "scan_project",
@@ -198,7 +235,7 @@ class GodotRuntimePlugin(ReverieRuntimePluginHost):
                         "required": ["project_dir"],
                     },
                     "expose_as_tool": True,
-                    "include_modes": ["reverie-gamer"],
+                    "include_modes": ["reverie", "reverie-gamer"],
                 },
                 {
                     "name": "open_editor",
@@ -222,7 +259,7 @@ class GodotRuntimePlugin(ReverieRuntimePluginHost):
                         "required": ["project_dir"],
                     },
                     "expose_as_tool": True,
-                    "include_modes": ["reverie-gamer"],
+                    "include_modes": ["reverie", "reverie-gamer"],
                     "guidance": "Only use this when the user explicitly wants the editor opened or when a visual Godot check is required.",
                 },
                 {
@@ -247,7 +284,7 @@ class GodotRuntimePlugin(ReverieRuntimePluginHost):
                         "required": ["project_dir"],
                     },
                     "expose_as_tool": True,
-                    "include_modes": ["reverie-gamer"],
+                    "include_modes": ["reverie", "reverie-gamer"],
                     "guidance": "Use after generating a Godot scaffold, importing glTF assets, or updating project files.",
                 },
             ],

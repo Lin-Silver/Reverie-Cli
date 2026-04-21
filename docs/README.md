@@ -21,7 +21,7 @@
 | Document | Description |
 | --- | --- |
 | [Reverie Engine User Guide](engine/reverie_engine_user_guide.md) | Built-in runtime architecture, content model, CLI workflow, and authoring expectations |
-| [Reverie-Gamer Modeling Guide](engine/reverie_gamer_modeling_pipeline.md) | Built-in Ashfox MCP integration, model workspace layout, import flow, and `/modeling` usage |
+| [Reverie-Gamer Modeling Guide](engine/reverie_gamer_modeling_pipeline.md) | Built-in Blender authoring, Ashfox MCP integration, model workspace layout, import flow, and `/modeling`/`/blender` usage |
 | [Reverie-Gamer Upgrade Plan](reverie_gamer_3d_game_generation_assessment.md) | Next-stage roadmap for evolving Gamer from vertical-slice generation into long-running 3D game production |
 
 ## Documentation Structure

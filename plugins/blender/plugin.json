@@ -1,0 +1,56 @@
+{
+  "schema_version": "2.0",
+  "id": "blender",
+  "display_name": "Blender Portable Plugin",
+  "runtime_family": "dcc",
+  "version": "0.2.0",
+  "delivery": "python-exe",
+  "description": "Self-contained Reverie CLI plugin wrapper that embeds Blender Portable, deploys it into the plugin runtime folder, launches Blender, and runs background scripts.",
+  "entry": {
+    "preferred": {
+      "windows": "dist/reverie-blender.exe",
+      "linux": "dist/reverie-blender",
+      "darwin": "dist/reverie-blender"
+    },
+    "fallbacks": {
+      "windows": "plugin.py",
+      "linux": "plugin.py",
+      "darwin": "plugin.py",
+      "default": "plugin.py"
+    },
+    "strategy": "prefer-packaged",
+    "allow_source_fallback": true
+  },
+  "packaging": {
+    "format": "pyinstaller-onefile",
+    "embedded_runtime": {
+      "archive": "blender-5.1.1-windows-x64.zip",
+      "deploy_command": "ensure_runtime",
+      "runtime_dir": "runtime"
+    },
+    "compiled": {
+      "windows": "dist/reverie-blender.exe",
+      "linux": "dist/reverie-blender",
+      "darwin": "dist/reverie-blender"
+    },
+    "source": {
+      "default": "plugin.py"
+    },
+    "build": {
+      "windows": [
+        "build.bat"
+      ],
+      "default": [
+        "python -m PyInstaller --noconfirm --clean --onefile --name reverie-blender plugin.py"
+      ]
+    }
+  },
+  "capabilities": [
+    "blender",
+    "dcc",
+    "modeling",
+    "rigging",
+    "baking",
+    "export"
+  ]
+}

@@ -1,126 +1,41 @@
-# Plugins Source Tree
+# Runtime Plugin Source Tree
 
-This directory is the source workspace for Reverie CLI runtime plugins. It is separate from the main-process plugin protocol code in `reverie/plugin/`, and it is also separate from the installed runtime-plugin delivery root under `.reverie/plugins/`.
+Plugins in Reverie CLI are portable software/runtime bundles, not another user-facing prompt layer beside Skills or MCP. They help users deploy and run heavyweight local environments beside `reverie.exe`, while protocol-ready plugin executables can also expose focused `rc_*` tools to the AI.
 
-## Directory roles
+## Directory Roles
 
 - `reverie/plugin/`
-  Main-process runtime-plugin protocol, discovery, manifest parsing, dynamic tool exposure, and `/plugins` command integration.
+  Main-process discovery, manifest parsing, protocol handshakes, dynamic `rc_*` tool exposure, and `/plugins` command integration.
 - `plugins/<plugin-id>/`
-  Source code for one runtime plugin wrapper before packaging.
-- `plugins/_sdk/`
-  Shared helpers used by plugin source trees, including the fixed Reverie CLI runtime host shell.
-- `plugins/_templates/`
-  Reusable source templates for authoring new runtime plugins, especially Python plugins that are later compiled into a single-file `exe`.
+  Source for one official or optional runtime plugin before packaging.
+- `dist/.reverie/plugins/<plugin-id>/`
+  Installed plugin/runtime depot used by packaged or source-checkout runs.
+- `dist/.reverie/plugins/<plugin-id>/runtime/`
+  Portable SDK/runtime payloads created by a plugin executable or `/plugins deploy`.
 
-## Delivery roots
+## Official Plugins
 
-- Source tree: `plugins/<plugin-id>/`
-- Installed runtime root: `.reverie/plugins/<plugin-id>/`
+- `plugins/blender/`
+  Official Blender Portable plugin. Its packaged `reverie-blender.exe` embeds `blender-5.1.1-windows-x64.zip` and can unpack it on demand with `rc_blender_ensure_runtime` or `/plugins deploy blender`.
+- `plugins/godot/`
+  Godot runtime manager for detection, registration, download/unpack, project scanning, launch, and headless checks.
 
-Typical workflow:
+## Fixed Protocol
 
-1. Author plugin source under `plugins/<plugin-id>/`.
-2. Package it into a compiled runtime entry, usually a single-file `exe`.
-3. Copy the packaged result plus `plugin.json` into `.reverie/plugins/<plugin-id>/`.
-4. Use `/plugins`, `/plugins inspect <plugin-id>`, and `/plugins templates` to validate the delivery.
-
-Command-driven workflow:
-
-1. `/plugins scaffold <plugin-id>`
-   Create a source plugin tree from a bundled template such as `runtime_python_exe`.
-2. `/plugins validate <plugin-id>`
-   Check manifest health, source fallback readiness, and build prerequisites.
-3. `/plugins build <plugin-id> install`
-   Run the declared build commands and sync the result into `.reverie/plugins/<plugin-id>/`.
-
-## Fixed protocol
-
-Every runnable runtime plugin must support:
+Every runnable runtime plugin should support:
 
 - `<plugin-entry> -RC`
   Return the Reverie CLI handshake JSON.
 - `<plugin-entry> -RC-CALL <command> <json-arguments>`
   Execute one plugin command and return a JSON result.
 
-Source fallback entries can be `.py`, `.cmd`, `.bat`, `.ps1`, or platform-native executables. Compiled entries are typically `.exe` on Windows.
+When a command has `"expose_as_tool": true`, Reverie can surface it as `rc_<plugin>_<command>`. Empty `include_modes` means the command is available in every mode unless `exclude_modes` blocks it.
 
-## Recommended manifest format
+## Blender Flow
 
-Reverie now supports a richer `plugin.json` schema for Python-to-EXE plugins:
+1. Build `plugins/blender/dist/reverie-blender.exe`.
+2. Install the plugin into `dist/.reverie/plugins/blender/`.
+3. Run `/plugins deploy blender` or call `rc_blender_ensure_runtime`.
+4. Run `/plugins run blender`, `rc_blender_run_script`, or the built-in `blender_modeling_workbench`.
 
-```json
-{
-  "schema_version": "2.0",
-  "id": "sample-runtime",
-  "display_name": "Sample Runtime Plugin",
-  "runtime_family": "engine",
-  "version": "0.1.0",
-  "delivery": "python-exe",
-  "template": "runtime_python_exe",
-  "description": "Example Reverie runtime plugin.",
-  "entry": {
-    "preferred": {
-      "windows": "dist/reverie-sample-runtime.exe",
-      "linux": "dist/reverie-sample-runtime",
-      "darwin": "dist/reverie-sample-runtime"
-    },
-    "fallbacks": {
-      "default": "plugin.py"
-    },
-    "strategy": "prefer-packaged",
-    "allow_source_fallback": true
-  },
-  "packaging": {
-    "format": "pyinstaller-onefile",
-    "compiled": {
-      "windows": "dist/reverie-sample-runtime.exe",
-      "linux": "dist/reverie-sample-runtime",
-      "darwin": "dist/reverie-sample-runtime"
-    },
-    "source": {
-      "default": "plugin.py"
-    },
-    "build": {
-      "windows": [
-        "build.bat"
-      ],
-      "default": [
-        "python -m PyInstaller --noconfirm --clean --onefile --name reverie-sample-runtime plugin.py"
-      ]
-    }
-  }
-}
-```
-
-### Key fields
-
-- `schema_version`
-  Manifest version tracked by Reverie. `2.0` is the current richer packaged-entry format.
-- `delivery`
-  High-level plugin delivery type. Use `python-exe` for Python source wrapped into a compiled executable.
-- `entry.preferred`
-  Compiled entry candidates Reverie should prefer at runtime.
-- `entry.fallbacks`
-  Source/script entries Reverie can use when the compiled artifact is missing during development.
-- `entry.strategy`
-  Usually `prefer-packaged` for production-ready plugins.
-- `packaging.format`
-  Packaging toolchain label, for example `pyinstaller-onefile`.
-- `packaging.build`
-  Human-readable build commands surfaced in `/plugins inspect`.
-- `template`
-  Template id that the plugin source was based on.
-
-## Templates
-
-Use `/plugins templates` to inspect the bundled authoring templates. The primary template for packaged runtime wrappers is:
-
-- `runtime_python_exe`
-  Python source plugin with a compiled-entry manifest, source fallback, and build-script guidance.
-
-## Current source directories
-
-- `plugins/godot/`
-- `plugins/_templates/runtime_python_exe/`
-- `plugins/_sdk/`
+The Blender zip is a build input for the plugin executable. It should not need to remain as a separate file in the installed `dist/.reverie/plugins/blender/` depot after packaging.

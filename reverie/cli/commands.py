@@ -57,7 +57,6 @@ class CommandHandler:
             'model': self.cmd_model,
             'subagent': self.cmd_subagent,
             'subagents': self.cmd_subagent,
-            'qwencode': self.cmd_qwencode,
             'geminicli': self.cmd_geminicli,
             'codex': self.cmd_codex,
             'nvidia': self.cmd_nvidia,
@@ -96,6 +95,7 @@ class CommandHandler:
             'scaffold': self.cmd_scaffold,
             'engine': self.cmd_engine,
             'modeling': self.cmd_modeling,
+            'blender': self.cmd_blender,
             'playtest': self.cmd_playtest,
             'pt': self.cmd_playtest,
             'CE': self.cmd_context_engine,  # Context Engine management (case-sensitive)
@@ -1729,6 +1729,10 @@ class CommandHandler:
 
         if operation in {"overview", "list", "status"}:
             return self._render_tools_overview(agent, mode)
+        if operation == "all":
+            return self._render_tools_all(agent, mode)
+        if operation == "details":
+            return self._render_tools_details(agent, mode)
         if operation == "groups":
             return self._render_tools_groups(agent, mode)
         if operation == "search":
@@ -1742,7 +1746,7 @@ class CommandHandler:
             "Tools",
             f"Unknown `/tools` action: {operation}",
             status="error",
-            detail="Use `/tools`, `/tools search <query>`, `/tools recommend <task>`, `/tools inspect <tool>`, or `/tools groups`.",
+            detail="Use `/tools`, `/tools all`, `/tools details`, `/tools search <query>`, `/tools recommend <task>`, `/tools inspect <tool>`, or `/tools groups`.",
         )
         self.console.print(self._build_tools_shortcuts_table())
         self.console.print()
@@ -1777,7 +1781,7 @@ class CommandHandler:
         if not filtered:
             return {"operation": "overview", "mode_override": mode_override, "query": "", "tool_name": ""}
 
-        known_operations = {"overview", "list", "status", "search", "recommend", "inspect", "groups"}
+        known_operations = {"overview", "list", "status", "all", "details", "search", "recommend", "inspect", "groups"}
         available_modes = {normalize_mode(mode_name) for mode_name in list_modes()}
 
         operation = str(filtered[0] or "").strip().lower()
@@ -1793,7 +1797,7 @@ class CommandHandler:
             return {"operation": operation, "mode_override": mode_override, "query": "", "tool_name": ""}
 
         remainder = list(filtered[1:])
-        if operation in {"overview", "list", "status", "groups"} and remainder and not mode_override:
+        if operation in {"overview", "list", "status", "all", "details", "groups"} and remainder and not mode_override:
             maybe_mode = normalize_mode(remainder[0])
             if maybe_mode in available_modes:
                 mode_override = maybe_mode
@@ -1890,6 +1894,56 @@ class CommandHandler:
             )
         return table
 
+    def _build_tool_details_table(
+        self,
+        items: List[Dict[str, Any]],
+        *,
+        title: str,
+        accent: str,
+        show_modes: bool = False,
+    ) -> Table:
+        """Build a detailed `/tools` table with schema-adjacent fields."""
+        compact = self._is_compact(130)
+        table = Table(
+            title=f"[bold {accent}]{self.deco.CRYSTAL} {escape(title)}[/bold {accent}]",
+            box=box.SIMPLE_HEAVY if compact else box.ROUNDED,
+            border_style=accent,
+            header_style=f"bold {self.theme.TEXT_SECONDARY}",
+            expand=True,
+            show_lines=not compact,
+            pad_edge=False,
+        )
+        table.add_column("Tool", style=f"bold {self.theme.BLUE_SOFT}", width=24 if compact else 28)
+        table.add_column("Kind", style=self.theme.MINT_SOFT, width=14, no_wrap=True)
+        table.add_column("Category", style=self.theme.PURPLE_SOFT, width=16, no_wrap=True)
+        if show_modes:
+            table.add_column("Modes", style=self.theme.TEXT_DIM, width=24)
+        table.add_column("Required", style=self.theme.PINK_SOFT, width=18)
+        table.add_column("Parameters", style=self.theme.TEXT_DIM, ratio=1)
+        table.add_column("Description", style=self.theme.TEXT_SECONDARY, ratio=2)
+
+        for item in sorted(items, key=lambda entry: str(entry.get("name", "")).lower()):
+            properties = [str(part) for part in (item.get("properties", []) or []) if str(part).strip()]
+            required = [str(part) for part in (item.get("required", []) or []) if str(part).strip()]
+            modes = [str(part) for part in (item.get("visible_modes", []) or item.get("supported_modes", []) or []) if str(part).strip()]
+            description = str(item.get("description", "") or "").strip().splitlines()[0] if str(item.get("description", "") or "").strip() else "(no description)"
+            row = [
+                str(item.get("name", "") or ""),
+                str(item.get("kind", "") or "built-in"),
+                str(item.get("category", "") or "general"),
+            ]
+            if show_modes:
+                row.append(self._truncate_middle(", ".join(modes) or "dynamic/all", 42 if compact else 64))
+            row.extend(
+                [
+                    self._truncate_middle(", ".join(required) or "(none)", 30),
+                    self._truncate_middle(", ".join(properties) or "(none)", 56 if compact else 84),
+                    self._truncate_middle(description, 90 if compact else 150),
+                ]
+            )
+            table.add_row(*row)
+        return table
+
     def _build_tool_group_table(
         self,
         mapping: Dict[str, List[str]],
@@ -1924,6 +1978,8 @@ class CommandHandler:
         return self._build_command_table(
             [
                 ("/tools", "Show the mode-aware tool overview with quick picks and groups"),
+                ("/tools all", "Show every loaded tool across modes with mode visibility and parameters"),
+                ("/tools details", "Show detailed tool information for the current or selected mode"),
                 ("/tools search <query>", "Keyword search against visible tool names, aliases, tags, and parameters"),
                 ("/tools recommend <task>", "Get intent-ranked tool suggestions for a task description"),
                 ("/tools inspect <tool>", "Inspect one tool or alias with supported modes and schema"),
@@ -1965,6 +2021,39 @@ class CommandHandler:
             result = self._execute_tool_catalog(agent, operation="list", mode=mode, max_results=200)
             data = result.data if result.success and isinstance(result.data, dict) else {}
             return list(data.get("items", []) or [])
+
+    def _get_all_tool_records_for_cli(self, agent: Any) -> List[Dict[str, Any]]:
+        """Fetch a union of tools visible across all registered modes."""
+        tool = ToolCatalogTool({"agent": agent, "project_root": self.app.get("project_root")})
+        merged: Dict[str, Dict[str, Any]] = {}
+        for mode_name in list_modes(include_computer=True, switchable_only=False):
+            normalized_mode = normalize_mode(mode_name)
+            try:
+                records = tool.list_visible_records(normalized_mode)
+            except Exception:
+                records = []
+            for record in records:
+                name = str(record.get("name", "") or "").strip()
+                if not name:
+                    continue
+                existing = merged.setdefault(name, dict(record))
+                visible_modes = set(existing.get("visible_modes", []) or [])
+                visible_modes.add(normalized_mode)
+                supported_modes = {
+                    str(item).strip()
+                    for item in (record.get("supported_modes", []) or existing.get("supported_modes", []) or [])
+                    if str(item).strip()
+                }
+                if supported_modes:
+                    visible_modes |= supported_modes
+                existing["visible_modes"] = sorted(visible_modes)
+                if not existing.get("description") and record.get("description"):
+                    existing["description"] = record.get("description")
+                if not existing.get("properties") and record.get("properties"):
+                    existing["properties"] = record.get("properties")
+                if not existing.get("required") and record.get("required"):
+                    existing["required"] = record.get("required")
+        return sorted(merged.values(), key=lambda item: str(item.get("name", "")).lower())
 
     def _get_total_tool_count_for_cli(self, agent: Any, fallback: int) -> int:
         """Return loaded tool count across all modes for compact totals."""
@@ -2026,7 +2115,7 @@ class CommandHandler:
         footer.append("Total: ", style=f"bold {self.theme.TEXT_PRIMARY}")
         footer.append(f"{current_count}/{total_count} tools available in current mode", style=self.theme.TEXT_SECONDARY)
         footer.append("\n")
-        footer.append("Use /tools search <query>, /tools inspect <tool>, or /tools --mode <mode> for narrower views.", style=self.theme.TEXT_DIM)
+        footer.append("Use /tools all, /tools details, /tools search <query>, /tools inspect <tool>, or /tools --mode <mode> for narrower views.", style=self.theme.TEXT_DIM)
         return Group(body, Text(""), footer)
 
     def _render_tools_overview(self, agent: Any, mode: str) -> bool:
@@ -2052,6 +2141,72 @@ class CommandHandler:
 
         total_tool_count = self._get_total_tool_count_for_cli(agent, len(items))
         self.console.print(self._build_tools_plain_list(items, mode=mode, total_tool_count=total_tool_count))
+        self.console.print()
+        return True
+
+    def _render_tools_details(self, agent: Any, mode: str) -> bool:
+        """Render `/tools details` for the selected mode."""
+        self._show_command_panel(
+            "Tool Details",
+            subtitle="Detailed schema-adjacent tool surface for the selected mode.",
+            accent=self.theme.BORDER_PRIMARY,
+            meta=f"{get_mode_display_name(mode)}  {self.deco.DOT_MEDIUM}  {mode}",
+        )
+        try:
+            items = self._get_tool_records_for_cli(agent, mode)
+        except Exception as exc:
+            self._show_activity_event(
+                "Tools",
+                "Tool catalog could not load detailed records.",
+                status="error",
+                detail=str(exc),
+            )
+            self.console.print()
+            return True
+
+        self.console.print(f"[{self.theme.TEXT_DIM}]Details include Required fields, Parameters, mode/kind/category, and descriptions.[/{self.theme.TEXT_DIM}]")
+        self.console.print()
+        self.console.print(
+            self._build_tool_details_table(
+                items,
+                title=f"{get_mode_display_name(mode)} Tools",
+                accent=self.theme.BORDER_PRIMARY,
+                show_modes=False,
+            )
+        )
+        self.console.print()
+        return True
+
+    def _render_tools_all(self, agent: Any, mode: str) -> bool:
+        """Render `/tools all` with a union across every mode."""
+        self._show_command_panel(
+            "All Tools",
+            subtitle="Complete tool inventory across built-in, MCP, and runtime-plugin surfaces.",
+            accent=self.theme.BORDER_PRIMARY,
+            meta=f"Current mode: {get_mode_display_name(mode)}  {self.deco.DOT_MEDIUM}  {mode}",
+        )
+        try:
+            items = self._get_all_tool_records_for_cli(agent)
+        except Exception as exc:
+            self._show_activity_event(
+                "Tools",
+                "Tool catalog could not load the full inventory.",
+                status="error",
+                detail=str(exc),
+            )
+            self.console.print()
+            return True
+
+        self.console.print(f"[{self.theme.TEXT_DIM}]Details include Required fields, Parameters, mode/kind/category, and descriptions.[/{self.theme.TEXT_DIM}]")
+        self.console.print()
+        self.console.print(
+            self._build_tool_details_table(
+                items,
+                title=f"All Tools ({len(items)})",
+                accent=self.theme.BORDER_PRIMARY,
+                show_modes=True,
+            )
+        )
         self.console.print()
         return True
 
@@ -4186,6 +4341,18 @@ class CommandHandler:
             return self._cmd_plugins_build("")
         elif query.startswith("build "):
             return self._cmd_plugins_build(raw_query[6:].strip())
+        elif query == "deploy":
+            return self._cmd_plugins_deploy("")
+        elif query.startswith("deploy "):
+            return self._cmd_plugins_deploy(raw_query[7:].strip())
+        elif query == "run":
+            return self._cmd_plugins_run("")
+        elif query.startswith("run "):
+            return self._cmd_plugins_run(raw_query[4:].strip())
+        elif query == "sdk":
+            return self._cmd_plugins_sdk("")
+        elif query.startswith("sdk "):
+            return self._cmd_plugins_sdk(raw_query[4:].strip())
         elif query in ("template", "templates"):
             return self._cmd_plugins_templates("")
         elif query.startswith("template "):
@@ -4195,15 +4362,15 @@ class CommandHandler:
         elif query == "path":
             summary = runtime_plugin_manager.get_status_summary()
             self._show_command_panel(
-                "Runtime Plugin Paths",
-                subtitle="Plugin-delivered external runtimes live beside the executable.",
+                "Plugin SDK Depot Paths",
+                subtitle="Portable SDKs and optional RC wrappers live beside the executable.",
                 accent=self.theme.BLUE_SOFT,
             )
             self.console.print(
                 self._build_key_value_table(
                     [
                         ("Source Root", summary.get("source_root", "")),
-                        ("Install Root", summary.get("install_root", "")),
+                        ("SDK/Install Root", summary.get("install_root", "")),
                         ("Catalog Code", summary.get("catalog_root", "")),
                         ("Template Root", summary.get("template_root", "")),
                     ]
@@ -4213,7 +4380,7 @@ class CommandHandler:
             return True
         else:
             self.console.print(
-                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /plugins [status|rescan|path|inspect <plugin-id>|scaffold <plugin-id>|validate <plugin-id>|build <plugin-id>|templates|template inspect <template-id>][/{self.theme.AMBER_GLOW}]"
+                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /plugins [status|rescan|path|sdk [plugin-id]|deploy <plugin-id>|run <plugin-id>|inspect <plugin-id>|scaffold <plugin-id>|validate <plugin-id>|build <plugin-id>|templates|template inspect <template-id>][/{self.theme.AMBER_GLOW}]"
             )
             return True
 
@@ -4223,8 +4390,8 @@ class CommandHandler:
             self.app['refresh_agent_prompt_guidance']()
 
         self._show_command_panel(
-            "Runtime Plugins",
-            subtitle="Only currently detected plugin directories are shown, with Reverie CLI `-RC` protocol probing when possible.",
+            "Runtime Plugins / SDK Depot",
+            subtitle="Plugins now anchor portable SDK/runtime folders under `.reverie/plugins`; RC tools are optional add-ons.",
             accent=self.theme.BLUE_SOFT,
             meta=str(summary.get("install_root", "")),
         )
@@ -4625,6 +4792,223 @@ class CommandHandler:
             self.console.print()
         return True
 
+    def _cmd_plugins_sdk(self, args: str) -> bool:
+        """Inspect or prepare portable SDK/runtime plugin depots."""
+        runtime_plugin_manager = self.app.get('runtime_plugin_manager')
+        if not runtime_plugin_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Runtime plugin manager is not available.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        positional, _options, flags = self._parse_plugins_action_tokens(args)
+        plugin_id = positional[0] if positional else ""
+        if str(plugin_id).lower() in {"inspect", "prepare", "deploy"} and len(positional) > 1:
+            plugin_id = positional[1]
+
+        if plugin_id:
+            result = runtime_plugin_manager.materialize_sdk_package(plugin_id, overwrite="overwrite" in flags)
+            status = result.get("status", {}) if isinstance(result, dict) else {}
+            self._show_command_panel(
+                f"Plugin SDK {plugin_id}",
+                subtitle="Prepare a portable SDK/runtime folder under `.reverie/plugins`.",
+                accent=self.theme.BLUE_SOFT,
+                meta=str(status.get("sdk_dir", "")),
+            )
+            if not result.get("success", False):
+                self._show_activity_event(
+                    "Plugins",
+                    "SDK depot preparation failed.",
+                    status="error",
+                    detail=str(result.get("error") or ""),
+                )
+                self.console.print()
+                return True
+
+            self._show_activity_event(
+                "Plugins",
+                "SDK depot prepared.",
+                status="success",
+                detail="Portable SDK manifest and runtime folder are ready.",
+            )
+            self.console.print()
+            self.console.print(
+                self._build_key_value_table(
+                    [
+                        ("Plugin ID", status.get("plugin_id", plugin_id)),
+                        ("Name", status.get("display_name", plugin_id)),
+                        ("Status", status.get("status", "(unknown)")),
+                        ("SDK Dir", status.get("sdk_dir", "")),
+                        ("Manifest", status.get("manifest_path", "")),
+                        ("Entry", status.get("entry_path") or "(not found yet)"),
+                        ("Download Page", status.get("download_page", "") or "(none)"),
+                        ("Install Hint", status.get("install_hint", "") or status.get("archive_hint", "") or "(none)"),
+                    ]
+                )
+            )
+            self.console.print()
+            return True
+
+        rows = runtime_plugin_manager.list_sdk_package_rows(force_refresh=False)
+        summary = runtime_plugin_manager.get_status_summary(force_refresh=False)
+        self._show_command_panel(
+            "Plugin SDK Depot",
+            subtitle="Portable SDK/runtime packages managed under `.reverie/plugins`.",
+            accent=self.theme.BLUE_SOFT,
+            meta=str(summary.get("sdk_root", summary.get("install_root", ""))),
+        )
+
+        self.console.print(
+            self._build_key_value_table(
+                [
+                    ("SDK Root", summary.get("sdk_root", summary.get("install_root", ""))),
+                    ("Known SDKs", str(len(rows))),
+                    ("Prepare", "/plugins sdk blender"),
+                ]
+            )
+        )
+        self.console.print()
+
+        table = Table(
+            title=f"[bold {self.theme.PINK_SOFT}]{self.deco.CRYSTAL} Portable SDK Plugins[/bold {self.theme.PINK_SOFT}]",
+            box=box.ROUNDED,
+            border_style=self.theme.BORDER_PRIMARY,
+            expand=True,
+        )
+        table.add_column("SDK", style=f"bold {self.theme.BLUE_SOFT}", width=18)
+        table.add_column("Type", style=self.theme.TEXT_SECONDARY, width=10)
+        table.add_column("Status", style=self.theme.TEXT_SECONDARY, width=10)
+        table.add_column("Entry", style=self.theme.TEXT_PRIMARY, ratio=2)
+        table.add_column("Hint", style=self.theme.TEXT_DIM, ratio=3)
+        for row in rows:
+            status = row.get("status", "missing")
+            status_color = self.theme.MINT_SOFT if status == "ready" else (self.theme.AMBER_GLOW if status == "prepared" else self.theme.TEXT_DIM)
+            table.add_row(
+                row.get("name", ""),
+                row.get("family", ""),
+                f"[{status_color}]{escape(status)}[/{status_color}]",
+                escape(row.get("entry", "-")),
+                escape(row.get("hint", "")),
+            )
+        self.console.print(table)
+        self.console.print()
+        return True
+
+    def _cmd_plugins_deploy(self, args: str) -> bool:
+        """Deploy a portable SDK package into `.reverie/plugins/<plugin-id>/runtime`."""
+        runtime_plugin_manager = self.app.get('runtime_plugin_manager')
+        if not runtime_plugin_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Runtime plugin manager is not available.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        positional, options, flags = self._parse_plugins_action_tokens(args)
+        plugin_id = positional[0] if positional else ""
+        if not plugin_id:
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /plugins deploy <plugin-id> [archive=<zip-path>] [overwrite][/{self.theme.AMBER_GLOW}]"
+            )
+            return True
+
+        result = runtime_plugin_manager.deploy_sdk_package(
+            plugin_id,
+            archive_path=options.get("archive", ""),
+            overwrite="overwrite" in flags,
+        )
+        status = result.get("status", {}) if isinstance(result, dict) else {}
+        self._show_command_panel(
+            f"Deploy {plugin_id}",
+            subtitle="Extract a portable SDK archive beside the executable.",
+            accent=self.theme.BLUE_SOFT,
+            meta=str(status.get("sdk_dir", "")),
+        )
+        if not result.get("success", False):
+            self._show_activity_event(
+                "Plugins",
+                "Plugin deployment failed.",
+                status="error",
+                detail=str(result.get("error") or ""),
+            )
+            self.console.print()
+            return True
+
+        self._show_activity_event(
+            "Plugins",
+            "Plugin deployment completed.",
+            status="success",
+            detail=f"Archive extracted into {status.get('sdk_dir', '')}",
+        )
+        self.console.print()
+        self.console.print(
+            self._build_key_value_table(
+                [
+                    ("Plugin ID", status.get("plugin_id", plugin_id)),
+                    ("Archive", result.get("archive_path", "(none)") or "(none)"),
+                    ("SDK Dir", status.get("sdk_dir", "")),
+                    ("Entry", status.get("entry_path") or "(not detected)"),
+                    ("Extracted Items", str(result.get("extracted_count", 0))),
+                ]
+            )
+        )
+        self.console.print()
+        return True
+
+    def _cmd_plugins_run(self, args: str) -> bool:
+        """Launch one portable SDK plugin for the user."""
+        runtime_plugin_manager = self.app.get('runtime_plugin_manager')
+        if not runtime_plugin_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Runtime plugin manager is not available.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        positional, _options, _flags = self._parse_plugins_action_tokens(args)
+        plugin_id = positional[0] if positional else ""
+        if not plugin_id:
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /plugins run <plugin-id>[/{self.theme.AMBER_GLOW}]"
+            )
+            return True
+
+        result = runtime_plugin_manager.run_sdk_package(plugin_id)
+        status = result.get("status", {}) if isinstance(result, dict) else {}
+        self._show_command_panel(
+            f"Run {plugin_id}",
+            subtitle="Launch the portable SDK/runtime entry.",
+            accent=self.theme.BLUE_SOFT,
+            meta=str(status.get("entry_path", "")),
+        )
+        if not result.get("success", False):
+            self._show_activity_event(
+                "Plugins",
+                "Plugin launch failed.",
+                status="error",
+                detail=str(result.get("error") or ""),
+            )
+            self.console.print()
+            return True
+
+        self._show_activity_event(
+            "Plugins",
+            "Plugin launched.",
+            status="success",
+            detail=f"PID {result.get('pid', '?')}",
+        )
+        self.console.print()
+        self.console.print(
+            self._build_key_value_table(
+                [
+                    ("Plugin ID", status.get("plugin_id", plugin_id)),
+                    ("Entry", status.get("entry_path", "")),
+                    ("PID", str(result.get("pid", ""))),
+                    ("Command", " ".join(str(item) for item in result.get("command", []))),
+                ]
+            )
+        )
+        self.console.print()
+        return True
+
     def _cmd_plugins_templates(self, args: str) -> bool:
         """Inspect available source templates for runtime plugins."""
         runtime_plugin_manager = self.app.get('runtime_plugin_manager')
@@ -4656,7 +5040,7 @@ class CommandHandler:
                 [
                     ("Template Root", summary.get("template_root", "")),
                     ("Template Count", str(summary.get("template_count", 0))),
-                    ("Recommended", "runtime_python_exe"),
+                    ("Recommended", "runtime_python_exe" if rows else "(none bundled)"),
                 ]
             )
         )
@@ -4698,7 +5082,7 @@ class CommandHandler:
             Panel(
                 Text.from_markup(
                     f"[bold {self.theme.BLUE_SOFT}]/plugins templates[/bold {self.theme.BLUE_SOFT}] list available templates\n"
-                    f"[bold {self.theme.BLUE_SOFT}]/plugins template inspect runtime_python_exe[/bold {self.theme.BLUE_SOFT}] inspect one template"
+                    f"[bold {self.theme.BLUE_SOFT}]/plugins template inspect <template-id>[/bold {self.theme.BLUE_SOFT}] inspect one template"
                 ),
                 title=f"[bold {self.theme.PURPLE_SOFT}]{self.deco.DIAMOND} Shortcuts[/bold {self.theme.PURPLE_SOFT}]",
                 border_style=self.theme.BORDER_SUBTLE,
@@ -4923,7 +5307,7 @@ class CommandHandler:
         }
 
         for command in protocol.commands:
-            include_modes = ", ".join(command.include_modes) if command.include_modes else "reverie-gamer"
+            include_modes = ", ".join(command.include_modes) if command.include_modes else "all modes"
             if command.exclude_modes:
                 include_modes = f"{include_modes} / !{', '.join(command.exclude_modes)}"
             table.add_row(
@@ -4942,7 +5326,6 @@ class CommandHandler:
         """Return a readable model source label."""
         mapping = {
             "standard": "config.json",
-            "qwencode": "Qwen Code",
             "geminicli": "Gemini CLI",
             "codex": "Codex",
             "nvidia": "NVIDIA",
@@ -5137,6 +5520,7 @@ class CommandHandler:
         active_source: str,
         model_query: str,
         normalize_query: Optional[Callable[[str], str]] = None,
+        post_select_config: Optional[Callable[[Dict[str, Any], Dict[str, Any]], Dict[str, Any]]] = None,
     ) -> bool:
         """Persist model selection for an external provider."""
         config_manager = self.app.get('config_manager')
@@ -5166,6 +5550,8 @@ class CommandHandler:
 
         provider_cfg["selected_model_id"] = selected_model["id"]
         provider_cfg["selected_model_display_name"] = selected_model["display_name"]
+        if post_select_config is not None:
+            provider_cfg = post_select_config(provider_cfg, selected_model)
         setattr(config, config_attr, provider_cfg)
         config.active_model_source = active_source
         config_manager.save(config)
@@ -5258,239 +5644,6 @@ class CommandHandler:
         if normalized_mode == "computer-controller":
             return self._prepare_computer_controller_nvidia_configuration(config)
         return True
-
-    def cmd_qwencode(self, args: str) -> bool:
-        """Qwen Code integration command."""
-        raw = args.strip()
-        if not raw:
-            return self._cmd_qwencode_status()
-
-        lowered = raw.lower()
-        if lowered in ("status", "check"):
-            return self._cmd_qwencode_status()
-        if lowered == "login":
-            return self._cmd_qwencode_login()
-        if lowered == "model":
-            return self._cmd_qwencode_model("")
-        if lowered.startswith("model "):
-            return self._cmd_qwencode_model(raw[6:].strip())
-        if lowered == "endpoint":
-            return self._cmd_qwencode_endpoint("")
-        if lowered.startswith("endpoint "):
-            return self._cmd_qwencode_endpoint(raw[9:].strip())
-
-        self.console.print(
-            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /qwencode [status|login|model|endpoint][/{self.theme.AMBER_GLOW}]"
-        )
-        return True
-
-    def _cmd_qwencode_status(self) -> bool:
-        """Detect local Qwen Code CLI credentials and show current Qwen Code selection."""
-        from ..qwencode import (
-            detect_qwencode_cli_credentials,
-            normalize_qwencode_config,
-            resolve_qwencode_runtime_request_url,
-            resolve_qwencode_selected_model,
-        )
-
-        config_manager = self.app.get('config_manager')
-        config = config_manager.load() if config_manager else None
-
-        cred = detect_qwencode_cli_credentials()
-        self.console.print()
-
-        if cred.get("found"):
-            self.console.print(
-                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Qwen Code CLI credentials detected.[/{self.theme.MINT_VIBRANT}]"
-            )
-            self.console.print(
-                f"[{self.theme.MINT_SOFT}]Qwen Code CLI is installed and logged in. Use /qwencode model to select a model.[/{self.theme.MINT_SOFT}]"
-            )
-            if cred.get("refreshed"):
-                self.console.print(
-                    f"[{self.theme.MINT_SOFT}]Access token was auto-refreshed from local OAuth cache.[/{self.theme.MINT_SOFT}]"
-                )
-            source_file = cred.get("source_file", "")
-            if source_file:
-                self.console.print(
-                    f"[{self.theme.TEXT_DIM}]Credential source: {source_file}[/{self.theme.TEXT_DIM}]"
-                )
-            expires_at = cred.get("expires_at")
-            if isinstance(expires_at, int) and expires_at > 0:
-                expires_at_text = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(expires_at / 1000))
-                self.console.print(
-                    f"[{self.theme.TEXT_DIM}]Token expiry: {expires_at_text}[/{self.theme.TEXT_DIM}]"
-                )
-            if cred.get("resource_url"):
-                self.console.print(
-                    f"[{self.theme.TEXT_DIM}]Credential resource_url: {cred.get('resource_url')}[/{self.theme.TEXT_DIM}]"
-                )
-            if cred.get("is_expired") is True:
-                self.console.print(
-                    f"[{self.theme.AMBER_GLOW}]Token is expired. Run /qwencode login after completing `qwen` OAuth login.[/{self.theme.AMBER_GLOW}]"
-                )
-        else:
-            self.console.print(
-                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Qwen Code CLI credentials were not found under ~/.qwen.[/{self.theme.CORAL_SOFT}]"
-            )
-            self.console.print(
-                f"[{self.theme.AMBER_GLOW}]Use /qwencode login to authenticate, or install Qwen Code CLI first.[/{self.theme.AMBER_GLOW}]"
-            )
-            if cred.get("errors"):
-                self.console.print(
-                    f"[{self.theme.TEXT_DIM}]Details: {' | '.join(str(x) for x in cred.get('errors', []))}[/{self.theme.TEXT_DIM}]"
-                )
-
-        if config_manager and config:
-            qwencode_cfg = normalize_qwencode_config(getattr(config, "qwencode", {}))
-            selected = resolve_qwencode_selected_model(qwencode_cfg)
-            if selected:
-                self.console.print(
-                    f"[{self.theme.BLUE_SOFT}]Current Qwen Code model:[/{self.theme.BLUE_SOFT}] {selected['display_name']} ({selected['id']})"
-                )
-                context_length = selected.get('context_length', 0)
-                if context_length:
-                    self.console.print(
-                        f"[{self.theme.TEXT_DIM}]Context length: {context_length:,} tokens[/{self.theme.TEXT_DIM}]"
-                    )
-            else:
-                self.console.print(
-                    f"[{self.theme.TEXT_DIM}]Current Qwen Code model: (none)[/{self.theme.TEXT_DIM}]"
-                )
-
-            model_source = str(getattr(config, "active_model_source", "standard")).lower()
-            self.console.print(
-                f"[{self.theme.BLUE_SOFT}]Active model source:[/{self.theme.BLUE_SOFT}] {self._format_model_source_label(model_source)}"
-            )
-            api_url = str(qwencode_cfg.get("api_url", "")).strip()
-            if api_url:
-                self.console.print(
-                    f"[{self.theme.TEXT_DIM}]Qwen Code API endpoint: {api_url}[/{self.theme.TEXT_DIM}]"
-                )
-            endpoint = str(qwencode_cfg.get("endpoint", "")).strip()
-            if endpoint:
-                self.console.print(
-                    f"[{self.theme.TEXT_DIM}]Endpoint override: {endpoint}[/{self.theme.TEXT_DIM}]"
-                )
-            effective_request_url = resolve_qwencode_runtime_request_url(
-                qwencode_cfg,
-                credentials=cred if cred.get("found") else None,
-            )
-            if effective_request_url:
-                self.console.print(
-                    f"[{self.theme.TEXT_DIM}]Effective request URL: {effective_request_url}[/{self.theme.TEXT_DIM}]"
-                )
-
-        self.console.print()
-        return True
-
-    def _cmd_qwencode_login(self) -> bool:
-        """Validate or refresh local Qwen OAuth credentials."""
-        from ..qwencode import qwen_oauth_login
-
-        self.console.print()
-        self.console.print(
-            f"[{self.theme.PURPLE_SOFT}]{self.deco.SPARKLE} Validating Qwen OAuth credentials...[/{self.theme.PURPLE_SOFT}]"
-        )
-        self.console.print()
-
-        with self.console.status(f"[{self.theme.PURPLE_SOFT}]Checking local CLI cache...[/{self.theme.PURPLE_SOFT}]"):
-            login_result = qwen_oauth_login(force_refresh=True)
-
-        if not login_result.get("success"):
-            error_msg = login_result.get("error", "Unknown error")
-            self.console.print(
-                f"[{self.theme.CORAL_VIBRANT}]{self.deco.CROSS} Login failed: {error_msg}[/{self.theme.CORAL_VIBRANT}]"
-            )
-            self.console.print(
-                f"[{self.theme.AMBER_GLOW}]Please run `qwen`, complete OAuth login, then run /qwencode login again.[/{self.theme.AMBER_GLOW}]"
-            )
-            self.console.print()
-            return True
-
-        is_expired = login_result.get("is_expired") is True
-        if is_expired:
-            self.console.print(
-                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Credentials found but token is expired.[/{self.theme.AMBER_GLOW}]"
-            )
-        elif login_result.get("refreshed"):
-            self.console.print(
-                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Qwen OAuth token refreshed successfully.[/{self.theme.MINT_VIBRANT}]"
-            )
-        else:
-            self.console.print(
-                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Qwen OAuth credentials are valid.[/{self.theme.MINT_VIBRANT}]"
-            )
-
-        source_file = str(login_result.get("source_file", "")).strip()
-        if source_file:
-            self.console.print(
-                f"[{self.theme.TEXT_DIM}]Credential source: {source_file}[/{self.theme.TEXT_DIM}]"
-            )
-        expires_at = login_result.get("expires_at")
-        if isinstance(expires_at, int) and expires_at > 0:
-            expires_at_text = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(expires_at / 1000))
-            self.console.print(
-                f"[{self.theme.TEXT_DIM}]Token expiry: {expires_at_text}[/{self.theme.TEXT_DIM}]"
-            )
-        if login_result.get("errors"):
-            self.console.print(
-                f"[{self.theme.TEXT_DIM}]Notes: {' | '.join(str(x) for x in login_result.get('errors', []))}[/{self.theme.TEXT_DIM}]"
-            )
-        self.console.print(
-            f"[{self.theme.TEXT_DIM}]Use /qwencode model to select a model.[/{self.theme.TEXT_DIM}]"
-        )
-        self.console.print()
-        return True
-
-    def _cmd_qwencode_endpoint(self, endpoint_value: str) -> bool:
-        """Configure custom endpoint override for Qwen OpenAI-compatible requests."""
-        from ..qwencode import normalize_qwencode_config
-
-        return self._configure_provider_endpoint(
-            config_attr="qwencode",
-            normalize_config=normalize_qwencode_config,
-            provider_label="Qwen Code",
-            endpoint_value=endpoint_value,
-        )
-
-    def _cmd_qwencode_model(self, model_query: str) -> bool:
-        """Select Qwen Code model from dedicated catalog."""
-        from ..qwencode import (
-            detect_qwencode_cli_credentials,
-            get_qwencode_model_catalog,
-            normalize_qwencode_config,
-        )
-
-        config_manager = self.app.get('config_manager')
-        if not config_manager:
-            self.console.print(
-                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
-            )
-            return True
-
-        cred = detect_qwencode_cli_credentials()
-        if not cred.get("found"):
-            self.console.print(
-                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Qwen Code CLI credentials were not found under ~/.qwen.[/{self.theme.CORAL_SOFT}]"
-            )
-            self.console.print(
-                f"[{self.theme.AMBER_GLOW}]Run /qwencode first after logging into Qwen Code CLI.[/{self.theme.AMBER_GLOW}]"
-            )
-            return True
-
-        catalog = get_qwencode_model_catalog()
-        return self._select_external_provider_model(
-            config_attr="qwencode",
-            normalize_config=normalize_qwencode_config,
-            catalog=catalog,
-            provider_label="Qwen Code",
-            active_source="qwencode",
-            model_query=model_query,
-            normalize_query=lambda raw_query: str(
-                normalize_qwencode_config({"selected_model_id": raw_query}).get("selected_model_id", "")
-            ),
-        )
 
     def cmd_geminicli(self, args: str) -> bool:
         """Gemini CLI integration command."""
@@ -6487,13 +6640,21 @@ class CommandHandler:
         effective_api_key = resolve_nvidia_api_key(nvidia_cfg)
         key_origin = " (from NVIDIA_API_KEY)" if effective_api_key and not str(nvidia_cfg.get("api_key", "") or "").strip() else ""
         model_source = str(getattr(config, "active_model_source", "standard") or "standard").strip().lower()
+        selected_id = str((selected or {}).get("id", "") if selected else "").strip()
+        thinking_control = str((selected or {}).get("thinking_control", "none") if selected else "none").strip().lower()
+        if thinking_control == "toggle":
+            thinking_label = "ON" if bool(nvidia_cfg.get("enable_thinking", True)) else "OFF"
+        elif thinking_control == "fixed":
+            thinking_label = "FIXED"
+        else:
+            thinking_label = "N/A"
 
         lines = [
             f"[{self.theme.BLUE_SOFT}]Active model source:[/{self.theme.BLUE_SOFT}] {self._format_model_source_label(model_source)}",
             f"[{self.theme.BLUE_SOFT}]Configured key:[/{self.theme.BLUE_SOFT}] {mask_secret(effective_api_key) if effective_api_key else '(not set)'}{key_origin}",
             f"[{self.theme.BLUE_SOFT}]API URL:[/{self.theme.BLUE_SOFT}] {escape(str(nvidia_cfg.get('api_url', '')))}",
             f"[{self.theme.BLUE_SOFT}]Endpoint:[/{self.theme.BLUE_SOFT}] {escape(str(nvidia_cfg.get('endpoint', '')))}",
-            f"[{self.theme.BLUE_SOFT}]Thinking:[/{self.theme.BLUE_SOFT}] {'ON' if bool(nvidia_cfg.get('enable_thinking', True)) else 'OFF'}",
+            f"[{self.theme.BLUE_SOFT}]Thinking:[/{self.theme.BLUE_SOFT}] {thinking_label}",
             f"[{self.theme.BLUE_SOFT}]Default max tokens:[/{self.theme.BLUE_SOFT}] {nvidia_cfg.get('max_tokens', 16384)}",
             f"[{self.theme.BLUE_SOFT}]API key help:[/{self.theme.BLUE_SOFT}] {escape(NVIDIA_API_KEY_HINT_URL)}",
         ]
@@ -6588,6 +6749,23 @@ class CommandHandler:
             endpoint_value=endpoint_value,
         )
 
+    def _configure_nvidia_thinking_for_model(self, nvidia_cfg: Dict[str, Any], selected_model: Dict[str, Any]) -> Dict[str, Any]:
+        """Ask for NVIDIA thinking mode only when the selected model supports on/off control."""
+        from ..nvidia import normalize_nvidia_config
+
+        cfg = normalize_nvidia_config(nvidia_cfg)
+        thinking_control = str(selected_model.get("thinking_control", "none") or "none").strip().lower()
+        if thinking_control != "toggle":
+            return cfg
+
+        current = bool(cfg.get("enable_thinking", True))
+        enabled = Confirm.ask(
+            f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Enable thinking mode for {selected_model.get('display_name', selected_model.get('id', 'this model'))}?",
+            default=current,
+        )
+        cfg["enable_thinking"] = bool(enabled)
+        return normalize_nvidia_config(cfg)
+
     def _cmd_nvidia_model(self, model_query: str) -> bool:
         from ..nvidia import get_nvidia_model_catalog, normalize_nvidia_config
 
@@ -6598,6 +6776,7 @@ class CommandHandler:
             provider_label="NVIDIA",
             active_source="nvidia",
             model_query=model_query,
+            post_select_config=self._configure_nvidia_thinking_for_model,
         )
 
     def cmd_web(self, args: str) -> bool:
@@ -8260,6 +8439,138 @@ class CommandHandler:
 
         self.console.print(
             f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /modeling [status|setup|sync|stub|primitive|import|ashfox][/{self.theme.AMBER_GLOW}]"
+        )
+        return True
+
+    def cmd_blender(self, args: str) -> bool:
+        """Manage the built-in Blender modeling workflow."""
+        from ..tools.blender_modeling_workbench import BlenderModelingWorkbenchTool
+
+        tokens = self._split_command_args(args)
+        action = tokens[0].lower() if tokens else "status"
+        tool = BlenderModelingWorkbenchTool(
+            {
+                "project_root": str(self._get_project_root()),
+                "config_manager": self.app.get("config_manager"),
+            }
+        )
+        output_dir = "."
+
+        if action in {"help", "?"}:
+            self._show_command_panel(
+                "Blender Modeling",
+                subtitle="First-party Blender authoring without an external MCP server or Skill.",
+                accent=self.theme.BLUE_SOFT,
+            )
+            self.console.print(
+                self._build_command_table(
+                    [
+                        ("/blender status", "Inspect Blender install, generated scripts, and model counts"),
+                        ("/blender setup", "Create Blender source/script/plan folders inside the modeling workspace"),
+                        ("/blender script <model_name> <brief>", "Generate a Blender Python authoring script without running Blender"),
+                        ("/blender script hero \"Genshin / ZZZ style anime action character\"", "Generate a richer stylized character blockout preset"),
+                        ("/blender create <model_name> <brief>", "Generate and run Blender to save `.blend`, export `.glb`, and render a preview"),
+                        ("/blender run <script_path>", "Run a workspace-local Blender Python script in background mode"),
+                        ("/blender validate <script_path>", "Run Reverie's conservative static scan against a Blender script"),
+                        ("/blender sync", "Regenerate `data/models/model_registry.yaml`"),
+                    ],
+                    title="Blender Commands",
+                    accent=self.theme.BORDER_SECONDARY,
+                )
+            )
+            self.console.print()
+            return True
+
+        if action in {"status", "inspect"}:
+            result = tool.execute(action="inspect_stack", output_dir=output_dir)
+            self._print_tool_result("Blender Modeling Stack", result)
+            return True
+
+        if action == "setup":
+            overwrite = Confirm.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Overwrite existing Blender modeling README/manifest files?",
+                default=False,
+            )
+            result = tool.execute(action="setup_workspace", output_dir=output_dir, overwrite=overwrite)
+            self._print_tool_result("Blender Modeling Workspace", result)
+            return True
+
+        if action in {"script", "generate"}:
+            model_name = tokens[1] if len(tokens) > 1 else Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Model Name",
+                default="blender_asset",
+            ).strip()
+            brief = " ".join(tokens[2:]).strip() if len(tokens) > 2 else Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Modeling Brief",
+                default=model_name,
+            ).strip()
+            overwrite = Confirm.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Overwrite existing generated plan/script?",
+                default=False,
+            )
+            result = tool.execute(
+                action="generate_script",
+                output_dir=output_dir,
+                model_name=model_name,
+                brief=brief,
+                overwrite=overwrite,
+            )
+            self._print_tool_result("Blender Authoring Script", result)
+            return True
+
+        if action in {"create", "model", "new"}:
+            model_name = tokens[1] if len(tokens) > 1 else Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Model Name",
+                default="blender_asset",
+            ).strip()
+            brief = " ".join(tokens[2:]).strip() if len(tokens) > 2 else Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Modeling Brief",
+                default=model_name,
+            ).strip()
+            render_preview = Confirm.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Render a preview image?",
+                default=True,
+            )
+            overwrite = Confirm.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Overwrite existing generated files?",
+                default=False,
+            )
+            result = tool.execute(
+                action="create_model",
+                output_dir=output_dir,
+                model_name=model_name,
+                brief=brief,
+                export_format="glb",
+                render_preview=render_preview,
+                run_blender=True,
+                overwrite=overwrite,
+            )
+            self._print_tool_result("Blender Model", result)
+            return True
+
+        if action == "run":
+            script_path = tokens[1] if len(tokens) > 1 else Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Script Path"
+            ).strip()
+            result = tool.execute(action="run_script", output_dir=output_dir, script_path=script_path)
+            self._print_tool_result("Blender Script Run", result)
+            return True
+
+        if action == "validate":
+            script_path = tokens[1] if len(tokens) > 1 else Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Script Path"
+            ).strip()
+            result = tool.execute(action="validate_script", output_dir=output_dir, script_path=script_path)
+            self._print_tool_result("Blender Script Validation", result)
+            return True
+
+        if action in {"sync", "registry"}:
+            result = tool.execute(action="sync_registry", output_dir=output_dir)
+            self._print_tool_result("Blender Model Registry", result)
+            return True
+
+        self.console.print(
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /blender [status|setup|script|create|run|validate|sync][/{self.theme.AMBER_GLOW}]"
         )
         return True
     

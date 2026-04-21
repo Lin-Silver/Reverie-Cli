@@ -36,3 +36,4 @@ env/
 # Reverie local state and secrets
 .reverie/
 .env
+plugins/blender/*.zip

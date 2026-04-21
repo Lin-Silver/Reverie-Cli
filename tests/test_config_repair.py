@@ -4,10 +4,13 @@ import json
 import reverie.config as config_module
 
 from reverie.config import (
+    Config,
     ConfigManager,
     _escape_invalid_json_string_control_chars,
     get_app_root,
+    get_project_data_dir,
 )
+from reverie.tools.mcp_resource_tools import ReadMcpResourceTool
 
 
 def test_escape_invalid_json_string_control_chars_only_changes_string_payloads() -> None:
@@ -69,6 +72,21 @@ def test_get_app_root_uses_launcher_root_for_packaged_windows(tmp_path: Path, mo
     monkeypatch.setattr(config_module.sys, "frozen", True, raising=False)
 
     assert get_app_root() == launcher_root.resolve()
+
+
+def test_get_app_root_uses_dist_depot_for_source_checkout(tmp_path: Path, monkeypatch) -> None:
+    source_root = tmp_path / "Reverie-Cli"
+    package_dir = source_root / "reverie"
+    package_dir.mkdir(parents=True, exist_ok=True)
+    (source_root / "setup.py").write_text("# test source marker\n", encoding="utf-8")
+
+    monkeypatch.delenv("REVERIE_APP_ROOT", raising=False)
+    monkeypatch.setattr(config_module.sys, "frozen", False, raising=False)
+    monkeypatch.setattr(config_module, "__file__", str(package_dir / "config.py"))
+    monkeypatch.setattr(config_module, "get_launcher_root", lambda: source_root)
+
+    assert get_app_root() == (source_root / "dist").resolve()
+    assert not (source_root / ".reverie").exists()
 
 
 def test_config_manager_creates_default_config_file_for_manual_editing(tmp_path: Path, monkeypatch) -> None:
@@ -245,3 +263,64 @@ def test_save_writes_back_to_loaded_source_instead_of_overwriting_other_profile(
 
     global_text = manager.global_config_path.read_text(encoding="utf-8")
     assert "added-model" not in global_text
+
+
+def test_workspace_mode_save_does_not_create_project_root_reverie_dir(tmp_path: Path, monkeypatch) -> None:
+    app_root = tmp_path / "app"
+    project_root = tmp_path / "project"
+    project_root.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr("reverie.config.get_app_root", lambda: app_root)
+    monkeypatch.setattr("reverie.config.get_launcher_root", lambda: app_root)
+
+    manager = ConfigManager(project_root)
+    manager.ensure_dirs()
+    manager.set_workspace_mode(True)
+    manager.save(Config())
+
+    assert manager.workspace_config_path.exists()
+    assert not (project_root / ".reverie").exists()
+
+
+def test_legacy_workspace_config_is_migrated_without_rewriting_project_root_reverie_dir(tmp_path: Path, monkeypatch) -> None:
+    app_root = tmp_path / "app"
+    project_root = tmp_path / "project"
+    legacy_dir = project_root / ".reverie"
+    legacy_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr("reverie.config.get_app_root", lambda: app_root)
+    monkeypatch.setattr("reverie.config.get_launcher_root", lambda: app_root)
+
+    manager = ConfigManager(project_root)
+    legacy_payload = Config().to_dict()
+    legacy_payload["use_workspace_config"] = True
+    manager.legacy_workspace_config_path.write_text(
+        json.dumps(legacy_payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    legacy_before = manager.legacy_workspace_config_path.read_text(encoding="utf-8")
+
+    loaded = manager.load()
+    loaded.tool_output_style = "full"
+    manager.save(loaded)
+
+    assert manager.workspace_config_path.exists()
+    migrated_payload = json.loads(manager.workspace_config_path.read_text(encoding="utf-8"))
+    assert migrated_payload["tool_output_style"] == "full"
+    assert manager.legacy_workspace_config_path.read_text(encoding="utf-8") == legacy_before
+
+
+def test_read_mcp_resource_cache_defaults_to_project_cache_not_project_root_reverie(tmp_path: Path, monkeypatch) -> None:
+    app_root = tmp_path / "app"
+    project_root = tmp_path / "project"
+    project_root.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr("reverie.config.get_app_root", lambda: app_root)
+    monkeypatch.setattr("reverie.config.get_launcher_root", lambda: app_root)
+
+    tool = ReadMcpResourceTool({"project_root": project_root})
+    cache_dir = tool._resource_cache_dir()
+
+    assert cache_dir == get_project_data_dir(project_root) / "mcp_resources"
+    assert cache_dir.exists()
+    assert not (project_root / ".reverie").exists()

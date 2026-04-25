@@ -128,6 +128,10 @@ def test_blender_production_character_pipeline_builds_full_authoring_stack(tmp_p
     assert "reverie.blender_texture_authoring_manifest.v1" in script_text
     assert "reverie.blender_art_readiness_report.v1" in script_text
     assert "create_humanoid_rig" in script_text
+    assert "create_unified_body_core" in script_text
+    assert "rv_voxel_body_continuity" in script_text
+    assert "reverie.blender_body_continuity_report.v1" in script_text
+    assert "continuous_body_core" in script_text
     assert "assign_runtime_vertex_groups" in script_text
     assert "create_lod_variants" in script_text
     assert "create_rig_control_markers" in script_text
@@ -149,6 +153,7 @@ def test_blender_production_character_pipeline_builds_full_authoring_stack(tmp_p
     assert "create_visual_qa_report" in script_text
     assert "facial_landmark_visibility" in script_text
     assert "material_role_coverage" in script_text
+    assert "body_continuity" in script_text
     assert "render_helper_exclusion" in script_text
     assert "character_detail_floor" in script_text
     assert "create_engine_import_contract" in script_text

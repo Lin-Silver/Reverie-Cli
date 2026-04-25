@@ -344,15 +344,15 @@ DEFAULT_RUNTIME_PLUGIN_CATALOG: tuple[RuntimePluginSpec, ...] = (
         description="Plugin-local open model package manager for Reverie-Gamer asset production.",
         source_repo_hint="https://huggingface.co/models",
         delivery="sdk-runtime",
-        capabilities=("huggingface-models", "image-to-3d", "motion-generation", "game-assets", "plugin-local-venv"),
+        capabilities=("huggingface-models", "text-to-3d", "image-to-3d", "motion-generation", "game-assets", "8gb-vram-profiles", "plugin-local-venv"),
         entry_candidates={
             "windows": ("reverie-game-models*.exe", "dist/reverie-game-models*.exe", "plugin.py", "runtime/model_manifest.json"),
             "linux": ("reverie-game-models*", "dist/reverie-game-models*", "plugin.py", "runtime/model_manifest.json"),
             "darwin": ("reverie-game-models*", "dist/reverie-game-models*", "plugin.py", "runtime/model_manifest.json"),
         },
         sdk_download_page="https://huggingface.co/models",
-        sdk_archive_hint="Use `/plugins deploy game_models`, `rc_game_models_prepare_environment`, and `rc_game_models_download_model` to prepare plugin-local model packages.",
-        sdk_install_hint="Model snapshots stay under `.reverie/plugins/game_models/models/`; the virtual environment stays under `.reverie/plugins/game_models/venv/`.",
+        sdk_archive_hint="Use `/plugins deploy game_models`, `/plugins models ...`, `rc_game_models_select_model`, and `rc_game_models_download_model` to prepare plugin-local model packages.",
+        sdk_install_hint="Model snapshots stay under `.reverie/plugins/game_models/models/`; caches stay under `.reverie/plugins/game_models/cache/`; the virtual environment stays under `.reverie/plugins/game_models/venv/`.",
     ),
     RuntimePluginSpec(
         plugin_id="blender",

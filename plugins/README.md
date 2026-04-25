@@ -22,7 +22,7 @@ Plugins in Reverie CLI are portable software/runtime bundles, not another user-f
 - `plugins/o3de/`
   O3DE source SDK manager for GitHub version discovery, plugin-local source checkout, and local SDK manifest generation.
 - `plugins/game_models/`
-  Game auxiliary model depot manager for plugin-local Python venvs, HuggingFace model snapshots, 8GB-VRAM deployment planning, and guarded heavy-model downloads.
+  Game auxiliary model depot manager for plugin-local Python venvs, HuggingFace model snapshots/caches, 8GB-VRAM deployment planning, selectable model profiles, and guarded heavy-model downloads.
 
 ## Fixed Protocol
 
@@ -49,7 +49,8 @@ The Blender zip is a build input for the plugin executable. It should not need t
 1. Build `plugins/game_models/dist/reverie-game-models.exe`.
 2. Install the plugin into `dist/.reverie/plugins/game_models/`.
 3. Run `/plugins deploy game_models` or call `rc_game_models_prepare_environment`.
-4. Call `rc_game_models_deployment_plan` before downloads.
-5. Call `rc_game_models_download_model` with `dry_run=true` first, then download only models that fit the local hardware profile.
+4. Run `/plugins models plan ram=24 vram=8` or call `rc_game_models_deployment_plan` before downloads.
+5. Run `/plugins models select trellis-text-xlarge profile=low_vram download` or call `rc_game_models_select_model` when choosing a model/profile.
+6. Call `rc_game_models_download_model` with `dry_run=true` first, then download only models that fit the local hardware profile.
 
-Model snapshots and virtual environments must stay inside `dist/.reverie/plugins/game_models/` unless the user explicitly registers an external model path.
+Model snapshots, caches, and virtual environments must stay inside `dist/.reverie/plugins/game_models/` unless the user explicitly registers an external model path.

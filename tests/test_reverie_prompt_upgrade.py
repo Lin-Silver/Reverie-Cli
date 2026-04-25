@@ -33,6 +33,8 @@ def test_reverie_prompt_adds_black_box_completion_protocol() -> None:
     assert "For Blender, Blockbench, game, runtime, or asset-pipeline requests in base Reverie mode" in prompt
     assert "`production_character_pipeline`" in prompt
     assert "rather than a guarantee of final hand-authored AAA character art" in prompt
+    assert "continuous deformable body core" in prompt
+    assert "TRELLIS `profile=low_vram`" in prompt
 
 
 def test_reverie_tool_workflow_guides_black_box_character_art() -> None:
@@ -43,6 +45,7 @@ def test_reverie_tool_workflow_guides_black_box_character_art() -> None:
     assert "For AAA character-art briefs in base Reverie mode" in workflow
     assert "require post-run audit evidence" in workflow
     assert "`game_models` assisted lanes" in workflow
+    assert "body-continuity" in workflow
 
 
 def test_shared_coding_guardrails_are_injected_into_all_modes() -> None:

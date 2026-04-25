@@ -38,7 +38,7 @@ What remains optional:
 
 Without a desktop Blockbench/Ashfox session, Reverie still validates simple `.bbmodel` files and exports cuboid elements to runtime `.gltf` files. Complex Blockbench features such as rotations, custom face UV paint, and editor previews remain optional live-editor work.
 
-For model-assisted asset generation, use `/plugins deploy game_models` and the exposed `rc_game_models_*` tools. The default policy targets 24GB RAM / 8GB VRAM and recommends smaller image-to-3D helpers such as `stable-fast-3d` or `tripo-sr`; heavier research models such as `microsoft/TRELLIS-text-xlarge` and `tencent/HY-Motion-1.0` are guarded and require explicit `allow_heavy=true`.
+For model-assisted asset generation, use `/plugins deploy game_models`, `/plugins models ...`, and the exposed `rc_game_models_*` tools. The default policy targets 24GB RAM / 8GB VRAM and treats `microsoft/TRELLIS-text-xlarge` as selectable through `profile=low_vram`; `stable-fast-3d`, `tencent/Hunyuan3D-2mini`, and `tripo-sr` remain image-to-3D fallback/ideation helpers. `tencent/HY-Motion-1.0` remains guarded and requires explicit `allow_heavy=true`.
 
 ## Workspace Layout
 
@@ -72,7 +72,9 @@ Use `/blender` when the asset should be controlled or scaffolded directly in Ble
 
 For stylized playable-character blockouts, briefs that mention `anime action`, `Genshin`, `ZZZ`, `Zenless`, `Ananta`, or the Chinese titles for those styles select the `anime_action_character` preset. That preset emits layered clothing shapes, hair clumps, face markers, weapon silhouette, material IDs, rig markers, LOD markers, lighting, and preview/export wiring.
 
-For a heavier production scaffold, briefs that mention `final character asset`, `high poly`, `retopo`, `UV unwrap`, `texture bake`, `rigged`, `skinned`, or the Chinese equivalents select the `production_character_pipeline` preset. That preset generates a high-poly sculpt collection, retopo/game-mesh collection, smart UV layout, procedural basecolor/normal/ORM/material-ID texture seed maps, texture authoring metadata, bake cages, mesh metrics, PBR material tuning, a humanoid armature, weight hints, a skinning manifest, IK targets and constraints, animation clips plus an animation manifest, non-zero facial shape-key deformation data, a skinning stress-test action, bone attachment sockets, runtime collision proxies, LOD variants, a visual QA report, an engine import contract, a turntable camera animation, a production stage manifest, a black-box iteration plan, a production asset card, and quality gates ready for downstream runtime use. It remains a scaffold/control workflow; final anatomy, appeal, clothing design, topology polish, and texture paint still require manual DCC or model-assisted passes.
+For a heavier production scaffold, briefs that mention `final character asset`, `high poly`, `retopo`, `UV unwrap`, `texture bake`, `rigged`, `skinned`, or the Chinese equivalents select the `production_character_pipeline` preset. That preset generates a fused continuous body core, high-poly sculpt collection, retopo/game-mesh collection, smart UV layout, procedural basecolor/normal/ORM/material-ID texture seed maps, texture authoring metadata, bake cages, mesh metrics, body-continuity report, PBR material tuning, a humanoid armature, weight hints, a skinning manifest, IK targets and constraints, animation clips plus an animation manifest, non-zero facial shape-key deformation data, a skinning stress-test action, bone attachment sockets, runtime collision proxies, LOD variants, a visual QA report, an engine import contract, a turntable camera animation, a production stage manifest, a black-box iteration plan, a production asset card, and quality gates ready for downstream runtime use. It remains a scaffold/control workflow; final anatomy, appeal, clothing design, topology polish, and texture paint still require manual DCC or model-assisted passes.
+
+For playable humanoids, do not accept disconnected limb/torso blockouts as final. The reference target is closer to the local `Nahida Dragon` sample: one primary Body mesh, one Armature, UVs, multiple material slots, external 2048 texture maps, and many facial/shape-key targets. Reverie-generated output should therefore keep a continuous deformable body core under layered hair, clothing, accessories, weapon meshes, and VFX.
 
 If Blender is portable rather than globally installed, run `/plugins deploy blender` or call `rc_blender_ensure_runtime`. The official Blender plugin embeds the portable archive in `reverie-blender.exe` and unpacks it to `.reverie/plugins/blender/runtime/blender.exe`.
 
@@ -80,16 +82,18 @@ Common flow:
 
 1. `/blender setup`
 2. `/plugins deploy blender`
-3. `/blender script hero "AAA final character asset with high poly sculpt, retopo, UV unwrap, texture bake, rigged animation"`
-4. inspect or edit `assets/models/source/blender/scripts/hero.py` if needed
-5. `/blender create hero "AAA final character asset with high poly sculpt, retopo, UV unwrap, texture bake, rigged animation"`
+3. `/plugins models plan ram=24 vram=8`
+4. `/plugins models select trellis-text-xlarge profile=low_vram download`
+5. `/blender script hero "AAA final character asset with high poly sculpt, retopo, UV unwrap, texture bake, rigged animation"`
+6. inspect or edit `assets/models/source/blender/scripts/hero.py` if needed
+7. `/blender create hero "AAA final character asset with high poly sculpt, retopo, UV unwrap, texture bake, rigged animation"`
    Successful Blender runs automatically attach an audit result to the tool output.
-6. review `assets/models/source/hero.blend`, `assets/models/runtime/hero.glb`, and `playtest/renders/models/hero.png`
-7. `/blender audit hero`
-   Check generated artifacts, GLB header validity, texture completeness, validation schema, production manifest, black-box iteration plan, material/skin/animation/facial manifests, pose-stress action, visual QA report, engine import contract, rig/action/IK coverage, weights, sockets, collision proxies, LOD coverage, and in-Blender production gates.
-8. `/plugins run blender`
+8. review `assets/models/source/hero.blend`, `assets/models/runtime/hero.glb`, and `playtest/renders/models/hero.png`
+9. `/blender audit hero`
+   Check generated artifacts, GLB header validity, texture completeness, validation schema, production manifest, black-box iteration plan, body-continuity report, material/skin/animation/facial manifests, pose-stress action, visual QA report, engine import contract, rig/action/IK coverage, weights, sockets, collision proxies, LOD coverage, and in-Blender production gates.
+10. `/plugins run blender`
    Open the deployed portable Blender build when manual sculpting, retopo cleanup, texture painting, or animation polish is needed.
-9. `/blender sync`
+11. `/blender sync`
 
 The same workflow is exposed to the model through the built-in `blender_modeling_workbench` tool:
 

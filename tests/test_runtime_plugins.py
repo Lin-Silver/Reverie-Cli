@@ -670,6 +670,26 @@ def test_plugins_deploy_command_extracts_portable_blender_archive(tmp_path: Path
     assert ".reverie\\plugins\\blender\\runtime" in deploy_text or ".reverie/plugins/blender/runtime" in deploy_text
 
 
+def test_plugins_models_command_plans_trellis_low_vram(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    manager = RuntimePluginManager(app_root)
+    console = Console(record=True, force_terminal=False, width=140)
+    handler = CommandHandler(
+        console,
+        {
+            "runtime_plugin_manager": manager,
+            "project_root": tmp_path,
+        },
+    )
+
+    assert handler.handle("/plugins models plan ram=24 vram=8") is True
+
+    text = console.export_text()
+    assert "Game Model Plan" in text
+    assert "trellis-text-xlarge" in text
+    assert "low_vram" in text
+
+
 def test_plugins_commands_can_scaffold_validate_and_build(tmp_path: Path) -> None:
     app_root = tmp_path / "app"
     _create_template_tree(app_root)

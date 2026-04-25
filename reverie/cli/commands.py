@@ -4345,6 +4345,16 @@ class CommandHandler:
             return self._cmd_plugins_deploy("")
         elif query.startswith("deploy "):
             return self._cmd_plugins_deploy(raw_query[7:].strip())
+        elif query in ("models", "model", "game-models", "game_models"):
+            return self._cmd_plugins_models("")
+        elif query.startswith("models "):
+            return self._cmd_plugins_models(raw_query[7:].strip())
+        elif query.startswith("model "):
+            return self._cmd_plugins_models(raw_query[6:].strip())
+        elif query.startswith("game-models "):
+            return self._cmd_plugins_models(raw_query[12:].strip())
+        elif query.startswith("game_models "):
+            return self._cmd_plugins_models(raw_query[12:].strip())
         elif query == "run":
             return self._cmd_plugins_run("")
         elif query.startswith("run "):
@@ -4380,7 +4390,7 @@ class CommandHandler:
             return True
         else:
             self.console.print(
-                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /plugins [status|rescan|path|sdk [plugin-id]|deploy <plugin-id>|run <plugin-id>|inspect <plugin-id>|scaffold <plugin-id>|validate <plugin-id>|build <plugin-id>|templates|template inspect <template-id>][/{self.theme.AMBER_GLOW}]"
+                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /plugins [status|rescan|path|sdk [plugin-id]|deploy <plugin-id>|models [list|plan|select|download|status]|run <plugin-id>|inspect <plugin-id>|scaffold <plugin-id>|validate <plugin-id>|build <plugin-id>|templates|template inspect <template-id>][/{self.theme.AMBER_GLOW}]"
             )
             return True
 
@@ -4490,11 +4500,172 @@ class CommandHandler:
                 key, value = lowered.split("=", 1)
                 options[key.strip()] = text.split("=", 1)[1].strip().strip('"').strip("'")
                 continue
-            if lowered in {"overwrite", "install"}:
+            if lowered in {"overwrite", "install", "dry-run", "dry_run", "download", "allow-heavy", "allow_heavy", "only-8gb", "only_8gb"}:
                 flags.add(lowered)
                 continue
             positional.append(text)
         return positional, options, flags
+
+    def _bool_plugin_flag(self, flags: set[str], *names: str) -> bool:
+        normalized = {item.replace("-", "_") for item in flags}
+        return any(name.replace("-", "_") in normalized for name in names)
+
+    def _ensure_game_models_protocol(self) -> tuple[bool, str]:
+        """Install the source plugin if needed so user-facing model commands work."""
+        runtime_plugin_manager = self.app.get('runtime_plugin_manager')
+        if not runtime_plugin_manager:
+            return False, "Runtime plugin manager is not available."
+
+        record = runtime_plugin_manager.get_record("game_models", force_refresh=True)
+        if record is not None and record.protocol_supported:
+            return True, ""
+
+        try:
+            installed = runtime_plugin_manager.install_source_plugin("game_models", overwrite=False)
+        except Exception as exc:
+            return False, str(exc)
+        if not installed.get("success", False):
+            return False, str(installed.get("error") or "Unable to install source game_models plugin.")
+        record = runtime_plugin_manager.get_record("game_models", force_refresh=True)
+        if record is None or not record.protocol_supported:
+            return False, "game_models plugin is installed but does not expose the RC protocol."
+        return True, ""
+
+    def _call_game_models_tool(self, command_name: str, payload: Dict[str, object]) -> Dict[str, object]:
+        runtime_plugin_manager = self.app.get('runtime_plugin_manager')
+        ready, error = self._ensure_game_models_protocol()
+        if not ready:
+            return {"success": False, "output": "", "error": error, "data": {}}
+        try:
+            return runtime_plugin_manager.call_tool("game_models", command_name, payload)
+        except Exception as exc:
+            return {"success": False, "output": "", "error": str(exc), "data": {}}
+
+    def _cmd_plugins_models(self, args: str) -> bool:
+        """User-facing helper for selecting and downloading game auxiliary models."""
+        positional, options, flags = self._parse_plugins_action_tokens(args)
+        action = positional[0].lower() if positional else "list"
+        model_id = positional[1] if len(positional) > 1 else options.get("model", options.get("model_id", ""))
+        if action not in {"list", "plan", "select", "download", "status"}:
+            model_id = positional[0] if positional else model_id
+            action = "status" if model_id else "list"
+
+        payload: Dict[str, object] = {}
+        if model_id:
+            payload["model_id"] = model_id
+        if options.get("repo") or options.get("repo_id"):
+            payload["repo_id"] = options.get("repo") or options.get("repo_id", "")
+        if options.get("profile"):
+            payload["profile"] = options.get("profile", "")
+        if options.get("ram") or options.get("ram_gb"):
+            payload["ram_gb"] = options.get("ram") or options.get("ram_gb", "")
+        if options.get("vram") or options.get("vram_gb"):
+            payload["vram_gb"] = options.get("vram") or options.get("vram_gb", "")
+        if options.get("revision"):
+            payload["revision"] = options.get("revision", "")
+        if self._bool_plugin_flag(flags, "dry_run", "dry-run"):
+            payload["dry_run"] = True
+        if self._bool_plugin_flag(flags, "allow_heavy", "allow-heavy"):
+            payload["allow_heavy"] = True
+        if self._bool_plugin_flag(flags, "download"):
+            payload["download"] = True
+        if self._bool_plugin_flag(flags, "only_8gb", "only-8gb"):
+            payload["only_8gb"] = True
+
+        command = {
+            "list": "list_models",
+            "plan": "deployment_plan",
+            "select": "select_model",
+            "download": "download_model",
+            "status": "model_status",
+        }[action]
+        if action in {"select", "download", "status"} and not model_id and not payload.get("repo_id"):
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /plugins models {action} <model-id> [profile=low_vram] [download] [dry_run] [allow_heavy][/{self.theme.AMBER_GLOW}]"
+            )
+            return True
+
+        result = self._call_game_models_tool(command, payload)
+        title = {
+            "list": "Game Model Catalog",
+            "plan": "Game Model Plan",
+            "select": "Game Model Selection",
+            "download": "Game Model Download",
+            "status": "Game Model Status",
+        }[action]
+        self._show_command_panel(
+            title,
+            subtitle="Choose and deploy auxiliary open models inside `.reverie/plugins/game_models`.",
+            accent=self.theme.BLUE_SOFT,
+        )
+        if not result.get("success", False):
+            self._show_activity_event(
+                "Game Models",
+                "Command failed.",
+                status="error",
+                detail=str(result.get("error") or ""),
+            )
+            self.console.print()
+            return True
+
+        data = result.get("data", {}) if isinstance(result.get("data"), dict) else {}
+        self._show_activity_event("Game Models", str(result.get("output") or "Command completed."), status="success")
+        self.console.print()
+
+        if action == "list":
+            table = Table(box=box.ROUNDED, border_style=self.theme.BORDER_PRIMARY, expand=True)
+            table.add_column("Model", style=f"bold {self.theme.BLUE_SOFT}", width=22)
+            table.add_column("8GB", style=self.theme.TEXT_SECONDARY, width=6)
+            table.add_column("Profile", style=self.theme.TEXT_SECONDARY, width=14)
+            table.add_column("Repo", style=self.theme.TEXT_DIM, ratio=2)
+            table.add_column("Role", style=self.theme.TEXT_DIM, ratio=3)
+            for item in data.get("models", []) if isinstance(data.get("models"), list) else []:
+                profile = str(item.get("default_profile", "default"))
+                table.add_row(
+                    str(item.get("id", "")),
+                    "yes" if item.get("recommended_for_8gb_vram") else "no",
+                    profile,
+                    str(item.get("repo_id", "")),
+                    str(item.get("pipeline_role", "")),
+                )
+            self.console.print(table)
+        elif action == "plan":
+            rows = []
+            for section_name, items in (("Recommended", data.get("recommended", [])), ("Guarded/Blocked", data.get("guarded_or_blocked", []))):
+                if isinstance(items, list):
+                    for item in items:
+                        profile = item.get("selected_profile", {}) if isinstance(item, dict) else {}
+                        rows.append((
+                            section_name,
+                            str(item.get("id", "")),
+                            str(profile.get("id", item.get("default_profile", "default"))),
+                            str(item.get("repo_id", "")),
+                        ))
+            table = Table(box=box.ROUNDED, border_style=self.theme.BORDER_PRIMARY, expand=True)
+            table.add_column("Bucket", style=self.theme.TEXT_SECONDARY, width=18)
+            table.add_column("Model", style=f"bold {self.theme.BLUE_SOFT}", width=22)
+            table.add_column("Profile", style=self.theme.TEXT_SECONDARY, width=14)
+            table.add_column("Repo", style=self.theme.TEXT_DIM, ratio=2)
+            for row in rows:
+                table.add_row(*row)
+            self.console.print(table)
+        else:
+            model = data.get("model", {}) if isinstance(data.get("model"), dict) else data.get("selected_model", {}).get("model", {}) if isinstance(data.get("selected_model"), dict) else {}
+            profile = data.get("profile", {}) if isinstance(data.get("profile"), dict) else data.get("selected_model", {}).get("profile", {}) if isinstance(data.get("selected_model"), dict) else {}
+            self.console.print(
+                self._build_key_value_table(
+                    [
+                        ("Model", str(model.get("id", data.get("model_id", model_id)))),
+                        ("Repo", str(model.get("repo_id", ""))),
+                        ("Profile", str(profile.get("id", ""))),
+                        ("Target", str(data.get("target") or data.get("path") or "")),
+                        ("Manifest", str(data.get("manifest_path") or "")),
+                        ("Cache Root", str(data.get("cache_root") or "")),
+                    ]
+                )
+            )
+        self.console.print()
+        return True
 
     def _cmd_plugins_scaffold(self, args: str) -> bool:
         """Create a new source plugin tree from a bundled template."""

@@ -20,7 +20,7 @@ import sys
 import venv
 
 
-PLUGIN_VERSION = "0.1.0"
+PLUGIN_VERSION = "0.2.0"
 PLUGIN_ID = "game_models"
 
 
@@ -34,6 +34,16 @@ MODEL_CATALOG: list[dict[str, Any]] = [
         "recommended_for_8gb_vram": True,
         "min_ram_gb": 16,
         "min_vram_gb": 6,
+        "default_profile": "low_vram",
+        "memory_profiles": [
+            {
+                "id": "low_vram",
+                "label": "8GB low-VRAM image-to-3D",
+                "min_ram_gb": 16,
+                "min_vram_gb": 6,
+                "notes": "Use for fast concept-image-to-mesh candidates before Blender cleanup.",
+            }
+        ],
         "deployment": "huggingface_snapshot",
         "default_enabled": True,
         "pipeline_role": "Generate mesh-ready 3D asset candidates from concept images produced by the TTI pipeline.",
@@ -47,9 +57,42 @@ MODEL_CATALOG: list[dict[str, Any]] = [
         "recommended_for_8gb_vram": True,
         "min_ram_gb": 16,
         "min_vram_gb": 8,
+        "default_profile": "low_vram",
+        "memory_profiles": [
+            {
+                "id": "low_vram",
+                "label": "8GB image-to-3D fallback",
+                "min_ram_gb": 16,
+                "min_vram_gb": 8,
+                "notes": "Use when the user has an 8GB GPU and wants a local reconstruction fallback.",
+            }
+        ],
         "deployment": "huggingface_snapshot",
         "default_enabled": True,
         "pipeline_role": "Fallback image-to-3D reconstruction model for local asset ideation on smaller GPUs.",
+    },
+    {
+        "id": "hunyuan3d-2mini",
+        "display_name": "Hunyuan3D 2 Mini",
+        "repo_id": "tencent/Hunyuan3D-2mini",
+        "task": "image_to_3d_asset",
+        "license_family": "tencent-hunyuan-community",
+        "recommended_for_8gb_vram": True,
+        "min_ram_gb": 24,
+        "min_vram_gb": 8,
+        "default_profile": "low_vram",
+        "memory_profiles": [
+            {
+                "id": "low_vram",
+                "label": "8GB image-to-3D mini",
+                "min_ram_gb": 24,
+                "min_vram_gb": 8,
+                "notes": "Small Hunyuan3D image-to-3D lane; use lower chunk/resolution settings in the eventual runner.",
+            }
+        ],
+        "deployment": "huggingface_snapshot",
+        "default_enabled": True,
+        "pipeline_role": "Image-to-3D candidate model for higher-quality mesh ideation after local TTI concept generation.",
     },
     {
         "id": "trellis-text-xlarge",
@@ -57,13 +100,37 @@ MODEL_CATALOG: list[dict[str, Any]] = [
         "repo_id": "microsoft/TRELLIS-text-xlarge",
         "task": "text_to_3d_asset",
         "license_family": "open-source-research-model",
-        "recommended_for_8gb_vram": False,
+        "recommended_for_8gb_vram": True,
         "min_ram_gb": 24,
-        "min_vram_gb": 16,
+        "min_vram_gb": 8,
+        "default_profile": "low_vram",
+        "memory_profiles": [
+            {
+                "id": "low_vram",
+                "label": "8GB low-VRAM text-to-3D",
+                "min_ram_gb": 24,
+                "min_vram_gb": 8,
+                "notes": "8GB attempt profile; prefer smaller generation counts, offload-friendly execution, and Blender cleanup after export.",
+            },
+            {
+                "id": "balanced",
+                "label": "12GB balanced text-to-3D",
+                "min_ram_gb": 24,
+                "min_vram_gb": 12,
+                "notes": "Balanced local profile for higher fidelity sampling while keeping workstation pressure moderate.",
+            },
+            {
+                "id": "quality",
+                "label": "16GB quality text-to-3D",
+                "min_ram_gb": 32,
+                "min_vram_gb": 16,
+                "notes": "Closer to published/research guidance; use when available for fewer low-memory compromises.",
+            },
+        ],
         "deployment": "huggingface_snapshot",
-        "default_enabled": False,
-        "requires_allow_heavy": True,
-        "pipeline_role": "High quality text-to-3D research model; register/download only when local hardware is sufficient.",
+        "default_enabled": True,
+        "requires_allow_heavy": False,
+        "pipeline_role": "Primary local text-to-3D candidate for 8GB VRAM workstations; generate a candidate mesh, then pass through Blender cleanup, retopo, materials, and rig validation.",
     },
     {
         "id": "hy-motion-1.0",
@@ -73,7 +140,18 @@ MODEL_CATALOG: list[dict[str, Any]] = [
         "license_family": "open-source-research-model",
         "recommended_for_8gb_vram": False,
         "min_ram_gb": 32,
-        "min_vram_gb": 24,
+        "min_vram_gb": 16,
+        "default_profile": "research",
+        "memory_profiles": [
+            {
+                "id": "research",
+                "label": "research motion-generation",
+                "min_ram_gb": 32,
+                "min_vram_gb": 16,
+                "requires_allow_heavy": True,
+                "notes": "Use as an optional motion lane after the playable character skeleton is stable.",
+            }
+        ],
         "deployment": "huggingface_snapshot",
         "default_enabled": False,
         "requires_allow_heavy": True,
@@ -146,6 +224,61 @@ def _as_bool(value: Any, default: bool = False) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _as_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
+def _memory_profiles(model: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_profiles = model.get("memory_profiles", [])
+    if not isinstance(raw_profiles, list) or not raw_profiles:
+        return [
+            {
+                "id": str(model.get("default_profile") or "default"),
+                "label": "default",
+                "min_ram_gb": int(model.get("min_ram_gb", 0) or 0),
+                "min_vram_gb": int(model.get("min_vram_gb", 0) or 0),
+                "notes": "Default hardware profile.",
+            }
+        ]
+    profiles: list[dict[str, Any]] = []
+    for profile in raw_profiles:
+        if isinstance(profile, dict):
+            profiles.append(dict(profile))
+    return profiles
+
+
+def _resolve_memory_profile(
+    model: dict[str, Any],
+    requested_profile: Any = "",
+    *,
+    ram_gb: int | None = None,
+    vram_gb: int | None = None,
+) -> dict[str, Any]:
+    profiles = _memory_profiles(model)
+    requested = str(requested_profile or "").strip().lower()
+    if requested:
+        for profile in profiles:
+            if str(profile.get("id", "")).strip().lower() == requested:
+                return dict(profile)
+    if ram_gb is not None and vram_gb is not None:
+        fitting = [
+            profile
+            for profile in profiles
+            if int(profile.get("min_ram_gb", 0) or 0) <= ram_gb
+            and int(profile.get("min_vram_gb", 0) or 0) <= vram_gb
+        ]
+        if fitting:
+            return dict(fitting[0])
+    default_profile = str(model.get("default_profile") or "").strip().lower()
+    for profile in profiles:
+        if str(profile.get("id", "")).strip().lower() == default_profile:
+            return dict(profile)
+    return dict(profiles[0])
+
+
 class GameModelsPlugin(ReverieRuntimePluginHost):
     """Manage optional local model packages for the Reverie-Gamer asset lane."""
 
@@ -153,6 +286,7 @@ class GameModelsPlugin(ReverieRuntimePluginHost):
         self.plugin_root = self._resolve_plugin_root()
         self.model_root = self.plugin_root / "models"
         self.venv_root = self.plugin_root / "venv"
+        self.cache_root = self.plugin_root / "cache"
         self.state_path = self.plugin_root / "state" / "model_state.json"
 
     def _resolve_plugin_root(self) -> Path:
@@ -190,7 +324,18 @@ class GameModelsPlugin(ReverieRuntimePluginHost):
                 "task": "custom_auxiliary_model",
                 "recommended_for_8gb_vram": False,
                 "min_ram_gb": 24,
-                "min_vram_gb": 12,
+                "min_vram_gb": 8,
+                "default_profile": "low_vram",
+                "memory_profiles": [
+                    {
+                        "id": "low_vram",
+                        "label": "8GB custom model attempt",
+                        "min_ram_gb": 24,
+                        "min_vram_gb": 8,
+                        "requires_allow_heavy": True,
+                        "notes": "Unknown custom model; require explicit opt-in before download.",
+                    }
+                ],
                 "deployment": "huggingface_snapshot",
                 "default_enabled": False,
                 "requires_allow_heavy": True,
@@ -219,6 +364,21 @@ class GameModelsPlugin(ReverieRuntimePluginHost):
     def _model_dir(self, model: dict[str, Any]) -> Path:
         return self._ensure_inside_plugin(self.model_root / _safe_slug(model.get("id")))
 
+    def _subprocess_env(self) -> dict[str, str]:
+        """Keep downloader/cache activity inside the plugin depot."""
+        cache_root = self._ensure_inside_plugin(self.cache_root)
+        hf_home = cache_root / "huggingface"
+        pip_cache = cache_root / "pip"
+        hf_home.mkdir(parents=True, exist_ok=True)
+        pip_cache.mkdir(parents=True, exist_ok=True)
+        env = os.environ.copy()
+        env["HF_HOME"] = str(hf_home)
+        env["HF_HUB_CACHE"] = str(hf_home / "hub")
+        env["TRANSFORMERS_CACHE"] = str(hf_home / "transformers")
+        env["PIP_CACHE_DIR"] = str(pip_cache)
+        env["XDG_CACHE_HOME"] = str(cache_root)
+        return env
+
     def build_handshake(self) -> dict[str, Any]:
         return {
             "protocol_version": "1.0",
@@ -229,6 +389,7 @@ class GameModelsPlugin(ReverieRuntimePluginHost):
             "description": "Plugin-local deployment manager for open auxiliary game asset models.",
             "tool_call_hint": (
                 "Use rc_game_models_list_models to inspect supported models, "
+                "rc_game_models_select_model to persist the chosen model/profile, "
                 "rc_game_models_prepare_environment to create the plugin-local venv, "
                 "rc_game_models_download_model to download a HuggingFace snapshot, and "
                 "rc_game_models_model_status before claiming a model is available."
@@ -236,7 +397,7 @@ class GameModelsPlugin(ReverieRuntimePluginHost):
             "system_prompt": (
                 "This plugin manages model packages only inside its plugin-local depot. "
                 "Do not download model files to C:\\Users, global cache folders, or system SDK paths. "
-                "HY-Motion and TRELLIS are heavy research models; require explicit allow_heavy before download."
+                "TRELLIS Text XLarge supports an 8GB low_vram attempt profile; HY-Motion remains guarded by allow_heavy."
             ),
             "commands": [
                 {
@@ -297,6 +458,26 @@ class GameModelsPlugin(ReverieRuntimePluginHost):
                     "include_modes": ["reverie-gamer"],
                 },
                 {
+                    "name": "select_model",
+                    "description": "Persist the preferred auxiliary model/profile and optionally download it.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "model_id": {"type": "string"},
+                            "repo_id": {"type": "string"},
+                            "profile": {"type": "string"},
+                            "ram_gb": {"type": "integer"},
+                            "vram_gb": {"type": "integer"},
+                            "download": {"type": "boolean"},
+                            "dry_run": {"type": "boolean"},
+                            "allow_heavy": {"type": "boolean"},
+                        },
+                        "required": [],
+                    },
+                    "expose_as_tool": True,
+                    "include_modes": ["reverie-gamer"],
+                },
+                {
                     "name": "download_model",
                     "description": "Download a HuggingFace snapshot into the plugin-local model depot.",
                     "parameters": {
@@ -305,6 +486,9 @@ class GameModelsPlugin(ReverieRuntimePluginHost):
                             "model_id": {"type": "string"},
                             "repo_id": {"type": "string"},
                             "revision": {"type": "string"},
+                            "profile": {"type": "string"},
+                            "ram_gb": {"type": "integer"},
+                            "vram_gb": {"type": "integer"},
                             "allow_heavy": {"type": "boolean"},
                             "dry_run": {"type": "boolean"},
                         },
@@ -345,6 +529,8 @@ class GameModelsPlugin(ReverieRuntimePluginHost):
             return self.prepare_environment(prepared)
         if command == "model_status":
             return self.model_status(payload)
+        if command == "select_model":
+            return self.select_model(payload)
         if command == "download_model":
             return self.download_model(payload)
         if command == "register_model_path":
@@ -361,18 +547,46 @@ class GameModelsPlugin(ReverieRuntimePluginHost):
         return {
             "success": True,
             "output": f"{len(models)} auxiliary model package(s) available.",
-            "data": {"models": models, "plugin_root": str(self.plugin_root), "model_root": str(self.model_root)},
+            "data": {
+                "models": models,
+                "plugin_root": str(self.plugin_root),
+                "model_root": str(self.model_root),
+                "cache_root": str(self.cache_root),
+            },
         }
 
     def deployment_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
-        ram_gb = int(payload.get("ram_gb", 24) or 24)
-        vram_gb = int(payload.get("vram_gb", 8) or 8)
+        ram_gb = _as_int(payload.get("ram_gb", 24), 24)
+        vram_gb = _as_int(payload.get("vram_gb", 8), 8)
+        requested_profile = str(payload.get("profile", "") or "").strip()
         ready = []
         blocked = []
         for item in MODEL_CATALOG:
-            fits = int(item.get("min_ram_gb", 0) or 0) <= ram_gb and int(item.get("min_vram_gb", 0) or 0) <= vram_gb
+            profiles = _memory_profiles(item)
+            fitting_profiles = [
+                dict(profile)
+                for profile in profiles
+                if int(profile.get("min_ram_gb", 0) or 0) <= ram_gb
+                and int(profile.get("min_vram_gb", 0) or 0) <= vram_gb
+            ]
+            selected_profile = _resolve_memory_profile(
+                item,
+                requested_profile,
+                ram_gb=ram_gb,
+                vram_gb=vram_gb,
+            )
+            fits = bool(fitting_profiles)
             record = dict(item)
             record["fits_requested_hardware"] = fits
+            record["selected_profile"] = selected_profile
+            record["fitting_profiles"] = fitting_profiles
+            record["profile_policy"] = (
+                "ready"
+                if fits and not bool(selected_profile.get("requires_allow_heavy"))
+                else "requires_allow_heavy"
+                if bool(item.get("requires_allow_heavy")) or bool(selected_profile.get("requires_allow_heavy"))
+                else "outside_requested_hardware"
+            )
             if fits and bool(item.get("recommended_for_8gb_vram")):
                 ready.append(record)
             else:
@@ -384,7 +598,11 @@ class GameModelsPlugin(ReverieRuntimePluginHost):
                 "hardware": {"ram_gb": ram_gb, "vram_gb": vram_gb},
                 "recommended": ready,
                 "guarded_or_blocked": blocked,
-                "policy": "Heavy models require allow_heavy=true and remain plugin-local.",
+                "policy": (
+                    "TRELLIS Text XLarge is selectable on the 8GB low_vram profile. "
+                    "Models/profiles outside the requested hardware require allow_heavy=true. "
+                    "All downloads and caches remain plugin-local."
+                ),
             },
         }
 
@@ -400,7 +618,7 @@ class GameModelsPlugin(ReverieRuntimePluginHost):
         installed = False
         if install_packages:
             cmd = [str(self._python_executable()), "-m", "pip", "install", "--upgrade", "huggingface_hub>=0.24.0", "safetensors>=0.4.5"]
-            result = subprocess.run(cmd, cwd=str(self.plugin_root), text=True, capture_output=True, timeout=1800)
+            result = subprocess.run(cmd, cwd=str(self.plugin_root), text=True, capture_output=True, timeout=1800, env=self._subprocess_env())
             if result.returncode != 0:
                 return {
                     "success": False,
@@ -410,12 +628,22 @@ class GameModelsPlugin(ReverieRuntimePluginHost):
                 }
             installed = True
         state = self._state()
-        state["venv"] = {"path": str(self.venv_root), "python": str(self._python_executable()), "packages_installed": installed}
+        state["venv"] = {
+            "path": str(self.venv_root),
+            "python": str(self._python_executable()),
+            "packages_installed": installed,
+            "cache_root": str(self.cache_root),
+        }
         self._write_state(state)
         return {
             "success": True,
             "output": "Game model plugin environment is ready.",
-            "data": {"venv": str(self.venv_root), "python": str(self._python_executable()), "packages_installed": installed},
+            "data": {
+                "venv": str(self.venv_root),
+                "python": str(self._python_executable()),
+                "packages_installed": installed,
+                "cache_root": str(self.cache_root),
+            },
         }
 
     def model_status(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -429,6 +657,7 @@ class GameModelsPlugin(ReverieRuntimePluginHost):
             except Exception:
                 manifest = {"error": "manifest could not be parsed"}
         state = self._state()
+        profile = _resolve_memory_profile(model, payload.get("profile", ""))
         return {
             "success": True,
             "output": f"{model['id']}: {'ready' if model_dir.exists() else 'missing'}",
@@ -439,29 +668,84 @@ class GameModelsPlugin(ReverieRuntimePluginHost):
                 "manifest_path": str(manifest_path),
                 "manifest": manifest,
                 "state_record": (state.get("models") or {}).get(str(model["id"]), {}),
+                "selected_model": state.get("selected_model", {}),
+                "profile": profile,
             },
+        }
+
+    def select_model(self, payload: dict[str, Any]) -> dict[str, Any]:
+        model = self._resolve_model(payload.get("model_id", ""), payload.get("repo_id", ""))
+        ram_gb = _as_int(payload.get("ram_gb", 24), 24)
+        vram_gb = _as_int(payload.get("vram_gb", 8), 8)
+        profile = _resolve_memory_profile(
+            model,
+            payload.get("profile", ""),
+            ram_gb=ram_gb,
+            vram_gb=vram_gb,
+        )
+        state = self._state()
+        selected = {
+            "model": model,
+            "profile": profile,
+            "hardware": {"ram_gb": ram_gb, "vram_gb": vram_gb},
+            "selected_at": _utc_now(),
+            "model_root": str(self.model_root),
+            "cache_root": str(self.cache_root),
+        }
+        state["selected_model"] = selected
+        state.setdefault("selections", {})[str(model["id"])] = selected
+        self._write_state(state)
+
+        if _as_bool(payload.get("download"), False):
+            download_payload = dict(payload)
+            download_payload["model_id"] = model["id"]
+            download_payload["profile"] = profile.get("id", "")
+            result = self.download_model(download_payload)
+            result.setdefault("data", {})["selected_model"] = selected
+            return result
+
+        return {
+            "success": True,
+            "output": f"Selected {model['display_name']} with profile {profile.get('id', 'default')}.",
+            "data": selected,
         }
 
     def download_model(self, payload: dict[str, Any]) -> dict[str, Any]:
         model = self._resolve_model(payload.get("model_id", ""), payload.get("repo_id", ""))
+        ram_gb = _as_int(payload.get("ram_gb", 24), 24)
+        vram_gb = _as_int(payload.get("vram_gb", 8), 8)
+        profile = _resolve_memory_profile(
+            model,
+            payload.get("profile", ""),
+            ram_gb=ram_gb,
+            vram_gb=vram_gb,
+        )
         allow_heavy = _as_bool(payload.get("allow_heavy"), False)
         dry_run = _as_bool(payload.get("dry_run"), False)
-        if bool(model.get("requires_allow_heavy")) and not allow_heavy:
+        profile_min_ram = int(profile.get("min_ram_gb", model.get("min_ram_gb", 0)) or 0)
+        profile_min_vram = int(profile.get("min_vram_gb", model.get("min_vram_gb", 0)) or 0)
+        profile_exceeds_hardware = profile_min_ram > ram_gb or profile_min_vram > vram_gb
+        requires_heavy = bool(model.get("requires_allow_heavy")) or bool(profile.get("requires_allow_heavy")) or profile_exceeds_hardware
+        if requires_heavy and not allow_heavy:
             return {
                 "success": False,
                 "output": "",
                 "error": (
-                    f"{model['display_name']} is guarded because it needs about "
-                    f"{model.get('min_vram_gb')}GB VRAM. Pass allow_heavy=true to download anyway."
+                    f"{model['display_name']} profile {profile.get('id', 'default')} is guarded because it needs about "
+                    f"{profile_min_vram}GB VRAM / {profile_min_ram}GB RAM for the requested profile. "
+                    "Pass allow_heavy=true to download anyway."
                 ),
-                "data": {"model": model, "plugin_root": str(self.plugin_root)},
+                "data": {"model": model, "profile": profile, "plugin_root": str(self.plugin_root)},
             }
         target = self._model_dir(model)
         plan = {
             "model": model,
+            "profile": profile,
+            "hardware": {"ram_gb": ram_gb, "vram_gb": vram_gb},
             "target": str(target),
             "manifest_path": str(target / "model_manifest.json"),
             "plugin_root": str(self.plugin_root),
+            "cache_root": str(self.cache_root),
             "dry_run": dry_run,
         }
         if dry_run:
@@ -483,7 +767,14 @@ class GameModelsPlugin(ReverieRuntimePluginHost):
             + (f", revision={json.dumps(revision)}" if revision else "")
             + ")\n"
         )
-        result = subprocess.run([str(self._python_executable()), "-c", code], cwd=str(self.plugin_root), text=True, capture_output=True, timeout=7200)
+        result = subprocess.run(
+            [str(self._python_executable()), "-c", code],
+            cwd=str(self.plugin_root),
+            text=True,
+            capture_output=True,
+            timeout=7200,
+            env=self._subprocess_env(),
+        )
         if result.returncode != 0:
             return {
                 "success": False,
@@ -498,10 +789,13 @@ class GameModelsPlugin(ReverieRuntimePluginHost):
             "path": str(target),
             "source": "huggingface_snapshot",
             "revision": revision or "default",
+            "profile": profile,
             "hardware_guard": {
                 "recommended_for_8gb_vram": bool(model.get("recommended_for_8gb_vram")),
-                "min_ram_gb": int(model.get("min_ram_gb", 0) or 0),
-                "min_vram_gb": int(model.get("min_vram_gb", 0) or 0),
+                "min_ram_gb": profile_min_ram,
+                "min_vram_gb": profile_min_vram,
+                "requested_ram_gb": ram_gb,
+                "requested_vram_gb": vram_gb,
             },
         }
         (target / "model_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")

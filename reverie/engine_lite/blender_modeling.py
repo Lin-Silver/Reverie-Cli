@@ -521,7 +521,7 @@ import bpy
 SPEC = json.loads({spec_json!r})
 OUTPUTS = {{key: Path(value) for key, value in json.loads({output_json!r}).items()}}
 RENDER_PREVIEW = {bool(render_preview)!r}
-PIPELINE_STATE = {{"export_objects": [], "actions": [], "textures": {{}}, "texture_manifest": {{}}, "texture_authoring_manifest": {{}}, "material_tuning": {{}}, "collections": [], "armature": "", "shape_keys": [], "facial_manifest": {{}}, "sockets": [], "rig_controls": [], "ik_targets": [], "ik_constraints": [], "collision_proxies": [], "lods": [], "vertex_groups": {{}}, "skinning_manifest": {{}}, "animation_manifest": {{}}, "pose_stress_report": {{}}, "mesh_metrics": {{}}, "bake_manifest": {{}}, "art_readiness_report": {{}}, "visual_qa_report": {{}}, "engine_import_contract": {{}}, "production_manifest": {{}}, "iteration_plan": {{}}, "validation": {{}}, "quality_gates": [], "asset_card": {{}}, "camera_action": ""}}
+PIPELINE_STATE = {{"export_objects": [], "actions": [], "textures": {{}}, "texture_manifest": {{}}, "texture_authoring_manifest": {{}}, "material_tuning": {{}}, "collections": [], "armature": "", "shape_keys": [], "facial_manifest": {{}}, "sockets": [], "rig_controls": [], "ik_targets": [], "ik_constraints": [], "collision_proxies": [], "lods": [], "vertex_groups": {{}}, "skinning_manifest": {{}}, "animation_manifest": {{}}, "pose_stress_report": {{}}, "mesh_metrics": {{}}, "body_continuity_report": {{}}, "bake_manifest": {{}}, "art_readiness_report": {{}}, "visual_qa_report": {{}}, "engine_import_contract": {{}}, "production_manifest": {{}}, "iteration_plan": {{}}, "validation": {{}}, "quality_gates": [], "asset_card": {{}}, "camera_action": ""}}
 
 
 def ensure_parent(path):
@@ -710,6 +710,68 @@ def material_set():
         "line": make_material("rv_ink_linework", [0.015, 0.017, 0.02, 1], 0.0, 0.7),
         "glow": make_material("rv_emissive_detail", palette[1], 0.0, 0.2, emission=palette[1], strength=1.8),
     }}
+
+
+def create_unified_body_core(m):
+    """Fuse overlapping anatomy primitives into one continuous body core mesh."""
+    parts = []
+
+    def add_part(obj, rotation=(0.0, 0.0, 0.0)):
+        obj.rotation_euler = rotation
+        obj["reverie_body_core_part"] = True
+        parts.append(obj)
+        return obj
+
+    add_part(ellipsoid("body_core_pelvis", (0.0, 0.0, 0.78), 0.24, (0.95, 0.72, 0.72), m["skin"], segments=24, ring_count=12, bevel=0.0))
+    add_part(ellipsoid("body_core_torso", (0.0, 0.0, 1.18), 0.36, (0.72, 0.52, 1.42), m["skin"], segments=32, ring_count=16, bevel=0.0))
+    add_part(ellipsoid("body_core_neck", (0.0, 0.0, 1.56), 0.11, (0.68, 0.54, 1.18), m["skin"], segments=18, ring_count=10, bevel=0.0))
+    add_part(ellipsoid("body_core_head", (0.0, -0.015, 1.82), 0.23, (0.78, 0.68, 1.04), m["skin"], segments=32, ring_count=16, bevel=0.0))
+    for side_name, sx in (("L", -1), ("R", 1)):
+        add_part(ellipsoid("body_core_shoulder_" + side_name, (sx * 0.24, -0.005, 1.42), 0.14, (1.25, 0.7, 0.75), m["skin"], segments=20, ring_count=10, bevel=0.0))
+        add_part(cylinder("body_core_upper_arm_" + side_name, (sx * 0.43, -0.02, 1.18), 0.075, 0.54, m["skin"], vertices=18, bevel=0.0), rotation=(0.0, math.radians(18 * sx), 0.0))
+        add_part(ellipsoid("body_core_elbow_" + side_name, (sx * 0.52, -0.05, 0.98), 0.078, (0.9, 0.82, 0.9), m["skin"], segments=16, ring_count=8, bevel=0.0))
+        add_part(cylinder("body_core_forearm_" + side_name, (sx * 0.6, -0.08, 0.78), 0.065, 0.46, m["skin"], vertices=18, bevel=0.0), rotation=(0.0, math.radians(-10 * sx), 0.0))
+        add_part(ellipsoid("body_core_hand_" + side_name, (sx * 0.66, -0.12, 0.58), 0.07, (1.05, 0.82, 0.72), m["skin"], segments=16, ring_count=8, bevel=0.0))
+        add_part(ellipsoid("body_core_hip_" + side_name, (sx * 0.13, 0.0, 0.68), 0.14, (0.8, 0.72, 0.95), m["skin"], segments=18, ring_count=10, bevel=0.0))
+        add_part(cylinder("body_core_thigh_" + side_name, (sx * 0.15, 0.0, 0.42), 0.095, 0.55, m["skin"], vertices=18, bevel=0.0), rotation=(0.0, math.radians(-3 * sx), 0.0))
+        add_part(ellipsoid("body_core_knee_" + side_name, (sx * 0.165, -0.02, 0.25), 0.08, (0.9, 0.8, 0.72), m["skin"], segments=16, ring_count=8, bevel=0.0))
+        add_part(cylinder("body_core_shin_" + side_name, (sx * 0.18, -0.04, 0.12), 0.07, 0.38, m["skin"], vertices=18, bevel=0.0), rotation=(0.0, math.radians(4 * sx), 0.0))
+        add_part(ellipsoid("body_core_foot_" + side_name, (sx * 0.2, -0.16, 0.02), 0.075, (1.25, 1.65, 0.42), m["skin"], segments=16, ring_count=8, bevel=0.0))
+
+    bpy.ops.object.select_all(action="DESELECT")
+    for obj in parts:
+        apply_object_transforms(obj)
+        obj.select_set(True)
+    bpy.context.view_layer.objects.active = parts[0]
+    bpy.ops.object.join()
+    core = bpy.context.object
+    core.name = "unified_body_anatomy_core"
+    core.data.name = SPEC["slug"] + "_unified_body_mesh"
+    core["reverie_continuous_body_core"] = True
+    core["reverie_body_regions"] = "head,neck,torso,pelvis,arms,hands,legs,feet"
+    core["reverie_reference_profile"] = "single Body mesh plus Armature and facial shape keys, inspired by the local Nahida Dragon reference asset"
+    remesh = add_modifier(core, "REMESH", "rv_voxel_body_continuity")
+    if hasattr(remesh, "mode"):
+        remesh.mode = "VOXEL"
+    if hasattr(remesh, "voxel_size"):
+        remesh.voxel_size = 0.045
+    if hasattr(remesh, "adaptivity"):
+        remesh.adaptivity = 0.0
+    smooth = add_modifier(core, "CORRECTIVE_SMOOTH", "rv_body_surface_relax", iterations=2)
+    if hasattr(smooth, "factor"):
+        smooth.factor = 0.45
+    polish(core, bevel=0.0, weighted=True, shade=True)
+    PIPELINE_STATE["body_continuity_report"] = {{
+        "schema": "reverie.blender_body_continuity_report.v1",
+        "source_mesh": core.name,
+        "strategy": "overlapping_anatomy_primitives_joined_then_voxel_remeshed",
+        "declared_regions": ["head", "neck", "torso", "pelvis", "upper_arms", "forearms", "hands", "thighs", "shins", "feet"],
+        "reference_notes": [
+            "Local Nahida Dragon reference uses a single Body mesh, one Armature, multiple material slots, UVs, textures, and many shape keys.",
+            "Reverie generated characters should keep a continuous deformable body core and layer clothing, hair, accessories, and weapons above it.",
+        ],
+    }}
+    return core
 
 
 def capture_created_objects(builder, *args, **kwargs):
@@ -1173,6 +1235,40 @@ def collect_mesh_metrics(high_meshes, low_meshes):
         }},
     }}
     return PIPELINE_STATE["mesh_metrics"]
+
+
+def create_body_continuity_report(low_meshes, armature):
+    core_meshes = [
+        obj
+        for obj in low_meshes
+        if obj.type == "MESH"
+        and (bool(obj.get("reverie_continuous_body_core")) or "unified_body_anatomy_core" in obj.name.lower())
+    ]
+    regions = [
+        "head",
+        "neck",
+        "torso",
+        "pelvis",
+        "upper_arms",
+        "forearms",
+        "hands",
+        "thighs",
+        "shins",
+        "feet",
+    ]
+    report = dict(PIPELINE_STATE.get("body_continuity_report", {{}}))
+    report.update({{
+        "schema": "reverie.blender_body_continuity_report.v1",
+        "runtime_core_meshes": [obj.name for obj in core_meshes],
+        "runtime_core_mesh_count": len(core_meshes),
+        "single_deformable_core": len(core_meshes) == 1,
+        "has_armature": armature is not None,
+        "required_regions": regions,
+        "passed": len(core_meshes) == 1 and armature is not None,
+        "authoring_rule": "A playable humanoid must have a continuous deformable body core; hair, clothing, armor, weapon, and VFX may remain layered meshes.",
+    }})
+    PIPELINE_STATE["body_continuity_report"] = report
+    return report
 
 
 def create_humanoid_rig(collection):
@@ -1682,6 +1778,7 @@ def create_art_readiness_report(low_meshes, high_meshes):
     texture_roles = set(texture_manifest.keys()) if isinstance(texture_manifest, dict) else set()
     texture_authoring = PIPELINE_STATE.get("texture_authoring_manifest", {{}})
     facial_manifest = PIPELINE_STATE.get("facial_manifest", {{}})
+    body_continuity = PIPELINE_STATE.get("body_continuity_report", {{}})
     mesh_metrics = PIPELINE_STATE.get("mesh_metrics", {{}})
     totals = mesh_metrics.get("totals", {{}}) if isinstance(mesh_metrics, dict) else {{}}
     facial_deformation_count = sum(
@@ -1712,6 +1809,7 @@ def create_art_readiness_report(low_meshes, high_meshes):
         quality_gate("texture_resolution", texture_resolution_ready and len(texture_roles) >= 4, "Generated texture maps meet the 1024px production-candidate floor."),
         quality_gate("material_assignment", material_slot_count >= len(low_meshes), "Runtime meshes carry material slots for lookdev review."),
         quality_gate("facial_target_evidence", len(PIPELINE_STATE.get("shape_keys", [])) >= 4 and facial_deformation_count > 0, "Facial targets include non-zero deformation evidence."),
+        quality_gate("continuous_body_core", bool(body_continuity.get("passed")) if isinstance(body_continuity, dict) else False, "A fused deformable body core is present under layered costume and accessories."),
         quality_gate("silhouette_complexity", silhouette_pipeline_ready, "High and runtime mesh metrics plus non-destructive sculpt modifiers show a sculpt-to-game silhouette pipeline."),
         quality_gate("runtime_lod_collision", len(PIPELINE_STATE.get("lods", [])) >= max(1, len(low_meshes)) * 2 and len(PIPELINE_STATE.get("collision_proxies", [])) >= 4, "LOD and collision evidence exists for runtime readability."),
     ]
@@ -1727,6 +1825,7 @@ def create_art_readiness_report(low_meshes, high_meshes):
         "texture_authoring": texture_authoring,
         "facial_deformation_count": facial_deformation_count,
         "sculpt_modifier_count": sculpt_modifier_count,
+        "body_continuity_report": body_continuity,
         "mesh_metrics": mesh_metrics,
         "decision_notes": [
             "Automated checks can prove pipeline completeness and deformation/texture evidence.",
@@ -1753,6 +1852,7 @@ def validate_runtime_character_asset(low_meshes, armature):
     animation_manifest = PIPELINE_STATE.get("animation_manifest", {{}})
     pose_stress_report = PIPELINE_STATE.get("pose_stress_report", {{}})
     art_readiness_report = PIPELINE_STATE.get("art_readiness_report", {{}})
+    body_continuity_report = PIPELINE_STATE.get("body_continuity_report", {{}})
     visual_qa_report = PIPELINE_STATE.get("visual_qa_report", {{}})
     engine_import_contract = PIPELINE_STATE.get("engine_import_contract", {{}})
     facial_deformation_count = sum(
@@ -1788,6 +1888,8 @@ def validate_runtime_character_asset(low_meshes, armature):
         "animation_clip_count": animation_clip_count,
         "ik_constraint_count": ik_constraint_count,
         "pose_stress_frame_count": pose_stress_frame_count,
+        "body_continuity_passed": bool(body_continuity_report.get("passed")) if isinstance(body_continuity_report, dict) else False,
+        "continuous_body_core_count": int(body_continuity_report.get("runtime_core_mesh_count", 0) or 0) if isinstance(body_continuity_report, dict) else 0,
         "art_readiness_passed": bool(art_readiness_report.get("passed")) if isinstance(art_readiness_report, dict) else False,
         "visual_qa_passed": bool(visual_qa_report.get("passed")) if isinstance(visual_qa_report, dict) else False,
         "engine_import_contract_passed": bool(engine_import_contract.get("passed")) if isinstance(engine_import_contract, dict) else False,
@@ -1807,6 +1909,7 @@ def validate_runtime_character_asset(low_meshes, armature):
         quality_gate("armature", validation["has_armature"], "A humanoid armature exists for skinning and animation."),
         quality_gate("weights", validation["weighted_mesh_count"] == validation["low_mesh_count"], "Every runtime mesh has generated vertex-group weight hints."),
         quality_gate("skinning_manifest", validation["skinning_manifest_mesh_count"] == validation["low_mesh_count"], "Every runtime mesh has a skinning contract."),
+        quality_gate("continuous_body_core", validation["body_continuity_passed"], "A single fused body core exists so torso, head, limbs, hands, legs, and feet read as one deformable character underneath layers."),
         quality_gate("actions", validation["action_count"] >= 2, "Idle and attack preview actions are stored."),
         quality_gate("animation_manifest", validation["animation_clip_count"] >= 2, "Animation clips are described in a runtime manifest."),
         quality_gate("face_keys", validation["shape_key_count"] >= 4, "Face expression shape keys exist."),
@@ -1843,6 +1946,7 @@ def create_production_manifest(low_meshes, high_meshes, armature):
         ("procedural_textures", 1 if PIPELINE_STATE.get("texture_authoring_manifest", {{}}) else 0, "texture", "Generated basecolor, normal, ORM, and material-ID texture seed maps with authoring metadata."),
         ("material_tuning", len(PIPELINE_STATE.get("material_tuning", {{}}).get("meshes", {{}})), "lookdev", "Runtime PBR material graphs and material IDs are assigned."),
         ("skinning", len(PIPELINE_STATE.get("skinning_manifest", {{}}).get("meshes", {{}})), "rig", "Vertex groups and skinning manifest are generated for the humanoid skeleton."),
+        ("body_continuity", 1 if PIPELINE_STATE.get("body_continuity_report", {{}}).get("passed") else 0, "topology", "A fused continuous body core exists beneath layered clothing, hair, accessories, and weapons."),
         ("animation", len(PIPELINE_STATE.get("animation_manifest", {{}}).get("clips", [])), "animation", "Idle and attack preview clips are authored and stored as actions."),
         ("face_shapes", len(PIPELINE_STATE.get("shape_keys", [])), "facial", "Face expression shape keys are authored with named runtime targets for downstream facial animation."),
         ("facial_deformation", len(PIPELINE_STATE.get("facial_manifest", {{}}).get("shapes", {{}})), "facial", "Expression shape keys contain non-zero vertex deformation evidence."),
@@ -1888,6 +1992,7 @@ def create_production_manifest(low_meshes, high_meshes, armature):
             "bake_manifest": PIPELINE_STATE.get("bake_manifest", {{}}),
             "material_tuning": PIPELINE_STATE.get("material_tuning", {{}}),
             "skinning_manifest": PIPELINE_STATE.get("skinning_manifest", {{}}),
+            "body_continuity_report": PIPELINE_STATE.get("body_continuity_report", {{}}),
             "animation_manifest": PIPELINE_STATE.get("animation_manifest", {{}}),
             "facial_manifest": PIPELINE_STATE.get("facial_manifest", {{}}),
             "pose_stress_report": PIPELINE_STATE.get("pose_stress_report", {{}}),
@@ -1938,6 +2043,8 @@ def create_blackbox_iteration_plan():
         "armature": "Recreate the humanoid armature and parent runtime meshes.",
         "weights": "Regenerate vertex groups and weight hints for every runtime mesh.",
         "skinning_manifest": "Rebuild the skinning contract for all weighted meshes.",
+        "continuous_body_core": "Rebuild the fused anatomy core with overlapping body primitives and voxel remesh, then rerun rig binding.",
+        "body_continuity": "Regenerate the continuous body core report and verify the runtime mesh includes exactly one fused body core.",
         "actions": "Recreate idle and attack preview actions.",
         "animation_manifest": "Rebuild runtime animation clip metadata.",
         "face_keys": "Regenerate facial expression shape keys.",
@@ -2003,6 +2110,7 @@ def create_visual_qa_report(low_meshes, armature, collections=None):
     mesh_metrics = PIPELINE_STATE.get("mesh_metrics", {{}})
     totals = mesh_metrics.get("totals", {{}}) if isinstance(mesh_metrics, dict) else {{}}
     art_readiness = PIPELINE_STATE.get("art_readiness_report", {{}})
+    body_continuity = PIPELINE_STATE.get("body_continuity_report", {{}})
     low_names = [obj.name.lower() for obj in low_meshes if obj.type == "MESH"]
     face_landmarks = {{
         "eye_white_sclera": any("eye_white_sclera" in name for name in low_names),
@@ -2038,6 +2146,7 @@ def create_visual_qa_report(low_meshes, armature, collections=None):
             {{"id": "silhouette_readability", "passed": len(low_meshes) > 0, "detail": "Runtime meshes exist for silhouette review."}},
             {{"id": "face_targets", "passed": len(PIPELINE_STATE.get("shape_keys", [])) >= 4, "detail": "Facial targets are present for expression review."}},
             {{"id": "facial_landmark_visibility", "passed": all(face_landmarks.values()), "detail": "Eyes, iris highlights, brows, nose, mouth, and ears exist as visible runtime mesh landmarks."}},
+            {{"id": "body_continuity", "passed": bool(body_continuity.get("passed")) if isinstance(body_continuity, dict) else False, "detail": "A single continuous body core exists under costume layers so limbs and torso are not disconnected."}},
             {{"id": "material_slots", "passed": all(len(obj.material_slots) > 0 for obj in low_meshes if obj.type == "MESH"), "detail": "Every runtime mesh has material slots."}},
             {{"id": "material_role_coverage", "passed": {{"skin", "hair", "metal", "cloth"}}.issubset(material_roles), "detail": "Skin, hair, metal, and cloth material roles are present for lookdev separation."}},
             {{"id": "art_readiness", "passed": bool(art_readiness.get("passed")) if isinstance(art_readiness, dict) else False, "detail": "Generated art-readiness evidence passed automated checks."}},
@@ -2059,6 +2168,7 @@ def create_visual_qa_report(low_meshes, armature, collections=None):
             "Check material ID regions, generated texture detail, and whether hand-painted/baked finals are needed.",
         ],
         "art_readiness_report": art_readiness,
+        "body_continuity_report": body_continuity,
         "face_landmarks": face_landmarks,
         "material_roles": sorted(material_roles),
     }}
@@ -2069,6 +2179,7 @@ def create_visual_qa_report(low_meshes, armature, collections=None):
 
 def create_engine_import_contract(low_meshes, armature):
     animation_clips = PIPELINE_STATE.get("animation_manifest", {{}}).get("clips", [])
+    body_continuity = PIPELINE_STATE.get("body_continuity_report", {{}})
     humanoid_bone_map = {{
         "hips": "root",
         "spine": "spine",
@@ -2089,6 +2200,7 @@ def create_engine_import_contract(low_meshes, armature):
         {{"id": "retarget_map_declared", "passed": len(humanoid_bone_map) >= 10, "detail": "Humanoid retarget bone map is available."}},
         {{"id": "socket_collision_lod_declared", "passed": len(PIPELINE_STATE.get("sockets", [])) >= 5 and len(PIPELINE_STATE.get("collision_proxies", [])) >= 4 and len(PIPELINE_STATE.get("lods", [])) >= max(1, len(low_meshes)) * 2, "detail": "Sockets, collision proxies, and LOD variants are declared."}},
         {{"id": "texture_roles_declared", "passed": {{"basecolor", "normal", "orm", "id"}}.issubset(set(PIPELINE_STATE.get("textures", {{}}).keys())), "detail": "Runtime texture roles are declared."}},
+        {{"id": "continuous_body_core_declared", "passed": bool(body_continuity.get("passed")) if isinstance(body_continuity, dict) else False, "detail": "Runtime import contract includes a single continuous deformable body core."}},
     ]
     contract = {{
         "schema": "reverie.engine_import_contract.v1",
@@ -2098,6 +2210,7 @@ def create_engine_import_contract(low_meshes, armature):
         "runtime_export": str(OUTPUTS["runtime"]),
         "skeleton": armature.name if armature is not None else "",
         "runtime_meshes": [obj.name for obj in low_meshes],
+        "body_continuity_report": body_continuity,
         "texture_set": PIPELINE_STATE.get("textures", {{}}),
         "material_workflow": PIPELINE_STATE.get("material_tuning", {{}}).get("workflow", "metallic_roughness"),
         "animation_clips": animation_clips,
@@ -2162,6 +2275,7 @@ def create_runtime_asset_card(low_meshes, armature):
             "ik_constraints": list(PIPELINE_STATE.get("ik_constraints", [])),
             "collision_proxies": list(PIPELINE_STATE.get("collision_proxies", [])),
             "lods": list(PIPELINE_STATE.get("lods", [])),
+            "body_continuity": PIPELINE_STATE.get("body_continuity_report", {{}}),
         }},
         "artist_review_notes": [
             "Generated asset includes high/low collections, bake cages, UVs, material IDs, rig, weights, actions, sockets, LODs, and validation gates.",
@@ -2175,6 +2289,7 @@ def create_runtime_asset_card(low_meshes, armature):
         "material_tuning": PIPELINE_STATE.get("material_tuning", {{}}),
         "bake_manifest": PIPELINE_STATE.get("bake_manifest", {{}}),
         "skinning_manifest": PIPELINE_STATE.get("skinning_manifest", {{}}),
+        "body_continuity_report": PIPELINE_STATE.get("body_continuity_report", {{}}),
         "animation_manifest": PIPELINE_STATE.get("animation_manifest", {{}}),
         "facial_manifest": PIPELINE_STATE.get("facial_manifest", {{}}),
         "pose_stress_report": PIPELINE_STATE.get("pose_stress_report", {{}}),
@@ -2237,6 +2352,7 @@ def build_production_character_pipeline(m):
     bind_meshes_to_rig(low_meshes, armature)
     assign_runtime_vertex_groups(low_meshes)
     create_skinning_manifest(low_meshes, armature)
+    create_body_continuity_report(low_meshes, armature)
     create_lod_variants(low_meshes, collections["preview"])
     actions = create_preview_actions(armature)
     stress_action = create_pose_stress_action(armature)
@@ -2320,6 +2436,7 @@ def build_environment_diorama(m):
 def build_anime_action_character(m):
     cube("lod0_character_silhouette_base", (0, 0, 0.015), (0.82, 0.62, 0.03), m["line"], bevel=0.02)
     cylinder("centerline_rig_reference", (0, 0.18, 1.08), 0.012, 2.15, m["glow"], vertices=8, bevel=0.0)
+    create_unified_body_core(m)
     cylinder("pelvis_blockout", (0, 0, 0.76), 0.2, 0.3, m["dark"], vertices=18, bevel=0.024)
     cylinder("waist_belt_layer", (0, -0.01, 0.95), 0.25, 0.11, m["gold"], vertices=24, bevel=0.014)
     ellipsoid("torso_anime_taper", (0, 0, 1.22), 0.4, (0.62, 0.4, 1.15), m["primary"], segments=32, ring_count=16, bevel=0.018)
@@ -2494,7 +2611,7 @@ def build_scene():
     configure_scene()
     mats = material_set()
     preset = SPEC["preset"]
-    PIPELINE_STATE = {{"export_objects": [], "actions": [], "textures": {{}}, "texture_manifest": {{}}, "texture_authoring_manifest": {{}}, "material_tuning": {{}}, "collections": [], "armature": "", "shape_keys": [], "facial_manifest": {{}}, "sockets": [], "rig_controls": [], "ik_targets": [], "ik_constraints": [], "collision_proxies": [], "lods": [], "vertex_groups": {{}}, "skinning_manifest": {{}}, "animation_manifest": {{}}, "pose_stress_report": {{}}, "mesh_metrics": {{}}, "bake_manifest": {{}}, "art_readiness_report": {{}}, "visual_qa_report": {{}}, "engine_import_contract": {{}}, "production_manifest": {{}}, "iteration_plan": {{}}, "validation": {{}}, "quality_gates": [], "asset_card": {{}}, "camera_action": ""}}
+    PIPELINE_STATE = {{"export_objects": [], "actions": [], "textures": {{}}, "texture_manifest": {{}}, "texture_authoring_manifest": {{}}, "material_tuning": {{}}, "collections": [], "armature": "", "shape_keys": [], "facial_manifest": {{}}, "sockets": [], "rig_controls": [], "ik_targets": [], "ik_constraints": [], "collision_proxies": [], "lods": [], "vertex_groups": {{}}, "skinning_manifest": {{}}, "animation_manifest": {{}}, "pose_stress_report": {{}}, "mesh_metrics": {{}}, "body_continuity_report": {{}}, "bake_manifest": {{}}, "art_readiness_report": {{}}, "visual_qa_report": {{}}, "engine_import_contract": {{}}, "production_manifest": {{}}, "iteration_plan": {{}}, "validation": {{}}, "quality_gates": [], "asset_card": {{}}, "camera_action": ""}}
     if preset == "fantasy_relic":
         build_fantasy_relic(mats)
     elif preset == "sci_fi_crate":

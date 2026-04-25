@@ -175,10 +175,24 @@ def _local_model_assistants() -> Dict[str, Any]:
         "hardware_profile": {"ram_gb": 24, "vram_gb": 8},
         "recommended_models": [
             {
+                "id": "trellis-text-xlarge",
+                "repo_id": "microsoft/TRELLIS-text-xlarge",
+                "role": "text_to_3d_primary_low_vram",
+                "profile": "low_vram",
+                "reason": "Primary local text-to-3D candidate; use the 8GB low_vram profile, then run Blender cleanup, retopo, rig, and material validation.",
+            },
+            {
                 "id": "stable-fast-3d",
                 "repo_id": "stabilityai/stable-fast-3d",
                 "role": "image_to_3d_asset_candidate",
                 "reason": "Default 8GB-VRAM-friendly local 3D asset ideation path after concept-image generation.",
+            },
+            {
+                "id": "hunyuan3d-2mini",
+                "repo_id": "tencent/Hunyuan3D-2mini",
+                "role": "image_to_3d_higher_quality_mini",
+                "profile": "low_vram",
+                "reason": "Optional smaller Hunyuan3D image-to-3D lane for concept-image-to-mesh candidates on 24GB RAM / 8GB VRAM systems.",
             },
             {
                 "id": "tripo-sr",
@@ -189,20 +203,20 @@ def _local_model_assistants() -> Dict[str, Any]:
         ],
         "guarded_heavy_models": [
             {
-                "id": "trellis-text-xlarge",
-                "repo_id": "microsoft/TRELLIS-text-xlarge",
-                "role": "text_to_3d_research",
-                "guard": "Requires explicit allow_heavy because published/runtime guidance exceeds the default 8GB VRAM budget.",
-            },
-            {
                 "id": "hy-motion-1.0",
                 "repo_id": "tencent/HY-Motion-1.0",
                 "role": "human_motion_generation",
-                "guard": "Requires explicit allow_heavy; HY-Motion's published profiles are above the default 8GB VRAM budget.",
+                "guard": "Requires explicit allow_heavy; use only after the humanoid skeleton and retarget contract are stable.",
             },
+        ],
+        "character_modeling_contract": [
+            "Use text-to-3D outputs as candidate meshes, not final shipped anatomy.",
+            "For playable humanoids, require a continuous body core, one retargetable armature, explicit face landmarks, material roles, UVs, and GLB import validation.",
+            "Layer clothing, hair, accessories, and weapon meshes over the continuous body core instead of leaving limbs or torso visually disconnected.",
         ],
         "usage_policy": [
             "Use rc_game_models_deployment_plan before downloading model packages.",
+            "Use rc_game_models_select_model to persist the chosen model/profile; use profile=low_vram for TRELLIS on 8GB VRAM.",
             "Use rc_game_models_prepare_environment to create the plugin-local venv.",
             "Use rc_game_models_download_model with dry_run=true before heavy downloads.",
             "Never place model snapshots in C:\\Users, global HuggingFace cache folders, or system SDK paths by default.",

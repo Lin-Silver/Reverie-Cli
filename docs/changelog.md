@@ -3,7 +3,9 @@
 ### Runtime
 
 * Added NVIDIA catalog entries for `deepseek-ai/deepseek-v4-pro` and `deepseek-ai/deepseek-v4-flash`, including 1M context metadata and selectable `max`/`high`/`off` thinking depth through `/nvidia thinking`.
-* Added the official `game_models` runtime plugin for plugin-local auxiliary game model deployment, 8GB-VRAM planning, HuggingFace snapshot downloads, and guarded HY-Motion/TRELLIS registration.
+* Added the official `game_models` runtime plugin for plugin-local auxiliary game model deployment, selectable model profiles, 8GB-VRAM planning, HuggingFace snapshot downloads/caches, TRELLIS `low_vram` selection, Hunyuan3D-2mini registration, and guarded HY-Motion registration.
+* Added `/plugins models ...` commands so users can plan, select, download, dry-run, and inspect game auxiliary models without relying only on `rc_game_models_*` dynamic tools.
+* Upgraded generated humanoid Blender scaffolds with a fused continuous body-core mesh and body-continuity reports, reducing disconnected limb/torso failures before layered clothing, hair, accessories, and weapons are added.
 * Reframed Blender and Blockbench support as DCC/editor control, validation, and export automation rather than guaranteed final AAA character-art generation.
 * Added NVIDIA catalog support for `z-ai/glm-5.1` with a fast interactive profile that disables GLM chat-template thinking by default and caps GLM fast output to reduce first-token latency and streaming stalls.
 * Added a ModelScope source backed by the Anthropic SDK, defaulting to `ZhipuAI/GLM-5.1`, with built-in catalogs for GLM, Kimi, MiniMax, Qwen, and DeepSeek models.

@@ -15,6 +15,7 @@ Important folders:
 
 - `venv/`: plugin-local Python environment
 - `models/`: plugin-local HuggingFace model snapshots
+- `cache/`: plugin-local HuggingFace/pip caches so downloads do not spill into `C:\Users`
 - `state/model_state.json`: registered/downloaded model state
 
 Supported commands include:
@@ -24,11 +25,20 @@ Supported commands include:
 - `rc_game_models_prepare_environment`
 - `rc_game_models_ensure_runtime`
 - `rc_game_models_model_status`
+- `rc_game_models_select_model`
 - `rc_game_models_download_model`
 - `rc_game_models_register_model_path`
 
+User-facing CLI shortcuts:
+
+- `/plugins models`
+- `/plugins models plan ram=24 vram=8`
+- `/plugins models select trellis-text-xlarge profile=low_vram download`
+- `/plugins models download trellis-text-xlarge profile=low_vram dry_run`
+- `/plugins models status trellis-text-xlarge`
+
 Hardware policy:
 
-- `stable-fast-3d` and `tripo-sr` are the default 8GB VRAM-friendly asset-ideation choices.
-- `microsoft/TRELLIS-text-xlarge` and `tencent/HY-Motion-1.0` are registered as guarded heavy research models.
-- Heavy models require `allow_heavy=true` before download and are not treated as default runnable models for 24GB RAM / 8GB VRAM systems.
+- `microsoft/TRELLIS-text-xlarge` is selectable on the `low_vram` profile for 24GB RAM / 8GB VRAM systems.
+- `stable-fast-3d`, `hunyuan3d-2mini`, and `tripo-sr` remain 8GB VRAM-friendly image-to-3D fallback/ideation choices.
+- `tencent/HY-Motion-1.0` remains guarded and requires `allow_heavy=true`.

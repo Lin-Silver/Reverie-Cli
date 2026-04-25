@@ -87,6 +87,7 @@ ModelScope is called through the Anthropic SDK and reads `MODELSCOPE_API_KEY`, `
 | `/plugins` | Inspect the portable SDK/runtime depot and optional RC plugin tools |
 | `/plugins sdk <plugin-id>` | Prepare `.reverie/plugins/<plugin-id>/runtime` and write an SDK manifest |
 | `/plugins deploy <plugin-id>` | Let a plugin prepare its local SDK/runtime by downloading, extracting, or cloning into `.reverie/plugins/<plugin-id>/` |
+| `/plugins models [list|plan|select|download|status]` | Choose and download game auxiliary models such as TRELLIS under `.reverie/plugins/game_models/` |
 | `/plugins run <plugin-id>` | Launch the detected portable SDK/runtime entry |
 | `/search <query>` | Run a web search |
 | `/index` | Rebuild the current workspace index |

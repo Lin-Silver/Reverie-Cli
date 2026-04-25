@@ -15,7 +15,7 @@ def _load_game_models_plugin():
     return module
 
 
-def test_game_models_plugin_catalog_marks_heavy_models_as_guarded(tmp_path: Path, monkeypatch) -> None:
+def test_game_models_plugin_catalog_marks_trellis_as_8gb_selectable(tmp_path: Path, monkeypatch) -> None:
     module = _load_game_models_plugin()
     plugin_root = tmp_path / "app" / ".reverie" / "plugins" / "game_models"
     monkeypatch.setenv("REVERIE_PLUGIN_ROOT", str(plugin_root))
@@ -28,14 +28,17 @@ def test_game_models_plugin_catalog_marks_heavy_models_as_guarded(tmp_path: Path
 
     assert listed["success"] is True
     assert "ensure_runtime" in command_names
+    assert "select_model" in command_names
     assert "stable-fast-3d" in ids
     assert "tripo-sr" in ids
-    assert "trellis-text-xlarge" not in ids
+    assert "hunyuan3d-2mini" in ids
+    assert "trellis-text-xlarge" in ids
     assert "hy-motion-1.0" not in ids
     assert listed["data"]["model_root"] == str(plugin_root / "models")
+    assert listed["data"]["cache_root"] == str(plugin_root / "cache")
 
 
-def test_game_models_plugin_deployment_plan_blocks_hy_motion_and_trellis_on_8gb(tmp_path: Path, monkeypatch) -> None:
+def test_game_models_plugin_deployment_plan_allows_trellis_low_vram_on_8gb(tmp_path: Path, monkeypatch) -> None:
     module = _load_game_models_plugin()
     plugin_root = tmp_path / "app" / ".reverie" / "plugins" / "game_models"
     monkeypatch.setenv("REVERIE_PLUGIN_ROOT", str(plugin_root))
@@ -46,23 +49,45 @@ def test_game_models_plugin_deployment_plan_blocks_hy_motion_and_trellis_on_8gb(
     guarded = {item["id"] for item in plan["data"]["guarded_or_blocked"]}
 
     assert plan["success"] is True
-    assert {"stable-fast-3d", "tripo-sr"}.issubset(recommended)
-    assert {"trellis-text-xlarge", "hy-motion-1.0"}.issubset(guarded)
+    assert {"stable-fast-3d", "tripo-sr", "hunyuan3d-2mini", "trellis-text-xlarge"}.issubset(recommended)
+    assert "hy-motion-1.0" in guarded
+    trellis = next(item for item in plan["data"]["recommended"] if item["id"] == "trellis-text-xlarge")
+    assert trellis["selected_profile"]["id"] == "low_vram"
+    assert trellis["selected_profile"]["min_vram_gb"] == 8
 
 
-def test_game_models_plugin_download_dry_run_is_plugin_local_and_guards_heavy_models(tmp_path: Path, monkeypatch) -> None:
+def test_game_models_plugin_download_dry_run_is_plugin_local_and_trellis_selectable(tmp_path: Path, monkeypatch) -> None:
     module = _load_game_models_plugin()
     plugin_root = tmp_path / "app" / ".reverie" / "plugins" / "game_models"
     monkeypatch.setenv("REVERIE_PLUGIN_ROOT", str(plugin_root))
     plugin = module.GameModelsPlugin()
 
-    guarded = plugin.download_model({"model_id": "trellis-text-xlarge", "dry_run": True})
+    trellis = plugin.download_model({"model_id": "trellis-text-xlarge", "profile": "low_vram", "dry_run": True})
     dry_run = plugin.download_model({"model_id": "stable-fast-3d", "dry_run": True})
+    guarded = plugin.download_model({"model_id": "hy-motion-1.0", "dry_run": True})
 
-    assert guarded["success"] is False
+    assert trellis["success"] is True
+    assert trellis["data"]["profile"]["id"] == "low_vram"
+    assert Path(trellis["data"]["target"]).is_relative_to(plugin_root)
     assert "allow_heavy=true" in guarded["error"]
     assert dry_run["success"] is True
     assert Path(dry_run["data"]["target"]).is_relative_to(plugin_root)
+    assert dry_run["data"]["cache_root"] == str(plugin_root / "cache")
+
+
+def test_game_models_plugin_selects_model_profile_without_downloading(tmp_path: Path, monkeypatch) -> None:
+    module = _load_game_models_plugin()
+    plugin_root = tmp_path / "app" / ".reverie" / "plugins" / "game_models"
+    monkeypatch.setenv("REVERIE_PLUGIN_ROOT", str(plugin_root))
+    plugin = module.GameModelsPlugin()
+
+    selected = plugin.select_model({"model_id": "trellis-text-xlarge", "profile": "low_vram", "ram_gb": 24, "vram_gb": 8})
+    status = plugin.model_status({"model_id": "trellis-text-xlarge"})
+
+    assert selected["success"] is True
+    assert selected["data"]["profile"]["id"] == "low_vram"
+    assert selected["data"]["profile"]["min_vram_gb"] == 8
+    assert status["data"]["selected_model"]["model"]["id"] == "trellis-text-xlarge"
 
 
 def test_game_models_plugin_registers_external_model_manifest_without_copying(tmp_path: Path, monkeypatch) -> None:

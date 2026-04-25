@@ -217,6 +217,7 @@ Plugins are the portable SDK/runtime depot under `.reverie/plugins`, not another
 - Prepare a depot: `/plugins sdk <plugin-id>`
 - Deploy a bundled portable runtime: `/plugins deploy <plugin-id>`
 - Launch a deployed runtime: `/plugins run <plugin-id>`
+- Select/download game auxiliary models: `/plugins models plan ram=24 vram=8`, then `/plugins models select trellis-text-xlarge profile=low_vram download`
 
 For Blender portable deployment, use:
 
@@ -227,6 +228,8 @@ For Blender portable deployment, use:
 The official Blender plugin embeds `blender-5.1.1-windows-x64.zip` inside `reverie-blender.exe` at build time. `/plugins deploy blender` or the `rc_blender_ensure_runtime` tool asks that plugin executable to extract the portable runtime into the depot, so the installed `dist/.reverie/plugins/blender/` folder does not need to keep a separate zip file.
 
 The built-in Blender workflow also checks `REVERIE_BLENDER_PATH`, `BLENDER_PATH`, `PATH`, and common system install folders.
+
+The official `game_models` plugin keeps model snapshots, HuggingFace cache, pip cache, manifests, and its Python venv inside `.reverie/plugins/game_models/`. TRELLIS Text XLarge is selectable on the `low_vram` profile for 24GB RAM / 8GB VRAM systems; HY-Motion remains guarded by `allow_heavy=true`.
 
 ## Text-To-Image Configuration
 

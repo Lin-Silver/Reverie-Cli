@@ -9,6 +9,7 @@ from reverie.config import (
     _escape_invalid_json_string_control_chars,
     get_app_root,
     get_project_data_dir,
+    normalize_tti_models,
 )
 from reverie.tools.mcp_resource_tools import ReadMcpResourceTool
 
@@ -20,6 +21,28 @@ def test_escape_invalid_json_string_control_chars_only_changes_string_payloads()
     assert changed is True
     assert '"message": "line1\\nline2\\tend"' in repaired
     assert '\n  "count": 1\n' in repaired
+
+
+def test_normalize_tti_models_preserves_gguf_auxiliary_metadata() -> None:
+    models = normalize_tti_models(
+        [
+            {
+                "path": "F:/Models/T2I/ernie-image-turbo-Q4_K_S.gguf",
+                "display_name": "ernie-turbo",
+                "format": "gguf",
+                "clip_model": "F:/Models/T2I/ministral-3-3b.safetensors",
+                "vae_model": "F:/Models/T2I/flux2-vae.safetensors",
+                "recommended_steps": 8,
+                "recommended_cfg": 1.0,
+            }
+        ]
+    )
+
+    assert models[0]["format"] == "gguf"
+    assert models[0]["clip_model"].endswith("ministral-3-3b.safetensors")
+    assert models[0]["vae_model"].endswith("flux2-vae.safetensors")
+    assert models[0]["recommended_steps"] == 8
+    assert models[0]["recommended_cfg"] == 1.0
 
 
 def test_config_manager_repairs_invalid_control_chars_and_emits_notice(tmp_path: Path, monkeypatch) -> None:

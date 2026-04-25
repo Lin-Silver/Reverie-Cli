@@ -29,7 +29,7 @@ def _capability_summary(profile: Dict[str, Any]) -> Dict[str, Any]:
         blockers.append("runtime validation still depends on external tooling or later integration")
 
     combat_profile = "action_slice_ready"
-    if "third-person-template" in capabilities or "3d_third_person" in templates:
+    if "third-person-template" in capabilities or "third_person_action" in templates or "3d_third_person" in templates:
         combat_profile = "third_person_action_base"
     elif "large-scale-3d" in capabilities:
         combat_profile = "future_large_scale_combat_base"
@@ -42,7 +42,7 @@ def _capability_summary(profile: Dict[str, Any]) -> Dict[str, Any]:
     if runtime_id == "godot":
         quest_cutscene = "scene_driven_quest_flow"
     elif runtime_id == "o3de":
-        quest_cutscene = "research_only"
+        quest_cutscene = "component_entity_flow"
 
     asset_import = "project_level_registry"
     if "gltf" in capabilities:

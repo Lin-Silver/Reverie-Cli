@@ -1,0 +1,50 @@
+{
+  "schema_version": "2.0",
+  "id": "o3de",
+  "display_name": "O3DE Source SDK Plugin",
+  "runtime_family": "engine",
+  "version": "0.1.0",
+  "delivery": "python-exe",
+  "description": "Reverie CLI plugin wrapper for O3DE source checkout, version discovery, local SDK manifests, and project validation prep.",
+  "entry": {
+    "preferred": {
+      "windows": "dist/reverie-o3de.exe",
+      "linux": "dist/reverie-o3de",
+      "darwin": "dist/reverie-o3de"
+    },
+    "fallbacks": {
+      "windows": "plugin.py",
+      "linux": "plugin.py",
+      "darwin": "plugin.py",
+      "default": "plugin.py"
+    },
+    "strategy": "prefer-packaged",
+    "allow_source_fallback": true
+  },
+  "packaging": {
+    "format": "pyinstaller-onefile",
+    "compiled": {
+      "windows": "dist/reverie-o3de.exe",
+      "linux": "dist/reverie-o3de",
+      "darwin": "dist/reverie-o3de"
+    },
+    "source": {
+      "default": "plugin.py"
+    },
+    "build": {
+      "windows": [
+        "build.bat"
+      ],
+      "default": [
+        "python -m PyInstaller --noconfirm --clean --onefile --name reverie-o3de plugin.py"
+      ]
+    }
+  },
+  "capabilities": [
+    "o3de",
+    "engine",
+    "source-sdk",
+    "github-version-discovery",
+    "asset-processor-contract"
+  ]
+}

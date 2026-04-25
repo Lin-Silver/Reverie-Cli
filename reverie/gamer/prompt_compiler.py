@@ -432,17 +432,17 @@ def _infer_runtime_preferences(
     existing_runtime: str,
 ) -> Dict[str, Any]:
     explicit = str(requested_runtime or "").strip().lower()
+    unsupported_explicit = ""
     if not explicit:
         if _matches_any(text, tokens, {"godot"}):
             explicit = "godot"
         elif _matches_any(text, tokens, {"o3de"}):
             explicit = "o3de"
-        elif _matches_any(text, tokens, {"unity"}):
-            explicit = "unity"
-        elif _matches_any(text, tokens, {"unreal"}):
-            explicit = "unreal"
+    if explicit and explicit not in {"godot", "o3de", "reverie_engine", "reverie_engine_lite", "custom"}:
+        unsupported_explicit = explicit
+        explicit = ""
 
-    external_preferred = bool(explicit in {"godot", "o3de", "unity", "unreal"})
+    external_preferred = bool(explicit in {"godot", "o3de"})
     if not explicit and dimension == "3D" and _matches_any(text, tokens, {"genshin", "wuthering", "zenless", "\u5f00\u653e\u4e16\u754c", "open world"}):
         explicit = "godot"
         external_preferred = True
@@ -450,6 +450,7 @@ def _infer_runtime_preferences(
     preferred = explicit or existing_runtime or "reverie_engine"
     return {
         "requested_runtime": explicit,
+        "unsupported_requested_runtime": unsupported_explicit,
         "existing_runtime": str(existing_runtime or "").strip().lower(),
         "preferred_runtime": preferred,
         "external_runtime_preferred": external_preferred,

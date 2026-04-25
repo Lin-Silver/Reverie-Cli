@@ -372,6 +372,8 @@ Generate images with the local configured text-to-image runtime.
 
 **Actions**:
 - `list_models`
+- `diagnose`
+- `prepare_models`
 - `generate`
 
 **Important parameters for `generate`**:
@@ -384,12 +386,16 @@ Generate images with the local configured text-to-image runtime.
 
 **Usage notes**:
 - Choose models by configured display name, not raw path
-- Use `list_models` first when model availability is unclear
+- Model entries can point to a single model file or a folder package; GGUF folder packages auto-detect common ERNIE auxiliary files such as Ministral text encoder and Flux VAE
+- Use `diagnose` when script/model/Python runtime availability is unclear; this is a local configured runtime, not an always-available black-box generator
+- Use `prepare_models` to inspect or populate the app-local `.reverie/plugins/Packages/comfyui/models` depot for supported GGUF model packages; keep `include_optional=false` unless optional large extras are needed
 - Keep `output_path` workspace-safe and relative when you override it
 
 **Example calls**:
 ```
 text_to_image(action="list_models")
+text_to_image(action="diagnose")
+text_to_image(action="prepare_models", package="ernie-image-turbo-gguf", download=false)
 text_to_image(action="generate", prompt="cinematic neon skyline", model="cinematic-xl", width=1024, height=576)
 ```
 """
@@ -707,12 +713,16 @@ Use this tool to run Reverie-Gamer's built-in Blockbench and Ashfox MCP content 
 - `setup_workspace`
 - `sync_registry`
 - `create_model_stub`
+- `generate_primitive`
+- `validate_blockbench_model`
+- `export_blockbench_model`
 - `import_export`
 - `list_ashfox_tools`
 - `ashfox_call`
 
 **Best uses**:
 - Standardize source `.bbmodel` files under `assets/models/source`
+- Validate and export simple `.bbmodel` cuboid assets through Reverie's headless fallback when Blockbench/Ashfox are unavailable
 - Import runtime `.glb` or `.gltf` exports into `assets/models/runtime`
 - Regenerate `data/models/model_registry.yaml` after authoring changes
 - Validate, inspect, preview, or export active Blockbench projects through the built-in Ashfox MCP integration
@@ -733,13 +743,18 @@ Use this tool when Reverie should author Blender assets directly instead of rely
 - `create_model`
 - `run_script`
 - `validate_script`
+- `audit_model`
+- `repair_model`
 - `sync_registry`
 
 **Best uses**:
 - Detect the local Blender executable and workspace readiness
 - Generate a polished, auditable Blender Python authoring script from a model brief
 - Use built-in presets such as `anime_action_character` for stylized playable-character blockouts with clothing layers, weapon silhouettes, rig markers, LOD markers, material IDs, lighting, and preview output
-- Run Blender in background mode to save `.blend` source files, export `.glb`/`.gltf`, and render previews
+- Use `production_character_pipeline` for heavier character assets that need high-poly sculpt support, retopo/game meshes, UVs, generated production-candidate PBR texture sets, texture authoring metadata, bake cages, PBR material tuning, skinning manifests, animation manifests, non-zero facial shape-key deformation, pose-stress validation, art-readiness evidence, visual QA, engine import contracts, IK targets, sockets, collision proxies, LODs, production-stage evidence, and a black-box iteration plan
+- Run Blender in background mode to save `.blend` source files, export `.glb`/`.gltf`, render previews, and receive an automatic post-run audit
+- Use `repair_model` to consume automatic repair queues by regenerating scripts, rerunning Blender, and re-auditing
+- Audit completed Blender assets for required artifacts, GLB validity, texture set completeness, production validation gates, material/skin/animation/facial manifests, pose-stress actions, visual QA reports, engine import contracts, rig/IK/collision/LOD coverage, production manifest, black-box iteration plan, and asset-card metadata
 - Keep all generated model plans, scripts, source assets, runtime exports, and registry entries inside the Reverie project layout
 """
 
@@ -927,14 +942,14 @@ def _get_mode_tool_workflow(mode: str) -> str:
 - Expect `plan_production` to emit `artifacts/game_program.json`, `artifacts/design_intelligence.json`, `artifacts/campaign_program.json`, `artifacts/roster_strategy.json`, `artifacts/live_ops_plan.json`, `artifacts/production_operating_model.json`, `artifacts/reference_intelligence.json`, `artifacts/runtime_capability_graph.json`, `artifacts/runtime_delivery_plan.json`, `artifacts/world_program.json`, `artifacts/region_kits.json`, `artifacts/system_specs.json`, `artifacts/task_graph.json`, `artifacts/content_expansion.json`, `artifacts/asset_pipeline.json`, and `artifacts/resume_state.json`, and expect `generate_vertical_slice` to emit `playtest/slice_score.json`.
 - For large 3D, open-world, or "AAA-like" requests, automatically reduce scope to the first credible playable slice and record deferred systems explicitly.
 - Keep `artifacts/design_intelligence.json` current so personas, onboarding, difficulty, balance probes, accessibility, and large-scene guardrails survive across sessions.
-- When `references/` exists, treat local engine, sample-project, and asset-pipeline repos as first-class planning inputs and keep `artifacts/reference_intelligence.json` current.
+- When `references/` or `.reverie/plugins/<plugin-id>/source` exists, treat local engine, sample-project, source-SDK, and asset-pipeline repos as first-class planning inputs and keep `artifacts/reference_intelligence.json` current.
 - Use `game_project_scaffolder(action="generate_vertical_slice")` when the user wants the repository to turn a compiled request into a real slice scaffold and artifact set.
 - Use `game_design_orchestrator(action="generate_gameplay_factory")`, `plan_boss_arc`, `expand_region`, `generate_character_kit`, and `build_enemy_faction` for specialized follow-up production passes.
 - Default to the repository's existing runtime; otherwise prefer `reverie_engine` for the fastest runnable slice and keep external-engine choices explicit.
-- For extensible 3D action RPG foundations, allow the runtime registry to select `godot` and materialize the Godot scaffold under `engine/godot/`.
+- For extensible 3D action RPG foundations, allow the runtime registry to select `godot` or `o3de` and materialize the open-runtime scaffold under `engine/<runtime>/`.
 - Prefer `reverie_engine`; accept `reverie_engine_lite` as a compatibility alias for existing projects.
 - Treat `blender_modeling_workbench` as the preferred built-in path for direct Blender authoring, `.blend` source generation, `.glb` exports, and preview renders.
-- Use the built-in Blockbench plus Ashfox MCP flow when the project specifically needs `.bbmodel` source editing or an active Blockbench session.
+- Use the built-in Ashfox MCP configuration and headless `.bbmodel` flow when the project specifically needs Blockbench-style source editing or an active Blockbench session.
 - Bring `game_playtest_lab` in early enough to define quality gates and telemetry before the project sprawls, and use `game_playtest_lab(action="run_quality_gates")`, `game_playtest_lab(action="score_combat_feel")`, and `game_playtest_lab(action="plan_next_iteration")` once the slice exists.
 - Treat implementation, balance simulation, runtime testing, playtests, telemetry, and content iteration as one loop.
 - Do not stop at documents alone when the user asked to build a game; push through to runnable implementation and verification.
@@ -967,6 +982,8 @@ def _get_mode_tool_workflow(mode: str) -> str:
 
 - For small, clear tasks, use a lightweight loop: targeted retrieval -> focused edit -> narrow verification -> respond.
 - Treat user-specified libraries, SDK choices, endpoints, payload fields, config knobs, and requested file layouts as acceptance criteria, not suggestions.
+- For black-box, one-shot, `continue`, or "do not stop" requests, keep a private completion ledger and continue through implementation, verification, and repair until the requested outcome is ready or a real external blocker remains.
+- Ask for `userInput` only for irreversible or externally sensitive choices such as credentials, paid downloads, destructive actions, deployments, licensing/business decisions, or contradictory requirements.
 - Retrieve code context first.
 - Use git history when conventions or earlier fixes matter.
 - Edit with the narrowest correct tool.
@@ -975,6 +992,7 @@ def _get_mode_tool_workflow(mode: str) -> str:
 - Do not default to `task_manager` for small deliverables or isolated greenfield scaffolds, even if they span several files.
 - Game production, engine scaffolding, playtesting, and asset-pipeline tools are available directly in Reverie mode; use them here when the user asks for game/runtime/modeling work.
 - For Blender work, use `blender_modeling_workbench` to create auditable authoring scripts and use runtime-plugin tools such as `rc_blender_ensure_runtime` / `rc_blender_run_script` when a protocol-ready Blender plugin is installed.
+- For AAA character-art briefs in base Reverie mode, prefer `production_character_pipeline`, require post-run audit evidence, and continue remediation through art-readiness, texture, rig, animation, engine-contract, and repair-loop gates.
 - For automation, desktop, or agent-style requests, implement the full runtime loop the user described: observe or screenshot -> decide -> act -> verify -> repeat, with explicit stop conditions.
 - Feed action results and the latest observation back into later iterations; do not reset the loop into stateless one-shot calls after each action.
 - When a model returns normalized coordinates or model-space coordinates, implement a dedicated coordinate-mapping layer into the real runtime space before invoking actions.
@@ -1026,7 +1044,7 @@ def _get_compact_tool_surface(mode: str) -> str:
 
     if normalized == "reverie":
         lines.append("- `subagent`: delegate clear, bounded development subtasks to user-configured Subagents when parallel investigation or implementation would help.")
-        lines.append("- `blender_modeling_workbench`: directly generate and run Blender authoring scripts when the task is explicitly about Blender modeling assets.")
+        lines.append("- `blender_modeling_workbench`: directly generate and run Blender authoring scripts when the task is explicitly about Blender modeling assets, including production-character audits and black-box iteration plans.")
         lines.append("- `game_design_orchestrator`, `game_project_scaffolder`, `reverie_engine`, `reverie_engine_lite`, `game_playtest_lab`, and related Gamer tools are available in Reverie mode for game/runtime production.")
         lines.append("- Runtime-plugin tools such as `rc_blender_ensure_runtime`, `rc_blender_runtime_status`, and `rc_blender_run_script` may appear when protocol-ready plugins are installed; inspect them with `tool_catalog` before first use.")
 
@@ -1039,8 +1057,8 @@ def _get_compact_tool_surface(mode: str) -> str:
                 "- `game_design_orchestrator`: compile raw prompts into `game_request.json`, create blueprints, analyze scope, plan production, expand systems, and generate vertical-slice plans.",
                 "- `game_project_scaffolder`: plan or create the runtime, data, tests, playtest, and content-pipeline foundation, upgrade an existing runtime project, apply one system packet, or directly generate a request-backed vertical slice.",
                 "- `reverie_engine` / `reverie_engine_lite`: create, inspect, validate, benchmark, and smoke-test Reverie's built-in runtime projects.",
-                "- `blender_modeling_workbench`: create Blender plans/scripts, run Blender in background mode, export `.blend`/`.glb`/`.gltf`, render previews, and sync the model registry.",
-                "- `game_modeling_workbench`: manage the built-in Blockbench plus Ashfox MCP pipeline, `.bbmodel` stubs, registry sync, and runtime imports.",
+                "- `blender_modeling_workbench`: create Blender plans/scripts, run Blender in background mode, export `.blend`/`.glb`/`.gltf`, render previews, generate production-character audit and black-box iteration evidence, and sync the model registry.",
+                "- `game_modeling_workbench`: manage headless `.bbmodel` stubs/exports, the built-in Ashfox MCP bridge, registry sync, and runtime imports.",
                 "- `game_playtest_lab`: generate telemetry schemas, quality gates, playtest plans, performance budgets, combat-feel reports, continuation plans, and feedback analysis artifacts.",
                 "- Other Gamer tools such as `game_gdd_manager`, `level_design`, `game_asset_manager`, `game_balance_analyzer`, `game_math_simulator`, `game_stats_analyzer`, and `story_design` remain available through `tool_catalog`.",
             ]

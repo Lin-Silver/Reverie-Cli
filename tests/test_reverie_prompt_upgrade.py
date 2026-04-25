@@ -23,6 +23,26 @@ def test_reverie_prompt_adds_package_and_verification_loop_guidance() -> None:
     assert "Before a burst of related retrieval or command calls, briefly tell the user what you are checking and why." in prompt
 
 
+def test_reverie_prompt_adds_black_box_completion_protocol() -> None:
+    prompt = build_system_prompt(model_name="Test Model", mode="reverie")
+
+    assert "Black-Box Completion Protocol" in prompt
+    assert "Treat broad user directives such as `continue`, `complete`, `black box`, `do not stop`, or `one-shot`" in prompt
+    assert "Maintain a private completion ledger" in prompt
+    assert "Ask the user only for irreversible or externally sensitive decisions" in prompt
+    assert "For Blender, game, runtime, or asset-pipeline requests in base Reverie mode" in prompt
+    assert "`production_character_pipeline`" in prompt
+
+
+def test_reverie_tool_workflow_guides_black_box_character_art() -> None:
+    workflow = get_tool_descriptions_for_mode("reverie")
+
+    assert "For black-box, one-shot, `continue`, or \"do not stop\" requests" in workflow
+    assert "Ask for `userInput` only for irreversible or externally sensitive choices" in workflow
+    assert "For AAA character-art briefs in base Reverie mode" in workflow
+    assert "require post-run audit evidence" in workflow
+
+
 def test_shared_coding_guardrails_are_injected_into_all_modes() -> None:
     for mode in (
         "reverie",

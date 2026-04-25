@@ -7,6 +7,7 @@
 --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/   # https://github.com/microsoft/onnxruntime/issues/21684  
 
 accelerate  # Original: accelerate==1.11.0
+av  # Required by recent ComfyUI image/video model paths
 certifi  # Original: certifi==2025.10.5
 charset-normalizer  # Original: charset-normalizer==3.4.4
 colorama  # Original: colorama==0.4.6
@@ -40,6 +41,7 @@ transformers  # Original: transformers==4.46.3
 typing_extensions  # Original: typing_extensions==4.15.0
 urllib3  # Original: urllib3==2.5.0
 zipp  # Original: zipp==3.23.0
+gguf>=0.18.0  # Required by ComfyUI-GGUF custom nodes
 hyperpyyaml  # Original: hyperpyyaml (no version constraint)
 modelscope  # Original: modelscope (no version constraint)
 conformer  # Original: conformer==0.3.2

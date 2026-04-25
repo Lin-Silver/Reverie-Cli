@@ -11,7 +11,7 @@ import zipfile
 from rich.console import Console
 
 from reverie.cli.commands import CommandHandler
-from reverie.plugin.runtime_manager import RuntimePluginManager
+from reverie.plugin.runtime_manager import DEFAULT_RUNTIME_PLUGIN_CATALOG, RuntimePluginManager
 
 
 def _compiled_entry_name(plugin_id: str) -> str:
@@ -524,6 +524,44 @@ def test_plugins_sdk_depot_prepares_portable_runtime_manifest(tmp_path: Path) ->
     status = manager.sdk_package_status("blender", force_refresh=True)
     assert status["status"] == "prepared"
     assert status["download_page"] == "https://www.blender.org/download/"
+
+
+def test_default_runtime_catalog_focuses_open_engine_plugins() -> None:
+    catalog_ids = {item.plugin_id for item in DEFAULT_RUNTIME_PLUGIN_CATALOG}
+
+    assert {"godot", "o3de", "blender"}.issubset(catalog_ids)
+    assert "blockbench" not in catalog_ids
+    assert "unity" not in catalog_ids
+    assert "unreal" not in catalog_ids
+
+
+def test_o3de_sdk_manifest_is_deployable_but_not_directly_launched(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    manifest_path = app_root / ".reverie" / "plugins" / "o3de" / "runtime" / "sdk_manifest.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(json.dumps({"runtime": "o3de", "source_dir": "source/o3de-2510.2"}), encoding="utf-8")
+    manager = RuntimePluginManager(app_root)
+
+    status = manager.sdk_package_status("o3de", force_refresh=True)
+    run_result = manager.run_sdk_package("o3de", deploy_if_missing=False)
+
+    assert status["status"] == "ready"
+    assert status["entry_path"] == manifest_path.resolve(strict=False)
+    assert run_result["success"] is False
+    assert "source-managed" in run_result["error"]
+
+
+def test_godot_sdk_status_detects_nested_plugin_runtime(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    runtime_path = app_root / ".reverie" / "plugins" / "godot" / "runtime" / "4.6.2-stable" / "Godot_v4.6.2-stable_win64.exe"
+    runtime_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime_path.write_text("godot", encoding="utf-8")
+    manager = RuntimePluginManager(app_root)
+
+    status = manager.sdk_package_status("godot", force_refresh=True)
+
+    assert status["status"] == "ready"
+    assert status["entry_path"] == runtime_path.resolve(strict=False)
 
 
 def test_sdk_runtime_entries_do_not_require_rc_handshake(tmp_path: Path) -> None:

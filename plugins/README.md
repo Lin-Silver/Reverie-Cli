@@ -18,7 +18,9 @@ Plugins in Reverie CLI are portable software/runtime bundles, not another user-f
 - `plugins/blender/`
   Official Blender Portable plugin. Its packaged `reverie-blender.exe` embeds `blender-5.1.1-windows-x64.zip` and can unpack it on demand with `rc_blender_ensure_runtime` or `/plugins deploy blender`.
 - `plugins/godot/`
-  Godot runtime manager for detection, registration, download/unpack, project scanning, launch, and headless checks.
+  Godot runtime manager for detection, registration, GitHub release download/unpack, source checkout, project scanning, launch, and headless checks.
+- `plugins/o3de/`
+  O3DE source SDK manager for GitHub version discovery, plugin-local source checkout, and local SDK manifest generation.
 
 ## Fixed Protocol
 

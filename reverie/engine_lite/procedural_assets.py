@@ -327,6 +327,155 @@ def build_gltf_document(mesh: PrimitiveMesh, *, model_name: str) -> Dict[str, An
     }
 
 
+def _merge_meshes(meshes: Iterable[PrimitiveMesh]) -> PrimitiveMesh:
+    vertices: list[float] = []
+    normals: list[float] = []
+    uvs: list[float] = []
+    indices: list[int] = []
+    vertex_offset = 0
+    for mesh in meshes:
+        vertices.extend(mesh.vertices)
+        normals.extend(mesh.normals)
+        uvs.extend(mesh.uvs)
+        indices.extend(int(index) + vertex_offset for index in mesh.indices)
+        vertex_offset += len(mesh.vertices) // 3
+    return PrimitiveMesh(vertices=vertices, normals=normals, uvs=uvs, indices=indices)
+
+
+def _translated_mesh(mesh: PrimitiveMesh, offset: tuple[float, float, float]) -> PrimitiveMesh:
+    vertices: list[float] = []
+    for index in range(0, len(mesh.vertices), 3):
+        vertices.extend(
+            [
+                mesh.vertices[index] + offset[0],
+                mesh.vertices[index + 1] + offset[1],
+                mesh.vertices[index + 2] + offset[2],
+            ]
+        )
+    return PrimitiveMesh(vertices=vertices, normals=list(mesh.normals), uvs=list(mesh.uvs), indices=list(mesh.indices))
+
+
+def _element_box_mesh(element: Dict[str, Any]) -> PrimitiveMesh:
+    start = list(element.get("from") or [0, 0, 0])
+    end = list(element.get("to") or [16, 16, 16])
+    while len(start) < 3:
+        start.append(0)
+    while len(end) < 3:
+        end.append(16)
+    sx, sy, sz = (float(start[0]), float(start[1]), float(start[2]))
+    ex, ey, ez = (float(end[0]), float(end[1]), float(end[2]))
+    width = max(0.001, abs(ex - sx) / 16.0)
+    height = max(0.001, abs(ey - sy) / 16.0)
+    depth = max(0.001, abs(ez - sz) / 16.0)
+    center = (((sx + ex) * 0.5 - 8.0) / 16.0, ((sy + ey) * 0.5) / 16.0, ((sz + ez) * 0.5 - 8.0) / 16.0)
+    return _translated_mesh(build_primitive_mesh("box", width=width, height=height, depth=depth), center)
+
+
+def _read_blockbench_payload(path: Path) -> Dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def validate_blockbench_model_file(path: str | Path) -> Dict[str, Any]:
+    """Validate the subset of `.bbmodel` Reverie can export without Blockbench/Ashfox."""
+    model_path = Path(path)
+    payload = _read_blockbench_payload(model_path)
+    errors: list[str] = []
+    warnings: list[str] = []
+    if not model_path.exists():
+        errors.append(f"Model file not found: {model_path}")
+    if not payload:
+        errors.append("Model JSON is missing or unreadable.")
+    meta = payload.get("meta", {}) if isinstance(payload.get("meta"), dict) else {}
+    elements = payload.get("elements", [])
+    if not isinstance(elements, list):
+        errors.append("Blockbench payload has a non-list `elements` field.")
+        elements = []
+    for index, element in enumerate(elements):
+        if not isinstance(element, dict):
+            errors.append(f"Element {index} is not an object.")
+            continue
+        if not isinstance(element.get("from"), list) or not isinstance(element.get("to"), list):
+            errors.append(f"Element {index} is missing numeric `from`/`to` bounds.")
+    if not elements:
+        warnings.append("No Blockbench elements found; headless export will emit a unit cube starter mesh.")
+    return {
+        "valid": not errors,
+        "errors": errors,
+        "warnings": warnings,
+        "path": str(model_path),
+        "format_version": meta.get("format_version", ""),
+        "model_format": meta.get("model_format", ""),
+        "element_count": len(elements),
+        "texture_count": len(payload.get("textures") or []),
+        "animation_count": len(payload.get("animations") or []),
+        "headless_export_supported": not errors,
+    }
+
+
+def build_blockbench_runtime_mesh(payload: Dict[str, Any]) -> PrimitiveMesh:
+    elements = [item for item in payload.get("elements", []) if isinstance(item, dict)]
+    if not elements:
+        return build_primitive_mesh("box", width=1.0, height=1.0, depth=1.0)
+    return _merge_meshes(_element_box_mesh(element) for element in elements)
+
+
+def create_blockbench_runtime_export(
+    project_root: str | Path,
+    source_path: str | Path,
+    *,
+    dest_name: str | None = None,
+    overwrite: bool = False,
+    create_preview: bool = True,
+) -> Dict[str, Any]:
+    """Export a simple cuboid `.bbmodel` to glTF without requiring Blockbench or Ashfox."""
+    paths = project_modeling_paths(project_root)
+    root = paths["project_root"]
+    source = Path(source_path)
+    if not source.is_absolute():
+        source = (root / source).resolve()
+    validation = validate_blockbench_model_file(source)
+    if validation["errors"]:
+        raise ValueError("; ".join(validation["errors"]))
+
+    payload = _read_blockbench_payload(source)
+    mesh = build_blockbench_runtime_mesh(payload)
+    target_name = _sanitize_name(dest_name or source.stem)
+    runtime_path = paths["runtime_models"] / f"{target_name}.gltf"
+    preview_path = paths["preview_renders"] / f"{target_name}.png"
+    if runtime_path.exists() and not overwrite:
+        raise FileExistsError(f"Target already exists: {runtime_path}")
+    if create_preview and preview_path.exists() and not overwrite:
+        raise FileExistsError(f"Target already exists: {preview_path}")
+    runtime_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime_path.write_text(
+        json.dumps(build_gltf_document(mesh, model_name=target_name), indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    preview_written = ""
+    if create_preview:
+        preview_path.parent.mkdir(parents=True, exist_ok=True)
+        _draw_preview(mesh).save(preview_path, format="PNG")
+        preview_written = str(preview_path)
+    registry = sync_model_registry(root, overwrite=True)
+    return {
+        "source_path": str(source),
+        "runtime_path": str(runtime_path),
+        "preview_path": preview_written,
+        "validation": validation,
+        "registry": registry,
+        "mesh_summary": {
+            "vertex_count": len(mesh.vertices) // 3,
+            "triangle_count": len(mesh.indices) // 3,
+            "source_element_count": int(validation.get("element_count", 0) or 0),
+        },
+        "exporter": "reverie_headless_bbmodel_exporter",
+    }
+
+
 def _draw_preview(mesh: PrimitiveMesh, *, width: int = 768, height: int = 768) -> Image.Image:
     image = Image.new("RGBA", (width, height), (246, 248, 252, 255))
     draw = ImageDraw.Draw(image, "RGBA")
@@ -423,7 +572,10 @@ def create_primitive_model(
 __all__ = [
     "PRIMITIVE_MODEL_TYPES",
     "PrimitiveMesh",
+    "build_blockbench_runtime_mesh",
     "build_gltf_document",
     "build_primitive_mesh",
+    "create_blockbench_runtime_export",
     "create_primitive_model",
+    "validate_blockbench_model_file",
 ]

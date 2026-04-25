@@ -244,7 +244,6 @@ class CodebaseIndexer:
         '.shader', '.glsl', '.hlsl', '.vert', '.frag',
         # Game-specific
         '.tscn', '.tres',  # Godot scenes and resources
-        '.unity', '.prefab',  # Unity
         '.tmx', '.tsx',  # Tiled map editor
     }
     
@@ -385,8 +384,6 @@ class CodebaseIndexer:
         # Game-specific assets
         if ext in {'.tscn', '.tres'}:
             return 'godot_resource'
-        if ext in {'.unity', '.prefab'}:
-            return 'unity_resource'
         if ext in {'.tmx', '.tsx'}:
             return 'tilemap'
         
@@ -1445,7 +1442,6 @@ class CodebaseIndexer:
             'font': [],
             'shader': [],
             'godot_resource': [],
-            'unity_resource': [],
             'tilemap': [],
             'other': []
         }

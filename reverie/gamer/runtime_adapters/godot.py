@@ -3750,44 +3750,61 @@ class GodotRuntimeAdapter(BaseRuntimeAdapter):
     )
     template_support = ("third_person_action", "action_rpg_slice")
 
-    def _detect_plugin_runtime(self, root: Path) -> tuple[bool, str]:
+    def _detect_plugin_runtime(self, root: Path) -> tuple[bool, str, bool, str]:
         plugin_root = root / ".reverie" / "plugins" / "godot"
         if not plugin_root.exists():
-            return False, str(plugin_root)
+            return False, str(plugin_root), False, str(plugin_root / "source")
         patterns = (
             "reverie-godot*.exe",
             "godot.exe",
             "godot*.exe",
             "Godot*.exe",
             "bin/Godot*.exe",
+            "runtime/**/*.exe",
+            "runtime/**/Godot*.exe",
+            "runtime/**/godot*.exe",
         )
         for pattern in patterns:
             if list(plugin_root.glob(pattern)):
-                return True, str(plugin_root)
-        return False, str(plugin_root)
+                return True, str(plugin_root), self._has_plugin_source(plugin_root), str(plugin_root / "source")
+        return False, str(plugin_root), self._has_plugin_source(plugin_root), str(plugin_root / "source")
+
+    def _has_plugin_source(self, plugin_root: Path) -> bool:
+        source_root = plugin_root / "source"
+        if not source_root.exists():
+            return False
+        for candidate in source_root.iterdir():
+            if candidate.is_dir() and ((candidate / ".git").exists() or (candidate / "SConstruct").exists()):
+                return True
+        return False
 
     def detect(self, project_root: Path, app_root: Path | None = None) -> RuntimeProfile:
         root = Path(app_root or project_root).resolve()
-        runtime_ready, plugin_install = self._detect_plugin_runtime(root)
+        runtime_ready, plugin_install, source_ready, source_root = self._detect_plugin_runtime(root)
+        health = "ready" if runtime_ready else ("source-sdk-ready" if source_ready else "artifact-validated")
+        source = "runtime-plugin" if runtime_ready else ("source-sdk-plugin" if source_ready else "built-in-artifact-validation")
         return RuntimeProfile(
             id=self.runtime_id,
             display_name=self.display_name,
             available=True,
             can_scaffold=True,
-            can_validate=runtime_ready,
+            can_validate=True,
             external=self.external,
             maturity=self.maturity,
-            source="runtime-plugin" if runtime_ready else "scaffold-template",
+            source=source,
             version="",
-            capabilities=list(self.capability_tags),
+            capabilities=list(self.capability_tags) + ["artifact-validation", "source-sdk"],
             template_support=list(self.template_support),
-            health="ready" if runtime_ready else "scaffold-only",
+            health=health,
             notes=[
                 "Preferred external runtime for extensible third-person 3D slices.",
-                "Validation upgrades automatically when the Godot runtime plugin is installed.",
+                "Built-in artifact validation checks the scaffold and data contracts even without the Godot runtime plugin.",
+                "Validation upgrades to native headless Godot checks when the runtime plugin is installed.",
+                "Godot source checkouts are managed under the plugin-local depot when source inspection or engine builds are needed.",
             ],
             paths={
                 "plugin_install": plugin_install,
+                "plugin_source_root": source_root,
                 "project_root": str(Path(project_root).resolve()),
             },
         )
@@ -3879,5 +3896,6 @@ class GodotRuntimeAdapter(BaseRuntimeAdapter):
             "valid": all(item["ok"] for item in checks),
             "checks": checks,
             "project_root": str(runtime_root),
+            "validation_mode": "artifact_validation",
             "notes": ["Headless Godot validation can run through the runtime plugin when available."],
         }

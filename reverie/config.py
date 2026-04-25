@@ -193,9 +193,9 @@ def default_gamer_mode_config() -> Dict[str, Any]:
     return {
         "target_engine": "reverie_engine",
         "supported_dimensions": ["2D", "2.5D", "3D"],
-        "supported_engines": ["reverie_engine", "reverie_engine_lite", "custom", "web", "pygame", "love2d", "cocos2d", "godot", "unity", "unreal"],
+        "supported_engines": ["reverie_engine", "reverie_engine_lite", "custom", "web", "pygame", "love2d", "cocos2d", "godot", "o3de"],
         "supported_frameworks": [
-            "reverie_engine", "reverie_engine_lite", "phaser", "pixijs", "threejs", "pygame", "love2d", "cocos2d", "godot", "unity", "unreal"
+            "reverie_engine", "reverie_engine_lite", "phaser", "pixijs", "threejs", "pygame", "love2d", "cocos2d", "godot", "o3de"
         ],
         "asset_tracking_enabled": True,
         "asset_packaging_enabled": True,
@@ -384,10 +384,10 @@ def _tti_display_name_from_path(path: str, fallback_index: int) -> str:
     return f"tti-model-{fallback_index + 1}"
 
 
-def normalize_tti_models(raw_models: Any, legacy_model_paths: Any = None) -> List[Dict[str, str]]:
+def normalize_tti_models(raw_models: Any, legacy_model_paths: Any = None) -> List[Dict[str, Any]]:
     """
     Normalize TTI model configuration into:
-    [{"path": "...", "display_name": "...", "introduction": "..."}]
+    [{"path": "...", "display_name": "...", "introduction": "...", ...}]
     """
     merged_entries: List[Any] = []
 
@@ -405,6 +405,8 @@ def normalize_tti_models(raw_models: Any, legacy_model_paths: Any = None) -> Lis
         path_value = ""
         display_name = ""
         introduction = ""
+
+        extra_fields: Dict[str, Any] = {}
 
         if isinstance(entry, str):
             path_value = sanitize_tti_path(entry)
@@ -430,6 +432,58 @@ def normalize_tti_models(raw_models: Any, legacy_model_paths: Any = None) -> Lis
                 raw_intro = entry.get("intro", "")
             if raw_intro is not None:
                 introduction = str(raw_intro)
+
+            path_like_keys = {
+                "clip_model",
+                "vae_model",
+                "prompt_enhancer_model",
+                "text_encoder",
+                "vae",
+                "workflow_path",
+                "model_file",
+                "main_model",
+                "diffusion_model",
+            }
+            for key in (
+                "format",
+                "model_format",
+                "architecture",
+                "family",
+                "model_file",
+                "main_model",
+                "diffusion_model",
+                "clip_model",
+                "vae_model",
+                "prompt_enhancer_model",
+                "text_encoder",
+                "vae",
+                "clip_type",
+                "workflow_path",
+                "source_url",
+                "license",
+                "recommended_width",
+                "recommended_height",
+                "recommended_steps",
+                "recommended_cfg",
+                "recommended_sampler",
+                "recommended_scheduler",
+                "requires_auxiliary_models",
+                "auto_install_missing_deps",
+            ):
+                if key not in entry:
+                    continue
+                value = entry.get(key)
+                if value is None:
+                    continue
+                if key in path_like_keys:
+                    value = sanitize_tti_path(value)
+                    if not value:
+                        continue
+                elif isinstance(value, str):
+                    value = value.strip()
+                    if not value:
+                        continue
+                extra_fields[key] = value
         else:
             continue
 
@@ -453,13 +507,13 @@ def normalize_tti_models(raw_models: Any, legacy_model_paths: Any = None) -> Lis
         display_name = candidate
         used_display_names.add(display_name.lower())
 
-        models.append(
-            {
-                "path": path_value,
-                "display_name": display_name,
-                "introduction": introduction,
-            }
-        )
+        normalized_entry: Dict[str, Any] = {
+            "path": path_value,
+            "display_name": display_name,
+            "introduction": introduction,
+        }
+        normalized_entry.update(extra_fields)
+        models.append(normalized_entry)
 
     return models
 

@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 import py_compile
+import json
 
 from reverie.agent.tool_descriptions import get_tool_descriptions_for_mode
 from reverie.agent.tool_executor import ToolExecutor
+import reverie.engine_lite.blender_modeling as bm
 from reverie.engine_lite.blender_modeling import (
+    audit_blender_model,
     create_blender_authoring_job,
     infer_blender_preset,
+    repair_blender_model,
     validate_blender_script_text,
 )
 from reverie.tools.blender_modeling_workbench import BlenderModelingWorkbenchTool
@@ -90,17 +94,39 @@ def test_blender_production_character_pipeline_builds_full_authoring_stack(tmp_p
     assert job["spec"]["quality_targets"]["retopo_low_collection"] is True
     assert job["spec"]["quality_targets"]["uv_layout"] is True
     assert job["spec"]["quality_targets"]["texture_exports"] is True
+    assert job["spec"]["quality_targets"]["procedural_texture_authoring"] is True
     assert job["spec"]["quality_targets"]["skeletal_rig"] is True
     assert job["spec"]["quality_targets"]["animation_actions"] is True
     assert job["spec"]["quality_targets"]["ik_control_markers"] is True
     assert job["spec"]["quality_targets"]["lod_variants"] is True
     assert job["spec"]["quality_targets"]["vertex_group_weights"] is True
+    assert job["spec"]["quality_targets"]["material_tuning_pass"] is True
+    assert job["spec"]["quality_targets"]["skinning_manifest"] is True
+    assert job["spec"]["quality_targets"]["animation_manifest"] is True
+    assert job["spec"]["quality_targets"]["facial_deformation_manifest"] is True
+    assert job["spec"]["quality_targets"]["pose_stress_validation"] is True
+    assert job["spec"]["quality_targets"]["visual_qa_report"] is True
+    assert job["spec"]["quality_targets"]["engine_import_contract"] is True
+    assert job["spec"]["quality_targets"]["production_stage_manifest"] is True
     assert job["spec"]["quality_targets"]["asset_validation_report"] is True
+    assert job["spec"]["quality_targets"]["automation_iteration_plan"] is True
 
     script_path = Path(job["paths"]["script"])
     script_text = script_path.read_text(encoding="utf-8")
     assert "build_production_character_pipeline" in script_text
-    assert "create_texture_placeholders" in script_text
+    assert "create_production_texture_set" in script_text
+    assert "create_texture_placeholders" not in script_text
+    assert "create_procedural_texture_image" in script_text
+    assert "cloth_weave" in script_text
+    assert "edge_wear" in script_text
+    assert "material_id_zones" in script_text
+    assert "material_role_from_name" in script_text
+    assert "role_tint" in script_text
+    assert "reverie_material_role" in script_text
+    assert "node_texture_set_available_without_flattening_role_color" in script_text
+    assert "normal_map.inputs[\"Strength\"].default_value" in script_text
+    assert "reverie.blender_texture_authoring_manifest.v1" in script_text
+    assert "reverie.blender_art_readiness_report.v1" in script_text
     assert "create_humanoid_rig" in script_text
     assert "assign_runtime_vertex_groups" in script_text
     assert "create_lod_variants" in script_text
@@ -110,12 +136,194 @@ def test_blender_production_character_pipeline_builds_full_authoring_stack(tmp_p
     assert "create_expression_shape_keys" in script_text
     assert "create_attachment_sockets" in script_text
     assert "create_turntable_camera_animation" in script_text
+    assert "collect_mesh_metrics" in script_text
+    assert "quality_gate" in script_text
+    assert "create_runtime_asset_card" in script_text
+    assert "create_collision_proxies" in script_text
+    assert "tune_runtime_materials" in script_text
+    assert "create_skinning_manifest" in script_text
+    assert "create_animation_manifest" in script_text
+    assert "create_pose_stress_action" in script_text
+    assert "create_ik_constraint_targets" in script_text
+    assert "create_art_readiness_report" in script_text
+    assert "create_visual_qa_report" in script_text
+    assert "facial_landmark_visibility" in script_text
+    assert "material_role_coverage" in script_text
+    assert "render_helper_exclusion" in script_text
+    assert "character_detail_floor" in script_text
+    assert "create_engine_import_contract" in script_text
+    assert "create_production_manifest" in script_text
+    assert "create_blackbox_iteration_plan" in script_text
+    assert "reverie.blender_blackbox_iteration_plan.v1" in script_text
+    assert "reverie.blender_facial_manifest.v1" in script_text
+    assert "left_eye_white_sclera" in script_text
+    assert "left_iris_catchlight" in script_text
+    assert "left_eye_gloss_lens" in script_text
+    assert "nose_soft_plane" in script_text
+    assert "mouth_shadow_curve" in script_text
+    assert "nameplate.hide_render = True" in script_text
+    assert "pipeline_label.hide_render = True" in script_text
+    assert "for name in (\"high\", \"bake\", \"rig\", \"preview\", \"collision\")" in script_text
+    assert "\"finger_\" + side_name + \"_\" + str(finger_index + 1)" in script_text
+    assert "layered_back_cape_panel" in script_text
+    assert "knee_guard_layer" in script_text
+    assert "chest_layered_armor_trim" in script_text
     assert "retopo_low" in script_text
     assert str(job["paths"]["texture_basecolor"]).endswith("aurora_vanguard_basecolor.png")
     assert str(job["paths"]["texture_id"]).endswith("aurora_vanguard_id.png")
     assert str(job["paths"]["validation_report"]).endswith("aurora_vanguard_validation.json")
+    assert str(job["paths"]["asset_card"]).endswith("aurora_vanguard_asset_card.json")
+    assert str(job["paths"]["production_manifest"]).endswith("aurora_vanguard_production_manifest.json")
+    assert str(job["paths"]["qa_report"]).endswith("aurora_vanguard_qa_report.json")
+    assert str(job["paths"]["engine_contract"]).endswith("aurora_vanguard_engine_contract.json")
+    assert str(job["paths"]["iteration_plan"]).endswith("aurora_vanguard_iteration_plan.json")
 
     py_compile.compile(str(script_path), doraise=True)
+
+
+def test_blender_model_audit_scores_complete_artifacts_without_blender(tmp_path: Path) -> None:
+    job = create_blender_authoring_job(
+        tmp_path,
+        brief="AAA final character asset with high poly retopo UV texture bake rigged animation",
+        model_name="Audit Hero",
+        overwrite=True,
+    )
+    paths = {key: Path(value) for key, value in job["paths"].items()}
+    for key in ("blend", "texture_basecolor", "texture_normal", "texture_orm", "texture_id"):
+        paths[key].parent.mkdir(parents=True, exist_ok=True)
+        paths[key].write_bytes(b"placeholder")
+    paths["runtime"].parent.mkdir(parents=True, exist_ok=True)
+    paths["runtime"].write_bytes(b"glTF" + (2).to_bytes(4, "little") + (12).to_bytes(4, "little"))
+    paths["metadata"].parent.mkdir(parents=True, exist_ok=True)
+    paths["metadata"].write_text(
+        json.dumps(
+            {
+                "schema": "reverie.blender_authoring_result.v1",
+                "object_count": 8,
+                "mesh_count": 4,
+                "export_selection": ["hero_mesh_game", "hero_rig"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    validation = {
+        "passed": True,
+        "score": 100,
+        "low_mesh_count": 1,
+        "weighted_mesh_count": 1,
+        "uv_ready_mesh_count": 1,
+        "material_id_mesh_count": 1,
+        "bake_cage_count": 1,
+        "texture_authoring_passed": True,
+        "lod_count": 2,
+        "collision_proxy_count": 5,
+        "material_tuning_mesh_count": 1,
+        "skinning_manifest_mesh_count": 1,
+        "animation_clip_count": 2,
+        "ik_constraint_count": 4,
+        "facial_deformation_count": 12,
+        "pose_stress_frame_count": 3,
+        "art_readiness_passed": True,
+        "visual_qa_passed": True,
+        "engine_import_contract_passed": True,
+        "has_armature": True,
+        "action_count": 2,
+        "texture_count": 4,
+    }
+    quality_gates = [{"id": "unit_gate", "passed": True, "detail": "ok"}]
+    paths["validation_report"].write_text(
+        json.dumps(
+            {
+                "schema": "reverie.blender_asset_validation.v1",
+                "validation": validation,
+                "quality_gates": quality_gates,
+                "pipeline": {
+                    "collections": ["high_poly", "retopo_low"],
+                    "actions": ["idle", "attack"],
+                    "sockets": ["weapon"],
+                    "rig_controls": ["head"],
+                    "ik_targets": ["hand"],
+                    "ik_constraints": [{"name": "rv_ik_hand", "bone": "forearm.R", "target": "hand", "chain_count": 2}],
+                    "collision_proxies": ["ucx_body"],
+                    "shape_keys": ["blink_L"],
+                    "texture_authoring_manifest": {"schema": "reverie.blender_texture_authoring_manifest.v1"},
+                    "facial_manifest": {"shapes": {"blink_L": {"affected_vertices": 12}}},
+                    "pose_stress_report": {"frames": [1, 18, 36], "action": "stress"},
+                    "art_readiness_report": {"passed": True},
+                    "visual_qa_report": {"passed": True},
+                    "engine_import_contract": {"passed": True},
+                    "iteration_plan": {"schema": "reverie.blender_blackbox_iteration_plan.v1", "state": "ready"},
+                    "material_tuning": {"meshes": {"hero_mesh_game": {}}},
+                    "skinning_manifest": {"meshes": {"hero_mesh_game": {}}},
+                    "animation_manifest": {"clips": ["idle", "attack"]},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    paths["production_manifest"].write_text(
+        json.dumps(
+            {
+                "schema": "reverie.blender_production_manifest.v1",
+                "pipeline_state": "complete",
+                "stages": [
+                    {"id": "retopo_low", "status": "passed", "evidence_count": 1},
+                    {"id": "visual_qa", "status": "passed", "evidence_count": 1},
+                    {"id": "engine_import", "status": "passed", "evidence_count": 1},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    paths["qa_report"].write_text(
+        json.dumps(
+            {
+                "schema": "reverie.blender_visual_qa_report.v1",
+                "passed": True,
+                "checks": [{"id": "silhouette_readability", "passed": True}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    paths["engine_contract"].write_text(
+        json.dumps(
+            {
+                "schema": "reverie.engine_import_contract.v1",
+                "passed": True,
+                "runtime_format": "glb",
+                "animation_clips": ["idle", "attack"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    paths["iteration_plan"].write_text(
+        json.dumps(
+            {
+                "schema": "reverie.blender_blackbox_iteration_plan.v1",
+                "state": "ready",
+                "automatic_repair_queue": [],
+                "blocking_decisions": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    paths["asset_card"].write_text(
+        json.dumps(
+            {
+                "schema": "reverie.blender_production_asset_card.v1",
+                "runtime_contract": {"format": "glb"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    audit = audit_blender_model(tmp_path, "Audit Hero")
+
+    assert audit["status"] == "passed"
+    assert audit["passed"] is True
+    assert audit["runtime_summary"]["valid_header"] is True
+    assert audit["iteration_plan"]["state"] == "ready"
+    assert audit["failed_gates"] == []
 
 
 def test_blender_script_validation_blocks_unsafe_modules() -> None:
@@ -123,6 +331,45 @@ def test_blender_script_validation_blocks_unsafe_modules() -> None:
 
     assert ok is False
     assert "blocked import: socket" in issues
+
+
+def test_blender_repair_loop_records_blocked_attempt_without_blender(tmp_path: Path, monkeypatch) -> None:
+    job = create_blender_authoring_job(
+        tmp_path,
+        brief="AAA final character asset with high poly retopo UV texture bake rigged animation",
+        model_name="Repair Hero",
+        overwrite=True,
+    )
+    paths = {key: Path(value) for key, value in job["paths"].items()}
+    paths["iteration_plan"].parent.mkdir(parents=True, exist_ok=True)
+    paths["iteration_plan"].write_text(
+        json.dumps(
+            {
+                "schema": "reverie.blender_blackbox_iteration_plan.v1",
+                "state": "continue",
+                "automatic_repair_queue": [
+                    {"id": "runtime_export", "source": "quality_gate", "action": "rerun", "verification": "audit"}
+                ],
+                "blocking_decisions": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_run(*args, **kwargs):
+        return {"success": False, "exit_code": -1, "stderr": "fake blender unavailable", "blocked": False}
+
+    monkeypatch.setattr(bm, "run_blender_script", fake_run)
+
+    report = repair_blender_model(tmp_path, "Repair Hero", max_iterations=1)
+    updated_plan = json.loads(paths["iteration_plan"].read_text(encoding="utf-8"))
+
+    assert report["success"] is False
+    assert report["attempt_count"] == 1
+    assert report["attempts"][0]["repair_ids"] == ["runtime_export"]
+    assert updated_plan["state"] == "blocked"
+    assert updated_plan["repair_history"][0]["status"] == "blocked"
+    assert Path(report["repair_report_path"]).exists()
 
 
 def test_blender_tool_is_visible_and_prompted_in_reverie_and_gamer(tmp_path: Path) -> None:
@@ -136,6 +383,7 @@ def test_blender_tool_is_visible_and_prompted_in_reverie_and_gamer(tmp_path: Pat
     assert "blender_modeling_workbench" in reverie_names
     assert "blender_modeling_workbench" in gamer_names
     assert "rc_blender_ensure_runtime" in reverie_prompt
+    assert "black-box iteration plan" in reverie_prompt
     assert "direct Blender authoring" in gamer_prompt
 
 

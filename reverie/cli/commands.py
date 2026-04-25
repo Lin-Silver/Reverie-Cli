@@ -7323,7 +7323,7 @@ class CommandHandler:
             target_engine = Prompt.ask(
                 f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Target Engine",
                 default="reverie_engine",
-                choices=["reverie_engine", "reverie_engine_lite", "custom", "phaser", "pixijs", "threejs", "pygame", "love2d", "godot", "unity", "unreal"]
+                choices=["reverie_engine", "reverie_engine_lite", "custom", "phaser", "pixijs", "threejs", "pygame", "love2d", "godot", "o3de"]
             )
             target_platform = Prompt.ask(
                 f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Target Platform",
@@ -7729,7 +7729,7 @@ class CommandHandler:
             target_engine = Prompt.ask(
                 f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Target Engine",
                 default="reverie_engine",
-                choices=["reverie_engine", "reverie_engine_lite", "custom", "phaser", "pixijs", "threejs", "pygame", "love2d", "godot", "unity", "unreal"],
+                choices=["reverie_engine", "reverie_engine_lite", "custom", "phaser", "pixijs", "threejs", "pygame", "love2d", "godot", "o3de"],
             ).strip()
             camera_model = Prompt.ask(
                 f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Camera Model",
@@ -8144,7 +8144,7 @@ class CommandHandler:
         if action in {"renpy", "import-renpy"}:
             script_path = tokens[1] if len(tokens) > 1 else Prompt.ask(
                 f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Ren'Py Script Path",
-                default="references/renpy-master/testcases/game/tests/test_game_flow.rpy",
+                default="scripts/dialogue.rpy",
             ).strip()
             conversation_id = tokens[2] if len(tokens) > 2 else Prompt.ask(
                 f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Conversation ID (optional)",
@@ -8252,6 +8252,8 @@ class CommandHandler:
                         "/modeling sync",
                         "/modeling stub [model_name]",
                         "/modeling primitive [box|plane|pyramid|sphere] [model_name]",
+                        "/modeling validate-bbmodel <source_bbmodel>",
+                        "/modeling export-bbmodel <source_bbmodel> [dest_name]",
                         "/modeling import <runtime_export> [source_bbmodel] [preview_image] [dest_name]",
                         "/tools  # shows built-in Ashfox MCP tools when Blockbench + plugin are running",
                         "/modeling ashfox tools",
@@ -8337,6 +8339,42 @@ class CommandHandler:
                 overwrite=overwrite,
             )
             self._print_tool_result("Primitive Model", result)
+            return True
+
+        if action in {"validate-bbmodel", "validate_bbmodel", "bbvalidate"}:
+            bbmodel_path = tokens[1] if len(tokens) > 1 else Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] `.bbmodel` Path"
+            ).strip()
+            result = tool.execute(
+                action="validate_blockbench_model",
+                output_dir=output_dir,
+                bbmodel_path=bbmodel_path,
+            )
+            self._print_tool_result("Blockbench Headless Validation", result)
+            return True
+
+        if action in {"export-bbmodel", "export_bbmodel", "bbexport"}:
+            bbmodel_path = tokens[1] if len(tokens) > 1 else Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] `.bbmodel` Path"
+            ).strip()
+            dest_name = tokens[2] if len(tokens) > 2 else Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Target Name (optional)",
+                default="",
+            ).strip()
+            overwrite = Confirm.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Overwrite generated runtime export if it exists?",
+                default=False,
+            )
+            kwargs = {
+                "action": "export_blockbench_model",
+                "output_dir": output_dir,
+                "bbmodel_path": bbmodel_path,
+                "overwrite": overwrite,
+            }
+            if dest_name:
+                kwargs["dest_name"] = dest_name
+            result = tool.execute(**kwargs)
+            self._print_tool_result("Blockbench Headless Export", result)
             return True
 
         if action == "import":
@@ -8438,7 +8476,7 @@ class CommandHandler:
                 return True
 
         self.console.print(
-            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /modeling [status|setup|sync|stub|primitive|import|ashfox][/{self.theme.AMBER_GLOW}]"
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /modeling [status|setup|sync|stub|primitive|validate-bbmodel|export-bbmodel|import|ashfox][/{self.theme.AMBER_GLOW}]"
         )
         return True
 
@@ -8472,6 +8510,8 @@ class CommandHandler:
                         ("/blender create <model_name> <brief>", "Generate and run Blender to save `.blend`, export `.glb`, and render a preview"),
                         ("/blender run <script_path>", "Run a workspace-local Blender Python script in background mode"),
                         ("/blender validate <script_path>", "Run Reverie's conservative static scan against a Blender script"),
+                        ("/blender audit <model_name>", "Audit generated `.blend`/`.glb`/textures/rig/actions/collision/LOD gates"),
+                        ("/blender repair <model_name>", "Consume the black-box repair queue: regenerate, rerun Blender, and re-audit"),
                         ("/blender sync", "Regenerate `data/models/model_registry.yaml`"),
                     ],
                     title="Blender Commands",
@@ -8564,13 +8604,35 @@ class CommandHandler:
             self._print_tool_result("Blender Script Validation", result)
             return True
 
+        if action in {"audit", "qa", "quality"}:
+            model_name = tokens[1] if len(tokens) > 1 else Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Model Name"
+            ).strip()
+            result = tool.execute(action="audit_model", output_dir=output_dir, model_name=model_name)
+            self._print_tool_result("Blender Model Audit", result)
+            return True
+
+        if action in {"repair", "fix", "iterate"}:
+            model_name = tokens[1] if len(tokens) > 1 else Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Model Name"
+            ).strip()
+            max_iterations = int(tokens[2]) if len(tokens) > 2 and tokens[2].isdigit() else 3
+            result = tool.execute(
+                action="repair_model",
+                output_dir=output_dir,
+                model_name=model_name,
+                max_iterations=max_iterations,
+            )
+            self._print_tool_result("Blender Black-Box Repair", result)
+            return True
+
         if action in {"sync", "registry"}:
             result = tool.execute(action="sync_registry", output_dir=output_dir)
             self._print_tool_result("Blender Model Registry", result)
             return True
 
         self.console.print(
-            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /blender [status|setup|script|create|run|validate|sync][/{self.theme.AMBER_GLOW}]"
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /blender [status|setup|script|create|run|validate|audit|repair|sync][/{self.theme.AMBER_GLOW}]"
         )
         return True
     

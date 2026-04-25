@@ -11,11 +11,13 @@ from ..engine import (
     ASHFOX_MCP_SERVER_NAME,
     PRIMITIVE_MODEL_TYPES,
     copy_imported_model,
+    create_blockbench_runtime_export,
     create_model_stub,
     create_primitive_model,
     inspect_modeling_workspace,
     materialize_modeling_workspace,
     sync_model_registry,
+    validate_blockbench_model_file,
 )
 
 
@@ -27,8 +29,8 @@ class GameModelingWorkbenchTool(BaseTool):
     tool_tags = ("game", "model", "blockbench", "ashfox", "gltf", "3d", "asset")
     description = (
         "Manage Reverie-Gamer's built-in modeling workflow: inspect Blockbench and Ashfox MCP availability, "
-        "materialize workspace folders, create `.bbmodel` stubs, import runtime exports, and call the built-in "
-        "Ashfox MCP server."
+        "materialize workspace folders, create `.bbmodel` stubs, run headless `.bbmodel` validation/export, "
+        "import runtime exports, and call the built-in Ashfox MCP server when available."
     )
 
     parameters = {
@@ -42,6 +44,8 @@ class GameModelingWorkbenchTool(BaseTool):
                     "sync_registry",
                     "create_model_stub",
                     "generate_primitive",
+                    "validate_blockbench_model",
+                    "export_blockbench_model",
                     "import_export",
                     "list_ashfox_tools",
                     "ashfox_call",
@@ -53,6 +57,7 @@ class GameModelingWorkbenchTool(BaseTool):
             "relative_path": {"type": "string", "description": "Optional explicit path for the created `.bbmodel`"},
             "source_path": {"type": "string", "description": "Runtime export to import into `assets/models/runtime`"},
             "source_model_path": {"type": "string", "description": "Optional source authoring file to copy into `assets/models/source`"},
+            "bbmodel_path": {"type": "string", "description": "Workspace-local `.bbmodel` path for headless validation/export"},
             "preview_path": {"type": "string", "description": "Optional preview image path for the model"},
             "dest_name": {"type": "string", "description": "Optional target stem for imported files"},
             "endpoint": {"type": "string", "description": "Ashfox MCP endpoint override for status text"},
@@ -94,6 +99,10 @@ class GameModelingWorkbenchTool(BaseTool):
                 return self._create_stub(project_root, kwargs)
             if action == "generate_primitive":
                 return self._generate_primitive(project_root, kwargs)
+            if action == "validate_blockbench_model":
+                return self._validate_blockbench_model(project_root, kwargs)
+            if action == "export_blockbench_model":
+                return self._export_blockbench_model(project_root, kwargs)
             if action == "import_export":
                 return self._import_export(project_root, kwargs)
             if action == "list_ashfox_tools":
@@ -181,8 +190,8 @@ class GameModelingWorkbenchTool(BaseTool):
             f"Prepared Reverie-Gamer modeling workspace in {project_root}\n"
             f"Directories created: {len(result['directories'])}\n"
             f"Files written: {len(result['files'])}\n"
-            f"Blockbench desktop: {'detected' if result['stack']['blockbench']['installed'] else 'manual install required'}\n"
-            f"Ashfox MCP: {'reachable' if result['stack']['ashfox']['reachable'] else 'launch Blockbench with the Ashfox plugin'}"
+            f"Blockbench desktop: {'detected' if result['stack']['blockbench']['installed'] else 'optional for visual editing'}\n"
+            f"Ashfox MCP: {'reachable' if result['stack']['ashfox']['reachable'] else 'built-in config seeded; start Blockbench/Ashfox only for live editor automation'}"
         )
         return ToolResult.ok(output, result)
 
@@ -247,6 +256,52 @@ class GameModelingWorkbenchTool(BaseTool):
         if generated.get("preview_path"):
             output += f"\nPreview image: {generated['preview_path']}"
         return ToolResult.ok(output, generated)
+
+    def _bbmodel_path_arg(self, kwargs: Dict[str, Any]) -> str:
+        return str(kwargs.get("bbmodel_path") or kwargs.get("source_model_path") or kwargs.get("source_path") or "").strip()
+
+    def _validate_blockbench_model(self, project_root: Path, kwargs: Dict[str, Any]) -> ToolResult:
+        raw_path = self._bbmodel_path_arg(kwargs)
+        if not raw_path:
+            return ToolResult.fail("bbmodel_path is required for validate_blockbench_model")
+        model_path = self._resolve_project_path(project_root, raw_path, purpose="resolve Blockbench model")
+        validation = validate_blockbench_model_file(model_path)
+        output = (
+            f"Blockbench headless validation: {'passed' if validation.get('valid') else 'failed'}\n"
+            f"Path: {model_path}\n"
+            f"Elements: {validation.get('element_count', 0)} | Textures: {validation.get('texture_count', 0)} | Animations: {validation.get('animation_count', 0)}"
+        )
+        if validation.get("warnings"):
+            output += "\nWarnings:\n" + "\n".join(f"- {item}" for item in validation["warnings"])
+        if validation.get("errors"):
+            output += "\nErrors:\n" + "\n".join(f"- {item}" for item in validation["errors"])
+            return ToolResult.fail(output)
+        return ToolResult.ok(output, validation)
+
+    def _export_blockbench_model(self, project_root: Path, kwargs: Dict[str, Any]) -> ToolResult:
+        raw_path = self._bbmodel_path_arg(kwargs)
+        if not raw_path:
+            return ToolResult.fail("bbmodel_path is required for export_blockbench_model")
+        model_path = self._resolve_project_path(project_root, raw_path, purpose="resolve Blockbench model export")
+        exported = create_blockbench_runtime_export(
+            project_root,
+            model_path,
+            dest_name=kwargs.get("dest_name"),
+            overwrite=bool(kwargs.get("overwrite", False)),
+            create_preview=bool(kwargs.get("create_preview", True)),
+        )
+        output = (
+            "Exported Blockbench model through Reverie's headless fallback\n"
+            f"Source: {model_path}\n"
+            f"Runtime target: {exported.get('runtime_path', '')}\n"
+            f"Triangles: {exported.get('mesh_summary', {}).get('triangle_count', 0)} | "
+            f"Vertices: {exported.get('mesh_summary', {}).get('vertex_count', 0)}\n"
+            f"Registry synced: {exported.get('registry', {}).get('registry_path', '')}"
+        )
+        warnings = exported.get("validation", {}).get("warnings", [])
+        if warnings:
+            output += "\nWarnings:\n" + "\n".join(f"- {item}" for item in warnings)
+        return ToolResult.ok(output, exported)
 
     def _import_export(self, project_root: Path, kwargs: Dict[str, Any]) -> ToolResult:
         source_path = str(kwargs.get("source_path") or "").strip()

@@ -475,6 +475,7 @@ def _augment_reverie_engine_slice(
         "modeling_workspace": asset_pipeline.get("modeling_workspace", {}),
         "content_sets": asset_pipeline.get("content_sets", {}),
         "modeling_seed": asset_pipeline.get("modeling_seed", []),
+        "starter_asset_packages": asset_pipeline.get("starter_asset_packages", []),
     }
     asset_import_profile_payload = {
         "runtime_delivery": asset_pipeline.get("runtime_delivery", {}),
@@ -1652,6 +1653,7 @@ def _augment_godot_slice(
             "modeling_workspace": asset_pipeline.get("modeling_workspace", {}),
             "content_sets": asset_pipeline.get("content_sets", {}),
             "modeling_seed": asset_pipeline.get("modeling_seed", []),
+            "starter_asset_packages": asset_pipeline.get("starter_asset_packages", []),
         },
         runtime_root / "data" / "asset_import_profile.json": {
             "runtime_delivery": asset_pipeline.get("runtime_delivery", {}),

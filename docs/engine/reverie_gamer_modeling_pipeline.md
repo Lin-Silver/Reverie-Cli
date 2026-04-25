@@ -7,8 +7,8 @@ Reverie CLI includes a built-in modeling workflow for `Reverie-Gamer`.
 The pipeline standardizes how modeled assets move from authoring to runtime:
 
 - Blender for direct `.blend` authoring, procedural asset generation, preview rendering, and `.glb`/`.gltf` export
-- Blockbench for editing and authoring
-- Ashfox for validation, preview, export, and automation
+- a built-in Ashfox MCP server configuration for live Blockbench automation when an editor session is already running
+- headless `.bbmodel` validation/export for simple Blockbench-style cuboid assets
 - Reverie Engine for import, registry, and runtime-facing structure
 
 ## Integration Strategy
@@ -23,16 +23,19 @@ What is built in:
 - Blender background execution for `.blend` source saves, `.glb`/`.gltf` runtime exports, preview renders, and registry sync
 - the Reverie-Gamer modeling workspace layout
 - the `/modeling` command surface
+- headless `.bbmodel` validation and simple cuboid `.bbmodel` -> `.gltf` export through `game_modeling_workbench`
 - a seeded built-in `ashfox` MCP server entry
 - Gamer-only Ashfox MCP tool exposure through `/tools`
 - model registry, import, and inspection helpers
 
-What remains manual:
+What remains optional:
 
 - install Blender desktop, or use the official Blender plugin to unpack its embedded portable Blender build to `.reverie/plugins/blender/runtime/blender.exe`, when using direct Blender execution
-- install Blockbench desktop
-- install the Ashfox plugin inside Blockbench
-- launch Blockbench so the local Ashfox MCP endpoint is reachable
+- use Blockbench desktop only when visual `.bbmodel` editing is desired
+- enable the Ashfox plugin inside Blockbench only for live editor automation
+- launch Blockbench only when the local Ashfox MCP endpoint should be queried
+
+Without a desktop Blockbench/Ashfox session, Reverie still validates simple `.bbmodel` files and exports cuboid elements to runtime `.gltf` files. Complex Blockbench features such as rotations, custom face UV paint, and editor previews remain optional live-editor work.
 
 ## Workspace Layout
 
@@ -53,11 +56,12 @@ Common flow:
 
 1. `/modeling setup`
 2. `/modeling stub hero_body`
-3. edit the generated `.bbmodel` in Blockbench
-4. `/modeling ashfox validate`
-5. `/modeling ashfox export gltf assets/models/runtime/hero_body.glb`
-6. `/modeling import exports/hero_body.glb assets/models/source/hero_body.bbmodel`
-7. `/modeling sync`
+3. `/modeling export-bbmodel assets/models/source/hero_body.bbmodel`
+4. optionally edit the generated `.bbmodel` in Blockbench for richer authored detail
+5. optionally run `/modeling ashfox validate`
+6. optionally run `/modeling ashfox export gltf assets/models/runtime/hero_body.glb`
+7. `/modeling import exports/hero_body.glb assets/models/source/hero_body.bbmodel`
+8. `/modeling sync`
 
 ## Blender Workflow
 
@@ -65,7 +69,7 @@ Use `/blender` when the asset should be authored directly in Blender instead of 
 
 For stylized playable-character blockouts, briefs that mention `anime action`, `Genshin`, `ZZZ`, `Zenless`, `Ananta`, or the Chinese titles for those styles select the `anime_action_character` preset. That preset emits layered clothing shapes, hair clumps, face markers, weapon silhouette, material IDs, rig markers, LOD markers, lighting, and preview/export wiring.
 
-For a heavier production scaffold, briefs that mention `final character asset`, `high poly`, `retopo`, `UV unwrap`, `texture bake`, `rigged`, `skinned`, or the Chinese equivalents select the `production_character_pipeline` preset. That preset generates a high-poly sculpt collection, retopo/game-mesh collection, smart UV layout, texture placeholder exports, bake cages, a humanoid armature, preview actions, face shape-key placeholders, bone attachment sockets, and a turntable camera animation ready for further artist polish.
+For a heavier production scaffold, briefs that mention `final character asset`, `high poly`, `retopo`, `UV unwrap`, `texture bake`, `rigged`, `skinned`, or the Chinese equivalents select the `production_character_pipeline` preset. That preset generates a high-poly sculpt collection, retopo/game-mesh collection, smart UV layout, procedural basecolor/normal/ORM/material-ID texture seed maps, texture authoring metadata, bake cages, mesh metrics, PBR material tuning, a humanoid armature, weight hints, a skinning manifest, IK targets and constraints, animation clips plus an animation manifest, non-zero facial shape-key deformation data, a skinning stress-test action, bone attachment sockets, runtime collision proxies, LOD variants, a visual QA report, an engine import contract, a turntable camera animation, a production stage manifest, a black-box iteration plan, a production asset card, and quality gates ready for downstream runtime use.
 
 If Blender is portable rather than globally installed, run `/plugins deploy blender` or call `rc_blender_ensure_runtime`. The official Blender plugin embeds the portable archive in `reverie-blender.exe` and unpacks it to `.reverie/plugins/blender/runtime/blender.exe`.
 
@@ -76,10 +80,13 @@ Common flow:
 3. `/blender script hero "AAA final character asset with high poly sculpt, retopo, UV unwrap, texture bake, rigged animation"`
 4. inspect or edit `assets/models/source/blender/scripts/hero.py` if needed
 5. `/blender create hero "AAA final character asset with high poly sculpt, retopo, UV unwrap, texture bake, rigged animation"`
+   Successful Blender runs automatically attach an audit result to the tool output.
 6. review `assets/models/source/hero.blend`, `assets/models/runtime/hero.glb`, and `playtest/renders/models/hero.png`
-7. `/plugins run blender`
+7. `/blender audit hero`
+   Check generated artifacts, GLB header validity, texture completeness, validation schema, production manifest, black-box iteration plan, material/skin/animation/facial manifests, pose-stress action, visual QA report, engine import contract, rig/action/IK coverage, weights, sockets, collision proxies, LOD coverage, and in-Blender production gates.
+8. `/plugins run blender`
    Open the deployed portable Blender build when manual sculpting, retopo cleanup, texture painting, or animation polish is needed.
-8. `/blender sync`
+9. `/blender sync`
 
 The same workflow is exposed to the model through the built-in `blender_modeling_workbench` tool:
 
@@ -89,6 +96,8 @@ The same workflow is exposed to the model through the built-in `blender_modeling
 - `create_model`
 - `run_script`
 - `validate_script`
+- `audit_model`
+- `repair_model`
 - `sync_registry`
 
 The generated script is deliberately project-local and auditable. The default path uses Blender background mode and does not require a running MCP server, a Blender add-on server, or a Codex `SKILL.md`.

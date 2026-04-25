@@ -9,7 +9,7 @@ Reverie CLI is a context-engine-powered AI coding assistant for large repositori
 - **Multi-Provider** — standard OpenAI-compatible models plus `Gemini CLI`, `Codex`, `NVIDIA`, and `ModelScope`
 - **Rich TUI** — selectors, streaming output, help browser, status panels, session browsing, checkpoint rollback, command discovery
 - **Workspace Safety** — file-access sandboxing, audited command execution, archive extraction hardening
-- **Game Tooling** — built-in `Reverie Engine` runtime, a prompt-to-vertical-slice Reverie-Gamer workflow, direct built-in Blender authoring, and an Ashfox MCP modeling flow for Blockbench projects
+- **Game Tooling** — built-in `Reverie Engine` runtime, prompt-to-vertical-slice Reverie-Gamer workflow, direct Blender authoring, Godot/O3DE open-runtime plugins, and a built-in Ashfox MCP bridge for optional Blockbench sessions
 
 ## Latest Update
 
@@ -100,7 +100,7 @@ Use `/model` to add presets or `/Geminicli`, `/codex`, `/nvidia`, `/modelscope` 
 | `/index` | Rebuild the workspace index |
 | `/tools` | List tools visible to the active model/provider |
 | `/tools all` | Show every loaded tool across modes with detailed parameters |
-| `/plugins deploy blender` | Auto-extract the bundled portable Blender plugin/runtime |
+| `/plugins deploy <plugin-id>` | Prepare plugin-local runtimes or source SDKs under `.reverie/plugins/<plugin-id>/` |
 | `/blender` | Create Blender scripts/assets through the built-in modeling workflow |
 | `/sessions` | Browse sessions |
 | `/rollback` | Restore earlier checkpoints or interaction states |
@@ -162,7 +162,7 @@ Windows executable packaging:
 .\build.bat --test-exe
 ```
 
-The packaged `dist/reverie.exe` now includes the built-in Reverie-Gamer runtime flows in one file, including `/engine video`, `/engine renpy`, `/modeling primitive`, and `/blender`. When `plugins/blender/blender-5.1.1-windows-x64.zip` is present, `build.bat` builds and installs the official `reverie-blender.exe` plugin with that portable Blender archive embedded inside the plugin executable; `/plugins deploy blender` or `rc_blender_ensure_runtime` can then unpack Blender beside the executable without requiring a separate zip in `dist`. If `ffmpeg` is available during build, `build.bat` bundles it into the executable so `mp4` and `gif` export work without a separate system install. If not, frame-sequence export still works and encoded video falls back to an external `ffmpeg` at runtime.
+The packaged `dist/reverie.exe` now includes the built-in Reverie-Gamer runtime flows in one file, including `/engine video`, `/engine renpy`, `/modeling primitive`, and `/blender`. `build.bat` installs the official Blender, Godot, and O3DE runtime plugins into `dist/.reverie/plugins/`: Blender can unpack its portable runtime when the build input zip is present, Godot can discover/download official GitHub releases or clone source, and O3DE can clone source plus write a plugin-local SDK manifest. If `ffmpeg` is available during build, `build.bat` bundles it into the executable so `mp4` and `gif` export work without a separate system install. If not, frame-sequence export still works and encoded video falls back to an external `ffmpeg` at runtime.
 
 ## Documentation
 

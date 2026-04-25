@@ -93,7 +93,9 @@ def select_runtime_profile(
         scaffold_ready_alignment = [
             item
             for item in reference_intelligence.get("runtime_alignment", [])
-            if profiles.get(str(item.get("runtime_id", ""))) and profiles[str(item.get("runtime_id", ""))].can_scaffold
+            if profiles.get(str(item.get("runtime_id", "")))
+            and profiles[str(item.get("runtime_id", ""))].can_scaffold
+            and "experimental" not in profiles[str(item.get("runtime_id", ""))].maturity
         ]
         scaffold_ready_alignment.sort(key=lambda item: int(item.get("reference_fit_score", 0)), reverse=True)
         strongest_runtime = ""

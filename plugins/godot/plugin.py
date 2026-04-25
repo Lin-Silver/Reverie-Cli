@@ -8,7 +8,6 @@ from typing import Any, Optional
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
-import hashlib
 import json
 import os
 import shutil
@@ -17,15 +16,10 @@ import sys
 import uuid
 import zipfile
 
-try:
-    import winreg
-except ImportError:  # pragma: no cover - non-Windows fallback
-    winreg = None
 
-
-PLUGIN_VERSION = "0.2.0"
+PLUGIN_VERSION = "0.3.0"
 DEFAULT_GODOT_RELEASES_API = "https://api.github.com/repos/godotengine/godot/releases"
-WINDOWS_STATE_KEY = r"Software\Reverie\Plugins\Godot"
+DEFAULT_GODOT_REPOSITORY = "https://github.com/godotengine/godot.git"
 
 
 class ReverieRuntimePluginHost:
@@ -99,8 +93,9 @@ class GodotRuntimePlugin(ReverieRuntimePluginHost):
         self.plugin_root = self._resolve_plugin_root()
         self.runtime_root = self.plugin_root / "runtime"
         self.download_root = self.plugin_root / "downloads"
+        self.source_root = self.plugin_root / "source"
+        self.state_path = self.plugin_root / "state" / "runtime_state.json"
         self.bundle_root = self._resolve_bundle_root()
-        self.state_key = f"{WINDOWS_STATE_KEY}\\{self._state_namespace()}"
 
     def build_handshake(self) -> dict[str, Any]:
         return {
@@ -115,13 +110,16 @@ class GodotRuntimePlugin(ReverieRuntimePluginHost):
             ),
             "tool_call_hint": (
                 "Use rc_godot_runtime_status to inspect the current Godot runtime state, "
-                "rc_godot_install_runtime to download or unpack a plugin-local runtime, "
+                "rc_godot_list_versions to inspect official GitHub releases, "
+                "rc_godot_install_runtime or rc_godot_ensure_runtime to download or unpack a plugin-local runtime, "
+                "rc_godot_clone_source when source checkout is requested, "
                 "rc_godot_scan_project before making Godot-specific assumptions, "
                 "and rc_godot_headless_check after generating or updating a Godot project."
             ),
             "system_prompt": (
                 "This plugin owns Godot-specific runtime checks, installation, and launch behavior. "
-                "Prefer the exposed rc_godot_* tools instead of inventing shell commands for Godot."
+                "Prefer the exposed rc_godot_* tools instead of inventing shell commands for Godot. "
+                "Keep downloads, source clones, and runtime installs inside the plugin-local depot."
             ),
             "commands": [
                 {
@@ -140,6 +138,23 @@ class GodotRuntimePlugin(ReverieRuntimePluginHost):
                     "expose_as_tool": True,
                     "include_modes": ["reverie", "reverie-gamer"],
                     "guidance": "Call this before runtime-sensitive Godot actions to see whether the plugin already has a usable editor/runtime.",
+                },
+                {
+                    "name": "list_versions",
+                    "description": "List official Godot GitHub release tags and the selected editor archive for this platform.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "limit": {
+                                "type": "integer",
+                                "description": "Maximum release count to return.",
+                            }
+                        },
+                        "required": [],
+                    },
+                    "expose_as_tool": True,
+                    "include_modes": ["reverie", "reverie-gamer"],
+                    "guidance": "Use this when the user wants to choose a Godot version before installation.",
                 },
                 {
                     "name": "register_runtime",
@@ -186,6 +201,54 @@ class GodotRuntimePlugin(ReverieRuntimePluginHost):
                     "expose_as_tool": True,
                     "include_modes": ["reverie", "reverie-gamer"],
                     "guidance": "Prefer this when the plugin should manage its own Godot runtime under .reverie/plugins/godot/runtime.",
+                },
+                {
+                    "name": "ensure_runtime",
+                    "description": "Ensure a plugin-local Godot runtime exists, downloading the latest official release when needed.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "version": {
+                                "type": "string",
+                                "description": "Requested release tag, or `latest` for the latest official stable release.",
+                            },
+                            "force": {
+                                "type": "boolean",
+                                "description": "When true, reinstall the selected version even if a runtime already exists.",
+                            },
+                        },
+                        "required": [],
+                    },
+                    "expose_as_tool": True,
+                    "include_modes": ["reverie", "reverie-gamer"],
+                    "guidance": "Use this for `/plugins deploy godot` style setup where the plugin should manage the runtime itself.",
+                },
+                {
+                    "name": "source_status",
+                    "description": "Inspect Godot source checkouts stored in the plugin-local source depot.",
+                    "parameters": {"type": "object", "properties": {}, "required": []},
+                    "expose_as_tool": True,
+                    "include_modes": ["reverie", "reverie-gamer"],
+                    "guidance": "Use this before cloning or updating Godot source code.",
+                },
+                {
+                    "name": "clone_source",
+                    "description": "Clone Godot source from GitHub into the plugin-local source depot.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "version": {"type": "string", "description": "Release tag, branch, commit, or `latest`."},
+                            "repository": {"type": "string", "description": "Optional repository URL override. Defaults to the official Godot GitHub repo."},
+                            "target_name": {"type": "string", "description": "Optional folder name under the plugin source depot."},
+                            "depth": {"type": "integer", "description": "Shallow clone depth. Defaults to 1."},
+                            "with_submodules": {"type": "boolean", "description": "When true, initialize submodules after clone."},
+                            "force": {"type": "boolean", "description": "When true, replace an existing target checkout inside the source depot."},
+                        },
+                        "required": [],
+                    },
+                    "expose_as_tool": True,
+                    "include_modes": ["reverie", "reverie-gamer"],
+                    "guidance": "Use this only when source is needed; official runtime downloads are faster for normal Godot execution.",
                 },
                 {
                     "name": "detect_runtime",
@@ -293,10 +356,18 @@ class GodotRuntimePlugin(ReverieRuntimePluginHost):
     def handle_command(self, command_name: str, payload: dict[str, Any]) -> dict[str, Any]:
         if command_name == "runtime_status":
             return self._cmd_runtime_status(payload)
+        if command_name == "list_versions":
+            return self._cmd_list_versions(payload)
         if command_name == "register_runtime":
             return self._cmd_register_runtime(payload)
         if command_name == "install_runtime":
             return self._cmd_install_runtime(payload)
+        if command_name == "ensure_runtime":
+            return self._cmd_ensure_runtime(payload)
+        if command_name == "source_status":
+            return self._cmd_source_status(payload)
+        if command_name == "clone_source":
+            return self._cmd_clone_source(payload)
         if command_name == "detect_runtime":
             return self._cmd_detect_runtime(payload)
         if command_name == "version":
@@ -334,9 +405,43 @@ class GodotRuntimePlugin(ReverieRuntimePluginHost):
                 "installed_runtime_version": str(state.get("installed_runtime_version") or ""),
                 "install_root": str(self.runtime_root),
                 "downloads_root": str(self.download_root),
+                "source_root": str(self.source_root),
                 "bundled_runtime_archive": str(self._find_bundled_runtime_archive() or ""),
                 "installed_versions": self._list_installed_runtime_dirs(),
+                "source_checkouts": self._list_source_checkouts(),
             },
+        }
+
+    def _cmd_list_versions(self, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            limit = int(payload.get("limit", 8) or 8)
+        except (TypeError, ValueError):
+            limit = 8
+        limit = max(1, min(limit, 30))
+        try:
+            releases = self._http_get_json_list(DEFAULT_GODOT_RELEASES_API)
+        except Exception as exc:
+            return {"success": False, "output": "", "error": str(exc), "data": {}}
+
+        rows: list[dict[str, str]] = []
+        for release in releases[:limit]:
+            if not isinstance(release, dict):
+                continue
+            asset = self._select_release_asset(list(release.get("assets", []) or []))
+            rows.append(
+                {
+                    "tag": str(release.get("tag_name") or ""),
+                    "name": str(release.get("name") or ""),
+                    "prerelease": str(bool(release.get("prerelease", False))).lower(),
+                    "asset_name": str(asset.get("name") or "") if asset else "",
+                    "download_url": str(asset.get("browser_download_url") or "") if asset else "",
+                }
+            )
+        return {
+            "success": True,
+            "output": "\n".join(f"{row['tag']} :: {row['asset_name']}" for row in rows),
+            "error": "",
+            "data": {"repository": DEFAULT_GODOT_REPOSITORY, "releases": rows},
         }
 
     def _cmd_register_runtime(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -459,6 +564,128 @@ class GodotRuntimePlugin(ReverieRuntimePluginHost):
                 "state_backend": self._state_backend_label(),
                 "state_location": self._state_location_label(),
             },
+        }
+
+    def _cmd_ensure_runtime(self, payload: dict[str, Any]) -> dict[str, Any]:
+        force = bool(payload.get("force", False))
+        requested_version = str(payload.get("version") or "latest").strip() or "latest"
+        detection = self._detect_runtime(str(payload.get("godot_executable") or "").strip())
+        if detection["path"] is not None and not force:
+            return {
+                "success": True,
+                "output": f"Godot runtime already available at {detection['path']}",
+                "error": "",
+                "data": {
+                    "deployed": False,
+                    "runtime_path": str(detection["path"]),
+                    "source": detection["source"],
+                    "version": self._probe_version(detection["path"]),
+                },
+            }
+
+        bundled_archive = self._find_bundled_runtime_archive()
+        if bundled_archive is not None:
+            result = self._cmd_install_runtime(
+                {
+                    "archive_path": str(bundled_archive),
+                    "version": self._infer_version_from_archive_name(bundled_archive),
+                    "force": force,
+                }
+            )
+        else:
+            result = self._cmd_install_runtime({"version": requested_version, "force": force})
+        if isinstance(result.get("data"), dict):
+            result["data"]["deployed"] = bool(result.get("success", False))
+        return result
+
+    def _cmd_source_status(self, payload: dict[str, Any]) -> dict[str, Any]:
+        checkouts = self._source_checkout_details()
+        return {
+            "success": True,
+            "output": "\n".join(f"{item['name']} :: {item['head']}" for item in checkouts) or "No Godot source checkouts found.",
+            "error": "",
+            "data": {
+                "source_root": str(self.source_root),
+                "repository": DEFAULT_GODOT_REPOSITORY,
+                "checkouts": checkouts,
+            },
+        }
+
+    def _cmd_clone_source(self, payload: dict[str, Any]) -> dict[str, Any]:
+        repository = str(payload.get("repository") or DEFAULT_GODOT_REPOSITORY).strip()
+        requested_version = str(payload.get("version") or "latest").strip() or "latest"
+        target_name = str(payload.get("target_name") or "").strip()
+        force = bool(payload.get("force", False))
+        with_submodules = bool(payload.get("with_submodules", False))
+        try:
+            depth = int(payload.get("depth", 1) or 1)
+        except (TypeError, ValueError):
+            depth = 1
+        depth = max(1, min(depth, 1000))
+        git_exe = shutil.which("git.exe") or shutil.which("git")
+        if not git_exe:
+            return {"success": False, "output": "", "error": "Git executable not found in PATH.", "data": {}}
+
+        try:
+            ref = self._resolve_source_ref(requested_version)
+        except Exception as exc:
+            return {"success": False, "output": "", "error": str(exc), "data": {"version": requested_version}}
+        target = self._source_target_path(target_name or f"godot-{self._sanitize_version_dir_name(ref)}")
+        if target.exists():
+            if not force:
+                return {
+                    "success": True,
+                    "output": f"Godot source checkout already exists: {target}",
+                    "error": "",
+                    "data": {"cloned": False, "source_dir": str(target), "ref": ref, "repository": repository},
+                }
+            self._safe_remove_source_dir(target)
+
+        self.source_root.mkdir(parents=True, exist_ok=True)
+        command = self._build_clone_command(git_exe, repository, ref, target, depth, use_http11=False)
+        completed = self._run_git_clone(command)
+        if completed.returncode != 0 and target.exists():
+            self._safe_remove_source_dir(target)
+            command = self._build_clone_command(git_exe, repository, ref, target, depth, use_http11=True)
+            completed = self._run_git_clone(command)
+        if completed.returncode != 0:
+            if target.exists():
+                self._safe_remove_source_dir(target)
+            return {
+                "success": False,
+                "output": completed.stdout.strip(),
+                "error": completed.stderr.strip() or f"git clone failed with exit code {completed.returncode}",
+                "data": {"command": command, "source_dir": str(target), "ref": ref, "repository": repository},
+            }
+        if with_submodules:
+            submodule = subprocess.run(
+                [git_exe, "submodule", "update", "--init", "--recursive", "--depth", str(depth)],
+                cwd=str(target),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=7200,
+            )
+            if submodule.returncode != 0:
+                return {
+                    "success": False,
+                    "output": completed.stdout.strip() + "\n" + submodule.stdout.strip(),
+                    "error": submodule.stderr.strip() or f"git submodule update failed with exit code {submodule.returncode}",
+                    "data": {"source_dir": str(target), "ref": ref, "repository": repository},
+                }
+
+        state = self._load_state()
+        state["source_checkout_path"] = str(target)
+        state["source_checkout_ref"] = ref
+        state["source_repository"] = repository
+        state["updated_at"] = self._utc_now()
+        self._save_state(state)
+        return {
+            "success": True,
+            "output": f"Cloned Godot source {ref} into {target}",
+            "error": "",
+            "data": {"cloned": True, "source_dir": str(target), "ref": ref, "repository": repository},
         }
 
     def _cmd_detect_runtime(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -803,66 +1030,107 @@ class GodotRuntimePlugin(ReverieRuntimePluginHost):
         return subprocess.Popen(command, **popen_kwargs)
 
     def _state_backend_label(self) -> str:
-        return "windows-registry" if winreg is not None else "process-memory"
+        return "plugin-local-json"
 
     def _state_location_label(self) -> str:
-        if winreg is not None:
-            return f"HKCU\\{self.state_key}"
-        return "in-memory"
+        return str(self.state_path)
 
     def _state_namespace(self) -> str:
-        root_text = str(self.plugin_root.resolve(strict=False)).lower()
-        digest = hashlib.sha1(root_text.encode("utf-8", errors="replace")).hexdigest()[:12]
-        return f"path_{digest}"
+        return self._sanitize_version_dir_name(self.plugin_root.name or "godot")
 
     def _load_state(self) -> dict[str, Any]:
-        if winreg is None:
-            return {}
-
-        known_keys = (
-            "registered_runtime_path",
-            "installed_runtime_path",
-            "installed_runtime_version",
-            "last_install_asset_name",
-            "last_install_source",
-            "last_download_url",
-            "updated_at",
-        )
         try:
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, self.state_key, 0, winreg.KEY_READ) as key:
-                state: dict[str, Any] = {}
-                for item in known_keys:
-                    try:
-                        value, _value_type = winreg.QueryValueEx(key, item)
-                    except FileNotFoundError:
-                        continue
-                    state[item] = str(value or "")
-                return state
-        except FileNotFoundError:
+            payload = json.loads(self.state_path.read_text(encoding="utf-8"))
+            return payload if isinstance(payload, dict) else {}
+        except Exception:
             return {}
 
     def _save_state(self, payload: dict[str, Any]) -> None:
-        if winreg is None:
-            return
-
-        with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, self.state_key, 0, winreg.KEY_WRITE) as key:
-            for raw_key, raw_value in payload.items():
-                name = str(raw_key or "").strip()
-                if not name:
-                    continue
-                value = str(raw_value or "").strip()
-                if value:
-                    winreg.SetValueEx(key, name, 0, winreg.REG_SZ, value)
-                else:
-                    try:
-                        winreg.DeleteValue(key, name)
-                    except FileNotFoundError:
-                        pass
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        self.state_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def _list_installed_runtime_dirs(self) -> list[str]:
         if not self.runtime_root.exists():
             return []
         return sorted([item.name for item in self.runtime_root.iterdir() if item.is_dir()])
+
+    def _list_source_checkouts(self) -> list[str]:
+        if not self.source_root.exists():
+            return []
+        return sorted([item.name for item in self.source_root.iterdir() if item.is_dir()])
+
+    def _source_checkout_details(self) -> list[dict[str, str]]:
+        rows: list[dict[str, str]] = []
+        for item in self._list_source_checkouts():
+            path = self.source_root / item
+            rows.append({"name": item, "path": str(path), "head": self._git_head(path)})
+        return rows
+
+    def _git_head(self, path: Path) -> str:
+        git_exe = shutil.which("git.exe") or shutil.which("git")
+        if not git_exe or not (path / ".git").exists():
+            return ""
+        try:
+            completed = subprocess.run(
+                [git_exe, "rev-parse", "--short", "HEAD"],
+                cwd=str(path),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=15,
+            )
+        except Exception:
+            return ""
+        return completed.stdout.strip() if completed.returncode == 0 else ""
+
+    def _source_target_path(self, target_name: str) -> Path:
+        safe = self._sanitize_version_dir_name(target_name).replace("/", "_").replace("\\", "_")
+        target = (self.source_root / safe).resolve(strict=False)
+        root = self.source_root.resolve(strict=False)
+        try:
+            target.relative_to(root)
+        except ValueError as exc:
+            raise RuntimeError(f"Refusing to use source target outside plugin source root: {target}") from exc
+        return target
+
+    def _build_clone_command(
+        self,
+        git_exe: str,
+        repository: str,
+        ref: str,
+        target: Path,
+        depth: int,
+        *,
+        use_http11: bool,
+    ) -> list[str]:
+        prefix = [git_exe]
+        if use_http11:
+            prefix.extend(["-c", "http.version=HTTP/1.1", "-c", "http.postBuffer=524288000"])
+        return [
+            *prefix,
+            "clone",
+            "--depth",
+            str(depth),
+            "--filter=blob:none",
+            "--single-branch",
+            "--no-tags",
+            "--branch",
+            ref,
+            repository,
+            str(target),
+        ]
+
+    def _run_git_clone(self, command: list[str]) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            command,
+            cwd=str(self.source_root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=7200,
+        )
 
     def _resolve_release_asset(self, *, requested_version: str, download_url: str) -> dict[str, str]:
         if download_url:
@@ -907,6 +1175,13 @@ class GodotRuntimePlugin(ReverieRuntimePluginHost):
                 errors.append(f"{tag}: {exc}")
         raise RuntimeError(f"Failed to resolve Godot release metadata for `{requested_version}`: {'; '.join(errors)}")
 
+    def _resolve_source_ref(self, requested_version: str) -> str:
+        version_text = str(requested_version or "latest").strip()
+        if version_text.lower() in {"", "latest", "stable", "current"}:
+            release = self._load_release_metadata("latest")
+            return str(release.get("tag_name") or "").strip() or "master"
+        return version_text
+
     def _select_release_asset(self, assets: list[Any]) -> Optional[dict[str, Any]]:
         ranked: list[tuple[int, dict[str, Any]]] = []
         for asset in assets:
@@ -949,7 +1224,7 @@ class GodotRuntimePlugin(ReverieRuntimePluginHost):
     def _http_get_json(self, url: str) -> dict[str, Any]:
         request = Request(
             url,
-            headers={"Accept": "application/vnd.github+json", "User-Agent": "Reverie-Godot-Plugin/0.2"},
+            headers={"Accept": "application/vnd.github+json", "User-Agent": "Reverie-Godot-Plugin/0.3"},
         )
         try:
             with urlopen(request, timeout=30) as response:
@@ -965,6 +1240,27 @@ class GodotRuntimePlugin(ReverieRuntimePluginHost):
             raise RuntimeError(f"Invalid JSON received from {url}: {exc}") from exc
         if not isinstance(data, dict):
             raise RuntimeError(f"Release metadata from {url} was not a JSON object.")
+        return data
+
+    def _http_get_json_list(self, url: str) -> list[Any]:
+        request = Request(
+            url,
+            headers={"Accept": "application/vnd.github+json", "User-Agent": "Reverie-Godot-Plugin/0.3"},
+        )
+        try:
+            with urlopen(request, timeout=30) as response:
+                payload = response.read().decode("utf-8", errors="replace")
+        except HTTPError as exc:
+            raise RuntimeError(f"HTTP {exc.code} while requesting {url}") from exc
+        except URLError as exc:
+            raise RuntimeError(f"Network error while requesting {url}: {exc.reason}") from exc
+
+        try:
+            data = json.loads(payload)
+        except Exception as exc:
+            raise RuntimeError(f"Invalid JSON received from {url}: {exc}") from exc
+        if not isinstance(data, list):
+            raise RuntimeError(f"Release metadata from {url} was not a JSON array.")
         return data
 
     def _download_file(self, url: str, destination: Path) -> None:
@@ -993,7 +1289,7 @@ class GodotRuntimePlugin(ReverieRuntimePluginHost):
             if temp_path.exists():
                 temp_path.unlink()
 
-        request = Request(url, headers={"User-Agent": "Reverie-Godot-Plugin/0.2"})
+        request = Request(url, headers={"User-Agent": "Reverie-Godot-Plugin/0.3"})
         with urlopen(request, timeout=300) as response, open(temp_path, "wb") as handle:
             shutil.copyfileobj(response, handle)
         if destination.suffix.lower() == ".zip" and not zipfile.is_zipfile(temp_path):
@@ -1049,12 +1345,23 @@ class GodotRuntimePlugin(ReverieRuntimePluginHost):
             return None
 
     def _resolve_plugin_root(self) -> Path:
+        env_root = os.environ.get("REVERIE_GODOT_PLUGIN_ROOT", "").strip() or os.environ.get("REVERIE_PLUGIN_ROOT", "").strip()
+        if env_root:
+            return self._normalize_plugin_root(Path(env_root).expanduser().resolve(strict=False))
+
         if getattr(sys, "frozen", False):
             try:
-                return Path(sys.executable).resolve().parent
+                executable_dir = Path(sys.executable).resolve(strict=False).parent
+                return self._normalize_plugin_root(executable_dir)
             except Exception:
                 pass
-        return Path(__file__).resolve().parent
+        return self._normalize_plugin_root(Path(__file__).resolve().parent)
+
+    def _normalize_plugin_root(self, root: Path) -> Path:
+        candidate = Path(root).resolve(strict=False)
+        if candidate.name.lower() == "dist" and (candidate.parent / "plugin.json").exists():
+            return candidate.parent.resolve(strict=False)
+        return candidate
 
     def _find_bundled_runtime_archive(self) -> Optional[Path]:
         if self.bundle_root is None:
@@ -1112,6 +1419,16 @@ class GodotRuntimePlugin(ReverieRuntimePluginHost):
             resolved_target.relative_to(resolved_root)
         except ValueError as exc:
             raise RuntimeError(f"Refusing to remove directory outside runtime root: {resolved_target}") from exc
+        if resolved_target.exists():
+            shutil.rmtree(resolved_target)
+
+    def _safe_remove_source_dir(self, target: Path) -> None:
+        resolved_root = self.source_root.resolve(strict=False)
+        resolved_target = target.resolve(strict=False)
+        try:
+            resolved_target.relative_to(resolved_root)
+        except ValueError as exc:
+            raise RuntimeError(f"Refusing to remove directory outside source root: {resolved_target}") from exc
         if resolved_target.exists():
             shutil.rmtree(resolved_target)
 

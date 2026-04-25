@@ -409,7 +409,7 @@ def build_production_operating_model(
         },
         {
             "id": "asset_and_animation",
-            "goal": "Promote placeholder assets into validated production-ready kits with reviewable budgets.",
+            "goal": "Promote generated starter assets into validated production-ready kits with reviewable budgets.",
             "artifacts": [
                 "artifacts/asset_pipeline.json",
                 "artifacts/environment_kits.json",

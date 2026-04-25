@@ -188,6 +188,49 @@ def _repo_root(*, project_root: Path | None = None, app_root: Path | None = None
     return ordered[0] if ordered else Path("references").resolve()
 
 
+def _plugin_depot_roots(*, project_root: Path | None = None, app_root: Path | None = None) -> List[Path]:
+    candidates: List[Path] = []
+    if app_root:
+        candidates.append(Path(app_root) / ".reverie" / "plugins")
+    if project_root:
+        candidates.append(Path(project_root) / ".reverie" / "plugins")
+    repo_root = Path(__file__).resolve().parents[2]
+    candidates.append(repo_root / "dist" / ".reverie" / "plugins")
+
+    seen: set[str] = set()
+    roots: List[Path] = []
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        key = str(resolved).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        if resolved.exists():
+            roots.append(resolved)
+    return roots
+
+
+def _plugin_depot_fingerprint(plugin_roots: Iterable[Path]) -> str:
+    parts: List[str] = []
+    for root in plugin_roots:
+        parts.append(str(root))
+        for plugin_id in ("godot", "o3de"):
+            plugin_root = root / plugin_id
+            source_root = plugin_root / "source"
+            manifest_path = plugin_root / "runtime" / "sdk_manifest.json"
+            try:
+                source_stat = source_root.stat()
+                parts.append(f"{plugin_id}:source:{source_stat.st_mtime_ns}:{source_stat.st_size}")
+            except OSError:
+                parts.append(f"{plugin_id}:source:missing")
+            try:
+                manifest_stat = manifest_path.stat()
+                parts.append(f"{plugin_id}:manifest:{manifest_stat.st_mtime_ns}:{manifest_stat.st_size}")
+            except OSError:
+                parts.append(f"{plugin_id}:manifest:missing")
+    return "|".join(parts)
+
+
 def _reference_fingerprint(reference_root: Path) -> str:
     root = Path(reference_root).resolve()
     parts = [str(root)]
@@ -237,6 +280,81 @@ def _entry(
         "reuse_policy": reuse_policy,
         "guardrails": list(guardrails or []),
     }
+
+
+def _source_checkout_dirs(source_root: Path, *, markers: Iterable[str]) -> List[Path]:
+    if not source_root.exists():
+        return []
+    marker_list = [str(marker).replace("\\", "/").strip("/") for marker in markers if str(marker).strip()]
+    checkouts: List[Path] = []
+    try:
+        children = sorted([item for item in source_root.iterdir() if item.is_dir()], key=lambda path: path.name.lower())
+    except OSError:
+        return []
+    for child in children:
+        if (child / ".git").exists():
+            checkouts.append(child)
+            continue
+        if any((child / marker).exists() for marker in marker_list):
+            checkouts.append(child)
+    return checkouts
+
+
+def _analyze_plugin_source_sdk(
+    plugin_roots: Iterable[Path],
+    *,
+    plugin_id: str,
+    reference_id: str,
+    display_name: str,
+    engine: str,
+    markers: Iterable[str],
+    signals: Iterable[str],
+    usage: Iterable[str],
+    runtime_affinity: Dict[str, float],
+) -> Dict[str, Any] | None:
+    for depot_root in plugin_roots:
+        plugin_root = depot_root / plugin_id
+        source_root = plugin_root / "source"
+        manifest_path = plugin_root / "runtime" / "sdk_manifest.json"
+        checkouts = _source_checkout_dirs(source_root, markers=markers)
+        if not checkouts and not manifest_path.exists():
+            continue
+        evidence = [
+            {
+                "path": _rel(source_root, depot_root),
+                "signal": "plugin_local_source_depot",
+                "note": "Source SDK checkouts are managed inside the executable-local plugin depot.",
+            }
+        ]
+        if manifest_path.exists():
+            evidence.append(
+                {
+                    "path": _rel(manifest_path, depot_root),
+                    "signal": "plugin_runtime_manifest",
+                    "note": "The runtime plugin has written SDK metadata for downstream planning and validation.",
+                }
+            )
+        return _entry(
+            reference_root=depot_root,
+            repo_root=plugin_root,
+            reference_id=reference_id,
+            display_name=display_name,
+            category="source_sdk",
+            engine=engine,
+            direct_applicability="supporting",
+            signals=signals,
+            recommended_usage=usage,
+            evidence=evidence,
+            stats={
+                "checkout_count": len(checkouts),
+                "manifest_exists": manifest_path.exists(),
+                "total_files": 0,
+                "directory_count": len(checkouts),
+            },
+            runtime_affinity=runtime_affinity,
+            reuse_policy="source_sdk_reference",
+        )
+    return None
 
 
 def _analyze_godot_tps_demo(reference_root: Path) -> Dict[str, Any] | None:
@@ -548,8 +666,10 @@ def scan_reference_catalog(
     """Scan the local references workspace and return a compact catalog."""
 
     reference_root = _repo_root(project_root=project_root, app_root=app_root)
-    fingerprint = _reference_fingerprint(reference_root)
-    cached = _REFERENCE_SCAN_CACHE.get(str(reference_root))
+    plugin_roots = _plugin_depot_roots(project_root=project_root, app_root=app_root)
+    fingerprint = _reference_fingerprint(reference_root) + "|" + _plugin_depot_fingerprint(plugin_roots)
+    cache_key = str(reference_root) + "|" + ";".join(str(root) for root in plugin_roots)
+    cached = _REFERENCE_SCAN_CACHE.get(cache_key)
     if cached and cached.get("fingerprint") == fingerprint:
         payload = deepcopy(cached.get("payload", {}))
         payload["cache_status"] = "hit"
@@ -560,6 +680,28 @@ def scan_reference_catalog(
         _analyze_godot_demo_projects(reference_root),
         _analyze_o3de_multiplayersample(reference_root),
         _analyze_o3de_multiplayersample_assets(reference_root),
+        _analyze_plugin_source_sdk(
+            plugin_roots,
+            plugin_id="godot",
+            reference_id="godot-source-sdk",
+            display_name="Godot Source SDK",
+            engine="godot",
+            markers=("SConstruct", "main/main.cpp"),
+            signals=("source_sdk", "open_runtime", "engine_source", "plugin_local_depot"),
+            usage=("Use as plugin-local source context for Godot versioning, engine builds, and runtime integration planning.",),
+            runtime_affinity={"godot": 0.72, "o3de": 0.08, "reverie_engine": 0.12},
+        ),
+        _analyze_plugin_source_sdk(
+            plugin_roots,
+            plugin_id="o3de",
+            reference_id="o3de-source-sdk",
+            display_name="O3DE Source SDK",
+            engine="o3de",
+            markers=("scripts/o3de.py", "scripts/o3de.bat", "cmake"),
+            signals=("source_sdk", "open_runtime", "large_scale_3d", "plugin_local_depot"),
+            usage=("Use as plugin-local source context for O3DE SDK manifests, native build planning, and Asset Processor integration.",),
+            runtime_affinity={"o3de": 0.78, "godot": 0.08, "reverie_engine": 0.1},
+        ),
         _analyze_cross_runtime_tool(
             reference_root,
             "blender",
@@ -632,6 +774,7 @@ def scan_reference_catalog(
 
     payload = {
         "reference_root": str(reference_root),
+        "plugin_depot_roots": [str(root) for root in plugin_roots],
         "available": reference_root.exists(),
         "detected_repositories": detected,
         "summary": {
@@ -644,7 +787,7 @@ def scan_reference_catalog(
         "legal_guardrails": guardrails,
         "cache_status": "miss",
     }
-    _REFERENCE_SCAN_CACHE[str(reference_root)] = {
+    _REFERENCE_SCAN_CACHE[cache_key] = {
         "fingerprint": fingerprint,
         "payload": deepcopy(payload),
     }
@@ -723,10 +866,20 @@ def _runtime_alignment(
         reasons["godot"].append("Additional local Godot samples reinforce scene and project conventions.")
         support["godot"].append("godot-demo-projects")
 
+    if "godot-source-sdk" in repo_map:
+        scores["godot"] += 0.12
+        reasons["godot"].append("A plugin-local Godot source SDK is available for version-aware runtime integration.")
+        support["godot"].append("godot-source-sdk")
+
     if ("large_scale" in flags or "open_world" in flags or "multiplayer" in flags) and "o3de-multiplayersample" in repo_map:
         scores["o3de"] += 0.46
         reasons["o3de"].append("Local O3DE multiplayer sample is a strong architecture reference for larger-scale runtime planning.")
         support["o3de"].append("o3de-multiplayersample")
+
+    if "o3de-source-sdk" in repo_map:
+        scores["o3de"] += 0.14
+        reasons["o3de"].append("A plugin-local O3DE source SDK is available for native build and Asset Processor planning.")
+        support["o3de"].append("o3de-source-sdk")
 
     if ("large_scale" in flags or "open_world" in flags or "multiplayer" in flags) and "o3de-multiplayersample-assets" in repo_map:
         scores["o3de"] += 0.18
@@ -804,8 +957,12 @@ def _recommended_reference_stack(
         add("godot-tps-demo", "third-person movement, camera, aim, and combat reference", "runtime_pattern")
     if "godot-demo-projects" in repo_map:
         add("godot-demo-projects", "Godot scene-layout and project-convention library", "pattern_library")
+    if "godot-source-sdk" in repo_map:
+        add("godot-source-sdk", "Godot source SDK for version-aware runtime integration", "source_sdk_reference")
     if ("large_scale" in flags or "open_world" in flags or "multiplayer" in flags) and "o3de-multiplayersample" in repo_map:
         add("o3de-multiplayersample", "future expansion architecture, packaging, and traversal-device reference", "architecture_reference")
+    if "o3de-source-sdk" in repo_map:
+        add("o3de-source-sdk", "O3DE source SDK for native build and Asset Processor planning", "source_sdk_reference")
     if "o3de-multiplayersample-assets" in repo_map:
         add("o3de-multiplayersample-assets", "modular asset-pack and DCC bootstrap reference", "pipeline_reference")
     if "blender" in repo_map:
@@ -903,6 +1060,15 @@ def _toolchain_matrix(detected_repositories: List[Dict[str, Any]]) -> List[Dict[
         ),
     )
     add(
+        "open_runtime_source_sdks",
+        "plugin-local open-runtime source SDKs",
+        ("godot-source-sdk", "o3de-source-sdk"),
+        (
+            "keep source checkouts beside the executable under `.reverie/plugins`",
+            "derive native build and import validation steps from plugin SDK manifests",
+        ),
+    )
+    add(
         "dcc_authoring",
         "source asset authoring and graybox iteration",
         ("blender", "blockbench", "blockbench-plugins"),
@@ -966,6 +1132,18 @@ def _adoption_plan(
                 "references": ["o3de-multiplayersample"],
                 "adoption_mode": "architecture_reference",
                 "runtime_bias": alignment_map.get("o3de", {}),
+            }
+        )
+
+    source_sdk_references = [item for item in ("godot-source-sdk", "o3de-source-sdk") if item in repo_map]
+    if source_sdk_references:
+        phases.append(
+            {
+                "id": "open_runtime_sdk_depot",
+                "goal": "Use plugin-local source SDKs for version-aware runtime validation without relying on repository `references` payloads.",
+                "references": source_sdk_references,
+                "adoption_mode": "source_sdk_reference",
+                "runtime_bias": alignment_map.get("godot", {}) if "godot-source-sdk" in source_sdk_references else alignment_map.get("o3de", {}),
             }
         )
 

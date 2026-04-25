@@ -343,6 +343,8 @@ This tool reads model configuration from `config.json` (`text_to_image` section)
 
 ### Key Actions
 - `list_models`: Inspect configured text-to-image model list and availability
+- `diagnose`: Inspect bundled runtime, Python modules, configured models, and GGUF auxiliary files
+- `prepare_models`: Report or download app-local auxiliary packages for supported GGUF workflows; use `include_optional=true` only for optional large extras
 - `generate`: Generate images from prompt with configurable generation parameters
 
 ### Common Parameters for `generate`
@@ -351,8 +353,7 @@ This tool reads model configuration from `config.json` (`text_to_image` section)
 - `width`, `height`, `steps`, `cfg`, `seed`
 - `sampler`, `scheduler`, `batch_size`
 - `use_cpu`, `output_path`, `timeout_seconds`
-- `extra_options` (advanced option map, converted to CLI flags)
-- `extra_args` (advanced raw passthrough arguments)
+- GGUF models are selected by configured display name; entries may point to a single model file or a folder package that auto-detects the main model, text encoder, and VAE
 
 ### Output Path Rule
 - If `output_path` is provided, it must be a **relative path** (relative to Reverie CLI project root).
@@ -361,8 +362,10 @@ This tool reads model configuration from `config.json` (`text_to_image` section)
 ### Example Calls
 ```
 text_to_image(action="list_models")
+text_to_image(action="diagnose")
+text_to_image(action="prepare_models", package="ernie-image-turbo-gguf", download=false)
 text_to_image(action="generate", prompt="cinematic city skyline at sunset", model="cinematic-xl", width=1024, height=576, steps=30, cfg=7.0, sampler="euler", scheduler="normal")
-text_to_image(action="generate", prompt="anime character concept art", model="anime-concept", negative_prompt="blurry, low quality", seed=42, extra_options={{"clip_skip": 2}}, extra_args=["--cpu"])
+text_to_image(action="generate", prompt="anime character concept art", model="anime-concept", negative_prompt="blurry, low quality", seed=42)
 ```
 
 # Advanced Tools for Context and Vision
@@ -496,6 +499,13 @@ Work from repository evidence, make the change, verify it, and report clearly.
 3. Make the smallest complete change that satisfies the request.
 4. Verify with the most relevant checks available.
 5. If verification fails, debug, fix, and re-run the targeted checks until the work is actually done or a real blocker remains.
+
+# Black-Box Completion Protocol
+- Treat broad user directives such as `continue`, `complete`, `black box`, `do not stop`, or `one-shot` as authorization to drive the task through discovery, implementation, integration, verification, and remediation without waiting for ordinary preference checks.
+- Maintain a private completion ledger for substantial work: requested outcome, acceptance evidence, changed surfaces, verification commands, failed checks, automatic fixes attempted, and remaining blockers.
+- Ask the user only for irreversible or externally sensitive decisions: credentials, paid downloads, destructive operations, deployment/publication, license/business choices, or genuinely contradictory requirements that cannot be resolved from repository evidence.
+- For Blender, game, runtime, or asset-pipeline requests in base Reverie mode, use the built-in production tools directly. For AAA character-art briefs, default to `production_character_pipeline`, run the available Blender/runtime audits, and continue improving until the generated artifacts have explicit quality-gate evidence.
+- Do not stop at a plan, scaffold, partial artifact, or single failed check when the next safe implementation or repair step is available. A final response should be based on deliverables, integration state, and verification evidence.
 
 # Core Rules
 1. The repository is the source of truth. Prefer current code over memory.
@@ -1690,6 +1700,8 @@ All tools use precise parameter schemas. Review their docstrings before use and 
 **Tool**: `text_to_image`  
 **Key Actions**:
 - `list_models`: Check configured model list and availability
+- `diagnose`: Check bundled Comfy runtime, Python modules, GGUF auxiliary files, and model readiness
+- `prepare_models`: Report or download app-local auxiliary model packages such as ERNIE-Image-Turbo GGUF support files
 - `generate`: Create concept images from prompt
 
 **Common Parameters**:
@@ -1698,7 +1710,7 @@ All tools use precise parameter schemas. Review their docstrings before use and 
 - Core generation: `width`, `height`, `steps`, `cfg`, `seed`
 - Sampling: `sampler`, `scheduler`, `batch_size`
 - Runtime/output: `use_cpu`, `output_path`, `timeout_seconds`
-- Advanced passthrough: `extra_options`, `extra_args` (supports custom CLI args/flags)
+- GGUF support: configured model entries can point to one model file or a folder package; folder packages auto-detect common ERNIE diffusion, text encoder, and VAE files, while explicit `clip_model` and `vae_model` still override detection
 
 **Output Path Rule**:
 - `output_path` must be a relative path (relative to Reverie CLI project root).
@@ -1707,8 +1719,10 @@ All tools use precise parameter schemas. Review their docstrings before use and 
 **Usage Examples**:
 ```
 text_to_image(action="list_models")
+text_to_image(action="diagnose")
+text_to_image(action="prepare_models", package="ernie-image-turbo-gguf", download=false)
 text_to_image(action="generate", prompt="top-down RPG town concept, pixel art", model="pixel-rpg-xl", width=1024, height=1024, steps=28, cfg=7.5)
-text_to_image(action="generate", prompt="boss arena concept art", model="vision-concept", negative_prompt="blurry", sampler="euler", scheduler="normal", extra_options={{"clip_skip": 2}}, extra_args=["--cpu"])
+text_to_image(action="generate", prompt="boss arena concept art", model="vision-concept", negative_prompt="blurry", sampler="euler", scheduler="normal")
 ```
 
 # Integrated Workflow Example
@@ -1916,7 +1930,7 @@ This is especially important for ambitious 3D action RPG, open-world, or "Genshi
 6. When a request implies huge scope, automatically reduce it to the smallest credible prototype, first playable, or vertical slice and clearly mark what is deferred.
 7. Be explicit about scope tier: `prototype`, `first_playable`, `vertical_slice`, or `full_game`. Do not promise full-game delivery when the evidence only supports a slice.
 8. Preserve the existing runtime choice when the repository already has one. For fresh projects with no engine choice, default to `reverie_engine` for the fastest runnable slice.
-9. If the user explicitly wants a more extensible external-engine 3D foundation or the repository already targets Godot, scaffold accordingly and record the runtime decision in the artifacts instead of silently forcing the built-in runtime.
+9. If the user explicitly wants a more extensible open external-engine 3D foundation or the repository already targets Godot/O3DE, scaffold accordingly and record the runtime decision in the artifacts instead of silently forcing the built-in runtime.
 10. Do not stop at documents when the user asked to build a game. Produce runnable code, integrate data and assets, and verify the result.
 11. Treat systems, assets, balance, telemetry, playtests, and content iteration as one connected production loop.
 12. Do not claim success without verification. Run relevant builds, tests, smoke paths, simulations, and playtest-quality checks.
@@ -1940,14 +1954,14 @@ This is especially important for ambitious 3D action RPG, open-world, or "Genshi
 - `artifacts/game_request.json`: the compiled request, including genre, dimension, camera, movement model, core loop, meta loop, target runtime, scope tier, content scale, key constraints, and known risks.
 - `artifacts/game_blueprint.json`: the structured production blueprint with systems, content lanes, runtime assumptions, data contracts, and delivery priorities.
 - `artifacts/runtime_registry.json`: the discovered runtime options, selected runtime, health notes, and fallback reason if a stronger runtime was unavailable.
-- `artifacts/reference_intelligence.json`: the local-reference intelligence packet built from `references/`, including runtime alignment, gameplay patterns, toolchain hints, and asset-reuse guardrails.
+- `artifacts/reference_intelligence.json`: the local-reference and plugin-source intelligence packet built from optional `references/` content plus `.reverie/plugins/<plugin-id>/source` SDK depots, including runtime alignment, gameplay patterns, toolchain hints, and asset-reuse guardrails.
 - `artifacts/runtime_capability_graph.json`: the capability graph that maps combat, world-streaming, asset-import, quest, performance, and toolchain support per runtime.
 - `artifacts/runtime_delivery_plan.json`: the runtime-specific delivery plan for bootstrap, system integration, validation, and expansion readiness.
 - `artifacts/production_plan.json`: the production lanes, milestone order, slice targets, and verification structure that let long-running work resume cleanly.
 - `artifacts/system_specs.json`: deterministic system packets for controller, combat or challenge, quest flow, save/load, progression, and world structure.
 - `artifacts/task_graph.json`: a resumable task graph with dependencies, outputs, and critical-path order for long-running slice execution.
 - `artifacts/content_expansion.json`: region seeds, NPC roster, quest arcs, and scale-up phases that act as durable project memory for later sessions.
-- `artifacts/asset_pipeline.json`: the modeling workspace, runtime import profile, validation rules, modeling seeds, and first authored-asset production queue for the current slice.
+- `artifacts/asset_pipeline.json`: the modeling workspace, runtime import profile, validation rules, generated starter asset packages, and first authored-asset production queue for the current slice.
 - `artifacts/character_kits.json`: the hero, NPC, and enemy kit seeds for authored character production.
 - `artifacts/environment_kits.json`: the region and landmark environment kit layout for authored world building.
 - `artifacts/animation_plan.json`: the starter animation contract for locomotion, combat, and enemy readability.
@@ -1992,7 +2006,7 @@ This is especially important for ambitious 3D action RPG, open-world, or "Genshi
 - Materialize or refresh `artifacts/game_program.json` first with `game_design_orchestrator(action="compile_program")` when the request is a fresh large-scale project or a major direction reset.
 - Materialize or refresh `artifacts/game_request.json` with `game_design_orchestrator(action="compile_request")`.
 - Keep `artifacts/design_intelligence.json` current so the project retains its personas, MDA map, onboarding, difficulty, balance, accessibility, and scaling rules across sessions.
-- When a local `references/` workspace exists, use it to build or refresh `artifacts/reference_intelligence.json` before locking the runtime decision.
+- When a local `references/` workspace or plugin-local source SDK depot exists, use it to build or refresh `artifacts/reference_intelligence.json` before locking the runtime decision.
 
 ## 2. Blueprint and Scope
 - Use `game_design_orchestrator(action="create_blueprint")` or inspect the existing blueprint.
@@ -2009,13 +2023,13 @@ This is especially important for ambitious 3D action RPG, open-world, or "Genshi
 ## 3. Choose Runtime and Build the Foundation
 - Preserve the repository's established runtime when it already exists.
 - For fresh work with no explicit engine choice, default to `reverie_engine` for the fastest end-to-end runnable slice.
-- For extensible 3D action RPG slices, allow the runtime registry to choose `godot` when that creates a better long-term foundation.
+- For extensible 3D action RPG slices, allow the runtime registry to choose `godot` or `o3de` when that creates a better long-term open-runtime foundation.
 - Use `game_project_scaffolder(action="plan_structure")` before creating a fresh game foundation.
 - Then use `game_project_scaffolder(action="create_foundation")` to establish runtime, data, tests, telemetry, and playtest structure.
 - Use `game_project_scaffolder(action="generate_vertical_slice")` when the user wants prompt-to-project delivery instead of planning-only output.
 - Use `game_project_scaffolder(action="upgrade_runtime_project")` to refresh an existing long-running project foundation and `game_project_scaffolder(action="apply_system_packet")` to stage one system contract into the runtime workstream.
 - Use `reverie_engine(action="create_project")` when building against Reverie's first-party runtime.
-- For Godot or other external-engine foundations, keep the engine-specific workspace explicit and mirror data contracts inside repository artifacts and support files.
+- For Godot/O3DE foundations, keep the engine-specific workspace explicit and mirror data contracts inside repository artifacts and support files.
 - Ensure the project has a real path to boot, load data, save progress, and run smoke verification.
 
 ## 4. Build the First Playable
@@ -2023,8 +2037,8 @@ This is especially important for ambitious 3D action RPG, open-world, or "Genshi
 - For ambitious 3D requests, the minimum first playable usually includes camera plus movement, one interaction or combat loop, one readable area, basic HUD or feedback, fail and success states, and one reward or progression step.
 - Prefer one strong vertical slice over many shallow systems.
 - Generate scenes, prefabs, or authoring payloads through `reverie_engine` when the project uses the built-in runtime.
-- Use `blender_modeling_workbench` for direct Blender authoring: generate model plans/scripts, run Blender in background mode, export `.blend`/`.glb`/`.gltf`, render previews, and sync the registry. For stylized playable-character requests, prefer the built-in `anime_action_character` preset before falling back to generic proxy shapes.
-- Use `game_modeling_workbench` for `.bbmodel` source stubs, runtime-model imports, primitive placeholders, and Ashfox MCP calls when Blockbench/Ashfox is the intended authoring path.
+- Use `blender_modeling_workbench` for direct Blender authoring: generate model plans/scripts, run Blender in background mode, export `.blend`/`.glb`/`.gltf`, render previews, audit completed assets with `audit_model`, and sync the registry. For stylized playable-character requests, prefer the built-in `anime_action_character` preset; for final/AAA character briefs with high-poly, retopo, UV, texture, rig, weights, or actions, prefer `production_character_pipeline` so procedural texture authoring, material, skinning, animation, facial-deformation, pose-stress, visual-QA, engine-import, IK, collision, LOD, production-manifest, and asset-card evidence are emitted.
+- Use `game_modeling_workbench` for `.bbmodel` source stubs, headless `.bbmodel` validation/export, runtime-model imports, generated primitive starter assets, and Ashfox MCP calls when a live Blockbench/Ashfox editor session is intentionally part of the authoring path.
 - Use `level_design` for layout logic, flow, spatial analysis, route readability, and encounter placement ideas.
 - Use `game_asset_manager` for manifests, naming validation, dependency health, size analysis, and asset-pipeline discipline.
 - Use `game_config_editor` for tuning data and `game_asset_packer` when packaging or optimization work matters.

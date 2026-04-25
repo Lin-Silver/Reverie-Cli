@@ -109,13 +109,21 @@ When `active_model_source` is `standard`, Reverie uses `active_model_index` to c
 
 ## Gamer Modeling
 
-`gamer_mode` may include Blender and Blockbench/Ashfox modeling settings. Useful keys:
+`gamer_mode` may include Blender and the built-in Ashfox MCP bridge settings. Useful keys:
 
 - `blender_modeling_enabled`: enables the built-in Blender workflow.
 - `blender_path`: optional absolute path to `blender.exe`/`blender`; otherwise Reverie checks `REVERIE_BLENDER_PATH`, `BLENDER_PATH`, PATH, and common install folders.
 - `blender_default_export_format`: default runtime export format, normally `glb`.
 - `blender_timeout_seconds`: timeout for background Blender script runs.
-- `ashfox_server_name` and `ashfox_endpoint`: Blockbench/Ashfox integration settings.
+- `ashfox_server_name` and `ashfox_endpoint`: the built-in Ashfox MCP server entry used when an optional Blockbench session exposes Ashfox locally.
+
+## Runtime Plugins
+
+Open runtime SDKs live under the executable-local `.reverie/plugins/<plugin-id>` depot.
+
+- Godot uses `rc_godot_list_versions`, `rc_godot_install_runtime`, `rc_godot_ensure_runtime`, and `rc_godot_clone_source` for GitHub release discovery, plugin-local downloads, and source checkouts.
+- O3DE uses `rc_o3de_list_versions`, `rc_o3de_clone_source`, and `rc_o3de_ensure_runtime` to create a plugin-local source SDK and `runtime/sdk_manifest.json`.
+- Do not place cloned engine source or SDK payloads in global user folders; Reverie expects them beside the executable under `.reverie/plugins`.
 
 ## External Model Sources
 
@@ -231,6 +239,18 @@ Minimal example:
         "path": "Comfy/models/t2i/bluePencilXL_v700.safetensors",
         "display_name": "blue-pencil-xl",
         "introduction": "General illustration model"
+      },
+      {
+        "path": "F:/Models/T2I/ernie-image",
+        "display_name": "ernie-image-turbo-folder",
+        "format": "auto",
+        "introduction": "ERNIE-Image-Turbo GGUF folder package for local high-quality visual assets",
+        "recommended_width": 512,
+        "recommended_height": 512,
+        "recommended_steps": 8,
+        "recommended_cfg": 1.0,
+        "recommended_sampler": "euler",
+        "recommended_scheduler": "simple"
       }
     ],
     "default_model_display_name": "blue-pencil-xl",
@@ -251,6 +271,10 @@ Minimal example:
 Notes:
 
 - Relative TTI model paths are resolved from the active config or project context.
+- A model entry `path` may point to either a single model file or a folder package. For folder packages, Reverie auto-selects the main diffusion model and common auxiliary files such as `ministral-3-3b.safetensors` and `flux2-vae.safetensors`.
+- GGUF diffusion models are supported through the bundled `ComfyUI-GGUF` custom node. They usually need separate ComfyUI-compatible text encoder and VAE files; for ERNIE-Image-Turbo, place `ernie-image-turbo-Q4_K_S.gguf`, `ministral-3-3b.safetensors`, and `flux2-vae.safetensors` in the same folder or in standard `text_encoders/` and `vae/` subfolders.
+- Advanced entries may still set `model_file`/`diffusion_model`, `clip_model`, `vae_model`, or `prompt_enhancer_model` explicitly. Relative auxiliary paths are resolved from the model package folder first.
+- `text_to_image(action="prepare_models", package="ernie-image-turbo-gguf")` reports the app-local depot under `.reverie/plugins/Packages/comfyui/models`; pass `download=true` only when you want Reverie to fetch the large required auxiliary files there, and add `include_optional=true` only if you also want the optional prompt enhancer.
 - `output_dir` defaults to the project root when set to `"."`.
 - `requirements-tti.txt` is optional and only needed when you plan to run `/tti`.
 - In packaged Windows builds, bundled runtime assets are embedded by `build.bat`.

@@ -509,31 +509,34 @@ class GameAssetManagerTool(BaseTool):
 
         # Collect sprite info
         sprites = []
+        unmeasured = []
         for file_path in sprites_dir.rglob("*"):
-            if file_path.is_file() and file_path.suffix.lower() in {".png", ".jpg", ".jpeg"}:
-                try:
-                    # Try to get image dimensions (requires PIL)
-                    from PIL import Image
-                    with Image.open(file_path) as img:
-                        width, height = img.size
-                        sprites.append({
-                            "path": str(file_path.relative_to(self.project_root)),
-                            "name": file_path.name,
-                            "width": width,
-                            "height": height,
-                            "area": width * height
-                        })
-                except (ImportError, Exception):
-                    # PIL not available or invalid image file, use placeholder dimensions
+            if file_path.is_file() and file_path.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp"}:
+                dimensions = self._read_sprite_dimensions(file_path)
+                if dimensions.get("ok"):
+                    width = int(dimensions["width"])
+                    height = int(dimensions["height"])
                     sprites.append({
                         "path": str(file_path.relative_to(self.project_root)),
                         "name": file_path.name,
-                        "width": 64,  # placeholder
-                        "height": 64,  # placeholder
-                        "area": 4096
+                        "width": width,
+                        "height": height,
+                        "area": width * height,
+                        "dimension_source": dimensions.get("source", "unknown"),
+                    })
+                else:
+                    unmeasured.append({
+                        "path": str(file_path.relative_to(self.project_root)),
+                        "name": file_path.name,
+                        "error": dimensions.get("error", "unknown image dimension error"),
                     })
 
         if not sprites:
+            if unmeasured:
+                return ToolResult.fail(
+                    "No measurable sprites found for atlas generation. "
+                    f"{len(unmeasured)} image(s) could not be measured; install Pillow or repair invalid files."
+                )
             return ToolResult.fail("No sprites found for atlas generation")
 
         # Sort by area (largest first) for better packing
@@ -571,6 +574,8 @@ class GameAssetManagerTool(BaseTool):
         # Generate report
         output = f"Sprite Atlas Plan:\n\n"
         output += f"Total sprites: {len(sprites)}\n"
+        if unmeasured:
+            output += f"Unmeasured sprites excluded: {len(unmeasured)}\n"
         output += f"Planned atlases: {len(atlases)}\n"
         output += f"Max atlas size: {atlas_max_size}x{atlas_max_size}\n\n"
         
@@ -583,7 +588,88 @@ class GameAssetManagerTool(BaseTool):
                 output += f" ... and {len(atlas['sprites']) - 5} more"
             output += "\n\n"
 
-        return ToolResult.ok(output, {"atlases": atlases, "total_sprites": len(sprites)})
+        data = {"atlases": atlases, "total_sprites": len(sprites), "unmeasured_sprites": unmeasured}
+        if unmeasured:
+            return ToolResult.partial(output, f"{len(unmeasured)} sprite(s) could not be measured and were excluded.")
+        return ToolResult.ok(output, data)
+
+    def _read_sprite_dimensions(self, file_path: Path) -> Dict[str, Any]:
+        try:
+            from PIL import Image
+            with Image.open(file_path) as img:
+                width, height = img.size
+            return {"ok": True, "width": int(width), "height": int(height), "source": "pillow"}
+        except ImportError:
+            return self._read_sprite_dimensions_from_header(file_path, pillow_error="Pillow is not installed")
+        except Exception as exc:
+            header = self._read_sprite_dimensions_from_header(file_path, pillow_error=str(exc))
+            if header.get("ok"):
+                return header
+            return {"ok": False, "error": str(exc)}
+
+    def _read_sprite_dimensions_from_header(self, file_path: Path, *, pillow_error: str = "") -> Dict[str, Any]:
+        try:
+            data = file_path.read_bytes()[:512]
+        except OSError as exc:
+            return {"ok": False, "error": str(exc)}
+
+        if data.startswith(b"\x89PNG\r\n\x1a\n") and len(data) >= 24:
+            return {
+                "ok": True,
+                "width": int.from_bytes(data[16:20], "big"),
+                "height": int.from_bytes(data[20:24], "big"),
+                "source": "png_header",
+            }
+        if data.startswith((b"GIF87a", b"GIF89a")) and len(data) >= 10:
+            return {
+                "ok": True,
+                "width": int.from_bytes(data[6:8], "little"),
+                "height": int.from_bytes(data[8:10], "little"),
+                "source": "gif_header",
+            }
+        if data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+            if data[12:16] == b"VP8X" and len(data) >= 30:
+                width = int.from_bytes(data[24:27], "little") + 1
+                height = int.from_bytes(data[27:30], "little") + 1
+                return {"ok": True, "width": width, "height": height, "source": "webp_vp8x_header"}
+            if data[12:16] == b"VP8 " and len(data) >= 30:
+                width = int.from_bytes(data[26:28], "little") & 0x3FFF
+                height = int.from_bytes(data[28:30], "little") & 0x3FFF
+                return {"ok": True, "width": width, "height": height, "source": "webp_vp8_header"}
+        if data.startswith(b"\xff\xd8"):
+            jpeg_dims = self._read_jpeg_dimensions(file_path)
+            if jpeg_dims.get("ok"):
+                return jpeg_dims
+        detail = f"; Pillow detail: {pillow_error}" if pillow_error else ""
+        return {"ok": False, "error": f"Unsupported or invalid image header{detail}"}
+
+    def _read_jpeg_dimensions(self, file_path: Path) -> Dict[str, Any]:
+        try:
+            data = file_path.read_bytes()
+        except OSError as exc:
+            return {"ok": False, "error": str(exc)}
+        index = 2
+        while index + 9 < len(data):
+            if data[index] != 0xFF:
+                index += 1
+                continue
+            marker = data[index + 1]
+            index += 2
+            if marker in {0xD8, 0xD9}:
+                continue
+            if index + 2 > len(data):
+                break
+            segment_length = int.from_bytes(data[index:index + 2], "big")
+            if segment_length < 2 or index + segment_length > len(data):
+                break
+            if marker in {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}:
+                if index + 7 <= len(data):
+                    height = int.from_bytes(data[index + 3:index + 5], "big")
+                    width = int.from_bytes(data[index + 5:index + 7], "big")
+                    return {"ok": True, "width": width, "height": height, "source": "jpeg_header"}
+                break
+            index += segment_length
+        return {"ok": False, "error": "Could not find JPEG SOF dimensions"}
 
     def _build_dependency_graph(self, asset_dir: Path, code_dirs: List[str], asset_type: str) -> ToolResult:
         assets = self._collect_assets(asset_dir, asset_type)

@@ -74,7 +74,7 @@ def build_performance_budget(
         "optimization_passes": [
             "streaming and visibility discipline before map-size expansion",
             "combat VFX and projectile pressure tuning before adding more enemies per wave",
-            "asset import validation and placeholder replacement tracking before art-fidelity escalation",
+            "asset import validation and generated starter-asset acceptance before art-fidelity escalation",
         ],
         "checks": [
             "controller, camera, and combat should hold target fps on the critical path",

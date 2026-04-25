@@ -353,16 +353,44 @@ class Live2DManager:
         }
 
     def summary(self) -> Dict[str, Any]:
+        readiness = self.readiness_report()
+        return {
+            **readiness,
+            "validation_errors": readiness["validation_errors"],
+        }
+
+    def readiness_report(self) -> Dict[str, Any]:
         manifest = self.load_manifest()
         sdk_path = self.discover_sdk()
+        validation_errors = self.validate()
+        placeholder_count = sum(1 for model in manifest.models.values() if model.placeholder)
+        real_model_count = len(manifest.models) - placeholder_count
+        placeholder_only = bool(manifest.models) and real_model_count == 0
+        if not manifest.enabled:
+            status = "disabled"
+        elif validation_errors:
+            status = "blocked"
+        elif placeholder_only:
+            status = "bridge-placeholder-ready"
+        else:
+            status = "runtime-ready"
         return {
+            "schema": "reverie.live2d_readiness.v1",
             "enabled": manifest.enabled,
             "renderer": manifest.renderer,
             "model_count": len(manifest.models),
+            "placeholder_count": placeholder_count,
+            "real_model_count": real_model_count,
+            "placeholder_only": placeholder_only,
             "models": sorted(manifest.models.keys()),
             "sdk_found": sdk_path is not None,
             "sdk_path": str(sdk_path) if sdk_path else "",
-            "validation_errors": self.validate(),
+            "validation_errors": validation_errors,
+            "status": status,
+            "notes": [
+                "Placeholder-only manifests validate the bridge and routing path but do not prove a real Cubism model is present.",
+                "Real Live2D models require Cubism Core plus `.model3.json`, moc, texture, and optional motion/expression assets.",
+            ],
         }
 
     def build_runtime_bundle(self, output_path: str | Path, *, sdk_path: Optional[Path] = None) -> Path:
@@ -401,6 +429,7 @@ class Live2DManager:
             "manifest_path": str(self._relative_from(target.parent, self.manifest_path)),
             "models": models,
             "validation_errors": self.validate(),
+            "readiness": self.readiness_report(),
         }
         target.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
         return target

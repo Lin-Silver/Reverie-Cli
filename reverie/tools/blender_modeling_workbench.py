@@ -9,11 +9,13 @@ from .base import BaseTool, ToolResult
 from ..engine import (
     BLENDER_EXPORT_FORMATS,
     BLENDER_MODEL_PRESETS,
+    audit_blender_model,
     create_blender_authoring_job,
     create_blender_model,
     detect_blender_installation,
     inspect_blender_modeling_workspace,
     materialize_blender_workspace,
+    repair_blender_model,
     run_blender_script,
     sync_model_registry,
     validate_blender_script_text,
@@ -34,6 +36,7 @@ class BlenderModelingWorkbenchTool(BaseTool):
         "Built-in Blender authoring workflow. Detect Blender, prepare the Reverie modeling workspace, "
         "generate polished procedural Blender scripts from a modeling brief, run workspace-local bpy scripts "
         "in Blender background mode, export `.blend`/`.glb`/`.gltf`, render previews, and sync the model registry. "
+        "Production-character runs emit validation, QA, engine import, asset-card, and black-box iteration-plan evidence. "
         "This is first-party Reverie tooling, not an external MCP or Skill dependency."
     )
 
@@ -49,6 +52,8 @@ class BlenderModelingWorkbenchTool(BaseTool):
                     "generate_script",
                     "run_script",
                     "validate_script",
+                    "audit_model",
+                    "repair_model",
                     "sync_registry",
                 ],
                 "description": "Blender modeling action",
@@ -68,12 +73,15 @@ class BlenderModelingWorkbenchTool(BaseTool):
                 "description": "Runtime export format. `glb` is preferred for games.",
             },
             "script_path": {"type": "string", "description": "Workspace-local Blender Python script path for run/validate"},
+            "strict": {"type": "boolean", "description": "Treat audit warnings as failures where applicable"},
             "blender_path": {"type": "string", "description": "Optional explicit Blender executable path"},
             "render_preview": {"type": "boolean", "description": "Render a preview PNG when running Blender"},
             "run_blender": {"type": "boolean", "description": "Execute Blender after generating the script"},
             "overwrite": {"type": "boolean", "description": "Overwrite existing generated plan/script/output files"},
             "timeout_seconds": {"type": "integer", "description": "Maximum Blender execution time"},
             "allow_unsafe_python": {"type": "boolean", "description": "Bypass conservative script blocklist for trusted scripts"},
+            "auto_repair": {"type": "boolean", "description": "For audit/create, consume the black-box repair queue automatically when gates fail"},
+            "max_iterations": {"type": "integer", "description": "Maximum automatic repair attempts"},
         },
         "required": ["action"],
     }
@@ -99,6 +107,10 @@ class BlenderModelingWorkbenchTool(BaseTool):
                 return self._run_script(project_root, kwargs)
             if action == "validate_script":
                 return self._validate_script(project_root, kwargs)
+            if action == "audit_model":
+                return self._audit_model(project_root, kwargs)
+            if action == "repair_model":
+                return self._repair_model(project_root, kwargs)
             if action == "sync_registry":
                 return self._sync_registry(project_root)
             return ToolResult.fail(f"Unknown action: {action}")
@@ -246,6 +258,24 @@ class BlenderModelingWorkbenchTool(BaseTool):
             output += f"\nBlender detail: {str(run_result.get('stderr'))[:600]}"
         if run_result.get("success"):
             output += f"\nRegistry synced: {result['registry']['registry_path']}"
+            audit = result.get("audit", {})
+            if audit and audit.get("status") != "passed" and bool(kwargs.get("auto_repair", False)):
+                repair = repair_blender_model(
+                    project_root,
+                    str(spec.get("model_name", "")),
+                    export_format=str(spec.get("export_format") or kwargs.get("export_format") or "glb"),
+                    blender_path=self._ensure_blender_path(kwargs, deploy=True),
+                    timeout_seconds=int(kwargs.get("timeout_seconds", 240) or 240),
+                    max_iterations=int(kwargs.get("max_iterations", 3) or 3),
+                    render_preview=bool(kwargs.get("render_preview", True)),
+                )
+                result["repair"] = repair
+                audit = repair.get("final_audit", audit)
+            if audit:
+                output += (
+                    f"\nAudit: {audit.get('status', 'unknown')} "
+                    f"(score {audit.get('score', 'n/a')}, failed gates: {', '.join(audit.get('failed_gates') or []) or 'none'})"
+                )
             return ToolResult.ok(output, result)
         if run_result.get("skipped"):
             return ToolResult.ok(output, result)
@@ -284,6 +314,84 @@ class BlenderModelingWorkbenchTool(BaseTool):
         if issues:
             output += "\nIssues:\n" + "\n".join(f"- {issue}" for issue in issues)
         return ToolResult.ok(output, {"ok": ok, "issues": issues, "script_path": str(script_path)}) if ok else ToolResult.fail(output)
+
+    def _audit_model(self, project_root: Path, kwargs: Dict[str, Any]) -> ToolResult:
+        model_name = str(kwargs.get("model_name") or "").strip()
+        if not model_name:
+            return ToolResult.fail("model_name is required for audit_model")
+        if bool(kwargs.get("auto_repair", False)):
+            return self._repair_model(project_root, kwargs)
+        audit = audit_blender_model(
+            project_root,
+            model_name,
+            export_format=str(kwargs.get("export_format") or "glb").strip().lower(),
+        )
+        output = (
+            f"Blender model audit for '{audit['model_name']}'\n"
+            f"Status: {audit['status']} | Score: {audit['score']} | Blocker score: {audit['blocker_score']}\n"
+            f"Preset: {audit.get('preset', 'unknown')}\n"
+            f"Failed gates: {', '.join(audit.get('failed_gates') or []) or 'none'}"
+        )
+        if audit.get("validation"):
+            validation = audit["validation"]
+            output += (
+                f"\nRuntime meshes: {validation.get('low_mesh_count', 0)} | "
+                f"Actions: {validation.get('action_count', 0)} | "
+                f"LOD variants: {validation.get('lod_count', 0)} | "
+                f"Pipeline score: {validation.get('score', 'n/a')}"
+                f"\nMaterial manifests: {validation.get('material_tuning_mesh_count', 0)} | "
+                f"Skinning manifests: {validation.get('skinning_manifest_mesh_count', 0)} | "
+                f"Animation clips: {validation.get('animation_clip_count', 0)} | "
+                f"IK constraints: {validation.get('ik_constraint_count', 0)}"
+            )
+        if audit.get("production_manifest"):
+            manifest = audit["production_manifest"]
+            output += (
+                f"\nProduction manifest: {manifest.get('pipeline_state') or 'unknown'} | "
+                f"Stages: {manifest.get('stage_count', 0)} | "
+                f"Missing: {', '.join(manifest.get('missing_stages') or []) or 'none'}"
+            )
+        if audit.get("iteration_plan"):
+            plan = audit["iteration_plan"]
+            output += (
+                f"\nBlack-box iteration: {plan.get('state') or 'unknown'} | "
+                f"Repairs: {plan.get('repair_count', 0)} | "
+                f"Blocking decisions: {plan.get('blocking_decision_count', 0)}"
+            )
+        if audit.get("runtime_summary"):
+            output += f"\nRuntime summary: {audit['runtime_summary']}"
+        if audit.get("status") == "passed":
+            return ToolResult.ok(output, audit)
+        if audit.get("status") == "warning" and not bool(kwargs.get("strict", False)):
+            return ToolResult.ok(output, audit)
+        return ToolResult.partial(output, "Blender asset audit found issues.")
+
+    def _repair_model(self, project_root: Path, kwargs: Dict[str, Any]) -> ToolResult:
+        model_name = str(kwargs.get("model_name") or "").strip()
+        if not model_name:
+            return ToolResult.fail("model_name is required for repair_model")
+        repair = repair_blender_model(
+            project_root,
+            model_name,
+            export_format=str(kwargs.get("export_format") or "glb").strip().lower(),
+            blender_path=self._ensure_blender_path(kwargs, deploy=True),
+            timeout_seconds=int(kwargs.get("timeout_seconds", 240) or 240),
+            max_iterations=int(kwargs.get("max_iterations", 3) or 3),
+            render_preview=bool(kwargs.get("render_preview", True)),
+        )
+        final_audit = repair.get("final_audit", {})
+        output = (
+            f"Blender black-box repair for '{repair.get('model_name', model_name)}'\n"
+            f"Attempts: {repair.get('attempt_count', 0)} / {repair.get('max_iterations', 0)}\n"
+            f"Result: {'repaired' if repair.get('success') else 'needs review'}\n"
+            f"Final audit: {final_audit.get('status', 'unknown')} "
+            f"(score {final_audit.get('score', 'n/a')}, failed gates: {', '.join(final_audit.get('failed_gates') or []) or 'none'})\n"
+            f"Repair report: {repair.get('repair_report_path', '')}"
+        )
+        if repair.get("success"):
+            return ToolResult.ok(output, repair)
+        blocked = any(item.get("status") == "blocked" for item in repair.get("attempts", []) if isinstance(item, dict))
+        return ToolResult.partial(output, "Automatic Blender repair is blocked." if blocked else "Automatic Blender repair did not clear all gates.")
 
     def _sync_registry(self, project_root: Path) -> ToolResult:
         result = sync_model_registry(project_root, overwrite=True)

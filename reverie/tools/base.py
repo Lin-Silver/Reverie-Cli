@@ -53,11 +53,12 @@ class ToolResult:
         )
     
     @classmethod
-    def partial(cls, output: str, error: str) -> 'ToolResult':
+    def partial(cls, output: str, error: str, data: Optional[Dict] = None) -> 'ToolResult':
         return cls(
             success=True,
             output=output,
             error=error,
+            data=data or {},
             status=ToolResultStatus.PARTIAL
         )
 

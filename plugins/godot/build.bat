@@ -3,8 +3,13 @@ setlocal
 cd /d "%~dp0"
 
 set "PLUGIN_NAME=reverie-godot"
+set "PYTHON_EXE=python"
 
-python -m PyInstaller ^
+if exist "%~dp0..\..\venv\Scripts\python.exe" (
+  set "PYTHON_EXE=%~dp0..\..\venv\Scripts\python.exe"
+)
+
+"%PYTHON_EXE%" -m PyInstaller ^
   --noconfirm ^
   --clean ^
   --onefile ^

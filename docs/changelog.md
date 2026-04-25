@@ -8,7 +8,20 @@
 * Simplified `/tools` into a lightweight English tool list with current-mode and total tool counts, and reduced startup/session log noise plus streaming footer refresh churn.
 * Added a first-party `blender_modeling_workbench` tool and `/blender` command so Reverie can generate auditable Blender authoring scripts, run Blender in background mode, save `.blend` sources, export `.glb`/`.gltf`, render previews, and sync the model registry without configuring an external MCP server or Skill.
 * Hardened streaming stability in the CLI so partial provider disconnects no longer spill transport errors into the middle of a partially rendered answer as often, and reduced duplicate live-footer redraws on Windows PowerShell by switching the streaming footer to manual refresh with deduplicated tool-progress updates.
-* Expanded the `production_character_pipeline` Blender preset with face shape-key placeholders, attachment sockets, and a preview turntable camera animation on top of the existing high-poly, retopo, UV, texture, rig, and action scaffolding.
+* Expanded the `production_character_pipeline` Blender preset with face shape-key deformation, attachment sockets, and a preview turntable camera animation on top of the existing high-poly, retopo, UV, texture, rig, and action evidence.
+* Added material tuning, skinning, animation, IK, collision, LOD, asset-card, and production-stage manifest evidence to the Blender production-character audit path.
+* Upgraded Blender production-character outputs with non-zero facial shape-key deformation, a skinning pose-stress action, visual QA reports, and engine import contracts.
+* Replaced flat Blender texture stubs in the production-character path with deterministic production-candidate basecolor, normal, ORM, and material-ID texture sets plus texture authoring metadata.
+* Added automatic Blender repair execution so iteration plans now consume repair queues, regenerate authoring scripts, rerun Blender when available, re-audit, and persist repair history.
+* Added production-character art-readiness reports and enriched engine import contracts with artifact import validation and animation-retarget profiles.
+* Added open-runtime Godot and O3DE delivery coverage: Godot now reports artifact-validated readiness without the optional runtime plugin, and O3DE has a scaffold-ready adapter plus plugin-local source SDK deployment.
+* Added headless Blockbench `.bbmodel` validation/export so simple cuboid assets can become runtime `.gltf` files without requiring Blockbench desktop or Ashfox.
+* Added text-to-image runtime diagnostics, Live2D readiness reports, and stricter atlas dimension analysis that fails invalid images instead of assuming `64x64`.
+* Removed Unity/Unreal runtime adapter support from Gamer planning to avoid closed commercial engine entanglement; open engine delivery is now focused on Godot and O3DE.
+* Added official Godot and O3DE runtime plugins that can discover GitHub versions and keep downloads/source checkouts inside the executable-root `.reverie/plugins/<package>` depot.
+* Strengthened base Reverie mode with a Black-Box Completion Protocol so broad `continue`, `one-shot`, and "do not stop" requests keep advancing through implementation, verification, repair, and artifact evidence before closure.
+* Added Blender production-character black-box iteration plans so generated AAA character assets now carry automatic repair queues and audit evidence for continued remediation.
+* Regenerated the application icon assets with transparent PNG/ICO backgrounds instead of the previous black square backdrop.
 * Added the `anime_action_character` Blender preset for stylized playable-character blockouts with layered clothing, hair clumps, weapon silhouettes, rig markers, LOD markers, material IDs, and preview/export wiring.
 * Repositioned Plugins as a portable SDK/runtime depot under `.reverie/plugins/<plugin-id>/runtime`, with `/plugins sdk <plugin-id>` preparing SDK manifests and folders while optional `rc_*` wrappers remain available for model-callable automation.
 
@@ -325,7 +338,7 @@
 
 * Added OpenAI Codex-style skill discovery so Reverie now scans the application-root `.reverie/Skills` and `.reverie/skills` roots for `SKILL.md` instruction packs.
 * Added explicit `$skill-name` turn injection so a detected skill's `SKILL.md` body can be loaded directly into the active model turn when requested by the user.
-* Added built-in primitive 3D asset generation so Reverie-Gamer can create runtime `.gltf` placeholders and preview renders directly through `/modeling primitive`.
+* Added built-in primitive 3D asset generation so Reverie-Gamer can create runtime `.gltf` starter assets and preview renders directly through `/modeling primitive`.
 * Added built-in playblast and encoded video export through `/engine video`, including frame-sequence export that works even when no external encoder is installed.
 * Added a practical Ren'Py import pipeline through `/engine renpy`, including stage-command support for `scene`, `show`, `hide`, `play`, `voice`, and `stop`.
 * Added build-time support for bundling `ffmpeg` into the Windows one-file `reverie.exe` when it is available.
@@ -360,7 +373,7 @@
 ### Changed
 
 * Clarified the internal engine structure so `reverie_engine` remains the canonical built-in runtime surface while `reverie_engine_lite` stays as a compatibility alias over the same implementation.
-* Reworked the modeling flow so Reverie no longer depends on checked-out `references/blockbench-master`, `references/ashfox-main`, or root-level helper scripts; only Blockbench desktop plus the Ashfox plugin remain manual installs.
+* Reworked the modeling flow so Reverie no longer depends on checked-out `references/blockbench-master`, `references/ashfox-main`, or root-level helper scripts; Reverie seeds the Ashfox MCP config internally, and Blockbench desktop/Ashfox are optional live-editor additions.
 * Expanded engine inspection, health, validation, packaging, and resource-loading flows to account for model-pipeline state, model registries, `.bbmodel`, `.gltf`, and `.glb` assets.
 * Updated Gamer-mode prompts, help catalog entries, and CLI command documentation to reflect the built-in Ashfox MCP workflow and its Gamer-only boundary.
 
@@ -429,7 +442,7 @@
 * **2D games**: platformers, metroidvanias, top-down action games, roguelikes, bullet hell shooters, JRPGs, tactics games, deckbuilders/card games, puzzle games, visual novels, and management/simulation projects.
 * **2.5D games**: isometric ARPGs, tactics/strategy games, Diablo-like loot games, cinematic platformers, survival-horror hybrids, and fixed-camera exploration projects.
 * **3D games**: action-adventure games, RPGs, open-zone/open-world projects, FPS/TPS combat games, survival/crafting games, dungeon crawlers, immersive sims, racing prototypes, and systemic sandbox experiences.
-* **Engine/runtime coverage**: built-in `Reverie Engine Lite`, custom runtime workflows, web stacks (`Phaser`, `PixiJS`, `Three.js`), lightweight Python/Lua stacks (`Pygame`, `Love2D`), and engine-aware project structures for `Godot`, `Unity`, and `Unreal`.
+* **Engine/runtime coverage**: built-in `Reverie Engine Lite`, custom runtime workflows, web stacks (`Phaser`, `PixiJS`, `Three.js`), lightweight Python/Lua stacks (`Pygame`, `Love2D`), and open engine project structures for `Godot` and `O3DE`.
 
 ### Notes
 * `reverie-gamer` now has the strongest results when used as a production loop: blueprint -> scaffold -> first playable -> simulation -> playtest -> telemetry-informed iteration.

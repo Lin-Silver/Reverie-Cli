@@ -13,6 +13,7 @@ from datetime import datetime
 import json
 
 from .base import BaseTool, ToolResult
+from ..config import get_app_root
 from ..engine import canonical_engine_name, is_builtin_engine_name
 from ..gamer.asset_pipeline import build_asset_pipeline_plan, asset_pipeline_markdown
 from ..gamer.asset_budgeting import build_asset_budget
@@ -308,6 +309,7 @@ class GameDesignOrchestratorTool(BaseTool):
         runtime_selection = select_runtime_profile(
             game_request,
             project_root=self.project_root,
+            app_root=get_app_root(),
             requested_runtime=kwargs.get("requested_runtime", ""),
             existing_runtime=kwargs.get("existing_runtime", ""),
         )
@@ -682,6 +684,7 @@ class GameDesignOrchestratorTool(BaseTool):
             runtime_selection = select_runtime_profile(
                 game_request,
                 project_root=self.project_root,
+                app_root=get_app_root(),
                 requested_runtime=kwargs.get("requested_runtime", ""),
                 existing_runtime=kwargs.get("existing_runtime", ""),
             )
@@ -1044,6 +1047,7 @@ class GameDesignOrchestratorTool(BaseTool):
             runtime_selection = select_runtime_profile(
                 game_request,
                 project_root=self.project_root,
+                app_root=get_app_root(),
                 requested_runtime="",
                 existing_runtime="",
             )

@@ -76,6 +76,7 @@ from .modeling import (
 from .blender_modeling import (
     BLENDER_EXPORT_FORMATS,
     BLENDER_MODEL_PRESETS,
+    audit_blender_model,
     blender_modeling_paths,
     build_blender_model_spec,
     create_blender_authoring_job,
@@ -84,15 +85,19 @@ from .blender_modeling import (
     infer_blender_preset,
     inspect_blender_modeling_workspace,
     materialize_blender_workspace,
+    repair_blender_model,
     run_blender_script,
     validate_blender_script_text,
 )
 from .procedural_assets import (
     PRIMITIVE_MODEL_TYPES,
     PrimitiveMesh,
+    build_blockbench_runtime_mesh,
     build_gltf_document,
     build_primitive_mesh,
+    create_blockbench_runtime_export,
     create_primitive_model,
+    validate_blockbench_model_file,
 )
 from .renpy_import import ParsedRenPyScript, compile_renpy_script, import_renpy_script, parse_renpy_script
 from .navigation import GridNavigationMap, NavigationPath, NavigationServer, TowerDefenseLane
@@ -222,6 +227,7 @@ __all__ = [
     "benchmark_ai_command_latency",
     "benchmark_project",
     "benchmark_scene_instantiation",
+    "audit_blender_model",
     "BlendMode",
     "ButtonComponent",
     "Camera",
@@ -288,6 +294,7 @@ __all__ = [
     "PrimitiveMesh",
     "Quaternion",
     "RaycastResult",
+    "repair_blender_model",
     "RenderBackend",
     "RenderCommand",
     "RenderFrame",
@@ -334,6 +341,7 @@ __all__ = [
     "World3DState",
     "SpotLight",
     "build_blockbench_model_stub",
+    "build_blockbench_runtime_mesh",
     "build_blender_model_spec",
     "build_engine_config",
     "build_gltf_document",
@@ -347,6 +355,7 @@ __all__ = [
     "copy_imported_model",
     "create_blender_authoring_job",
     "create_blender_model",
+    "create_blockbench_runtime_export",
     "create_model_stub",
     "create_primitive_model",
     "create_project_skeleton",
@@ -398,6 +407,7 @@ __all__ = [
     "summarize_schema_required_keys",
     "sync_model_registry",
     "validate_blender_script_text",
+    "validate_blockbench_model_file",
     "validate_document_schema",
     "validate_engine_config_schema",
     "validate_gameplay_manifest_schema",

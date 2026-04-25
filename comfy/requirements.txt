@@ -2,6 +2,7 @@
 --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/ # https://github.com/microsoft/onnxruntime/issues/21684
 
 accelerate==1.11.0
+av
 certifi==2025.10.5
 charset-normalizer==3.4.4
 colorama==0.4.6
@@ -34,6 +35,7 @@ transformers==4.46.3
 typing_extensions==4.15.0
 urllib3==2.5.0
 zipp==3.23.0
+gguf>=0.18.0
 hyperpyyaml
 modelscope
 conformer==0.3.2

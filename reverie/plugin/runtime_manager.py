@@ -6,6 +6,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Iterable, Optional
 import json
+import os
 import platform
 import re
 import shlex
@@ -296,29 +297,52 @@ class RuntimePluginTemplateRecord:
 
 
 DEFAULT_RUNTIME_PLUGIN_CATALOG: tuple[RuntimePluginSpec, ...] = (
-        RuntimePluginSpec(
-            plugin_id="godot",
-            display_name="Godot Editor",
-            runtime_family="engine",
-            description="Primary 3D runtime/editor target for the first plugin-delivered pipeline.",
-            source_repo_hint="references/godot",
-            delivery="sdk-runtime",
-            capabilities=("editor", "3d", "scene-import", "gltf"),
-            entry_candidates={
-                "windows": ("runtime/reverie-godot*.exe", "runtime/godot.exe", "runtime/Godot*.exe", "reverie-godot*.exe", "godot.exe", "godot*.exe", "Godot*.exe", "bin/Godot*.exe"),
-                "linux": ("runtime/Godot*", "runtime/godot*", "Godot*", "godot*", "bin/Godot*"),
-                "darwin": ("runtime/Godot*.app", "Godot*.app", "Godot*", "bin/Godot*"),
-            },
-            sdk_download_page="https://godotengine.org/download/windows/",
-            sdk_archive_hint="Unpack a portable Godot build into `.reverie/plugins/godot/runtime/`.",
-            sdk_install_hint="Expected entry: `.reverie/plugins/godot/runtime/Godot*.exe` or `godot.exe`.",
-        ),
+    RuntimePluginSpec(
+        plugin_id="godot",
+        display_name="Godot Editor",
+        runtime_family="engine",
+        description="Open-source 3D runtime/editor target with plugin-local GitHub release downloads and source checkout support.",
+        source_repo_hint="https://github.com/godotengine/godot",
+        delivery="sdk-runtime",
+        capabilities=("editor", "3d", "scene-import", "gltf", "github-release", "source-sdk"),
+        entry_candidates={
+            "windows": ("runtime/reverie-godot*.exe", "runtime/godot.exe", "runtime/Godot*.exe", "runtime/**/*.exe", "runtime/**/Godot*.exe", "runtime/**/godot*.exe", "reverie-godot*.exe", "godot.exe", "godot*.exe", "Godot*.exe", "bin/Godot*.exe"),
+            "linux": ("runtime/Godot*", "runtime/godot*", "runtime/**/Godot*", "runtime/**/godot*", "Godot*", "godot*", "bin/Godot*"),
+            "darwin": ("runtime/Godot*.app", "runtime/**/Godot*.app", "Godot*.app", "Godot*", "bin/Godot*"),
+        },
+        sdk_download_page="https://github.com/godotengine/godot/releases",
+        sdk_archive_hint="Use `/plugins deploy godot`, `rc_godot_list_versions`, or `rc_godot_install_runtime` to download an official release into `.reverie/plugins/godot/runtime/`.",
+        sdk_install_hint="Expected entry: `.reverie/plugins/godot/runtime/<version>/Godot*.exe`; source checkouts live under `.reverie/plugins/godot/source/`.",
+    ),
+    RuntimePluginSpec(
+        plugin_id="o3de",
+        display_name="O3DE Source SDK",
+        runtime_family="engine",
+        description="Open-source O3DE source SDK manager that clones GitHub source and writes plugin-local SDK manifests.",
+        source_repo_hint="https://github.com/o3de/o3de",
+        delivery="sdk-runtime",
+        capabilities=("engine", "large-scale-3d", "source-sdk", "github-release", "asset-processor-contract"),
+        entry_candidates={
+            "windows": (
+                "runtime/sdk_manifest.json",
+                "runtime/**/sdk_manifest.json",
+                "source/**/scripts/o3de.bat",
+                "source/**/scripts/o3de.py",
+                "source/**/build/windows/bin/profile/Editor.exe",
+            ),
+            "linux": ("runtime/sdk_manifest.json", "source/**/scripts/o3de.py", "source/**/build/linux/bin/profile/Editor"),
+            "darwin": ("runtime/sdk_manifest.json", "source/**/scripts/o3de.py", "source/**/build/mac/bin/profile/Editor.app"),
+        },
+        sdk_download_page="https://github.com/o3de/o3de/releases",
+        sdk_archive_hint="Use `/plugins deploy o3de`, `rc_o3de_list_versions`, or `rc_o3de_clone_source` to create `.reverie/plugins/o3de/source/` plus a runtime SDK manifest.",
+        sdk_install_hint="Expected manifest: `.reverie/plugins/o3de/runtime/sdk_manifest.json`; source checkout stays under `.reverie/plugins/o3de/source/`.",
+    ),
     RuntimePluginSpec(
         plugin_id="blender",
         display_name="Blender",
         runtime_family="dcc",
         description="Authoring/runtime-adjacent DCC for mesh processing, baking, and export automation.",
-        source_repo_hint="references/blender",
+        source_repo_hint="https://projects.blender.org/blender/blender",
         delivery="sdk-runtime",
         capabilities=("mesh", "rigging", "bake", "export"),
         entry_candidates={
@@ -334,28 +358,11 @@ DEFAULT_RUNTIME_PLUGIN_CATALOG: tuple[RuntimePluginSpec, ...] = (
         },
     ),
     RuntimePluginSpec(
-        plugin_id="blockbench",
-        display_name="Blockbench",
-        runtime_family="dcc",
-        description="Lightweight companion editor for fast modeling, previews, and MCP-assisted workflows.",
-        source_repo_hint="references/blockbench",
-        delivery="sdk-runtime",
-        capabilities=("modeling", "preview", "mcp"),
-        entry_candidates={
-            "windows": ("runtime/Blockbench.exe", "Blockbench.exe", "blockbench.exe", "bin/Blockbench.exe"),
-            "linux": ("runtime/Blockbench", "Blockbench", "blockbench", "bin/Blockbench"),
-            "darwin": ("runtime/Blockbench.app", "Blockbench.app", "Blockbench*.app"),
-        },
-        sdk_download_page="https://www.blockbench.net/downloads",
-        sdk_archive_hint="Unpack or install a portable Blockbench build under `.reverie/plugins/blockbench/runtime/`.",
-        sdk_install_hint="Expected entry: `.reverie/plugins/blockbench/runtime/Blockbench.exe`.",
-    ),
-    RuntimePluginSpec(
         plugin_id="gltf-validator",
         display_name="glTF Validator",
         runtime_family="validator",
         description="Validation/runtime health tool for imported glTF assets before downstream engine ingestion.",
-        source_repo_hint="references/gltf-validator",
+        source_repo_hint="https://github.com/KhronosGroup/glTF-Validator",
         delivery="sdk-runtime",
         capabilities=("validation", "gltf"),
         entry_candidates={
@@ -796,6 +803,15 @@ class RuntimePluginManager:
             return {
                 "success": False,
                 "error": f"No runnable entry found for SDK plugin: {plugin_id}",
+                "status": status,
+            }
+        if entry_path.suffix.lower() in {".json", ".yaml", ".yml", ".md", ".txt"}:
+            return {
+                "success": False,
+                "error": (
+                    f"{plugin_id} is source-managed and has a metadata entry instead of a directly runnable SDK binary. "
+                    f"Use the plugin RC tools, such as rc_{normalized}_runtime_status or rc_{normalized}_clone_source."
+                ),
                 "status": status,
             }
 
@@ -1465,6 +1481,11 @@ class RuntimePluginManager:
 
     def _run_plugin_process(self, entry_path: Path, extra_args: list[str], *, timeout_seconds: float) -> dict[str, Any]:
         command = self._build_launch_command(entry_path, extra_args)
+        plugin_root = entry_path.parent
+        if plugin_root.name.lower() == "dist" and (plugin_root.parent / "plugin.json").exists():
+            plugin_root = plugin_root.parent
+        env = dict(os.environ)
+        env.setdefault("REVERIE_PLUGIN_ROOT", str(plugin_root.resolve(strict=False)))
         startupinfo = None
         creationflags = 0
         if sys.platform.startswith("win"):
@@ -1484,6 +1505,7 @@ class RuntimePluginManager:
                 timeout=timeout_seconds,
                 startupinfo=startupinfo,
                 creationflags=creationflags,
+                env=env,
                 shell=False,
             )
         except subprocess.TimeoutExpired as exc:

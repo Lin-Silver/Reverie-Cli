@@ -12,6 +12,14 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def _runtime_contract_root(runtime_id: str) -> tuple[str, str]:
+    if runtime_id == "godot":
+        return "engine/godot/data", ".json"
+    if runtime_id == "o3de":
+        return "engine/o3de/Registry", ".json"
+    return "data/content", ".yaml"
+
+
 def build_runtime_delivery_plan(
     game_request: Dict[str, Any],
     blueprint: Dict[str, Any],
@@ -58,10 +66,9 @@ def build_runtime_delivery_plan(
     ]
     runtime_data_contracts = []
     if runtime_contract_ids:
-        runtime_root_hint = "engine/godot/data" if selected_runtime == "godot" else "data/content"
+        runtime_root_hint, extension = _runtime_contract_root(selected_runtime)
         for contract_id in runtime_contract_ids:
             file_stem = contract_id
-            extension = ".json" if selected_runtime == "godot" else ".yaml"
             runtime_data_contracts.append(
                 {
                     "id": contract_id,
@@ -175,7 +182,7 @@ def build_runtime_delivery_plan(
         "optimization_backlog": [
             "profile region transitions and tighten loaded-cell counts before widening the active region budget",
             "keep combat VFX, projectile counts, and AI density inside one shared frame budget",
-            "promote only validated assets into runtime import lanes so placeholder swaps do not regress load times",
+            "promote only validated starter assets into runtime import lanes so art upgrades do not regress load times",
         ],
         "asset_contract": {
             "runtime_root": runtime_root,

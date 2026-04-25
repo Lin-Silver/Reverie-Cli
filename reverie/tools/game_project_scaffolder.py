@@ -12,6 +12,7 @@ from pathlib import Path
 import json
 
 from .base import BaseTool, ToolResult
+from ..config import get_app_root
 from ..engine import canonical_engine_name, create_project_skeleton, is_builtin_engine_name
 from ..gamer.prompt_compiler import compile_game_prompt
 from ..gamer.production_plan import build_blueprint_from_request
@@ -74,7 +75,7 @@ class GameProjectScaffolderTool(BaseTool):
             },
             "engine": {
                 "type": "string",
-                "description": "Engine or framework such as custom, godot, unity, unreal, phaser, pygame",
+                "description": "Engine or framework such as custom, godot, o3de, phaser, pygame",
             },
             "dimension": {
                 "type": "string",
@@ -206,6 +207,7 @@ class GameProjectScaffolderTool(BaseTool):
         runtime_selection = select_runtime_profile(
             game_request,
             project_root=output_dir,
+            app_root=get_app_root(),
             requested_runtime=kwargs.get("requested_runtime", ""),
             existing_runtime=kwargs.get("existing_runtime", ""),
         )
@@ -260,7 +262,7 @@ class GameProjectScaffolderTool(BaseTool):
             requested_runtime=kwargs.get("requested_runtime", ""),
             existing_runtime=kwargs.get("existing_runtime", ""),
             overwrite=kwargs.get("overwrite", False),
-            app_root=self.project_root,
+            app_root=get_app_root(),
         )
         verification = result.get("verification", {})
         output = (
@@ -305,6 +307,7 @@ class GameProjectScaffolderTool(BaseTool):
             runtime_selection = select_runtime_profile(
                 game_request,
                 project_root=output_dir,
+                app_root=get_app_root(),
                 requested_runtime=kwargs.get("requested_runtime", ""),
                 existing_runtime=kwargs.get("existing_runtime", ""),
             )
@@ -321,7 +324,7 @@ class GameProjectScaffolderTool(BaseTool):
             requested_runtime=kwargs.get("requested_runtime", ""),
             existing_runtime=kwargs.get("existing_runtime", ""),
             overwrite=kwargs.get("overwrite", False),
-            app_root=self.project_root,
+            app_root=get_app_root(),
         )
         return ToolResult.ok(
             f"Upgraded runtime project in {output_dir}\nRuntime: {result['runtime']}\nArtifacts: {len(result.get('written_artifacts', []))}",
@@ -348,6 +351,7 @@ class GameProjectScaffolderTool(BaseTool):
         runtime_selection = select_runtime_profile(
             game_request,
             project_root=output_dir,
+            app_root=get_app_root(),
             requested_runtime=kwargs.get("requested_runtime", ""),
             existing_runtime=kwargs.get("existing_runtime", ""),
         )
@@ -514,7 +518,7 @@ class GameProjectScaffolderTool(BaseTool):
                     "telemetry",
                 ]
             )
-        elif engine in {"godot", "unity", "unreal"}:
+        elif engine in {"godot", "o3de"}:
             structure.extend(["engine", "engine/runtime_notes"])
         elif engine in {"pygame", "custom"}:
             structure.extend(["src/game", "src/game/systems", "src/game/content"])
@@ -641,8 +645,8 @@ class GameProjectScaffolderTool(BaseTool):
             return "lua"
         if normalized == "godot":
             return "gdscript"
-        if normalized in {"unity", "unreal"}:
-            return "csharp" if normalized == "unity" else "cpp"
+        if normalized == "o3de":
+            return "lua/cpp"
         return "python"
 
     def _pascal_case(self, text: str) -> str:

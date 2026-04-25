@@ -55,7 +55,7 @@ The built-in engine is data-driven:
 - content data is YAML or JSON
 - model assets are tracked through `data/models/model_registry.yaml`
 
-The main Reverie executable does not embed the full Blender or Blockbench applications. Instead, the official Blender plugin can embed Blender Portable inside `reverie-blender.exe` and unpack it into `.reverie/plugins/blender/runtime/` on demand. Blender authoring is handled by the built-in `blender_modeling_workbench` tool through background `bpy` scripts; portable SDK/runtime binaries live under `.reverie/plugins/<plugin-id>/runtime/`; Blockbench authoring remains available through the built-in Ashfox MCP integration when that editor/plugin pair is running.
+The main Reverie executable does not embed full desktop DCC/editor applications by default. The official Blender plugin can embed Blender Portable inside `reverie-blender.exe` and unpack it into `.reverie/plugins/blender/runtime/` on demand; Godot and O3DE plugins manage releases, source checkouts, and SDK metadata under `.reverie/plugins/<plugin-id>/runtime/` and `.reverie/plugins/<plugin-id>/source/`. Blender authoring is handled by the built-in `blender_modeling_workbench` tool through background `bpy` scripts, while Blockbench authoring remains available through the built-in Ashfox MCP integration when that optional editor/plugin pair is running.
 
 ## Modeling Integration
 
@@ -68,7 +68,7 @@ In short:
 3. Sync the generated registry
 4. Validate the pipeline before playtest or packaging
 
-For quick internal placeholders, `/modeling primitive` can generate a built-in runtime `.gltf` plus preview image directly into the standard project layout. For richer authored placeholders, `/blender create <model_name> <brief>` generates a `.blend` source, `.glb` runtime export, and preview render without configuring an external MCP server.
+For quick generated starter assets, `/modeling primitive` can create a built-in runtime `.gltf` plus preview image directly into the standard project layout. For richer authored assets, `/blender create <model_name> <brief>` generates a `.blend` source, `.glb` runtime export, preview render, audit evidence, and optional repair loop without configuring an external MCP server.
 
 ## Ren'Py And Video Integration
 

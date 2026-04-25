@@ -150,6 +150,38 @@ if defined BLENDER_ARCHIVE_SOURCE (
     echo       Blender portable archive not found. Official Blender plugin build skipped.
 )
 
+if exist "%ROOT_DIR%\plugins\godot\plugin.py" (
+    echo       Building official Godot plugin...
+    call "%ROOT_DIR%\plugins\godot\build.bat"
+    if %ERRORLEVEL% neq 0 (
+        echo [ERROR] Failed to build Godot plugin executable.
+        set "BUILD_EXIT_CODE=1"
+        goto finish
+    )
+    python -c "from reverie.config import get_app_root; from reverie.plugin.runtime_manager import RuntimePluginManager; manager=RuntimePluginManager(get_app_root()); result=manager.install_source_plugin('godot', overwrite=False); print('      Godot plugin installed:', result.get('target_dir')); raise SystemExit(0 if result.get('success') else 1)"
+    if %ERRORLEVEL% neq 0 (
+        echo [ERROR] Failed to install Godot plugin into dist runtime depot.
+        set "BUILD_EXIT_CODE=1"
+        goto finish
+    )
+)
+
+if exist "%ROOT_DIR%\plugins\o3de\plugin.py" (
+    echo       Building official O3DE plugin...
+    call "%ROOT_DIR%\plugins\o3de\build.bat"
+    if %ERRORLEVEL% neq 0 (
+        echo [ERROR] Failed to build O3DE plugin executable.
+        set "BUILD_EXIT_CODE=1"
+        goto finish
+    )
+    python -c "from reverie.config import get_app_root; from reverie.plugin.runtime_manager import RuntimePluginManager; manager=RuntimePluginManager(get_app_root()); result=manager.install_source_plugin('o3de', overwrite=False); print('      O3DE plugin installed:', result.get('target_dir')); raise SystemExit(0 if result.get('success') else 1)"
+    if %ERRORLEVEL% neq 0 (
+        echo [ERROR] Failed to install O3DE plugin into dist runtime depot.
+        set "BUILD_EXIT_CODE=1"
+        goto finish
+    )
+)
+
 echo.
 echo [5/6] Resolving optional ffmpeg and icon...
 if defined USER_FFMPEG_PATH if exist "%USER_FFMPEG_PATH%" set "REVERIE_FFMPEG_PATH=%USER_FFMPEG_PATH%"

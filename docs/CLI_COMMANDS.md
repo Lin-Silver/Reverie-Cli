@@ -85,7 +85,7 @@ ModelScope is called through the Anthropic SDK and reads `MODELSCOPE_API_KEY`, `
 | `/tools details` | Show detailed tool information for the current or selected mode |
 | `/plugins` | Inspect the portable SDK/runtime depot and optional RC plugin tools |
 | `/plugins sdk <plugin-id>` | Prepare `.reverie/plugins/<plugin-id>/runtime` and write an SDK manifest |
-| `/plugins deploy <plugin-id>` | Extract a bundled portable SDK archive into `.reverie/plugins/<plugin-id>/runtime` |
+| `/plugins deploy <plugin-id>` | Let a plugin prepare its local SDK/runtime by downloading, extracting, or cloning into `.reverie/plugins/<plugin-id>/` |
 | `/plugins run <plugin-id>` | Launch the detected portable SDK/runtime entry |
 | `/search <query>` | Run a web search |
 | `/index` | Rebuild the current workspace index |
@@ -200,6 +200,8 @@ Notes:
 | `/modeling sync` | Regenerate the model registry from source/runtime folders |
 | `/modeling stub <model_name>` | Create a starter `.bbmodel` in `assets/models/source/` |
 | `/modeling primitive <type> <model_name>` | Generate a built-in primitive `.gltf` plus preview image |
+| `/modeling validate-bbmodel <source_bbmodel>` | Validate a Blockbench `.bbmodel` without requiring Blockbench desktop or Ashfox |
+| `/modeling export-bbmodel <source_bbmodel> [dest_name]` | Convert a supported cuboid `.bbmodel` into runtime `.gltf`, preview, and registry evidence |
 | `/modeling import <runtime_export> [source_bbmodel] [preview_image] [dest_name]` | Import a runtime model plus optional source model and preview |
 | `/modeling ashfox tools` | List available Ashfox MCP tools |
 | `/modeling ashfox capabilities` | Show Ashfox capability metadata |
@@ -211,10 +213,12 @@ Notes:
 | `/blender setup` | Create Blender source/script/plan folders in the modeling workspace |
 | `/blender script <model_name> <brief>` | Generate an auditable Blender Python authoring script without running Blender |
 | `/blender script hero "Genshin / ZZZ style anime action character"` | Generate a richer stylized character blockout preset |
-| `/blender script hero "AAA final character asset with high poly sculpt, retopo, UV unwrap, texture bake, rigged animation"` | Generate the production character pipeline preset with high-poly, retopo, UV, texture, rig, and preview-action scaffolding |
-| `/blender create <model_name> <brief>` | Run Blender in background mode to save `.blend`, export `.glb`, render a preview, and sync the registry |
+| `/blender script hero "AAA final character asset with high poly sculpt, retopo, UV unwrap, texture bake, rigged animation"` | Generate the production character pipeline preset with high-poly, retopo, UV, texture, material tuning, skinning, IK, rig, preview-action scaffolding, and black-box iteration evidence |
+| `/blender create <model_name> <brief>` | Run Blender in background mode to save `.blend`, export `.glb`, render a preview, auto-audit the result, and sync the registry |
 | `/blender run <script_path>` | Run a workspace-local Blender Python script through the built-in Blender workflow |
 | `/blender validate <script_path>` | Validate a Blender script with Reverie's conservative static scan |
+| `/blender audit <model_name>` | Audit generated `.blend`, `.glb`, texture set, validation report, production manifest, black-box iteration plan, material/skin/animation manifests, rig, IK, weights, sockets, collision proxies, and LOD gates |
+| `/blender repair <model_name> [max_iterations]` | Consume the automatic repair queue, rerun Blender authoring, re-audit, and write repair history |
 | `/blender sync` | Regenerate the model registry after Blender authoring work |
 | `/playtest` or `/pt` | Create a playtest plan |
 | `/playtest telemetry` | Generate telemetry schema |

@@ -26,7 +26,7 @@ def _runtime_delivery(runtime: str) -> Dict[str, Any]:
             "import_profile_path": "engine/godot/data/asset_import_profile.json",
             "notes": [
                 "Keep authored imports under engine/godot/assets while the project-level modeling workspace remains the source of truth.",
-                "Mirror approved runtime models from assets/models/runtime into authored Godot scenes as they replace primitive placeholders.",
+                "Mirror approved runtime models from assets/models/runtime into authored Godot scenes once registry and import checks pass.",
             ],
         }
     if normalized == "o3de":
@@ -56,7 +56,7 @@ def _import_profile(runtime: str) -> Dict[str, Any]:
         "accepted_texture_formats": [".png", ".webp", ".jpg"],
         "accepted_audio_formats": [".ogg", ".wav"],
         "material_expectations": [
-            "readable silhouette-first placeholder materials before final authored shaders",
+            "readable silhouette-first starter materials before final authored shaders",
             "texture names stay aligned with model stems whenever possible",
             "collision and interaction helpers are tracked as explicit companion assets",
         ],
@@ -89,7 +89,7 @@ def _import_profile(runtime: str) -> Dict[str, Any]:
         {
             "engine_asset_root": "assets/models/runtime",
             "scene_integration": "Built-in Reverie Engine content can reference runtime exports directly through registry and scene data.",
-            "import_flags": ["registry_sync_required", "placeholder_ready", "smoke_import"],
+            "import_flags": ["registry_sync_required", "starter_asset_ready", "smoke_import"],
         }
     )
     return profile
@@ -196,7 +196,7 @@ def _budget_profile(
             "enemy_family_library": max(3, enemy_count),
         },
         "budget_rules": [
-            "Replace only the highest-leverage placeholder assets first: player, guide, two enemy families, shrine finale, and one regional landmark kit.",
+            "Promote the highest-leverage starter assets first: player, guide, two enemy families, shrine finale, and one regional landmark kit.",
             "Do not widen region count until the current region kit, combat readability, and import validation all stay stable together.",
             "Treat UI, VFX, audio, and landmark kits as first-class production lanes instead of leaving them as unnamed polish debt.",
         ],
@@ -221,9 +221,9 @@ def _starter_hero_model_seeds(
         affinities = ["flare", "tide", "volt", "gale"]
 
     role_specs = [
-        ("starter_breaker", "Starter Breaker Proxy", "breaker"),
-        ("starter_support", "Starter Support Proxy", "support"),
-        ("starter_controller", "Starter Controller Proxy", "controller"),
+        ("starter_breaker", "Starter Breaker Runtime Kit", "breaker"),
+        ("starter_support", "Starter Support Runtime Kit", "support"),
+        ("starter_controller", "Starter Controller Runtime Kit", "controller"),
     ]
     seeds: List[Dict[str, Any]] = []
     home_region = str(regions[0].get("id", "starter_ruins")) if regions else "starter_ruins"
@@ -270,7 +270,7 @@ def build_asset_pipeline_plan(
     modeling_seed: List[Dict[str, Any]] = [
         _model_seed(
             asset_id="player_avatar",
-            label="Player Avatar Proxy",
+            label="Player Avatar Runtime Kit",
             category="character",
             primitive="box",
             region_id=str(regions[0].get("id", "starter_ruins")) if regions else "starter_ruins",
@@ -305,7 +305,7 @@ def build_asset_pipeline_plan(
         modeling_seed.append(
             _model_seed(
                 asset_id=archetype_id,
-                label=_display_name(archetype_id, "Enemy Proxy"),
+                label=_display_name(archetype_id, "Enemy Runtime Kit"),
                 category="enemy",
                 primitive=primitive,
                 region_id=str(regions[0].get("id", "starter_ruins")) if regions else "starter_ruins",
@@ -391,7 +391,7 @@ def build_asset_pipeline_plan(
                 "id": f"{asset_id}_production",
                 "priority": priority,
                 "category": category,
-                "goal": f"Replace the {asset_id} placeholder with an authored production-ready asset package.",
+                "goal": f"Promote {asset_id} into an authored production-ready asset package with source, runtime export, preview, and import evidence.",
                 "source_stub": seed["source_stub"],
                 "runtime_target": seed["runtime_target"],
                 "validation": ["naming", "dependencies", "budgets", "runtime_import_review"],
@@ -413,7 +413,7 @@ def build_asset_pipeline_plan(
                 "id": "hud_surface_upgrade",
                 "priority": "next",
                 "category": "ui",
-                "goal": "Replace placeholder HUD surfaces with a coherent ARPG presentation kit for health, stamina, objective, and guard states.",
+                "goal": "Author a coherent ARPG HUD presentation kit for health, stamina, objective, and guard states.",
                 "source_stub": "assets/raw/ui/hud",
                 "runtime_target": "assets/processed/ui/hud",
                 "validation": ["readability_review", "slice_smoke_review"],
@@ -463,11 +463,23 @@ def build_asset_pipeline_plan(
         },
         "registry_seed": registry_seed,
         "modeling_seed": modeling_seed,
+        "starter_asset_packages": [
+            {
+                "id": str(seed.get("id", "")),
+                "category": str(seed.get("category", "world_kit")),
+                "source_stub": str(seed.get("source_stub", "")),
+                "runtime_target": str(seed.get("runtime_target", "")),
+                "preview_target": str(seed.get("preview_target", "")),
+                "status": "generated_runtime_starter",
+                "required_evidence": ["source_stub", "runtime_export", "preview", "model_registry_entry"],
+            }
+            for seed in modeling_seed
+        ],
         "production_queue": production_queue,
         "continuity_rules": [
             "Treat the project-level modeling workspace as the source of truth even when the selected runtime keeps its own asset mirror.",
-            "Do not replace placeholder visuals faster than combat readability, quest ids, and slice validation can keep up.",
-            "Refresh the model registry and asset pipeline artifact together whenever placeholder seeds are promoted into authored content.",
+            "Do not widen visual fidelity faster than combat readability, quest ids, and slice validation can keep up.",
+            "Refresh the model registry and asset pipeline artifact together whenever starter assets are promoted into authored content.",
         ],
     }
 
@@ -489,6 +501,12 @@ def asset_pipeline_markdown(plan: Dict[str, Any]) -> str:
     for item in plan.get("production_queue", []):
         lines.append(
             f"- {item.get('id', 'item')}: [{item.get('priority', 'later')}] {item.get('category', 'asset')} -> {item.get('goal', '')}"
+        )
+    lines.append("")
+    lines.append("## Starter Asset Packages")
+    for item in plan.get("starter_asset_packages", []):
+        lines.append(
+            f"- {item.get('id', 'asset')}: {item.get('status', 'generated')} | {item.get('runtime_target', '')}"
         )
     lines.append("")
     lines.append("## Modeling Seeds")

@@ -3,9 +3,9 @@
   "id": "blender",
   "display_name": "Blender Portable Plugin",
   "runtime_family": "dcc",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "delivery": "python-exe",
-  "description": "Self-contained Reverie CLI plugin wrapper that embeds Blender Portable, deploys it into the plugin runtime folder, launches Blender, and runs background scripts.",
+  "description": "Self-contained Reverie CLI plugin wrapper that embeds Blender Portable, deploys it into the plugin runtime folder, launches Blender, runs background scripts, and manages plugin-local MMD Tools import support.",
   "entry": {
     "preferred": {
       "windows": "dist/reverie-blender.exe",
@@ -51,6 +51,12 @@
     "modeling",
     "rigging",
     "baking",
-    "export"
+    "export",
+    "mmd",
+    "pmx",
+    "pmd",
+    "vmd",
+    "vpd",
+    "addon-management"
   ]
 }

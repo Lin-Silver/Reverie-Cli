@@ -9,11 +9,19 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import zipfile
 
 
-PLUGIN_VERSION = "0.2.0"
+PLUGIN_VERSION = "0.3.0"
 ARCHIVE_NAME = "blender-5.1.1-windows-x64.zip"
+MMD_TOOLS_REPO_URL = "https://github.com/MMD-Blender/blender_mmd_tools.git"
+MMD_TOOLS_MODULE = "mmd_tools"
+MMD_TOOLS_STATUS_MARKER = "REVERIE_MMD_TOOLS_STATUS="
+MMD_IMPORT_STATUS_MARKER = "REVERIE_MMD_IMPORT_RESULT="
+MMD_MODEL_EXTENSIONS = {".pmd", ".pmx"}
+MMD_MOTION_EXTENSIONS = {".vmd"}
+MMD_POSE_EXTENSIONS = {".vpd"}
 
 
 class ReverieRuntimePluginHost:
@@ -86,6 +94,12 @@ class BlenderRuntimePlugin(ReverieRuntimePluginHost):
     def __init__(self) -> None:
         self.plugin_root = self._resolve_plugin_root()
         self.runtime_root = self.plugin_root / "runtime"
+        self.addons_root = self.plugin_root / "addons"
+        self.mmd_tools_root = self.addons_root / "blender_mmd_tools"
+        self.config_root = self.plugin_root / "config"
+        self.scripts_root = self.plugin_root / "scripts"
+        self.datafiles_root = self.plugin_root / "datafiles"
+        self.tmp_root = self.plugin_root / "tmp"
 
     def build_handshake(self) -> dict[str, Any]:
         return {
@@ -97,11 +111,14 @@ class BlenderRuntimePlugin(ReverieRuntimePluginHost):
             "description": (
                 "Self-contained portable Blender plugin with an embedded Blender archive, "
                 "plugin-local deployment, version checks, launch, background bpy script "
-                "execution, and scene metadata inspection."
+                "execution, scene metadata inspection, and plugin-local MMD Tools support "
+                "for PMD/PMX model, VMD motion, and VPD pose import."
             ),
             "tool_call_hint": (
                 "Use rc_blender_ensure_runtime to deploy the embedded portable Blender "
                 "environment, then rc_blender_run_script for background asset authoring. "
+                "Use rc_blender_ensure_mmd_tools or rc_blender_import_mmd_model when "
+                "working with MMD PMD/PMX/VMD/VPD assets. "
                 "Use blender_modeling_workbench to generate production Blender scripts "
                 "and this plugin to provide the actual Blender executable."
             ),
@@ -109,6 +126,9 @@ class BlenderRuntimePlugin(ReverieRuntimePluginHost):
                 "This plugin owns the local portable Blender environment. It can unpack the "
                 "Blender archive embedded in the plugin executable into the plugin runtime "
                 "folder, report readiness, launch Blender, and run generated bpy scripts. "
+                "It can also clone/update the open-source MMD Tools Blender add-on into "
+                "the plugin-local addons folder, enable it with plugin-local Blender user "
+                "config, and import .pmx/.pmd models with optional .vmd motion or .vpd pose. "
                 "For AI modeling workflows, combine blender_modeling_workbench for script/"
                 "asset planning with rc_blender_ensure_runtime and rc_blender_run_script "
                 "for execution."
@@ -123,6 +143,14 @@ class BlenderRuntimePlugin(ReverieRuntimePluginHost):
                             "force": {
                                 "type": "boolean",
                                 "description": "When true, replace the existing plugin-local Blender runtime before extracting."
+                            },
+                            "with_mmd_tools": {
+                                "type": "boolean",
+                                "description": "Also clone/update MMD Tools into the plugin-local addons folder. Defaults to true."
+                            },
+                            "enable_mmd_tools": {
+                                "type": "boolean",
+                                "description": "After deployment, run Blender once in background to verify/enable MMD Tools. Defaults to false."
                             }
                         },
                         "required": []
@@ -147,6 +175,64 @@ class BlenderRuntimePlugin(ReverieRuntimePluginHost):
                     "expose_as_tool": True,
                     "include_modes": [],
                     "guidance": "Call this before attempting direct Blender execution."
+                },
+                {
+                    "name": "mmd_tools_status",
+                    "description": "Inspect plugin-local MMD Tools checkout, Python import paths, git status, and Blender enablement readiness.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "blender_executable": {
+                                "type": "string",
+                                "description": "Optional absolute Blender executable path for an enablement probe."
+                            },
+                            "probe_blender": {
+                                "type": "boolean",
+                                "description": "When true, run a short Blender background probe to check that MMD Tools can be enabled."
+                            }
+                        },
+                        "required": []
+                    },
+                    "expose_as_tool": True,
+                    "include_modes": [],
+                    "guidance": "Use this before importing .pmx/.pmd assets when you need to know whether the add-on is already installed."
+                },
+                {
+                    "name": "ensure_mmd_tools",
+                    "description": "Clone or update MMD Tools from GitHub into the plugin-local addons folder and optionally verify it in Blender.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "force": {
+                                "type": "boolean",
+                                "description": "Replace an existing plugin-local MMD Tools checkout."
+                            },
+                            "update": {
+                                "type": "boolean",
+                                "description": "Pull the latest checkout when a git clone already exists. Defaults to true."
+                            },
+                            "enable": {
+                                "type": "boolean",
+                                "description": "Run Blender in background to enable/probe the add-on after checkout."
+                            },
+                            "dry_run": {
+                                "type": "boolean",
+                                "description": "Report planned paths and commands without cloning or running Blender."
+                            },
+                            "blender_executable": {
+                                "type": "string",
+                                "description": "Optional absolute Blender executable path used for enablement."
+                            },
+                            "timeout_seconds": {
+                                "type": "integer",
+                                "description": "Git or Blender probe timeout."
+                            }
+                        },
+                        "required": []
+                    },
+                    "expose_as_tool": True,
+                    "include_modes": [],
+                    "guidance": "Use this when an MMD asset workflow is requested; files stay under .reverie/plugins/blender/addons/."
                 },
                 {
                     "name": "detect_runtime",
@@ -205,6 +291,10 @@ class BlenderRuntimePlugin(ReverieRuntimePluginHost):
                             "auto_prepare": {
                                 "type": "boolean",
                                 "description": "Automatically deploy the embedded portable runtime if Blender is missing. Defaults to true."
+                            },
+                            "with_mmd_tools": {
+                                "type": "boolean",
+                                "description": "Automatically prepare and enable MMD Tools before launch. Defaults to true."
                             }
                         },
                         "required": []
@@ -237,12 +327,77 @@ class BlenderRuntimePlugin(ReverieRuntimePluginHost):
                             "auto_prepare": {
                                 "type": "boolean",
                                 "description": "Automatically deploy the embedded portable runtime if Blender is missing. Defaults to true."
+                            },
+                            "auto_mmd_tools": {
+                                "type": "boolean",
+                                "description": "Automatically prepare and enable MMD Tools before running the script. Defaults to false."
                             }
                         },
                         "required": ["script_path"]
                     },
                     "expose_as_tool": True,
                     "include_modes": []
+                },
+                {
+                    "name": "import_mmd_model",
+                    "description": "Import an MMD PMD/PMX model through MMD Tools, optionally apply VMD motion or VPD pose, save .blend, and optionally export glTF/GLB.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "model_path": {
+                                "type": "string",
+                                "description": "Absolute or working-directory-relative .pmx or .pmd model path."
+                            },
+                            "motion_path": {
+                                "type": "string",
+                                "description": "Optional .vmd motion path to apply after model import."
+                            },
+                            "pose_path": {
+                                "type": "string",
+                                "description": "Optional .vpd pose path to apply after model import."
+                            },
+                            "output_blend_path": {
+                                "type": "string",
+                                "description": "Optional .blend output path. Defaults to plugin-local imports/<model>.blend when save_blend is true."
+                            },
+                            "export_path": {
+                                "type": "string",
+                                "description": "Optional .glb or .gltf output path."
+                            },
+                            "export_format": {
+                                "type": "string",
+                                "description": "Optional glb or gltf default export format when export_path is not provided."
+                            },
+                            "scale": {
+                                "type": "number",
+                                "description": "MMD import scale. Defaults to MMD Tools' common 0.08 scale."
+                            },
+                            "save_blend": {
+                                "type": "boolean",
+                                "description": "Save a .blend source after import. Defaults to true."
+                            },
+                            "clear_scene": {
+                                "type": "boolean",
+                                "description": "Clear the default scene before import. Defaults to true."
+                            },
+                            "blender_executable": {
+                                "type": "string",
+                                "description": "Optional absolute Blender executable path."
+                            },
+                            "timeout_seconds": {
+                                "type": "integer",
+                                "description": "Import timeout."
+                            },
+                            "auto_prepare": {
+                                "type": "boolean",
+                                "description": "Automatically deploy Blender and MMD Tools if missing. Defaults to true."
+                            }
+                        },
+                        "required": ["model_path"]
+                    },
+                    "expose_as_tool": True,
+                    "include_modes": [],
+                    "guidance": "Prefer this command for .pmx/.pmd game-asset ingestion instead of hand-writing add-on bootstrap code."
                 }
             ]
         }
@@ -264,8 +419,23 @@ class BlenderRuntimePlugin(ReverieRuntimePluginHost):
                     "archive": archive,
                     "detected": detection,
                     "version": version,
+                    "mmd_tools": self._mmd_tools_status_data(),
                 },
             )
+
+        if command_name == "mmd_tools_status":
+            data = self._mmd_tools_status_data()
+            if bool(payload.get("probe_blender", False)):
+                detection, deploy_result = self._ensure_ready_detection(payload)
+                data["detected"] = detection
+                data["deployment"] = deploy_result
+                if detection["available"]:
+                    data["enable_probe"] = self._enable_mmd_tools(detection["path"], int(payload.get("timeout_seconds") or 60))
+            message = "MMD Tools add-on is installed." if data["installed"] else "MMD Tools add-on is not installed."
+            return self._ok(message, data)
+
+        if command_name == "ensure_mmd_tools":
+            return self._ensure_mmd_tools(payload)
 
         if command_name == "detect_runtime":
             detection = self._detect_runtime(payload.get("blender_executable"))
@@ -284,6 +454,9 @@ class BlenderRuntimePlugin(ReverieRuntimePluginHost):
 
         if command_name == "run_script":
             return self._run_script(payload)
+
+        if command_name == "import_mmd_model":
+            return self._import_mmd_model(payload)
 
         return self._fail(f"Unknown command: {command_name}", {})
 
@@ -366,19 +539,368 @@ class BlenderRuntimePlugin(ReverieRuntimePluginHost):
         source = "embedded" if self._is_inside(archive, bundle_root) and getattr(sys, "frozen", False) else "plugin-local"
         return {"available": True, "name": archive.name, "path": str(archive), "source": source, "candidates": candidates}
 
+    def _mmd_module_path(self) -> Path | None:
+        candidates = [
+            self.mmd_tools_root / MMD_TOOLS_MODULE / "__init__.py",
+            self.addons_root / MMD_TOOLS_MODULE / "__init__.py",
+            self.plugin_root / MMD_TOOLS_MODULE / "__init__.py",
+        ]
+        for candidate in candidates:
+            if candidate.exists() and candidate.is_file():
+                return candidate.parent.resolve(strict=False)
+        return None
+
+    def _mmd_python_paths(self) -> list[str]:
+        candidates: list[Path] = []
+        module_path = self._mmd_module_path()
+        if module_path is not None:
+            candidates.append(module_path.parent)
+        candidates.extend([self.mmd_tools_root, self.addons_root])
+
+        unique: list[str] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            try:
+                resolved = candidate.resolve(strict=False)
+            except Exception:
+                resolved = candidate.absolute()
+            key = str(resolved).lower()
+            if key not in seen and resolved.exists():
+                unique.append(str(resolved))
+                seen.add(key)
+        return unique
+
+    def _git_executable(self) -> str:
+        return str(shutil.which("git") or "")
+
+    def _git_output(self, args: list[str], *, cwd: Path | None = None, timeout_seconds: int = 10) -> str:
+        git = self._git_executable()
+        if not git:
+            return ""
+        try:
+            completed = subprocess.run(
+                [git, *args],
+                cwd=str(cwd or self.plugin_root),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=max(1, timeout_seconds),
+                check=False,
+                env=self._blender_env(),
+            )
+        except Exception:
+            return ""
+        if completed.returncode != 0:
+            return ""
+        return (completed.stdout or "").strip()
+
+    def _mmd_tools_status_data(self) -> dict[str, Any]:
+        module_path = self._mmd_module_path()
+        git_dir = self.mmd_tools_root / ".git"
+        commit = self._git_output(["rev-parse", "--short", "HEAD"], cwd=self.mmd_tools_root) if git_dir.exists() else ""
+        branch = self._git_output(["branch", "--show-current"], cwd=self.mmd_tools_root) if git_dir.exists() else ""
+        return {
+            "repo_url": MMD_TOOLS_REPO_URL,
+            "addon_root": str(self.mmd_tools_root),
+            "addons_root": str(self.addons_root),
+            "module_name": MMD_TOOLS_MODULE,
+            "module_path": str(module_path or ""),
+            "installed": module_path is not None,
+            "checkout_exists": self.mmd_tools_root.exists(),
+            "git_available": bool(self._git_executable()),
+            "git_commit": commit,
+            "git_branch": branch,
+            "python_paths": self._mmd_python_paths(),
+            "supported_extensions": {
+                "model": sorted(MMD_MODEL_EXTENSIONS),
+                "motion": sorted(MMD_MOTION_EXTENSIONS),
+                "pose": sorted(MMD_POSE_EXTENSIONS),
+            },
+            "storage_policy": "plugin-local",
+        }
+
+    def _blender_env(self, extra_python_paths: list[str] | None = None) -> dict[str, str]:
+        env = os.environ.copy()
+        for env_name, root in (
+            ("BLENDER_USER_CONFIG", self.config_root),
+            ("BLENDER_USER_SCRIPTS", self.scripts_root),
+            ("BLENDER_USER_DATAFILES", self.datafiles_root),
+        ):
+            root.mkdir(parents=True, exist_ok=True)
+            env[env_name] = str(root)
+
+        python_paths: list[str] = []
+        for raw_path in extra_python_paths or []:
+            if not raw_path:
+                continue
+            candidate = Path(str(raw_path)).expanduser()
+            try:
+                resolved = candidate.resolve(strict=False)
+            except Exception:
+                resolved = candidate.absolute()
+            if resolved.exists():
+                python_paths.append(str(resolved))
+
+        existing = env.get("PYTHONPATH", "")
+        if python_paths:
+            env["PYTHONPATH"] = os.pathsep.join([*python_paths, existing] if existing else python_paths)
+        return env
+
+    def _mmd_bootstrap_source(self, *, strict: bool, emit_marker: bool) -> str:
+        paths_json = json.dumps(self._mmd_python_paths())
+        marker_json = json.dumps(MMD_TOOLS_STATUS_MARKER)
+        strict_python = repr(bool(strict))
+        emit_marker_python = repr(bool(emit_marker))
+        return f"""
+import importlib
+import json
+import sys
+import traceback
+
+paths = {paths_json}
+marker = {marker_json}
+strict = {strict_python}
+emit_marker = {emit_marker_python}
+for path in reversed(paths):
+    if path and path not in sys.path:
+        sys.path.insert(0, path)
+
+result = {{
+    "success": False,
+    "module": "{MMD_TOOLS_MODULE}",
+    "paths": paths,
+    "available": False,
+    "enabled": False,
+    "module_file": "",
+    "error": "",
+}}
+try:
+    import addon_utils
+    module = importlib.import_module("{MMD_TOOLS_MODULE}")
+    result["module_file"] = str(getattr(module, "__file__", "") or "")
+    addon_utils.enable("{MMD_TOOLS_MODULE}", default_set=False, persistent=True)
+    available, enabled = addon_utils.check("{MMD_TOOLS_MODULE}")
+    result["available"] = bool(available)
+    result["enabled"] = bool(enabled)
+    result["success"] = bool(enabled)
+except Exception as exc:
+    result["error"] = str(exc)
+    result["traceback"] = traceback.format_exc()[-4000:]
+
+if emit_marker:
+    print(marker + json.dumps(result, ensure_ascii=False, sort_keys=True))
+if strict and not result["success"]:
+    raise SystemExit(23)
+""".strip()
+
+    def _write_mmd_bootstrap_script(self, *, strict: bool = False, emit_marker: bool = False) -> Path:
+        self.tmp_root.mkdir(parents=True, exist_ok=True)
+        script_path = self.tmp_root / ("reverie_mmd_tools_strict.py" if strict else "reverie_mmd_tools_bootstrap.py")
+        script_path.write_text(self._mmd_bootstrap_source(strict=strict, emit_marker=emit_marker), encoding="utf-8")
+        return script_path
+
+    def _run_blender_python(self, blender_path: Any, script_text: str, timeout_seconds: int, *, extra_python_paths: list[str] | None = None) -> dict[str, Any]:
+        self.tmp_root.mkdir(parents=True, exist_ok=True)
+        temp_path = ""
+        try:
+            with tempfile.NamedTemporaryFile("w", suffix=".py", prefix="reverie_blender_", dir=self.tmp_root, encoding="utf-8", delete=False) as handle:
+                handle.write(script_text)
+                temp_path = handle.name
+            command = [str(blender_path), "--background", "--python", temp_path]
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=max(1, timeout_seconds),
+                check=False,
+                env=self._blender_env(extra_python_paths),
+            )
+            return {
+                "command": command,
+                "exit_code": completed.returncode,
+                "stdout": completed.stdout[-8000:],
+                "stderr": completed.stderr[-8000:],
+                "script_path": temp_path,
+            }
+        except Exception as exc:
+            return {"command": [str(blender_path), "--background", "--python", temp_path], "exit_code": -1, "stdout": "", "stderr": str(exc), "script_path": temp_path}
+        finally:
+            if temp_path:
+                try:
+                    Path(temp_path).unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+    def _extract_marker_json(self, text: str, marker: str) -> dict[str, Any]:
+        for line in text.splitlines():
+            if marker not in line:
+                continue
+            raw = line.split(marker, 1)[1].strip()
+            try:
+                value = json.loads(raw)
+            except Exception:
+                return {}
+            return value if isinstance(value, dict) else {}
+        return {}
+
+    def _enable_mmd_tools(self, blender_path: Any, timeout_seconds: int = 60) -> dict[str, Any]:
+        script_text = self._mmd_bootstrap_source(strict=True, emit_marker=True)
+        completed = self._run_blender_python(
+            blender_path,
+            script_text,
+            timeout_seconds,
+            extra_python_paths=self._mmd_python_paths(),
+        )
+        probe = self._extract_marker_json(f"{completed.get('stdout', '')}\n{completed.get('stderr', '')}", MMD_TOOLS_STATUS_MARKER)
+        return {
+            "success": bool(completed.get("exit_code") == 0 and probe.get("success")),
+            "probe": probe,
+            "command": completed.get("command", []),
+            "exit_code": completed.get("exit_code"),
+            "stdout": str(completed.get("stdout", ""))[-4000:],
+            "stderr": str(completed.get("stderr", ""))[-4000:],
+        }
+
+    def _ensure_mmd_tools(self, payload: dict[str, Any]) -> dict[str, Any]:
+        force = bool(payload.get("force", False))
+        update = payload.get("update", True) is not False
+        enable = bool(payload.get("enable", False))
+        dry_run = bool(payload.get("dry_run", False))
+        timeout = int(payload.get("timeout_seconds") or 900)
+        target = self.mmd_tools_root.resolve(strict=False)
+
+        data = self._mmd_tools_status_data()
+        data.update(
+            {
+                "target": str(target),
+                "dry_run": dry_run,
+                "planned_commands": [],
+            }
+        )
+
+        if not self._is_inside(target, self.plugin_root):
+            return self._fail("Refusing to place MMD Tools outside the Blender plugin root.", data)
+
+        git = self._git_executable()
+        if force and self.mmd_tools_root.exists():
+            data["planned_commands"].append(f"remove {self.mmd_tools_root}")
+        if not self._mmd_module_path() or force:
+            data["planned_commands"].append(f"git clone --depth 1 {MMD_TOOLS_REPO_URL} {self.mmd_tools_root}")
+        elif update and (self.mmd_tools_root / ".git").exists():
+            data["planned_commands"].append(f"git -C {self.mmd_tools_root} pull --ff-only")
+        if enable:
+            data["planned_commands"].append("blender --background --python <enable mmd_tools probe>")
+
+        if dry_run:
+            return self._ok("MMD Tools deployment dry-run completed.", data)
+
+        self.addons_root.mkdir(parents=True, exist_ok=True)
+        if force and self.mmd_tools_root.exists():
+            self._safe_remove_tree(self.plugin_root, self.mmd_tools_root)
+
+        module_path = self._mmd_module_path()
+        if module_path is None:
+            if self.mmd_tools_root.exists() and any(self.mmd_tools_root.iterdir()):
+                data = data | self._mmd_tools_status_data()
+                return self._fail("MMD Tools target exists but is not a valid checkout; rerun with force=true.", data)
+            if not git:
+                data = data | self._mmd_tools_status_data()
+                return self._fail("git was not found on PATH, so MMD Tools cannot be cloned automatically.", data)
+            try:
+                completed = subprocess.run(
+                    [git, "clone", "--depth", "1", MMD_TOOLS_REPO_URL, str(self.mmd_tools_root)],
+                    cwd=str(self.plugin_root),
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=max(1, timeout),
+                    check=False,
+                )
+            except Exception as exc:
+                data = data | self._mmd_tools_status_data()
+                return self._fail(str(exc), data)
+            data["clone"] = {
+                "exit_code": completed.returncode,
+                "stdout": completed.stdout[-4000:],
+                "stderr": completed.stderr[-4000:],
+            }
+            if completed.returncode != 0:
+                data = data | self._mmd_tools_status_data()
+                return self._fail("MMD Tools clone failed.", data)
+        elif update and (self.mmd_tools_root / ".git").exists() and git:
+            try:
+                completed = subprocess.run(
+                    [git, "-C", str(self.mmd_tools_root), "pull", "--ff-only"],
+                    cwd=str(self.plugin_root),
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=max(1, timeout),
+                    check=False,
+                )
+                data["update"] = {
+                    "exit_code": completed.returncode,
+                    "stdout": completed.stdout[-4000:],
+                    "stderr": completed.stderr[-4000:],
+                }
+                if completed.returncode != 0:
+                    data = data | self._mmd_tools_status_data()
+                    return self._fail("MMD Tools update failed.", data)
+            except Exception as exc:
+                data = data | self._mmd_tools_status_data()
+                return self._fail(str(exc), data)
+
+        data = data | self._mmd_tools_status_data()
+        if not data.get("installed"):
+            return self._fail("MMD Tools checkout completed but the mmd_tools module was not found.", data)
+
+        if enable:
+            detection, deploy_result = self._ensure_ready_detection(
+                {
+                    "blender_executable": payload.get("blender_executable"),
+                    "auto_prepare": payload.get("auto_prepare", True),
+                }
+            )
+            data["detected"] = detection
+            data["deployment"] = deploy_result
+            if not detection["available"]:
+                return self._fail("MMD Tools is installed, but no Blender executable was detected for enablement.", data)
+            enable_result = self._enable_mmd_tools(detection["path"], min(timeout, int(payload.get("enable_timeout_seconds") or 120)))
+            data["enable"] = enable_result
+            if not enable_result["success"]:
+                return self._fail("MMD Tools is installed, but Blender could not enable the add-on.", data)
+
+        return self._ok("MMD Tools add-on is ready.", data)
+
     def _ensure_runtime(self, payload: dict[str, Any]) -> dict[str, Any]:
         force = bool(payload.get("force", False))
+        with_mmd_tools = payload.get("with_mmd_tools", True) is not False
         current = self._detect_runtime(payload.get("blender_executable"))
         if current["available"] and not force:
+            data = {
+                "deployed": False,
+                "reason": "runtime already exists",
+                "detected": current,
+                "archive": self._archive_status(),
+                "runtime_root": str(self.runtime_root),
+            }
+            if with_mmd_tools:
+                data["mmd_tools"] = self._ensure_mmd_tools(
+                    {
+                        "force": False,
+                        "update": payload.get("update_mmd_tools", False),
+                        "enable": bool(payload.get("enable_mmd_tools", False)),
+                        "blender_executable": current["path"],
+                    }
+                )
             return self._ok(
                 "Portable Blender runtime is already available.",
-                {
-                    "deployed": False,
-                    "reason": "runtime already exists",
-                    "detected": current,
-                    "archive": self._archive_status(),
-                    "runtime_root": str(self.runtime_root),
-                },
+                data,
             )
 
         archive = self._find_archive()
@@ -407,6 +929,15 @@ class BlenderRuntimePlugin(ReverieRuntimePluginHost):
             "created_entries": sorted(after_entries - before_entries)[:40],
             "detected": detected,
         }
+        if with_mmd_tools:
+            data["mmd_tools"] = self._ensure_mmd_tools(
+                {
+                    "force": False,
+                    "update": payload.get("update_mmd_tools", False),
+                    "enable": bool(payload.get("enable_mmd_tools", False)),
+                    "blender_executable": detected.get("path", ""),
+                }
+            )
         if detected["available"]:
             return self._ok("Embedded portable Blender runtime deployed.", data)
         return self._fail("Embedded archive extracted, but no Blender executable was detected.", data)
@@ -418,7 +949,7 @@ class BlenderRuntimePlugin(ReverieRuntimePluginHost):
         auto_prepare = payload.get("auto_prepare", True)
         if auto_prepare is False:
             return detection, None
-        deploy_result = self._ensure_runtime({"force": False})
+        deploy_result = self._ensure_runtime({"force": False, "with_mmd_tools": False})
         detection = self._detect_runtime(payload.get("blender_executable"))
         return detection, deploy_result
 
@@ -530,16 +1061,34 @@ class BlenderRuntimePlugin(ReverieRuntimePluginHost):
             return self._fail("No Blender executable detected.", {"detected": detection, "deployment": deploy_result})
 
         command = [detection["path"]]
+        mmd_result: dict[str, Any] | None = None
+        if payload.get("with_mmd_tools", True) is not False:
+            mmd_result = self._ensure_mmd_tools(
+                {
+                    "force": False,
+                    "update": payload.get("update_mmd_tools", False),
+                    "enable": False,
+                    "auto_prepare": False,
+                }
+            )
+            if mmd_result.get("success"):
+                bootstrap = self._write_mmd_bootstrap_script(strict=False, emit_marker=False)
+                command.extend(["--python", str(bootstrap)])
         blend_path = self._resolve_existing_path(payload.get("blend_path"))
         if blend_path is not None:
             command.append(str(blend_path))
         try:
-            process = subprocess.Popen(command, cwd=str(Path(detection["path"]).parent), shell=False)
+            process = subprocess.Popen(
+                command,
+                cwd=str(Path(detection["path"]).parent),
+                shell=False,
+                env=self._blender_env(self._mmd_python_paths()),
+            )
         except Exception as exc:
             return self._fail(str(exc), {"command": command})
         return self._ok(
             "Blender launched.",
-            {"command": command, "pid": int(process.pid), "detected": detection, "deployment": deploy_result},
+            {"command": command, "pid": int(process.pid), "detected": detection, "deployment": deploy_result, "mmd_tools": mmd_result},
         )
 
     def _run_script(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -555,6 +1104,20 @@ class BlenderRuntimePlugin(ReverieRuntimePluginHost):
         command = [detection["path"], "--background"]
         if blend_path is not None:
             command.append(str(blend_path))
+        mmd_result: dict[str, Any] | None = None
+        if bool(payload.get("auto_mmd_tools", False)):
+            mmd_result = self._ensure_mmd_tools(
+                {
+                    "force": False,
+                    "update": payload.get("update_mmd_tools", False),
+                    "enable": False,
+                    "auto_prepare": False,
+                }
+            )
+            if not mmd_result.get("success"):
+                return self._fail("MMD Tools could not be prepared before running the Blender script.", {"mmd_tools": mmd_result, "detected": detection, "deployment": deploy_result})
+            bootstrap = self._write_mmd_bootstrap_script(strict=True, emit_marker=False)
+            command.extend(["--python", str(bootstrap)])
         command.extend(["--python", str(script_path)])
 
         timeout = int(payload.get("timeout_seconds") or 240)
@@ -567,6 +1130,7 @@ class BlenderRuntimePlugin(ReverieRuntimePluginHost):
                 errors="replace",
                 timeout=max(1, timeout),
                 check=False,
+                env=self._blender_env(self._mmd_python_paths()),
             )
         except Exception as exc:
             return self._fail(str(exc), {"command": command})
@@ -577,10 +1141,215 @@ class BlenderRuntimePlugin(ReverieRuntimePluginHost):
             "stderr": completed.stderr[-6000:],
             "detected": detection,
             "deployment": deploy_result,
+            "mmd_tools": mmd_result,
         }
         if completed.returncode == 0:
             return self._ok("Blender script completed.", data)
         return self._fail("Blender script failed.", data)
+
+    def _import_mmd_model(self, payload: dict[str, Any]) -> dict[str, Any]:
+        model_path = self._resolve_existing_path(payload.get("model_path"))
+        if model_path is None:
+            return self._fail("model_path does not exist.", {"model_path": str(payload.get("model_path") or "")})
+        if model_path.suffix.lower() not in MMD_MODEL_EXTENSIONS:
+            return self._fail("model_path must be a .pmx or .pmd file.", {"model_path": str(model_path)})
+
+        motion_path = self._resolve_existing_path(payload.get("motion_path"))
+        if payload.get("motion_path") and motion_path is None:
+            return self._fail("motion_path does not exist.", {"motion_path": str(payload.get("motion_path") or "")})
+        if motion_path is not None and motion_path.suffix.lower() not in MMD_MOTION_EXTENSIONS:
+            return self._fail("motion_path must be a .vmd file.", {"motion_path": str(motion_path)})
+
+        pose_path = self._resolve_existing_path(payload.get("pose_path"))
+        if payload.get("pose_path") and pose_path is None:
+            return self._fail("pose_path does not exist.", {"pose_path": str(payload.get("pose_path") or "")})
+        if pose_path is not None and pose_path.suffix.lower() not in MMD_POSE_EXTENSIONS:
+            return self._fail("pose_path must be a .vpd file.", {"pose_path": str(pose_path)})
+
+        save_blend = payload.get("save_blend", True) is not False
+        output_blend_path = self._resolve_output_path(payload.get("output_blend_path"))
+        if save_blend and output_blend_path is None:
+            output_blend_path = (self.plugin_root / "imports" / f"{model_path.stem}.blend").resolve(strict=False)
+        if output_blend_path is not None and output_blend_path.suffix.lower() != ".blend":
+            return self._fail("output_blend_path must end with .blend.", {"output_blend_path": str(output_blend_path)})
+
+        export_path = self._resolve_output_path(payload.get("export_path"))
+        export_format = str(payload.get("export_format") or "").strip().lower().lstrip(".")
+        if export_path is None and export_format in {"glb", "gltf"}:
+            export_path = (self.plugin_root / "imports" / f"{model_path.stem}.{export_format}").resolve(strict=False)
+        if export_path is not None and export_path.suffix.lower() not in {".glb", ".gltf"}:
+            return self._fail("export_path must end with .glb or .gltf.", {"export_path": str(export_path)})
+
+        detection, deploy_result = self._ensure_ready_detection(payload)
+        if not detection["available"]:
+            return self._fail("No Blender executable detected.", {"detected": detection, "deployment": deploy_result})
+
+        mmd_result = self._ensure_mmd_tools(
+            {
+                "force": bool(payload.get("force_mmd_tools", False)),
+                "update": payload.get("update_mmd_tools", False),
+                "enable": True,
+                "blender_executable": detection["path"],
+                "auto_prepare": False,
+                "timeout_seconds": int(payload.get("timeout_seconds") or 900),
+            }
+        )
+        if not mmd_result.get("success"):
+            return self._fail("MMD Tools could not be prepared for import.", {"mmd_tools": mmd_result, "detected": detection, "deployment": deploy_result})
+
+        for path in (output_blend_path, export_path):
+            if path is not None:
+                path.parent.mkdir(parents=True, exist_ok=True)
+
+        import_types = payload.get("types") or ["MESH", "ARMATURE", "PHYSICS", "DISPLAY", "MORPHS"]
+        if not isinstance(import_types, list):
+            import_types = ["MESH", "ARMATURE", "PHYSICS", "DISPLAY", "MORPHS"]
+        scale = float(payload.get("scale") or 0.08)
+        script_payload = {
+            "model_path": str(model_path),
+            "motion_path": str(motion_path or ""),
+            "pose_path": str(pose_path or ""),
+            "output_blend_path": str(output_blend_path or ""),
+            "export_path": str(export_path or ""),
+            "export_format": "GLB" if (export_path and export_path.suffix.lower() == ".glb") else "GLTF_SEPARATE",
+            "scale": scale,
+            "types": [str(item).upper() for item in import_types],
+            "clear_scene": payload.get("clear_scene", True) is not False,
+            "clean_model": payload.get("clean_model", True) is not False,
+            "remove_doubles": bool(payload.get("remove_doubles", False)),
+            "create_new_action": bool(payload.get("create_new_action", True)),
+            "marker": MMD_IMPORT_STATUS_MARKER,
+        }
+        script_text = self._mmd_import_script(script_payload)
+        timeout = int(payload.get("timeout_seconds") or 900)
+        completed = self._run_blender_python(
+            detection["path"],
+            script_text,
+            timeout,
+            extra_python_paths=self._mmd_python_paths(),
+        )
+        import_result = self._extract_marker_json(f"{completed.get('stdout', '')}\n{completed.get('stderr', '')}", MMD_IMPORT_STATUS_MARKER)
+        data = {
+            "detected": detection,
+            "deployment": deploy_result,
+            "mmd_tools": mmd_result,
+            "import": import_result,
+            "command": completed.get("command", []),
+            "exit_code": completed.get("exit_code"),
+            "stdout": str(completed.get("stdout", ""))[-6000:],
+            "stderr": str(completed.get("stderr", ""))[-6000:],
+            "outputs": {
+                "blend": str(output_blend_path or ""),
+                "export": str(export_path or ""),
+            },
+        }
+        if completed.get("exit_code") == 0 and import_result.get("success"):
+            return self._ok("MMD model imported through Blender.", data)
+        return self._fail("MMD model import failed.", data)
+
+    def _mmd_import_script(self, payload: dict[str, Any]) -> str:
+        payload_json = json.dumps(payload, ensure_ascii=False)
+        payload_source = json.dumps(payload_json, ensure_ascii=False)
+        paths_json = json.dumps(self._mmd_python_paths())
+        return f"""
+import importlib
+import json
+import sys
+import traceback
+
+paths = {paths_json}
+payload = json.loads({payload_source})
+for path in reversed(paths):
+    if path and path not in sys.path:
+        sys.path.insert(0, path)
+
+result = {{
+    "success": False,
+    "model_path": payload.get("model_path", ""),
+    "motion_path": payload.get("motion_path", ""),
+    "pose_path": payload.get("pose_path", ""),
+    "output_blend_path": payload.get("output_blend_path", ""),
+    "export_path": payload.get("export_path", ""),
+    "imported_objects": [],
+    "mesh_count": 0,
+    "armature_count": 0,
+    "material_count": 0,
+    "action_count": 0,
+    "shape_key_count": 0,
+    "operator_results": {{}},
+    "error": "",
+}}
+try:
+    import bpy
+    import addon_utils
+
+    importlib.import_module("{MMD_TOOLS_MODULE}")
+    addon_utils.enable("{MMD_TOOLS_MODULE}", default_set=False, persistent=True)
+    if payload.get("clear_scene", True):
+        bpy.ops.object.select_all(action="SELECT")
+        bpy.ops.object.delete()
+
+    before = set(bpy.data.objects.keys())
+    op_result = bpy.ops.mmd_tools.import_model(
+        filepath=payload["model_path"],
+        types=set(payload.get("types") or ["MESH", "ARMATURE", "PHYSICS", "DISPLAY", "MORPHS"]),
+        scale=float(payload.get("scale") or 0.08),
+        clean_model=bool(payload.get("clean_model", True)),
+        remove_doubles=bool(payload.get("remove_doubles", False)),
+    )
+    result["operator_results"]["import_model"] = sorted(str(item) for item in op_result)
+    imported = [obj for obj in bpy.context.scene.objects if obj.name not in before]
+    result["imported_objects"] = [obj.name for obj in imported]
+    if not imported:
+        raise RuntimeError("MMD Tools import finished without creating scene objects.")
+
+    bpy.ops.object.select_all(action="DESELECT")
+    for obj in imported:
+        obj.select_set(True)
+    bpy.context.view_layer.objects.active = imported[0]
+
+    if payload.get("motion_path"):
+        vmd_result = bpy.ops.mmd_tools.import_vmd(
+            filepath=payload["motion_path"],
+            scale=float(payload.get("scale") or 0.08),
+            create_new_action=bool(payload.get("create_new_action", True)),
+        )
+        result["operator_results"]["import_vmd"] = sorted(str(item) for item in vmd_result)
+
+    if payload.get("pose_path"):
+        vpd_result = bpy.ops.mmd_tools.import_vpd(
+            filepath=payload["pose_path"],
+            scale=float(payload.get("scale") or 0.08),
+        )
+        result["operator_results"]["import_vpd"] = sorted(str(item) for item in vpd_result)
+
+    if payload.get("output_blend_path"):
+        bpy.ops.wm.save_as_mainfile(filepath=payload["output_blend_path"])
+
+    if payload.get("export_path"):
+        bpy.ops.export_scene.gltf(
+            filepath=payload["export_path"],
+            export_format=payload.get("export_format") or "GLB",
+        )
+
+    result["mesh_count"] = sum(1 for obj in bpy.context.scene.objects if obj.type == "MESH")
+    result["armature_count"] = sum(1 for obj in bpy.context.scene.objects if obj.type == "ARMATURE")
+    result["material_count"] = len(bpy.data.materials)
+    result["action_count"] = len(bpy.data.actions)
+    result["shape_key_count"] = sum(
+        len(obj.data.shape_keys.key_blocks)
+        for obj in bpy.context.scene.objects
+        if getattr(getattr(obj, "data", None), "shape_keys", None)
+    )
+    result["success"] = result["mesh_count"] > 0 or result["armature_count"] > 0
+except Exception as exc:
+    result["error"] = str(exc)
+    result["traceback"] = traceback.format_exc()[-6000:]
+
+print(payload.get("marker", "{MMD_IMPORT_STATUS_MARKER}") + json.dumps(result, ensure_ascii=False, sort_keys=True))
+if not result["success"]:
+    raise SystemExit(24)
+""".strip()
 
     def _resolve_existing_path(self, raw_path: Any) -> Path | None:
         text = str(raw_path or "").strip()
@@ -594,6 +1363,18 @@ class BlenderRuntimePlugin(ReverieRuntimePluginHost):
         except Exception:
             candidate = candidate.absolute()
         return candidate if candidate.exists() else None
+
+    def _resolve_output_path(self, raw_path: Any) -> Path | None:
+        text = str(raw_path or "").strip()
+        if not text:
+            return None
+        candidate = Path(text).expanduser()
+        if not candidate.is_absolute():
+            candidate = Path.cwd() / candidate
+        try:
+            return candidate.resolve(strict=False)
+        except Exception:
+            return candidate.absolute()
 
     def _is_inside(self, path: Path, root: Path) -> bool:
         try:

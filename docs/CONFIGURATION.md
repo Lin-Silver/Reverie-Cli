@@ -227,6 +227,8 @@ For Blender portable deployment, use:
 
 The official Blender plugin embeds `blender-5.1.1-windows-x64.zip` inside `reverie-blender.exe` at build time. `/plugins deploy blender` or the `rc_blender_ensure_runtime` tool asks that plugin executable to extract the portable runtime into the depot, so the installed `dist/.reverie/plugins/blender/` folder does not need to keep a separate zip file.
 
+For MMD assets, the same plugin can prepare `blender_mmd_tools` under `.reverie/plugins/blender/addons/blender_mmd_tools/`. Use `rc_blender_ensure_mmd_tools` for a one-time checkout/update or `rc_blender_import_mmd_model` to automatically prepare the add-on while importing `.pmx`/`.pmd` models with optional `.vmd` motion or `.vpd` pose files.
+
 The built-in Blender workflow also checks `REVERIE_BLENDER_PATH`, `BLENDER_PATH`, `PATH`, and common system install folders.
 
 The official `game_models` plugin keeps model snapshots, HuggingFace cache, pip cache, manifests, and its Python venv inside `.reverie/plugins/game_models/`. TRELLIS Text XLarge is selectable on the `low_vram` profile for 24GB RAM / 8GB VRAM systems; HY-Motion remains guarded by `allow_heavy=true`.

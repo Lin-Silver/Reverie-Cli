@@ -16,7 +16,7 @@ Plugins in Reverie CLI are portable software/runtime bundles, not another user-f
 ## Official Plugins
 
 - `plugins/blender/`
-  Official Blender Portable plugin. Its packaged `reverie-blender.exe` embeds `blender-5.1.1-windows-x64.zip` and can unpack it on demand with `rc_blender_ensure_runtime` or `/plugins deploy blender`.
+  Official Blender Portable plugin. Its packaged `reverie-blender.exe` embeds `blender-5.1.1-windows-x64.zip`, can unpack it on demand with `rc_blender_ensure_runtime` or `/plugins deploy blender`, and can clone MMD Tools into its plugin-local `addons/` folder for PMD/PMX/VMD/VPD import workflows.
 - `plugins/godot/`
   Godot runtime manager for detection, registration, GitHub release download/unpack, source checkout, project scanning, launch, and headless checks.
 - `plugins/o3de/`
@@ -40,9 +40,12 @@ When a command has `"expose_as_tool": true`, Reverie can surface it as `rc_<plug
 1. Build `plugins/blender/dist/reverie-blender.exe`.
 2. Install the plugin into `dist/.reverie/plugins/blender/`.
 3. Run `/plugins deploy blender` or call `rc_blender_ensure_runtime`.
-4. Run `/plugins run blender`, `rc_blender_run_script`, or the built-in `blender_modeling_workbench`.
+4. For MMD assets, call `rc_blender_ensure_mmd_tools` once or let `rc_blender_import_mmd_model` prepare it automatically.
+5. Run `/plugins run blender`, `rc_blender_run_script`, `rc_blender_import_mmd_model`, or the built-in `blender_modeling_workbench`.
 
 The Blender zip is a build input for the plugin executable. It should not need to remain as a separate file in the installed `dist/.reverie/plugins/blender/` depot after packaging.
+
+MMD Tools is cloned from `https://github.com/MMD-Blender/blender_mmd_tools.git` into `dist/.reverie/plugins/blender/addons/blender_mmd_tools/`. The plugin sets Blender user config and Python paths to plugin-local folders when probing or launching Blender, so this does not require a global Blender add-on install.
 
 ## Game Model Flow
 

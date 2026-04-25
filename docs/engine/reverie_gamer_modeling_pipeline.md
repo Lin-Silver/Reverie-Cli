@@ -78,6 +78,8 @@ For playable humanoids, do not accept disconnected limb/torso blockouts as final
 
 If Blender is portable rather than globally installed, run `/plugins deploy blender` or call `rc_blender_ensure_runtime`. The official Blender plugin embeds the portable archive in `reverie-blender.exe` and unpacks it to `.reverie/plugins/blender/runtime/blender.exe`.
 
+For imported MMD characters, use `rc_blender_import_mmd_model` with a `.pmx` or `.pmd` path. The command automatically prepares the open-source MMD Tools add-on in `.reverie/plugins/blender/addons/blender_mmd_tools/`, can apply optional `.vmd` motion or `.vpd` pose files, saves a `.blend` source, and can export `.glb`/`.gltf` when requested. This is the preferred route for high-quality externally authored MMD models; Reverie should treat those assets as reference/production inputs rather than trying to rebuild the full character from primitives.
+
 Common flow:
 
 1. `/blender setup`
@@ -93,7 +95,8 @@ Common flow:
    Check generated artifacts, GLB header validity, texture completeness, validation schema, production manifest, black-box iteration plan, body-continuity report, material/skin/animation/facial manifests, pose-stress action, visual QA report, engine import contract, rig/action/IK coverage, weights, sockets, collision proxies, LOD coverage, and in-Blender production gates.
 10. `/plugins run blender`
    Open the deployed portable Blender build when manual sculpting, retopo cleanup, texture painting, or animation polish is needed.
-11. `/blender sync`
+11. Optional MMD import: `rc_blender_import_mmd_model` with `model_path`, optional `motion_path`, optional `pose_path`, and optional `export_path`.
+12. `/blender sync`
 
 The same workflow is exposed to the model through the built-in `blender_modeling_workbench` tool:
 

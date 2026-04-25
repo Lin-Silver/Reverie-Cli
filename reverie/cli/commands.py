@@ -6608,19 +6608,24 @@ class CommandHandler:
             return self._cmd_nvidia_model("")
         if lowered.startswith("model "):
             return self._cmd_nvidia_model(raw[6:].strip())
+        if lowered in ("thinking", "reasoning", "effort"):
+            return self._cmd_nvidia_thinking("")
+        if lowered.startswith(("thinking ", "reasoning ", "effort ")):
+            return self._cmd_nvidia_thinking(raw.split(None, 1)[1].strip())
         if lowered == "endpoint":
             return self._cmd_nvidia_endpoint("")
         if lowered.startswith("endpoint "):
             return self._cmd_nvidia_endpoint(raw[9:].strip())
 
         self.console.print(
-            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /nvidia [status|key|activate|model|endpoint][/{self.theme.AMBER_GLOW}]"
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /nvidia [status|key|activate|model|thinking|endpoint][/{self.theme.AMBER_GLOW}]"
         )
         return True
 
     def _cmd_nvidia_status(self) -> bool:
         from ..nvidia import (
             NVIDIA_API_KEY_HINT_URL,
+            get_nvidia_reasoning_effort_label,
             mask_secret,
             normalize_nvidia_config,
             resolve_nvidia_api_key,
@@ -6644,6 +6649,9 @@ class CommandHandler:
         thinking_control = str((selected or {}).get("thinking_control", "none") if selected else "none").strip().lower()
         if thinking_control == "toggle":
             thinking_label = "ON" if bool(nvidia_cfg.get("enable_thinking", True)) else "OFF"
+        elif thinking_control == "effort":
+            effort = nvidia_cfg.get("reasoning_effort", "max") if bool(nvidia_cfg.get("enable_thinking", True)) else "none"
+            thinking_label = get_nvidia_reasoning_effort_label(effort)
         elif thinking_control == "fixed":
             thinking_label = "FIXED"
         else:
@@ -6749,12 +6757,78 @@ class CommandHandler:
             endpoint_value=endpoint_value,
         )
 
+    def _cmd_nvidia_thinking(self, effort_value: str) -> bool:
+        from ..nvidia import (
+            get_nvidia_reasoning_effort_label,
+            normalize_nvidia_config,
+            normalize_nvidia_reasoning_effort,
+            resolve_nvidia_selected_model,
+        )
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        nvidia_cfg = normalize_nvidia_config(getattr(config, "nvidia", {}))
+        selected = resolve_nvidia_selected_model(nvidia_cfg)
+        selected_name = str((selected or {}).get("display_name", "NVIDIA model"))
+        thinking_control = str((selected or {}).get("thinking_control", "none") if selected else "none").strip().lower()
+
+        if thinking_control == "toggle":
+            if not str(effort_value or "").strip():
+                enabled = Confirm.ask(
+                    f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Enable thinking mode for {selected_name}?",
+                    default=bool(nvidia_cfg.get("enable_thinking", True)),
+                )
+            else:
+                enabled = str(effort_value or "").strip().lower() not in {"off", "false", "0", "none", "no"}
+            nvidia_cfg["enable_thinking"] = bool(enabled)
+            status_text = "ON" if enabled else "OFF"
+        elif thinking_control == "effort":
+            if not str(effort_value or "").strip():
+                current = normalize_nvidia_reasoning_effort(nvidia_cfg.get("reasoning_effort", "max"))
+                choices = ["max", "high", "off"]
+                selected_index = Prompt.ask(
+                    f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] NVIDIA thinking depth for {selected_name} (max/high/off)",
+                    choices=choices,
+                    default="off" if current == "none" else current,
+                )
+                effort = normalize_nvidia_reasoning_effort(selected_index)
+            else:
+                effort = normalize_nvidia_reasoning_effort(effort_value)
+            nvidia_cfg["reasoning_effort"] = effort
+            nvidia_cfg["enable_thinking"] = effort != "none"
+            status_text = get_nvidia_reasoning_effort_label(effort)
+        else:
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} {selected_name} does not expose configurable NVIDIA thinking depth.[/{self.theme.AMBER_GLOW}]"
+            )
+            return True
+
+        config.nvidia = normalize_nvidia_config(nvidia_cfg)
+        config.active_model_source = "nvidia"
+        config_manager.save(config)
+        if self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} NVIDIA thinking set to {status_text} for {selected_name}.[/{self.theme.MINT_VIBRANT}]"
+        )
+        return True
+
     def _configure_nvidia_thinking_for_model(self, nvidia_cfg: Dict[str, Any], selected_model: Dict[str, Any]) -> Dict[str, Any]:
         """Ask for NVIDIA thinking mode only when the selected model supports on/off control."""
-        from ..nvidia import normalize_nvidia_config
+        from ..nvidia import normalize_nvidia_config, normalize_nvidia_reasoning_effort
 
         cfg = normalize_nvidia_config(nvidia_cfg)
         thinking_control = str(selected_model.get("thinking_control", "none") or "none").strip().lower()
+        if thinking_control == "effort":
+            cfg["reasoning_effort"] = normalize_nvidia_reasoning_effort(cfg.get("reasoning_effort", "max"))
+            cfg["enable_thinking"] = cfg["reasoning_effort"] != "none"
+            return normalize_nvidia_config(cfg)
         if thinking_control != "toggle":
             return cfg
 

@@ -165,6 +165,51 @@ def _model_seed(
     }
 
 
+def _local_model_assistants() -> Dict[str, Any]:
+    """Return the default local-model support policy for asset production."""
+    return {
+        "plugin_id": "game_models",
+        "plugin_depot": ".reverie/plugins/game_models",
+        "model_depot": ".reverie/plugins/game_models/models",
+        "venv": ".reverie/plugins/game_models/venv",
+        "hardware_profile": {"ram_gb": 24, "vram_gb": 8},
+        "recommended_models": [
+            {
+                "id": "stable-fast-3d",
+                "repo_id": "stabilityai/stable-fast-3d",
+                "role": "image_to_3d_asset_candidate",
+                "reason": "Default 8GB-VRAM-friendly local 3D asset ideation path after concept-image generation.",
+            },
+            {
+                "id": "tripo-sr",
+                "repo_id": "stabilityai/TripoSR",
+                "role": "image_to_3d_fallback",
+                "reason": "Fallback reconstruction model for smaller local hardware.",
+            },
+        ],
+        "guarded_heavy_models": [
+            {
+                "id": "trellis-text-xlarge",
+                "repo_id": "microsoft/TRELLIS-text-xlarge",
+                "role": "text_to_3d_research",
+                "guard": "Requires explicit allow_heavy because published/runtime guidance exceeds the default 8GB VRAM budget.",
+            },
+            {
+                "id": "hy-motion-1.0",
+                "repo_id": "tencent/HY-Motion-1.0",
+                "role": "human_motion_generation",
+                "guard": "Requires explicit allow_heavy; HY-Motion's published profiles are above the default 8GB VRAM budget.",
+            },
+        ],
+        "usage_policy": [
+            "Use rc_game_models_deployment_plan before downloading model packages.",
+            "Use rc_game_models_prepare_environment to create the plugin-local venv.",
+            "Use rc_game_models_download_model with dry_run=true before heavy downloads.",
+            "Never place model snapshots in C:\\Users, global HuggingFace cache folders, or system SDK paths by default.",
+        ],
+    }
+
+
 def _budget_profile(
     playable_character_count: int,
     content_expansion: Dict[str, Any],
@@ -445,6 +490,7 @@ def build_asset_pipeline_plan(
             "pipeline_manifest_path": "data/models/pipeline.yaml",
         },
         "import_profile": _import_profile(runtime),
+        "local_model_assistants": _local_model_assistants(),
         "validation_rules": _validation_rules(runtime, world_packet),
         "budget_profile": _budget_profile(
             len([seed for seed in modeling_seed if bool(seed.get("playable", False))]),
@@ -496,6 +542,15 @@ def asset_pipeline_markdown(plan: Dict[str, Any]) -> str:
     lines.append("## Import Profile")
     for key, value in (plan.get("import_profile", {}) or {}).items():
         lines.append(f"- {key}: {value}")
+    lines.append("")
+    lines.append("## Local Model Assistants")
+    assistants = plan.get("local_model_assistants", {}) or {}
+    lines.append(f"- plugin: {assistants.get('plugin_id', 'game_models')}")
+    lines.append(f"- model depot: {assistants.get('model_depot', '.reverie/plugins/game_models/models')}")
+    for item in assistants.get("recommended_models", []):
+        lines.append(f"- recommended: {item.get('id', 'model')} | {item.get('repo_id', '')}")
+    for item in assistants.get("guarded_heavy_models", []):
+        lines.append(f"- guarded: {item.get('id', 'model')} | {item.get('repo_id', '')}")
     lines.append("")
     lines.append("## Production Queue")
     for item in plan.get("production_queue", []):

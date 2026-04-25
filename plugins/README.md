@@ -21,6 +21,8 @@ Plugins in Reverie CLI are portable software/runtime bundles, not another user-f
   Godot runtime manager for detection, registration, GitHub release download/unpack, source checkout, project scanning, launch, and headless checks.
 - `plugins/o3de/`
   O3DE source SDK manager for GitHub version discovery, plugin-local source checkout, and local SDK manifest generation.
+- `plugins/game_models/`
+  Game auxiliary model depot manager for plugin-local Python venvs, HuggingFace model snapshots, 8GB-VRAM deployment planning, and guarded heavy-model downloads.
 
 ## Fixed Protocol
 
@@ -41,3 +43,13 @@ When a command has `"expose_as_tool": true`, Reverie can surface it as `rc_<plug
 4. Run `/plugins run blender`, `rc_blender_run_script`, or the built-in `blender_modeling_workbench`.
 
 The Blender zip is a build input for the plugin executable. It should not need to remain as a separate file in the installed `dist/.reverie/plugins/blender/` depot after packaging.
+
+## Game Model Flow
+
+1. Build `plugins/game_models/dist/reverie-game-models.exe`.
+2. Install the plugin into `dist/.reverie/plugins/game_models/`.
+3. Run `/plugins deploy game_models` or call `rc_game_models_prepare_environment`.
+4. Call `rc_game_models_deployment_plan` before downloads.
+5. Call `rc_game_models_download_model` with `dry_run=true` first, then download only models that fit the local hardware profile.
+
+Model snapshots and virtual environments must stay inside `dist/.reverie/plugins/game_models/` unless the user explicitly registers an external model path.

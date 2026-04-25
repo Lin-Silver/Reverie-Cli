@@ -26,6 +26,48 @@ NVIDIA_GLM_CONTEXT_TOKENS = 205_000
 NVIDIA_STEP_FLASH_CONTEXT_TOKENS = 256_000
 NVIDIA_GPT_OSS_120B_CONTEXT_TOKENS = 128_000
 NVIDIA_KIMI_K2_THINKING_CONTEXT_TOKENS = 256_000
+NVIDIA_DEEPSEEK_V4_CONTEXT_TOKENS = 1_000_000
+NVIDIA_DEFAULT_REASONING_EFFORT = "max"
+NVIDIA_REASONING_EFFORTS = ("max", "high", "none")
+
+
+def normalize_nvidia_reasoning_effort(value: Any, default: str = NVIDIA_DEFAULT_REASONING_EFFORT) -> str:
+    """Normalize NVIDIA hosted-model thinking depth.
+
+    NVIDIA DeepSeek V4 exposes a provider-specific chat-template knob with
+    non-thinking, High, and Max modes. Reverie stores the compact lowercase
+    value and renders the provider payload only for models that support it.
+    """
+    text = str(value or "").strip().lower().replace("_", " ").replace("-", " ")
+    aliases = {
+        "": default,
+        "default": default,
+        "auto": default,
+        "max": "max",
+        "maximum": "max",
+        "extra high": "max",
+        "xhigh": "max",
+        "high": "high",
+        "think high": "high",
+        "none": "none",
+        "off": "none",
+        "false": "none",
+        "0": "none",
+        "no": "none",
+        "non think": "none",
+        "nonthinking": "none",
+        "non thinking": "none",
+        "no thinking": "none",
+    }
+    normalized = aliases.get(text, text)
+    if normalized not in NVIDIA_REASONING_EFFORTS:
+        normalized = default if default in NVIDIA_REASONING_EFFORTS else NVIDIA_DEFAULT_REASONING_EFFORT
+    return normalized
+
+
+def get_nvidia_reasoning_effort_label(value: Any) -> str:
+    effort = normalize_nvidia_reasoning_effort(value)
+    return {"max": "Max", "high": "High", "none": "Non-think"}.get(effort, "Max")
 
 
 def _request_model(
@@ -143,6 +185,22 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         thinking=True,
         context_length=NVIDIA_STEP_FLASH_CONTEXT_TOKENS,
     ),
+    _openai_model(
+        "deepseek-ai/deepseek-v4-pro",
+        "DeepSeek V4 Pro",
+        "OpenAI SDK transport with 1M context and selectable Non-think/High/Max chat-template reasoning.",
+        thinking=True,
+        thinking_control="effort",
+        context_length=NVIDIA_DEEPSEEK_V4_CONTEXT_TOKENS,
+    ),
+    _openai_model(
+        "deepseek-ai/deepseek-v4-flash",
+        "DeepSeek V4 Flash",
+        "OpenAI SDK transport with 1M context and selectable Non-think/High/Max chat-template reasoning.",
+        thinking=True,
+        thinking_control="effort",
+        context_length=NVIDIA_DEEPSEEK_V4_CONTEXT_TOKENS,
+    ),
     _request_model(
         "mistralai/mistral-large-3-675b-instruct-2512",
         "Mistral Large 3 675B",
@@ -191,6 +249,7 @@ def default_nvidia_config() -> Dict[str, Any]:
         "presence_penalty": 0.0,
         "repetition_penalty": 1.0,
         "enable_thinking": True,
+        "reasoning_effort": NVIDIA_DEFAULT_REASONING_EFFORT,
     }
 
 
@@ -299,6 +358,7 @@ def normalize_nvidia_config(raw_nvidia: Any) -> Dict[str, Any]:
             cfg[key] = default_value
 
     cfg["enable_thinking"] = bool(cfg.get("enable_thinking", True))
+    cfg["reasoning_effort"] = normalize_nvidia_reasoning_effort(cfg.get("reasoning_effort", NVIDIA_DEFAULT_REASONING_EFFORT))
 
     matched = resolve_nvidia_selected_model(cfg)
     if matched:
@@ -420,7 +480,11 @@ def build_nvidia_runtime_model_data(nvidia_config: Any, model_id: Optional[str] 
         "thinking_mode": (
             ("true" if bool(cfg.get("enable_thinking", True)) else "false")
             if str(selected.get("thinking_control", "")).strip().lower() == "toggle"
-            else None
+            else (
+                normalize_nvidia_reasoning_effort(cfg.get("reasoning_effort"))
+                if str(selected.get("thinking_control", "")).strip().lower() == "effort"
+                else None
+            )
         ),
         "endpoint": "" if provider != "request" else "",
         "custom_headers": {},
@@ -540,6 +604,23 @@ def _build_openai_step_flash_options() -> Dict[str, Any]:
     }
 
 
+def _build_openai_deepseek_v4_options(nvidia_config: Any = None) -> Dict[str, Any]:
+    cfg = normalize_nvidia_config(nvidia_config)
+    effort = normalize_nvidia_reasoning_effort(cfg.get("reasoning_effort", NVIDIA_DEFAULT_REASONING_EFFORT))
+    thinking_enabled = bool(cfg.get("enable_thinking", True)) and effort != "none"
+    chat_template_kwargs: Dict[str, Any] = {"thinking": thinking_enabled}
+    if thinking_enabled:
+        chat_template_kwargs["reasoning_effort"] = effort
+    return {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "max_tokens": int(cfg.get("max_tokens", 16384) or 16384),
+        "extra_body": {
+            "chat_template_kwargs": chat_template_kwargs,
+        },
+    }
+
+
 def _build_openai_gpt_oss_options() -> Dict[str, Any]:
     return {
         "temperature": 1.0,
@@ -562,6 +643,8 @@ _NVIDIA_OPENAI_OPTION_BUILDERS = {
     "minimaxai/minimax-m2.7": _build_openai_minimax_m27_options,
     "z-ai/glm-5.1": _build_openai_glm5_options,
     "stepfun-ai/step-3.5-flash": _build_openai_step_flash_options,
+    "deepseek-ai/deepseek-v4-pro": _build_openai_deepseek_v4_options,
+    "deepseek-ai/deepseek-v4-flash": _build_openai_deepseek_v4_options,
     "moonshotai/kimi-k2-thinking": _build_openai_kimi_k2_thinking_options,
     "openai/gpt-oss-120b": _build_openai_gpt_oss_options,
 }

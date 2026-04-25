@@ -182,6 +182,22 @@ if exist "%ROOT_DIR%\plugins\o3de\plugin.py" (
     )
 )
 
+if exist "%ROOT_DIR%\plugins\game_models\plugin.py" (
+    echo       Building official Game Models plugin...
+    call "%ROOT_DIR%\plugins\game_models\build.bat"
+    if %ERRORLEVEL% neq 0 (
+        echo [ERROR] Failed to build Game Models plugin executable.
+        set "BUILD_EXIT_CODE=1"
+        goto finish
+    )
+    python -c "from reverie.config import get_app_root; from reverie.plugin.runtime_manager import RuntimePluginManager; manager=RuntimePluginManager(get_app_root()); result=manager.install_source_plugin('game_models', overwrite=False); print('      Game Models plugin installed:', result.get('target_dir')); raise SystemExit(0 if result.get('success') else 1)"
+    if %ERRORLEVEL% neq 0 (
+        echo [ERROR] Failed to install Game Models plugin into dist runtime depot.
+        set "BUILD_EXIT_CODE=1"
+        goto finish
+    )
+)
+
 echo.
 echo [5/6] Resolving optional ffmpeg and icon...
 if defined USER_FFMPEG_PATH if exist "%USER_FFMPEG_PATH%" set "REVERIE_FFMPEG_PATH=%USER_FFMPEG_PATH%"

@@ -167,6 +167,14 @@ The `nvidia` section stores the NVIDIA API key, selected model, transport-specif
 Get the API key from `https://build.nvidia.com/settings/api-keys`.
 Reverie also reads `NVIDIA_API_KEY` from the environment when it is present, and Computer Controller mode pins the runtime to `qwen/qwen3.5-397b-a17b`.
 
+NVIDIA DeepSeek V4 models use `reasoning_effort` for provider-side thinking depth. Reverie normalizes it to:
+
+- `max` - default, maps to NVIDIA Max thinking
+- `high` - maps to NVIDIA High thinking
+- `none` - non-thinking mode; `/nvidia thinking off`
+
+Use `/nvidia thinking max`, `/nvidia thinking high`, or `/nvidia thinking off` to change this without editing JSON.
+
 For NVIDIA-hosted `z-ai/glm-5.1`, Reverie enables a fast interactive profile by default because the hosted model is very slow when paired with large output budgets and chat-template thinking. The profile uses:
 
 - `glm_fast_mode`: default `true`

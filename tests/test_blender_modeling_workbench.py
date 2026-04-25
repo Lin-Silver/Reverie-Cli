@@ -384,7 +384,8 @@ def test_blender_tool_is_visible_and_prompted_in_reverie_and_gamer(tmp_path: Pat
     assert "blender_modeling_workbench" in gamer_names
     assert "rc_blender_ensure_runtime" in reverie_prompt
     assert "black-box iteration plan" in reverie_prompt
-    assert "direct Blender authoring" in gamer_prompt
+    assert "Blender DCC control" in gamer_prompt
+    assert "game_models" in gamer_prompt
 
 
 def test_blender_preset_inference_handles_chinese_modeling_briefs() -> None:

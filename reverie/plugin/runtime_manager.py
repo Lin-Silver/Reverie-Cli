@@ -338,6 +338,23 @@ DEFAULT_RUNTIME_PLUGIN_CATALOG: tuple[RuntimePluginSpec, ...] = (
         sdk_install_hint="Expected manifest: `.reverie/plugins/o3de/runtime/sdk_manifest.json`; source checkout stays under `.reverie/plugins/o3de/source/`.",
     ),
     RuntimePluginSpec(
+        plugin_id="game_models",
+        display_name="Game Auxiliary Models",
+        runtime_family="model-depot",
+        description="Plugin-local open model package manager for Reverie-Gamer asset production.",
+        source_repo_hint="https://huggingface.co/models",
+        delivery="sdk-runtime",
+        capabilities=("huggingface-models", "image-to-3d", "motion-generation", "game-assets", "plugin-local-venv"),
+        entry_candidates={
+            "windows": ("reverie-game-models*.exe", "dist/reverie-game-models*.exe", "plugin.py", "runtime/model_manifest.json"),
+            "linux": ("reverie-game-models*", "dist/reverie-game-models*", "plugin.py", "runtime/model_manifest.json"),
+            "darwin": ("reverie-game-models*", "dist/reverie-game-models*", "plugin.py", "runtime/model_manifest.json"),
+        },
+        sdk_download_page="https://huggingface.co/models",
+        sdk_archive_hint="Use `/plugins deploy game_models`, `rc_game_models_prepare_environment`, and `rc_game_models_download_model` to prepare plugin-local model packages.",
+        sdk_install_hint="Model snapshots stay under `.reverie/plugins/game_models/models/`; the virtual environment stays under `.reverie/plugins/game_models/venv/`.",
+    ),
+    RuntimePluginSpec(
         plugin_id="blender",
         display_name="Blender",
         runtime_family="dcc",

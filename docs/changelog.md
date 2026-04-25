@@ -2,6 +2,9 @@
 
 ### Runtime
 
+* Added NVIDIA catalog entries for `deepseek-ai/deepseek-v4-pro` and `deepseek-ai/deepseek-v4-flash`, including 1M context metadata and selectable `max`/`high`/`off` thinking depth through `/nvidia thinking`.
+* Added the official `game_models` runtime plugin for plugin-local auxiliary game model deployment, 8GB-VRAM planning, HuggingFace snapshot downloads, and guarded HY-Motion/TRELLIS registration.
+* Reframed Blender and Blockbench support as DCC/editor control, validation, and export automation rather than guaranteed final AAA character-art generation.
 * Added NVIDIA catalog support for `z-ai/glm-5.1` with a fast interactive profile that disables GLM chat-template thinking by default and caps GLM fast output to reduce first-token latency and streaming stalls.
 * Added a ModelScope source backed by the Anthropic SDK, defaulting to `ZhipuAI/GLM-5.1`, with built-in catalogs for GLM, Kimi, MiniMax, Qwen, and DeepSeek models.
 * Added project-wide coding guardrails to every Reverie mode, adapted from the Karpathy-inspired CLAUDE.md guidance to favor assumptions checks, simplicity, surgical edits, and verifiable goals.

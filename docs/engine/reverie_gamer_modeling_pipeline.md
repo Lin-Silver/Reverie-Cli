@@ -4,12 +4,13 @@
 
 Reverie CLI includes a built-in modeling workflow for `Reverie-Gamer`.
 
-The pipeline standardizes how modeled assets move from authoring to runtime:
+The pipeline standardizes how modeled assets move from authoring to runtime. Blender and Blockbench support should be understood as editor control, source generation, validation, and export automation rather than a guarantee that Reverie can synthesize final hand-authored character art by itself.
 
-- Blender for direct `.blend` authoring, procedural asset generation, preview rendering, and `.glb`/`.gltf` export
+- Blender for direct `.blend` authoring control, procedural scaffold generation, preview rendering, and `.glb`/`.gltf` export
 - a built-in Ashfox MCP server configuration for live Blockbench automation when an editor session is already running
 - headless `.bbmodel` validation/export for simple Blockbench-style cuboid assets
 - Reverie Engine for import, registry, and runtime-facing structure
+- the `game_models` runtime plugin for optional local auxiliary open model packages under `.reverie/plugins/game_models/`
 
 ## Integration Strategy
 
@@ -36,6 +37,8 @@ What remains optional:
 - launch Blockbench only when the local Ashfox MCP endpoint should be queried
 
 Without a desktop Blockbench/Ashfox session, Reverie still validates simple `.bbmodel` files and exports cuboid elements to runtime `.gltf` files. Complex Blockbench features such as rotations, custom face UV paint, and editor previews remain optional live-editor work.
+
+For model-assisted asset generation, use `/plugins deploy game_models` and the exposed `rc_game_models_*` tools. The default policy targets 24GB RAM / 8GB VRAM and recommends smaller image-to-3D helpers such as `stable-fast-3d` or `tripo-sr`; heavier research models such as `microsoft/TRELLIS-text-xlarge` and `tencent/HY-Motion-1.0` are guarded and require explicit `allow_heavy=true`.
 
 ## Workspace Layout
 
@@ -65,11 +68,11 @@ Common flow:
 
 ## Blender Workflow
 
-Use `/blender` when the asset should be authored directly in Blender instead of through an external MCP server.
+Use `/blender` when the asset should be controlled or scaffolded directly in Blender instead of through an external MCP server.
 
 For stylized playable-character blockouts, briefs that mention `anime action`, `Genshin`, `ZZZ`, `Zenless`, `Ananta`, or the Chinese titles for those styles select the `anime_action_character` preset. That preset emits layered clothing shapes, hair clumps, face markers, weapon silhouette, material IDs, rig markers, LOD markers, lighting, and preview/export wiring.
 
-For a heavier production scaffold, briefs that mention `final character asset`, `high poly`, `retopo`, `UV unwrap`, `texture bake`, `rigged`, `skinned`, or the Chinese equivalents select the `production_character_pipeline` preset. That preset generates a high-poly sculpt collection, retopo/game-mesh collection, smart UV layout, procedural basecolor/normal/ORM/material-ID texture seed maps, texture authoring metadata, bake cages, mesh metrics, PBR material tuning, a humanoid armature, weight hints, a skinning manifest, IK targets and constraints, animation clips plus an animation manifest, non-zero facial shape-key deformation data, a skinning stress-test action, bone attachment sockets, runtime collision proxies, LOD variants, a visual QA report, an engine import contract, a turntable camera animation, a production stage manifest, a black-box iteration plan, a production asset card, and quality gates ready for downstream runtime use.
+For a heavier production scaffold, briefs that mention `final character asset`, `high poly`, `retopo`, `UV unwrap`, `texture bake`, `rigged`, `skinned`, or the Chinese equivalents select the `production_character_pipeline` preset. That preset generates a high-poly sculpt collection, retopo/game-mesh collection, smart UV layout, procedural basecolor/normal/ORM/material-ID texture seed maps, texture authoring metadata, bake cages, mesh metrics, PBR material tuning, a humanoid armature, weight hints, a skinning manifest, IK targets and constraints, animation clips plus an animation manifest, non-zero facial shape-key deformation data, a skinning stress-test action, bone attachment sockets, runtime collision proxies, LOD variants, a visual QA report, an engine import contract, a turntable camera animation, a production stage manifest, a black-box iteration plan, a production asset card, and quality gates ready for downstream runtime use. It remains a scaffold/control workflow; final anatomy, appeal, clothing design, topology polish, and texture paint still require manual DCC or model-assisted passes.
 
 If Blender is portable rather than globally installed, run `/plugins deploy blender` or call `rc_blender_ensure_runtime`. The official Blender plugin embeds the portable archive in `reverie-blender.exe` and unpacks it to `.reverie/plugins/blender/runtime/blender.exe`.
 

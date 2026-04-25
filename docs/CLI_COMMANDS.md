@@ -64,6 +64,7 @@ Subagents are enabled only in base `reverie` mode. They inherit the active Rever
 | `/nvidia key` | Save the NVIDIA API key from build.nvidia.com/settings/api-keys |
 | `/nvidia activate` | Switch active source to NVIDIA |
 | `/nvidia model <model-id>` | Set the NVIDIA model |
+| `/nvidia thinking max\|high\|off` | Set NVIDIA model thinking depth when the selected model supports it |
 | `/nvidia fast on\|off` | Toggle the GLM-5.1 fast interactive profile |
 | `/nvidia endpoint <value>` | Set or clear NVIDIA endpoint override |
 | `/modelscope` | Show ModelScope configuration |

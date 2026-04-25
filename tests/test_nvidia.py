@@ -1,8 +1,10 @@
 from reverie.nvidia import (
     build_nvidia_openai_options,
     build_nvidia_runtime_model_data,
+    get_nvidia_reasoning_effort_label,
     get_nvidia_model_catalog,
     get_nvidia_model_metadata,
+    normalize_nvidia_reasoning_effort,
 )
 
 
@@ -56,6 +58,8 @@ def test_nvidia_catalog_context_lengths_match_model_cards():
         "qwen/qwen3.5-397b-a17b": 262144,
         "z-ai/glm-5.1": 205000,
         "stepfun-ai/step-3.5-flash": 256000,
+        "deepseek-ai/deepseek-v4-pro": 1000000,
+        "deepseek-ai/deepseek-v4-flash": 1000000,
         "mistralai/mistral-large-3-675b-instruct-2512": 262144,
         "moonshotai/kimi-k2-thinking": 256000,
         "openai/gpt-oss-120b": 128000,
@@ -183,3 +187,72 @@ def test_nvidia_openai_options_for_kimi_k2_thinking_match_provider_example():
     )
     assert runtime is not None
     assert runtime["thinking_mode"] is None
+
+
+def test_nvidia_catalog_contains_deepseek_v4_models_with_effort_control():
+    catalog_by_id = {item["id"]: item for item in get_nvidia_model_catalog()}
+
+    for model_id in ("deepseek-ai/deepseek-v4-pro", "deepseek-ai/deepseek-v4-flash"):
+        metadata = catalog_by_id[model_id]
+        assert metadata["transport"] == "openai-sdk"
+        assert metadata["context_length"] == 1000000
+        assert metadata["thinking"] is True
+        assert metadata["thinking_control"] == "effort"
+
+
+def test_nvidia_reasoning_effort_defaults_to_max_and_normalizes_aliases():
+    assert normalize_nvidia_reasoning_effort("") == "max"
+    assert normalize_nvidia_reasoning_effort("extra high") == "max"
+    assert normalize_nvidia_reasoning_effort("High") == "high"
+    assert normalize_nvidia_reasoning_effort("off") == "none"
+    assert get_nvidia_reasoning_effort_label("none") == "Non-think"
+
+
+def test_nvidia_openai_options_for_deepseek_v4_default_to_max_reasoning():
+    options = build_nvidia_openai_options(
+        {"selected_model_id": "deepseek-ai/deepseek-v4-pro"},
+        "deepseek-ai/deepseek-v4-pro",
+    )
+
+    assert options == {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "max_tokens": 16384,
+        "extra_body": {
+            "chat_template_kwargs": {
+                "thinking": True,
+                "reasoning_effort": "max",
+            }
+        },
+    }
+
+
+def test_nvidia_openai_options_for_deepseek_v4_can_select_high_or_non_think():
+    high = build_nvidia_openai_options(
+        {"selected_model_id": "deepseek-ai/deepseek-v4-flash", "reasoning_effort": "high"},
+        "deepseek-ai/deepseek-v4-flash",
+    )
+    off = build_nvidia_openai_options(
+        {"selected_model_id": "deepseek-ai/deepseek-v4-flash", "reasoning_effort": "off"},
+        "deepseek-ai/deepseek-v4-flash",
+    )
+
+    assert high["extra_body"]["chat_template_kwargs"] == {"thinking": True, "reasoning_effort": "high"}
+    assert off["extra_body"]["chat_template_kwargs"] == {"thinking": False}
+
+
+def test_nvidia_runtime_model_data_uses_deepseek_v4_context_and_effort_mode():
+    runtime = build_nvidia_runtime_model_data(
+        {
+            "enabled": True,
+            "api_key": "nvapi-test",
+            "selected_model_id": "deepseek-ai/deepseek-v4-pro",
+            "reasoning_effort": "high",
+        }
+    )
+
+    assert runtime is not None
+    assert runtime["model"] == "deepseek-ai/deepseek-v4-pro"
+    assert runtime["provider"] == "openai-sdk"
+    assert runtime["max_context_tokens"] == 1000000
+    assert runtime["thinking_mode"] == "high"

@@ -402,6 +402,10 @@ def test_plan_production_emits_system_specs_and_task_graph(tmp_path: Path) -> No
     assert asset_pipeline["modeling_workspace"]["registry_path"] == "data/models/model_registry.yaml"
     assert any(item["id"] == "player_avatar" for item in asset_pipeline["modeling_seed"])
     assert any(item["id"] == "starter_support" for item in asset_pipeline["modeling_seed"])
+    assert asset_pipeline["local_model_assistants"]["plugin_id"] == "game_models"
+    assert asset_pipeline["local_model_assistants"]["model_depot"] == ".reverie/plugins/game_models/models"
+    assert any(item["id"] == "stable-fast-3d" for item in asset_pipeline["local_model_assistants"]["recommended_models"])
+    assert any(item["id"] == "trellis-text-xlarge" for item in asset_pipeline["local_model_assistants"]["guarded_heavy_models"])
     assert len(character_kits["hero_kits"]) >= 4
     assert asset_pipeline["import_profile"]["runtime"] == "godot"
     assert world_program["world_topology"]["nodes"]

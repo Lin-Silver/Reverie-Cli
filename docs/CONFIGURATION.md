@@ -167,23 +167,15 @@ The `nvidia` section stores the NVIDIA API key, selected model, transport-specif
 Get the API key from `https://build.nvidia.com/settings/api-keys`.
 Reverie also reads `NVIDIA_API_KEY` from the environment when it is present, and Computer Controller mode pins the runtime to `qwen/qwen3.5-397b-a17b`.
 
-NVIDIA DeepSeek V4 models use `reasoning_effort` for provider-side thinking depth. Reverie normalizes it to:
+Some NVIDIA models expose provider-side thinking controls. These are model-specific fixed choices, not prompt instructions:
 
-- `max` - default, maps to NVIDIA Max thinking
-- `high` - maps to NVIDIA High thinking
-- `none` - non-thinking mode; `/nvidia thinking off`
+- Toggle models, such as Qwen and GLM, store the choice as `enable_thinking`.
+- Effort models, such as DeepSeek V4, Nemotron, Mistral Small, and GPT-OSS, store the choice as `reasoning_effort`.
+- Dedicated thinking models expose no extra toggle because the provider always emits reasoning.
 
-Use `/nvidia thinking max`, `/nvidia thinking high`, or `/nvidia thinking off` to change this without editing JSON.
+Use `/nvidia model` or `/nvidia model <model-id>` to select the model. When the selected model has configurable thinking, Reverie immediately opens a fixed choice selector for that model. Use `/nvidia thinking` to reopen the selector for the active NVIDIA model.
 
-For NVIDIA-hosted `z-ai/glm-5.1`, Reverie enables a fast interactive profile by default because the hosted model is very slow when paired with large output budgets and chat-template thinking. The profile uses:
-
-- `glm_fast_mode`: default `true`
-- `glm_fast_max_tokens`: default `1024`
-- `glm_fast_temperature`: default `0.25`
-- `glm_fast_top_p`: default `0.90`
-
-Set `glm_fast_mode` to `false` only for deliberate deep-thinking runs where latency is acceptable.
-Use `/nvidia fast on` or `/nvidia fast off` to toggle this without editing JSON by hand.
+NVIDIA request timeouts default to 60 seconds and follow the global `/setting timeout` unless the `nvidia.timeout` value is explicitly set to another value.
 
 ### ModelScope
 

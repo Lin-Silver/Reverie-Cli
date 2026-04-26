@@ -469,6 +469,8 @@ class BlenderRuntimePlugin(ReverieRuntimePluginHost):
             executable_dir = Path(sys.executable).resolve(strict=False).parent
             if executable_dir.name.lower() == "dist":
                 return executable_dir.parent
+            if executable_dir.name.lower() == "plugins" and executable_dir.parent.name.lower() == ".reverie":
+                return (executable_dir / "blender").resolve(strict=False)
             return executable_dir
 
         here = Path(__file__).resolve(strict=False).parent

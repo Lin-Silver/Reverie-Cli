@@ -116,3 +116,18 @@ def test_game_models_source_plugin_manifest_validates() -> None:
     assert validation["success"] is True
     assert validation["plugin_id"] == "game_models"
     assert any("build.bat" in command for command in validation["build_commands"])
+
+
+def test_game_models_standalone_launcher_uses_plugin_subdirectory(tmp_path: Path, monkeypatch) -> None:
+    module = _load_game_models_plugin()
+    install_root = tmp_path / "app" / ".reverie" / "plugins"
+    install_root.mkdir(parents=True)
+    launcher_path = install_root / "reverie-game-models.exe"
+    launcher_path.write_text("", encoding="utf-8")
+    monkeypatch.delenv("REVERIE_PLUGIN_ROOT", raising=False)
+    monkeypatch.setattr(module.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(module.sys, "executable", str(launcher_path), raising=False)
+
+    plugin = module.GameModelsPlugin()
+
+    assert plugin.plugin_root == (install_root / "game_models").resolve()

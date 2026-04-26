@@ -1403,6 +1403,15 @@ class DisplayComponents:
     def show_stream_event(self, event: Dict[str, Any]) -> bool:
         """Render a structured stream event if supported."""
         event_type = str(event.get("event", "") or "").strip().lower()
+        if event_type in {"model_request", "model_wait", "model_retry"}:
+            self.show_activity_event(
+                category=str(event.get("category", "") or "Model"),
+                message=str(event.get("message", "") or "").strip(),
+                status=str(event.get("status", "") or "working"),
+                detail=str(event.get("detail", "") or "").strip(),
+                meta=str(event.get("meta", "") or "").strip(),
+            )
+            return True
         if event_type == "tool_start":
             self.show_tool_invocation(
                 tool_name=str(event.get("tool_name", "") or "tool"),

@@ -2078,7 +2078,15 @@ class ReverieInterface:
             prefix = Text(f"{DECO.LINE_VERTICAL} ", style=self.theme.THINKING_DIM)
             line = Text()
             line.append_text(prefix)
-            line.append(text if text else " ", style=f"italic {self.theme.THINKING_SOFT}")
+            if text:
+                line.append_text(
+                    self._markdown_formatter.format_inline_text(
+                        text,
+                        base_style=f"italic {self.theme.THINKING_SOFT}",
+                    )
+                )
+            else:
+                line.append(" ", style=f"italic {self.theme.THINKING_SOFT}")
             self.console.print(line)
             return
 
@@ -2200,6 +2208,35 @@ class ReverieInterface:
             mode=self.agent.mode,
             ant_phase=prompt_phase,
         )
+
+    def _bind_agent_runtime_context(self, config: Config) -> None:
+        """Attach shared runtime managers and UI callbacks to the active agent."""
+        if not self.agent:
+            return
+        self.agent.config = config
+        self.agent.tool_executor.update_context('config_manager', self.config_manager)
+        self.agent.tool_executor.update_context('mcp_config_manager', self.mcp_config_manager)
+        self.agent.tool_executor.update_context('mcp_runtime', self.mcp_runtime)
+        self.agent.tool_executor.update_context('runtime_plugin_manager', self.runtime_plugin_manager)
+        self.agent.tool_executor.update_context('skills_manager', self.skills_manager)
+        self.agent.tool_executor.update_context('session_manager', self.session_manager)
+        self.agent.tool_executor.update_context('project_data_dir', self.project_data_dir)
+        self.agent.tool_executor.update_context('memory_indexer', self.memory_indexer)
+        self.agent.tool_executor.update_context('workspace_stats_manager', self.workspace_stats_manager)
+        self.agent.tool_executor.update_context('ensure_context_engine', self.ensure_context_engine)
+        self.agent.tool_executor.update_context('ensure_git_integration', self.ensure_git_integration)
+        self.agent.tool_executor.update_context('ensure_lsp_manager', self.ensure_lsp_manager)
+        self.agent.tool_executor.update_context('lsp_manager', self.lsp_manager)
+        self.agent.tool_executor.update_context('git_integration', self.git_integration)
+        self.agent.tool_executor.update_context('console', self.console)
+        self._status_live = None
+        self.agent.tool_executor.update_context('get_status_live', lambda: self._status_live)
+        self.agent.tool_executor.update_context('pause_stream_input_capture', self._pause_stream_input_capture)
+        self.agent.tool_executor.update_context('resume_stream_input_capture', self._resume_stream_input_capture)
+        self.agent.tool_executor.update_context('ui_event_handler', self._handle_agent_ui_event)
+        self.agent.tool_executor.update_context('subagent_manager', self.subagent_manager)
+        self.agent.tool_executor.update_context('is_subagent', False)
+        self.agent.tool_executor.update_context('subagent_id', 'main')
 
     def _run_context_indexing_with_progress(self) -> Optional[object]:
         """Run a full context index while streaming live progress to the terminal."""
@@ -2327,7 +2364,7 @@ class ReverieInterface:
     ) -> None:
         config = self._clone_config(config_override) if config_override is not None else self._load_active_runtime_config()
         self.mcp_runtime.set_project_root(self.project_root)
-        self.runtime_plugin_manager.scan()
+        self.runtime_plugin_manager.get_snapshot(force_refresh=False)
         scope_changed = self._ensure_runtime_services_for_config(config)
         if normalize_mode(config.mode) == "computer-controller":
             runtime_nvidia = build_nvidia_computer_controller_runtime_model_data(getattr(config, "nvidia", {}))
@@ -2381,68 +2418,56 @@ class ReverieInterface:
                 detail=f"Saved max context tokens for {model.model_display_name}.",
             )
 
-        # Preserve existing messages when reinitializing within the same runtime scope.
-        existing_messages = []
-        if not scope_changed and hasattr(self, 'agent') and self.agent is not None:
-            existing_messages = self.agent.messages.copy()
+        agent_kwargs = {
+            "base_url": model.base_url,
+            "api_key": model.api_key,
+            "model": model.model,
+            "model_display_name": model.model_display_name,
+            "additional_rules": self._build_additional_rules_with_tti(config),
+            "mode": config.mode or "reverie",
+            "provider": getattr(model, 'provider', 'openai-sdk'),
+            "thinking_mode": getattr(model, 'thinking_mode', None),
+            "endpoint": getattr(model, 'endpoint', ''),
+            "custom_headers": getattr(model, 'custom_headers', {}),
+            "config": config,
+        }
 
-        self.agent = ReverieAgent(
-            base_url=model.base_url, api_key=model.api_key, model=model.model,
-            model_display_name=model.model_display_name, project_root=self.project_root,
-            retriever=self.retriever, indexer=self.indexer, git_integration=self.git_integration,
-            additional_rules=self._build_additional_rules_with_tti(config),
-            mode=config.mode or "reverie",
-            provider=getattr(model, 'provider', 'openai-sdk'),
-            thinking_mode=getattr(model, 'thinking_mode', None),
-            endpoint=getattr(model, 'endpoint', ''),
-            custom_headers=getattr(model, 'custom_headers', {}),
-            operation_history=self.operation_history,
-            rollback_manager=self.rollback_manager,
-            config=config
-        )
-        
-        # Restore messages after agent creation when the runtime scope stayed the same.
-        if existing_messages:
-            self.agent.messages = existing_messages
-            self._show_activity_event(
-                "Session",
-                "Restored prior transcript into the new agent",
-                status="info",
-                detail=f"{len(existing_messages)} messages were preserved across reinitialization.",
+        reused_agent = False
+        if (
+            not scope_changed
+            and self.agent is not None
+            and hasattr(self.agent, "reconfigure_runtime")
+        ):
+            self.agent.reconfigure_runtime(**agent_kwargs)
+            reused_agent = True
+        else:
+            existing_messages = []
+            if not scope_changed and hasattr(self, 'agent') and self.agent is not None:
+                existing_messages = self.agent.messages.copy()
+
+            self.agent = ReverieAgent(
+                project_root=self.project_root,
+                retriever=self.retriever,
+                indexer=self.indexer,
+                git_integration=self.git_integration,
+                operation_history=self.operation_history,
+                rollback_manager=self.rollback_manager,
+                **agent_kwargs,
             )
-        
-        # Ensure the agent picks up values from the loaded Config (e.g. api_timeout)
-        self.agent.config = config
-        # Also inject config_manager into tool context for context threshold check
-        self.agent.tool_executor.update_context('config_manager', self.config_manager)
-        self.agent.tool_executor.update_context('mcp_config_manager', self.mcp_config_manager)
-        self.agent.tool_executor.update_context('mcp_runtime', self.mcp_runtime)
-        self.agent.tool_executor.update_context('runtime_plugin_manager', self.runtime_plugin_manager)
-        self.agent.tool_executor.update_context('skills_manager', self.skills_manager)
-        # Inject session_manager for context management tool
-        self.agent.tool_executor.update_context('session_manager', self.session_manager)
-        self.agent.tool_executor.update_context('project_data_dir', self.project_data_dir)
-        self.agent.tool_executor.update_context('memory_indexer', self.memory_indexer)
-        self.agent.tool_executor.update_context('workspace_stats_manager', self.workspace_stats_manager)
-        self.agent.tool_executor.update_context('ensure_context_engine', self.ensure_context_engine)
-        self.agent.tool_executor.update_context('ensure_git_integration', self.ensure_git_integration)
-        self.agent.tool_executor.update_context('ensure_lsp_manager', self.ensure_lsp_manager)
-        self.agent.tool_executor.update_context('lsp_manager', self.lsp_manager)
-        self.agent.tool_executor.update_context('git_integration', self.git_integration)
-        # Inject console into tool context for proper input handling (especially on Windows)
-        self.agent.tool_executor.update_context('console', self.console)
-        # Inject status_live control for user input (will be set during _process_message)
-        self._status_live = None
-        self.agent.tool_executor.update_context('get_status_live', lambda: self._status_live)
-        self.agent.tool_executor.update_context('pause_stream_input_capture', self._pause_stream_input_capture)
-        self.agent.tool_executor.update_context('resume_stream_input_capture', self._resume_stream_input_capture)
-        self.agent.tool_executor.update_context('ui_event_handler', self._handle_agent_ui_event)
-        self.agent.tool_executor.update_context('subagent_manager', self.subagent_manager)
-        self.agent.tool_executor.update_context('is_subagent', False)
-        self.agent.tool_executor.update_context('subagent_id', 'main')
+
+            if existing_messages:
+                self.agent.messages = existing_messages
+                self._show_activity_event(
+                    "Session",
+                    "Restored prior transcript into the new agent",
+                    status="info",
+                    detail=f"{len(existing_messages)} messages were preserved across reinitialization.",
+                )
+
+        self._bind_agent_runtime_context(config)
         self._show_activity_event(
             "Agent",
-            f"Agent ready with {model.model_display_name}",
+            f"{'Agent updated' if reused_agent else 'Agent ready'} with {model.model_display_name}",
             status="success",
             detail=f"Provider: {self._resolve_provider_label(config)}",
         )

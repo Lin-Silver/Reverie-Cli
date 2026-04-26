@@ -1361,6 +1361,8 @@ class GodotRuntimePlugin(ReverieRuntimePluginHost):
         candidate = Path(root).resolve(strict=False)
         if candidate.name.lower() == "dist" and (candidate.parent / "plugin.json").exists():
             return candidate.parent.resolve(strict=False)
+        if candidate.name.lower() == "plugins" and candidate.parent.name.lower() == ".reverie":
+            return (candidate / "godot").resolve(strict=False)
         return candidate
 
     def _find_bundled_runtime_archive(self) -> Optional[Path]:

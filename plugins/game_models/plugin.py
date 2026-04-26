@@ -294,7 +294,10 @@ class GameModelsPlugin(ReverieRuntimePluginHost):
         if override:
             return Path(override).expanduser().resolve()
         if getattr(sys, "frozen", False):
-            return Path(sys.executable).resolve().parent
+            executable_dir = Path(sys.executable).resolve().parent
+            if executable_dir.name.lower() == "plugins" and executable_dir.parent.name.lower() == ".reverie":
+                return (executable_dir / PLUGIN_ID).resolve()
+            return executable_dir
         return Path(__file__).resolve().parent
 
     def _ensure_inside_plugin(self, path: Path) -> Path:

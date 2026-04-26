@@ -209,6 +209,7 @@ class RuntimePluginRecord:
             "manifest+catalog": "Manifest+Hint",
             "auto-detect": "Known Type",
             "directory": "Directory",
+            "root-entry": "Standalone EXE",
         }
         return labels.get(self.source, self.source.title())
 
@@ -490,6 +491,11 @@ class RuntimePluginManager:
     def scan(self) -> RuntimePluginSnapshot:
         """Rescan the install root and rebuild the runtime plugin snapshot."""
         records_by_id: dict[str, RuntimePluginRecord] = {}
+        if self.install_root.exists():
+            for record in self._discover_root_plugin_entries():
+                records_by_id[record.plugin_id] = record
+
+        skip_directory_ids = set(records_by_id)
         install_dirs = []
         if self.install_root.exists():
             install_dirs = sorted(
@@ -502,6 +508,12 @@ class RuntimePluginManager:
             )
 
         for install_dir in install_dirs:
+            normalized_dir_id = sanitize_plugin_identifier(install_dir.name)
+            # Standalone launchers live at the plugin root now. If a same-name
+            # directory also exists, treat it as plugin data/SDK storage rather
+            # than a second plugin record, even when legacy wrapper files remain.
+            if normalized_dir_id in skip_directory_ids:
+                continue
             manifest_path = install_dir / "plugin.json"
             if manifest_path.is_file():
                 record = self._record_from_manifest(install_dir, manifest_path)
@@ -1033,6 +1045,52 @@ class RuntimePluginManager:
         target_dir = (self.install_root / normalized_plugin_id).resolve()
         self.ensure_install_root()
 
+        if self._should_install_standalone_entry(validation):
+            compiled_entry_path = validation.get("compiled_entry_path")
+            if not isinstance(compiled_entry_path, Path):
+                return {
+                    "success": False,
+                    "error": "Standalone install requires a compiled entry path.",
+                    "validation": validation,
+                }
+
+            target_path = (self.install_root / compiled_entry_path.name).resolve()
+            if target_path.exists() and target_path.is_dir():
+                return {
+                    "success": False,
+                    "error": f"Standalone plugin target collides with a directory: {target_path}",
+                    "target_path": target_path,
+                    "target_dir": target_dir,
+                    "validation": validation,
+                }
+            if target_path.exists() and not overwrite:
+                return {
+                    "success": False,
+                    "error": f"Standalone plugin executable already exists: {target_path}. Pass overwrite=True to replace it.",
+                    "target_path": target_path,
+                    "target_dir": target_dir,
+                    "validation": validation,
+                }
+
+            removed_legacy_entries = self._cleanup_legacy_standalone_wrapper(target_dir)
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(compiled_entry_path, target_path)
+
+            self.scan()
+            installed_record = self.get_record(normalized_plugin_id, force_refresh=False)
+            return {
+                "success": True,
+                "error": "",
+                "source_dir": source_dir,
+                "target_dir": target_dir,
+                "target_path": target_path,
+                "install_mode": "standalone-entry",
+                "merged": target_dir.exists(),
+                "legacy_cleanup": removed_legacy_entries,
+                "validation": validation,
+                "record": installed_record,
+            }
+
         merge_existing_sdk_depot = target_dir.exists() and normalized_plugin_id in self.catalog and not overwrite
         if target_dir.exists():
             if not overwrite and not merge_existing_sdk_depot:
@@ -1155,6 +1213,8 @@ class RuntimePluginManager:
             record.entry_path,
             ["-RC-CALL", command.name, payload_text],
             timeout_seconds=self.TOOL_TIMEOUT_SECONDS,
+            plugin_root_override=record.install_dir,
+            plugin_id=record.plugin_id,
         )
         if result.get("timed_out"):
             return {
@@ -1410,7 +1470,13 @@ class RuntimePluginManager:
         if record.entry_path is None:
             return {"status": "no-entry", "error": "", "protocol": None}
 
-        result = self._run_plugin_process(record.entry_path, ["-RC"], timeout_seconds=self.PROTOCOL_TIMEOUT_SECONDS)
+        result = self._run_plugin_process(
+            record.entry_path,
+            ["-RC"],
+            timeout_seconds=self.PROTOCOL_TIMEOUT_SECONDS,
+            plugin_root_override=record.install_dir,
+            plugin_id=record.plugin_id,
+        )
         if result.get("timed_out"):
             return {"status": "timeout", "error": "Timed out while probing `-RC`.", "protocol": None}
         if result.get("error"):
@@ -1496,13 +1562,26 @@ class RuntimePluginManager:
                 return command
         return None
 
-    def _run_plugin_process(self, entry_path: Path, extra_args: list[str], *, timeout_seconds: float) -> dict[str, Any]:
+    def _run_plugin_process(
+        self,
+        entry_path: Path,
+        extra_args: list[str],
+        *,
+        timeout_seconds: float,
+        plugin_root_override: Optional[Path] = None,
+        plugin_id: str = "",
+    ) -> dict[str, Any]:
         command = self._build_launch_command(entry_path, extra_args)
-        plugin_root = entry_path.parent
-        if plugin_root.name.lower() == "dist" and (plugin_root.parent / "plugin.json").exists():
+        plugin_root = plugin_root_override or entry_path.parent
+        if plugin_root == entry_path.parent and plugin_root.name.lower() == "dist" and (plugin_root.parent / "plugin.json").exists():
             plugin_root = plugin_root.parent
         env = dict(os.environ)
-        env.setdefault("REVERIE_PLUGIN_ROOT", str(plugin_root.resolve(strict=False)))
+        resolved_plugin_root = str(Path(plugin_root).resolve(strict=False))
+        env.setdefault("REVERIE_PLUGIN_ROOT", resolved_plugin_root)
+        normalized_plugin_id = sanitize_plugin_identifier(plugin_id or "")
+        if normalized_plugin_id:
+            env_var = f"REVERIE_{normalized_plugin_id.upper()}_PLUGIN_ROOT"
+            env.setdefault(env_var, resolved_plugin_root)
         startupinfo = None
         creationflags = 0
         if sys.platform.startswith("win"):
@@ -1583,6 +1662,121 @@ class RuntimePluginManager:
             return payload if isinstance(payload, dict) else None
         except Exception:
             return None
+
+    def _discover_root_plugin_entries(self) -> tuple[RuntimePluginRecord, ...]:
+        """Detect standalone plugin launchers placed directly under `.reverie/plugins`."""
+        if not self.install_root.exists():
+            return tuple()
+
+        records: list[RuntimePluginRecord] = []
+        for candidate in sorted(self.install_root.iterdir(), key=lambda path: path.name.lower()):
+            if candidate.is_dir() or candidate.name.startswith(("_", ".")):
+                continue
+            if not self._is_launch_target(candidate):
+                continue
+            plugin_id = self._guess_root_plugin_id(candidate)
+            if not plugin_id:
+                continue
+
+            spec = self.catalog.get(plugin_id)
+            install_dir = (self.install_root / plugin_id).resolve()
+            records.append(
+                RuntimePluginRecord(
+                    plugin_id=plugin_id,
+                    display_name=spec.display_name if spec else plugin_id,
+                    runtime_family=spec.runtime_family if spec else "runtime",
+                    status="ready",
+                    install_dir=install_dir,
+                    source="root-entry",
+                    detail="Standalone plugin executable detected in the plugin depot root.",
+                    description=spec.description if spec else "Standalone runtime plugin entry.",
+                    entry_path=candidate.resolve(strict=False),
+                    delivery="plugin-exe",
+                    source_repo_hint=spec.source_repo_hint if spec else "",
+                    capabilities=spec.capabilities if spec else tuple(),
+                    catalog_managed=spec is not None,
+                    packaging_format="standalone-root-entry",
+                    entry_strategy="root-entry",
+                    compiled_entry_path=candidate.resolve(strict=False),
+                )
+            )
+        return tuple(records)
+
+    def _guess_root_plugin_id(self, entry_path: Path) -> str:
+        """Infer a plugin id from a standalone launcher filename."""
+        stem = sanitize_plugin_identifier(entry_path.stem or entry_path.name)
+        candidates: list[str] = []
+        if stem.startswith("reverie_"):
+            candidates.append(sanitize_plugin_identifier(stem[len("reverie_") :]))
+        if stem.startswith("plugin_"):
+            candidates.append(sanitize_plugin_identifier(stem[len("plugin_") :]))
+        candidates.append(stem)
+
+        for candidate in candidates:
+            if candidate in self.catalog:
+                return candidate
+        return candidates[0] if candidates else ""
+
+    def _should_install_standalone_entry(self, validation: dict[str, Any]) -> bool:
+        """Whether a source plugin should install as one standalone launcher file."""
+        if str(validation.get("delivery") or "").strip() not in {"python-exe", "plugin-exe"}:
+            return False
+        if not isinstance(validation.get("compiled_entry_path"), Path):
+            return False
+
+        packaging_format = str(validation.get("packaging_format") or "").strip().lower()
+        if "pyinstaller" in packaging_format or "onefile" in packaging_format:
+            return True
+
+        build_commands = [str(item).strip().lower() for item in (validation.get("build_commands") or []) if str(item).strip()]
+        return any("pyinstaller" in command and "--onefile" in command for command in build_commands)
+
+    def _cleanup_legacy_standalone_wrapper(self, target_dir: Path) -> list[str]:
+        """Remove obsolete wrapper/source artifacts from a plugin data directory."""
+        resolved_target_dir = Path(target_dir).resolve(strict=False)
+        if not resolved_target_dir.exists() or not resolved_target_dir.is_dir():
+            return []
+
+        removable_files = {
+            "plugin.json",
+            "plugin.py",
+            "build.bat",
+            "build.sh",
+            "build.ps1",
+            "setup.py",
+            "pyproject.toml",
+        }
+        removable_dirs = {
+            "__pycache__",
+            ".pytest_cache",
+            ".mypy_cache",
+            ".ruff_cache",
+            "build",
+            "dist",
+        }
+
+        removed: list[str] = []
+        for name in sorted(removable_files):
+            candidate = resolved_target_dir / name
+            if not candidate.exists() or not candidate.is_file():
+                continue
+            candidate.unlink()
+            removed.append(name)
+
+        for name in sorted(removable_dirs):
+            candidate = resolved_target_dir / name
+            if not candidate.exists() or not candidate.is_dir():
+                continue
+            self._safe_remove_tree(resolved_target_dir, candidate)
+            removed.append(f"{name}/")
+
+        for candidate in sorted(resolved_target_dir.glob("*.spec"), key=lambda path: path.name.lower()):
+            if not candidate.is_file():
+                continue
+            candidate.unlink()
+            removed.append(candidate.name)
+
+        return removed
 
     def _manifest_entry_candidates(self, raw_value: Any) -> tuple[str, ...]:
         if isinstance(raw_value, str):

@@ -531,6 +531,8 @@ class O3DESourceSDKPlugin(ReverieRuntimePluginHost):
         candidate = Path(root).resolve(strict=False)
         if candidate.name.lower() == "dist" and (candidate.parent / "plugin.json").exists():
             return candidate.parent.resolve(strict=False)
+        if candidate.name.lower() == "plugins" and candidate.parent.name.lower() == ".reverie":
+            return (candidate / "o3de").resolve(strict=False)
         return candidate
 
     def _utc_now(self) -> str:

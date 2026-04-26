@@ -4917,8 +4917,16 @@ class CommandHandler:
                     ("Install Requested", "yes" if "install" in flags else "no"),
                     (
                         "Install Target",
-                        ((result.get("install_result", {}) or {}).get("target_dir") if isinstance(result.get("install_result"), dict) else "")
+                        (
+                            ((result.get("install_result", {}) or {}).get("target_path") if isinstance(result.get("install_result"), dict) else "")
+                            or ((result.get("install_result", {}) or {}).get("target_dir") if isinstance(result.get("install_result"), dict) else "")
+                        )
                         or "(none)",
+                    ),
+                    (
+                        "Install Mode",
+                        ((result.get("install_result", {}) or {}).get("install_mode") if isinstance(result.get("install_result"), dict) else "")
+                        or "directory-sync",
                     ),
                 ]
             )
@@ -6796,11 +6804,12 @@ class CommandHandler:
     def _cmd_nvidia_status(self) -> bool:
         from ..nvidia import (
             NVIDIA_API_KEY_HINT_URL,
-            get_nvidia_reasoning_effort_label,
+            get_nvidia_thinking_choice_label,
             mask_secret,
             normalize_nvidia_config,
             resolve_nvidia_api_key,
             resolve_nvidia_selected_model,
+            resolve_nvidia_thinking_choice,
         )
 
         config_manager = self.app.get('config_manager')
@@ -6818,11 +6827,9 @@ class CommandHandler:
         model_source = str(getattr(config, "active_model_source", "standard") or "standard").strip().lower()
         selected_id = str((selected or {}).get("id", "") if selected else "").strip()
         thinking_control = str((selected or {}).get("thinking_control", "none") if selected else "none").strip().lower()
-        if thinking_control == "toggle":
-            thinking_label = "ON" if bool(nvidia_cfg.get("enable_thinking", True)) else "OFF"
-        elif thinking_control == "effort":
-            effort = nvidia_cfg.get("reasoning_effort", "max") if bool(nvidia_cfg.get("enable_thinking", True)) else "none"
-            thinking_label = get_nvidia_reasoning_effort_label(effort)
+        if thinking_control in {"toggle", "effort"}:
+            choice = resolve_nvidia_thinking_choice(nvidia_cfg, selected_id)
+            thinking_label = get_nvidia_thinking_choice_label(selected_id, choice)
         elif thinking_control == "fixed":
             thinking_label = "FIXED"
         else:
@@ -6930,10 +6937,13 @@ class CommandHandler:
 
     def _cmd_nvidia_thinking(self, effort_value: str) -> bool:
         from ..nvidia import (
-            get_nvidia_reasoning_effort_label,
+            apply_nvidia_thinking_choice,
+            get_nvidia_thinking_choice_label,
+            get_nvidia_thinking_options,
             normalize_nvidia_config,
-            normalize_nvidia_reasoning_effort,
+            normalize_nvidia_thinking_choice,
             resolve_nvidia_selected_model,
+            resolve_nvidia_thinking_choice,
         )
 
         config_manager = self.app.get('config_manager')
@@ -6947,39 +6957,28 @@ class CommandHandler:
         nvidia_cfg = normalize_nvidia_config(getattr(config, "nvidia", {}))
         selected = resolve_nvidia_selected_model(nvidia_cfg)
         selected_name = str((selected or {}).get("display_name", "NVIDIA model"))
+        selected_id = str((selected or {}).get("id", "") if selected else "").strip()
         thinking_control = str((selected or {}).get("thinking_control", "none") if selected else "none").strip().lower()
 
-        if thinking_control == "toggle":
-            if not str(effort_value or "").strip():
-                enabled = Confirm.ask(
-                    f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Enable thinking mode for {selected_name}?",
-                    default=bool(nvidia_cfg.get("enable_thinking", True)),
-                )
-            else:
-                enabled = str(effort_value or "").strip().lower() not in {"off", "false", "0", "none", "no"}
-            nvidia_cfg["enable_thinking"] = bool(enabled)
-            status_text = "ON" if enabled else "OFF"
-        elif thinking_control == "effort":
-            if not str(effort_value or "").strip():
-                current = normalize_nvidia_reasoning_effort(nvidia_cfg.get("reasoning_effort", "max"))
-                choices = ["max", "high", "off"]
-                selected_index = Prompt.ask(
-                    f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] NVIDIA thinking depth for {selected_name} (max/high/off)",
-                    choices=choices,
-                    default="off" if current == "none" else current,
-                )
-                effort = normalize_nvidia_reasoning_effort(selected_index)
-            else:
-                effort = normalize_nvidia_reasoning_effort(effort_value)
-            nvidia_cfg["reasoning_effort"] = effort
-            nvidia_cfg["enable_thinking"] = effort != "none"
-            status_text = get_nvidia_reasoning_effort_label(effort)
-        else:
+        if thinking_control not in {"toggle", "effort"} or not get_nvidia_thinking_options(selected_id):
             self.console.print(
                 f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} {selected_name} does not expose configurable NVIDIA thinking depth.[/{self.theme.AMBER_GLOW}]"
             )
             return True
 
+        if not str(effort_value or "").strip():
+            updated_cfg = self._select_nvidia_thinking_choice(nvidia_cfg, selected or {})
+            if updated_cfg is None:
+                return True
+            nvidia_cfg = updated_cfg
+        else:
+            choice = normalize_nvidia_thinking_choice(selected_id, effort_value)
+            nvidia_cfg = apply_nvidia_thinking_choice(nvidia_cfg, selected_id, choice)
+
+        status_text = get_nvidia_thinking_choice_label(
+            selected_id,
+            resolve_nvidia_thinking_choice(nvidia_cfg, selected_id),
+        )
         config.nvidia = normalize_nvidia_config(nvidia_cfg)
         config.active_model_source = "nvidia"
         config_manager.save(config)
@@ -6990,26 +6989,62 @@ class CommandHandler:
         )
         return True
 
-    def _configure_nvidia_thinking_for_model(self, nvidia_cfg: Dict[str, Any], selected_model: Dict[str, Any]) -> Dict[str, Any]:
-        """Ask for NVIDIA thinking mode only when the selected model supports on/off control."""
-        from ..nvidia import normalize_nvidia_config, normalize_nvidia_reasoning_effort
+    def _select_nvidia_thinking_choice(self, nvidia_cfg: Dict[str, Any], selected_model: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Open a fixed NVIDIA thinking selector for the selected model."""
+        from ..nvidia import (
+            apply_nvidia_thinking_choice,
+            get_nvidia_thinking_options,
+            normalize_nvidia_config,
+            resolve_nvidia_thinking_choice,
+        )
+        from .tui_selector import SelectorAction, SelectorItem, TUISelector
 
         cfg = normalize_nvidia_config(nvidia_cfg)
-        thinking_control = str(selected_model.get("thinking_control", "none") or "none").strip().lower()
-        if thinking_control == "effort":
-            cfg["reasoning_effort"] = normalize_nvidia_reasoning_effort(cfg.get("reasoning_effort", "max"))
-            cfg["enable_thinking"] = cfg["reasoning_effort"] != "none"
-            return normalize_nvidia_config(cfg)
-        if thinking_control != "toggle":
+        selected_id = str(selected_model.get("id", "") or "").strip()
+        options = get_nvidia_thinking_options(selected_id)
+        if not selected_id or not options:
             return cfg
 
-        current = bool(cfg.get("enable_thinking", True))
-        enabled = Confirm.ask(
-            f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Enable thinking mode for {selected_model.get('display_name', selected_model.get('id', 'this model'))}?",
-            default=current,
+        current_choice = resolve_nvidia_thinking_choice(cfg, selected_id)
+        items = [
+            SelectorItem(
+                id=str(option["id"]),
+                title=str(option["label"]),
+                description=str(option.get("description", "")),
+                metadata={"model": {"id": str(option["id"])}},
+            )
+            for option in options
+        ]
+
+        selector = TUISelector(
+            console=self.console,
+            title=f"NVIDIA Thinking: {selected_model.get('display_name', selected_model.get('id', 'Model'))}",
+            items=items,
+            allow_search=False,
+            allow_cancel=True,
+            show_descriptions=True,
         )
-        cfg["enable_thinking"] = bool(enabled)
-        return normalize_nvidia_config(cfg)
+        for index, item in enumerate(items):
+            if item.id == current_choice:
+                selector.selected_index = index
+                selector.scroll_offset = max(0, index - selector.max_visible + 1)
+                break
+
+        result = selector.run()
+        if result.action != SelectorAction.SELECT or not result.selected_item:
+            return None
+
+        return apply_nvidia_thinking_choice(cfg, selected_id, result.selected_item.id)
+
+    def _configure_nvidia_thinking_for_model(self, nvidia_cfg: Dict[str, Any], selected_model: Dict[str, Any]) -> Dict[str, Any]:
+        """Ask for NVIDIA thinking mode when the selected model exposes fixed options."""
+        from ..nvidia import get_nvidia_thinking_options, normalize_nvidia_config
+
+        cfg = normalize_nvidia_config(nvidia_cfg)
+        if not get_nvidia_thinking_options(selected_model.get("id", "")):
+            return cfg
+        selected_cfg = self._select_nvidia_thinking_choice(cfg, selected_model)
+        return normalize_nvidia_config(selected_cfg or cfg)
 
     def _cmd_nvidia_model(self, model_query: str) -> bool:
         from ..nvidia import get_nvidia_model_catalog, normalize_nvidia_config

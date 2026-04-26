@@ -61,8 +61,8 @@ class ToolCatalogTool(BaseTool):
     """Search and inspect the tools currently visible to the active agent."""
 
     name = "tool_catalog"
-    aliases = ("tool_search", "tools_help")
-    search_hint = "find inspect and recommend the right tool"
+    aliases = ("tool_search", "tools_help", "list_tools", "tool_list", "tools_catalog")
+    search_hint = "list tools inspect schemas and recommend the right tool"
     tool_category = "orchestration"
     tool_tags = ("tool", "discover", "inspect", "schema", "recommend")
     read_only = True
@@ -107,8 +107,18 @@ next in the active mode.
                 "default": True,
             },
         },
-        "required": ["operation"],
+        "required": [],
     }
+
+    def _resolve_operation(self, operation: Any, query: Any, tool_name: Any) -> str:
+        normalized = str(operation or "").strip().lower()
+        if normalized:
+            return normalized
+        if str(tool_name or "").strip():
+            return "inspect"
+        if str(query or "").strip():
+            return "recommend"
+        return "list"
 
     def _tool_executor(self):
         agent = self.context.get("agent")
@@ -672,7 +682,11 @@ next in the active mode.
         )
 
     def execute(self, **kwargs) -> ToolResult:
-        operation = str(kwargs.get("operation", "") or "").strip().lower()
+        operation = self._resolve_operation(
+            kwargs.get("operation", ""),
+            kwargs.get("query", ""),
+            kwargs.get("tool_name", ""),
+        )
         mode = self._resolve_mode(kwargs.get("mode"))
         max_results = kwargs.get("max_results", 8)
         include_schema = bool(kwargs.get("include_schema", True))

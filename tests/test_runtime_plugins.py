@@ -383,6 +383,123 @@ def test_runtime_plugin_manager_prefers_packaged_entry_when_available(tmp_path: 
     assert result["data"]["echo"] == "packaged-call"
 
 
+def test_runtime_plugin_manager_detects_standalone_root_entry_and_sets_plugin_root(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    install_root = app_root / ".reverie" / "plugins"
+    install_root.mkdir(parents=True, exist_ok=True)
+    script_path = install_root / "reverie-standalone-sample.py"
+    script_path.write_text(
+        dedent(
+            """
+            import json
+            import os
+            import sys
+
+
+            def handshake():
+                return {
+                    "protocol_version": "1.0",
+                    "plugin_id": "standalone-sample",
+                    "display_name": "Standalone Sample",
+                    "version": "0.1.0",
+                    "runtime_family": "runtime",
+                    "commands": [
+                        {
+                            "name": "status",
+                            "description": "Return current plugin root.",
+                            "parameters": {"type": "object", "properties": {}, "required": []},
+                            "expose_as_tool": True,
+                            "include_modes": ["reverie"],
+                        }
+                    ],
+                }
+
+
+            if len(sys.argv) >= 2 and sys.argv[1] == "-RC":
+                print(json.dumps(handshake()))
+                raise SystemExit(0)
+
+            if len(sys.argv) >= 2 and sys.argv[1] == "-RC-CALL":
+                print(
+                    json.dumps(
+                        {
+                            "success": True,
+                            "output": "ok",
+                            "error": "",
+                            "data": {
+                                "plugin_root": os.environ.get("REVERIE_PLUGIN_ROOT", ""),
+                            },
+                        }
+                    )
+                )
+                raise SystemExit(0)
+
+            raise SystemExit(1)
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    manager = RuntimePluginManager(app_root)
+    record = manager.get_record("standalone_sample", force_refresh=True)
+
+    assert record is not None
+    assert record.source == "root-entry"
+    assert record.entry_path == script_path.resolve(strict=False)
+    assert record.install_dir == (install_root / "standalone_sample").resolve()
+    assert record.protocol_supported is True
+
+    result = manager.call_tool("standalone_sample", "status", {})
+    assert result["success"] is True
+    assert result["data"]["plugin_root"] == str((install_root / "standalone_sample").resolve())
+
+
+def test_runtime_plugin_manager_prefers_root_entry_over_same_name_legacy_wrapper_dir(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    install_root = app_root / ".reverie" / "plugins"
+    install_root.mkdir(parents=True, exist_ok=True)
+
+    script_path = install_root / "reverie-standalone-sample.py"
+    script_path.write_text(
+        dedent(
+            """
+            import json
+            import sys
+
+
+            if len(sys.argv) >= 2 and sys.argv[1] == "-RC":
+                print(json.dumps({
+                    "protocol_version": "1.0",
+                    "plugin_id": "standalone-sample",
+                    "display_name": "Standalone Root Entry",
+                    "version": "0.1.0",
+                    "runtime_family": "runtime",
+                    "commands": []
+                }))
+                raise SystemExit(0)
+
+            raise SystemExit(1)
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    legacy_dir = install_root / "standalone_sample"
+    legacy_dir.mkdir(parents=True, exist_ok=True)
+    _write_manifest(legacy_dir, plugin_id="standalone_sample", compiled_relative_path=_compiled_entry_name("standalone_sample"))
+    _write_runtime_script(legacy_dir / "plugin.py", marker="legacy-wrapper")
+
+    manager = RuntimePluginManager(app_root)
+    record = manager.get_record("standalone_sample", force_refresh=True)
+
+    assert record is not None
+    assert record.source == "root-entry"
+    assert record.entry_path == script_path.resolve(strict=False)
+    assert record.display_name == "Standalone Root Entry"
+
+
 def test_runtime_plugin_templates_are_optional_in_repo_source_tree() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     manager = RuntimePluginManager(repo_root)
@@ -443,6 +560,41 @@ def test_runtime_plugin_manager_can_scaffold_build_and_install_source_plugin(tmp
     assert result["success"] is True
     assert result["data"]["plugin_id"] == "terrain_runtime"
     assert result["data"]["message"] == "asset-pass"
+
+
+def test_install_source_plugin_standalone_cleans_legacy_wrapper_but_keeps_runtime_data(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    source_dir = app_root / "plugins" / "terrain_runtime"
+    source_dir.mkdir(parents=True, exist_ok=True)
+    _write_manifest(source_dir, plugin_id="terrain-runtime", compiled_relative_path=_compiled_entry_name("terrain-runtime"))
+    _write_runtime_script(source_dir / "plugin.py", marker="source-fallback")
+    packaged_script = source_dir / "packaged_plugin.py"
+    _write_runtime_script(packaged_script, marker="packaged")
+    _write_platform_wrapper(source_dir / _compiled_entry_name("terrain-runtime"), packaged_script.resolve(strict=False))
+
+    install_dir = app_root / ".reverie" / "plugins" / "terrain_runtime"
+    (install_dir / "runtime").mkdir(parents=True, exist_ok=True)
+    (install_dir / "runtime" / "keep.txt").write_text("keep me\n", encoding="utf-8")
+    (install_dir / "plugin.json").write_text("{}", encoding="utf-8")
+    (install_dir / "plugin.py").write_text("print('legacy wrapper')\n", encoding="utf-8")
+    (install_dir / "build").mkdir(parents=True, exist_ok=True)
+    (install_dir / "dist").mkdir(parents=True, exist_ok=True)
+    (install_dir / "terrain-runtime.spec").write_text("# legacy\n", encoding="utf-8")
+
+    manager = RuntimePluginManager(app_root)
+    result = manager.install_source_plugin("terrain-runtime", overwrite=True)
+
+    target_path = app_root / ".reverie" / "plugins" / Path(_compiled_entry_name("terrain-runtime")).name
+    assert result["success"] is True
+    assert result["install_mode"] == "standalone-entry"
+    assert target_path.exists()
+    assert (install_dir / "runtime" / "keep.txt").read_text(encoding="utf-8") == "keep me\n"
+    assert not (install_dir / "plugin.json").exists()
+    assert not (install_dir / "plugin.py").exists()
+    assert not (install_dir / "build").exists()
+    assert not (install_dir / "dist").exists()
+    assert not (install_dir / "terrain-runtime.spec").exists()
+    assert "plugin.json" in result["legacy_cleanup"]
 
 
 def test_plugins_commands_render_delivery_and_template_surfaces(tmp_path: Path) -> None:
@@ -739,3 +891,4 @@ def test_plugins_commands_can_scaffold_validate_and_build(tmp_path: Path) -> Non
     assert "Build terrain-runtime" in build_text
     assert "Plugin build completed." in build_text
     assert "Install Target" in build_text
+    assert "Install Mode" in build_text

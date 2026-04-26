@@ -112,6 +112,10 @@ class MarkdownFormatter:
     def format_streaming_chunk(self, chunk: str) -> RenderableType:
         return self.format_text(chunk)
 
+    def format_inline_text(self, text: str, base_style: Optional[str] = None) -> Text:
+        """Render inline markdown emphasis without block parsing."""
+        return self._format_inline(str(text or ""), base_style=base_style)
+
     def _safe_symbol(self, preferred: str, fallback: str) -> str:
         """Prefer Unicode glyphs, but degrade cleanly on legacy console encodings."""
         encoding = str(getattr(getattr(self.console, "file", None), "encoding", "") or "utf-8")

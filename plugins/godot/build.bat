@@ -17,4 +17,4 @@ if exist "%~dp0..\..\venv\Scripts\python.exe" (
   --specpath build ^
   plugin.py
 
-endlocal
+endlocal & exit /b %ERRORLEVEL%

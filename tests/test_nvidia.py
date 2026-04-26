@@ -1,10 +1,21 @@
+from pathlib import Path
+
+from rich.console import Console
+
+from reverie.cli.commands import CommandHandler
+from reverie.cli.tui_selector import SelectorAction, SelectorResult
+from reverie.config import ConfigManager
 from reverie.nvidia import (
+    apply_nvidia_thinking_choice,
     build_nvidia_openai_options,
     build_nvidia_runtime_model_data,
+    default_nvidia_config,
     get_nvidia_reasoning_effort_label,
     get_nvidia_model_catalog,
     get_nvidia_model_metadata,
+    get_nvidia_thinking_options,
     normalize_nvidia_reasoning_effort,
+    resolve_nvidia_thinking_choice,
 )
 
 
@@ -15,6 +26,10 @@ def test_nvidia_catalog_contains_minimax_m27():
     assert metadata["id"] == "minimaxai/minimax-m2.7"
     assert metadata["display_name"] == "MiniMax M2.7"
     assert metadata["transport"] == "openai-sdk"
+
+
+def test_nvidia_default_timeout_matches_global_api_timeout_default():
+    assert default_nvidia_config()["timeout"] == 60
 
 
 def test_nvidia_openai_options_for_minimax_m27_match_expected_defaults():
@@ -198,17 +213,20 @@ def test_nvidia_catalog_contains_deepseek_v4_models_with_effort_control():
         assert metadata["context_length"] == 1000000
         assert metadata["thinking"] is True
         assert metadata["thinking_control"] == "effort"
+        assert [item["id"] for item in metadata["thinking_options"]] == ["high", "max", "none"]
 
 
-def test_nvidia_reasoning_effort_defaults_to_max_and_normalizes_aliases():
-    assert normalize_nvidia_reasoning_effort("") == "max"
+def test_nvidia_reasoning_effort_defaults_to_high_and_normalizes_aliases():
+    assert normalize_nvidia_reasoning_effort("") == "high"
     assert normalize_nvidia_reasoning_effort("extra high") == "max"
     assert normalize_nvidia_reasoning_effort("High") == "high"
+    assert normalize_nvidia_reasoning_effort("med") == "medium"
+    assert normalize_nvidia_reasoning_effort("light") == "low"
     assert normalize_nvidia_reasoning_effort("off") == "none"
     assert get_nvidia_reasoning_effort_label("none") == "Non-think"
 
 
-def test_nvidia_openai_options_for_deepseek_v4_default_to_max_reasoning():
+def test_nvidia_openai_options_for_deepseek_v4_default_to_high_reasoning():
     options = build_nvidia_openai_options(
         {"selected_model_id": "deepseek-ai/deepseek-v4-pro"},
         "deepseek-ai/deepseek-v4-pro",
@@ -219,10 +237,7 @@ def test_nvidia_openai_options_for_deepseek_v4_default_to_max_reasoning():
         "top_p": 0.95,
         "max_tokens": 16384,
         "extra_body": {
-            "chat_template_kwargs": {
-                "thinking": True,
-                "reasoning_effort": "max",
-            }
+            "reasoning_effort": "high",
         },
     }
 
@@ -237,8 +252,8 @@ def test_nvidia_openai_options_for_deepseek_v4_can_select_high_or_non_think():
         "deepseek-ai/deepseek-v4-flash",
     )
 
-    assert high["extra_body"]["chat_template_kwargs"] == {"thinking": True, "reasoning_effort": "high"}
-    assert off["extra_body"]["chat_template_kwargs"] == {"thinking": False}
+    assert high["extra_body"] == {"reasoning_effort": "high"}
+    assert off["extra_body"] == {"reasoning_effort": "none"}
 
 
 def test_nvidia_runtime_model_data_uses_deepseek_v4_context_and_effort_mode():
@@ -256,3 +271,75 @@ def test_nvidia_runtime_model_data_uses_deepseek_v4_context_and_effort_mode():
     assert runtime["provider"] == "openai-sdk"
     assert runtime["max_context_tokens"] == 1000000
     assert runtime["thinking_mode"] == "high"
+
+
+def test_nvidia_catalog_contains_model_specific_thinking_options():
+    assert [item["id"] for item in get_nvidia_thinking_options("mistralai/mistral-small-4-119b-2603")] == ["high", "none"]
+    assert [item["id"] for item in get_nvidia_thinking_options("nvidia/nemotron-3-super-120b-a12b")] == ["high", "low", "none"]
+    assert [item["id"] for item in get_nvidia_thinking_options("openai/gpt-oss-120b")] == ["low", "medium", "high"]
+    assert resolve_nvidia_thinking_choice({"selected_model_id": "openai/gpt-oss-120b"}, "openai/gpt-oss-120b") == "medium"
+
+
+def test_nvidia_apply_thinking_choice_updates_toggle_and_effort_config():
+    qwen_cfg = apply_nvidia_thinking_choice(
+        {"selected_model_id": "qwen/qwen3.5-397b-a17b", "enable_thinking": True},
+        "qwen/qwen3.5-397b-a17b",
+        "off",
+    )
+    assert qwen_cfg["enable_thinking"] is False
+    assert resolve_nvidia_thinking_choice(qwen_cfg, "qwen/qwen3.5-397b-a17b") == "false"
+
+    gpt_cfg = apply_nvidia_thinking_choice(
+        {"selected_model_id": "openai/gpt-oss-120b"},
+        "openai/gpt-oss-120b",
+        "high",
+    )
+    assert gpt_cfg["reasoning_effort"] == "high"
+    assert gpt_cfg["enable_thinking"] is True
+
+
+def test_nvidia_openai_options_for_nemotron_and_gpt_oss_use_model_specific_effort():
+    nemotron = build_nvidia_openai_options(
+        {"selected_model_id": "nvidia/nemotron-3-super-120b-a12b", "reasoning_effort": "low"},
+        "nvidia/nemotron-3-super-120b-a12b",
+    )
+    gpt_oss = build_nvidia_openai_options(
+        {"selected_model_id": "openai/gpt-oss-120b"},
+        "openai/gpt-oss-120b",
+    )
+
+    assert nemotron["extra_body"] == {"reasoning_effort": "low"}
+    assert gpt_oss["extra_body"] == {"reasoning_effort": "medium"}
+
+
+def test_nvidia_model_selection_opens_fixed_thinking_selector(tmp_path: Path, monkeypatch) -> None:
+    app_root = tmp_path / "app"
+    project_root = tmp_path / "project"
+    project_root.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr("reverie.config.get_app_root", lambda: app_root)
+    monkeypatch.setattr("reverie.config.get_launcher_root", lambda: app_root)
+
+    seen: dict[str, object] = {}
+
+    def fake_selector_run(self):
+        seen["title"] = self.title
+        seen["ids"] = [item.id for item in self.items]
+        return SelectorResult(SelectorAction.SELECT, self.items[2])
+
+    monkeypatch.setattr("reverie.cli.tui_selector.TUISelector.run", fake_selector_run)
+
+    config_manager = ConfigManager(project_root)
+    handler = CommandHandler(
+        Console(record=True, force_terminal=False, width=120),
+        {"config_manager": config_manager, "project_root": project_root},
+    )
+
+    assert handler._cmd_nvidia_model("openai/gpt-oss-120b") is True
+
+    reloaded = config_manager.load()
+    assert reloaded.active_model_source == "nvidia"
+    assert reloaded.nvidia["selected_model_id"] == "openai/gpt-oss-120b"
+    assert reloaded.nvidia["reasoning_effort"] == "high"
+    assert seen["ids"] == ["low", "medium", "high"]
+    assert "NVIDIA Thinking" in str(seen["title"])

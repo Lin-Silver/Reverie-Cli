@@ -29,4 +29,4 @@ if not defined ARCHIVE_SOURCE (
   --add-data "%ARCHIVE_SOURCE%;." ^
   plugin.py
 
-endlocal
+endlocal & exit /b %ERRORLEVEL%

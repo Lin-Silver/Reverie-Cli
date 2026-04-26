@@ -73,3 +73,18 @@ def test_blender_plugin_rejects_invalid_mmd_import_before_blender(tmp_path: Path
 
     assert result["success"] is False
     assert ".pmx or .pmd" in result["error"]
+
+
+def test_blender_plugin_standalone_launcher_uses_plugin_subdirectory(tmp_path: Path, monkeypatch) -> None:
+    module = _load_blender_plugin()
+    install_root = tmp_path / "app" / ".reverie" / "plugins"
+    install_root.mkdir(parents=True)
+    launcher_path = install_root / "reverie-blender.exe"
+    launcher_path.write_text("", encoding="utf-8")
+    monkeypatch.delenv("REVERIE_BLENDER_PLUGIN_ROOT", raising=False)
+    monkeypatch.setattr(module.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(module.sys, "executable", str(launcher_path), raising=False)
+
+    plugin = module.BlenderRuntimePlugin()
+
+    assert plugin.plugin_root == (install_root / "blender").resolve(strict=False)

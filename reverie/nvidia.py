@@ -27,17 +27,26 @@ NVIDIA_STEP_FLASH_CONTEXT_TOKENS = 256_000
 NVIDIA_GPT_OSS_120B_CONTEXT_TOKENS = 128_000
 NVIDIA_KIMI_K2_THINKING_CONTEXT_TOKENS = 256_000
 NVIDIA_DEEPSEEK_V4_CONTEXT_TOKENS = 1_000_000
-NVIDIA_DEFAULT_REASONING_EFFORT = "max"
-NVIDIA_REASONING_EFFORTS = ("max", "high", "none")
+NVIDIA_DEFAULT_REASONING_EFFORT = "high"
+NVIDIA_DEFAULT_REASONING_BUDGET = 16_384
+NVIDIA_REASONING_EFFORTS = ("max", "high", "medium", "low", "none")
+
+
+def _coerce_bool(value: Any, default: bool = True) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y", "on", "enable", "enabled", "thinking"}:
+        return True
+    if text in {"0", "false", "no", "n", "off", "disable", "disabled", "none", "non-think"}:
+        return False
+    return default
 
 
 def normalize_nvidia_reasoning_effort(value: Any, default: str = NVIDIA_DEFAULT_REASONING_EFFORT) -> str:
-    """Normalize NVIDIA hosted-model thinking depth.
-
-    NVIDIA DeepSeek V4 exposes a provider-specific chat-template knob with
-    non-thinking, High, and Max modes. Reverie stores the compact lowercase
-    value and renders the provider payload only for models that support it.
-    """
+    """Normalize a compact NVIDIA hosted-model thinking depth value."""
     text = str(value or "").strip().lower().replace("_", " ").replace("-", " ")
     aliases = {
         "": default,
@@ -49,6 +58,12 @@ def normalize_nvidia_reasoning_effort(value: Any, default: str = NVIDIA_DEFAULT_
         "xhigh": "max",
         "high": "high",
         "think high": "high",
+        "medium": "medium",
+        "med": "medium",
+        "normal": "medium",
+        "low": "low",
+        "light": "low",
+        "low effort": "low",
         "none": "none",
         "off": "none",
         "false": "none",
@@ -67,7 +82,68 @@ def normalize_nvidia_reasoning_effort(value: Any, default: str = NVIDIA_DEFAULT_
 
 def get_nvidia_reasoning_effort_label(value: Any) -> str:
     effort = normalize_nvidia_reasoning_effort(value)
-    return {"max": "Max", "high": "High", "none": "Non-think"}.get(effort, "Max")
+    return {
+        "max": "Max",
+        "high": "High",
+        "medium": "Medium",
+        "low": "Low",
+        "none": "Non-think",
+    }.get(effort, "High")
+
+
+def _thinking_option(option_id: str, label: str, description: str) -> Dict[str, str]:
+    return {
+        "id": str(option_id).strip().lower(),
+        "label": str(label).strip(),
+        "description": str(description).strip(),
+    }
+
+
+NVIDIA_THINKING_TOGGLE_OPTIONS = (
+    _thinking_option("true", "Thinking ON", "Enable provider-side thinking for this model."),
+    _thinking_option("false", "Thinking OFF", "Disable provider-side thinking for faster direct replies."),
+)
+NVIDIA_REASONING_NONE_HIGH_OPTIONS = (
+    _thinking_option("high", "High", "Full reasoning mode for complex work."),
+    _thinking_option("none", "Non-think", "Disable reasoning for faster lightweight replies."),
+)
+NVIDIA_REASONING_NONE_LOW_HIGH_OPTIONS = (
+    _thinking_option("high", "High", "Full reasoning mode."),
+    _thinking_option("low", "Low", "Low-effort reasoning with fewer reasoning tokens."),
+    _thinking_option("none", "Non-think", "Disable reasoning tokens."),
+)
+NVIDIA_REASONING_NONE_HIGH_MAX_OPTIONS = (
+    _thinking_option("high", "High", "High reasoning mode."),
+    _thinking_option("max", "Max", "Maximum reasoning effort."),
+    _thinking_option("none", "Non-think", "Disable thinking."),
+)
+NVIDIA_REASONING_LOW_MEDIUM_HIGH_OPTIONS = (
+    _thinking_option("low", "Low", "Basic reasoning with lower latency."),
+    _thinking_option("medium", "Medium", "Balanced reasoning depth."),
+    _thinking_option("high", "High", "Detailed step-by-step reasoning."),
+)
+
+
+def _normalize_thinking_options(options: Any) -> List[Dict[str, str]]:
+    normalized: List[Dict[str, str]] = []
+    if not isinstance(options, (list, tuple)):
+        return normalized
+    seen: set[str] = set()
+    for item in options:
+        if not isinstance(item, dict):
+            continue
+        option_id = str(item.get("id", "") or "").strip().lower()
+        if not option_id or option_id in seen:
+            continue
+        seen.add(option_id)
+        normalized.append(
+            _thinking_option(
+                option_id,
+                str(item.get("label") or get_nvidia_reasoning_effort_label(option_id)),
+                str(item.get("description") or ""),
+            )
+        )
+    return normalized
 
 
 def _request_model(
@@ -81,10 +157,12 @@ def _request_model(
     tool_calling: bool = True,
     system_message_first: bool = True,
     thinking_control: str = "none",
+    thinking_options: Optional[List[Dict[str, str]]] = None,
+    default_thinking_choice: str = "",
 ) -> Dict[str, Any]:
     # NVIDIA request-transport models in this catalog are treated as agentic
     # by default so tool loops stay enabled unless an entry opts out.
-    return {
+    metadata = {
         "id": model_id,
         "display_name": display_name,
         "description": description,
@@ -96,6 +174,13 @@ def _request_model(
         "system_message_first": bool(system_message_first),
         "thinking_control": str(thinking_control or ("toggle" if thinking else "none")).strip().lower(),
     }
+    options = _normalize_thinking_options(thinking_options)
+    if options:
+        metadata["thinking_options"] = options
+        option_ids = {item["id"] for item in options}
+        normalized_default = str(default_thinking_choice or "").strip().lower()
+        metadata["default_thinking_choice"] = normalized_default if normalized_default in option_ids else options[0]["id"]
+    return metadata
 
 
 def _openai_model(
@@ -109,8 +194,10 @@ def _openai_model(
     tool_calling: bool = True,
     system_message_first: bool = True,
     thinking_control: str = "none",
+    thinking_options: Optional[List[Dict[str, str]]] = None,
+    default_thinking_choice: str = "",
 ) -> Dict[str, Any]:
-    return {
+    metadata = {
         "id": model_id,
         "display_name": display_name,
         "description": description,
@@ -122,16 +209,25 @@ def _openai_model(
         "system_message_first": bool(system_message_first),
         "thinking_control": str(thinking_control or ("toggle" if thinking else "none")).strip().lower(),
     }
+    options = _normalize_thinking_options(thinking_options)
+    if options:
+        metadata["thinking_options"] = options
+        option_ids = {item["id"] for item in options}
+        normalized_default = str(default_thinking_choice or "").strip().lower()
+        metadata["default_thinking_choice"] = normalized_default if normalized_default in option_ids else options[0]["id"]
+    return metadata
 
 
 _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
     _request_model(
         "mistralai/mistral-small-4-119b-2603",
         "Mistral Small 4 119B",
-        "Request transport, reasoning_effort=high.",
+        "Request transport with selectable reasoning_effort none/high.",
         vision=True,
         thinking=True,
-        thinking_control="toggle",
+        thinking_control="effort",
+        thinking_options=list(NVIDIA_REASONING_NONE_HIGH_OPTIONS),
+        default_thinking_choice="high",
         context_length=NVIDIA_DEFAULT_CONTEXT_TOKENS,
     ),
     _request_model(
@@ -141,13 +237,18 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         vision=True,
         thinking=True,
         thinking_control="toggle",
+        thinking_options=list(NVIDIA_THINKING_TOGGLE_OPTIONS),
+        default_thinking_choice="true",
         context_length=NVIDIA_DEFAULT_CONTEXT_TOKENS,
     ),
     _openai_model(
         "nvidia/nemotron-3-super-120b-a12b",
         "Nemotron 3 Super 120B",
-        "OpenAI SDK transport with reasoning_budget. Supports up to 1M context.",
+        "OpenAI SDK transport with selectable none/low/high reasoning and optional reasoning_budget.",
         thinking=True,
+        thinking_control="effort",
+        thinking_options=list(NVIDIA_REASONING_NONE_LOW_HIGH_OPTIONS),
+        default_thinking_choice="high",
         context_length=NVIDIA_NEMOTRON_3_SUPER_CONTEXT_TOKENS,
     ),
     _openai_model(
@@ -168,6 +269,9 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         "Request transport with enable_thinking, top_k, and repetition controls.",
         vision=True,
         thinking=True,
+        thinking_control="toggle",
+        thinking_options=list(NVIDIA_THINKING_TOGGLE_OPTIONS),
+        default_thinking_choice="true",
         context_length=NVIDIA_DEFAULT_CONTEXT_TOKENS,
     ),
     _openai_model(
@@ -176,6 +280,8 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         "OpenAI SDK transport with clear_thinking=False.",
         thinking=True,
         thinking_control="toggle",
+        thinking_options=list(NVIDIA_THINKING_TOGGLE_OPTIONS),
+        default_thinking_choice="true",
         context_length=NVIDIA_GLM_CONTEXT_TOKENS,
     ),
     _openai_model(
@@ -183,6 +289,7 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         "Step-3.5-Flash",
         "OpenAI SDK transport.",
         thinking=True,
+        thinking_control="fixed",
         context_length=NVIDIA_STEP_FLASH_CONTEXT_TOKENS,
     ),
     _openai_model(
@@ -191,6 +298,8 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         "OpenAI SDK transport with 1M context and selectable Non-think/High/Max chat-template reasoning.",
         thinking=True,
         thinking_control="effort",
+        thinking_options=list(NVIDIA_REASONING_NONE_HIGH_MAX_OPTIONS),
+        default_thinking_choice="high",
         context_length=NVIDIA_DEEPSEEK_V4_CONTEXT_TOKENS,
     ),
     _openai_model(
@@ -199,6 +308,8 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         "OpenAI SDK transport with 1M context and selectable Non-think/High/Max chat-template reasoning.",
         thinking=True,
         thinking_control="effort",
+        thinking_options=list(NVIDIA_REASONING_NONE_HIGH_MAX_OPTIONS),
+        default_thinking_choice="high",
         context_length=NVIDIA_DEEPSEEK_V4_CONTEXT_TOKENS,
     ),
     _request_model(
@@ -219,8 +330,11 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
     _openai_model(
         "openai/gpt-oss-120b",
         "GPT-OSS-120B",
-        "OpenAI SDK transport.",
+        "OpenAI SDK transport with selectable low/medium/high reasoning_effort.",
         thinking=True,
+        thinking_control="effort",
+        thinking_options=list(NVIDIA_REASONING_LOW_MEDIUM_HIGH_OPTIONS),
+        default_thinking_choice="medium",
         context_length=NVIDIA_GPT_OSS_120B_CONTEXT_TOKENS,
     ),
 ]
@@ -241,7 +355,7 @@ def default_nvidia_config() -> Dict[str, Any]:
         "api_url": NVIDIA_DEFAULT_API_URL,
         "endpoint": NVIDIA_DEFAULT_REQUEST_ENDPOINT,
         "max_context_tokens": NVIDIA_DEFAULT_CONTEXT_TOKENS,
-        "timeout": 300,
+        "timeout": 60,
         "max_tokens": 16384,
         "temperature": 0.60,
         "top_p": 0.95,
@@ -250,6 +364,7 @@ def default_nvidia_config() -> Dict[str, Any]:
         "repetition_penalty": 1.0,
         "enable_thinking": True,
         "reasoning_effort": NVIDIA_DEFAULT_REASONING_EFFORT,
+        "reasoning_budget": NVIDIA_DEFAULT_REASONING_BUDGET,
     }
 
 
@@ -265,6 +380,88 @@ def get_nvidia_model_metadata(model_id: Any) -> Optional[Dict[str, Any]]:
         return None
     found = _NVIDIA_MODEL_METADATA.get(wanted)
     return dict(found) if found else None
+
+
+def get_nvidia_thinking_options(model_id: Any) -> List[Dict[str, str]]:
+    """Return fixed user-selectable thinking options for one NVIDIA model."""
+    metadata = get_nvidia_model_metadata(model_id)
+    if not metadata:
+        return []
+    return [dict(item) for item in _normalize_thinking_options(metadata.get("thinking_options", []))]
+
+
+def get_nvidia_default_thinking_choice(model_id: Any) -> str:
+    """Return the default thinking option id for one NVIDIA model."""
+    options = get_nvidia_thinking_options(model_id)
+    if not options:
+        return ""
+    option_ids = {item["id"] for item in options}
+    metadata = get_nvidia_model_metadata(model_id) or {}
+    configured = str(metadata.get("default_thinking_choice", "") or "").strip().lower()
+    return configured if configured in option_ids else options[0]["id"]
+
+
+def normalize_nvidia_thinking_choice(model_id: Any, value: Any, default: Optional[str] = None) -> str:
+    """Normalize a model-specific NVIDIA thinking option id."""
+    options = get_nvidia_thinking_options(model_id)
+    if not options:
+        return str(default or "").strip().lower()
+
+    option_ids = {item["id"] for item in options}
+    fallback = str(default or "").strip().lower()
+    if fallback not in option_ids:
+        fallback = get_nvidia_default_thinking_choice(model_id)
+
+    text = str(value or "").strip().lower().replace("_", " ").replace("-", " ")
+    control = str((get_nvidia_model_metadata(model_id) or {}).get("thinking_control", "") or "").strip().lower()
+    aliases = {
+        "": fallback,
+        "default": fallback,
+        "auto": fallback,
+        "on": "true" if "true" in option_ids else fallback,
+        "enable": "true" if "true" in option_ids else fallback,
+        "enabled": "true" if "true" in option_ids else fallback,
+        "true": "true" if "true" in option_ids else fallback,
+        "yes": "true" if "true" in option_ids else fallback,
+        "1": "true" if "true" in option_ids else fallback,
+        "off": "false" if "false" in option_ids else ("none" if "none" in option_ids else fallback),
+        "disable": "false" if "false" in option_ids else ("none" if "none" in option_ids else fallback),
+        "disabled": "false" if "false" in option_ids else ("none" if "none" in option_ids else fallback),
+        "false": "false" if "false" in option_ids else ("none" if "none" in option_ids else fallback),
+        "no": "false" if "false" in option_ids else ("none" if "none" in option_ids else fallback),
+        "0": "false" if "false" in option_ids else ("none" if "none" in option_ids else fallback),
+        "non think": "none" if "none" in option_ids else fallback,
+        "nonthinking": "none" if "none" in option_ids else fallback,
+        "non thinking": "none" if "none" in option_ids else fallback,
+        "no thinking": "none" if "none" in option_ids else fallback,
+        "none": "none" if "none" in option_ids else fallback,
+        "max": "max",
+        "maximum": "max",
+        "extra high": "max",
+        "xhigh": "max",
+        "high": "high",
+        "medium": "medium",
+        "med": "medium",
+        "normal": "medium",
+        "low": "low",
+        "light": "low",
+        "low effort": "low",
+    }
+    normalized = aliases.get(text, text)
+    if normalized not in option_ids and control == "toggle":
+        normalized = "true" if _coerce_bool(value, fallback != "false") else "false"
+    if normalized not in option_ids:
+        normalized = fallback
+    return normalized
+
+
+def get_nvidia_thinking_choice_label(model_id: Any, value: Any) -> str:
+    """Return a human-readable label for one model-specific thinking option."""
+    choice = normalize_nvidia_thinking_choice(model_id, value)
+    for item in get_nvidia_thinking_options(model_id):
+        if item["id"] == choice:
+            return item["label"]
+    return get_nvidia_reasoning_effort_label(choice)
 
 
 def is_nvidia_model(model_id: Any) -> bool:
@@ -309,7 +506,9 @@ def is_nvidia_api_url(api_url: Any) -> bool:
 def normalize_nvidia_config(raw_nvidia: Any) -> Dict[str, Any]:
     """Normalize NVIDIA config for persistence and runtime usage."""
     cfg = default_nvidia_config()
+    raw_has_reasoning_effort = False
     if isinstance(raw_nvidia, dict):
+        raw_has_reasoning_effort = "reasoning_effort" in raw_nvidia
         cfg.update(raw_nvidia)
 
     cfg["api_key"] = str(cfg.get("api_key", "") or "").strip()
@@ -334,7 +533,7 @@ def normalize_nvidia_config(raw_nvidia: Any) -> Dict[str, Any]:
 
     for key, default_value in (
         ("max_context_tokens", NVIDIA_DEFAULT_CONTEXT_TOKENS),
-        ("timeout", 300),
+        ("timeout", 60),
         ("max_tokens", 16384),
         ("top_k", 20),
     ):
@@ -357,8 +556,15 @@ def normalize_nvidia_config(raw_nvidia: Any) -> Dict[str, Any]:
         except (TypeError, ValueError):
             cfg[key] = default_value
 
-    cfg["enable_thinking"] = bool(cfg.get("enable_thinking", True))
-    cfg["reasoning_effort"] = normalize_nvidia_reasoning_effort(cfg.get("reasoning_effort", NVIDIA_DEFAULT_REASONING_EFFORT))
+    try:
+        reasoning_budget = int(cfg.get("reasoning_budget", NVIDIA_DEFAULT_REASONING_BUDGET))
+    except (TypeError, ValueError):
+        reasoning_budget = NVIDIA_DEFAULT_REASONING_BUDGET
+    if reasoning_budget < -1:
+        reasoning_budget = NVIDIA_DEFAULT_REASONING_BUDGET
+    cfg["reasoning_budget"] = min(reasoning_budget, 32768)
+
+    cfg["enable_thinking"] = _coerce_bool(cfg.get("enable_thinking", True), True)
 
     matched = resolve_nvidia_selected_model(cfg)
     if matched:
@@ -367,6 +573,13 @@ def normalize_nvidia_config(raw_nvidia: Any) -> Dict[str, Any]:
         context_length = matched.get("context_length")
         if context_length:
             cfg["max_context_tokens"] = int(context_length)
+        thinking_control = str(matched.get("thinking_control", "none") or "none").strip().lower()
+        raw_reasoning_effort = cfg.get("reasoning_effort") if raw_has_reasoning_effort else ""
+        if thinking_control == "effort":
+            cfg["reasoning_effort"] = normalize_nvidia_thinking_choice(matched["id"], raw_reasoning_effort)
+            cfg["enable_thinking"] = cfg["reasoning_effort"] != "none"
+        else:
+            cfg["reasoning_effort"] = normalize_nvidia_reasoning_effort(cfg.get("reasoning_effort", NVIDIA_DEFAULT_REASONING_EFFORT))
 
     return cfg
 
@@ -431,6 +644,53 @@ def resolve_nvidia_selected_model(nvidia_config: Any, model_id: Optional[str] = 
     return get_nvidia_model_catalog()[0]
 
 
+def resolve_nvidia_thinking_choice(nvidia_config: Any, model_id: Optional[str] = None) -> str:
+    """Resolve the effective persisted thinking option for the selected NVIDIA model."""
+    cfg = default_nvidia_config()
+    raw_has_effort = False
+    if isinstance(nvidia_config, dict):
+        raw_has_effort = "reasoning_effort" in nvidia_config
+        cfg.update(nvidia_config)
+
+    selected = resolve_nvidia_selected_model(cfg, model_id=model_id)
+    if not selected:
+        return ""
+
+    selected_id = str(selected.get("id", "") or "")
+    thinking_control = str(selected.get("thinking_control", "none") or "none").strip().lower()
+    if thinking_control == "toggle":
+        return "true" if _coerce_bool(cfg.get("enable_thinking", True), True) else "false"
+    if thinking_control == "effort":
+        raw_effort = cfg.get("reasoning_effort") if raw_has_effort else ""
+        return normalize_nvidia_thinking_choice(selected_id, raw_effort)
+    if thinking_control == "fixed":
+        return "fixed"
+    return ""
+
+
+def apply_nvidia_thinking_choice(nvidia_config: Any, model_id: Any, choice: Any) -> Dict[str, Any]:
+    """Apply a model-specific thinking option to an NVIDIA config dict."""
+    cfg = default_nvidia_config()
+    if isinstance(nvidia_config, dict):
+        cfg.update(nvidia_config)
+
+    selected = resolve_nvidia_selected_model(cfg, model_id=str(model_id or ""))
+    if not selected:
+        return normalize_nvidia_config(cfg)
+
+    selected_id = str(selected.get("id", "") or "")
+    cfg["selected_model_id"] = selected_id
+    cfg["selected_model_display_name"] = str(selected.get("display_name", cfg.get("selected_model_display_name", "")))
+    thinking_control = str(selected.get("thinking_control", "none") or "none").strip().lower()
+    normalized_choice = normalize_nvidia_thinking_choice(selected_id, choice)
+    if thinking_control == "toggle":
+        cfg["enable_thinking"] = normalized_choice != "false"
+    elif thinking_control == "effort":
+        cfg["reasoning_effort"] = normalized_choice
+        cfg["enable_thinking"] = normalized_choice != "none"
+    return normalize_nvidia_config(cfg)
+
+
 def get_nvidia_default_vision_model() -> Dict[str, Any]:
     """Return the default NVIDIA model that supports image input."""
     selected = get_nvidia_model_metadata(NVIDIA_DEFAULT_MODEL_ID)
@@ -469,6 +729,7 @@ def build_nvidia_runtime_model_data(nvidia_config: Any, model_id: Optional[str] 
         if provider == "request"
         else resolve_nvidia_sdk_base_url(cfg["api_url"])
     )
+    thinking_control = str(selected.get("thinking_control", "") or "").strip().lower()
 
     return {
         "model": selected["id"],
@@ -479,10 +740,10 @@ def build_nvidia_runtime_model_data(nvidia_config: Any, model_id: Optional[str] 
         "provider": provider,
         "thinking_mode": (
             ("true" if bool(cfg.get("enable_thinking", True)) else "false")
-            if str(selected.get("thinking_control", "")).strip().lower() == "toggle"
+            if thinking_control == "toggle"
             else (
-                normalize_nvidia_reasoning_effort(cfg.get("reasoning_effort"))
-                if str(selected.get("thinking_control", "")).strip().lower() == "effort"
+                resolve_nvidia_thinking_choice(cfg, selected["id"])
+                if thinking_control == "effort"
                 else None
             )
         ),
@@ -499,35 +760,42 @@ def build_nvidia_computer_controller_runtime_model_data(nvidia_config: Any) -> O
     return build_nvidia_runtime_model_data(cfg, model_id=NVIDIA_COMPUTER_CONTROLLER_MODEL_ID)
 
 
-def _build_request_mistral_small_options() -> Dict[str, Any]:
+def _build_request_mistral_small_options(nvidia_config: Any = None) -> Dict[str, Any]:
+    cfg = normalize_nvidia_config(nvidia_config)
+    effort = normalize_nvidia_thinking_choice(
+        "mistralai/mistral-small-4-119b-2603",
+        cfg.get("reasoning_effort"),
+    )
     return {
         "max_tokens": 16384,
         "temperature": 0.10,
         "top_p": 1.00,
-        "reasoning_effort": "high",
+        "reasoning_effort": effort,
     }
 
 
 def _build_request_qwen_122_options(nvidia_config: Any = None) -> Dict[str, Any]:
     cfg = normalize_nvidia_config(nvidia_config)
+    thinking_enabled = bool(cfg.get("enable_thinking", True))
     return {
         "max_tokens": 16384,
-        "temperature": 0.60,
-        "top_p": 0.95,
-        "chat_template_kwargs": {"enable_thinking": bool(cfg.get("enable_thinking", True))},
+        "temperature": 0.60 if thinking_enabled else 0.70,
+        "top_p": 0.95 if thinking_enabled else 0.80,
+        "chat_template_kwargs": {"enable_thinking": thinking_enabled},
     }
 
 
 def _build_request_qwen_397_options(nvidia_config: Any = None) -> Dict[str, Any]:
     cfg = normalize_nvidia_config(nvidia_config)
+    thinking_enabled = bool(cfg.get("enable_thinking", True))
     return {
         "max_tokens": 16384,
-        "temperature": 0.60,
-        "top_p": 0.95,
+        "temperature": 0.60 if thinking_enabled else 0.70,
+        "top_p": 0.95 if thinking_enabled else 0.80,
         "top_k": 20,
-        "presence_penalty": 0.0,
+        "presence_penalty": 0.0 if thinking_enabled else 1.5,
         "repetition_penalty": 1.0,
-        "chat_template_kwargs": {"enable_thinking": bool(cfg.get("enable_thinking", True))},
+        "chat_template_kwargs": {"enable_thinking": thinking_enabled},
     }
 
 
@@ -549,15 +817,20 @@ _NVIDIA_REQUEST_OPTION_BUILDERS = {
 }
 
 
-def _build_openai_nemotron_options() -> Dict[str, Any]:
+def _build_openai_nemotron_options(nvidia_config: Any = None) -> Dict[str, Any]:
+    cfg = normalize_nvidia_config(nvidia_config)
+    effort = normalize_nvidia_thinking_choice(
+        "nvidia/nemotron-3-super-120b-a12b",
+        cfg.get("reasoning_effort"),
+    )
+    extra_body: Dict[str, Any] = {"reasoning_effort": effort}
+    if effort == "high":
+        extra_body["reasoning_budget"] = int(cfg.get("reasoning_budget", NVIDIA_DEFAULT_REASONING_BUDGET))
     return {
         "temperature": 1.0,
         "top_p": 0.95,
         "max_tokens": 16384,
-        "extra_body": {
-            "chat_template_kwargs": {"enable_thinking": True},
-            "reasoning_budget": 16384,
-        },
+        "extra_body": extra_body,
     }
 
 
@@ -606,26 +879,26 @@ def _build_openai_step_flash_options() -> Dict[str, Any]:
 
 def _build_openai_deepseek_v4_options(nvidia_config: Any = None) -> Dict[str, Any]:
     cfg = normalize_nvidia_config(nvidia_config)
-    effort = normalize_nvidia_reasoning_effort(cfg.get("reasoning_effort", NVIDIA_DEFAULT_REASONING_EFFORT))
-    thinking_enabled = bool(cfg.get("enable_thinking", True)) and effort != "none"
-    chat_template_kwargs: Dict[str, Any] = {"thinking": thinking_enabled}
-    if thinking_enabled:
-        chat_template_kwargs["reasoning_effort"] = effort
+    selected_id = str(cfg.get("selected_model_id", "") or "")
+    if selected_id not in {"deepseek-ai/deepseek-v4-pro", "deepseek-ai/deepseek-v4-flash"}:
+        selected_id = "deepseek-ai/deepseek-v4-pro"
+    effort = normalize_nvidia_thinking_choice(selected_id, cfg.get("reasoning_effort"))
     return {
         "temperature": 1.0,
         "top_p": 0.95,
         "max_tokens": int(cfg.get("max_tokens", 16384) or 16384),
-        "extra_body": {
-            "chat_template_kwargs": chat_template_kwargs,
-        },
+        "extra_body": {"reasoning_effort": effort},
     }
 
 
-def _build_openai_gpt_oss_options() -> Dict[str, Any]:
+def _build_openai_gpt_oss_options(nvidia_config: Any = None) -> Dict[str, Any]:
+    cfg = normalize_nvidia_config(nvidia_config)
+    effort = normalize_nvidia_thinking_choice("openai/gpt-oss-120b", cfg.get("reasoning_effort"))
     return {
-        "temperature": 1.0,
-        "top_p": 1.0,
+        "temperature": 0.6,
+        "top_p": 0.7,
         "max_tokens": 4096,
+        "extra_body": {"reasoning_effort": effort},
     }
 
 

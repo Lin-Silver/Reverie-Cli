@@ -1524,6 +1524,73 @@ class ReverieAgent:
             mode=self.mode,
             ant_phase=self.ant_phase
         )
+
+    def reconfigure_runtime(
+        self,
+        *,
+        base_url: str,
+        api_key: str,
+        model: str,
+        model_display_name: Optional[str] = None,
+        additional_rules: str = "",
+        mode: str = "reverie",
+        provider: str = "openai-sdk",
+        thinking_mode: Optional[str] = None,
+        endpoint: str = "",
+        custom_headers: Optional[Dict[str, str]] = None,
+        config=None,
+    ) -> None:
+        """Refresh provider/model settings in place to speed up model switches."""
+        self.base_url = base_url
+        self.api_key = api_key
+        self.model = model
+        self.model_display_name = model_display_name or model
+        self.additional_rules = additional_rules
+        self.mode = mode
+        self.ant_phase = "PLANNING"
+        self.provider = provider
+        self.config = config
+        self.thinking_mode = thinking_mode
+        self.endpoint = str(endpoint or "").strip()
+        self.custom_headers = {}
+        if isinstance(custom_headers, dict):
+            for key, value in custom_headers.items():
+                k = str(key or "").strip()
+                v = str(value or "").strip()
+                if k and v:
+                    self.custom_headers[k] = v
+
+        self._openai_request_fallback_active = False
+        self.api_max_retries = 3
+        self.api_initial_backoff = 1.0
+        self.api_timeout = 60
+        self.api_enable_debug_logging = False
+        if config:
+            self.api_max_retries = getattr(config, 'api_max_retries', 3)
+            self.api_initial_backoff = getattr(config, 'api_initial_backoff', 1.0)
+            self.api_timeout = getattr(config, 'api_timeout', 60)
+            self.api_enable_debug_logging = getattr(config, 'api_enable_debug_logging', False)
+
+        if self.api_enable_debug_logging:
+            logging.getLogger(__name__).setLevel(logging.DEBUG)
+        else:
+            logging.getLogger(__name__).setLevel(logging.WARNING)
+
+        self._client = None
+        self._init_client()
+        self._token_estimate_cache_key = None
+        self._token_estimate_cache_value = 0
+        self._token_estimate_cache_time = 0.0
+        self._auto_context_compaction_active = False
+        self._auto_context_compaction_retry_after = 0.0
+        self._auto_context_rotation_active = False
+        self._auto_context_rotation_retry_after = 0.0
+        self.system_prompt = build_system_prompt(
+            model_name=self.model_display_name,
+            additional_rules=self.additional_rules,
+            mode=self.mode,
+            ant_phase=self.ant_phase
+        )
     
     def _init_client(self) -> None:
         """Initialize client based on provider"""
@@ -1533,15 +1600,26 @@ class ReverieAgent:
                 client_kwargs: Dict[str, Any] = {
                     "base_url": self.base_url,
                     "api_key": self.api_key,
+                    "timeout": self._resolve_provider_timeout(),
                 }
                 if self.custom_headers:
                     client_kwargs["default_headers"] = dict(self.custom_headers)
-                try:
-                    self._client = OpenAI(**client_kwargs)
-                except TypeError:
-                    # Backward compatibility for OpenAI SDK versions without default_headers.
-                    client_kwargs.pop("default_headers", None)
-                    self._client = OpenAI(**client_kwargs)
+                optional_kwargs = ("default_headers", "timeout")
+                while True:
+                    try:
+                        self._client = OpenAI(**client_kwargs)
+                        break
+                    except TypeError:
+                        # Backward compatibility for OpenAI SDK versions without
+                        # newer optional kwargs.
+                        removed = False
+                        for optional_key in optional_kwargs:
+                            if optional_key in client_kwargs:
+                                client_kwargs.pop(optional_key, None)
+                                removed = True
+                                break
+                        if not removed:
+                            raise
             except ImportError:
                 raise ImportError(
                     "OpenAI SDK not installed. Run: pip install openai"
@@ -1706,7 +1784,12 @@ class ReverieAgent:
             try:
                 cfg = getattr(config, "nvidia", {})
                 if isinstance(cfg, dict):
-                    return max(timeout_value, int(cfg.get("timeout", timeout_value)))
+                    provider_timeout = int(cfg.get("timeout", timeout_value))
+                    # Older NVIDIA configs persisted 300s as the implicit
+                    # default, which made global /setting timeout ineffective.
+                    if provider_timeout == 300:
+                        return timeout_value
+                    return max(1, provider_timeout)
             except Exception:
                 return timeout_value
 
@@ -1857,6 +1940,43 @@ class ReverieAgent:
         if extra_body is not None:
             kwargs["extra_body"] = extra_body
         return kwargs
+
+    def _create_openai_chat_completion(self, **kwargs: Any) -> Any:
+        """Call OpenAI-compatible chat completions with timeout fallback for older SDKs."""
+        try:
+            return self._client.chat.completions.create(**kwargs)
+        except TypeError as exc:
+            if "timeout" not in kwargs or "timeout" not in str(exc).lower():
+                raise
+            fallback_kwargs = dict(kwargs)
+            fallback_kwargs.pop("timeout", None)
+            return self._client.chat.completions.create(**fallback_kwargs)
+
+    def _openai_sdk_provider_label(self) -> str:
+        """Return a user-facing label for OpenAI SDK backed requests."""
+        if self._is_active_model_source("nvidia"):
+            return "NVIDIA API"
+        return "OpenAI-compatible API"
+
+    def _model_request_stream_event(
+        self,
+        *,
+        provider_label: str,
+        model: Any,
+        stream: bool,
+        timeout: int,
+    ) -> str:
+        """Build a visible status event before a potentially slow provider call."""
+        model_text = str(model or self.model or "model").strip() or "model"
+        transport = "stream" if stream else "non-stream"
+        return encode_stream_event(
+            "model_request",
+            category="Model",
+            message=f"Waiting for {provider_label} response",
+            status="working",
+            detail=f"{model_text} | {transport}",
+            meta=f"timeout {int(timeout or 60)}s",
+        )
 
     def _request_provider_label(self) -> str:
         """Return a user-facing provider label for request-provider errors."""
@@ -2595,6 +2715,7 @@ class ReverieAgent:
             self._check_and_compress_context(session_id=session_id)
             request_messages = self._build_messages()
             messages = self._build_messages(resolve_local_images=True)
+            effective_timeout = self._resolve_provider_timeout()
             # For OpenAI-compatible SDK calls, include thinking flags via extra_body when applicable
             nvidia_options: Dict[str, Any] = {}
             extra_body = self._openai_extra_body_for_thinking()
@@ -2611,12 +2732,21 @@ class ReverieAgent:
             if extra_body is not None and isinstance(model_for_sdk, str) and "(" in model_for_sdk and ")" in model_for_sdk:
                 # Strip depth suffix for ordinary SDK calls — only send boolean thinking
                 model_for_sdk = model_for_sdk.split("(", 1)[0].strip()
+            if self._is_active_model_source("nvidia") and nvidia_model_requires_system_message_first(model_for_sdk):
+                messages = _coalesce_system_messages_to_front(messages)
+            yield self._model_request_stream_event(
+                provider_label=self._openai_sdk_provider_label(),
+                model=model_for_sdk,
+                stream=True,
+                timeout=effective_timeout,
+            )
             if extra_body is not None:
-                response = self._client.chat.completions.create(
+                response = self._create_openai_chat_completion(
                     model=model_for_sdk,
                     messages=messages,
                     tools=tools if tools else None,
                     stream=True,
+                    timeout=effective_timeout,
                     extra_body=extra_body,
                     **{
                         key: value
@@ -2629,11 +2759,12 @@ class ReverieAgent:
                     },
                 )
             else:
-                response = self._client.chat.completions.create(
+                response = self._create_openai_chat_completion(
                     model=model_for_sdk,
                     messages=messages,
                     tools=tools if tools else None,
                     stream=True,
+                    timeout=effective_timeout,
                     **{
                         key: value
                         for key, value in {
@@ -2719,6 +2850,12 @@ class ReverieAgent:
             # Streaming request-provider calls can take longer for large outputs,
             # so we respect the provider timeout resolution here.
             effective_timeout = self._resolve_provider_timeout()
+            yield self._model_request_stream_event(
+                provider_label=self._request_provider_label(),
+                model=payload.get("model", self.model),
+                stream=True,
+                timeout=effective_timeout,
+            )
             try:
                 response = make_api_request_with_retry(
                     url=self.base_url,
@@ -2900,6 +3037,7 @@ class ReverieAgent:
             self._check_and_compress_context(session_id=session_id)
             request_messages = self._build_messages()
             messages = self._build_messages(resolve_local_images=True)
+            effective_timeout = self._resolve_provider_timeout()
             # For OpenAI-compatible SDK calls, include thinking flags via extra_body when applicable
             nvidia_options: Dict[str, Any] = {}
             extra_body = self._openai_extra_body_for_thinking()
@@ -2916,12 +3054,22 @@ class ReverieAgent:
             if extra_body is not None and isinstance(model_for_sdk, str) and "(" in model_for_sdk and ")" in model_for_sdk:
                 # Strip depth suffix for ordinary SDK calls — only send boolean thinking
                 model_for_sdk = model_for_sdk.split("(", 1)[0].strip()
+            if self._is_active_model_source("nvidia") and nvidia_model_requires_system_message_first(model_for_sdk):
+                messages = _coalesce_system_messages_to_front(messages)
+            self._emit_ui_event(
+                category="Model",
+                message=f"Waiting for {self._openai_sdk_provider_label()} response",
+                status="working",
+                detail=f"{model_for_sdk} | non-stream",
+                meta=f"timeout {effective_timeout}s",
+            )
             if extra_body is not None:
-                response = self._client.chat.completions.create(
+                response = self._create_openai_chat_completion(
                     model=model_for_sdk,
                     messages=messages,
                     tools=tools if tools else None,
                     stream=False,
+                    timeout=effective_timeout,
                     extra_body=extra_body,
                     **{
                         key: value
@@ -2934,11 +3082,12 @@ class ReverieAgent:
                     },
                 )
             else:
-                response = self._client.chat.completions.create(
+                response = self._create_openai_chat_completion(
                     model=model_for_sdk,
                     messages=messages,
                     tools=tools if tools else None,
                     stream=False,
+                    timeout=effective_timeout,
                     **{
                         key: value
                         for key, value in {

@@ -140,7 +140,7 @@ if defined BLENDER_ARCHIVE_SOURCE (
         set "BUILD_EXIT_CODE=1"
         goto finish
     )
-    python -c "from reverie.config import get_app_root; from reverie.plugin.runtime_manager import RuntimePluginManager; manager=RuntimePluginManager(get_app_root()); result=manager.install_source_plugin('blender', overwrite=False); print('      Blender plugin installed:', result.get('target_dir')); raise SystemExit(0 if result.get('success') else 1)"
+    python -c "from reverie.config import get_app_root; from reverie.plugin.runtime_manager import RuntimePluginManager; manager=RuntimePluginManager(get_app_root()); result=manager.install_source_plugin('blender', overwrite=True); location=result.get('target_path') or result.get('target_dir'); mode=result.get('install_mode') or 'directory-sync'; print(f'      Blender plugin installed ({mode}): {location}'); raise SystemExit(0 if result.get('success') else 1)"
     if %ERRORLEVEL% neq 0 (
         echo [ERROR] Failed to install Blender plugin into dist runtime depot.
         set "BUILD_EXIT_CODE=1"
@@ -158,7 +158,7 @@ if exist "%ROOT_DIR%\plugins\godot\plugin.py" (
         set "BUILD_EXIT_CODE=1"
         goto finish
     )
-    python -c "from reverie.config import get_app_root; from reverie.plugin.runtime_manager import RuntimePluginManager; manager=RuntimePluginManager(get_app_root()); result=manager.install_source_plugin('godot', overwrite=False); print('      Godot plugin installed:', result.get('target_dir')); raise SystemExit(0 if result.get('success') else 1)"
+    python -c "from reverie.config import get_app_root; from reverie.plugin.runtime_manager import RuntimePluginManager; manager=RuntimePluginManager(get_app_root()); result=manager.install_source_plugin('godot', overwrite=True); location=result.get('target_path') or result.get('target_dir'); mode=result.get('install_mode') or 'directory-sync'; print(f'      Godot plugin installed ({mode}): {location}'); raise SystemExit(0 if result.get('success') else 1)"
     if %ERRORLEVEL% neq 0 (
         echo [ERROR] Failed to install Godot plugin into dist runtime depot.
         set "BUILD_EXIT_CODE=1"
@@ -174,7 +174,7 @@ if exist "%ROOT_DIR%\plugins\o3de\plugin.py" (
         set "BUILD_EXIT_CODE=1"
         goto finish
     )
-    python -c "from reverie.config import get_app_root; from reverie.plugin.runtime_manager import RuntimePluginManager; manager=RuntimePluginManager(get_app_root()); result=manager.install_source_plugin('o3de', overwrite=False); print('      O3DE plugin installed:', result.get('target_dir')); raise SystemExit(0 if result.get('success') else 1)"
+    python -c "from reverie.config import get_app_root; from reverie.plugin.runtime_manager import RuntimePluginManager; manager=RuntimePluginManager(get_app_root()); result=manager.install_source_plugin('o3de', overwrite=True); location=result.get('target_path') or result.get('target_dir'); mode=result.get('install_mode') or 'directory-sync'; print(f'      O3DE plugin installed ({mode}): {location}'); raise SystemExit(0 if result.get('success') else 1)"
     if %ERRORLEVEL% neq 0 (
         echo [ERROR] Failed to install O3DE plugin into dist runtime depot.
         set "BUILD_EXIT_CODE=1"
@@ -190,7 +190,7 @@ if exist "%ROOT_DIR%\plugins\game_models\plugin.py" (
         set "BUILD_EXIT_CODE=1"
         goto finish
     )
-    python -c "from reverie.config import get_app_root; from reverie.plugin.runtime_manager import RuntimePluginManager; manager=RuntimePluginManager(get_app_root()); result=manager.install_source_plugin('game_models', overwrite=False); print('      Game Models plugin installed:', result.get('target_dir')); raise SystemExit(0 if result.get('success') else 1)"
+    python -c "from reverie.config import get_app_root; from reverie.plugin.runtime_manager import RuntimePluginManager; manager=RuntimePluginManager(get_app_root()); result=manager.install_source_plugin('game_models', overwrite=True); location=result.get('target_path') or result.get('target_dir'); mode=result.get('install_mode') or 'directory-sync'; print(f'      Game Models plugin installed ({mode}): {location}'); raise SystemExit(0 if result.get('success') else 1)"
     if %ERRORLEVEL% neq 0 (
         echo [ERROR] Failed to install Game Models plugin into dist runtime depot.
         set "BUILD_EXIT_CODE=1"

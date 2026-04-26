@@ -16,6 +16,17 @@ class _FakeToolExecutor:
         self.context[key] = value
 
 
+class _ReusableAgent:
+    def __init__(self) -> None:
+        self.tool_executor = _FakeToolExecutor()
+        self.messages = [{"role": "user", "content": "keep transcript"}]
+        self.reconfigure_calls = []
+        self.config = None
+
+    def reconfigure_runtime(self, **kwargs) -> None:
+        self.reconfigure_calls.append(dict(kwargs))
+
+
 class _FakeAgent:
     def __init__(self) -> None:
         self.tool_executor = _FakeToolExecutor()
@@ -140,6 +151,40 @@ def test_run_prompt_once_collects_output_and_events(tmp_path, monkeypatch):
     serialized = result.to_dict()
     assert serialized["auto_followup_count"] == 0
     assert "harness_report" in serialized
+
+
+def test_init_agent_reuses_existing_agent_without_rescanning_plugins(tmp_path, monkeypatch):
+    interface = ReverieInterface(tmp_path, headless=True)
+    config = Config(
+        models=[
+            ModelConfig(
+                model="fast-switch-model",
+                model_display_name="Fast Switch Model",
+                base_url="https://example.com/v1",
+                api_key="test-key",
+                max_context_tokens=128000,
+            )
+        ],
+        active_model_index=0,
+    )
+
+    reusable_agent = _ReusableAgent()
+    interface.agent = reusable_agent
+
+    monkeypatch.setattr(interface.config_manager, "load", lambda: config)
+    monkeypatch.setattr(
+        interface.runtime_plugin_manager,
+        "scan",
+        lambda: (_ for _ in ()).throw(AssertionError("runtime plugin scan should not run during cached model switch")),
+    )
+
+    interface._init_agent()
+
+    assert interface.agent is reusable_agent
+    assert len(reusable_agent.reconfigure_calls) == 1
+    assert reusable_agent.messages == [{"role": "user", "content": "keep transcript"}]
+    assert reusable_agent.tool_executor.context["runtime_plugin_manager"] is interface.runtime_plugin_manager
+    assert reusable_agent.tool_executor.context["project_data_dir"] == interface.project_data_dir
 
 
 def test_active_model_reuses_standard_nvidia_key_for_computer_controller():

@@ -17,6 +17,7 @@ from reverie.harness import (
 )
 from reverie.skills_manager import SkillsManager
 from reverie.tools.mcp_resource_tools import ListMcpResourcesTool, ReadMcpResourceTool
+from reverie.tools.mode_switch import ModeSwitchTool
 from reverie.tools.skill_lookup import SkillLookupTool
 from reverie.tools.tool_catalog import ToolCatalogTool
 
@@ -121,6 +122,9 @@ class DummyAgent:
         self.mode = mode
         self.tool_executor = DummyToolExecutor(tools)
 
+    def update_mode(self, mode: str) -> None:
+        self.mode = mode
+
 
 class DummyRuntime:
     def __init__(self):
@@ -215,9 +219,34 @@ def test_tool_catalog_search_and_inspect(tmp_path: Path) -> None:
     assert recommend_result.success is True
     assert "read_mcp_resource" in recommend_result.output
 
+    inferred_recommend = tool.execute(query="read mcp docs")
+    assert inferred_recommend.success is True
+    assert "read_mcp_resource" in inferred_recommend.output
+
+    inferred_inspect = tool.execute(tool_name="command_exec")
+    assert inferred_inspect.success is True
+    assert "Tool: command_exec" in inferred_inspect.output
+
     groups_result = tool.execute(operation="groups")
     assert groups_result.success is True
     assert "mcp-resource" in groups_result.output
+
+
+def test_mode_switch_lists_recommends_and_switches(tmp_path: Path) -> None:
+    agent = DummyAgent([], mode="reverie")
+    tool = ModeSwitchTool({"agent": agent, "project_root": tmp_path})
+
+    list_result = tool.execute(operation="list")
+    assert list_result.success is True
+    assert "reverie-gamer" in list_result.output
+
+    recommend_result = tool.execute(operation="recommend", query="build a godot 3d combat prototype")
+    assert recommend_result.success is True
+    assert recommend_result.data["recommended_mode"] == "reverie-gamer"
+
+    switch_result = tool.execute(mode="writer", reason="story-heavy drafting")
+    assert switch_result.success is True
+    assert agent.mode == "writer"
 
 
 def test_skill_lookup_lists_and_inspects_discovered_skills(tmp_path: Path) -> None:

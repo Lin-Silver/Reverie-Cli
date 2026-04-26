@@ -980,7 +980,9 @@ def _get_mode_tool_workflow(mode: str) -> str:
     return """
 ## Reverie Mode Tool Workflow
 
+- Base Reverie is the default full-spectrum Ultra Agentic mode, not a stripped-down fallback.
 - For small, clear tasks, use a lightweight loop: targeted retrieval -> focused edit -> narrow verification -> respond.
+- Use the strongest visible toolchain that matches the task, including MCP, runtime-plugin, modeling, runtime, and game-production tools when they shorten the path to a verified outcome.
 - Treat user-specified libraries, SDK choices, endpoints, payload fields, config knobs, and requested file layouts as acceptance criteria, not suggestions.
 - For black-box, one-shot, `continue`, or "do not stop" requests, keep a private completion ledger and continue through implementation, verification, and repair until the requested outcome is ready or a real external blocker remains.
 - Ask for `userInput` only for irreversible or externally sensitive choices such as credentials, paid downloads, destructive actions, deployments, licensing/business decisions, or contradictory requirements.
@@ -990,7 +992,7 @@ def _get_mode_tool_workflow(mode: str) -> str:
 - Verify with commands and manage context proactively on long sessions.
 - Use planning tools when the work is large enough to benefit from explicit tracking; do not default to formal planning for tiny fixes.
 - Do not default to `task_manager` for small deliverables or isolated greenfield scaffolds, even if they span several files.
-- Game production, engine scaffolding, playtesting, and asset-pipeline tools are available directly in Reverie mode; use them here when the user asks for game/runtime/modeling work.
+- Game production, engine scaffolding, playtesting, and asset-pipeline tools are available directly in Reverie mode; use them here when the user asks for game/runtime/modeling work or when they are the fastest safe path to the deliverable.
 - For Blender work, use `blender_modeling_workbench` to create auditable authoring scripts and use runtime-plugin tools such as `rc_blender_ensure_runtime` / `rc_blender_run_script` when a protocol-ready Blender plugin is installed. For MMD `.pmx`/`.pmd` assets, prefer `rc_blender_import_mmd_model`; it prepares plugin-local MMD Tools and can apply optional `.vmd` motion or `.vpd` pose.
 - For AAA character-art briefs in base Reverie mode, prefer `production_character_pipeline` only for scaffold/control evidence, require post-run audit evidence, and continue remediation through body-continuity, art-readiness, texture, rig, animation, engine-contract, repair-loop, manual DCC, or `game_models` assisted lanes before claiming final-quality art.
 - For automation, desktop, or agent-style requests, implement the full runtime loop the user described: observe or screenshot -> decide -> act -> verify -> repeat, with explicit stop conditions.
@@ -998,7 +1000,7 @@ def _get_mode_tool_workflow(mode: str) -> str:
 - When a model returns normalized coordinates or model-space coordinates, implement a dedicated coordinate-mapping layer into the real runtime space before invoking actions.
 - If the user asked for safe or conservative behavior, surface that in runtime defaults such as dry-run, confirmation, bounded retries, or similarly cautious controls.
 - Prefer encoding-safe terminal output and verification paths for generated Windows-facing CLIs and scripts.
-- If another mode has a better workflow for the current phase, switch proactively instead of forcing generic execution.
+- If another mode has a better workflow for the current phase, switch proactively for workflow leverage, artifacts, or continuity instead of because Reverie lacks capability.
 - Judge completion using deliverables, integration state, and verification evidence rather than optimistic progress estimates.
 """
 

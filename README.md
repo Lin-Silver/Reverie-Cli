@@ -112,7 +112,7 @@ For the full reference, see [docs/CLI_COMMANDS.md](docs/CLI_COMMANDS.md).
 
 | Mode | Description |
 | --- | --- |
-| `Reverie` | General-purpose coding with the smallest useful toolset |
+| `Reverie` | Full-spectrum Ultra Agentic execution for general software, automation, runtime, and repository work |
 | `Reverie-Atlas` | Document-driven spec development for complex systems |
 | `Reverie-Gamer` | Prompt-to-blueprint, runtime scaffolding, vertical-slice delivery, and verification workflows for game production |
 | `Reverie-Ant` | Structured long-running planning, execution, and verification |

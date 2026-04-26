@@ -13,7 +13,7 @@ from typing import Any, Dict, List
 MODE_METADATA: Dict[str, Dict[str, object]] = {
     "reverie": {
         "display_name": "Reverie",
-        "description": "General-purpose coding mode that uses Context Engine plus the smallest useful toolset for focused fixes and end-to-end delivery.",
+        "description": "Full-spectrum Ultra Agentic mode that uses Context Engine plus the complete visible tool surface for software, automation, runtime, and end-to-end delivery.",
         "switchable": True,
     },
     "reverie-atlas": {

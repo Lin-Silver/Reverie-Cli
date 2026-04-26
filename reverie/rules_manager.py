@@ -98,8 +98,8 @@ class RulesManager:
 # Example rules (uncomment to use):
 # Always use type hints in function definitions
 # Follow PEP 8 style guidelines
-# Write docstrings for all public functions
-# Use async/await for I/O operations
+# Prefer concise final summaries unless I ask for a deep walkthrough
+# Use detailed implementation explanations only when I explicitly ask for them
 # Add unit tests for new features
 """
             with open(self.rules_txt_path, 'w', encoding='utf-8') as f:

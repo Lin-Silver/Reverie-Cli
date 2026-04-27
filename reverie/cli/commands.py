@@ -5735,6 +5735,16 @@ class CommandHandler:
         config.active_model_source = active_source
         config_manager.save(config)
 
+        # Sync NVIDIA config to global config.json for consistency
+        if config_attr == 'nvidia' and config_manager.is_workspace_mode():
+            from ..config import ConfigManager
+            project_root = self.app.get('project_root')
+            if project_root:
+                global_config_manager = ConfigManager(project_root, force_workspace_config=False)
+                global_config = global_config_manager.load()
+                global_config.nvidia = config.nvidia
+                global_config_manager.save(global_config)
+
         self.console.print()
         self.console.print(
             f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Switched to {provider_label} model: {selected_model['display_name']} ({selected_model['id']})[/{self.theme.MINT_VIBRANT}]"

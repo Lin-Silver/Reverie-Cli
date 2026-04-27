@@ -1909,11 +1909,23 @@ class ReverieAgent:
         stream: bool,
     ) -> Dict[str, Any]:
         """Build OpenAI SDK chat-completions kwargs, including NVIDIA-specific adapters."""
-        extra_body = self._openai_extra_body_for_thinking()
         model_for_sdk = self.model
         prepared_messages = list(messages or [])
-        if extra_body is not None and isinstance(model_for_sdk, str) and "(" in model_for_sdk and ")" in model_for_sdk:
-            model_for_sdk = model_for_sdk.split("(", 1)[0].strip()
+        
+        nvidia_options: Dict[str, Any] = {}
+        extra_body: Optional[Dict[str, Any]] = None
+        
+        if self._is_active_model_source("nvidia"):
+            nvidia_options = build_nvidia_openai_options(getattr(self.config, "nvidia", {}), model_for_sdk)
+            if nvidia_options:
+                option_model = str(nvidia_options.get("model", "") or "").strip()
+                if option_model:
+                    model_for_sdk = option_model
+                extra_body = nvidia_options.get("extra_body")
+        else:
+            extra_body = self._openai_extra_body_for_thinking()
+            if extra_body is not None and isinstance(model_for_sdk, str) and "(" in model_for_sdk and ")" in model_for_sdk:
+                model_for_sdk = model_for_sdk.split("(", 1)[0].strip()
 
         if self._is_active_model_source("nvidia") and nvidia_model_requires_system_message_first(model_for_sdk):
             prepared_messages = _coalesce_system_messages_to_front(prepared_messages)
@@ -1926,19 +1938,15 @@ class ReverieAgent:
         if tools:
             kwargs["tools"] = tools
 
-        if self._is_active_model_source("nvidia"):
-            nvidia_options = build_nvidia_openai_options(getattr(self.config, "nvidia", {}), model_for_sdk)
-            if nvidia_options:
-                option_model = str(nvidia_options.get("model", "") or "").strip()
-                if option_model:
-                    kwargs["model"] = option_model
-                for key in ("temperature", "top_p", "max_tokens"):
-                    if key in nvidia_options:
-                        kwargs[key] = nvidia_options[key]
-                extra_body = _merge_extra_body(extra_body, nvidia_options.get("extra_body"))
-
         if extra_body is not None:
             kwargs["extra_body"] = extra_body
+        
+        # Add NVIDIA-specific options
+        if nvidia_options:
+            for key in ("temperature", "top_p", "max_tokens"):
+                if key in nvidia_options:
+                    kwargs[key] = nvidia_options[key]
+        
         return kwargs
 
     def _create_openai_chat_completion(self, **kwargs: Any) -> Any:
@@ -2558,7 +2566,12 @@ class ReverieAgent:
         - If `thinking_mode` is unset, detect model suffix like "model(thinking)" and enable thinking for
           recognized suffixes (auto, low, medium, high, xhigh, minimal, digits).
         - For GLM-family models include `clear_thinking: False` when enabling thinking.
+        - For NVIDIA-hosted models, defer to model-specific configuration.
         """
+        # Skip if using NVIDIA source - let NVIDIA-specific options handle it
+        if self._is_active_model_source("nvidia"):
+            return None
+
         # Explicit override from config
         if isinstance(self.thinking_mode, str) and self.thinking_mode.lower() in ("true", "false"):
             if self.thinking_mode.lower() == "false":
@@ -2718,7 +2731,6 @@ class ReverieAgent:
             effective_timeout = self._resolve_provider_timeout()
             # For OpenAI-compatible SDK calls, include thinking flags via extra_body when applicable
             nvidia_options: Dict[str, Any] = {}
-            extra_body = self._openai_extra_body_for_thinking()
             model_for_sdk = self.model
             if self._is_active_model_source("nvidia"):
                 nvidia_options = build_nvidia_openai_options(
@@ -2728,7 +2740,10 @@ class ReverieAgent:
                 option_model = str(nvidia_options.get("model", "") or "").strip()
                 if option_model:
                     model_for_sdk = option_model
-                extra_body = _merge_extra_body(extra_body, nvidia_options.get("extra_body"))
+                # For NVIDIA models, use NVIDIA-specific extra_body (don't merge with generic thinking)
+                extra_body = nvidia_options.get("extra_body")
+            else:
+                extra_body = self._openai_extra_body_for_thinking()
             if extra_body is not None and isinstance(model_for_sdk, str) and "(" in model_for_sdk and ")" in model_for_sdk:
                 # Strip depth suffix for ordinary SDK calls — only send boolean thinking
                 model_for_sdk = model_for_sdk.split("(", 1)[0].strip()
@@ -3040,7 +3055,6 @@ class ReverieAgent:
             effective_timeout = self._resolve_provider_timeout()
             # For OpenAI-compatible SDK calls, include thinking flags via extra_body when applicable
             nvidia_options: Dict[str, Any] = {}
-            extra_body = self._openai_extra_body_for_thinking()
             model_for_sdk = self.model
             if self._is_active_model_source("nvidia"):
                 nvidia_options = build_nvidia_openai_options(
@@ -3050,7 +3064,10 @@ class ReverieAgent:
                 option_model = str(nvidia_options.get("model", "") or "").strip()
                 if option_model:
                     model_for_sdk = option_model
-                extra_body = _merge_extra_body(extra_body, nvidia_options.get("extra_body"))
+                # For NVIDIA models, use NVIDIA-specific extra_body (don't merge with generic thinking)
+                extra_body = nvidia_options.get("extra_body")
+            else:
+                extra_body = self._openai_extra_body_for_thinking()
             if extra_body is not None and isinstance(model_for_sdk, str) and "(" in model_for_sdk and ")" in model_for_sdk:
                 # Strip depth suffix for ordinary SDK calls — only send boolean thinking
                 model_for_sdk = model_for_sdk.split("(", 1)[0].strip()

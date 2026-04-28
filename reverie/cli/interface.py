@@ -689,9 +689,7 @@ class ReverieInterface:
         self._status_live = None
         self._pending_input_draft = ""
         self._markdown_formatter = MarkdownFormatter(console=self.console)
-        self._status_line_cache_key = None
-        self._status_line_cache_renderable = None
-        self._status_line_cache_time = 0.0
+
         self._task_drawer_visible = True
         self._task_drawer_cache_key = None
         self._task_drawer_cache_renderable = None
@@ -1004,7 +1002,6 @@ class ReverieInterface:
             self._show_startup_configuration_log(config)
             
             self._init_agent()
-            self.ensure_context_engine(announce=True)
             self.command_handler = CommandHandler(self.console, self._get_app_context())
             if not self.session_manager.get_current_session():
                 self._init_session()
@@ -1086,28 +1083,6 @@ class ReverieInterface:
             except Exception:
                 total_tokens = None
 
-        cache_key = (
-            time_str,
-            provider_label,
-            str(mode).upper(),
-            model_label,
-            project_label,
-            reasoning_label,
-            index_status_label,
-            total_tokens,
-            max_tokens,
-            int(percentage),
-            token_color,
-            width < 112,
-            width < 86,
-        )
-        if (
-            self._status_line_cache_key == cache_key
-            and self._status_line_cache_renderable is not None
-            and (cache_now - self._status_line_cache_time) < 0.2
-        ):
-            return self._status_line_cache_renderable
-
         def build_meter(percent: float, color: str, *, width_hint: int) -> Text:
             meter_width = max(8, width_hint)
             filled = min(meter_width, max(0, int(round((percent / 100) * meter_width)))) if meter_width else 0
@@ -1180,9 +1155,6 @@ class ReverieInterface:
             padding=(0, 1),
         )
 
-        self._status_line_cache_key = cache_key
-        self._status_line_cache_renderable = body
-        self._status_line_cache_time = cache_now
         return body
 
     def _snapshot_stream_input_state(self) -> dict:
@@ -1809,6 +1781,9 @@ class ReverieInterface:
         self._last_footer_refresh_time = 0.0
         self._last_footer_render_signature = None
         self._start_stream_input_capture()
+
+        # Reset current content tokens for new message
+        self._current_content_tokens = 0
 
         try:
             first_non_tool_chunk = True

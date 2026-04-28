@@ -329,16 +329,22 @@ class CodebaseIndexer:
     def _should_ignore(self, path: Path) -> bool:
         """Check if a path should be ignored"""
         try:
-            rel_path = str(path.relative_to(self.project_root))
+            rel_path = path.relative_to(self.project_root)
         except ValueError:
             return True
-        
+
         for pattern in self._ignore_patterns:
-            if fnmatch.fnmatch(rel_path, pattern):
-                return True
-            if fnmatch.fnmatch(path.name, pattern):
-                return True
-        
+            # Use pathlib.Path.match which supports ** for recursive matching
+            try:
+                if rel_path.match(pattern):
+                    return True
+            except ValueError:
+                # If pattern is invalid for match, fall back to fnmatch
+                if fnmatch.fnmatch(str(rel_path), pattern):
+                    return True
+                if fnmatch.fnmatch(path.name, pattern):
+                    return True
+
         return False
     
     def _is_supported_file(self, path: Path) -> bool:

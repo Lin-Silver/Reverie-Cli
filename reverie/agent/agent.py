@@ -3941,7 +3941,7 @@ class ReverieAgent:
         cache_now = time.monotonic()
         if (
             self._token_estimate_cache_key == cache_key
-            and (cache_now - self._token_estimate_cache_time) < 1.0
+            and (cache_now - self._token_estimate_cache_time) < 0.5
         ):
             return self._token_estimate_cache_value
 

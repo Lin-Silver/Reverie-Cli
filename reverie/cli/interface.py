@@ -705,6 +705,7 @@ class ReverieInterface:
         self._last_footer_render_signature: Optional[tuple] = None
         self._assistant_render_started = False
         self._assistant_blank_line_pending = False
+        self._current_content_tokens = 0
 
     def _clone_config(self, config: Config) -> Config:
         """Return a deep-ish copy of config through the canonical serializer."""
@@ -923,6 +924,7 @@ class ReverieInterface:
         """Reset per-turn transcript rendering state for streamed assistant output."""
         self._assistant_render_started = False
         self._assistant_blank_line_pending = False
+        self._current_content_tokens = 0
 
     def _prepare_markdown_fragment_for_render(self, content: str) -> str:
         """Normalize streamed markdown so blank lines stay intentional instead of noisy."""
@@ -1002,6 +1004,7 @@ class ReverieInterface:
             self._show_startup_configuration_log(config)
             
             self._init_agent()
+            self.ensure_context_engine(announce=True)
             self.command_handler = CommandHandler(self.console, self._get_app_context())
             if not self.session_manager.get_current_session():
                 self._init_session()
@@ -1031,7 +1034,7 @@ class ReverieInterface:
             detail=f"theme: {theme_label} | workspace: {self.project_root}",
         )
 
-    def _get_status_line(self):
+    def _get_status_line(self, current_content_tokens: int = 0):
         """Generate a responsive live status panel."""
         cache_now = time.time()
         elapsed = self.total_active_time
@@ -1071,7 +1074,7 @@ class ReverieInterface:
         token_color = self.theme.MINT_SOFT
         if self.agent:
             try:
-                total_tokens = max(int(self.agent.get_token_estimate()), 0)
+                total_tokens = max(int(self.agent.get_token_estimate()), 0) + current_content_tokens
                 if active_model and active_model.max_context_tokens:
                     max_tokens = active_model.max_context_tokens
 
@@ -1101,7 +1104,7 @@ class ReverieInterface:
         if (
             self._status_line_cache_key == cache_key
             and self._status_line_cache_renderable is not None
-            and (cache_now - self._status_line_cache_time) < 0.35
+            and (cache_now - self._status_line_cache_time) < 0.2
         ):
             return self._status_line_cache_renderable
 
@@ -1428,7 +1431,7 @@ class ReverieInterface:
             config = self.config_manager.load()
             self._apply_display_preferences(config)
             if config.show_status_line:
-                renderables.append(self._get_status_line())
+                renderables.append(self._get_status_line(current_content_tokens=self._current_content_tokens))
         except Exception:
             pass
         live_tool_panel = self._get_live_tool_panel()
@@ -1803,7 +1806,7 @@ class ReverieInterface:
             footer_live = Live(
                 self.streaming_footer,
                 console=self.console,
-                refresh_per_second=6,
+                refresh_per_second=4,
                 auto_refresh=False,
                 transient=True,
                 vertical_overflow="visible",
@@ -2047,6 +2050,8 @@ class ReverieInterface:
         if not text:
             return
 
+        self._current_content_tokens += len(text) // 4
+
         renderable = format_markdown(
             text,
             formatter=self._markdown_formatter,
@@ -2061,6 +2066,7 @@ class ReverieInterface:
             return
 
         normalized = str(content or "").replace("\r\n", "\n").replace("\r", "\n")
+        self._current_content_tokens += len(normalized) // 4
         lines = normalized.split("\n")
         if lines and lines[-1] == "":
             lines = lines[:-1]

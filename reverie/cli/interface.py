@@ -1793,29 +1793,29 @@ class ReverieInterface:
 
         # Get current session ID
         session_id = self.session_manager.current_session.id if self.session_manager.current_session else "default"
-        
+
+        # Create live footer with status + input bar from message start
+        from rich.live import Live
+        footer_live = Live(
+            self.streaming_footer,
+            console=self.console,
+            refresh_per_second=1,
+            auto_refresh=False,
+            transient=True,
+            vertical_overflow="visible",
+        )
+        footer_live.start()
+        self._status_live = footer_live
+        self._last_footer_refresh_time = 0.0
+        self._last_footer_render_signature = None
+        self._start_stream_input_capture()
+
         try:
             first_non_tool_chunk = True
             response_header_printed = False
-            
+
             # Thinking content state management
             in_thinking_mode = False
-            
-            # Create live footer with status + input bar during streaming
-            from rich.live import Live
-            footer_live = Live(
-                self.streaming_footer,
-                console=self.console,
-                refresh_per_second=4,
-                auto_refresh=False,
-                transient=True,
-                vertical_overflow="visible",
-            )
-            footer_live.start()
-            self._status_live = footer_live
-            self._last_footer_refresh_time = 0.0
-            self._last_footer_render_signature = None
-            self._start_stream_input_capture()
 
             def ensure_response_header() -> None:
                 nonlocal response_header_printed

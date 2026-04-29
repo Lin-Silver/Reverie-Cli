@@ -115,6 +115,7 @@ def test_game_models_source_plugin_manifest_validates() -> None:
 
     assert validation["success"] is True
     assert validation["plugin_id"] == "game_models"
+    assert validation["packaging_format"] == "pyinstaller-onefile"
     assert any("build.bat" in command for command in validation["build_commands"])
 
 

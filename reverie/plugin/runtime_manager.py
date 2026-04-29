@@ -1743,6 +1743,7 @@ class RuntimePluginManager:
             "build.bat",
             "build.sh",
             "build.ps1",
+            "README.md",
             "setup.py",
             "pyproject.toml",
         }
@@ -1775,6 +1776,10 @@ class RuntimePluginManager:
                 continue
             candidate.unlink()
             removed.append(candidate.name)
+
+        if not any(resolved_target_dir.iterdir()):
+            resolved_target_dir.rmdir()
+            removed.append(f"{resolved_target_dir.name}/")
 
         return removed
 

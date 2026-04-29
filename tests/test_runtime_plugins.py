@@ -455,6 +455,26 @@ def test_runtime_plugin_manager_detects_standalone_root_entry_and_sets_plugin_ro
     assert result["data"]["plugin_root"] == str((install_root / "standalone_sample").resolve())
 
 
+def test_runtime_plugin_manager_detects_third_party_root_exe_without_catalog(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    install_root = app_root / ".reverie" / "plugins"
+    install_root.mkdir(parents=True, exist_ok=True)
+    exe_path = install_root / "reverie-third-party-runtime.exe"
+    exe_path.write_bytes(b"MZ third-party runtime placeholder")
+
+    manager = RuntimePluginManager(app_root)
+    record = manager.get_record("third_party_runtime", force_refresh=True)
+
+    assert record is not None
+    assert record.source == "root-entry"
+    assert record.catalog_managed is False
+    assert record.delivery == "plugin-exe"
+    assert record.packaging_format == "standalone-root-entry"
+    assert record.entry_path == exe_path.resolve(strict=False)
+    assert record.compiled_entry_path == exe_path.resolve(strict=False)
+    assert record.install_dir == (install_root / "third_party_runtime").resolve()
+
+
 def test_runtime_plugin_manager_prefers_root_entry_over_same_name_legacy_wrapper_dir(tmp_path: Path) -> None:
     app_root = tmp_path / "app"
     install_root = app_root / ".reverie" / "plugins"
@@ -577,6 +597,7 @@ def test_install_source_plugin_standalone_cleans_legacy_wrapper_but_keeps_runtim
     (install_dir / "runtime" / "keep.txt").write_text("keep me\n", encoding="utf-8")
     (install_dir / "plugin.json").write_text("{}", encoding="utf-8")
     (install_dir / "plugin.py").write_text("print('legacy wrapper')\n", encoding="utf-8")
+    (install_dir / "README.md").write_text("legacy docs\n", encoding="utf-8")
     (install_dir / "build").mkdir(parents=True, exist_ok=True)
     (install_dir / "dist").mkdir(parents=True, exist_ok=True)
     (install_dir / "terrain-runtime.spec").write_text("# legacy\n", encoding="utf-8")
@@ -588,9 +609,20 @@ def test_install_source_plugin_standalone_cleans_legacy_wrapper_but_keeps_runtim
     assert result["success"] is True
     assert result["install_mode"] == "standalone-entry"
     assert target_path.exists()
+    installed_record = manager.get_record("terrain-runtime", force_refresh=True)
+    assert installed_record is not None
+    assert installed_record.source == "root-entry"
+    assert installed_record.catalog_managed is False
+    assert installed_record.entry_path == target_path.resolve(strict=False)
+    assert installed_record.protocol_supported is True
+    call_result = manager.call_tool("terrain-runtime", "status", {"message": "generic-onefile"})
+    assert call_result["success"] is True
+    assert call_result["data"]["entry"] == "packaged"
+    assert call_result["data"]["echo"] == "generic-onefile"
     assert (install_dir / "runtime" / "keep.txt").read_text(encoding="utf-8") == "keep me\n"
     assert not (install_dir / "plugin.json").exists()
     assert not (install_dir / "plugin.py").exists()
+    assert not (install_dir / "README.md").exists()
     assert not (install_dir / "build").exists()
     assert not (install_dir / "dist").exists()
     assert not (install_dir / "terrain-runtime.spec").exists()

@@ -28,6 +28,7 @@
     ]
   },
   "packaging": {
+    "format": "pyinstaller-onefile",
     "template": "python-exe",
     "source": "plugin.py",
     "compiled": {

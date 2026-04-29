@@ -1413,7 +1413,13 @@ class DisplayComponents:
             )
             return True
         if event_type == "model_request":
-            # Do not display model_request to avoid showing timeout information
+            self.show_activity_event(
+                category=str(event.get("category", "") or "Model"),
+                message=str(event.get("message", "") or "").strip(),
+                status=str(event.get("status", "") or "working"),
+                detail=str(event.get("detail", "") or "").strip(),
+                meta=str(event.get("meta", "") or "").strip(),
+            )
             return True
         if event_type == "tool_start":
             self.show_tool_invocation(

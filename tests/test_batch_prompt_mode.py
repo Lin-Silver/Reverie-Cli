@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from reverie.agent.agent import THINKING_END_MARKER, THINKING_START_MARKER
 from reverie.__main__ import _decode_prompt_bytes, _resolve_prompt_text
-from reverie.cli.interface import ReverieInterface, _sanitize_prompt_output_text
+from reverie.cli.interface import PromptRunResult, ReverieInterface, _sanitize_prompt_output_text
 from reverie.config import Config, ModelConfig
 
 
@@ -249,6 +249,47 @@ def test_sanitize_prompt_output_text_removes_leaked_thinking():
     cleaned = _sanitize_prompt_output_text(output_text, thinking_text)
 
     assert cleaned == "OK"
+
+
+def test_sanitize_prompt_output_text_removes_untagged_reasoning_prefix():
+    output_text = (
+        "user is asking me to reply with only OK for a startup smoke test. "
+        "This is a straightforward request and I should simply respond with OK.\n\n"
+        "OK"
+    )
+
+    cleaned = _sanitize_prompt_output_text(output_text, "")
+
+    assert cleaned == "OK"
+
+
+def test_sanitize_prompt_output_text_removes_memory_replay_reasoning_prefix():
+    output_text = (
+        "This is exactly what the system prompt says in the workspace global memory: "
+        '"user is asking me to reply with only OK". I should simply respond with OK.\n\n'
+        'I\'ll just output "OK".\n\n'
+        "OK"
+    )
+
+    cleaned = _sanitize_prompt_output_text(output_text, "")
+
+    assert cleaned == "OK"
+
+
+def test_prompt_run_result_to_dict_is_json_serializable_with_paths(tmp_path: Path):
+    result = PromptRunResult(
+        success=True,
+        prompt="smoke",
+        output_text="OK",
+        mode="reverie",
+        project_root=str(tmp_path),
+        harness_report={"path": tmp_path / "report.json", "nested": {"paths": [tmp_path]}},
+    )
+
+    serialized = result.to_dict()
+
+    assert serialized["harness_report"]["path"] == str(tmp_path / "report.json")
+    json.dumps(serialized, ensure_ascii=False)
 
 
 def test_run_prompt_once_auto_continues_spec_driven(tmp_path, monkeypatch):

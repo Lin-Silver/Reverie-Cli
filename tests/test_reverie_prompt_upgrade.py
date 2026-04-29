@@ -3,66 +3,81 @@ from reverie.agent.tool_descriptions import get_tool_descriptions_for_mode
 from reverie.modes import get_mode_tool_discovery_profile
 
 
-def test_reverie_prompt_sets_full_spectrum_ultra_agentic_positioning() -> None:
+def test_reverie_prompt_uses_codex_style_agentic_positioning() -> None:
     prompt = build_system_prompt(model_name="Test Model", mode="reverie")
 
-    assert "You are the default full-spectrum Ultra Agentic mode." in prompt
-    assert "Base Reverie is not a reduced-scope fallback or a smallest-toolset mode." in prompt
-    assert "Use the strongest available tool or toolchain that matches the task." in prompt
-    assert "Switch modes when a specialist workflow offers better artifacts, continuity, or control" in prompt
+    assert "You are operating as and within the Reverie CLI" in prompt
+    assert "You are Reverie, running in Reverie CLI." in prompt
+    assert "The Reverie CLI is open-sourced." in prompt
+    assert "Within this context, Reverie refers to the open-source agentic coding interface." in prompt
+    assert "Please keep going until the user's query is completely resolved" in prompt
+    assert "do NOT guess or make up an answer." in prompt
+    assert "`reverie --help`" in prompt
+    assert "`codex --help`" not in prompt
+    assert "Ultra Agentic" not in prompt
 
 
-def test_reverie_prompt_keeps_incremental_task_manager_triggers() -> None:
+def test_reverie_prompt_keeps_codex_how_you_work_sections() -> None:
     prompt = build_system_prompt(model_name="Test Model", mode="reverie")
 
-    assert "Use `task_manager` when any of these triggers apply" in prompt
-    assert "multi-file or cross-layer" in prompt
-    assert "more than 2 edit/verify cycles likely" in prompt
-    assert "more than 5 information-gathering steps likely" in prompt
-    assert "batch state updates when switching tasks" in prompt
+    assert "# How you work" in prompt
+    assert "## Personality" in prompt
+    assert "### Preamble messages" in prompt
+    assert "## Planning" in prompt
+    assert "## Task execution" in prompt
+    assert "## Sandbox and approvals" in prompt
+    assert "## Ambition vs. precision" in prompt
 
 
-def test_reverie_prompt_adds_package_and_verification_loop_guidance() -> None:
+def test_reverie_prompt_preserves_codex_coding_guidelines() -> None:
     prompt = build_system_prompt(model_name="Test Model", mode="reverie")
 
-    assert "Use the appropriate package manager for dependency changes instead of manually editing manifests" in prompt
-    assert "If verification fails, diagnose the root cause, fix it, and re-run targeted checks" in prompt
-    assert "After editing, run the most relevant verification available" in prompt
+    assert "Fix the problem at the root cause rather than applying surface-level patches" in prompt
+    assert "Avoid unneeded complexity in your solution." in prompt
+    assert "Keep changes consistent with the style of the existing codebase." in prompt
+    assert "NEVER add copyright or license headers unless specifically requested." in prompt
+    assert "Do not `git commit` your changes or create new git branches unless explicitly requested." in prompt
+
+
+def test_reverie_prompt_guides_external_research_and_download_automation() -> None:
+    prompt = build_system_prompt(model_name="Test Model", mode="reverie")
+    workflow = get_tool_descriptions_for_mode("reverie")
+
+    assert "Prefer `web_search` for broad link discovery" in prompt
+    assert "Prefer `web_fetch` for fetching selected pages" in prompt
+    assert "Use those tool names and schemas rather than inventing Codex-specific tool names." in prompt
+    assert "Search the web for many candidate links" in workflow
+    assert "Fetch readable content from selected URLs." in workflow
 
 
 def test_reverie_prompt_moves_style_preferences_to_rules_layer() -> None:
     prompt = build_system_prompt(model_name="Test Model", mode="reverie")
 
-    assert "Project, team, or user preferences about tone, verbosity, formatting, explanation depth, or reporting style belong in Rules-layer guidance supplied through `additional_rules`." in prompt
-    assert "Let tone, verbosity, formatting, and explanation-depth preferences come from the active Rules layer" in prompt
+    assert "Your default personality and tone is concise, direct, and friendly." in prompt
+    assert "Final answer structure and style guidelines" in prompt
     assert "Be terse, direct, and engineering-focused." not in prompt
     assert "Do not pad. Do not re-narrate the work. Report outcomes." not in prompt
 
 
-def test_reverie_prompt_adds_black_box_completion_protocol() -> None:
+def test_reverie_prompt_keeps_completion_contract() -> None:
     prompt = build_system_prompt(model_name="Test Model", mode="reverie")
 
-    assert "Black-Box Completion Protocol" in prompt
-    assert "Treat broad directives - `continue`, `complete`, `black box`, `do not stop`, `one-shot`, `keep going`" in prompt
-    assert "Maintain the private completion ledger at all times." in prompt
-    assert "Escalate to the user **only** for: credentials, paid resources" in prompt
-    assert "For Blender, Blockbench, game, runtime, or asset-pipeline requests in base Reverie mode" in prompt
-    assert "continuous deformable body core" in prompt
-    assert "TRELLIS `profile=low_vram`" in prompt
+    assert "Only terminate your turn when you are sure that the problem is solved." in prompt
+    assert "Autonomously resolve the query to the best of your ability" in prompt
+    assert "End every final response with `//END//`; this is Reverie's completion signal." in prompt
 
 
-def test_reverie_tool_workflow_guides_full_spectrum_execution() -> None:
+def test_reverie_tool_workflow_comes_from_json_manifest() -> None:
     workflow = get_tool_descriptions_for_mode("reverie")
 
-    assert "Base Reverie is the default full-spectrum Ultra Agentic mode" in workflow
-    assert "Use the strongest visible toolchain that matches the task" in workflow
-    assert "For black-box, one-shot, `continue`, or \"do not stop\" requests" in workflow
-    assert "Ask for `userInput` only for irreversible or externally sensitive choices" in workflow
-    assert "For AAA character-art briefs in base Reverie mode" in workflow
-    assert "require post-run audit evidence" in workflow
-    assert "`game_models` assisted lanes" in workflow
-    assert "body-continuity" in workflow
-    assert "workflow leverage, artifacts, or continuity instead of because Reverie lacks capability" in workflow
+    assert "Source: `reverie/agent/tool_manifest.json`" in workflow
+    assert "General-purpose execution loop" in workflow
+    assert "`web_search`" in workflow
+    assert "`web_fetch`" in workflow
+    assert "`command_exec`" in workflow
+    assert "`task_manager`" in workflow
+    assert "`tool_catalog`" in workflow
+    assert "rc_blender_ensure_runtime" in workflow
 
 
 def test_shared_coding_guardrails_are_injected_into_all_modes() -> None:

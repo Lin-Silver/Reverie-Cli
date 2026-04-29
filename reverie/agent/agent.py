@@ -41,6 +41,8 @@ THINKING_START_MARKER = "[[THINKING_START]]"
 THINKING_END_MARKER = "[[THINKING_END]]"
 STREAM_EVENT_MARKER = "[[REVERIE_EVENT]]"
 HIDDEN_STREAM_TOKEN = "//END//"
+THINKING_OPEN_TAG_LITERAL = "<think>"
+THINKING_CLOSE_TAG_LITERAL = "</think>"
 
 # Configure logging for debugging
 logger = logging.getLogger(__name__)
@@ -417,7 +419,30 @@ class _StreamingTurnState:
     finish_reason: Optional[str] = None
     thinking_started: bool = False
     stream_buffer: str = ""
+    content_tag_buffer: str = ""
+    inline_thinking: bool = False
     token_to_hide: str = HIDDEN_STREAM_TOKEN
+
+    @staticmethod
+    def _find_tag(text: str, tag: str) -> int:
+        return str(text or "").lower().find(str(tag or "").lower())
+
+    @staticmethod
+    def _split_partial_tag_suffix(text: str, tags: tuple[str, ...]) -> tuple[str, str]:
+        lower_text = str(text or "").lower()
+        if not lower_text:
+            return "", ""
+
+        best_length = 0
+        for tag in tags:
+            lower_tag = str(tag or "").lower()
+            for suffix_length in range(1, min(len(lower_text), len(lower_tag) - 1) + 1):
+                if lower_tag.startswith(lower_text[-suffix_length:]):
+                    best_length = max(best_length, suffix_length)
+
+        if best_length <= 0:
+            return text, ""
+        return text[:-best_length], text[-best_length:]
 
     def add_reasoning(self, text: Any) -> List[str]:
         reasoning_text = str(text or "")
@@ -431,7 +456,7 @@ class _StreamingTurnState:
         chunks.append(reasoning_text)
         return chunks
 
-    def add_content(self, text: Any) -> List[str]:
+    def _add_visible_content(self, text: Any) -> List[str]:
         content_text = str(text or "")
         if not content_text:
             return []
@@ -468,6 +493,76 @@ class _StreamingTurnState:
             self.stream_buffer = ""
 
         return chunks
+
+    def _drain_content_tag_buffer(self, *, final: bool = False) -> List[str]:
+        chunks: List[str] = []
+
+        while self.content_tag_buffer:
+            buffer = self.content_tag_buffer
+            if self.inline_thinking:
+                close_index = self._find_tag(buffer, THINKING_CLOSE_TAG_LITERAL)
+                if close_index >= 0:
+                    thinking_text = buffer[:close_index]
+                    if thinking_text:
+                        chunks.extend(self.add_reasoning(thinking_text))
+                    self.content_tag_buffer = buffer[close_index + len(THINKING_CLOSE_TAG_LITERAL):]
+                    self.inline_thinking = False
+                    continue
+
+                if final:
+                    chunks.extend(self.add_reasoning(buffer))
+                    self.content_tag_buffer = ""
+                    break
+
+                safe_text, pending_suffix = self._split_partial_tag_suffix(
+                    buffer,
+                    (THINKING_CLOSE_TAG_LITERAL,),
+                )
+                if safe_text:
+                    chunks.extend(self.add_reasoning(safe_text))
+                self.content_tag_buffer = pending_suffix
+                break
+
+            open_index = self._find_tag(buffer, THINKING_OPEN_TAG_LITERAL)
+            close_index = self._find_tag(buffer, THINKING_CLOSE_TAG_LITERAL)
+            if close_index >= 0 and (open_index < 0 or close_index < open_index):
+                visible_text = buffer[:close_index]
+                if visible_text:
+                    chunks.extend(self._add_visible_content(visible_text))
+                self.content_tag_buffer = buffer[close_index + len(THINKING_CLOSE_TAG_LITERAL):]
+                continue
+
+            if open_index >= 0:
+                visible_text = buffer[:open_index]
+                if visible_text:
+                    chunks.extend(self._add_visible_content(visible_text))
+                self.content_tag_buffer = buffer[open_index + len(THINKING_OPEN_TAG_LITERAL):]
+                self.inline_thinking = True
+                continue
+
+            if final:
+                chunks.extend(self._add_visible_content(buffer))
+                self.content_tag_buffer = ""
+                break
+
+            safe_text, pending_suffix = self._split_partial_tag_suffix(
+                buffer,
+                (THINKING_OPEN_TAG_LITERAL, THINKING_CLOSE_TAG_LITERAL),
+            )
+            if safe_text:
+                chunks.extend(self._add_visible_content(safe_text))
+            self.content_tag_buffer = pending_suffix
+            break
+
+        return chunks
+
+    def add_content(self, text: Any) -> List[str]:
+        content_text = str(text or "")
+        if not content_text:
+            return []
+
+        self.content_tag_buffer += content_text
+        return self._drain_content_tag_buffer(final=False)
 
     def ensure_tool_call(self, index: int) -> Dict[str, Any]:
         normalized_index = max(0, int(index or 0))
@@ -526,6 +621,8 @@ class _StreamingTurnState:
 
     def flush(self) -> List[str]:
         chunks: List[str] = []
+        chunks.extend(self._drain_content_tag_buffer(final=True))
+        self.inline_thinking = False
         if self.thinking_started:
             chunks.append(THINKING_END_MARKER)
             self.thinking_started = False

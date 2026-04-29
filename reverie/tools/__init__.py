@@ -8,7 +8,8 @@ Tools available to the AI Agent:
 - file_ops: File system operations
 - delete_file: Delete a single workspace file with confirmation
 - command_exec: Execute audited workspace commands with move/delete blacklist
-- web_search: Search the web
+- web_search: Search the web for candidate links
+- web_fetch: Fetch readable content from selected URLs
 - tool_catalog: Search and inspect the currently visible tool surface
 - task_manager: Organize complex work
 - subagent: Delegate bounded Reverie-mode work to configured Subagents
@@ -26,7 +27,7 @@ from .str_replace_editor import StrReplaceEditorTool
 from .file_ops import FileOpsTool
 from .delete_file import DeleteFileTool
 from .command_exec import CommandExecTool
-from .web_search import WebSearchTool
+from .web_search import WebFetchTool, WebSearchTool
 from .tool_catalog import ToolCatalogTool
 from .task_manager import TaskManagerTool
 from .subagent import SubagentTool
@@ -76,6 +77,7 @@ __all__ = [
     'DeleteFileTool',
     'CommandExecTool',
     'WebSearchTool',
+    'WebFetchTool',
     'ToolCatalogTool',
     'TaskManagerTool',
     "SubagentTool",

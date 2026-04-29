@@ -14,6 +14,7 @@ import threading
 import _thread
 import json
 import re
+import concurrent.futures
 from datetime import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -97,6 +98,8 @@ _TOOL_MARKUP_PREFIXES = (
     "[#ba68c8]   │",
 )
 _STRONG_CLEAR_SEQUENCE = "\033[3J\033[2J\033[H"
+_STREAM_FOOTER_MIN_REFRESH_INTERVAL = 0.08
+_STREAM_FOOTER_TICK_INTERVAL = 0.25
 _TASK_STATE_BY_MARKER = {
     " ": "NOT_STARTED",
     "/": "IN_PROGRESS",
@@ -340,6 +343,7 @@ def split_markdown_fragments(pending: str, fragment: str) -> tuple[str, str]:
 def parse_thinking_line(raw_line: str) -> tuple[str, str]:
     """Normalize one reasoning line for terminal-friendly display."""
     text = str(raw_line or "").replace("\r", "")
+    text = re.sub(r"(?is)</?think>", "", text)
     text = re.sub(r"[ \t]+", " ", text).strip()
     if not text:
         return "", ""
@@ -391,7 +395,87 @@ def _sanitize_prompt_output_text(output_text: str, thinking_text: str) -> str:
         if tail:
             cleaned = tail
 
+    cleaned = _strip_leaked_prompt_reasoning_prefix(cleaned)
+
     return cleaned.strip()
+
+
+def _strip_leaked_prompt_reasoning_prefix(output_text: str) -> str:
+    cleaned = str(output_text or "").strip()
+    if not cleaned:
+        return ""
+
+    paragraphs = [part.strip() for part in re.split(r"\n\s*\n+", cleaned) if part.strip()]
+    if len(paragraphs) < 2:
+        return cleaned
+
+    first = paragraphs[0]
+    tail = "\n\n".join(paragraphs[1:]).strip()
+    if not tail:
+        return cleaned
+
+    first_lower = first.lower()
+    leakage_prefixes = (
+        "the user ",
+        "user is ",
+        "user has ",
+        "the request ",
+        "this is a simple ",
+        "this is a straightforward ",
+        "i need ",
+        "i should ",
+        "let me ",
+        "we need ",
+    )
+    leakage_markers = (
+        " asking",
+        " asked",
+        " wants",
+        " requested",
+        " should ",
+        " respond",
+        " reply",
+        " output",
+        " prompt",
+        " request",
+    )
+    if any(first_lower.startswith(prefix) for prefix in leakage_prefixes) and any(
+        marker in first_lower for marker in leakage_markers
+    ):
+        return tail
+
+    final = paragraphs[-1]
+    prefix_text = "\n\n".join(paragraphs[:-1]).lower()
+    if len(final) <= 240 and any(
+        marker in prefix_text
+        for marker in (
+            "user is asking",
+            "user wants",
+            "the user wants",
+            "the user asked",
+            "i should simply",
+            "i should respond",
+            "i should reply",
+            "i'll just output",
+            "let me output",
+            "workspace global memory",
+        )
+    ):
+        return final
+
+    return cleaned
+
+
+def _json_safe_value(value: Any) -> Any:
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(_json_safe_value(key)): _json_safe_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe_value(item) for item in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
 
 
 def _build_batch_prompt_rules() -> str:
@@ -625,9 +709,9 @@ class PromptRunResult:
             "error": self.error,
             "context_engine_initialized": self.context_engine_initialized,
             "auto_followup_count": self.auto_followup_count,
-            "activity_events": list(self.activity_events),
-            "ui_events": list(self.ui_events),
-            "harness_report": dict(self.harness_report),
+            "activity_events": _json_safe_value(list(self.activity_events)),
+            "ui_events": _json_safe_value(list(self.ui_events)),
+            "harness_report": _json_safe_value(dict(self.harness_report)),
         }
 
 
@@ -661,9 +745,8 @@ class ReverieInterface:
         self.mcp_config_manager = MCPConfigManager(self.config_manager.app_root)
         self.mcp_config_manager.ensure_dirs()
         self.skills_manager = SkillsManager(self.project_root, self.config_manager.app_root)
-        self.skills_manager.scan()
         self.runtime_plugin_manager = RuntimePluginManager(self.config_manager.app_root)
-        self.runtime_plugin_manager.scan()
+        self._startup_discovery_ready = False
         self._ensure_builtin_mcp_servers()
         self.mcp_runtime = MCPRuntime(self.mcp_config_manager, project_root=self.project_root)
         self.rules_manager = RulesManager(project_root)
@@ -686,7 +769,11 @@ class ReverieInterface:
         self.streaming_footer = StreamingFooter(self)
         self._stream_input_state: Optional[StreamInputState] = None
         self._stream_input_thread: Optional[threading.Thread] = None
+        self._stream_footer_ticker_stop: Optional[threading.Event] = None
+        self._stream_footer_ticker_thread: Optional[threading.Thread] = None
         self._status_live = None
+        self._footer_refresh_lock = threading.Lock()
+        self._streaming_footer_config: Optional[Config] = None
         self._pending_input_draft = ""
         self._markdown_formatter = MarkdownFormatter(console=self.console)
 
@@ -704,6 +791,9 @@ class ReverieInterface:
         self._assistant_render_started = False
         self._assistant_blank_line_pending = False
         self._current_content_tokens = 0
+        self._startup_timing_active = False
+        self._startup_started_monotonic = time.perf_counter()
+        self._activity_last_monotonic = self._startup_started_monotonic
 
     def _clone_config(self, config: Config) -> Config:
         """Return a deep-ish copy of config through the canonical serializer."""
@@ -989,23 +1079,83 @@ class ReverieInterface:
             "modelscope": "ModelScope",
         }
         return source_labels.get(source_name, "") or provider_labels.get(provider_name, provider_name or "provider")
+
+    def _format_startup_timing_meta(self, meta: str = "") -> str:
+        """Append startup phase timing while the interactive shell is booting."""
+        meta_text = str(meta or "").strip()
+        if not self._startup_timing_active:
+            return meta_text
+
+        now = time.perf_counter()
+        delta_ms = max(0.0, (now - self._activity_last_monotonic) * 1000.0)
+        total_ms = max(0.0, (now - self._startup_started_monotonic) * 1000.0)
+        self._activity_last_monotonic = now
+        timing = f"+{delta_ms:.0f}ms | total {total_ms:.0f}ms"
+        return f"{meta_text} | {timing}" if meta_text else timing
+
+    def _warm_startup_discovery(self) -> None:
+        """Warm skill and runtime-plugin catalogs after the banner is visible."""
+        if self._startup_discovery_ready:
+            return
+
+        summaries: List[str] = []
+        errors: List[str] = []
+
+        def scan_skills() -> str:
+            return self.skills_manager.scan().summary_label()
+
+        def scan_plugins() -> str:
+            return self.runtime_plugin_manager.scan().summary_label()
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="reverie-startup") as executor:
+            futures = {
+                executor.submit(scan_skills): "skills",
+                executor.submit(scan_plugins): "plugins",
+            }
+            for future in concurrent.futures.as_completed(futures):
+                label = futures[future]
+                try:
+                    summaries.append(f"{label}: {future.result()}")
+                except Exception as exc:
+                    errors.append(f"{label}: {exc}")
+
+        self._startup_discovery_ready = True
+        if errors:
+            self._show_activity_event(
+                "Discovery",
+                "Startup discovery finished with warnings",
+                status="warning",
+                detail=" | ".join(errors[:2]),
+            )
+            return
+
+        self._show_activity_event(
+            "Discovery",
+            "Skills and runtime plugins are warm",
+            status="success",
+            detail=" | ".join(summaries),
+        )
     
     def run(self) -> None:
         """Main entry point"""
         try:
-            self._fast_clear_terminal()
+            self._startup_timing_active = True
+            self._startup_started_monotonic = time.perf_counter()
+            self._activity_last_monotonic = self._startup_started_monotonic
             config = self.config_manager.load()
             self._fast_clear_terminal()
             self.display.show_welcome()
             self._show_pending_config_notice()
             self._show_unconfigured_model_notice(config)
             self._show_startup_configuration_log(config)
+            self._warm_startup_discovery()
             
             self._init_agent()
             self.command_handler = CommandHandler(self.console, self._get_app_context())
             if not self.session_manager.get_current_session():
                 self._init_session()
-            
+
+            self._startup_timing_active = False
             self.main_loop()
             
         except KeyboardInterrupt:
@@ -1024,11 +1174,15 @@ class ReverieInterface:
         mode_label = str(getattr(config, "mode", "reverie") or "reverie").upper()
         theme_label = str(getattr(config, "theme", "default") or "default").strip() or "default"
         source_label = str(getattr(config, "active_model_source", "standard") or "standard").strip() or "standard"
+        stream_label = "stream on" if bool(getattr(config, "stream_responses", True)) else "stream off"
+        status_label = "status on" if bool(getattr(config, "show_status_line", True)) else "status off"
+        thinking_label = normalize_thinking_output_style(getattr(config, "thinking_output_style", "full"))
         self._show_activity_event(
             "Startup",
             f"v{__version__} | {mode_label} | {source_label}",
             status="info",
             detail=f"theme: {theme_label} | workspace: {self.project_root}",
+            meta=f"{stream_label} | thinking {thinking_label} | {status_label}",
         )
 
     def _get_status_line(self, current_content_tokens: int = 0):
@@ -1344,29 +1498,48 @@ class ReverieInterface:
         live = self._status_live
         if live is None:
             return
-        signature = self._build_streaming_footer_signature()
-        if not force and signature == self._last_footer_render_signature:
-            return
-        now = time.monotonic()
-        try:
-            live.update(self.streaming_footer, refresh=False)
-            if force or now - self._last_footer_refresh_time >= 0.12:
-                live.refresh()
-                self._last_footer_refresh_time = now
-                self._last_footer_render_signature = signature
-            return
-        except Exception:
-            pass
-        try:
-            if force or now - self._last_footer_refresh_time >= 0.12:
-                live.refresh()
-                self._last_footer_refresh_time = now
-                self._last_footer_render_signature = signature
-        except Exception:
-            pass
+        refresh_lock = getattr(self, "_footer_refresh_lock", None)
+        if refresh_lock is None:
+            refresh_lock = threading.Lock()
+            self._footer_refresh_lock = refresh_lock
+        with refresh_lock:
+            signature = self._build_streaming_footer_signature()
+            if not force and signature == self._last_footer_render_signature:
+                return
+            now = time.monotonic()
+            try:
+                live.update(self.streaming_footer, refresh=False)
+                if force or now - self._last_footer_refresh_time >= _STREAM_FOOTER_MIN_REFRESH_INTERVAL:
+                    live.refresh()
+                    self._last_footer_refresh_time = now
+                    self._last_footer_render_signature = signature
+                return
+            except Exception:
+                pass
+            try:
+                if force or now - self._last_footer_refresh_time >= _STREAM_FOOTER_MIN_REFRESH_INTERVAL:
+                    live.refresh()
+                    self._last_footer_refresh_time = now
+                    self._last_footer_render_signature = signature
+            except Exception:
+                pass
 
     def _build_streaming_footer_signature(self) -> tuple:
         """Build a lightweight signature so identical footer redraws can be skipped."""
+        elapsed = float(getattr(self, "total_active_time", 0.0) or 0.0)
+        current_task_start = getattr(self, "current_task_start", None)
+        if current_task_start:
+            elapsed += max(time.time() - float(current_task_start), 0.0)
+        try:
+            width_bucket = max(int(getattr(self.console.size, "width", 0) or self.console.width or 0), 60) // 8
+        except Exception:
+            width_bucket = 10
+
+        active_config = getattr(self, "_streaming_footer_config", None)
+        show_status_line = True
+        if active_config is not None:
+            show_status_line = bool(getattr(active_config, "show_status_line", True))
+
         with self._active_tool_lock:
             active_tool_rows = tuple(
                 (
@@ -1381,8 +1554,12 @@ class ReverieInterface:
             )
         stream_snapshot = self._stream_input_state.snapshot() if self._stream_input_state else {}
         return (
-            bool(self._task_drawer_visible),
-            self._task_drawer_cache_key,
+            int(elapsed),
+            int(getattr(self, "_current_content_tokens", 0) or 0),
+            width_bucket,
+            show_status_line,
+            bool(getattr(self, "_task_drawer_visible", False)),
+            getattr(self, "_task_drawer_cache_key", None),
             active_tool_rows,
             str(stream_snapshot.get("buffer", "") or ""),
             bool(stream_snapshot.get("paused")),
@@ -1400,7 +1577,7 @@ class ReverieInterface:
         """Compose the live footer shown during streaming output."""
         renderables = []
         try:
-            config = self.config_manager.load()
+            config = getattr(self, "_streaming_footer_config", None) or self.config_manager.load()
             self._apply_display_preferences(config)
             if config.show_status_line:
                 renderables.append(self._get_status_line(current_content_tokens=self._current_content_tokens))
@@ -1414,6 +1591,38 @@ class ReverieInterface:
             renderables.append(task_drawer)
         renderables.append(self._build_stream_input_prompt())
         return Group(*renderables)
+
+    def _streaming_footer_ticker_loop(self, stop_event: threading.Event) -> None:
+        """Refresh time-sensitive footer fields while output is otherwise quiet."""
+        while not stop_event.wait(_STREAM_FOOTER_TICK_INTERVAL):
+            if self._status_live is None:
+                return
+            self._refresh_streaming_footer()
+
+    def _start_streaming_footer_ticker(self) -> None:
+        """Start the low-frequency footer ticker for timers and live counters."""
+        self._stop_streaming_footer_ticker()
+        stop_event = threading.Event()
+        thread = threading.Thread(
+            target=self._streaming_footer_ticker_loop,
+            args=(stop_event,),
+            daemon=True,
+            name="reverie-stream-footer",
+        )
+        self._stream_footer_ticker_stop = stop_event
+        self._stream_footer_ticker_thread = thread
+        thread.start()
+
+    def _stop_streaming_footer_ticker(self) -> None:
+        """Stop the low-frequency footer ticker."""
+        stop_event = getattr(self, "_stream_footer_ticker_stop", None)
+        thread = getattr(self, "_stream_footer_ticker_thread", None)
+        if stop_event:
+            stop_event.set()
+        if thread and thread.is_alive() and thread is not threading.current_thread():
+            thread.join(timeout=0.3)
+        self._stream_footer_ticker_stop = None
+        self._stream_footer_ticker_thread = None
 
     def _consume_pending_input_draft(self) -> str:
         """Return and clear any draft captured during streaming."""
@@ -1538,13 +1747,14 @@ class ReverieInterface:
         meta: str = "",
     ) -> None:
         """Render a system/session activity event with the shared timeline style."""
+        display_meta = self._format_startup_timing_meta(meta)
         self._captured_activity_events.append(
             {
                 "category": str(category or "Activity"),
                 "message": str(message or "").strip(),
                 "status": str(status or "info"),
                 "detail": str(detail or "").strip(),
-                "meta": str(meta or "").strip(),
+                "meta": display_meta,
             }
         )
         if self.headless:
@@ -1554,7 +1764,7 @@ class ReverieInterface:
             message=message,
             status=status,
             detail=detail,
-            meta=meta,
+            meta=display_meta,
         )
 
     def _handle_agent_ui_event(self, event: Dict[str, Any]) -> None:
@@ -1771,15 +1981,18 @@ class ReverieInterface:
         footer_live = Live(
             self.streaming_footer,
             console=self.console,
-            refresh_per_second=1,
+            refresh_per_second=8,
             auto_refresh=False,
             transient=True,
             vertical_overflow="visible",
         )
         footer_live.start()
         self._status_live = footer_live
+        self._streaming_footer_config = config
         self._last_footer_refresh_time = 0.0
         self._last_footer_render_signature = None
+        self._refresh_streaming_footer(force=True)
+        self._start_streaming_footer_ticker()
         self._start_stream_input_capture()
 
         # Reset current content tokens for new message
@@ -1903,9 +2116,11 @@ class ReverieInterface:
                     except Exception:
                         pass
                 self._stop_stream_input_capture()
+                self._stop_streaming_footer_ticker()
                 self._stream_input_state = None
                 footer_live.stop()
                 self._status_live = None
+                self._streaming_footer_config = None
                 self._last_footer_render_signature = None
                 with self._active_tool_lock:
                     self._active_tool_details.clear()
@@ -1952,8 +2167,10 @@ class ReverieInterface:
             # Don't re-raise the exception to prevent app from stopping
         finally:
             self._stop_stream_input_capture()
+            self._stop_streaming_footer_ticker()
             self._stream_input_state = None
             self._status_live = None
+            self._streaming_footer_config = None
             if self.current_task_start:
                 elapsed_active = time.time() - self.current_task_start
                 self.total_active_time += elapsed_active
@@ -2033,6 +2250,7 @@ class ReverieInterface:
             max_width=max(int(getattr(self.console, "width", 80) or 80) - 2, 40),
         )
         self.console.print(Padding(renderable, (0, 0, 0, 2)))
+        self._refresh_streaming_footer()
     
     def _print_thinking_content(self, content: str) -> None:
         """Helper method to print thinking content with proper formatting"""
@@ -2047,6 +2265,7 @@ class ReverieInterface:
             lines = lines[:-1]
         for line in lines:
             self._render_thinking_line(line)
+        self._refresh_streaming_footer()
 
     def _render_thinking_line(self, raw_line: str) -> None:
         """Render one cleaned reasoning line without leaking raw markdown markers."""
@@ -2056,18 +2275,18 @@ class ReverieInterface:
 
         if style == "full":
             text = str(raw_line or "").replace("\r", "")
+            text = re.sub(r"(?is)</?think>", "", text).strip()
+            if not text:
+                return
             prefix = Text(f"{DECO.LINE_VERTICAL} ", style=self.theme.THINKING_DIM)
             line = Text()
             line.append_text(prefix)
-            if text:
-                line.append_text(
-                    self._markdown_formatter.format_inline_text(
-                        text,
-                        base_style=f"italic {self.theme.THINKING_SOFT}",
-                    )
+            line.append_text(
+                self._markdown_formatter.format_inline_text(
+                    text,
+                    base_style=f"italic {self.theme.THINKING_SOFT}",
                 )
-            else:
-                line.append(" ", style=f"italic {self.theme.THINKING_SOFT}")
+            )
             self.console.print(line)
             return
 
@@ -2101,6 +2320,8 @@ class ReverieInterface:
         lines, remainder = split_thinking_fragments(pending, fragment)
         for line in lines:
             self._render_thinking_line(line)
+        if lines:
+            self._refresh_streaming_footer()
         return remainder
 
     def _get_index_status_text(self) -> Optional[Text]:
@@ -2345,7 +2566,6 @@ class ReverieInterface:
     ) -> None:
         config = self._clone_config(config_override) if config_override is not None else self._load_active_runtime_config()
         self.mcp_runtime.set_project_root(self.project_root)
-        self.runtime_plugin_manager.get_snapshot(force_refresh=False)
         scope_changed = self._ensure_runtime_services_for_config(config)
         if normalize_mode(config.mode) == "computer-controller":
             runtime_nvidia = build_nvidia_computer_controller_runtime_model_data(getattr(config, "nvidia", {}))
@@ -2399,12 +2619,26 @@ class ReverieInterface:
                 detail=f"Saved max context tokens for {model.model_display_name}.",
             )
 
+        reuse_candidate = (
+            not scope_changed
+            and self.agent is not None
+            and hasattr(self.agent, "reconfigure_runtime")
+        )
+        include_discovery_status = (
+            not reuse_candidate
+            or self._startup_discovery_ready
+            or getattr(self.runtime_plugin_manager, "_snapshot", None) is not None
+        )
+
         agent_kwargs = {
             "base_url": model.base_url,
             "api_key": model.api_key,
             "model": model.model,
             "model_display_name": model.model_display_name,
-            "additional_rules": self._build_additional_rules_with_tti(config),
+            "additional_rules": self._build_additional_rules_with_tti(
+                config,
+                include_discovery_status=include_discovery_status,
+            ),
             "mode": config.mode or "reverie",
             "provider": getattr(model, 'provider', 'openai-sdk'),
             "thinking_mode": getattr(model, 'thinking_mode', None),
@@ -2414,14 +2648,11 @@ class ReverieInterface:
         }
 
         reused_agent = False
-        if (
-            not scope_changed
-            and self.agent is not None
-            and hasattr(self.agent, "reconfigure_runtime")
-        ):
+        if reuse_candidate:
             self.agent.reconfigure_runtime(**agent_kwargs)
             reused_agent = True
         else:
+            self.runtime_plugin_manager.get_snapshot(force_refresh=False)
             existing_messages = []
             if not scope_changed and hasattr(self, 'agent') and self.agent is not None:
                 existing_messages = self.agent.messages.copy()
@@ -2695,7 +2926,12 @@ class ReverieInterface:
         finally:
             self._runtime_config_override = previous_override
 
-    def _build_additional_rules_with_tti(self, config: Config) -> str:
+    def _build_additional_rules_with_tti(
+        self,
+        config: Config,
+        *,
+        include_discovery_status: bool = True,
+    ) -> str:
         """Append TTI model metadata from config.json into model context."""
         base_rules = (self.rules_manager.get_rules_text() or "").strip()
         normalized_mode = normalize_mode(getattr(config, "mode", "reverie"))
@@ -2780,13 +3016,13 @@ class ReverieInterface:
                     memory_indexer=self.memory_indexer,
                     operation_history=self.operation_history,
                     rollback_manager=self.rollback_manager,
-                    runtime_plugin_manager=self.runtime_plugin_manager,
-                    skills_manager=self.skills_manager,
+                    runtime_plugin_manager=self.runtime_plugin_manager if include_discovery_status else None,
+                    skills_manager=self.skills_manager if include_discovery_status else None,
                     mcp_runtime=self.mcp_runtime,
                 ),
                 self.mcp_runtime.describe_for_prompt(),
-                self.runtime_plugin_manager.describe_for_prompt(),
-                self.skills_manager.describe_for_prompt(force_refresh=True),
+                self.runtime_plugin_manager.describe_for_prompt() if include_discovery_status else "",
+                self.skills_manager.describe_for_prompt(force_refresh=False) if include_discovery_status else "",
                 atlas_block,
                 memory_block,
             ]

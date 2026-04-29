@@ -355,7 +355,7 @@ def default_nvidia_config() -> Dict[str, Any]:
         "api_url": NVIDIA_DEFAULT_API_URL,
         "endpoint": NVIDIA_DEFAULT_REQUEST_ENDPOINT,
         "max_context_tokens": NVIDIA_DEFAULT_CONTEXT_TOKENS,
-        "timeout": 30,
+        "timeout": 60,
         "max_tokens": 16384,
         "temperature": 0.60,
         "top_p": 0.95,

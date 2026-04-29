@@ -13,7 +13,7 @@ from .str_replace_editor import StrReplaceEditorTool
 from .file_ops import FileOpsTool
 from .delete_file import DeleteFileTool
 from .command_exec import CommandExecTool
-from .web_search import WebSearchTool
+from .web_search import WebFetchTool, WebSearchTool
 from .tool_catalog import ToolCatalogTool
 from .task_manager import TaskManagerTool
 from .context_management import ContextManagementTool
@@ -187,6 +187,7 @@ def _register_builtin_tools() -> None:
     register_tool_class(DeleteFileTool)
     register_tool_class(CommandExecTool)
     register_tool_class(WebSearchTool)
+    register_tool_class(WebFetchTool)
     register_tool_class(ToolCatalogTool)
     register_tool_class(TaskManagerTool, include_modes=("reverie", "reverie-gamer"))
     register_tool_class(SubagentTool, include_modes=("reverie",))

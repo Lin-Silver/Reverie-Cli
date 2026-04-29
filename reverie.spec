@@ -77,6 +77,7 @@ if resolved_icon is None:
 
 add_data_if_exists(comfy_src / "generate_image.py", "reverie_resources/comfy")
 add_data_if_exists(comfy_src / "embedded_comfy.b64", "reverie_resources/comfy")
+add_data_if_exists(repo_root / "reverie" / "agent" / "tool_manifest.json", "reverie/agent")
 add_data_if_exists(repo_root / "reverie" / "engine_lite" / "vendor" / "live2d" / "live2dcubismcore.min.js", "reverie/engine_lite/vendor/live2d")
 
 ffmpeg_binary = resolve_ffmpeg_binary()

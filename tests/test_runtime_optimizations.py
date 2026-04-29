@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from pathlib import Path
 
 import requests
@@ -21,6 +22,7 @@ from reverie.context_engine.symbol_table import Symbol, SymbolKind, SymbolTable
 from reverie.gamer import reference_intelligence as gamer_reference_intelligence
 from reverie.sse import iter_sse_data_strings
 from reverie.tools.command_exec import CommandExecTool
+from reverie.tools.web_search import WebFetchTool, WebSearchTool
 
 
 class _FakeStreamingResponse:
@@ -134,6 +136,26 @@ def test_streaming_turn_state_hides_end_token_and_closes_thinking() -> None:
         "world",
     ]
     assert state.cleaned_content() == "Hello world"
+
+
+def test_streaming_turn_state_routes_inline_think_tags_to_reasoning() -> None:
+    state = _StreamingTurnState()
+
+    chunks = []
+    chunks.extend(state.add_content("<thi"))
+    chunks.extend(state.add_content("nk>Plan first"))
+    chunks.extend(state.add_content("</thi"))
+    chunks.extend(state.add_content("nk>\nAnswer //END//"))
+    chunks.extend(state.flush())
+
+    assert chunks == [
+        THINKING_START_MARKER,
+        "Plan first",
+        THINKING_END_MARKER,
+        "\nAnswer ",
+    ]
+    assert state.collected_thinking == "Plan first"
+    assert state.cleaned_content() == "Answer"
 
 
 def test_streaming_turn_state_accumulates_tool_call_arguments() -> None:
@@ -331,6 +353,64 @@ def test_display_condensed_command_result_skips_preview_after_live_progress() ->
     assert "clean tree" not in rendered
 
 
+def test_web_search_defaults_to_link_discovery_without_fetch(monkeypatch) -> None:
+    tool = WebSearchTool()
+    tool._available = True
+
+    monkeypatch.setattr(
+        tool,
+        "_search_ddg",
+        lambda *args, **kwargs: [
+            {
+                "title": "Modrinth API",
+                "href": "https://docs.modrinth.com/api/",
+                "body": "Official API docs",
+                "rank": 1,
+            }
+        ],
+    )
+    monkeypatch.setattr(tool, "_search_brave", lambda *args, **kwargs: [])
+
+    def fail_fetch(*args, **kwargs):
+        raise AssertionError("web_search should not fetch page content by default")
+
+    monkeypatch.setattr(tool, "_fetch_page_payload", fail_fetch)
+
+    result = tool.execute(query="Modrinth API", max_results=5)
+
+    assert result.success is True
+    assert result.data["settings"]["fetch_content"] is False
+    assert "https://docs.modrinth.com/api/" in result.output
+    assert "Fetch Status" not in result.output
+
+
+def test_web_fetch_reads_selected_urls(monkeypatch) -> None:
+    tool = WebFetchTool()
+    tool._available = True
+
+    monkeypatch.setattr(
+        tool,
+        "_fetch_page_payload",
+        lambda url, **kwargs: {
+            "fetch_status": "ok",
+            "fetched_title": "Modrinth API",
+            "fetched_description": "API docs",
+            "fetched_content": "Use project versions endpoints for downloads.",
+            "outbound_links": ["https://api.modrinth.com/v2/"],
+        },
+    )
+
+    result = tool.execute(
+        urls=["https://docs.modrinth.com/api/", "not-a-url", "https://docs.modrinth.com/api/"],
+        max_content_chars=2000,
+    )
+
+    assert result.success is True
+    assert result.data["count"] == 1
+    assert "Use project versions endpoints for downloads." in result.output
+    assert result.data["results"][0]["url"] == "https://docs.modrinth.com/api"
+
+
 def test_command_exec_emits_incremental_ui_progress(tmp_path: Path) -> None:
     events = []
     tool = CommandExecTool(
@@ -413,6 +493,29 @@ def test_interface_deduplicates_repeated_live_tool_progress_chunks() -> None:
 
     summary = interface._clear_active_tool("call_progress")
     assert summary["had_live_progress"] is True
+
+
+def test_streaming_footer_signature_tracks_timer_and_token_changes() -> None:
+    interface = ReverieInterface.__new__(ReverieInterface)
+    interface.console = Console(record=True, force_terminal=False, width=120)
+    interface.total_active_time = 0.0
+    interface.current_task_start = time.time() - 1.1
+    interface._current_content_tokens = 0
+    interface._task_drawer_visible = True
+    interface._task_drawer_cache_key = None
+    interface._active_tool_details = {}
+    interface._active_tool_lock = threading.Lock()
+    interface._stream_input_state = None
+    interface._streaming_footer_config = None
+
+    first = interface._build_streaming_footer_signature()
+    interface.current_task_start = time.time() - 2.1
+    second = interface._build_streaming_footer_signature()
+    interface._current_content_tokens = 5
+    third = interface._build_streaming_footer_signature()
+
+    assert second != first
+    assert third != second
 
 
 def test_partial_stream_errors_are_recoverable_only_after_visible_output() -> None:

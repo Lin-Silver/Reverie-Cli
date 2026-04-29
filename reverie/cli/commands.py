@@ -2009,6 +2009,7 @@ class CommandHandler:
         "tool_catalog": ("List Tools", "tool_catalog"),
         "userInput": ("Ask User", "ask_user"),
         "vision_upload": ("Vision Upload", "vision_upload"),
+        "web_fetch": ("WebFetch", "web_fetch"),
         "web_search": ("WebSearch", "web_search"),
     }
 

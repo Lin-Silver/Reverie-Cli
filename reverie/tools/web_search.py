@@ -1,5 +1,5 @@
 """
-Web Search Tool - integrated search and content fetching.
+Web Search / Web Fetch tools for external research.
 
 Enhancement highlights:
 - provider fallback (DDG -> Brave)
@@ -26,21 +26,25 @@ from .base import BaseTool, ToolResult
 
 class WebSearchTool(BaseTool):
     name = "web_search"
-    aliases = ("search_web", "internet_search")
-    search_hint = "search unstable external docs and facts"
+    aliases = ("search_web", "internet_search", "websearch")
+    search_hint = "search the web for candidate links"
     tool_category = "external"
     tool_tags = ("web", "search", "docs", "internet", "reference", "news")
     read_only = True
     concurrency_safe = True
 
-    description = """Search the web and optionally fetch readable page content."""
+    description = """Search the web for candidate links. Use web_fetch to inspect selected pages."""
 
     parameters = {
         "type": "object",
         "properties": {
             "query": {"type": "string", "description": "Search query text."},
-            "max_results": {"type": "integer", "description": "Max results (default: 5).", "default": 5},
-            "fetch_content": {"type": "boolean", "description": "Fetch page content (default: true).", "default": True},
+            "max_results": {"type": "integer", "description": "Max links to return (default: 10).", "default": 10},
+            "fetch_content": {
+                "type": "boolean",
+                "description": "Compatibility option. Prefer web_fetch for page content.",
+                "default": False,
+            },
             "include_domains": {"type": "array", "items": {"type": "string"}},
             "exclude_domains": {"type": "array", "items": {"type": "string"}},
             "recency": {"type": "string", "description": "DDG recency hint: d/w/m/y."},
@@ -53,8 +57,8 @@ class WebSearchTool(BaseTool):
         "required": ["query"],
     }
 
-    DEFAULT_MAX_RESULTS = 5
-    MAX_ALLOWED_RESULTS = 12
+    DEFAULT_MAX_RESULTS = 10
+    MAX_ALLOWED_RESULTS = 30
     DEFAULT_TIMEOUT = 15
     DEFAULT_MAX_RETRIES = 2
     DEFAULT_FETCH_WORKERS = 4
@@ -455,7 +459,7 @@ class WebSearchTool(BaseTool):
             return ToolResult.fail("Query is required")
 
         max_results = self._coerce_int(kwargs.get("max_results", self.DEFAULT_MAX_RESULTS), self.DEFAULT_MAX_RESULTS, 1, self.MAX_ALLOWED_RESULTS)
-        fetch_content = self._coerce_bool(kwargs.get("fetch_content"), True)
+        fetch_content = self._coerce_bool(kwargs.get("fetch_content"), False)
         include_domains = self._normalize_domain_list(kwargs.get("include_domains"))
         exclude_domains = self._normalize_domain_list(kwargs.get("exclude_domains"))
         recency = str(kwargs.get("recency") or "").strip().lower()
@@ -555,6 +559,123 @@ class WebSearchTool(BaseTool):
                     "include_domains": include_domains,
                     "exclude_domains": exclude_domains,
                     "recency": recency,
+                },
+            },
+        )
+
+
+class WebFetchTool(WebSearchTool):
+    name = "web_fetch"
+    aliases = ("fetch_web", "webfetch", "fetch_url", "fetch_page")
+    search_hint = "fetch readable content from selected web links"
+    tool_tags = ("web", "fetch", "docs", "internet", "reference", "page")
+
+    description = """Fetch readable content from one or more URLs selected from web_search results."""
+
+    parameters = {
+        "type": "object",
+        "properties": {
+            "url": {"type": "string", "description": "Single URL to fetch."},
+            "urls": {"type": "array", "items": {"type": "string"}, "description": "URLs to fetch, up to 8."},
+            "request_timeout": {"type": "integer", "default": 15},
+            "max_retries": {"type": "integer", "default": 2},
+            "max_content_chars": {"type": "integer", "default": 12000},
+            "output_format": {"type": "string", "enum": ["text", "markdown"], "default": "markdown"},
+        },
+    }
+
+    DEFAULT_MAX_CONTENT_CHARS = 12000
+    MAX_URLS = 8
+
+    def get_execution_message(self, **kwargs) -> str:
+        urls = self._normalize_url_inputs(kwargs)
+        if len(urls) == 1:
+            return f"Executing web_fetch: {urls[0]}"
+        if urls:
+            return f"Executing web_fetch: {len(urls)} URLs"
+        return "Executing web_fetch..."
+
+    def _normalize_url_inputs(self, kwargs: Dict[str, Any]) -> List[str]:
+        raw_urls: List[Any] = []
+        if kwargs.get("url"):
+            raw_urls.append(kwargs.get("url"))
+        urls_value = kwargs.get("urls")
+        if isinstance(urls_value, str):
+            raw_urls.append(urls_value)
+        elif isinstance(urls_value, list):
+            raw_urls.extend(urls_value)
+
+        normalized: List[str] = []
+        seen = set()
+        for raw_url in raw_urls:
+            url = self._normalize_url(str(raw_url or "").strip())
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            normalized.append(url)
+            if len(normalized) >= self.MAX_URLS:
+                break
+        return normalized
+
+    def execute(self, **kwargs) -> ToolResult:
+        if not self._available:
+            return ToolResult.fail("Missing dependencies. Install: pip install requests beautifulsoup4 ddgs")
+
+        urls = self._normalize_url_inputs(kwargs)
+        if not urls:
+            return ToolResult.fail("url or urls is required")
+
+        request_timeout = self._coerce_int(kwargs.get("request_timeout", self.DEFAULT_TIMEOUT), self.DEFAULT_TIMEOUT, 5, 90)
+        max_retries = self._coerce_int(kwargs.get("max_retries", self.DEFAULT_MAX_RETRIES), self.DEFAULT_MAX_RETRIES, 0, 6)
+        max_content_chars = self._coerce_int(kwargs.get("max_content_chars", self.DEFAULT_MAX_CONTENT_CHARS), self.DEFAULT_MAX_CONTENT_CHARS, 1000, self.MAX_CONTENT_CHARS_LIMIT)
+        output_format = str(kwargs.get("output_format") or "markdown").strip().lower()
+        if output_format not in {"text", "markdown"}:
+            output_format = "markdown"
+
+        results: List[Dict[str, Any]] = []
+        for url in urls:
+            payload = self._fetch_page_payload(
+                url,
+                timeout=request_timeout,
+                max_retries=max_retries,
+                max_content_chars=max_content_chars,
+                output_format=output_format,
+            )
+            item = {"url": url}
+            item.update(payload)
+            results.append(item)
+
+        output_parts = ["# Web Fetch Results", ""]
+        for index, result in enumerate(results, 1):
+            output_parts.append(f"## {index}. {result.get('fetched_title') or result.get('url')}")
+            output_parts.append(f"**URL:** {result.get('url')}")
+            output_parts.append(f"**Fetch Status:** {result.get('fetch_status', 'n/a')}")
+            if result.get("fetched_description"):
+                output_parts.append(f"**Page Description:** {result.get('fetched_description')}")
+            links = result.get("outbound_links") or []
+            if links:
+                output_parts.append("**Outbound Links (sample):**")
+                for link in links[:6]:
+                    output_parts.append(f"- {link}")
+            content = str(result.get("fetched_content") or "")
+            if content:
+                output_parts.append("")
+                output_parts.append("**Extracted Content:**")
+                output_parts.append(f"```{'markdown' if output_format == 'markdown' else 'text'}")
+                output_parts.append(content.replace("```", "'''"))
+                output_parts.append("```")
+            output_parts.append("---")
+
+        return ToolResult.ok(
+            "\n".join(output_parts),
+            data={
+                "count": len(results),
+                "results": results,
+                "settings": {
+                    "request_timeout": request_timeout,
+                    "max_retries": max_retries,
+                    "max_content_chars": max_content_chars,
+                    "output_format": output_format,
                 },
             },
         )

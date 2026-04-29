@@ -29,6 +29,7 @@ setup(
     packages=find_packages(),
     include_package_data=True,
     package_data={
+        "reverie.agent": ["tool_manifest.json"],
         "reverie.engine_lite": ["vendor/live2d/live2dcubismcore.min.js"],
     },
     python_requires=">=3.10",

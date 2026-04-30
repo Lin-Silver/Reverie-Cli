@@ -495,7 +495,7 @@ def test_interface_deduplicates_repeated_live_tool_progress_chunks() -> None:
     assert summary["had_live_progress"] is True
 
 
-def test_streaming_footer_signature_tracks_timer_and_token_changes() -> None:
+def test_streaming_footer_signature_ignores_timer_only_changes() -> None:
     interface = ReverieInterface.__new__(ReverieInterface)
     interface.console = Console(record=True, force_terminal=False, width=120)
     interface.total_active_time = 0.0
@@ -514,7 +514,7 @@ def test_streaming_footer_signature_tracks_timer_and_token_changes() -> None:
     interface._current_content_tokens = 5
     third = interface._build_streaming_footer_signature()
 
-    assert second != first
+    assert second == first
     assert third != second
 
 

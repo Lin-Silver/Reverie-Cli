@@ -1526,10 +1526,6 @@ class ReverieInterface:
 
     def _build_streaming_footer_signature(self) -> tuple:
         """Build a lightweight signature so identical footer redraws can be skipped."""
-        elapsed = float(getattr(self, "total_active_time", 0.0) or 0.0)
-        current_task_start = getattr(self, "current_task_start", None)
-        if current_task_start:
-            elapsed += max(time.time() - float(current_task_start), 0.0)
         try:
             width_bucket = max(int(getattr(self.console.size, "width", 0) or self.console.width or 0), 60) // 8
         except Exception:
@@ -1554,7 +1550,6 @@ class ReverieInterface:
             )
         stream_snapshot = self._stream_input_state.snapshot() if self._stream_input_state else {}
         return (
-            int(elapsed),
             int(getattr(self, "_current_content_tokens", 0) or 0),
             width_bucket,
             show_status_line,

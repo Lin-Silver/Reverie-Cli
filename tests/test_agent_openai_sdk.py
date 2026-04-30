@@ -111,7 +111,7 @@ def test_openai_sdk_stream_emits_visible_wait_event_before_request(monkeypatch, 
     assert all(message["role"] != "system" for message in create_kwargs["messages"][1:])
 
 
-def test_display_renders_model_request_stream_event():
+def test_display_suppresses_model_request_stream_event():
     console = Console(record=True, force_terminal=False, width=120)
     display = DisplayComponents(console)
 
@@ -127,7 +127,7 @@ def test_display_renders_model_request_stream_event():
     )
 
     assert handled is True
-    assert "Waiting for NVIDIA API response" in console.export_text()
+    assert "Waiting for NVIDIA API response" not in console.export_text()
 
 
 def test_nvidia_help_matches_supported_commands():

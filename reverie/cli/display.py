@@ -1413,13 +1413,8 @@ class DisplayComponents:
             )
             return True
         if event_type == "model_request":
-            self.show_activity_event(
-                category=str(event.get("category", "") or "Model"),
-                message=str(event.get("message", "") or "").strip(),
-                status=str(event.get("status", "") or "working"),
-                detail=str(event.get("detail", "") or "").strip(),
-                meta=str(event.get("meta", "") or "").strip(),
-            )
+            # Internal bookkeeping event only. Rendering this before every tool
+            # result makes NVIDIA/OpenAI-compatible streams noisy while waiting.
             return True
         if event_type == "tool_start":
             self.show_tool_invocation(

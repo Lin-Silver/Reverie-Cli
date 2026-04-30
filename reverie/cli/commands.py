@@ -10032,8 +10032,8 @@ class CommandHandler:
         source_label = self._format_model_source_label(str(getattr(config, "active_model_source", "standard")).lower())
         storage_label = "Workspace" if config_manager.is_workspace_mode() else "Global"
         focus_label = str((selected_item or {}).get("name", "") or "Mode").strip()
-        pending_label = "Unsaved changes" if changed else "Live view"
-        pending_style = self.theme.AMBER_GLOW if changed else self.theme.MINT_SOFT
+        pending_label = "Saved changes" if changed else "Live view"
+        pending_style = self.theme.MINT_SOFT
 
         summary = Table(box=box.SIMPLE, show_header=False, pad_edge=False)
         summary.add_column(style=self.theme.TEXT_DIM, width=14)
@@ -10178,8 +10178,8 @@ class CommandHandler:
         detail_lines.extend(
             [
                 "",
-                f"[{self.theme.TEXT_DIM}]Quick adjust[/{self.theme.TEXT_DIM}] Use h/l or left/right for one-step edits when available.",
-                f"[{self.theme.TEXT_DIM}]Precise edit[/{self.theme.TEXT_DIM}] Press Enter for prompts, selectors, or rule editing.",
+                f"[{self.theme.TEXT_DIM}]Quick adjust[/{self.theme.TEXT_DIM}] Use h/l or left/right for one-step edits; changes save immediately.",
+                f"[{self.theme.TEXT_DIM}]Precise edit[/{self.theme.TEXT_DIM}] Press Enter for prompts, selectors, or rule editing; accepted edits save immediately.",
                 f"[{self.theme.TEXT_DIM}]Command equivalent[/{self.theme.TEXT_DIM}] {escape(command)}",
             ]
         )
@@ -10202,14 +10202,14 @@ class CommandHandler:
                 f"[{self.theme.TEXT_DIM}]"
                 f"{self.deco.DOT_MEDIUM} ↑/↓ or j/k: Navigate  "
                 f"{self.deco.DOT_MEDIUM} ←/→ or h/l: Quick change  "
-                f"{self.deco.DOT_MEDIUM} Enter: Edit precisely  "
+                f"{self.deco.DOT_MEDIUM} Enter: Edit & save  "
                 f"{self.deco.DOT_MEDIUM} One focused page at a time  "
-                f"{self.deco.DOT_MEDIUM} Esc: Save & exit"
+                f"{self.deco.DOT_MEDIUM} Esc: Exit"
                 f"[/{self.theme.TEXT_DIM}]"
             ),
             Text(
-                f"{selected_idx + 1}/{max(1, total_items)} · {'pending save' if changed else 'ready'}",
-                style=self.theme.AMBER_GLOW if changed else self.theme.TEXT_DIM,
+                f"{selected_idx + 1}/{max(1, total_items)} · {'saved' if changed else 'ready'}",
+                style=self.theme.MINT_SOFT if changed else self.theme.TEXT_DIM,
             ),
         )
         return Panel(
@@ -10253,6 +10253,26 @@ class CommandHandler:
         detail_panel = self._build_setting_detail_panel(selected_item, config, config_manager, rules_manager)
         footer_panel = self._build_setting_footer_panel(changed=changed, selected_idx=selected_idx, total_items=len(items))
         return Group(summary_panel, list_panel, detail_panel, footer_panel)
+
+    def _setting_save_ui_change(self, config, config_manager) -> None:
+        """Persist a successful interactive settings change immediately."""
+        config_manager.save(config)
+        if self.app.get('apply_display_preferences'):
+            try:
+                self.app['apply_display_preferences'](config)
+            except Exception:
+                pass
+
+    def _drain_msvcrt_keyboard_buffer(self, msvcrt_module, *, limit: int = 128) -> int:
+        """Drop stale keypresses before an interactive TUI starts."""
+        drained = 0
+        try:
+            while drained < limit and msvcrt_module.kbhit():
+                msvcrt_module.getch()
+                drained += 1
+        except (EOFError, OSError):
+            return drained
+        return drained
 
     def _setting_parse_bool(self, value: str):
         """Parse common boolean input values."""
@@ -10730,6 +10750,8 @@ class CommandHandler:
             self.console.print(f"[{self.theme.TEXT_DIM}]Use /setting status or /setting <subcommand> instead.[/{self.theme.TEXT_DIM}]")
             return True
 
+        self._drain_msvcrt_keyboard_buffer(msvcrt)
+
         config_manager = self.app.get('config_manager')
         if not config_manager:
             self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]")
@@ -10757,6 +10779,7 @@ class CommandHandler:
                     items = self._get_setting_items(config, config_manager, rules_manager)
                     selected_item = items[selected_idx]
                     should_reload_config = False
+                    changed_this_input = False
 
                     if key == b"\x1b":
                         break
@@ -10765,14 +10788,17 @@ class CommandHandler:
                     elif key in (b"j", b"J"):
                         selected_idx = (selected_idx + 1) % len(items)
                     elif key in (b"h", b"H", b"a", b"A"):
-                        changed = self._setting_step_item(selected_item, config, config_manager, rules_manager, -1) or changed
+                        changed_this_input = self._setting_step_item(selected_item, config, config_manager, rules_manager, -1)
+                        changed = changed_this_input or changed
                         should_reload_config = str(selected_item.get("kind", "")).strip() == "workspace"
                     elif key in (b"l", b"L", b"d", b"D", b" "):
-                        changed = self._setting_step_item(selected_item, config, config_manager, rules_manager, 1) or changed
+                        changed_this_input = self._setting_step_item(selected_item, config, config_manager, rules_manager, 1)
+                        changed = changed_this_input or changed
                         should_reload_config = str(selected_item.get("kind", "")).strip() == "workspace"
                     elif key == b"\r":
                         live.stop()
-                        changed = self._setting_edit_item(selected_item, config, config_manager, rules_manager) or changed
+                        changed_this_input = self._setting_edit_item(selected_item, config, config_manager, rules_manager)
+                        changed = changed_this_input or changed
                         kind = str(selected_item.get("kind", "")).strip()
                         should_reload_config = kind == "workspace"
                         if kind == "rules":
@@ -10787,14 +10813,20 @@ class CommandHandler:
                         elif key == b"P":
                             selected_idx = (selected_idx + 1) % len(items)
                         elif key == b"K":
-                            changed = self._setting_step_item(selected_item, config, config_manager, rules_manager, -1) or changed
+                            changed_this_input = self._setting_step_item(selected_item, config, config_manager, rules_manager, -1)
+                            changed = changed_this_input or changed
                             should_reload_config = str(selected_item.get("kind", "")).strip() == "workspace"
                         elif key == b"M":
-                            changed = self._setting_step_item(selected_item, config, config_manager, rules_manager, 1) or changed
+                            changed_this_input = self._setting_step_item(selected_item, config, config_manager, rules_manager, 1)
+                            changed = changed_this_input or changed
                             should_reload_config = str(selected_item.get("kind", "")).strip() == "workspace"
 
                     if should_reload_config:
                         config = config_manager.load()
+                    elif changed_this_input:
+                        kind = str(selected_item.get("kind", "")).strip()
+                        if kind not in ("rules", "readonly"):
+                            self._setting_save_ui_change(config, config_manager)
                     scroll_offset = self._clamp_help_browser_scroll(
                         selected_idx,
                         scroll_offset,

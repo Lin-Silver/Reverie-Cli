@@ -533,6 +533,25 @@ def test_setting_tool_output_rejects_invalid_values(tmp_path: Path, monkeypatch)
     assert "Invalid tool output style" in console.export_text()
 
 
+def test_setting_ui_drains_stale_keyboard_input_before_starting() -> None:
+    class FakeMsvcrt:
+        def __init__(self) -> None:
+            self.keys = [b"\r", b"\x1b"]
+
+        def kbhit(self) -> bool:
+            return bool(self.keys)
+
+        def getch(self) -> bytes:
+            return self.keys.pop(0)
+
+    fake_msvcrt = FakeMsvcrt()
+    console = Console(record=True, force_terminal=False, width=120)
+    handler = CommandHandler(console, {"project_root": Path.cwd()})
+
+    assert handler._drain_msvcrt_keyboard_buffer(fake_msvcrt) == 2
+    assert fake_msvcrt.keys == []
+
+
 def test_help_topic_normalizes_settings_alias() -> None:
     assert normalize_help_topic("settings") == "setting"
     assert normalize_help_topic("harness") == "doctor"

@@ -31,3 +31,23 @@ dotnet run
 
 Runtime configuration and secrets are stored outside the repository in the local
 application-data directory selected by the desktop host.
+
+## Build And Verify
+
+Run the full build, bridge smoke tests, mock chat streaming test, and a brief GUI
+launch check from the repository root:
+
+```powershell
+.\Reverie UI\build-gui.ps1
+```
+
+Useful options:
+
+```powershell
+.\Reverie UI\build-gui.ps1 -Configuration Debug
+.\Reverie UI\build-gui.ps1 -Publish
+.\Reverie UI\build-gui.ps1 -SkipLaunch
+.\Reverie UI\build-gui.ps1 -PythonPath "G:\Reverie\Reverie-Cli\venv\Scripts\python.exe"
+```
+
+The script writes smoke-test output under `Reverie UI/artifacts/`.

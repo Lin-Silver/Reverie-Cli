@@ -40,3 +40,4 @@ env/
 .env
 plugins/blender/*.zip
 Reverie UI/runtime/appdata/
+Reverie UI/artifacts/

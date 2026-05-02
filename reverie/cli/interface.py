@@ -784,6 +784,7 @@ class ReverieInterface:
         self._active_tool_lock = threading.Lock()
         self._context_engine_ready = False
         self._indexing_in_progress = False
+        self._indexing_thread: Optional[threading.Thread] = None
         self._git_integration_ready = False
         self._lsp_manager_ready = False
         self._last_footer_refresh_time = 0.0
@@ -854,6 +855,7 @@ class ReverieInterface:
         self.retriever = None
         self._context_engine_ready = False
         self._indexing_in_progress = False
+        self._indexing_thread = None
 
         from ..session import MemoryIndexer, WorkspaceStatsManager
         self.memory_indexer = MemoryIndexer(self.project_data_dir)
@@ -1592,7 +1594,7 @@ class ReverieInterface:
         while not stop_event.wait(_STREAM_FOOTER_TICK_INTERVAL):
             if self._status_live is None:
                 return
-            self._refresh_streaming_footer()
+            self._refresh_streaming_footer(force=True)
 
     def _start_streaming_footer_ticker(self) -> None:
         """Start the low-frequency footer ticker for timers and live counters."""
@@ -1740,6 +1742,7 @@ class ReverieInterface:
         status: str = "info",
         detail: str = "",
         meta: str = "",
+        render: bool = True,
     ) -> None:
         """Render a system/session activity event with the shared timeline style."""
         display_meta = self._format_startup_timing_meta(meta)
@@ -1752,7 +1755,7 @@ class ReverieInterface:
                 "meta": display_meta,
             }
         )
-        if self.headless:
+        if self.headless or not render:
             return
         self.display.show_activity_event(
             category=category,
@@ -2363,11 +2366,11 @@ class ReverieInterface:
         if not cached and config.auto_index:
             self._show_activity_event(
                 "Context Engine",
-                "No warm cache available, building a fresh index.",
+                "No warm cache available, building a fresh index in the background.",
                 status="working",
-                detail="The status bar will show index progress as a percentage and switch to index finished when done.",
+                detail="The first reply can continue while the status bar tracks indexing progress.",
             )
-            self._run_context_indexing_with_progress()
+            self._start_context_indexing_background()
         self.retriever = ContextRetriever(
             self.indexer.symbol_table,
             self.indexer.dependency_graph,
@@ -2378,6 +2381,45 @@ class ReverieInterface:
         )
         self._context_engine_ready = True
         self._refresh_command_context()
+
+    def _start_context_indexing_background(self) -> bool:
+        """Kick off a cold Context Engine index without blocking the active turn."""
+        if not self.indexer:
+            return False
+        if self._indexing_thread and self._indexing_thread.is_alive():
+            return False
+
+        self._indexing_in_progress = True
+
+        def _worker() -> None:
+            try:
+                self.indexer.full_index()
+                self._show_activity_event(
+                    "Context Engine",
+                    "Indexing finished.",
+                    status="done",
+                    render=False,
+                )
+            except Exception as exc:
+                self._show_activity_event(
+                    "Context Engine",
+                    "Indexing failed unexpectedly.",
+                    status="error",
+                    detail=str(exc),
+                    render=False,
+                )
+            finally:
+                self._indexing_in_progress = False
+                self._refresh_command_context()
+                self._sync_agent_context_engine()
+
+        self._indexing_thread = threading.Thread(
+            target=_worker,
+            name="reverie-context-indexer",
+            daemon=True,
+        )
+        self._indexing_thread.start()
+        return True
 
     def _sync_agent_context_engine(self) -> None:
         """Attach the lazily initialized Context Engine to the active agent and refresh prompt guidance."""

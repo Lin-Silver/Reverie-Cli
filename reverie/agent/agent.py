@@ -29,6 +29,7 @@ from ..tools.base import ToolResult
 from ..nvidia import (
     apply_nvidia_request_defaults,
     build_nvidia_openai_options,
+    get_nvidia_model_metadata,
     is_nvidia_api_url,
     nvidia_model_allows_tools,
     nvidia_model_requires_system_message_first,
@@ -1929,6 +1930,7 @@ class ReverieAgent:
                 prepared = _strip_tooling_from_payload(prepared)
                 if nvidia_model_requires_system_message_first(prepared.get("model")):
                     prepared["messages"] = _coalesce_system_messages_to_front(prepared.get("messages", []))
+            prepared = self._clamp_nvidia_request_max_tokens(prepared)
             return prepared
 
         # Generic `request` provider: accept model(depth) but only convert to
@@ -1962,9 +1964,113 @@ class ReverieAgent:
             if not isinstance(chat_kwargs, dict):
                 chat_kwargs = {}
                 prepared["chat_template_kwargs"] = chat_kwargs
-            chat_kwargs["thinking"] = self.thinking_mode.lower() == "true"
-
+                chat_kwargs["thinking"] = self.thinking_mode.lower() == "true"
+        
         return prepared
+
+    def _estimate_request_input_tokens(
+        self,
+        *,
+        messages: Optional[List[Dict[str, Any]]] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+    ) -> int:
+        """Estimate provider-counted input tokens for messages plus tool schemas."""
+        normalized_messages = list(messages or [])
+        workspace_stats_manager = self.tool_executor.context.get("workspace_stats_manager")
+        if workspace_stats_manager and hasattr(workspace_stats_manager, "count_messages_tokens"):
+            try:
+                total = max(int(workspace_stats_manager.count_messages_tokens(normalized_messages)), 0)
+            except Exception:
+                total = 0
+        else:
+            total = 0
+
+        if total <= 0:
+            try:
+                total = max(
+                    len(
+                        json.dumps(
+                            normalized_messages,
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        )
+                    )
+                    // 4,
+                    0,
+                )
+            except Exception:
+                total = sum(len(_coerce_text_fragments(message.get("content"))) for message in normalized_messages) // 4
+
+        if tools:
+            try:
+                total += len(json.dumps(tools, ensure_ascii=False, separators=(",", ":"))) // 4
+            except Exception:
+                total += len(str(tools)) // 4
+        return max(total, 0)
+
+    def _resolve_nvidia_context_window(self, model_id: Any) -> int:
+        metadata = get_nvidia_model_metadata(model_id)
+        if metadata:
+            try:
+                value = int(metadata.get("context_length") or 0)
+                if value > 0:
+                    return value
+            except (TypeError, ValueError):
+                pass
+        return self._resolve_max_context_tokens()
+
+    def _clamp_nvidia_max_tokens_value(
+        self,
+        *,
+        model_id: Any,
+        requested_max_tokens: Any,
+        messages: Optional[List[Dict[str, Any]]] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+    ) -> int:
+        """Keep NVIDIA max_tokens within context after current input and tools."""
+        context_window = max(int(self._resolve_nvidia_context_window(model_id) or 0), 1)
+        try:
+            requested = int(requested_max_tokens or 0)
+        except (TypeError, ValueError):
+            requested = 0
+        if requested <= 0:
+            requested = context_window
+
+        input_tokens = self._estimate_request_input_tokens(messages=messages, tools=tools)
+        reserve = max(1024, min(8192, context_window // 32))
+        available = context_window - input_tokens - reserve
+        if available <= 0:
+            return 1024
+        return max(1, min(requested, available))
+
+    def _clamp_nvidia_request_max_tokens(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        prepared = dict(payload or {})
+        prepared["max_tokens"] = self._clamp_nvidia_max_tokens_value(
+            model_id=prepared.get("model", self.model),
+            requested_max_tokens=prepared.get("max_tokens"),
+            messages=prepared.get("messages") if isinstance(prepared.get("messages"), list) else None,
+            tools=prepared.get("tools") if isinstance(prepared.get("tools"), list) else None,
+        )
+        return prepared
+
+    def _clamp_nvidia_options_for_messages(
+        self,
+        options: Dict[str, Any],
+        *,
+        model_id: Any,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        if not options:
+            return options
+        clamped = dict(options)
+        clamped["max_tokens"] = self._clamp_nvidia_max_tokens_value(
+            model_id=model_id,
+            requested_max_tokens=clamped.get("max_tokens"),
+            messages=messages,
+            tools=tools,
+        )
+        return clamped
 
     def get_visible_tool_schemas(self, mode: Optional[str] = None) -> List[Dict[str, Any]]:
         """Return the tool schemas that the current model/provider can actually receive."""
@@ -2026,6 +2132,13 @@ class ReverieAgent:
 
         if self._is_active_model_source("nvidia") and nvidia_model_requires_system_message_first(model_for_sdk):
             prepared_messages = _coalesce_system_messages_to_front(prepared_messages)
+        if self._is_active_model_source("nvidia"):
+            nvidia_options = self._clamp_nvidia_options_for_messages(
+                nvidia_options,
+                model_id=model_for_sdk,
+                messages=prepared_messages,
+                tools=tools if tools else None,
+            )
 
         kwargs: Dict[str, Any] = {
             "model": model_for_sdk,
@@ -2846,6 +2959,13 @@ class ReverieAgent:
                 model_for_sdk = model_for_sdk.split("(", 1)[0].strip()
             if self._is_active_model_source("nvidia") and nvidia_model_requires_system_message_first(model_for_sdk):
                 messages = _coalesce_system_messages_to_front(messages)
+            if self._is_active_model_source("nvidia"):
+                nvidia_options = self._clamp_nvidia_options_for_messages(
+                    nvidia_options,
+                    model_id=model_for_sdk,
+                    messages=messages,
+                    tools=tools if tools else None,
+                )
             yield self._model_request_stream_event(
                 provider_label=self._openai_sdk_provider_label(),
                 model=model_for_sdk,
@@ -3170,6 +3290,13 @@ class ReverieAgent:
                 model_for_sdk = model_for_sdk.split("(", 1)[0].strip()
             if self._is_active_model_source("nvidia") and nvidia_model_requires_system_message_first(model_for_sdk):
                 messages = _coalesce_system_messages_to_front(messages)
+            if self._is_active_model_source("nvidia"):
+                nvidia_options = self._clamp_nvidia_options_for_messages(
+                    nvidia_options,
+                    model_id=model_for_sdk,
+                    messages=messages,
+                    tools=tools if tools else None,
+                )
             self._emit_ui_event(
                 category="Model",
                 message=f"Waiting for {self._openai_sdk_provider_label()} response",

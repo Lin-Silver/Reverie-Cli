@@ -1056,8 +1056,6 @@ class ConfigManager:
             data = self._read_json_dict(candidate)
             if isinstance(data, dict) and 'use_workspace_config' in data:
                 return bool(data.get('use_workspace_config', False))
-        if workspace_found and not any(path.exists() for path in self._path_candidates_for_mode(False)):
-            return True
         return False
 
     def _sync_legacy_mirror(self, serialized: Dict[str, Any]) -> None:
@@ -1134,10 +1132,6 @@ class ConfigManager:
         if global_records:
             return max(global_records, key=_rank)
 
-        workspace_records = [record for record in records if record.get("workspace_mode")]
-        if workspace_records:
-            return max(workspace_records, key=_rank)
-
         return None
 
     def get_active_config_path(self) -> Path:
@@ -1153,12 +1147,27 @@ class ConfigManager:
     def _path_candidates_for_mode(self, workspace_mode: bool) -> List[Path]:
         """Return new + legacy config paths for one logical mode."""
         if workspace_mode:
-            return [self.workspace_config_path, self.legacy_workspace_config_path]
-        return [
+            candidates = [self.workspace_config_path]
+            legacy_workspace = self.legacy_workspace_config_path.resolve(strict=False)
+            global_config = self.global_config_path.resolve(strict=False)
+            workspace_config = self.workspace_config_path.resolve(strict=False)
+            if legacy_workspace not in {global_config, workspace_config}:
+                candidates.append(self.legacy_workspace_config_path)
+            return candidates
+        candidates = [
             self.global_config_path,
             self.legacy_global_config_path,
             self.legacy_project_global_config_path,
         ]
+        unique: List[Path] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            key = str(candidate.resolve(strict=False)).lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(candidate)
+        return unique
 
     def _load_path_candidates(self) -> List[Path]:
         """Return config paths in preferred load order."""
@@ -1574,13 +1583,8 @@ class ConfigManager:
         if self._config is None:
             return
 
-        # The manager decides the active destination. The config flag is stored
-        # as metadata and must not redirect writes on its own.
-        self._config.use_workspace_config = self._use_workspace_config
-        
         self.ensure_dirs()
 
-        serialized = self._config.to_dict()
         target_path = self._loaded_config_path or self.config_path
         if self._is_workspace_candidate_path(target_path):
             self._use_workspace_config = True
@@ -1590,6 +1594,11 @@ class ConfigManager:
             self._use_workspace_config = False
             self.config_path = self.global_config_path
             target_path = self.global_config_path
+
+        # The manager decides the active destination. Store that resolved mode
+        # in the file so the next process selects the same config again.
+        self._config.use_workspace_config = self._use_workspace_config
+        serialized = self._config.to_dict()
 
         write_json_secure(target_path, serialized)
         self._loaded_config_path = target_path

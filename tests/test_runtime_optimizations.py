@@ -495,27 +495,49 @@ def test_interface_deduplicates_repeated_live_tool_progress_chunks() -> None:
     assert summary["had_live_progress"] is True
 
 
-def test_streaming_footer_signature_ignores_timer_only_changes() -> None:
+def test_context_engine_cold_index_runs_in_background() -> None:
+    calls: list[str] = []
+
+    class FakeIndexer:
+        def full_index(self):
+            calls.append("full_index")
+            return object()
+
     interface = ReverieInterface.__new__(ReverieInterface)
-    interface.console = Console(record=True, force_terminal=False, width=120)
-    interface.total_active_time = 0.0
-    interface.current_task_start = time.time() - 1.1
-    interface._current_content_tokens = 0
-    interface._task_drawer_visible = True
-    interface._task_drawer_cache_key = None
-    interface._active_tool_details = {}
-    interface._active_tool_lock = threading.Lock()
-    interface._stream_input_state = None
-    interface._streaming_footer_config = None
+    interface.indexer = FakeIndexer()
+    interface._indexing_thread = None
+    interface._indexing_in_progress = False
+    interface._show_activity_event = lambda *args, **kwargs: calls.append("event")
+    interface._refresh_command_context = lambda: calls.append("refresh")
+    interface._sync_agent_context_engine = lambda: calls.append("sync")
 
-    first = interface._build_streaming_footer_signature()
-    interface.current_task_start = time.time() - 2.1
-    second = interface._build_streaming_footer_signature()
-    interface._current_content_tokens = 5
-    third = interface._build_streaming_footer_signature()
+    started = interface._start_context_indexing_background()
 
-    assert second == first
-    assert third != second
+    assert started is True
+    assert interface._indexing_thread is not None
+    interface._indexing_thread.join(timeout=2)
+    assert not interface._indexing_thread.is_alive()
+    assert interface._indexing_in_progress is False
+    assert "full_index" in calls
+    assert "refresh" in calls
+    assert "sync" in calls
+
+
+def test_streaming_footer_ticker_forces_timer_refresh() -> None:
+    interface = ReverieInterface.__new__(ReverieInterface)
+    interface._status_live = object()
+    calls: list[bool] = []
+    stop_event = threading.Event()
+
+    def fake_refresh(*, force: bool = False) -> None:
+        calls.append(force)
+        stop_event.set()
+
+    interface._refresh_streaming_footer = fake_refresh  # type: ignore[method-assign]
+
+    interface._streaming_footer_ticker_loop(stop_event)
+
+    assert calls == [True]
 
 
 def test_partial_stream_errors_are_recoverable_only_after_visible_output() -> None:

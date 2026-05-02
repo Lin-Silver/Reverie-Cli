@@ -1,14 +1,32 @@
 ## Unreleased
 
+No unreleased changes yet.
+
+---
+
+## Reverie CLI v2.3.2 - NVIDIA Profiles and Global Config Reliability
+
+**Release Date:** 2026-05-02
+
 ### Runtime
 
 * Added plugin-local MMD Tools support to the official Blender plugin, including `rc_blender_ensure_mmd_tools`, `rc_blender_mmd_tools_status`, and `rc_blender_import_mmd_model` for PMD/PMX model import with optional VMD motion or VPD pose.
+* Improved cold-start Context Engine behavior so missing workspace caches build in the background instead of blocking the first model reply.
+* Split NVIDIA request construction into model-specific profiles under `reverie/nvidia_profiles/`, so GLM-5.1, DeepSeek V4, Nemotron, Qwen, Mistral, MiniMax, Kimi, and GPT-OSS each use their own provider-style payload instead of one generic adapter.
+* Updated NVIDIA profile context/output budgets to full-window defaults on model switch and request construction, and synced NVIDIA model selection back to the global `config.json` when workspace config mode is active.
+* Fixed workspace-config saves so `use_workspace_config` is persisted after resolving the actual write target, preventing model selections from reverting to an older global config after restart.
+* Restored global config as the default config source; project/workspace config files are only selected after explicit workspace mode is enabled.
+* Added dynamic NVIDIA output-token clamping so full-window configs reserve room for the current prompt and tool schemas instead of sending `input + max_tokens` over the provider context limit.
+* Decoupled the streaming footer ticker from model token output so timers and indexing state keep refreshing while a provider is quiet.
+* Added NVIDIA catalog support for `mistralai/mistral-medium-3.5-128b`, including 256k multimodal context metadata and selectable `high`/`off` reasoning through `/nvidia thinking`.
+* Added NVIDIA catalog support for `moonshotai/kimi-k2.6` with a request-transport profile that matches the provider `chat_template_kwargs.thinking` payload.
+* Removed deprecated NVIDIA catalog entries for `minimaxai/minimax-m2.5` and `moonshotai/kimi-k2-thinking`; use `minimaxai/minimax-m2.7` and `moonshotai/kimi-k2.6` instead.
 * Added NVIDIA catalog entries for `deepseek-ai/deepseek-v4-pro` and `deepseek-ai/deepseek-v4-flash`, including 1M context metadata and selectable `max`/`high`/`off` thinking depth through `/nvidia thinking`.
 * Added the official `game_models` runtime plugin for plugin-local auxiliary game model deployment, selectable model profiles, 8GB-VRAM planning, HuggingFace snapshot downloads/caches, TRELLIS `low_vram` selection, Hunyuan3D-2mini registration, and guarded HY-Motion registration.
 * Added `/plugins models ...` commands so users can plan, select, download, dry-run, and inspect game auxiliary models without relying only on `rc_game_models_*` dynamic tools.
 * Upgraded generated humanoid Blender scaffolds with a fused continuous body-core mesh and body-continuity reports, reducing disconnected limb/torso failures before layered clothing, hair, accessories, and weapons are added.
 * Reframed Blender and Blockbench support as DCC/editor control, validation, and export automation rather than guaranteed final AAA character-art generation.
-* Added NVIDIA catalog support for `z-ai/glm-5.1` with a fast interactive profile that disables GLM chat-template thinking by default and caps GLM fast output to reduce first-token latency and streaming stalls.
+* Added NVIDIA catalog support for `z-ai/glm-5.1` using the provider chat-template thinking controls and full profile context metadata.
 * Added a ModelScope source backed by the Anthropic SDK, defaulting to `ZhipuAI/GLM-5.1`, with built-in catalogs for GLM, Kimi, MiniMax, Qwen, and DeepSeek models.
 * Added project-wide coding guardrails to every Reverie mode, adapted from the Karpathy-inspired CLAUDE.md guidance to favor assumptions checks, simplicity, surgical edits, and verifiable goals.
 * Simplified `/tools` into a lightweight English tool list with current-mode and total tool counts, and reduced startup/session log noise plus streaming footer refresh churn.

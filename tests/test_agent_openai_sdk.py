@@ -106,9 +106,87 @@ def test_openai_sdk_stream_emits_visible_wait_event_before_request(monkeypatch, 
 
     create_kwargs = seen["create_kwargs"]
     assert create_kwargs["timeout"] == 23
-    assert create_kwargs["extra_body"] == {"reasoning_effort": "max"}
+    assert create_kwargs["extra_body"] == {
+        "chat_template_kwargs": {
+            "thinking": True,
+            "reasoning_effort": "max",
+        }
+    }
     assert create_kwargs["messages"][0]["role"] == "system"
     assert all(message["role"] != "system" for message in create_kwargs["messages"][1:])
+
+
+def test_nvidia_short_turn_keeps_full_tools_and_reasoning(monkeypatch, tmp_path):
+    seen = {}
+    _install_fake_openai(monkeypatch, seen)
+    agent = ReverieAgent(
+        base_url="https://integrate.api.nvidia.com/v1",
+        api_key="test-key",
+        model="deepseek-ai/deepseek-v4-pro",
+        project_root=tmp_path,
+        provider="openai-sdk",
+        config=_nvidia_config(),
+    )
+    tool_schema = {"type": "function", "function": {"name": "codebase-retrieval", "parameters": {"type": "object"}}}
+    agent.tool_executor.get_tool_schemas = lambda mode="reverie": [tool_schema]
+    agent.messages.append({"role": "user", "content": "你是谁？"})
+
+    stream = agent._process_streaming_openai_sdk()
+    next(stream)
+    try:
+        next(stream)
+    except StopIteration:
+        pass
+
+    create_kwargs = seen["create_kwargs"]
+    assert create_kwargs["tools"] == [tool_schema]
+    assert create_kwargs["extra_body"] == {
+        "chat_template_kwargs": {
+            "thinking": True,
+            "reasoning_effort": "max",
+        }
+    }
+    assert 900000 <= create_kwargs["max_tokens"] < 1000000
+
+
+def test_nvidia_request_provider_clamps_output_to_remaining_context(tmp_path):
+    config = _nvidia_config()
+    config.nvidia = {
+        "selected_model_id": "mistralai/mistral-medium-3.5-128b",
+        "selected_model_display_name": "Mistral Medium 3.5 128B",
+        "max_tokens": 262144,
+    }
+    agent = ReverieAgent(
+        base_url="https://integrate.api.nvidia.com/v1/chat/completions",
+        api_key="test-key",
+        model="mistralai/mistral-medium-3.5-128b",
+        project_root=tmp_path,
+        provider="request",
+        config=config,
+    )
+    payload = {
+        "model": "mistralai/mistral-medium-3.5-128b",
+        "messages": [
+            {"role": "system", "content": "system" * 2000},
+            {"role": "user", "content": "hello" * 4000},
+        ],
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "large_tool",
+                    "parameters": {"type": "object", "description": "schema" * 4000},
+                },
+            }
+        ],
+        "stream": True,
+    }
+
+    prepared = agent._prepare_request_payload(payload)
+
+    assert prepared["max_tokens"] < 262144
+    assert prepared["max_tokens"] > 200000
+    assert prepared["reasoning_effort"] == "high"
 
 
 def test_display_suppresses_model_request_stream_event():

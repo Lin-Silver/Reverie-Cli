@@ -237,6 +237,80 @@ def test_global_config_wins_over_workspace_file_without_explicit_workspace_flag(
     assert manager.is_workspace_mode() is False
 
 
+def test_global_config_is_created_when_only_implicit_workspace_file_exists(tmp_path: Path, monkeypatch) -> None:
+    app_root = tmp_path / "app"
+    project_root = tmp_path / "project"
+    project_root.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr("reverie.config.get_app_root", lambda: app_root)
+    monkeypatch.setattr("reverie.config.get_launcher_root", lambda: app_root)
+
+    manager = ConfigManager(project_root)
+    manager.ensure_dirs()
+    manager.workspace_config_path.write_text(
+        '{\n'
+        '  "models": [{"model": "workspace-model", "model_display_name": "Workspace", "base_url": "https://workspace.example.com"}],\n'
+        '  "active_model_index": 0,\n'
+        '  "active_model_source": "standard"\n'
+        '}\n',
+        encoding="utf-8",
+    )
+
+    loaded = manager.load()
+
+    assert loaded.models == []
+    assert manager.get_active_config_path() == manager.global_config_path
+    assert manager.global_config_path.exists()
+    assert manager.is_workspace_mode() is False
+
+
+def test_global_config_is_not_misclassified_as_legacy_workspace_when_project_is_app_root(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app_root = tmp_path / "dist"
+    app_root.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr("reverie.config.get_app_root", lambda: app_root)
+    monkeypatch.setattr("reverie.config.get_launcher_root", lambda: app_root)
+
+    manager = ConfigManager(app_root)
+    manager.ensure_dirs()
+    manager.global_config_path.write_text(
+        '{\n'
+        '  "models": [{"model": "global-model", "model_display_name": "Global", "base_url": "https://global.example.com"}],\n'
+        '  "active_model_index": 0,\n'
+        '  "active_model_source": "standard",\n'
+        '  "use_workspace_config": false\n'
+        '}\n',
+        encoding="utf-8",
+    )
+    manager.workspace_config_path.write_text(
+        '{\n'
+        '  "models": [{"model": "workspace-model", "model_display_name": "Workspace", "base_url": "https://workspace.example.com"}],\n'
+        '  "active_model_index": 0,\n'
+        '  "active_model_source": "standard",\n'
+        '  "use_workspace_config": false\n'
+        '}\n',
+        encoding="utf-8",
+    )
+
+    reloaded_manager = ConfigManager(app_root)
+    loaded = reloaded_manager.load()
+    loaded.active_model_source = "nvidia"
+    reloaded_manager.save(loaded)
+
+    global_payload = json.loads(manager.global_config_path.read_text(encoding="utf-8"))
+    workspace_payload = json.loads(manager.workspace_config_path.read_text(encoding="utf-8"))
+
+    assert reloaded_manager.is_workspace_mode() is False
+    assert reloaded_manager.get_active_config_path() == manager.global_config_path
+    assert global_payload["active_model_source"] == "nvidia"
+    assert global_payload["use_workspace_config"] is False
+    assert workspace_payload["active_model_source"] == "standard"
+    assert workspace_payload["use_workspace_config"] is False
+
+
 def test_save_writes_back_to_loaded_source_instead_of_overwriting_other_profile(tmp_path: Path, monkeypatch) -> None:
     app_root = tmp_path / "app"
     project_root = tmp_path / "project"
@@ -302,6 +376,10 @@ def test_workspace_mode_save_does_not_create_project_root_reverie_dir(tmp_path: 
     manager.save(Config())
 
     assert manager.workspace_config_path.exists()
+    saved = json.loads(manager.workspace_config_path.read_text(encoding="utf-8"))
+    assert saved["use_workspace_config"] is True
+    reloaded = ConfigManager(project_root)
+    assert reloaded.is_workspace_mode() is True
     assert not (project_root / ".reverie").exists()
 
 

@@ -13,11 +13,11 @@ Reverie CLI is a context-engine-powered AI coding assistant for large repositori
 
 ## Latest Update
 
-Current stable repository version: `v2.1.21`.
+Current stable repository version: `v2.3.2`.
 
-- Recent unreleased work adds one-shot prompt execution through `reverie -p "<task>"`, `--mode`, and packaged `Reverie.exe -p "<task>"`.
-- `Reverie-Atlas` now downgrades simple Tier 1 tasks back to base `Reverie`, and `Writer` now asks for missing style/brief details more deliberately before long-form generation.
-- The docs were cleaned up around the engine/gamer workflow, and the old Gamer assessment note was replaced by a next-stage upgrade roadmap.
+- NVIDIA model routing now uses model-specific profiles, dynamic output-token clamping, and refreshed catalog entries.
+- Global configuration is once again the default; workspace/project config is used only after explicit workspace mode is enabled.
+- Context Engine cold-start indexing and the streaming footer were optimized so first replies and status refreshes remain responsive.
 
 For the full release notes, see [docs/changelog.md](docs/changelog.md).
 

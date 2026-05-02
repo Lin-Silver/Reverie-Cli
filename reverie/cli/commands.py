@@ -5730,6 +5730,14 @@ class CommandHandler:
 
         provider_cfg["selected_model_id"] = selected_model["id"]
         provider_cfg["selected_model_display_name"] = selected_model["display_name"]
+        if config_attr == "nvidia":
+            try:
+                full_context_tokens = int(selected_model.get("context_length") or 0)
+            except (TypeError, ValueError):
+                full_context_tokens = 0
+            if full_context_tokens > 0:
+                provider_cfg["max_context_tokens"] = full_context_tokens
+                provider_cfg["max_tokens"] = full_context_tokens
         if post_select_config is not None:
             provider_cfg = post_select_config(provider_cfg, selected_model)
         setattr(config, config_attr, provider_cfg)
@@ -5738,12 +5746,25 @@ class CommandHandler:
 
         # Sync NVIDIA config to global config.json for consistency
         if config_attr == 'nvidia' and config_manager.is_workspace_mode():
-            from ..config import ConfigManager
+            from ..config import Config, ConfigManager
             project_root = self.app.get('project_root')
             if project_root:
                 global_config_manager = ConfigManager(project_root, force_workspace_config=False)
-                global_config = global_config_manager.load()
+                global_config_manager.ensure_dirs()
+                global_path = global_config_manager.global_config_path
+                if global_path.exists():
+                    data = global_config_manager._load_json_payload(
+                        global_path,
+                        persist_repairs=True,
+                        record_notice=False,
+                    )
+                    global_config = Config.from_dict(data)
+                else:
+                    global_config = Config()
                 global_config.nvidia = config.nvidia
+                global_config.active_model_source = active_source
+                global_config_manager.set_workspace_mode(False)
+                global_config_manager._loaded_config_path = global_path
                 global_config_manager.save(global_config)
 
         self.console.print()

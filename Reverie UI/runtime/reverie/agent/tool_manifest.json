@@ -1,0 +1,860 @@
+{
+  "schema_version": 1,
+  "description": "Prompt-facing tool manifest. Runtime schemas remain authoritative; this file tells each mode which tools to emphasize and how to call them.",
+  "discovery_rules": [
+    "If the right tool or exact schema is unclear, call `tool_catalog(operation=\"search\", query=\"...\")`.",
+    "Use `tool_catalog(operation=\"inspect\", tool_name=\"...\")` before first use of unfamiliar, dynamic, or high-impact tools.",
+    "Use `skill_lookup` only when a discovered `SKILL.md` materially changes the workflow.",
+    "Use `list_mcp_resources` and `read_mcp_resource` for MCP resources; inspect dynamic `mcp_*` tools through `tool_catalog`.",
+    "Dynamic runtime-plugin tools such as `rc_*` may appear at startup; inspect them before first use."
+  ],
+  "calling_rules": [
+    "Use exact tool names and exact schema field names.",
+    "Start with required fields, then add optional fields only when needed.",
+    "Prefer narrow, reversible, read-only calls before high-impact calls.",
+    "Retrieve or inspect before editing; verify after editing.",
+    "After any tool use, return a user-facing response instead of stopping at raw output."
+  ],
+  "mode_profiles": {
+    "reverie": {
+      "title": "Reverie Mode Tool Surface",
+      "workflow": [
+        "General-purpose execution loop: understand the goal, gather evidence, choose the best available method, implement, verify, and report.",
+        "Use local repository tools for code and filesystem facts. Use web tools for current external information. Use command tools for scripts, builds, downloads, tests, and smoke checks.",
+        "If a task is broad, continue through safe research, implementation, repair, and verification until the requested outcome is actually delivered or a real blocker remains.",
+        "Switch modes only when another mode provides materially better workflow, artifacts, or continuity."
+      ],
+      "tools": [
+        "codebase-retrieval",
+        "git-commit-retrieval",
+        "str_replace_editor",
+        "create_file",
+        "file_ops",
+        "delete_file",
+        "command_exec",
+        "web_search",
+        "web_fetch",
+        "tool_catalog",
+        "skill_lookup",
+        "list_mcp_resources",
+        "read_mcp_resource",
+        "vision_upload",
+        "text_to_image",
+        "count_tokens",
+        "task_manager",
+        "subagent",
+        "userInput",
+        "switch_mode",
+        "game_design_orchestrator",
+        "game_project_scaffolder",
+        "reverie_engine",
+        "reverie_engine_lite",
+        "game_playtest_lab",
+        "game_modeling_workbench",
+        "blender_modeling_workbench",
+        "game_asset_manager",
+        "game_balance_analyzer",
+        "level_design",
+        "game_config_editor",
+        "game_asset_packer",
+        "game_gdd_manager",
+        "story_design",
+        "game_math_simulator",
+        "game_stats_analyzer"
+      ]
+    },
+    "reverie-gamer": {
+      "title": "Reverie-Gamer Tool Surface",
+      "workflow": [
+        "Use a prompt-to-production flow: compile request, constrain scope, create playable runtime work, verify, and iterate.",
+        "For ambitious prompts, reduce scope to the first credible playable slice before expanding.",
+        "Keep continuity artifacts current: artifacts/game_program.json, artifacts/design_intelligence.json, artifacts/campaign_program.json, artifacts/roster_strategy.json, artifacts/reference_intelligence.json, artifacts/runtime_capability_graph.json, artifacts/runtime_delivery_plan.json, artifacts/system_specs.json, artifacts/asset_pipeline.json, and playtest/slice_score.json.",
+        "Prefer concrete runtime artifacts and playtest evidence over concept-only output."
+      ],
+      "tools": [
+        "codebase-retrieval",
+        "git-commit-retrieval",
+        "str_replace_editor",
+        "create_file",
+        "file_ops",
+        "delete_file",
+        "command_exec",
+        "web_search",
+        "web_fetch",
+        "tool_catalog",
+        "skill_lookup",
+        "list_mcp_resources",
+        "read_mcp_resource",
+        "vision_upload",
+        "text_to_image",
+        "count_tokens",
+        "task_manager",
+        "userInput",
+        "switch_mode",
+        "game_design_orchestrator",
+        "game_project_scaffolder",
+        "reverie_engine",
+        "reverie_engine_lite",
+        "game_playtest_lab",
+        "game_modeling_workbench",
+        "blender_modeling_workbench",
+        "game_asset_manager",
+        "game_balance_analyzer",
+        "level_design",
+        "game_config_editor",
+        "game_asset_packer",
+        "game_gdd_manager",
+        "story_design",
+        "game_math_simulator",
+        "game_stats_analyzer"
+      ]
+    },
+    "reverie-atlas": {
+      "title": "Reverie-Atlas Tool Surface",
+      "workflow": [
+        "Research first, document the engineering contract, then implement and refresh documents after reality changes.",
+        "Use `atlas_delivery_orchestrator` for durable Atlas state, slices, blockers, checkpoints, and closure readiness.",
+        "Switch back to `reverie` for tiny, low-ambiguity coding tasks."
+      ],
+      "tools": [
+        "codebase-retrieval",
+        "git-commit-retrieval",
+        "str_replace_editor",
+        "create_file",
+        "file_ops",
+        "delete_file",
+        "command_exec",
+        "web_search",
+        "web_fetch",
+        "tool_catalog",
+        "skill_lookup",
+        "list_mcp_resources",
+        "read_mcp_resource",
+        "vision_upload",
+        "text_to_image",
+        "count_tokens",
+        "userInput",
+        "switch_mode",
+        "atlas_delivery_orchestrator"
+      ]
+    },
+    "spec-driven": {
+      "title": "Spec-Driven Tool Surface",
+      "workflow": [
+        "Inspect current state, create requirements, design, and tasks, then implement only after the contract is clear.",
+        "In one-shot prompt mode, continue through the requested document chain without pausing for approval."
+      ],
+      "tools": [
+        "codebase-retrieval",
+        "git-commit-retrieval",
+        "str_replace_editor",
+        "create_file",
+        "file_ops",
+        "delete_file",
+        "command_exec",
+        "web_search",
+        "web_fetch",
+        "tool_catalog",
+        "skill_lookup",
+        "list_mcp_resources",
+        "read_mcp_resource",
+        "vision_upload",
+        "text_to_image",
+        "count_tokens",
+        "userInput",
+        "switch_mode"
+      ]
+    },
+    "spec-vibe": {
+      "title": "Spec-Vibe Tool Surface",
+      "workflow": [
+        "Move quickly while still gathering enough evidence before edits.",
+        "Keep specs lightweight and useful; verify concrete outputs."
+      ],
+      "tools": [
+        "codebase-retrieval",
+        "git-commit-retrieval",
+        "str_replace_editor",
+        "create_file",
+        "file_ops",
+        "delete_file",
+        "command_exec",
+        "web_search",
+        "web_fetch",
+        "tool_catalog",
+        "skill_lookup",
+        "list_mcp_resources",
+        "read_mcp_resource",
+        "vision_upload",
+        "text_to_image",
+        "count_tokens",
+        "userInput",
+        "switch_mode"
+      ]
+    },
+    "writer": {
+      "title": "Writer Tool Surface",
+      "workflow": [
+        "Use `ask_clarification` early when format, genre, tone, length, POV, tense, or style brief is missing.",
+        "Use `userInput` when you need explicit outline approval or a blocking creative decision.",
+        "Use writer memory and consistency tools to preserve continuity across long-form output."
+      ],
+      "tools": [
+        "codebase-retrieval",
+        "git-commit-retrieval",
+        "str_replace_editor",
+        "create_file",
+        "file_ops",
+        "delete_file",
+        "command_exec",
+        "web_search",
+        "web_fetch",
+        "tool_catalog",
+        "skill_lookup",
+        "list_mcp_resources",
+        "read_mcp_resource",
+        "vision_upload",
+        "text_to_image",
+        "count_tokens",
+        "userInput",
+        "switch_mode",
+        "ask_clarification",
+        "novel_context_manager",
+        "consistency_checker",
+        "plot_analyzer"
+      ]
+    },
+    "ant": {
+      "title": "Reverie-Ant Tool Surface",
+      "workflow": [
+        "Structure long-running work into planning, execution, and verification phases.",
+        "Use `task_boundary` for visible phase updates and `notify_user` only when user review or a blocker matters."
+      ],
+      "tools": [
+        "codebase-retrieval",
+        "git-commit-retrieval",
+        "str_replace_editor",
+        "create_file",
+        "file_ops",
+        "delete_file",
+        "command_exec",
+        "web_search",
+        "web_fetch",
+        "tool_catalog",
+        "skill_lookup",
+        "list_mcp_resources",
+        "read_mcp_resource",
+        "vision_upload",
+        "text_to_image",
+        "count_tokens",
+        "userInput",
+        "switch_mode",
+        "task_boundary",
+        "notify_user"
+      ]
+    },
+    "computer-controller": {
+      "title": "Computer Controller Tool Surface",
+      "workflow": [
+        "Use an observe -> decide -> act -> re-observe loop until the desktop task is complete.",
+        "Prefer one small UI action at a time and verify the screen state after each action."
+      ],
+      "tools": [
+        "codebase-retrieval",
+        "git-commit-retrieval",
+        "str_replace_editor",
+        "create_file",
+        "file_ops",
+        "delete_file",
+        "command_exec",
+        "web_search",
+        "web_fetch",
+        "tool_catalog",
+        "skill_lookup",
+        "list_mcp_resources",
+        "read_mcp_resource",
+        "vision_upload",
+        "text_to_image",
+        "count_tokens",
+        "userInput",
+        "computer_control"
+      ]
+    }
+  },
+  "tools": {
+    "codebase-retrieval": {
+      "purpose": "Inspect repository files, symbols, usages, dependencies, workspace memory, and LSP state.",
+      "use_when": "Before non-trivial edits, design claims, refactors, bug fixes, or code explanations.",
+      "parameters": {
+        "query_type": "One of symbol, file, search, dependencies, outline, task, memory, lsp.",
+        "query": "Symbol, file path, search text, task description, or LSP target.",
+        "direction": "Optional dependency direction for dependency queries.",
+        "lsp_action": "Optional LSP action such as diagnostics, definitions, document_symbols, workspace_symbols, or status."
+      },
+      "examples": [
+        "codebase-retrieval(query_type=\"task\", query=\"fix streaming think tag rendering\")",
+        "codebase-retrieval(query_type=\"file\", query=\"reverie/agent/agent.py\")"
+      ]
+    },
+    "git-commit-retrieval": {
+      "purpose": "Inspect git history, blame, prior fixes, and current uncommitted state.",
+      "use_when": "History or conventions could reduce risk.",
+      "parameters": {
+        "query_type": "file_history, symbol_history, blame, commit_details, search, recent, or uncommitted.",
+        "target": "File path, symbol name, commit hash, or search query.",
+        "limit": "Optional result limit."
+      },
+      "examples": [
+        "git-commit-retrieval(query_type=\"search\", target=\"web_search\", limit=10)"
+      ]
+    },
+    "str_replace_editor": {
+      "purpose": "View, replace, insert, or create text files inside the workspace.",
+      "use_when": "Making precise edits to existing files.",
+      "parameters": {
+        "command": "view, str_replace, insert, or create.",
+        "path": "Workspace-relative file path.",
+        "old_str": "Exact unique text to replace.",
+        "new_str": "Replacement or inserted text.",
+        "insert_line": "1-based insertion line for insert.",
+        "view_range": "Optional [start, end] line range for view."
+      },
+      "examples": [
+        "str_replace_editor(command=\"view\", path=\"reverie/agent/system_prompt.py\", view_range=[560, 760])"
+      ]
+    },
+    "create_file": {
+      "purpose": "Create a new workspace file or intentionally overwrite an existing file.",
+      "use_when": "A clean full-file create is simpler than incremental edits.",
+      "parameters": {
+        "path": "Workspace-relative destination path.",
+        "content": "Full file content.",
+        "overwrite": "Set true only when intentionally replacing an existing file."
+      },
+      "examples": [
+        "create_file(path=\"tools/download.ps1\", content=\"...\", overwrite=false)"
+      ]
+    },
+    "file_ops": {
+      "purpose": "Read files, list directories, check existence, inspect metadata, or create directories.",
+      "use_when": "Non-destructive workspace filesystem work.",
+      "parameters": {
+        "operation": "read, list, exists, info, or mkdir.",
+        "path": "Workspace-relative path."
+      },
+      "examples": [
+        "file_ops(operation=\"list\", path=\".\")"
+      ]
+    },
+    "delete_file": {
+      "purpose": "Delete exactly one file inside the workspace.",
+      "use_when": "A file removal is required and safe.",
+      "parameters": {
+        "path": "Workspace-relative file path.",
+        "confirm_delete": "Must be true."
+      },
+      "examples": [
+        "delete_file(path=\"scratch.log\", confirm_delete=true)"
+      ]
+    },
+    "command_exec": {
+      "purpose": "Run audited commands in the workspace for tests, builds, scripts, downloads, diagnostics, and git checks.",
+      "use_when": "The task needs a shell command or verification command.",
+      "parameters": {
+        "command": "Command line to run.",
+        "timeout": "Optional timeout in seconds.",
+        "working_dir": "Optional workspace-relative working directory."
+      },
+      "examples": [
+        "command_exec(command=\"python -m pytest -q\")",
+        "command_exec(command=\"powershell -ExecutionPolicy Bypass -File .\\\\download-mods.ps1\")"
+      ]
+    },
+    "web_search": {
+      "purpose": "Search the web for many candidate links, titles, and snippets.",
+      "use_when": "Current external facts, APIs, products, docs, releases, or references may matter.",
+      "parameters": {
+        "query": "Search text.",
+        "max_results": "Maximum links to return.",
+        "include_domains": "Optional domains to include.",
+        "exclude_domains": "Optional domains to exclude.",
+        "recency": "Optional d, w, m, or y recency hint.",
+        "fetch_content": "Compatibility option; prefer `web_fetch` for page text."
+      },
+      "examples": [
+        "web_search(query=\"official API documentation dependency versions\", max_results=12)"
+      ]
+    },
+    "web_fetch": {
+      "purpose": "Fetch readable content from selected URLs.",
+      "use_when": "You need documentation details, API schemas, changelogs, metadata, or download links from known URLs.",
+      "parameters": {
+        "url": "Single URL to fetch.",
+        "urls": "List of URLs to fetch.",
+        "max_content_chars": "Maximum readable text per page.",
+        "output_format": "text or markdown."
+      },
+      "examples": [
+        "web_fetch(url=\"https://docs.example.com/api/\", output_format=\"markdown\")"
+      ]
+    },
+    "tool_catalog": {
+      "purpose": "List, search, inspect, recommend, or group visible tools.",
+      "use_when": "The right tool or exact schema is unclear.",
+      "parameters": {
+        "operation": "list, search, inspect, recommend, or groups.",
+        "query": "Search/recommend text.",
+        "tool_name": "Tool to inspect.",
+        "mode": "Optional mode.",
+        "max_results": "Optional result limit."
+      },
+      "examples": [
+        "tool_catalog(operation=\"inspect\", tool_name=\"command_exec\")"
+      ]
+    },
+    "skill_lookup": {
+      "purpose": "Inspect discovered Codex-style SKILL.md instructions.",
+      "use_when": "A skill may materially change the workflow.",
+      "parameters": {
+        "operation": "list, search, or inspect.",
+        "query": "Search text.",
+        "skill_name": "Skill to inspect."
+      },
+      "examples": [
+        "skill_lookup(operation=\"search\", query=\"openai docs\")"
+      ]
+    },
+    "list_mcp_resources": {
+      "purpose": "Discover read-only MCP resources exposed by connected servers.",
+      "use_when": "External MCP context is available as resources.",
+      "parameters": {
+        "server": "Optional MCP server name.",
+        "max_results": "Optional result limit."
+      },
+      "examples": [
+        "list_mcp_resources(server=\"filesystem\")"
+      ]
+    },
+    "read_mcp_resource": {
+      "purpose": "Read a specific MCP resource by server and URI.",
+      "use_when": "You selected a resource from list_mcp_resources.",
+      "parameters": {
+        "server": "MCP server name.",
+        "uri": "Resource URI."
+      },
+      "examples": [
+        "read_mcp_resource(server=\"filesystem\", uri=\"file:///workspace/README.md\")"
+      ]
+    },
+    "vision_upload": {
+      "purpose": "Upload local visual files for model-side inspection.",
+      "use_when": "Screenshots, diagrams, UI renders, or image assets matter.",
+      "parameters": {
+        "file_path": "Path to PNG, JPG, GIF, BMP, WEBP, or TIFF.",
+        "description": "Optional inspection context."
+      },
+      "examples": [
+        "vision_upload(file_path=\"screenshots/ui.png\", description=\"inspect layout\")"
+      ]
+    },
+    "text_to_image": {
+      "purpose": "Generate or prepare raster images through the configured local image runtime.",
+      "use_when": "The user explicitly needs generated bitmap assets.",
+      "parameters": {
+        "action": "list_models, diagnose, prepare_models, or generate.",
+        "prompt": "Generation prompt for generate.",
+        "model": "Optional model id/path.",
+        "display_name": "Optional configured display name.",
+        "width": "Optional width.",
+        "height": "Optional height.",
+        "output_path": "Optional workspace-safe output path."
+      },
+      "examples": [
+        "text_to_image(action=\"diagnose\")"
+      ]
+    },
+    "count_tokens": {
+      "purpose": "Estimate tokens for text or the current conversation.",
+      "use_when": "Context usage may affect completion.",
+      "parameters": {
+        "text": "Optional text to count.",
+        "check_current_conversation": "Set true to count current conversation."
+      },
+      "examples": [
+        "count_tokens(check_current_conversation=true)"
+      ]
+    },
+    "task_manager": {
+      "purpose": "Maintain a checklist-first task system for larger work.",
+      "use_when": "The task is multi-step, cross-layer, long-running, or user requested progress tracking.",
+      "parameters": {
+        "action": "Tool-specific task action.",
+        "tasks": "Task data or updates.",
+        "task_id": "Optional target task id.",
+        "state": "Optional task state."
+      },
+      "examples": [
+        "task_manager(action=\"list\")"
+      ]
+    },
+    "subagent": {
+      "purpose": "Delegate bounded Reverie-mode subtasks to configured subagents.",
+      "use_when": "Parallel investigation or implementation would help and the task is self-contained.",
+      "parameters": {
+        "action": "Subagent action.",
+        "prompt": "Delegated task instructions.",
+        "agent_id": "Optional configured agent id."
+      },
+      "examples": [
+        "subagent(action=\"run\", prompt=\"inspect failing test logs and summarize root cause\")"
+      ]
+    },
+    "userInput": {
+      "purpose": "Ask the user a blocking question.",
+      "use_when": "Credentials, paid resources, destructive operations, deployments, license/business choices, or contradictions block safe progress.",
+      "parameters": {
+        "question": "Question text.",
+        "options": "Optional choices.",
+        "allow_cancel": "Optional cancellation flag."
+      },
+      "examples": [
+        "userInput(question=\"Which deployment target should I use?\")"
+      ]
+    },
+    "switch_mode": {
+      "purpose": "Switch to another workflow mode.",
+      "use_when": "Another mode materially improves artifacts, continuity, or control.",
+      "parameters": {
+        "mode": "Target mode.",
+        "reason": "Concrete reason for switching.",
+        "operation": "Optional list or recommend."
+      },
+      "examples": [
+        "switch_mode(mode=\"reverie-gamer\", reason=\"dedicated game production workflow\")"
+      ]
+    },
+    "context_management": {
+      "purpose": "Compress, truncate, checkpoint, or restore conversation context.",
+      "use_when": "Long sessions need continuity protection.",
+      "parameters": {
+        "action": "compress, truncate, checkpoint, or restore.",
+        "keep_recent": "Optional recent message count.",
+        "checkpoint_id": "Optional checkpoint id."
+      },
+      "examples": [
+        "context_management(action=\"checkpoint\")"
+      ]
+    },
+    "game_design_orchestrator": {
+      "purpose": "Compile game prompts into durable request/program/design artifacts and vertical-slice plans.",
+      "use_when": "Game design, production planning, scope reduction, or slice generation is needed.",
+      "parameters": {
+        "action": "compile_request, compile_program, plan_production, generate_vertical_slice, or related game orchestration action.",
+        "prompt": "Game prompt or design brief.",
+        "project_name": "Optional project name.",
+        "output_dir": "Optional artifact directory."
+      },
+      "examples": [
+        "game_design_orchestrator(action=\"compile_request\")",
+        "game_design_orchestrator(action=\"compile_request\", prompt=\"...\", project_name=\"Slice\")",
+        "game_design_orchestrator(action=\"compile_program\")",
+        "game_design_orchestrator(action=\"plan_production\")",
+        "game_design_orchestrator(action=\"generate_vertical_slice\")"
+      ]
+    },
+    "game_project_scaffolder": {
+      "purpose": "Create or upgrade runtime/game project foundations and vertical slices.",
+      "use_when": "A playable runtime, project scaffold, or system packet is needed.",
+      "parameters": {
+        "action": "plan, create, generate_vertical_slice, upgrade_runtime_project, apply_system_packet, or related scaffolding action.",
+        "project_name": "Optional project name.",
+        "runtime": "Optional runtime target.",
+        "output_dir": "Optional output directory."
+      },
+      "examples": [
+        "game_project_scaffolder(action=\"generate_vertical_slice\")",
+        "game_project_scaffolder(action=\"upgrade_runtime_project\")"
+      ]
+    },
+    "reverie_engine": {
+      "purpose": "Create, inspect, validate, benchmark, and smoke-test Reverie Engine projects.",
+      "use_when": "The built-in runtime is the target.",
+      "parameters": {
+        "action": "Runtime action such as create_project, validate, benchmark, smoke, video, or renpy.",
+        "project_dir": "Optional project path.",
+        "output_path": "Optional output path."
+      },
+      "examples": [
+        "reverie_engine(action=\"validate\", project_dir=\"game\")"
+      ]
+    },
+    "reverie_engine_lite": {
+      "purpose": "Work with the lightweight Reverie Engine runtime.",
+      "use_when": "A compact built-in runtime is enough.",
+      "parameters": {
+        "action": "Runtime action.",
+        "project_dir": "Optional project path."
+      },
+      "examples": [
+        "reverie_engine_lite(action=\"inspect\", project_dir=\"game\")"
+      ]
+    },
+    "game_playtest_lab": {
+      "purpose": "Generate playtest plans, quality gates, telemetry schemas, performance budgets, and slice scores.",
+      "use_when": "Playable work needs verification evidence.",
+      "parameters": {
+        "action": "create_test_plan, run_quality_gates, score_combat_feel, plan_next_iteration, analyze_session_log, or related action.",
+        "project_dir": "Optional project path.",
+        "session_log_path": "Optional log path."
+      },
+      "examples": [
+        "game_playtest_lab(action=\"create_test_plan\")",
+        "game_playtest_lab(action=\"run_quality_gates\")",
+        "game_playtest_lab(action=\"score_combat_feel\")",
+        "game_playtest_lab(action=\"plan_next_iteration\")"
+      ]
+    },
+    "game_modeling_workbench": {
+      "purpose": "Manage headless model stubs, Blockbench-style data, game_models assisted lanes, registry sync, and runtime imports.",
+      "use_when": "Game modeling assets or registry integration are needed.",
+      "parameters": {
+        "action": "Modeling action.",
+        "model_id": "Optional model id.",
+        "output_dir": "Optional output directory."
+      },
+      "examples": [
+        "game_modeling_workbench(action=\"registry_status\")"
+      ]
+    },
+    "blender_modeling_workbench": {
+      "purpose": "Control Blender with auditable scripts, plans, exports, renders, and black-box iteration plan evidence.",
+      "use_when": "Blender DCC control, GLB/GLTF export, previews, or production-character scaffold audits are needed.",
+      "parameters": {
+        "action": "Blender workbench action.",
+        "brief": "Optional modeling brief.",
+        "output_dir": "Optional output directory.",
+        "export_format": "Optional export format."
+      },
+      "examples": [
+        "blender_modeling_workbench(action=\"plan_model\", brief=\"...\")",
+        "rc_blender_ensure_runtime()",
+        "rc_blender_run_script(script_path=\"...\")"
+      ]
+    },
+    "game_asset_manager": {
+      "purpose": "Track and manage game asset manifests.",
+      "use_when": "Assets need structured tracking.",
+      "parameters": {
+        "action": "Asset action.",
+        "asset_id": "Optional asset id.",
+        "data": "Optional asset data."
+      },
+      "examples": [
+        "game_asset_manager(action=\"list\")"
+      ]
+    },
+    "game_balance_analyzer": {
+      "purpose": "Analyze or tune game balance data.",
+      "use_when": "Stats, economy, progression, or combat balance needs review.",
+      "parameters": {
+        "action": "Balance action.",
+        "data": "Balance data or path."
+      },
+      "examples": [
+        "game_balance_analyzer(action=\"analyze\")"
+      ]
+    },
+    "level_design": {
+      "purpose": "Generate or validate level layouts, flow, pathing, placement, and difficulty.",
+      "use_when": "Level structure or spatial design is needed.",
+      "parameters": {
+        "action": "generate_layout, generate_rooms, check_logic, analyze_difficulty, validate_path, analyze_flow, export_config, npc_placement, or spatial_analysis.",
+        "layout": "Optional layout text.",
+        "config_path": "Optional config path."
+      },
+      "examples": [
+        "level_design(action=\"generate_layout\")"
+      ]
+    },
+    "game_config_editor": {
+      "purpose": "Read or write game configuration data.",
+      "use_when": "Config artifacts need structured edits.",
+      "parameters": {
+        "action": "Config action.",
+        "path": "Config path.",
+        "data": "Optional config data."
+      },
+      "examples": [
+        "game_config_editor(action=\"read\", path=\"config.json\")"
+      ]
+    },
+    "game_asset_packer": {
+      "purpose": "Package game assets for runtime delivery.",
+      "use_when": "Assets must be gathered, packed, or prepared for runtime.",
+      "parameters": {
+        "action": "Packing action.",
+        "input_dir": "Optional input directory.",
+        "output_dir": "Optional output directory."
+      },
+      "examples": [
+        "game_asset_packer(action=\"pack\")"
+      ]
+    },
+    "game_gdd_manager": {
+      "purpose": "Create and maintain game design documents.",
+      "use_when": "GDD content or game design artifacts are needed.",
+      "parameters": {
+        "action": "GDD action.",
+        "section": "Optional section.",
+        "content": "Optional content."
+      },
+      "examples": [
+        "game_gdd_manager(action=\"create\")"
+      ]
+    },
+    "story_design": {
+      "purpose": "Create and analyze story bibles, quests, NPCs, dialogue trees, factions, pacing, and arcs.",
+      "use_when": "Narrative systems or RPG content are needed.",
+      "parameters": {
+        "action": "story_bible, questline, npc_profiles, dialogue_tree, faction_matrix, consistency_check, story_pacing, or character_arc.",
+        "operation": "Optional create/read/update/analyze operation.",
+        "data": "Optional narrative data."
+      },
+      "examples": [
+        "story_design(action=\"questline\", operation=\"create\")"
+      ]
+    },
+    "game_math_simulator": {
+      "purpose": "Run math simulations for game systems.",
+      "use_when": "Probabilities, curves, economies, or progression need numerical checks.",
+      "parameters": {
+        "action": "Simulation action.",
+        "config": "Optional simulation config."
+      },
+      "examples": [
+        "game_math_simulator(action=\"simulate\")"
+      ]
+    },
+    "game_stats_analyzer": {
+      "purpose": "Analyze gameplay stats and telemetry.",
+      "use_when": "Metrics or playtest data need interpretation.",
+      "parameters": {
+        "action": "Stats action.",
+        "data": "Stats data or path."
+      },
+      "examples": [
+        "game_stats_analyzer(action=\"analyze\")"
+      ]
+    },
+    "atlas_delivery_orchestrator": {
+      "purpose": "Manage Atlas document contracts, slices, blockers, checkpoints, and closure readiness.",
+      "use_when": "Atlas mode needs durable delivery state.",
+      "parameters": {
+        "action": "Atlas orchestration action.",
+        "artifact_path": "Optional artifact path.",
+        "data": "Optional state data."
+      },
+      "examples": [
+        "atlas_delivery_orchestrator(action=\"status\")"
+      ]
+    },
+    "ask_clarification": {
+      "purpose": "Ask targeted creative or writing brief questions.",
+      "use_when": "Writer mode lacks essential style, format, tone, length, POV, tense, genre, or audience information.",
+      "parameters": {
+        "question": "Clarifying question.",
+        "context": "Optional context."
+      },
+      "examples": [
+        "ask_clarification(question=\"What POV and target length should I use?\")"
+      ]
+    },
+    "novel_context_manager": {
+      "purpose": "Manage long-form writing context and memory.",
+      "use_when": "Novel or story continuity matters.",
+      "parameters": {
+        "action": "Context action.",
+        "content": "Optional story content."
+      },
+      "examples": [
+        "novel_context_manager(action=\"summarize\")"
+      ]
+    },
+    "consistency_checker": {
+      "purpose": "Check writing continuity and consistency.",
+      "use_when": "Characters, plot, timeline, or world details need validation.",
+      "parameters": {
+        "action": "Consistency action.",
+        "content": "Content to check."
+      },
+      "examples": [
+        "consistency_checker(action=\"check\", content=\"...\")"
+      ]
+    },
+    "plot_analyzer": {
+      "purpose": "Analyze plot structure, pacing, character voice, and logical flow.",
+      "use_when": "Narrative analysis is needed.",
+      "parameters": {
+        "action": "Plot analysis action.",
+        "content": "Content to analyze."
+      },
+      "examples": [
+        "plot_analyzer(action=\"analyze_pacing\", content=\"...\")"
+      ]
+    },
+    "task_boundary": {
+      "purpose": "Publish Reverie-Ant phase/progress boundary updates.",
+      "use_when": "Ant mode starts or changes planning, execution, or verification phases.",
+      "parameters": {
+        "TaskName": "Current task identifier.",
+        "TaskSummary": "Cumulative summary.",
+        "TaskStatus": "Immediate next action.",
+        "Mode": "PLANNING, EXECUTION, or VERIFICATION.",
+        "PredictedTaskSize": "Estimated tool-call count."
+      },
+      "examples": [
+        "task_boundary(TaskName=\"Implement feature\", Mode=\"EXECUTION\", TaskSummary=\"...\", TaskStatus=\"...\", PredictedTaskSize=5)"
+      ]
+    },
+    "notify_user": {
+      "purpose": "Ask for review, surface blockers, or notify completion in Ant mode.",
+      "use_when": "User-visible Ant communication is required.",
+      "parameters": {
+        "Message": "User-facing message.",
+        "PathsToReview": "Optional artifact paths.",
+        "BlockedOnUser": "Whether progress is blocked."
+      },
+      "examples": [
+        "notify_user(Message=\"Plan is ready for review\", PathsToReview=[\"artifacts/task.md\"], BlockedOnUser=true)"
+      ]
+    },
+    "computer_control": {
+      "purpose": "Observe and control the desktop.",
+      "use_when": "Computer Controller mode needs visual UI automation.",
+      "parameters": {
+        "action": "observe, observe_window, click, type, key, hotkey, scroll, or related desktop action.",
+        "x": "Optional screen x coordinate.",
+        "y": "Optional screen y coordinate.",
+        "text": "Optional text to type.",
+        "grid_cols": "Optional observation grid columns.",
+        "grid_rows": "Optional observation grid rows."
+      },
+      "examples": [
+        "computer_control(action=\"observe\", grid_cols=3, grid_rows=3)",
+        "computer_control(action=\"click\", x=640, y=420)"
+      ]
+    }
+  },
+  "dynamic_tools": [
+    {
+      "pattern": "mcp_*",
+      "purpose": "Tools discovered from configured MCP servers.",
+      "calling_method": "Inspect with `tool_catalog(operation=\"inspect\", tool_name=\"mcp_server_tool\")` before use."
+    },
+    {
+      "pattern": "rc_*",
+      "purpose": "Runtime-plugin tools discovered from protocol-ready plugins.",
+      "calling_method": "Inspect with `tool_catalog` before use; common examples include rc_blender_ensure_runtime and rc_blender_run_script."
+    }
+  ]
+}

@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Reverie UI</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">R</div>
+        <div>
+          <div class="brand-name">Reverie UI</div>
+          <div class="brand-subtitle" id="runtimeStatus">Starting</div>
+        </div>
+      </div>
+
+      <label class="field-label" for="workspaceInput">Workspace</label>
+      <div class="path-row">
+        <input id="workspaceInput" class="text-input" spellcheck="false">
+        <button id="workspaceApply" class="icon-button" title="Open workspace">Go</button>
+      </div>
+
+      <label class="field-label" for="modeSelect">Mode</label>
+      <select id="modeSelect" class="select-input"></select>
+
+      <div class="sidebar-actions">
+        <button id="newSessionButton" class="primary-button">New Chat</button>
+        <button id="clearSessionButton" class="plain-button">Clear</button>
+      </div>
+
+      <div class="section-title">Sessions</div>
+      <div id="sessionList" class="session-list"></div>
+    </aside>
+
+    <main class="chat-region">
+      <header class="topbar">
+        <div>
+          <div id="workspaceName" class="topbar-title">Workspace</div>
+          <div id="modelStatus" class="topbar-subtitle">No model loaded</div>
+        </div>
+        <div class="topbar-actions">
+          <button id="indexButton" class="plain-button">Index</button>
+          <button id="diagnosticsButton" class="plain-button">Doctor</button>
+        </div>
+      </header>
+
+      <section id="messageList" class="message-list"></section>
+
+      <form id="composer" class="composer">
+        <textarea id="messageInput" rows="3" placeholder="Ask Reverie to inspect, edit, run, design, index, or automate this workspace."></textarea>
+        <div class="composer-footer">
+          <div id="turnStatus" class="turn-status">Ready</div>
+          <button id="sendButton" class="send-button" type="submit">Send</button>
+        </div>
+      </form>
+    </main>
+
+    <aside class="inspector">
+      <div class="tabs">
+        <button class="tab-button active" data-tab="context">Context</button>
+        <button class="tab-button" data-tab="models">Models</button>
+        <button class="tab-button" data-tab="tools">Tools</button>
+        <button class="tab-button" data-tab="logs">Logs</button>
+      </div>
+
+      <section id="contextTab" class="tab-panel active">
+        <div class="panel-header">
+          <div>
+            <h2>Context Engine</h2>
+            <p id="indexSummary">Not indexed in this session.</p>
+          </div>
+        </div>
+        <div class="meter">
+          <div id="indexMeter" class="meter-fill"></div>
+        </div>
+        <div id="diagnosticsList" class="diagnostics-list"></div>
+      </section>
+
+      <section id="modelsTab" class="tab-panel">
+        <div class="panel-header">
+          <div>
+            <h2>Model</h2>
+            <p id="configPath">Config path pending.</p>
+          </div>
+        </div>
+        <form id="modelForm" class="settings-form">
+          <input type="hidden" id="modelIndex" value="-1">
+          <label>
+            Display name
+            <input id="modelDisplayName" class="text-input" required>
+          </label>
+          <label>
+            Model id
+            <input id="modelId" class="text-input" required>
+          </label>
+          <label>
+            Base URL
+            <input id="modelBaseUrl" class="text-input" required>
+          </label>
+          <label>
+            API key
+            <input id="modelApiKey" class="text-input" type="password">
+          </label>
+          <label>
+            Provider
+            <select id="modelProvider" class="select-input">
+              <option value="openai-sdk">openai-sdk</option>
+              <option value="request">request</option>
+              <option value="anthropic">anthropic</option>
+              <option value="gemini-cli">gemini-cli</option>
+              <option value="codex">codex</option>
+            </select>
+          </label>
+          <label>
+            Max context tokens
+            <input id="modelContextTokens" class="text-input" type="number" min="1000" value="128000">
+          </label>
+          <button class="primary-button" type="submit">Save Model</button>
+        </form>
+        <div id="modelList" class="model-list"></div>
+      </section>
+
+      <section id="toolsTab" class="tab-panel">
+        <div class="panel-header">
+          <div>
+            <h2>Tools</h2>
+            <p id="toolSummary">Tool surface pending.</p>
+          </div>
+        </div>
+        <input id="toolFilter" class="text-input" placeholder="Filter tools">
+        <div id="toolList" class="tool-list"></div>
+      </section>
+
+      <section id="logsTab" class="tab-panel">
+        <div class="panel-header">
+          <div>
+            <h2>Runtime Log</h2>
+            <p>Bridge and tool events.</p>
+          </div>
+        </div>
+        <pre id="logOutput" class="log-output"></pre>
+      </section>
+    </aside>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

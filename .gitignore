@@ -1,6 +1,8 @@
 # 忽略构建输出
 build/
 dist/
+**/bin/
+**/obj/
 search-mcp/
 _embedded_tmp/
 add-on/
@@ -37,3 +39,4 @@ env/
 .reverie/
 .env
 plugins/blender/*.zip
+Reverie UI/runtime/appdata/

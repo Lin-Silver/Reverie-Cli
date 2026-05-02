@@ -1,0 +1,906 @@
+"""
+Game Asset Manager Tool - Advanced game asset management system
+
+Core Features:
+- Asset Inventory: comprehensive sprite, audio, model, animation tracking
+- Manifest Generation: automatic asset metadata and loading optimization
+- Dependency Analysis: track asset relationships and load order (NEW)
+- Compression Recommendations: format-specific optimization suggestions (NEW)
+- Memory Analysis: total size calculation and footprint estimation (NEW)
+- Naming Validation: enforce consistent naming conventions
+- Unused Detection: intelligent orphaned asset detection
+- Atlas Planning: automatic sprite sheet optimization
+
+Advanced Operations:
+- dependency_graph: Visualize asset dependency relationships
+- compress_recommend: Get compression suggestions per asset type
+- total_size: Calculate total memory usage and compression potential
+"""
+
+from typing import Optional, Dict, Any, List, Set
+from pathlib import Path
+import json
+import mimetypes
+
+from .base import BaseTool, ToolResult
+
+
+class GameAssetManagerTool(BaseTool):
+    name = "game_asset_manager"
+    aliases = ("asset_manager",)
+    search_hint = "inspect and manage game assets manifests and dependencies"
+    tool_category = "game-data"
+    tool_tags = ("game", "asset", "manifest", "dependency", "atlas", "compression")
+    description = "Manage game assets: inventory, manifest, dependency graph, compression guidance, memory sizing, usage checks, naming validation, and atlas planning."
+
+    parameters = {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": [
+                    "list",
+                    "check_missing",
+                    "generate_manifest",
+                    "import_asset",
+                    "analyze",
+                    "find_unused",
+                    "validate_naming",
+                    "build_atlas_plan",
+                    "dependency_graph",
+                    "compress_recommend",
+                    "total_size"
+                ],
+                "description": "Asset management action"
+            },
+            "asset_type": {
+                "type": "string",
+                "enum": ["all", "sprite", "audio", "model", "animation"],
+                "description": "Type of assets to manage"
+            },
+            "asset_dir": {
+                "type": "string",
+                "description": "Asset directory path (default: assets/)"
+            },
+            "source_path": {
+                "type": "string",
+                "description": "Source file path for import_asset"
+            },
+            "target_name": {
+                "type": "string",
+                "description": "Target name for imported asset"
+            },
+            "manifest_path": {
+                "type": "string",
+                "description": "Path to save/load manifest (default: assets/manifest.json)"
+            },
+            "code_dirs": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Directories to scan for asset references"
+            },
+            "naming_pattern": {
+                "type": "string",
+                "description": "Regex pattern for naming validation"
+            },
+            "atlas_max_size": {
+                "type": "integer",
+                "description": "Maximum atlas size in pixels (default: 2048)"
+            }
+        },
+        "required": ["action"]
+    }
+
+    # Asset type extensions
+    ASSET_EXTENSIONS = {
+        "sprite": {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg"},
+        "audio": {".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac"},
+        "model": {".bbmodel", ".obj", ".fbx", ".gltf", ".glb", ".dae", ".blend", ".mtl"},
+        "animation": {".anim", ".animation", ".fbx", ".gltf"}
+    }
+
+    def __init__(self, context: Optional[Dict] = None):
+        super().__init__(context)
+        self.project_root = Path(context.get("project_root")) if context and context.get("project_root") else Path.cwd()
+
+    def execute(self, **kwargs) -> ToolResult:
+        action = kwargs.get("action")
+        asset_type = kwargs.get("asset_type", "all")
+        asset_dir = self._resolve_path(kwargs.get("asset_dir", "assets"))
+
+        try:
+            if action == "list":
+                return self._list_assets(asset_dir, asset_type)
+            
+            elif action == "check_missing":
+                code_dirs = kwargs.get("code_dirs", ["src", "scripts"])
+                return self._check_missing(asset_dir, code_dirs)
+            
+            elif action == "generate_manifest":
+                manifest_path = self._resolve_path(kwargs.get("manifest_path", "assets/manifest.json"))
+                return self._generate_manifest(asset_dir, manifest_path)
+            
+            elif action == "import_asset":
+                source_path = kwargs.get("source_path")
+                target_name = kwargs.get("target_name")
+                if not source_path:
+                    return ToolResult.fail("source_path is required for import_asset")
+                return self._import_asset(source_path, asset_dir, target_name, asset_type)
+            
+            elif action == "analyze":
+                return self._analyze_assets(asset_dir)
+            
+            elif action == "find_unused":
+                code_dirs = kwargs.get("code_dirs", ["src", "scripts"])
+                return self._find_unused(asset_dir, code_dirs)
+            
+            elif action == "validate_naming":
+                naming_pattern = kwargs.get("naming_pattern", r"^[a-z0-9_]+$")
+                return self._validate_naming(asset_dir, naming_pattern)
+            
+            elif action == "build_atlas_plan":
+                atlas_max_size = kwargs.get("atlas_max_size", 2048)
+                return self._build_atlas_plan(asset_dir, atlas_max_size)
+
+            elif action == "dependency_graph":
+                code_dirs = kwargs.get("code_dirs", ["src", "scripts", "data"])
+                return self._build_dependency_graph(asset_dir, code_dirs, asset_type)
+
+            elif action == "compress_recommend":
+                return self._compression_recommendations(asset_dir, asset_type)
+
+            elif action == "total_size":
+                return self._total_size_report(asset_dir, asset_type)
+            
+            else:
+                return ToolResult.fail(f"Unknown action: {action}")
+
+        except Exception as e:
+            return ToolResult.fail(f"Error executing {action}: {str(e)}")
+
+    def _list_assets(self, asset_dir: Path, asset_type: str) -> ToolResult:
+        """List all assets or assets of a specific type"""
+        if not asset_dir.exists():
+            return ToolResult.fail(f"Asset directory not found: {asset_dir}")
+
+        assets_by_type: Dict[str, List[Dict[str, Any]]] = {
+            "sprite": [],
+            "audio": [],
+            "model": [],
+            "animation": []
+        }
+
+        # Scan directory recursively
+        for file_path in asset_dir.rglob("*"):
+            if file_path.is_file():
+                file_type = self._get_asset_type(file_path)
+                if file_type:
+                    asset_info = {
+                        "path": str(file_path.relative_to(self.project_root)),
+                        "name": file_path.name,
+                        "size": file_path.stat().st_size,
+                        "type": file_type
+                    }
+                    assets_by_type[file_type].append(asset_info)
+
+        # Filter by type if specified
+        if asset_type != "all":
+            filtered_assets = assets_by_type.get(asset_type, [])
+            total = len(filtered_assets)
+            output = f"Found {total} {asset_type} asset(s):\n"
+            for asset in filtered_assets:
+                size_kb = asset["size"] / 1024
+                output += f"  - {asset['name']} ({size_kb:.1f} KB) at {asset['path']}\n"
+            return ToolResult.ok(output, {"assets": filtered_assets, "count": total})
+        
+        # Return all assets
+        total = sum(len(assets) for assets in assets_by_type.values())
+        output = f"Found {total} total asset(s):\n"
+        for atype, assets in assets_by_type.items():
+            if assets:
+                output += f"\n{atype.upper()} ({len(assets)}):\n"
+                for asset in assets[:5]:  # Show first 5 of each type
+                    size_kb = asset["size"] / 1024
+                    output += f"  - {asset['name']} ({size_kb:.1f} KB)\n"
+                if len(assets) > 5:
+                    output += f"  ... and {len(assets) - 5} more\n"
+        
+        return ToolResult.ok(output, {"assets": assets_by_type, "total_count": total})
+
+    def _check_missing(self, asset_dir: Path, code_dirs: List[str]) -> ToolResult:
+        """Check for missing asset references in code"""
+        # Get all asset paths
+        existing_assets = set()
+        if asset_dir.exists():
+            for file_path in asset_dir.rglob("*"):
+                if file_path.is_file():
+                    existing_assets.add(str(file_path.relative_to(self.project_root)))
+
+        # Scan code for asset references
+        referenced_assets = set()
+        missing_assets = []
+
+        for code_dir_str in code_dirs:
+            code_dir = self._resolve_path(code_dir_str)
+            if not code_dir.exists():
+                continue
+            
+            for code_file in code_dir.rglob("*"):
+                if code_file.is_file() and code_file.suffix in {".py", ".js", ".lua", ".gd"}:
+                    try:
+                        content = code_file.read_text(encoding="utf-8", errors="ignore")
+                        # Simple pattern matching for asset paths
+                        for asset in existing_assets:
+                            if asset in content:
+                                referenced_assets.add(asset)
+                        
+                        # Look for potential missing references
+                        import re
+                        asset_patterns = [
+                            r'["\']([^"\']*\.(png|jpg|jpeg|gif|mp3|wav|ogg|obj|fbx|gltf|glb|bbmodel))["\']',
+                            r'load\(["\']([^"\']+)["\']',
+                            r'asset\(["\']([^"\']+)["\']'
+                        ]
+                        for pattern in asset_patterns:
+                            matches = re.findall(pattern, content, re.IGNORECASE)
+                            for match in matches:
+                                asset_path = match[0] if isinstance(match, tuple) else match
+                                if asset_path not in existing_assets:
+                                    missing_assets.append({
+                                        "path": asset_path,
+                                        "referenced_in": str(code_file.relative_to(self.project_root))
+                                    })
+                    except Exception:
+                        continue
+
+        if missing_assets:
+            output = f"Found {len(missing_assets)} missing asset reference(s):\n"
+            for missing in missing_assets[:10]:  # Show first 10
+                output += f"  - {missing['path']} (referenced in {missing['referenced_in']})\n"
+            if len(missing_assets) > 10:
+                output += f"  ... and {len(missing_assets) - 10} more\n"
+            return ToolResult.partial(output, f"{len(missing_assets)} missing assets found")
+        
+        output = "No missing asset references found. All referenced assets exist."
+        return ToolResult.ok(output, {"missing_count": 0})
+
+    def _generate_manifest(self, asset_dir: Path, manifest_path: Path) -> ToolResult:
+        """Generate asset manifest file"""
+        if not asset_dir.exists():
+            return ToolResult.fail(f"Asset directory not found: {asset_dir}")
+
+        manifest = {
+            "version": "1.0",
+            "generated_at": "",
+            "assets": {
+                "sprites": [],
+                "audio": [],
+                "models": [],
+                "animations": []
+            },
+            "statistics": {
+                "total_assets": 0,
+                "total_size": 0,
+                "by_type": {}
+            }
+        }
+
+        # Scan assets
+        for file_path in asset_dir.rglob("*"):
+            if file_path.is_file():
+                file_type = self._get_asset_type(file_path)
+                if file_type:
+                    asset_info = {
+                        "path": str(file_path.relative_to(self.project_root)),
+                        "name": file_path.name,
+                        "size": file_path.stat().st_size
+                    }
+                    
+                    # Add type-specific info
+                    if file_type == "sprite":
+                        manifest["assets"]["sprites"].append(asset_info)
+                    elif file_type == "audio":
+                        manifest["assets"]["audio"].append(asset_info)
+                    elif file_type == "model":
+                        manifest["assets"]["models"].append(asset_info)
+                    elif file_type == "animation":
+                        manifest["assets"]["animations"].append(asset_info)
+                    
+                    manifest["statistics"]["total_assets"] += 1
+                    manifest["statistics"]["total_size"] += asset_info["size"]
+
+        # Calculate statistics
+        for atype in ["sprites", "audio", "models", "animations"]:
+            count = len(manifest["assets"][atype])
+            manifest["statistics"]["by_type"][atype] = count
+
+        # Save manifest
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+        total_size_mb = manifest["statistics"]["total_size"] / (1024 * 1024)
+        output = f"Generated asset manifest at {manifest_path}\n"
+        output += f"Total assets: {manifest['statistics']['total_assets']}\n"
+        output += f"Total size: {total_size_mb:.2f} MB\n"
+        output += "By type:\n"
+        for atype, count in manifest["statistics"]["by_type"].items():
+            output += f"  - {atype}: {count}\n"
+
+        return ToolResult.ok(output, {"manifest_path": str(manifest_path), "manifest": manifest})
+
+    def _import_asset(self, source_path: str, asset_dir: Path, target_name: Optional[str], asset_type: str) -> ToolResult:
+        """Import new asset into project"""
+        source = self._resolve_path(source_path)
+        if not source.exists():
+            return ToolResult.fail(f"Source file not found: {source_path}")
+
+        # Determine asset type if not specified
+        if asset_type == "all":
+            asset_type = self._get_asset_type(source) or "sprite"
+
+        # Create target directory
+        type_dir = asset_dir / f"{asset_type}s"
+        type_dir.mkdir(parents=True, exist_ok=True)
+
+        # Determine target filename
+        if target_name:
+            target_file = type_dir / target_name
+        else:
+            target_file = type_dir / source.name
+
+        # Copy file
+        import shutil
+        shutil.copy2(source, target_file)
+
+        size_kb = target_file.stat().st_size / 1024
+        output = f"Imported {asset_type} asset: {source.name}\n"
+        output += f"Location: {target_file.relative_to(self.project_root)}\n"
+        output += f"Size: {size_kb:.1f} KB"
+
+        return ToolResult.ok(output, {
+            "source": str(source),
+            "target": str(target_file.relative_to(self.project_root)),
+            "type": asset_type,
+            "size": target_file.stat().st_size
+        })
+
+    def _analyze_assets(self, asset_dir: Path) -> ToolResult:
+        """Analyze asset usage and statistics"""
+        if not asset_dir.exists():
+            return ToolResult.fail(f"Asset directory not found: {asset_dir}")
+
+        stats = {
+            "total_count": 0,
+            "total_size": 0,
+            "by_type": {},
+            "by_extension": {},
+            "largest_files": []
+        }
+
+        all_files = []
+        for file_path in asset_dir.rglob("*"):
+            if file_path.is_file():
+                file_type = self._get_asset_type(file_path)
+                if file_type:
+                    size = file_path.stat().st_size
+                    stats["total_count"] += 1
+                    stats["total_size"] += size
+                    
+                    # By type
+                    stats["by_type"][file_type] = stats["by_type"].get(file_type, 0) + 1
+                    
+                    # By extension
+                    ext = file_path.suffix.lower()
+                    stats["by_extension"][ext] = stats["by_extension"].get(ext, 0) + 1
+                    
+                    all_files.append((file_path, size))
+
+        # Find largest files
+        all_files.sort(key=lambda x: x[1], reverse=True)
+        stats["largest_files"] = [
+            {
+                "path": str(f[0].relative_to(self.project_root)),
+                "size": f[1],
+                "size_mb": f[1] / (1024 * 1024)
+            }
+            for f in all_files[:10]
+        ]
+
+        # Generate report
+        total_size_mb = stats["total_size"] / (1024 * 1024)
+        output = f"Asset Analysis Report:\n\n"
+        output += f"Total Assets: {stats['total_count']}\n"
+        output += f"Total Size: {total_size_mb:.2f} MB\n\n"
+        
+        output += "By Type:\n"
+        for atype, count in stats["by_type"].items():
+            output += f"  - {atype}: {count}\n"
+        
+        output += "\nBy Extension:\n"
+        for ext, count in stats["by_extension"].items():
+            output += f"  - {ext}: {count}\n"
+        
+        output += "\nLargest Files:\n"
+        for file_info in stats["largest_files"][:5]:
+            output += f"  - {file_info['path']} ({file_info['size_mb']:.2f} MB)\n"
+
+        return ToolResult.ok(output, stats)
+
+    def _find_unused(self, asset_dir: Path, code_dirs: List[str]) -> ToolResult:
+        """Find unused assets"""
+        # Get all assets
+        all_assets = set()
+        if asset_dir.exists():
+            for file_path in asset_dir.rglob("*"):
+                if file_path.is_file() and self._get_asset_type(file_path):
+                    # Store path with forward slashes for consistency
+                    rel_path = str(file_path.relative_to(self.project_root)).replace("\\", "/")
+                    all_assets.add(rel_path)
+
+        # Find referenced assets
+        referenced = set()
+        for code_dir_str in code_dirs:
+            code_dir = self._resolve_path(code_dir_str)
+            if not code_dir.exists():
+                continue
+            
+            for code_file in code_dir.rglob("*"):
+                if code_file.is_file() and code_file.suffix in {".py", ".js", ".lua", ".gd", ".json", ".yaml"}:
+                    try:
+                        content = code_file.read_text(encoding="utf-8", errors="ignore")
+                        # Normalize content to use forward slashes
+                        content_normalized = content.replace("\\", "/")
+                        for asset in all_assets:
+                            # Check both full path and filename
+                            asset_filename = asset.split("/")[-1]
+                            if asset in content_normalized or asset_filename in content:
+                                referenced.add(asset)
+                    except Exception:
+                        continue
+
+        # Find unused
+        unused = all_assets - referenced
+        
+        if unused:
+            output = f"Found {len(unused)} unused asset(s):\n"
+            for asset in sorted(list(unused))[:20]:  # Show first 20
+                output += f"  - {asset}\n"
+            if len(unused) > 20:
+                output += f"  ... and {len(unused) - 20} more\n"
+            return ToolResult.ok(output, {"unused_assets": list(unused), "count": len(unused)})
+        
+        output = "No unused assets found. All assets are referenced in code."
+        return ToolResult.ok(output, {"unused_assets": [], "count": 0})
+
+    def _validate_naming(self, asset_dir: Path, naming_pattern: str) -> ToolResult:
+        """Validate asset naming conventions"""
+        import re
+        pattern = re.compile(naming_pattern)
+        
+        invalid_names = []
+        if asset_dir.exists():
+            for file_path in asset_dir.rglob("*"):
+                if file_path.is_file() and self._get_asset_type(file_path):
+                    name_without_ext = file_path.stem
+                    if not pattern.match(name_without_ext):
+                        invalid_names.append({
+                            "path": str(file_path.relative_to(self.project_root)),
+                            "name": file_path.name,
+                            "reason": f"Does not match pattern: {naming_pattern}"
+                        })
+
+        if invalid_names:
+            output = f"Found {len(invalid_names)} asset(s) with invalid naming:\n"
+            for item in invalid_names[:10]:
+                output += f"  - {item['name']} at {item['path']}\n"
+                output += f"    Reason: {item['reason']}\n"
+            if len(invalid_names) > 10:
+                output += f"  ... and {len(invalid_names) - 10} more\n"
+            return ToolResult.partial(output, f"{len(invalid_names)} naming violations found")
+        
+        output = f"All asset names are valid according to pattern: {naming_pattern}"
+        return ToolResult.ok(output, {"invalid_count": 0})
+
+    def _build_atlas_plan(self, asset_dir: Path, atlas_max_size: int) -> ToolResult:
+        """Plan sprite atlas generation"""
+        sprites_dir = asset_dir / "sprites"
+        if not sprites_dir.exists():
+            return ToolResult.fail(f"Sprites directory not found: {sprites_dir}")
+
+        # Collect sprite info
+        sprites = []
+        unmeasured = []
+        for file_path in sprites_dir.rglob("*"):
+            if file_path.is_file() and file_path.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp"}:
+                dimensions = self._read_sprite_dimensions(file_path)
+                if dimensions.get("ok"):
+                    width = int(dimensions["width"])
+                    height = int(dimensions["height"])
+                    sprites.append({
+                        "path": str(file_path.relative_to(self.project_root)),
+                        "name": file_path.name,
+                        "width": width,
+                        "height": height,
+                        "area": width * height,
+                        "dimension_source": dimensions.get("source", "unknown"),
+                    })
+                else:
+                    unmeasured.append({
+                        "path": str(file_path.relative_to(self.project_root)),
+                        "name": file_path.name,
+                        "error": dimensions.get("error", "unknown image dimension error"),
+                    })
+
+        if not sprites:
+            if unmeasured:
+                return ToolResult.fail(
+                    "No measurable sprites found for atlas generation. "
+                    f"{len(unmeasured)} image(s) could not be measured; install Pillow or repair invalid files."
+                )
+            return ToolResult.fail("No sprites found for atlas generation")
+
+        # Sort by area (largest first) for better packing
+        sprites.sort(key=lambda s: s["area"], reverse=True)
+
+        # Simple bin packing algorithm
+        atlases = []
+        current_atlas = {
+            "id": 1,
+            "max_size": atlas_max_size,
+            "sprites": [],
+            "estimated_size": 0
+        }
+
+        for sprite in sprites:
+            # Simple estimation: if adding this sprite would exceed max area, start new atlas
+            sprite_area = sprite["area"]
+            max_area = atlas_max_size * atlas_max_size
+            
+            if current_atlas["estimated_size"] + sprite_area > max_area * 0.8:  # 80% fill target
+                atlases.append(current_atlas)
+                current_atlas = {
+                    "id": len(atlases) + 1,
+                    "max_size": atlas_max_size,
+                    "sprites": [],
+                    "estimated_size": 0
+                }
+            
+            current_atlas["sprites"].append(sprite)
+            current_atlas["estimated_size"] += sprite_area
+
+        if current_atlas["sprites"]:
+            atlases.append(current_atlas)
+
+        # Generate report
+        output = f"Sprite Atlas Plan:\n\n"
+        output += f"Total sprites: {len(sprites)}\n"
+        if unmeasured:
+            output += f"Unmeasured sprites excluded: {len(unmeasured)}\n"
+        output += f"Planned atlases: {len(atlases)}\n"
+        output += f"Max atlas size: {atlas_max_size}x{atlas_max_size}\n\n"
+        
+        for atlas in atlases:
+            output += f"Atlas {atlas['id']}:\n"
+            output += f"  - Sprites: {len(atlas['sprites'])}\n"
+            output += f"  - Estimated fill: {(atlas['estimated_size'] / (atlas_max_size * atlas_max_size)) * 100:.1f}%\n"
+            output += f"  - Sprite list: {', '.join([s['name'] for s in atlas['sprites'][:5]])}"
+            if len(atlas['sprites']) > 5:
+                output += f" ... and {len(atlas['sprites']) - 5} more"
+            output += "\n\n"
+
+        data = {"atlases": atlases, "total_sprites": len(sprites), "unmeasured_sprites": unmeasured}
+        if unmeasured:
+            return ToolResult.partial(output, f"{len(unmeasured)} sprite(s) could not be measured and were excluded.")
+        return ToolResult.ok(output, data)
+
+    def _read_sprite_dimensions(self, file_path: Path) -> Dict[str, Any]:
+        try:
+            from PIL import Image
+            with Image.open(file_path) as img:
+                width, height = img.size
+            return {"ok": True, "width": int(width), "height": int(height), "source": "pillow"}
+        except ImportError:
+            return self._read_sprite_dimensions_from_header(file_path, pillow_error="Pillow is not installed")
+        except Exception as exc:
+            header = self._read_sprite_dimensions_from_header(file_path, pillow_error=str(exc))
+            if header.get("ok"):
+                return header
+            return {"ok": False, "error": str(exc)}
+
+    def _read_sprite_dimensions_from_header(self, file_path: Path, *, pillow_error: str = "") -> Dict[str, Any]:
+        try:
+            data = file_path.read_bytes()[:512]
+        except OSError as exc:
+            return {"ok": False, "error": str(exc)}
+
+        if data.startswith(b"\x89PNG\r\n\x1a\n") and len(data) >= 24:
+            return {
+                "ok": True,
+                "width": int.from_bytes(data[16:20], "big"),
+                "height": int.from_bytes(data[20:24], "big"),
+                "source": "png_header",
+            }
+        if data.startswith((b"GIF87a", b"GIF89a")) and len(data) >= 10:
+            return {
+                "ok": True,
+                "width": int.from_bytes(data[6:8], "little"),
+                "height": int.from_bytes(data[8:10], "little"),
+                "source": "gif_header",
+            }
+        if data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+            if data[12:16] == b"VP8X" and len(data) >= 30:
+                width = int.from_bytes(data[24:27], "little") + 1
+                height = int.from_bytes(data[27:30], "little") + 1
+                return {"ok": True, "width": width, "height": height, "source": "webp_vp8x_header"}
+            if data[12:16] == b"VP8 " and len(data) >= 30:
+                width = int.from_bytes(data[26:28], "little") & 0x3FFF
+                height = int.from_bytes(data[28:30], "little") & 0x3FFF
+                return {"ok": True, "width": width, "height": height, "source": "webp_vp8_header"}
+        if data.startswith(b"\xff\xd8"):
+            jpeg_dims = self._read_jpeg_dimensions(file_path)
+            if jpeg_dims.get("ok"):
+                return jpeg_dims
+        detail = f"; Pillow detail: {pillow_error}" if pillow_error else ""
+        return {"ok": False, "error": f"Unsupported or invalid image header{detail}"}
+
+    def _read_jpeg_dimensions(self, file_path: Path) -> Dict[str, Any]:
+        try:
+            data = file_path.read_bytes()
+        except OSError as exc:
+            return {"ok": False, "error": str(exc)}
+        index = 2
+        while index + 9 < len(data):
+            if data[index] != 0xFF:
+                index += 1
+                continue
+            marker = data[index + 1]
+            index += 2
+            if marker in {0xD8, 0xD9}:
+                continue
+            if index + 2 > len(data):
+                break
+            segment_length = int.from_bytes(data[index:index + 2], "big")
+            if segment_length < 2 or index + segment_length > len(data):
+                break
+            if marker in {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}:
+                if index + 7 <= len(data):
+                    height = int.from_bytes(data[index + 3:index + 5], "big")
+                    width = int.from_bytes(data[index + 5:index + 7], "big")
+                    return {"ok": True, "width": width, "height": height, "source": "jpeg_header"}
+                break
+            index += segment_length
+        return {"ok": False, "error": "Could not find JPEG SOF dimensions"}
+
+    def _build_dependency_graph(self, asset_dir: Path, code_dirs: List[str], asset_type: str) -> ToolResult:
+        assets = self._collect_assets(asset_dir, asset_type)
+        if not assets:
+            return ToolResult.fail("No assets found for dependency analysis")
+
+        graph = {
+            asset["path"]: {
+                "type": asset["type"],
+                "size": asset["size"],
+                "referenced_by": [],
+                "reference_count": 0,
+            }
+            for asset in assets
+        }
+
+        asset_lookup = [(asset["path"].replace("\\", "/"), asset["name"]) for asset in assets]
+        scan_extensions = {".py", ".js", ".ts", ".tsx", ".lua", ".gd", ".json", ".yaml", ".yml", ".md"}
+
+        for code_dir_str in code_dirs:
+            code_dir = self._resolve_path(code_dir_str)
+            if not code_dir.exists():
+                continue
+            for code_file in code_dir.rglob("*"):
+                if not code_file.is_file() or code_file.suffix.lower() not in scan_extensions:
+                    continue
+                try:
+                    content = code_file.read_text(encoding="utf-8", errors="ignore").replace("\\", "/")
+                except Exception:
+                    continue
+
+                rel_code_path = str(code_file.relative_to(self.project_root)).replace("\\", "/")
+                for asset_path, asset_name in asset_lookup:
+                    if asset_path in content or asset_name in content:
+                        refs = graph[asset_path]["referenced_by"]
+                        if rel_code_path not in refs:
+                            refs.append(rel_code_path)
+                            graph[asset_path]["reference_count"] += 1
+
+        orphaned = [path for path, node in graph.items() if not node["referenced_by"]]
+        hottest = sorted(
+            graph.items(),
+            key=lambda item: item[1]["reference_count"],
+            reverse=True,
+        )[:10]
+
+        output = "Asset Dependency Graph:\n\n"
+        output += f"Assets analyzed: {len(graph)}\n"
+        output += f"Orphaned assets: {len(orphaned)}\n\n"
+        output += "Most referenced assets:\n"
+        for path, node in hottest:
+            output += f"  - {path}: {node['reference_count']} references\n"
+        if orphaned:
+            output += "\nOrphaned sample:\n"
+            for path in orphaned[:10]:
+                output += f"  - {path}\n"
+
+        return ToolResult.ok(
+            output,
+            {
+                "graph": graph,
+                "orphaned_assets": orphaned,
+                "most_referenced": hottest,
+            },
+        )
+
+    def _compression_recommendations(self, asset_dir: Path, asset_type: str) -> ToolResult:
+        assets = self._collect_assets(asset_dir, asset_type)
+        if not assets:
+            return ToolResult.fail("No assets found for compression analysis")
+
+        recommendations = []
+        estimated_savings = 0
+        for asset in assets:
+            recommendation = self._recommend_compression(asset)
+            if recommendation:
+                recommendations.append(recommendation)
+                estimated_savings += recommendation["estimated_savings_bytes"]
+
+        recommendations.sort(key=lambda item: item["estimated_savings_bytes"], reverse=True)
+        output = "Compression Recommendations:\n\n"
+        output += f"Assets analyzed: {len(assets)}\n"
+        output += f"Recommendation count: {len(recommendations)}\n"
+        output += f"Estimated savings: {estimated_savings / (1024 * 1024):.2f} MB\n\n"
+        for recommendation in recommendations[:15]:
+            output += (
+                f"  - {recommendation['path']}: {recommendation['recommendation']} "
+                f"(~{recommendation['estimated_savings_bytes'] / 1024:.1f} KB savings)\n"
+            )
+
+        return ToolResult.ok(
+            output,
+            {
+                "recommendations": recommendations,
+                "estimated_savings_bytes": estimated_savings,
+            },
+        )
+
+    def _total_size_report(self, asset_dir: Path, asset_type: str) -> ToolResult:
+        assets = self._collect_assets(asset_dir, asset_type)
+        if not assets:
+            return ToolResult.fail("No assets found for size analysis")
+
+        totals: Dict[str, Dict[str, float]] = {}
+        runtime_total = 0.0
+        file_total = 0
+        for asset in assets:
+            file_total += asset["size"]
+            runtime_estimate = self._estimate_runtime_size(asset)
+            runtime_total += runtime_estimate
+            bucket = totals.setdefault(asset["type"], {"count": 0, "disk_bytes": 0, "runtime_bytes": 0.0})
+            bucket["count"] += 1
+            bucket["disk_bytes"] += asset["size"]
+            bucket["runtime_bytes"] += runtime_estimate
+
+        heaviest = sorted(assets, key=lambda item: item["size"], reverse=True)[:10]
+        output = "Asset Size Report:\n\n"
+        output += f"Total assets: {len(assets)}\n"
+        output += f"Disk footprint: {file_total / (1024 * 1024):.2f} MB\n"
+        output += f"Estimated runtime footprint: {runtime_total / (1024 * 1024):.2f} MB\n\n"
+        output += "By type:\n"
+        for type_name, values in totals.items():
+            output += (
+                f"  - {type_name}: {values['count']} files | "
+                f"disk {values['disk_bytes'] / (1024 * 1024):.2f} MB | "
+                f"runtime {values['runtime_bytes'] / (1024 * 1024):.2f} MB\n"
+            )
+        output += "\nHeaviest assets:\n"
+        for asset in heaviest:
+            output += f"  - {asset['path']} ({asset['size'] / (1024 * 1024):.2f} MB)\n"
+
+        return ToolResult.ok(
+            output,
+            {
+                "totals": totals,
+                "disk_bytes": file_total,
+                "runtime_bytes": runtime_total,
+                "heaviest_assets": heaviest,
+            },
+        )
+
+    def _collect_assets(self, asset_dir: Path, asset_type: str = "all") -> List[Dict[str, Any]]:
+        assets: List[Dict[str, Any]] = []
+        if not asset_dir.exists():
+            return assets
+
+        for file_path in asset_dir.rglob("*"):
+            if not file_path.is_file():
+                continue
+            detected_type = self._get_asset_type(file_path)
+            if not detected_type:
+                continue
+            if asset_type != "all" and detected_type != asset_type:
+                continue
+            assets.append(
+                {
+                    "path": str(file_path.relative_to(self.project_root)).replace("\\", "/"),
+                    "name": file_path.name,
+                    "size": file_path.stat().st_size,
+                    "type": detected_type,
+                    "extension": file_path.suffix.lower(),
+                }
+            )
+        return assets
+
+    def _recommend_compression(self, asset: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        size = int(asset["size"])
+        ext = asset["extension"]
+        asset_type = asset["type"]
+
+        if asset_type == "sprite" and ext == ".png" and size > 512 * 1024:
+            savings = int(size * 0.35)
+            return {
+                "path": asset["path"],
+                "recommendation": "Consider WebP or atlas packing for large sprite textures",
+                "estimated_savings_bytes": savings,
+            }
+        if asset_type == "audio" and ext in {".wav", ".flac"}:
+            savings = int(size * 0.45)
+            return {
+                "path": asset["path"],
+                "recommendation": "Convert source audio to OGG or platform-specific compressed runtime formats",
+                "estimated_savings_bytes": savings,
+            }
+        if asset_type == "model" and ext in {".fbx", ".obj", ".dae"}:
+            savings = int(size * 0.30)
+            return {
+                "path": asset["path"],
+                "recommendation": "Export to GLB/glTF and strip editor-only metadata",
+                "estimated_savings_bytes": savings,
+            }
+        if asset_type == "model" and ext == ".bbmodel":
+            savings = int(size * 0.15)
+            return {
+                "path": asset["path"],
+                "recommendation": "Keep `.bbmodel` as source-of-truth and export GLB/glTF into assets/models/runtime for runtime use",
+                "estimated_savings_bytes": savings,
+            }
+        if asset_type == "animation" and size > 256 * 1024:
+            savings = int(size * 0.20)
+            return {
+                "path": asset["path"],
+                "recommendation": "Prune redundant keyframes and split long clips into smaller runtime chunks",
+                "estimated_savings_bytes": savings,
+            }
+        return None
+
+    def _estimate_runtime_size(self, asset: Dict[str, Any]) -> float:
+        multiplier = {
+            "sprite": 4.0,
+            "audio": 1.2,
+            "model": 2.5,
+            "animation": 1.5,
+        }.get(asset["type"], 1.0)
+        if asset["type"] == "model" and asset.get("extension") == ".bbmodel":
+            multiplier = 0.25
+        return float(asset["size"]) * multiplier
+
+    def _get_asset_type(self, file_path: Path) -> Optional[str]:
+        """Determine asset type from file extension"""
+        ext = file_path.suffix.lower()
+        for asset_type, extensions in self.ASSET_EXTENSIONS.items():
+            if ext in extensions:
+                return asset_type
+        return None
+
+    def _resolve_path(self, raw: str) -> Path:
+        """Resolve path relative to project root"""
+        return self.resolve_workspace_path(raw, purpose="resolve asset path")
+
+    def get_execution_message(self, **kwargs) -> str:
+        action = kwargs.get("action", "unknown")
+        asset_type = kwargs.get("asset_type", "all")
+        return f"Managing game assets: {action} ({asset_type})"

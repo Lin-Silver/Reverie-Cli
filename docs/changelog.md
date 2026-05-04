@@ -4,6 +4,30 @@ No unreleased changes yet.
 
 ---
 
+## Reverie CLI v2.3.3 - Reverie UI SDK Bridge and Plugin Releases
+
+**Release Date:** 2026-05-04
+
+### Desktop UI
+
+* Rebuilt Reverie UI around the CLI SDK bridge so Plugins, Settings, Chats, Automations, Search, and Chat surfaces call real runtime actions instead of static placeholder data.
+* Unified the Windows title bar, WebView background, sidebar, composer, controls, and status colors around the same neutral dark palette with orange primary actions and clear blue/green/red status accents.
+* Added responsive layouts, dark native select styling, overflow-safe controls, batched chat streaming, reduced redraw churn, and a bounded transcript render window for smoother long-running sessions.
+
+### SDK Bridge
+
+* Added bridge actions for plugin listing, refresh, remote Release lookup, install/update, build, deploy, inspect, plugin command calls, settings listing and mutation, session rename/delete, and local automations.
+* Added shared setting catalog helpers so the CLI `/setting` command and the GUI use the same metadata, choices, validation, and persistence behavior.
+* Added local file-backed automations under `.reverie/automations`, with Windows Task Scheduler integration and a PowerShell runner that invokes Reverie for scheduled prompts.
+
+### Plugins and Release Automation
+
+* Added a main-branch GitHub Actions release pipeline that builds `reverie.exe`, `reverie-blender.exe`, `reverie-godot.exe`, `reverie-o3de.exe`, and `reverie-game-models.exe`, verifies plugin `-RC` handshakes, generates `plugins-manifest.json`, and uploads all release assets directly to the rolling latest Release.
+* Added remote plugin manifest parsing and fallback asset inference for `https://api.github.com/repos/Lin-Silver/Reverie-Cli/releases/latest`, while keeping the GUI usable from local plugin scans when GitHub is unavailable.
+* Added bridge tests covering settings metadata, remote manifest parsing, session operations, plugin action payloads, source plugin validation, and local automation persistence.
+
+---
+
 ## Reverie CLI v2.3.2 - NVIDIA Profiles and Global Config Reliability
 
 **Release Date:** 2026-05-02

@@ -11,80 +11,218 @@
     <aside class="sidebar">
       <div class="brand">
         <div class="brand-mark">R</div>
-        <div>
+        <div class="brand-copy">
           <div class="brand-name">Reverie UI</div>
           <div class="brand-subtitle" id="runtimeStatus">Starting</div>
         </div>
       </div>
 
-      <label class="field-label" for="workspaceInput">Workspace</label>
-      <div class="path-row">
-        <input id="workspaceInput" class="text-input" spellcheck="false">
-        <button id="workspaceApply" class="icon-button" title="Open workspace">Go</button>
-      </div>
+      <nav class="nav-stack" aria-label="Primary">
+        <button class="nav-item active" data-view="chat" type="button">New chat</button>
+        <button class="nav-item" data-view="search" type="button">Search</button>
+        <button class="nav-item" data-view="plugins" type="button">Plugins</button>
+        <button class="nav-item" data-view="automations" type="button">Automations</button>
+      </nav>
 
-      <label class="field-label" for="modeSelect">Mode</label>
-      <select id="modeSelect" class="select-input"></select>
+      <section class="sidebar-section">
+        <div class="section-row">
+          <span>Projects</span>
+          <button id="workspaceApply" class="micro-button" type="button">Use</button>
+        </div>
+        <input id="workspaceInput" class="text-input path-input" spellcheck="false">
+        <div id="projectList" class="project-list"></div>
+      </section>
 
-      <div class="sidebar-actions">
-        <button id="newSessionButton" class="primary-button">New Chat</button>
-        <button id="clearSessionButton" class="plain-button">Clear</button>
-      </div>
+      <section class="sidebar-section chats-section">
+        <div class="section-row">
+          <span>Chats</span>
+          <button id="newSessionButton" class="micro-button" type="button">New</button>
+        </div>
+        <input id="sessionSearch" class="text-input" placeholder="Filter chats">
+        <div id="sessionList" class="session-list"></div>
+      </section>
 
-      <div class="section-title">Sessions</div>
-      <div id="sessionList" class="session-list"></div>
+      <button id="settingsNavButton" class="settings-button" data-view="settings" type="button">Settings</button>
     </aside>
 
-    <main class="chat-region">
+    <main class="workspace">
       <header class="topbar">
-        <div>
+        <div class="topbar-main">
           <div id="workspaceName" class="topbar-title">Workspace</div>
           <div id="modelStatus" class="topbar-subtitle">No model loaded</div>
         </div>
         <div class="topbar-actions">
-          <button id="indexButton" class="plain-button">Index</button>
-          <button id="diagnosticsButton" class="plain-button">Doctor</button>
+          <button id="indexButton" class="toolbar-button" type="button">Index</button>
+          <button id="diagnosticsButton" class="toolbar-button" type="button">Doctor</button>
+          <button id="gitRefreshButton" class="toolbar-button" type="button">Git</button>
         </div>
       </header>
 
-      <section id="messageList" class="message-list"></section>
+      <section class="status-strip" aria-label="Runtime status">
+        <span id="cliStatusPill" class="status-pill">CLI resolving</span>
+        <span id="bridgeStatusPill" class="status-pill">Bridge pending</span>
+        <span id="gitStatusPill" class="status-pill">Git pending</span>
+        <span id="configStatusPill" class="status-pill">Config pending</span>
+      </section>
 
-      <form id="composer" class="composer">
-        <textarea id="messageInput" rows="3" placeholder="Ask Reverie to inspect, edit, run, design, index, or automate this workspace."></textarea>
-        <div class="composer-footer">
-          <div id="turnStatus" class="turn-status">Ready</div>
-          <button id="sendButton" class="send-button" type="submit">Send</button>
-        </div>
-      </form>
+      <div class="view-stack">
+        <section id="chatView" class="main-view chat-view active">
+          <section id="emptyState" class="empty-state">
+            <div class="empty-inner">
+              <h1>What should we build in Reverie?</h1>
+              <p>Use the composer below to inspect code, edit files, run tools, index context, manage sessions, or configure models.</p>
+            </div>
+          </section>
+
+          <section id="messageList" class="message-list" aria-live="polite"></section>
+
+          <section class="suggestions" aria-label="Suggested prompts">
+            <button class="suggestion" type="button">Review recent changes for correctness risks</button>
+            <button class="suggestion" type="button">Index this workspace and summarize architecture</button>
+            <button class="suggestion" type="button">List available tools and recommended workflow</button>
+          </section>
+
+          <form id="composer" class="composer">
+            <textarea id="messageInput" rows="3" placeholder="Ask Reverie anything. Use @ to mention files or describe the task clearly."></textarea>
+            <div class="composer-footer">
+              <div class="composer-controls">
+                <button id="clearSessionButton" class="icon-button" type="button">Clear</button>
+                <label class="select-chip">
+                  <span>Mode</span>
+                  <select id="modeSelect" class="select-input"></select>
+                </label>
+                <label class="select-chip">
+                  <span>Detail</span>
+                  <select id="thinkingStyleSelect" class="select-input">
+                    <option value="hidden">Hidden</option>
+                    <option value="compact">Compact</option>
+                    <option value="full">Full</option>
+                  </select>
+                </label>
+              </div>
+              <div class="composer-submit">
+                <span id="turnStatus" class="turn-status">Ready</span>
+                <button id="sendButton" class="send-button" type="submit">Send</button>
+              </div>
+            </div>
+          </form>
+        </section>
+
+        <section id="searchView" class="main-view page-view">
+          <div class="page-header">
+            <div>
+              <h1>Search</h1>
+              <p>Search local chats, tools, models, and plugin capabilities.</p>
+            </div>
+          </div>
+          <input id="globalSearchInput" class="text-input large-input" placeholder="Search Reverie UI">
+          <div id="searchResults" class="result-list"></div>
+        </section>
+
+        <section id="pluginsView" class="main-view page-view">
+          <div class="page-header">
+            <div>
+              <h1>Plugins</h1>
+              <p id="pluginSummary">Plugin surface pending.</p>
+            </div>
+            <div class="page-actions">
+              <button id="pluginRefreshButton" class="toolbar-button" type="button">Refresh</button>
+              <button id="remoteRefreshButton" class="toolbar-button" type="button">Remote</button>
+            </div>
+          </div>
+          <div class="split-layout">
+            <section class="list-pane">
+              <input id="pluginFilter" class="text-input" placeholder="Filter plugins">
+              <div id="pluginRemoteSummary" class="hint-line">Remote release pending.</div>
+              <div id="pluginList" class="plugin-list"></div>
+            </section>
+            <section class="detail-pane">
+              <h2>Plugin Details</h2>
+              <pre id="pluginDetail" class="code-output">Select a plugin or run an action.</pre>
+            </section>
+          </div>
+        </section>
+
+        <section id="automationsView" class="main-view page-view">
+          <div class="page-header">
+            <div>
+              <h1>Automations</h1>
+              <p id="automationSummary">Local scheduled Reverie tasks.</p>
+            </div>
+          </div>
+          <div class="split-layout">
+            <form id="automationForm" class="form-pane">
+              <input id="automationId" type="hidden">
+              <label>
+                Name
+                <input id="automationName" class="text-input" required>
+              </label>
+              <label>
+                Interval minutes
+                <input id="automationInterval" class="text-input" type="number" min="1" max="10080" value="60">
+              </label>
+              <label class="toggle-row">
+                <span>Enabled</span>
+                <input id="automationEnabled" type="checkbox" checked>
+              </label>
+              <label>
+                Prompt
+                <textarea id="automationPrompt" rows="8" required></textarea>
+              </label>
+              <div class="button-row">
+                <button class="primary-button" type="submit">Save automation</button>
+                <button id="automationResetButton" class="toolbar-button" type="button">Reset</button>
+              </div>
+            </form>
+            <section class="list-pane">
+              <div id="automationList" class="automation-list"></div>
+              <pre id="automationLog" class="code-output compact-output">No automation selected.</pre>
+            </section>
+          </div>
+        </section>
+
+        <section id="settingsView" class="main-view page-view">
+          <div class="page-header">
+            <div>
+              <h1>Settings</h1>
+              <p id="settingsSummary">CLI settings pending.</p>
+            </div>
+            <div class="page-actions">
+              <button id="settingsRefreshButton" class="toolbar-button" type="button">Refresh</button>
+            </div>
+          </div>
+          <div class="split-layout settings-layout">
+            <section id="settingsList" class="settings-list"></section>
+            <section class="detail-pane">
+              <h2>Details</h2>
+              <div id="settingDetail" class="setting-detail">Select a setting.</div>
+            </section>
+          </div>
+        </section>
+      </div>
     </main>
 
     <aside class="inspector">
       <div class="tabs">
-        <button class="tab-button active" data-tab="context">Context</button>
-        <button class="tab-button" data-tab="models">Models</button>
-        <button class="tab-button" data-tab="tools">Tools</button>
-        <button class="tab-button" data-tab="logs">Logs</button>
+        <button class="tab-button active" data-tab="context" type="button">Context</button>
+        <button class="tab-button" data-tab="models" type="button">Models</button>
+        <button class="tab-button" data-tab="tools" type="button">Tools</button>
+        <button class="tab-button" data-tab="git" type="button">Git</button>
       </div>
 
       <section id="contextTab" class="tab-panel active">
         <div class="panel-header">
-          <div>
-            <h2>Context Engine</h2>
-            <p id="indexSummary">Not indexed in this session.</p>
-          </div>
+          <h2>Context Engine</h2>
+          <p id="indexSummary">Not indexed in this session.</p>
         </div>
-        <div class="meter">
-          <div id="indexMeter" class="meter-fill"></div>
-        </div>
+        <div class="meter"><div id="indexMeter" class="meter-fill"></div></div>
         <div id="diagnosticsList" class="diagnostics-list"></div>
       </section>
 
       <section id="modelsTab" class="tab-panel">
         <div class="panel-header">
-          <div>
-            <h2>Model</h2>
-            <p id="configPath">Config path pending.</p>
-          </div>
+          <h2>Models</h2>
+          <p id="configPath">Config path pending.</p>
         </div>
         <form id="modelForm" class="settings-form">
           <input type="hidden" id="modelIndex" value="-1">
@@ -104,45 +242,45 @@
             API key
             <input id="modelApiKey" class="text-input" type="password">
           </label>
-          <label>
-            Provider
-            <select id="modelProvider" class="select-input">
-              <option value="openai-sdk">openai-sdk</option>
-              <option value="request">request</option>
-              <option value="anthropic">anthropic</option>
-              <option value="gemini-cli">gemini-cli</option>
-              <option value="codex">codex</option>
-            </select>
-          </label>
-          <label>
-            Max context tokens
-            <input id="modelContextTokens" class="text-input" type="number" min="1000" value="128000">
-          </label>
-          <button class="primary-button" type="submit">Save Model</button>
+          <div class="form-grid">
+            <label>
+              Provider
+              <select id="modelProvider" class="select-input">
+                <option value="openai-sdk">openai-sdk</option>
+                <option value="request">request</option>
+                <option value="anthropic">anthropic</option>
+                <option value="gemini-cli">gemini-cli</option>
+                <option value="codex">codex</option>
+              </select>
+            </label>
+            <label>
+              Context tokens
+              <input id="modelContextTokens" class="text-input" type="number" min="1000" value="128000">
+            </label>
+          </div>
+          <button class="primary-button" type="submit">Save model</button>
         </form>
         <div id="modelList" class="model-list"></div>
       </section>
 
       <section id="toolsTab" class="tab-panel">
         <div class="panel-header">
-          <div>
-            <h2>Tools</h2>
-            <p id="toolSummary">Tool surface pending.</p>
-          </div>
+          <h2>Tools</h2>
+          <p id="toolSummary">Tool surface pending.</p>
         </div>
         <input id="toolFilter" class="text-input" placeholder="Filter tools">
         <div id="toolList" class="tool-list"></div>
       </section>
 
-      <section id="logsTab" class="tab-panel">
+      <section id="gitTab" class="tab-panel">
         <div class="panel-header">
-          <div>
-            <h2>Runtime Log</h2>
-            <p>Bridge and tool events.</p>
-          </div>
+          <h2>Git</h2>
+          <p id="gitSummary">Repository status pending.</p>
         </div>
-        <pre id="logOutput" class="log-output"></pre>
+        <pre id="gitOutput" class="code-output">Git status pending.</pre>
       </section>
+
+      <pre id="logOutput" class="code-output log-output">UI log pending.</pre>
     </aside>
   </div>
 

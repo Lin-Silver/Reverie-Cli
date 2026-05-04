@@ -24,9 +24,10 @@ def test_modelscope_default_model_is_glm_51() -> None:
 def test_modelscope_catalog_context_lengths_match_model_cards() -> None:
     expected_context_lengths = {
         "ZhipuAI/GLM-5.1": 202752,
-        "deepseek-ai/DeepSeek-V3.2": 128000,
+        "deepseek-ai/DeepSeek-V4-Pro": 1048576,
+        "deepseek-ai/DeepSeek-V4-Flash": 1048576,
         "ZhipuAI/GLM-5": 202752,
-        "moonshotai/Kimi-K2.5": 262144,
+        "moonshotai/Kimi-K2.6": 262144,
         "MiniMax/MiniMax-M2.7": 204800,
         "Qwen/Qwen3.5-397B-A17B": 262144,
     }
@@ -73,6 +74,16 @@ def test_modelscope_anthropic_options_clamp_max_tokens() -> None:
     )
 
     assert options == {"max_tokens": 65536}
+
+
+def test_modelscope_latest_catalog_removes_superseded_models() -> None:
+    catalog_by_id = {item["id"]: item for item in get_modelscope_model_catalog()}
+
+    assert "deepseek-ai/DeepSeek-V3.2" not in catalog_by_id
+    assert "moonshotai/Kimi-K2.5" not in catalog_by_id
+    assert catalog_by_id["deepseek-ai/DeepSeek-V4-Pro"]["max_output_tokens"] == 393216
+    assert catalog_by_id["deepseek-ai/DeepSeek-V4-Flash"]["max_output_tokens"] == 393216
+    assert catalog_by_id["moonshotai/Kimi-K2.6"]["max_output_tokens"] == 98304
 
 
 def test_config_active_model_resolves_modelscope(monkeypatch) -> None:

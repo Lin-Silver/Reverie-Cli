@@ -1,18 +1,31 @@
 # Reverie UI
 
 Reverie UI is a Windows desktop GUI for Reverie built with C# WinForms and WebView2.
-It does not call the compiled `reverie.exe` as a kernel SDK. Instead, this project
-contains an embedded source runtime under `runtime/` and talks to it through
-`runtime/reverie_ui_bridge.py`.
+The UI treats the compiled `reverie.exe` as the preferred local SDK and talks to it
+through Reverie's JSONL bridge.
+
+## Runtime Resolution
+
+Startup resolves `reverie.exe` in this order:
+
+1. The system `PATH` environment variable, looking for `reverie.exe`, `reverie.cmd`, `reverie.bat`, or `reverie`.
+2. The latest GitHub Release asset from `Lin-Silver/Reverie-Cli` named `reverie.exe`.
+3. Bundled/local development fallbacks, including `runtime/reverie.exe` and repository `dist/reverie.exe`.
+4. Python source bridge fallback through `runtime/reverie_ui_bridge.py`.
+
+If the exe must be downloaded, it is stored at `%USERPROFILE%\.reverie\bin\reverie.exe`.
+Set `REVERIE_RELEASE_REPOSITORY=owner/repo` to use another release source.
+
+Configuration follows the selected exe when the exe is discovered from `PATH`.
+For the downloaded exe fallback, configuration is created under `%USERPROFILE%\.reverie`.
 
 ## Architecture
 
-- `src/Reverie.UI`: WebView2 host, process bridge, window lifecycle.
-- `src/Reverie.UI/wwwroot`: Codex-style chat workspace, sessions, models, tools,
-  context indexing, diagnostics, and runtime logs.
-- `runtime/reverie`: copied Reverie Python source used directly by the bridge.
-- `runtime/reverie_ui_bridge.py`: JSONL command bridge for chat streaming,
-  configuration, sessions, tools, and Context Engine indexing.
+- `src/Reverie.UI`: WebView2 host, exe/Python bridge launcher, window lifecycle.
+- `src/Reverie.UI/wwwroot`: Codex-style workspace with chats, projects, models, tools,
+  context indexing, Git status, diagnostics, settings, and runtime logs.
+- `runtime/reverie_ui_bridge.py`: compatibility launcher for the Python fallback bridge.
+- `reverie.sdk_bridge`: the canonical JSONL SDK bridge shared by CLI exe and UI.
 
 ## Run
 
@@ -21,16 +34,13 @@ cd ".\Reverie UI\src\Reverie.UI"
 dotnet run
 ```
 
-If Python is not on `PATH`, set `REVERIE_UI_PYTHON` to the Python executable that
-has Reverie's dependencies installed.
+Useful environment overrides:
 
 ```powershell
+$env:REVERIE_RELEASE_REPOSITORY = "Lin-Silver/Reverie-Cli"
 $env:REVERIE_UI_PYTHON = "G:\Reverie\Reverie-Cli\venv\Scripts\python.exe"
 dotnet run
 ```
-
-Runtime configuration and secrets are stored outside the repository in the local
-application-data directory selected by the desktop host.
 
 ## Build And Verify
 

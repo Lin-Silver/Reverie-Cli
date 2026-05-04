@@ -147,6 +147,12 @@ def main():
         action='store_true',
         help='Show version and exit'
     )
+
+    parser.add_argument(
+        '--sdk-bridge',
+        action='store_true',
+        help=argparse.SUPPRESS
+    )
     
     parser.add_argument(
         '--index-only',
@@ -188,6 +194,11 @@ def main():
     )
     
     args = parser.parse_args()
+
+    if args.sdk_bridge:
+        from reverie.sdk_bridge import main as sdk_bridge_main
+
+        return sdk_bridge_main()
     
     if args.version:
         print(f"Reverie Cli v{__version__}")

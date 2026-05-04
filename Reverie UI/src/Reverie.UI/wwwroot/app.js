@@ -1,46 +1,99 @@
+const OFFICIAL_PLUGINS = ["blender", "godot", "o3de", "game_models"];
+
 const state = {
   requestSeq: 1,
+  activeView: "chat",
+  host: {},
+  runtime: {},
   config: null,
   sessions: null,
   tools: [],
+  git: null,
+  plugins: null,
+  settings: null,
+  automations: null,
   currentAssistant: null,
-  busy: false
+  currentAssistantText: "",
+  pendingAssistantChunk: "",
+  streamFrame: 0,
+  busy: false,
+  logs: [],
+  selectedSettingKey: "",
+  selectedPluginId: "",
+  recentProjects: loadRecentProjects()
 };
 
+const $ = id => document.getElementById(id);
+
 const el = {
-  runtimeStatus: document.getElementById("runtimeStatus"),
-  workspaceInput: document.getElementById("workspaceInput"),
-  workspaceApply: document.getElementById("workspaceApply"),
-  modeSelect: document.getElementById("modeSelect"),
-  newSessionButton: document.getElementById("newSessionButton"),
-  clearSessionButton: document.getElementById("clearSessionButton"),
-  sessionList: document.getElementById("sessionList"),
-  workspaceName: document.getElementById("workspaceName"),
-  modelStatus: document.getElementById("modelStatus"),
-  indexButton: document.getElementById("indexButton"),
-  diagnosticsButton: document.getElementById("diagnosticsButton"),
-  messageList: document.getElementById("messageList"),
-  composer: document.getElementById("composer"),
-  messageInput: document.getElementById("messageInput"),
-  sendButton: document.getElementById("sendButton"),
-  turnStatus: document.getElementById("turnStatus"),
-  indexSummary: document.getElementById("indexSummary"),
-  indexMeter: document.getElementById("indexMeter"),
-  diagnosticsList: document.getElementById("diagnosticsList"),
-  configPath: document.getElementById("configPath"),
-  modelForm: document.getElementById("modelForm"),
-  modelIndex: document.getElementById("modelIndex"),
-  modelDisplayName: document.getElementById("modelDisplayName"),
-  modelId: document.getElementById("modelId"),
-  modelBaseUrl: document.getElementById("modelBaseUrl"),
-  modelApiKey: document.getElementById("modelApiKey"),
-  modelProvider: document.getElementById("modelProvider"),
-  modelContextTokens: document.getElementById("modelContextTokens"),
-  modelList: document.getElementById("modelList"),
-  toolSummary: document.getElementById("toolSummary"),
-  toolFilter: document.getElementById("toolFilter"),
-  toolList: document.getElementById("toolList"),
-  logOutput: document.getElementById("logOutput")
+  runtimeStatus: $("runtimeStatus"),
+  workspaceInput: $("workspaceInput"),
+  workspaceApply: $("workspaceApply"),
+  projectList: $("projectList"),
+  sessionSearch: $("sessionSearch"),
+  sessionList: $("sessionList"),
+  settingsNavButton: $("settingsNavButton"),
+  newSessionButton: $("newSessionButton"),
+  clearSessionButton: $("clearSessionButton"),
+  workspaceName: $("workspaceName"),
+  modelStatus: $("modelStatus"),
+  cliStatusPill: $("cliStatusPill"),
+  bridgeStatusPill: $("bridgeStatusPill"),
+  gitStatusPill: $("gitStatusPill"),
+  configStatusPill: $("configStatusPill"),
+  indexButton: $("indexButton"),
+  diagnosticsButton: $("diagnosticsButton"),
+  gitRefreshButton: $("gitRefreshButton"),
+  emptyState: $("emptyState"),
+  messageList: $("messageList"),
+  composer: $("composer"),
+  messageInput: $("messageInput"),
+  sendButton: $("sendButton"),
+  turnStatus: $("turnStatus"),
+  modeSelect: $("modeSelect"),
+  thinkingStyleSelect: $("thinkingStyleSelect"),
+  globalSearchInput: $("globalSearchInput"),
+  searchResults: $("searchResults"),
+  pluginSummary: $("pluginSummary"),
+  pluginRemoteSummary: $("pluginRemoteSummary"),
+  pluginRefreshButton: $("pluginRefreshButton"),
+  remoteRefreshButton: $("remoteRefreshButton"),
+  pluginFilter: $("pluginFilter"),
+  pluginList: $("pluginList"),
+  pluginDetail: $("pluginDetail"),
+  automationSummary: $("automationSummary"),
+  automationForm: $("automationForm"),
+  automationId: $("automationId"),
+  automationName: $("automationName"),
+  automationInterval: $("automationInterval"),
+  automationEnabled: $("automationEnabled"),
+  automationPrompt: $("automationPrompt"),
+  automationResetButton: $("automationResetButton"),
+  automationList: $("automationList"),
+  automationLog: $("automationLog"),
+  settingsSummary: $("settingsSummary"),
+  settingsRefreshButton: $("settingsRefreshButton"),
+  settingsList: $("settingsList"),
+  settingDetail: $("settingDetail"),
+  indexSummary: $("indexSummary"),
+  indexMeter: $("indexMeter"),
+  diagnosticsList: $("diagnosticsList"),
+  configPath: $("configPath"),
+  modelForm: $("modelForm"),
+  modelIndex: $("modelIndex"),
+  modelDisplayName: $("modelDisplayName"),
+  modelId: $("modelId"),
+  modelBaseUrl: $("modelBaseUrl"),
+  modelApiKey: $("modelApiKey"),
+  modelProvider: $("modelProvider"),
+  modelContextTokens: $("modelContextTokens"),
+  modelList: $("modelList"),
+  toolSummary: $("toolSummary"),
+  toolFilter: $("toolFilter"),
+  toolList: $("toolList"),
+  gitSummary: $("gitSummary"),
+  gitOutput: $("gitOutput"),
+  logOutput: $("logOutput")
 };
 
 function send(action, payload = {}) {
@@ -49,9 +102,28 @@ function send(action, payload = {}) {
   return id;
 }
 
+function loadRecentProjects() {
+  try {
+    const raw = JSON.parse(localStorage.getItem("reverie.recentProjects") || "[]");
+    return Array.isArray(raw) ? raw.filter(Boolean).slice(0, 8) : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberProject(path) {
+  const value = String(path || "").trim();
+  if (!value) return;
+  state.recentProjects = [value, ...state.recentProjects.filter(item => item !== value)].slice(0, 8);
+  localStorage.setItem("reverie.recentProjects", JSON.stringify(state.recentProjects));
+  renderProjects();
+}
+
 function log(message) {
   const stamp = new Date().toLocaleTimeString();
-  el.logOutput.textContent += `[${stamp}] ${message}\n`;
+  state.logs.push(`[${stamp}] ${message}`);
+  if (state.logs.length > 400) state.logs.splice(0, state.logs.length - 400);
+  el.logOutput.textContent = state.logs.join("\n");
   el.logOutput.scrollTop = el.logOutput.scrollHeight;
 }
 
@@ -60,83 +132,255 @@ function basename(path) {
   return value.split("/").pop() || value || "Workspace";
 }
 
+function compactPath(path) {
+  const text = String(path || "");
+  if (text.length <= 58) return text;
+  return `${text.slice(0, 26)}...${text.slice(-28)}`;
+}
+
 function setBusy(value, label = "Ready") {
   state.busy = value;
   el.sendButton.disabled = value;
   el.turnStatus.textContent = label;
 }
 
-function addMessage(role, content, className = "") {
+function setPill(node, text, className = "") {
+  node.textContent = text;
+  node.className = `status-pill ${className}`.trim();
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function renderInlineMarkdown(text) {
+  let html = escapeHtml(text);
+  html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
+  html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  return html.replace(/\n/g, "<br>");
+}
+
+function renderMarkdownLite(text) {
+  const parts = String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").split(/```/);
+  return parts.map((part, index) => {
+    if (index % 2 === 0) return renderInlineMarkdown(part);
+    const lines = part.split("\n");
+    if (lines.length > 1 && /^[A-Za-z0-9_+.-]+$/.test(lines[0].trim())) lines.shift();
+    return `<pre><code>${escapeHtml(lines.join("\n").trim())}</code></pre>`;
+  }).join("");
+}
+
+function setMessageContent(node, content) {
+  node.innerHTML = renderMarkdownLite(content);
+}
+
+function buildMessageElement(role, content) {
   const row = document.createElement("article");
-  row.className = `message ${role} ${className}`.trim();
+  row.className = `message ${role}`.trim();
   const roleEl = document.createElement("div");
   roleEl.className = "message-role";
   roleEl.textContent = role;
   const contentEl = document.createElement("div");
   contentEl.className = "message-content";
-  contentEl.textContent = content || "";
+  setMessageContent(contentEl, content || "");
   row.append(roleEl, contentEl);
+  return row;
+}
+
+function addMessage(role, content, className = "") {
+  const row = buildMessageElement(role, content);
+  if (className) row.classList.add(className);
   el.messageList.append(row);
+  updateEmptyState();
   el.messageList.scrollTop = el.messageList.scrollHeight;
-  return contentEl;
+  return row.querySelector(".message-content");
+}
+
+function updateEmptyState() {
+  const hasMessages = Boolean(el.messageList.children.length);
+  el.emptyState.classList.toggle("hidden", hasMessages);
+  el.messageList.classList.toggle("active", hasMessages);
+}
+
+function flushAssistantChunk() {
+  if (!state.currentAssistant || !state.pendingAssistantChunk) return;
+  state.currentAssistantText += state.pendingAssistantChunk;
+  state.pendingAssistantChunk = "";
+  setMessageContent(state.currentAssistant, state.currentAssistantText);
+  el.messageList.scrollTop = el.messageList.scrollHeight;
+}
+
+function queueAssistantChunk(chunk) {
+  state.pendingAssistantChunk += chunk || "";
+  if (state.streamFrame) return;
+  state.streamFrame = requestAnimationFrame(() => {
+    state.streamFrame = 0;
+    flushAssistantChunk();
+  });
+}
+
+function activateView(name) {
+  state.activeView = name;
+  document.querySelectorAll(".main-view").forEach(view => {
+    view.classList.toggle("active", view.id === `${name}View`);
+  });
+  document.querySelectorAll(".nav-item").forEach(item => {
+    item.classList.toggle("active", item.dataset.view === name);
+  });
+  el.settingsNavButton.classList.toggle("active", name === "settings");
+  if (name === "plugins" && !state.plugins) send("listPlugins");
+  if (name === "settings" && !state.settings) send("listSettings");
+  if (name === "automations" && !state.automations) send("listAutomations");
+  if (name === "search") {
+    renderSearch();
+    el.globalSearchInput.focus();
+  }
+}
+
+function activateTab(name) {
+  document.querySelectorAll(".tab-button").forEach(item => {
+    item.classList.toggle("active", item.dataset.tab === name);
+  });
+  document.querySelectorAll(".tab-panel").forEach(item => {
+    item.classList.toggle("active", item.id === `${name}Tab`);
+  });
 }
 
 function renderState(message) {
-  state.config = message.config;
-  state.sessions = message.sessions;
+  state.config = message.config || state.config;
+  state.sessions = message.sessions || state.sessions;
   state.tools = message.tools || state.tools;
+  state.runtime = message.runtime || state.runtime;
+  state.git = message.git || state.git;
 
+  const projectRoot = message.project_root || el.workspaceInput.value || state.host.workspaceRoot || "";
   el.runtimeStatus.textContent = "Connected";
-  el.workspaceInput.value = message.project_root || el.workspaceInput.value;
-  el.workspaceName.textContent = basename(message.project_root);
+  el.workspaceInput.value = projectRoot;
+  el.workspaceName.textContent = basename(projectRoot);
+  rememberProject(projectRoot);
 
   const activeModel = state.config?.active_model;
   el.modelStatus.textContent = activeModel
     ? `${activeModel.model_display_name || activeModel.model} via ${activeModel.provider || "provider"}`
     : "No active model configured";
-  el.configPath.textContent = state.config?.config_path || "Config path pending.";
 
+  el.configPath.textContent = state.config?.config_path || "Config path pending.";
+  renderStatusPills();
   renderModes();
+  el.thinkingStyleSelect.value = state.config?.thinking_output_style || "full";
+  renderProjects();
   renderSessions();
   renderModels();
   renderTools();
+  renderGit(state.git);
+  renderSearch();
 
   if (state.sessions?.messages && !state.busy) {
     el.messageList.replaceChildren();
-    for (const messageItem of state.sessions.messages) {
-      if (messageItem.role === "system") {
-        continue;
-      }
-      addMessage(messageItem.role || "message", messageItem.content || "");
-    }
+    const fragment = document.createDocumentFragment();
+    const visibleMessages = state.sessions.messages.filter(item => item.role !== "system").slice(-160);
+    for (const item of visibleMessages) fragment.append(buildMessageElement(item.role || "message", item.content || ""));
+    el.messageList.append(fragment);
+    updateEmptyState();
+    el.messageList.scrollTop = el.messageList.scrollHeight;
+  }
+}
+
+function renderStatusPills() {
+  const cliPath = state.host.reverieCliPath || state.runtime.executable || "";
+  setPill(el.cliStatusPill, cliPath ? `CLI ${compactPath(cliPath)}` : "CLI not found", cliPath ? "ok" : "warn");
+  setPill(el.bridgeStatusPill, state.runtime.kind || state.host.bridgeKind || "Bridge starting", state.runtime.kind ? "ok" : "");
+  const configPath = state.config?.config_path || "";
+  setPill(el.configStatusPill, configPath ? `Config ${compactPath(configPath)}` : "Config pending", configPath ? "ok" : "");
+  if (state.git?.available) {
+    setPill(el.gitStatusPill, state.git.dirty ? `Git dirty ${state.git.change_count || 0}` : "Git clean", state.git.dirty ? "hot" : "ok");
+  } else {
+    setPill(el.gitStatusPill, "Git unavailable", "warn");
   }
 }
 
 function renderModes() {
   const selected = state.config?.mode || "reverie";
+  const current = el.modeSelect.value;
   el.modeSelect.replaceChildren();
   for (const mode of state.config?.modes || []) {
     const option = document.createElement("option");
     option.value = mode.id;
     option.textContent = mode.name || mode.id;
-    option.selected = mode.id === selected;
+    option.selected = mode.id === (current || selected);
     el.modeSelect.append(option);
+  }
+}
+
+function renderProjects() {
+  const active = el.workspaceInput.value;
+  const projects = [...new Set([active, ...state.recentProjects].filter(Boolean))];
+  el.projectList.replaceChildren();
+  for (const project of projects.slice(0, 6)) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `project-item ${project === active ? "active" : ""}`;
+    button.textContent = basename(project);
+    button.title = project;
+    button.addEventListener("click", () => {
+      el.workspaceInput.value = project;
+      send("setWorkspace", { projectRoot: project });
+      send("listSettings");
+      send("listPlugins");
+      send("listAutomations");
+    });
+    el.projectList.append(button);
   }
 }
 
 function renderSessions() {
   const currentId = state.sessions?.current_session_id || "";
+  const filter = (el.sessionSearch.value || "").toLowerCase();
   el.sessionList.replaceChildren();
   for (const session of state.sessions?.sessions || []) {
-    const item = document.createElement("button");
-    item.type = "button";
+    const title = session.name || session.id;
+    if (filter && !`${title} ${session.id}`.toLowerCase().includes(filter)) continue;
+
+    const item = document.createElement("div");
     item.className = `session-item ${session.id === currentId ? "active" : ""}`;
-    item.innerHTML = `<div class="session-title"></div><div class="session-meta"></div>`;
-    item.querySelector(".session-title").textContent = session.name || session.id;
-    item.querySelector(".session-meta").textContent = `${session.message_count || 0} messages`;
-    item.addEventListener("click", () => send("switchSession", { sessionId: session.id }));
+    const row = document.createElement("div");
+    row.className = "session-row";
+    const titleEl = document.createElement("button");
+    titleEl.type = "button";
+    titleEl.className = "session-title link-button";
+    titleEl.textContent = title;
+    titleEl.addEventListener("click", () => {
+      activateView("chat");
+      send("switchSession", { sessionId: session.id });
+    });
+    const actions = document.createElement("div");
+    actions.className = "session-actions";
+    actions.append(
+      makeButton("Rename", () => renameSession(session)),
+      makeButton("Delete", () => deleteSession(session))
+    );
+    row.append(titleEl, actions);
+    const meta = document.createElement("div");
+    meta.className = "session-meta";
+    meta.textContent = `${session.message_count || 0} messages | ${formatDate(session.updated_at)}`;
+    item.append(row, meta);
     el.sessionList.append(item);
   }
+}
+
+function renameSession(session) {
+  const name = prompt("Rename chat", session.name || session.id);
+  if (!name || !name.trim()) return;
+  send("renameSession", { sessionId: session.id, name: name.trim() });
+}
+
+function deleteSession(session) {
+  if (!confirm(`Delete chat "${session.name || session.id}"?`)) return;
+  send("deleteSession", { sessionId: session.id });
 }
 
 function renderModels() {
@@ -153,11 +397,11 @@ function renderModels() {
     meta.textContent = `${model.provider || "provider"} | ${model.base_url || "no base url"}`;
     const badges = document.createElement("div");
     badges.className = "badge-row";
-    const edit = makeBadge("Edit");
-    const select = makeBadge("Use");
-    edit.addEventListener("click", () => fillModelForm(model));
-    select.addEventListener("click", () => send("selectModel", { index: model.index }));
-    badges.append(edit, select);
+    badges.append(
+      makeButton("Edit", () => fillModelForm(model)),
+      makeButton("Use", () => send("selectModel", { index: model.index })),
+      makeButton("Delete", () => send("deleteModel", { index: model.index }))
+    );
     item.append(name, meta, badges);
     el.modelList.append(item);
   }
@@ -172,6 +416,7 @@ function renderTools() {
   const exposed = state.tools.filter(tool => tool.visible).length;
   el.toolSummary.textContent = `${exposed} visible, ${state.tools.length} registered.`;
   el.toolList.replaceChildren();
+  const fragment = document.createDocumentFragment();
   for (const tool of visible) {
     const item = document.createElement("div");
     item.className = "tool-item";
@@ -187,18 +432,333 @@ function renderTools() {
     if (tool.read_only) badges.append(makeBadge("read only"));
     if (tool.destructive) badges.append(makeBadge("destructive", "warn"));
     item.append(name, meta, badges);
-    el.toolList.append(item);
+    fragment.append(item);
+  }
+  el.toolList.append(fragment);
+}
+
+function renderSettings() {
+  const settings = state.settings || {};
+  const items = settings.items || [];
+  if (!state.selectedSettingKey && items.length) state.selectedSettingKey = items[0].key;
+  el.settingsSummary.textContent = settings.config_path
+    ? `${settings.workspace_mode ? "Workspace" : "Global"} config | ${settings.config_path}`
+    : "CLI settings pending.";
+  el.settingsList.replaceChildren();
+  for (const item of items) {
+    const row = document.createElement("article");
+    row.className = `setting-item ${item.key === state.selectedSettingKey ? "active" : ""}`;
+    const title = document.createElement("div");
+    title.className = "setting-title-row";
+    const name = document.createElement("div");
+    name.className = "setting-name";
+    name.textContent = item.name || item.key;
+    title.append(name, makeBadge(item.kind || "setting"));
+    const meta = document.createElement("div");
+    meta.className = "setting-meta";
+    meta.textContent = item.description || item.command || "";
+    const control = buildSettingControl(item);
+    row.append(title, meta, control);
+    row.addEventListener("click", () => selectSetting(item));
+    el.settingsList.append(row);
+  }
+  const selected = items.find(item => item.key === state.selectedSettingKey) || items[0];
+  if (selected) selectSetting(selected, false);
+}
+
+function buildSettingControl(item) {
+  const wrap = document.createElement("div");
+  wrap.className = "setting-control";
+  wrap.addEventListener("click", event => event.stopPropagation());
+  if (item.kind === "readonly") {
+    wrap.append(makeValueLine(formatValue(item.value)));
+    return wrap;
+  }
+  if (item.kind === "bool" || item.kind === "workspace") {
+    const label = document.createElement("label");
+    label.className = "toggle-row";
+    const span = document.createElement("span");
+    span.textContent = item.value ? "On" : "Off";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = Boolean(item.value);
+    checkbox.addEventListener("change", event => {
+      event.stopPropagation();
+      send("setSetting", { key: item.key, value: checkbox.checked });
+    });
+    label.append(span, checkbox);
+    wrap.append(label);
+    return wrap;
+  }
+  if (item.kind === "choice") {
+    const select = document.createElement("select");
+    select.className = "select-input";
+    const options = item.options || [];
+    if (!options.length) {
+      const option = document.createElement("option");
+      option.textContent = "No choices available";
+      option.value = "";
+      select.append(option);
+      select.disabled = true;
+    } else {
+      for (const opt of options) {
+        const option = document.createElement("option");
+        option.value = opt.value;
+        option.textContent = opt.label || opt.value;
+        option.selected = String(opt.value) === String(item.value);
+        select.append(option);
+      }
+    }
+    select.addEventListener("change", event => {
+      event.stopPropagation();
+      send("setSetting", { key: item.key, value: select.value });
+    });
+    wrap.append(select);
+    return wrap;
+  }
+  if (item.kind === "int") {
+    const input = document.createElement("input");
+    input.className = "text-input";
+    input.type = "number";
+    input.min = item.min ?? 0;
+    input.max = item.max ?? 999999;
+    input.step = item.step ?? 1;
+    input.value = item.value ?? "";
+    input.addEventListener("change", event => {
+      event.stopPropagation();
+      send("setSetting", { key: item.key, value: Number(input.value) });
+    });
+    wrap.append(input);
+    return wrap;
+  }
+  if (item.kind === "rules") {
+    const textarea = document.createElement("textarea");
+    textarea.rows = 6;
+    textarea.value = item.value || "";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "primary-button";
+    button.textContent = "Save rules";
+    button.addEventListener("click", event => {
+      event.stopPropagation();
+      send("setSetting", { key: item.key, value: textarea.value });
+    });
+    wrap.append(textarea, button);
+    return wrap;
+  }
+  wrap.append(makeValueLine(formatValue(item.value)));
+  return wrap;
+}
+
+function selectSetting(item, scroll = true) {
+  state.selectedSettingKey = item.key;
+  el.settingDetail.innerHTML = `
+    <div class="setting-name">${escapeHtml(item.name || item.key)}</div>
+    <p>${escapeHtml(item.description || "")}</p>
+    <p><strong>Current:</strong> ${escapeHtml(formatValue(item.value))}</p>
+    <p><strong>Command:</strong> <code>${escapeHtml(item.command || "")}</code></p>
+  `;
+  if (scroll) renderSettings();
+}
+
+function renderPlugins() {
+  const data = state.plugins || {};
+  const localRecords = data.records || [];
+  const remote = data.remote || {};
+  const remotePlugins = remote.manifest?.plugins || [];
+  const validations = data.source_validations || [];
+  const filter = (el.pluginFilter.value || "").toLowerCase();
+  const localMap = new Map(localRecords.map(record => [record.id, record]));
+  const remoteMap = new Map(remotePlugins.map(plugin => [plugin.id, plugin]));
+  const validationMap = new Map(validations.map(item => [item.plugin_id, item]));
+  const ids = [...new Set([...OFFICIAL_PLUGINS, ...localMap.keys(), ...remoteMap.keys()])];
+  const summary = data.summary || {};
+  el.pluginSummary.textContent = summary.summary_label || `${localRecords.length} local plugins`;
+  el.pluginRemoteSummary.textContent = remote.success
+    ? `Remote ${remote.tag_name || "latest"} | ${remotePlugins.length} compiled plugin assets`
+    : `Remote unavailable: ${remote.error || "not queried"}`;
+  el.pluginList.replaceChildren();
+
+  for (const id of ids) {
+    const record = localMap.get(id);
+    const remotePlugin = remoteMap.get(id);
+    const validation = validationMap.get(id);
+    const haystack = `${id} ${record?.name || ""} ${record?.description || ""} ${remotePlugin?.name || ""}`.toLowerCase();
+    if (filter && !haystack.includes(filter)) continue;
+    const item = document.createElement("article");
+    item.className = "plugin-item";
+    const title = document.createElement("div");
+    title.className = "plugin-title-row";
+    const name = document.createElement("div");
+    name.className = "plugin-name";
+    name.textContent = record?.name || remotePlugin?.name || id;
+    title.append(name, makeBadge(record?.status_label || record?.status || "not installed", record?.status === "ready" ? "ok" : "warn"));
+
+    const meta = document.createElement("div");
+    meta.className = "plugin-meta";
+    meta.textContent = [
+      record ? `local ${record.delivery || ""}` : "local missing",
+      remotePlugin ? `remote ${remotePlugin.version || remote.tag_name || "latest"}` : "remote missing",
+      validation ? `source ${validation.success ? "valid" : "needs check"}` : ""
+    ].filter(Boolean).join(" | ");
+
+    const badges = document.createElement("div");
+    badges.className = "badge-row";
+    if (record?.protocol_status) badges.append(makeBadge(record.protocol_label || record.protocol_status, record.protocol_status === "ready" ? "ok" : "warn"));
+    if (record?.tool_count) badges.append(makeBadge(`${record.tool_count} tools`, "ok"));
+    if (remotePlugin?.size) badges.append(makeBadge(formatBytes(remotePlugin.size)));
+
+    const actions = document.createElement("div");
+    actions.className = "badge-row";
+    actions.append(makeButton("Inspect", () => {
+      state.selectedPluginId = id;
+      send("inspectPlugin", { pluginId: id });
+    }));
+    if (remotePlugin?.download_url) {
+      actions.append(makeButton(record ? "Update" : "Install", () => {
+        setBusy(true, "Installing");
+        send("installRemotePlugin", {
+          pluginId: id,
+          assetName: remotePlugin.asset_name,
+          downloadUrl: remotePlugin.download_url,
+          sha256: remotePlugin.sha256 || ""
+        });
+      }));
+    }
+    if (validation) {
+      actions.append(makeButton("Build", () => {
+        setBusy(true, "Building");
+        send("buildPlugin", { pluginId: id, install: true, overwrite: true });
+      }));
+    }
+    actions.append(makeButton("Deploy", () => send("deployPlugin", { pluginId: id })));
+    const quickCommands = (record?.commands || [])
+      .filter(command => !(command.parameters?.required || []).length)
+      .slice(0, 3);
+    for (const command of quickCommands) {
+      actions.append(makeButton(command.name, () => {
+        setBusy(true, command.name);
+        send("callPluginCommand", { pluginId: id, command: command.name, arguments: {} });
+      }));
+    }
+
+    item.append(title, meta, badges, actions);
+    item.addEventListener("click", () => {
+      state.selectedPluginId = id;
+      el.pluginDetail.textContent = JSON.stringify({ local: record || null, remote: remotePlugin || null, source: validation || null }, null, 2);
+    });
+    el.pluginList.append(item);
   }
 }
 
-function makeBadge(text, className = "") {
-  const badge = document.createElement("span");
-  badge.className = `badge ${className}`.trim();
-  badge.textContent = text;
-  return badge;
+function renderAutomations() {
+  const payload = state.automations || {};
+  const items = payload.automations || [];
+  el.automationSummary.textContent = `${items.length} task(s) | ${payload.scheduler || "local"} | ${payload.root || ""}`;
+  el.automationList.replaceChildren();
+  for (const automation of items) {
+    const item = document.createElement("article");
+    item.className = "automation-item";
+    const title = document.createElement("div");
+    title.className = "automation-title-row";
+    const name = document.createElement("div");
+    name.className = "automation-name";
+    name.textContent = automation.name || automation.id;
+    title.append(name, makeBadge(automation.enabled ? "enabled" : "paused", automation.enabled ? "ok" : "warn"));
+    const meta = document.createElement("div");
+    meta.className = "automation-meta";
+    meta.textContent = `Every ${automation.schedule?.interval_minutes || 60} min | ${automation.workspace || ""}`;
+    const actions = document.createElement("div");
+    actions.className = "badge-row";
+    actions.append(
+      makeButton("Edit", () => fillAutomationForm(automation)),
+      makeButton(automation.enabled ? "Pause" : "Resume", () => send("toggleAutomation", { id: automation.id, enabled: !automation.enabled })),
+      makeButton("Run", () => {
+        setBusy(true, "Running automation");
+        send("runAutomation", { id: automation.id });
+      }),
+      makeButton("Delete", () => {
+        if (confirm(`Delete automation "${automation.name || automation.id}"?`)) send("deleteAutomation", { id: automation.id });
+      })
+    );
+    item.append(title, meta, actions);
+    item.addEventListener("click", () => {
+      el.automationLog.textContent = automation.runtime?.last_log || "No run log yet.";
+    });
+    el.automationList.append(item);
+  }
+}
+
+function fillAutomationForm(automation) {
+  el.automationId.value = automation.id || "";
+  el.automationName.value = automation.name || "";
+  el.automationInterval.value = automation.schedule?.interval_minutes || 60;
+  el.automationEnabled.checked = Boolean(automation.enabled);
+  el.automationPrompt.value = automation.prompt || "";
+}
+
+function resetAutomationForm() {
+  el.automationId.value = "";
+  el.automationName.value = "";
+  el.automationInterval.value = 60;
+  el.automationEnabled.checked = true;
+  el.automationPrompt.value = "";
+}
+
+function renderGit(git) {
+  if (!git) return;
+  state.git = git;
+  if (!git.available) {
+    el.gitSummary.textContent = git.error || "Git repository unavailable.";
+    el.gitOutput.textContent = "";
+    renderStatusPills();
+    return;
+  }
+  el.gitSummary.textContent = `${git.branch || "branch"} | ${git.change_count || 0} changed files`;
+  el.gitOutput.textContent = (git.changes || []).join("\n") || "Working tree clean.";
+  renderStatusPills();
+}
+
+function renderSearch() {
+  const query = (el.globalSearchInput.value || "").toLowerCase();
+  const rows = [];
+  for (const session of state.sessions?.sessions || []) {
+    rows.push({ type: "chat", title: session.name || session.id, detail: `${session.message_count || 0} messages`, action: () => send("switchSession", { sessionId: session.id }) });
+  }
+  for (const tool of state.tools || []) rows.push({ type: "tool", title: tool.name, detail: tool.description || tool.category || "" });
+  for (const model of state.config?.models || []) rows.push({ type: "model", title: model.model_display_name || model.model, detail: model.provider || "" });
+  for (const plugin of state.plugins?.records || []) rows.push({ type: "plugin", title: plugin.name || plugin.id, detail: plugin.description || plugin.status || "", action: () => activateView("plugins") });
+  for (const setting of state.settings?.items || []) rows.push({ type: "setting", title: setting.name, detail: setting.description || "", action: () => activateView("settings") });
+  const visible = rows.filter(row => !query || `${row.type} ${row.title} ${row.detail}`.toLowerCase().includes(query)).slice(0, 80);
+  el.searchResults.replaceChildren();
+  for (const row of visible) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "result-item";
+    item.innerHTML = `<div class="setting-name">${escapeHtml(row.title)}</div><div class="setting-meta">${escapeHtml(row.type)} | ${escapeHtml(row.detail)}</div>`;
+    if (row.action) item.addEventListener("click", row.action);
+    el.searchResults.append(item);
+  }
+}
+
+function renderDiagnostics(items) {
+  el.diagnosticsList.replaceChildren();
+  for (const item of items) {
+    const row = document.createElement("div");
+    row.className = "diagnostic-item";
+    const label = document.createElement("div");
+    label.className = "diagnostic-title";
+    label.textContent = `${item.ok ? "OK" : "Check"} ${item.label}`;
+    const value = document.createElement("div");
+    value.className = "diagnostic-value";
+    value.textContent = item.value || "";
+    row.append(label, value);
+    el.diagnosticsList.append(row);
+  }
 }
 
 function fillModelForm(model) {
+  activateTab("models");
   el.modelIndex.value = model.index ?? -1;
   el.modelDisplayName.value = model.model_display_name || "";
   el.modelId.value = model.model || "";
@@ -208,20 +768,132 @@ function fillModelForm(model) {
   el.modelContextTokens.value = model.max_context_tokens || 128000;
 }
 
+function makeBadge(text, className = "") {
+  const badge = document.createElement("span");
+  badge.className = `badge ${className}`.trim();
+  badge.textContent = text;
+  return badge;
+}
+
+function makeButton(text, handler) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "badge-button";
+  button.textContent = text;
+  button.addEventListener("click", event => {
+    event.stopPropagation();
+    handler();
+  });
+  return button;
+}
+
+function makeValueLine(text) {
+  const line = document.createElement("div");
+  line.className = "setting-meta";
+  line.textContent = text;
+  return line;
+}
+
+function formatValue(value) {
+  if (value === true) return "on";
+  if (value === false) return "off";
+  if (value === null || value === undefined || value === "") return "(empty)";
+  return String(value);
+}
+
+function formatBytes(value) {
+  const size = Number(value || 0);
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
+  return `${Math.round(size / 1024 / 1024)} MB`;
+}
+
+function formatDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value).slice(0, 16).replace("T", " ");
+  return date.toLocaleString();
+}
+
+function renderIndexResult(message) {
+  const result = message.result || {};
+  el.indexSummary.textContent = `${result.files_parsed || 0} parsed, ${result.symbols_extracted || 0} symbols, ${Math.round(result.total_time_ms || 0)}ms.`;
+}
+
 function handleBridgeMessage(message) {
   switch (message.type) {
     case "ready":
+      state.runtime = { ...state.runtime, ...message };
       el.runtimeStatus.textContent = "Bridge ready";
-      log(`Bridge ready: ${message.runtime_root || ""}`);
+      log(`Bridge ready: ${message.kind || message.runtime_root || ""}`);
+      renderStatusPills();
+      break;
+    case "runtime":
+      state.runtime = { ...state.runtime, ...message };
+      renderStatusPills();
       break;
     case "host.info":
+      state.host = message;
       el.workspaceInput.value = message.workspaceRoot || message.cwd || "";
+      rememberProject(el.workspaceInput.value);
+      renderStatusPills();
       send("initialize", { projectRoot: el.workspaceInput.value });
+      send("listSettings");
+      send("listPlugins");
+      send("listAutomations");
       break;
     case "state":
       renderState(message);
       break;
+    case "settings":
+      state.settings = message.settings || {};
+      renderSettings();
+      renderSearch();
+      break;
+    case "setting.updated":
+      log(message.message || `Setting ${message.key} updated`);
+      break;
+    case "plugins":
+      state.plugins = message.plugins || {};
+      renderPlugins();
+      renderSearch();
+      setBusy(false, "Ready");
+      break;
+    case "remote.release":
+      state.plugins = state.plugins || {};
+      state.plugins.remote = message.remote || {};
+      renderPlugins();
+      break;
+    case "plugin.inspect":
+    case "plugin.build.complete":
+    case "plugin.deploy.complete":
+    case "plugin.command.complete":
+    case "plugin.installed":
+      el.pluginDetail.textContent = JSON.stringify(message, null, 2);
+      setBusy(false, "Ready");
+      break;
+    case "plugin.install.started":
+    case "plugin.build.started":
+    case "plugin.command.started":
+      log(`${message.type}: ${message.plugin_id || ""} ${message.command || ""}`);
+      break;
+    case "automations":
+      state.automations = message.automations || {};
+      renderAutomations();
+      renderSearch();
+      setBusy(false, "Ready");
+      break;
+    case "automation.saved":
+    case "automation.deleted":
+    case "automation.toggled":
+    case "automation.run.complete":
+      el.automationLog.textContent = JSON.stringify(message.result || message, null, 2);
+      setBusy(false, "Ready");
+      break;
     case "chat.started":
+      activateView("chat");
+      state.currentAssistantText = "";
+      state.pendingAssistantChunk = "";
       state.currentAssistant = addMessage("assistant", "");
       setBusy(true, "Streaming");
       break;
@@ -230,22 +902,25 @@ function handleBridgeMessage(message) {
       break;
     case "chat.chunk":
       if (!state.currentAssistant) state.currentAssistant = addMessage("assistant", "");
-      state.currentAssistant.textContent += message.chunk || "";
-      el.messageList.scrollTop = el.messageList.scrollHeight;
+      queueAssistantChunk(message.chunk || "");
       break;
     case "chat.thinking":
       log(`thinking: ${message.chunk || ""}`);
       break;
     case "chat.tool":
-      renderToolEvent(message.event);
+      log(`tool ${message.event?.event || ""}: ${message.event?.tool || message.event?.name || ""}`);
       break;
     case "chat.complete":
+      flushAssistantChunk();
       state.currentAssistant = null;
       setBusy(false, "Ready");
+      send("gitStatus", { projectRoot: el.workspaceInput.value });
       break;
     case "index.started":
       el.indexSummary.textContent = "Indexing started.";
       el.indexMeter.style.width = "1%";
+      setBusy(true, "Indexing");
+      activateTab("context");
       break;
     case "index.progress":
       el.indexSummary.textContent = `${message.stage || "index"}: ${message.current_file || message.message || ""}`;
@@ -254,13 +929,19 @@ function handleBridgeMessage(message) {
     case "index.complete":
       el.indexMeter.style.width = "100%";
       renderIndexResult(message);
+      setBusy(false, "Ready");
       break;
     case "diagnostics":
+      activateTab("context");
       renderDiagnostics(message.items || []);
       break;
     case "tools":
       state.tools = message.tools || [];
       renderTools();
+      renderSearch();
+      break;
+    case "git.status":
+      renderGit(message.git);
       break;
     case "host.log":
       log(message.message || "");
@@ -277,70 +958,67 @@ function handleBridgeMessage(message) {
   }
 }
 
-function renderToolEvent(event) {
-  if (!event) return;
-  const title = event.event || "tool";
-  const tool = event.tool || event.name || "";
-  log(`tool ${title}: ${tool}`);
-}
-
-function renderIndexResult(message) {
-  const result = message.result || {};
-  el.indexSummary.textContent = `${result.files_parsed || 0} parsed, ${result.symbols_extracted || 0} symbols, ${Math.round(result.total_time_ms || 0)}ms.`;
-}
-
-function renderDiagnostics(items) {
-  el.diagnosticsList.replaceChildren();
-  for (const item of items) {
-    const row = document.createElement("div");
-    row.className = "diagnostic-item";
-    const label = document.createElement("div");
-    label.className = "tool-name";
-    label.textContent = `${item.ok ? "OK" : "Check"} ${item.label}`;
-    const value = document.createElement("div");
-    value.className = "diagnostic-value";
-    value.textContent = item.value || "";
-    row.append(label, value);
-    el.diagnosticsList.append(row);
-  }
-}
+document.querySelectorAll(".nav-item").forEach(button => {
+  button.addEventListener("click", () => activateView(button.dataset.view));
+});
 
 document.querySelectorAll(".tab-button").forEach(button => {
-  button.addEventListener("click", () => {
-    document.querySelectorAll(".tab-button").forEach(item => item.classList.remove("active"));
-    document.querySelectorAll(".tab-panel").forEach(item => item.classList.remove("active"));
-    button.classList.add("active");
-    document.getElementById(`${button.dataset.tab}Tab`).classList.add("active");
-  });
+  button.addEventListener("click", () => activateTab(button.dataset.tab));
 });
+
+el.settingsNavButton.addEventListener("click", () => activateView("settings"));
 
 el.workspaceApply.addEventListener("click", () => {
+  rememberProject(el.workspaceInput.value);
   send("setWorkspace", { projectRoot: el.workspaceInput.value });
+  send("listSettings");
+  send("listPlugins");
+  send("listAutomations");
 });
 
-el.modeSelect.addEventListener("change", () => {
-  send("setMode", { mode: el.modeSelect.value });
-});
+el.modeSelect.addEventListener("change", () => send("setMode", { mode: el.modeSelect.value }));
+el.thinkingStyleSelect.addEventListener("change", () => send("setSetting", { key: "thinking_output_style", value: el.thinkingStyleSelect.value }));
 
 el.newSessionButton.addEventListener("click", () => {
   el.messageList.replaceChildren();
+  updateEmptyState();
+  activateView("chat");
   send("newSession", {});
 });
 
 el.clearSessionButton.addEventListener("click", () => {
+  if (!confirm("Clear the current chat transcript?")) return;
   el.messageList.replaceChildren();
+  updateEmptyState();
   send("clearSession", {});
 });
 
 el.indexButton.addEventListener("click", () => {
+  activateTab("context");
   send("indexWorkspace", { projectRoot: el.workspaceInput.value });
 });
 
 el.diagnosticsButton.addEventListener("click", () => {
+  activateTab("context");
   send("diagnostics", {});
 });
 
+el.gitRefreshButton.addEventListener("click", () => {
+  activateTab("git");
+  send("gitStatus", { projectRoot: el.workspaceInput.value });
+});
+
+el.pluginRefreshButton.addEventListener("click", () => {
+  setBusy(true, "Refreshing plugins");
+  send("refreshPlugins");
+});
+el.remoteRefreshButton.addEventListener("click", () => send("listRemoteReleases", { force: true }));
+el.pluginFilter.addEventListener("input", renderPlugins);
+el.settingsRefreshButton.addEventListener("click", () => send("listSettings"));
+el.sessionSearch.addEventListener("input", renderSessions);
 el.toolFilter.addEventListener("input", renderTools);
+el.globalSearchInput.addEventListener("input", renderSearch);
+el.automationResetButton.addEventListener("click", resetAutomationForm);
 
 el.modelForm.addEventListener("submit", event => {
   event.preventDefault();
@@ -356,6 +1034,18 @@ el.modelForm.addEventListener("submit", event => {
   el.modelForm.reset();
   el.modelIndex.value = "-1";
   el.modelContextTokens.value = "128000";
+});
+
+el.automationForm.addEventListener("submit", event => {
+  event.preventDefault();
+  send("saveAutomation", {
+    id: el.automationId.value,
+    name: el.automationName.value,
+    prompt: el.automationPrompt.value,
+    enabled: el.automationEnabled.checked,
+    workspace: el.workspaceInput.value,
+    schedule: { type: "interval", interval_minutes: Number(el.automationInterval.value || 60) }
+  });
 });
 
 el.composer.addEventListener("submit", event => {
@@ -379,8 +1069,14 @@ el.messageInput.addEventListener("keydown", event => {
   }
 });
 
-window.chrome.webview.addEventListener("message", event => {
-  handleBridgeMessage(event.data || {});
+document.querySelectorAll(".suggestion").forEach(button => {
+  button.addEventListener("click", () => {
+    el.messageInput.value = button.textContent.trim();
+    el.messageInput.focus();
+  });
 });
 
+window.chrome.webview.addEventListener("message", event => handleBridgeMessage(event.data || {}));
+
+updateEmptyState();
 send("hostInfo");

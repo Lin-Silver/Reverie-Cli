@@ -13,11 +13,11 @@ Reverie CLI is a context-engine-powered AI coding assistant for large repositori
 
 ## Latest Update
 
-Current stable repository version: `v2.3.2`.
+Current stable repository version: `v2.3.3`.
 
-- NVIDIA model routing now uses model-specific profiles, dynamic output-token clamping, and refreshed catalog entries.
-- Global configuration is once again the default; workspace/project config is used only after explicit workspace mode is enabled.
-- Context Engine cold-start indexing and the streaming footer were optimized so first replies and status refreshes remain responsive.
+- Reverie UI now uses the CLI as an embedded SDK bridge with real Plugins, Settings, Chats, Automations, and Release lookup surfaces.
+- GitHub Release publishing now builds `reverie.exe`, the four official plugin executables, and `plugins-manifest.json` directly into the latest Release.
+- Desktop startup, bridge event handling, plugin refresh, and long transcript rendering were optimized for lower UI churn.
 
 For the full release notes, see [docs/changelog.md](docs/changelog.md).
 

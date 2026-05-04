@@ -34,6 +34,15 @@ from ..modes import (
     normalize_mode,
 )
 from ..config import normalize_thinking_output_style, normalize_tool_output_style
+from ..settings_catalog import (
+    apply_workspace_mode_setting,
+    get_setting_items,
+    parse_bool as parse_setting_bool,
+    setting_mode_options,
+    setting_theme_options,
+    setting_thinking_output_choices,
+    setting_tool_output_choices,
+)
 from ..tools.tool_catalog import ToolCatalogTool
 
 
@@ -9856,133 +9865,23 @@ class CommandHandler:
 
     def _setting_mode_options(self) -> List[str]:
         """Available runtime modes for `/mode` and `/setting`."""
-        return list_modes(include_computer=True)
+        return setting_mode_options()
 
     def _setting_theme_options(self) -> List[str]:
         """Available theme values stored in config."""
-        return ["default", "dark", "light", "ocean"]
+        return setting_theme_options()
 
     def _setting_tool_output_choices(self) -> List[str]:
         """Available transcript styles for completed tool output."""
-        return ["compact", "condensed", "full"]
+        return setting_tool_output_choices()
 
     def _setting_thinking_output_choices(self) -> List[str]:
         """Available transcript styles for streamed reasoning content."""
-        return ["full", "compact", "hidden"]
+        return setting_thinking_output_choices()
 
     def _get_setting_items(self, config, config_manager, rules_manager) -> List[Dict[str, Any]]:
         """Build setting metadata for the interactive settings view."""
-        return [
-            {
-                "name": "Mode",
-                "key": "mode",
-                "kind": "choice",
-                "choices": self._setting_mode_options(),
-                "description": "Switch the active Reverie operating mode and prompt strategy.",
-                "command": "/setting mode <mode-name>",
-            },
-            {
-                "name": "Active Source",
-                "key": "active_model_source",
-                "kind": "readonly",
-                "description": "Current model source. Use /model or provider-native commands to switch sources.",
-                "command": "/status",
-            },
-            {
-                "name": "Standard Model",
-                "key": "active_model_index",
-                "kind": "choice",
-                "choices": list(range(len(config.models))),
-                "description": "Active model inside the standard catalog. Selecting here also switches source back to Standard.",
-                "command": "/setting model <index> or /model",
-            },
-            {
-                "name": "Theme",
-                "key": "theme",
-                "kind": "choice",
-                "choices": self._setting_theme_options(),
-                "description": "Persisted theme preset used by the CLI.",
-                "command": "/setting theme <theme>",
-            },
-            {
-                "name": "Auto Index",
-                "key": "auto_index",
-                "kind": "bool",
-                "description": "Automatically index the workspace when cache is cold.",
-                "command": "/setting auto-index on|off",
-            },
-            {
-                "name": "Status Line",
-                "key": "show_status_line",
-                "kind": "bool",
-                "description": "Show the live status line before and after responses.",
-                "command": "/setting status-line on|off",
-            },
-            {
-                "name": "Tool Output Style",
-                "key": "tool_output_style",
-                "kind": "choice",
-                "choices": self._setting_tool_output_choices(),
-                "description": "Choose how completed tool results appear after the live running panel collapses.",
-                "command": "/setting tool-output compact|condensed|full",
-            },
-            {
-                "name": "Thinking Output",
-                "key": "thinking_output_style",
-                "kind": "choice",
-                "choices": self._setting_thinking_output_choices(),
-                "description": "Choose whether streamed reasoning stays fully visible, compact, or hidden in the transcript.",
-                "command": "/setting thinking full|compact|hidden",
-            },
-            {
-                "name": "Stream Responses",
-                "key": "stream_responses",
-                "kind": "bool",
-                "description": "Stream assistant output token-by-token when the provider supports it.",
-                "command": "/setting stream on|off",
-            },
-            {
-                "name": "API Timeout",
-                "key": "api_timeout",
-                "kind": "int",
-                "min": 10,
-                "max": 3600,
-                "step": 10,
-                "description": "Default API timeout in seconds for model requests.",
-                "command": "/setting timeout <seconds>",
-            },
-            {
-                "name": "API Retries",
-                "key": "api_max_retries",
-                "kind": "int",
-                "min": 0,
-                "max": 12,
-                "step": 1,
-                "description": "Retry count for recoverable API failures.",
-                "command": "/setting retries <count>",
-            },
-            {
-                "name": "Debug Logging",
-                "key": "api_enable_debug_logging",
-                "kind": "bool",
-                "description": "Enable verbose API logging for troubleshooting.",
-                "command": "/setting debug on|off",
-            },
-            {
-                "name": "Workspace Config",
-                "key": "use_workspace_config",
-                "kind": "workspace",
-                "description": "Choose whether settings are stored in the current workspace or the global Reverie config.",
-                "command": "/setting workspace on|off",
-            },
-            {
-                "name": "Rules",
-                "key": "rules",
-                "kind": "rules",
-                "description": "Edit additional instruction rules applied to the active session.",
-                "command": "/setting rules",
-            },
-        ]
+        return get_setting_items(config, config_manager, rules_manager)
 
     def _setting_display_value(self, item: Dict[str, Any], config, config_manager, rules_manager) -> str:
         """Render a compact value label for a settings item."""
@@ -10297,12 +10196,7 @@ class CommandHandler:
 
     def _setting_parse_bool(self, value: str):
         """Parse common boolean input values."""
-        lowered = str(value or "").strip().lower()
-        if lowered in ("on", "true", "1", "yes", "enable", "enabled"):
-            return True
-        if lowered in ("off", "false", "0", "no", "disable", "disabled"):
-            return False
-        return None
+        return parse_setting_bool(value)
 
     def _setting_save_and_reinit(self, config, message: str, reinit: bool = True) -> bool:
         """Save config and optionally reinitialize the agent."""
@@ -10584,34 +10478,7 @@ class CommandHandler:
     def _apply_workspace_mode_setting(self, enabled: bool):
         """Apply workspace/global config mode and return success with a user-facing message."""
         config_manager = self.app.get('config_manager')
-        if not config_manager:
-            return False, "Config manager not available."
-
-        if enabled:
-            if config_manager.is_workspace_mode():
-                return True, "Workspace mode is already enabled."
-            if not config_manager.has_workspace_config():
-                if not config_manager.has_global_config():
-                    return False, "No configuration found. Configure a model before enabling workspace mode."
-                if not config_manager.copy_config_to_workspace():
-                    return False, "Failed to copy the global config into the workspace."
-            if not config_manager.set_workspace_config_enabled(True):
-                return False, "Failed to mark the workspace profile as enabled."
-            config_manager.set_workspace_mode(True)
-            config = config_manager.load()
-            config.use_workspace_config = True
-            config_manager.save(config)
-            return True, f"Workspace mode enabled. Config path: {config_manager.workspace_config_path}"
-
-        if not config_manager.is_workspace_mode():
-            return True, "Workspace mode is already disabled."
-        if not config_manager.set_workspace_config_enabled(False):
-            return False, "Failed to mark the workspace profile as disabled."
-        config_manager.set_workspace_mode(False)
-        config = config_manager.load()
-        config.use_workspace_config = False
-        config_manager.save(config)
-        return True, f"Workspace mode disabled. Config path: {config_manager.global_config_path}"
+        return apply_workspace_mode_setting(config_manager, enabled)
 
     def _cmd_setting_workspace(self, value: str) -> bool:
         """Toggle workspace config mode from `/setting`."""

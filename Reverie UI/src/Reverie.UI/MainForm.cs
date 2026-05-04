@@ -6,12 +6,15 @@ namespace Reverie.UI;
 
 public sealed class MainForm : Form
 {
+    private static readonly Color WindowBackground = Color.FromArgb(20, 20, 20);
+
     private readonly WebView2 _webView = new();
-    private readonly PythonBridgeService _bridge = new();
+    private readonly ReverieBridgeService _bridge = new();
 
     public MainForm()
     {
         Text = "Reverie UI";
+        BackColor = WindowBackground;
         MinimumSize = new Size(1120, 720);
         StartPosition = FormStartPosition.CenterScreen;
         WindowState = FormWindowState.Maximized;
@@ -24,9 +27,16 @@ public sealed class MainForm : Form
         _bridge.OutputReceived += OnBridgeOutputReceived;
     }
 
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        WindowsChrome.ApplyDarkTitleBar(Handle);
+    }
+
     private async void OnLoad(object? sender, EventArgs e)
     {
         await _webView.EnsureCoreWebView2Async();
+        _webView.DefaultBackgroundColor = WindowBackground;
         _webView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = true;
         _webView.CoreWebView2.Settings.AreDevToolsEnabled = true;
         _webView.CoreWebView2.WebMessageReceived += OnWebMessageReceived;
@@ -53,7 +63,10 @@ public sealed class MainForm : Form
                     cwd = Directory.GetCurrentDirectory(),
                     workspaceRoot = RuntimePaths.WorkspaceRoot,
                     runtimeRoot = RuntimePaths.RuntimeRoot,
-                    appDataRoot = RuntimePaths.AppDataRoot
+                    appDataRoot = RuntimePaths.AppDataRoot,
+                    reverieCliPath = RuntimePaths.ReverieCliPath,
+                    reverieCliVersion = RuntimePaths.ReverieCliVersion,
+                    bridgeKind = _bridge.BridgeKind
                 });
                 return;
             }

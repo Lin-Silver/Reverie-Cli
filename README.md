@@ -13,11 +13,11 @@ Reverie CLI is a context-engine-powered AI coding assistant for large repositori
 
 ## Latest Update
 
-Current stable repository version: `v2.3.2`.
+Current stable repository version: `v2.3.3`.
 
-- NVIDIA model routing now uses model-specific profiles, dynamic output-token clamping, and refreshed catalog entries.
-- Global configuration is once again the default; workspace/project config is used only after explicit workspace mode is enabled.
-- Context Engine cold-start indexing and the streaming footer were optimized so first replies and status refreshes remain responsive.
+- Reverie UI now uses the CLI as an embedded SDK bridge with real Plugins, Settings, Chats, Automations, and Release lookup surfaces.
+- GitHub Release publishing now builds `reverie.exe`, the four official plugin executables, and `plugins-manifest.json` directly into the latest Release.
+- Desktop startup, bridge event handling, plugin refresh, and long transcript rendering were optimized for lower UI churn.
 
 For the full release notes, see [docs/changelog.md](docs/changelog.md).
 
@@ -71,6 +71,10 @@ reverie -p "fix failing tests" --report-file artifacts/prompt_report.json
 reverie /path/to/project -p "add a health check" --mode reverie-atlas
 reverie --version            # print version
 ```
+
+`reverie --sdk-bridge` starts the long-lived JSONL SDK bridge used by Reverie UI.
+It is hidden from normal help output because it is intended for desktop hosts and
+tooling integrations, not interactive terminal use.
 
 `--report-file` writes structured JSON for prompt runs, including the final output, activity events, UI events, and a harness report that summarizes tasks, checkpoints, command audit evidence, verification posture, and recent run-history trends. Prompt-mode runs now also persist lightweight harness snapshots in the project cache so `/doctor` can show score and verification drift over time.
 
@@ -161,6 +165,10 @@ Windows executable packaging:
 .\build.bat --recreate-venv
 .\build.bat --test-exe
 ```
+
+GitHub Actions builds `dist/reverie.exe` automatically on every push to `main`
+and refreshes the rolling `latest` release asset used by Reverie UI's
+auto-download fallback.
 
 The packaged `dist/reverie.exe` now includes the built-in Reverie-Gamer runtime flows in one file, including `/engine video`, `/engine renpy`, `/modeling primitive`, and `/blender`. `build.bat` installs the official Blender, Godot, O3DE, and Game Models runtime plugins into `dist/.reverie/plugins/`: Blender can unpack its portable runtime when the build input zip is present and can prepare plugin-local MMD Tools for PMD/PMX/VMD/VPD import, Godot can discover/download official GitHub releases or clone source, O3DE can clone source plus write a plugin-local SDK manifest, and Game Models can prepare a plugin-local venv plus selectable HuggingFace model snapshots such as TRELLIS `low_vram` for local asset assistance. If `ffmpeg` is available during build, `build.bat` bundles it into the executable so `mp4` and `gif` export work without a separate system install. If not, frame-sequence export still works and encoded video falls back to an external `ffmpeg` at runtime.
 

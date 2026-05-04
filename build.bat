@@ -215,18 +215,20 @@ if defined REVERIE_FFMPEG_PATH (
 
 set "ICON_ICO=%ROOT_DIR%\reverie.ico"
 set "ICON_PNG=%ROOT_DIR%\reverie.png"
-set "GENERATED_ICO=%BUILD_DIR%\reverie.generated.ico"
+set "GUI_ICON_ICO=%ROOT_DIR%\Reverie UI\src\Reverie.UI\Assets\reverie.ico"
 set "REVERIE_ICON_PATH="
 
-if exist "%ICON_ICO%" (
-    set "REVERIE_ICON_PATH=%ICON_ICO%"
-) else if exist "%ICON_PNG%" (
-    python -c "from PIL import Image; Image.open(r'%ICON_PNG%').save(r'%GENERATED_ICO%', format='ICO', sizes=[(256,256),(128,128),(64,64),(48,48),(32,32),(16,16)])"
-    if %ERRORLEVEL% equ 0 (
-        set "REVERIE_ICON_PATH=%GENERATED_ICO%"
-    ) else (
-        set "REVERIE_ICON_PATH=%ICON_PNG%"
+if exist "%ICON_PNG%" (
+    python "%ROOT_DIR%\scripts\generate_reverie_icons.py" --source "%ICON_PNG%" "%ICON_ICO%" "%GUI_ICON_ICO%"
+    if %ERRORLEVEL% neq 0 (
+        echo [ERROR] Failed to generate icons from %ICON_PNG%.
+        set "BUILD_EXIT_CODE=1"
+        goto finish
     )
+    set "REVERIE_ICON_PATH=%ICON_ICO%"
+) else if exist "%ICON_ICO%" (
+    echo       reverie.png not found. Falling back to existing ico.
+    set "REVERIE_ICON_PATH=%ICON_ICO%"
 )
 
 if defined REVERIE_ICON_PATH (

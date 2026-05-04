@@ -62,6 +62,31 @@ function Invoke-Checked {
     }
 }
 
+function Update-ReverieIcons {
+    param([string]$Python)
+
+    $RepoRoot = Split-Path -Parent $ScriptRoot
+    $SourceIcon = Join-Path $RepoRoot "reverie.png"
+    $RootIcon = Join-Path $RepoRoot "reverie.ico"
+    $GuiIcon = Join-Path $ScriptRoot "src\Reverie.UI\Assets\reverie.ico"
+    $IconScript = Join-Path $RepoRoot "scripts\generate_reverie_icons.py"
+
+    if (-not (Test-Path $SourceIcon)) {
+        throw "Missing required icon source: $SourceIcon"
+    }
+    if (-not (Test-Path $IconScript)) {
+        throw "Missing icon generation script: $IconScript"
+    }
+
+    & $Python -c "import PIL" *> $null
+    if ($LASTEXITCODE -ne 0) {
+        Invoke-Checked $Python @("-m", "pip", "install", "--upgrade", "pillow")
+    }
+
+    Invoke-Checked $Python @($IconScript, "--source", $SourceIcon, $RootIcon, $GuiIcon)
+    Write-Ok "Application icons generated from reverie.png."
+}
+
 function Get-FreeTcpPort {
     $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
     $listener.Start()
@@ -413,6 +438,9 @@ New-Item -ItemType Directory -Force -Path $TestRoot | Out-Null
 Write-Step "Compiling Python bridge"
 Invoke-Checked $ResolvedPython @("-m", "py_compile", $BridgePath)
 Write-Ok "Python bridge syntax is valid."
+
+Write-Step "Generating application icons"
+Update-ReverieIcons -Python $ResolvedPython
 
 Write-Step "Restoring .NET dependencies"
 Invoke-Checked "dotnet" @("restore", $ProjectPath)

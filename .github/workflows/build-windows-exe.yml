@@ -47,6 +47,18 @@ jobs:
           python -m pip install --upgrade pyinstaller pillow
           python -m pip install -e .
 
+      - name: Generate application icons
+        shell: pwsh
+        run: |
+          $source = Join-Path $env:GITHUB_WORKSPACE "reverie.png"
+          $rootIcon = Join-Path $env:GITHUB_WORKSPACE "reverie.ico"
+          $guiIcon = Join-Path $env:GITHUB_WORKSPACE "Reverie UI\src\Reverie.UI\Assets\reverie.ico"
+          if (-not (Test-Path $source)) {
+            throw "Missing required icon source: $source"
+          }
+          python scripts\generate_reverie_icons.py --source $source $rootIcon $guiIcon
+          "REVERIE_ICON_PATH=$rootIcon" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Prepare bundled resources
         shell: pwsh
         run: |
@@ -64,9 +76,6 @@ jobs:
           }
 
           "REVERIE_BUNDLE_RES_DIR=$bundleRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          if (Test-Path (Join-Path $env:GITHUB_WORKSPACE "reverie.ico")) {
-            "REVERIE_ICON_PATH=$(Join-Path $env:GITHUB_WORKSPACE "reverie.ico")" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          }
 
       - name: Prepare Blender plugin archive
         shell: pwsh

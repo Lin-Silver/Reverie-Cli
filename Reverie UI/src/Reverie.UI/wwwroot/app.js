@@ -20,6 +20,7 @@ const state = {
   logs: [],
   selectedSettingKey: "",
   selectedPluginId: "",
+  pluginProgress: {},
   recentProjects: loadRecentProjects()
 };
 
@@ -607,6 +608,25 @@ function renderPlugins() {
     if (record?.protocol_status) badges.append(makeBadge(record.protocol_label || record.protocol_status, record.protocol_status === "ready" ? "ok" : "warn"));
     if (record?.tool_count) badges.append(makeBadge(`${record.tool_count} tools`, "ok"));
     if (remotePlugin?.size) badges.append(makeBadge(formatBytes(remotePlugin.size)));
+    const progress = state.pluginProgress[id];
+    const progressRow = document.createElement("div");
+    progressRow.className = `plugin-progress ${progress ? "visible" : ""}`;
+    if (progress) {
+      const label = document.createElement("div");
+      label.className = "plugin-progress-label";
+      const downloaded = progress.downloaded ? formatBytes(progress.downloaded) : "";
+      const total = progress.total ? formatBytes(progress.total) : "";
+      label.textContent = progress.percent
+        ? `${progress.status || "Downloading"} ${progress.percent}% (${downloaded}/${total})`
+        : `${progress.status || "Downloading"} ${downloaded}`;
+      const track = document.createElement("div");
+      track.className = "plugin-progress-track";
+      const meter = document.createElement("div");
+      meter.className = "plugin-progress-meter";
+      meter.style.width = `${Math.max(3, Math.min(100, Number(progress.percent || 3)))}%`;
+      track.append(meter);
+      progressRow.append(label, track);
+    }
 
     const actions = document.createElement("div");
     actions.className = "badge-row";
@@ -615,8 +635,15 @@ function renderPlugins() {
       send("inspectPlugin", { pluginId: id });
     }));
     if (remotePlugin?.download_url) {
-      actions.append(makeButton(record ? "Update" : "Install", () => {
+      actions.append(makeButton(record ? "Update exe" : "Download exe", () => {
         setBusy(true, "Installing");
+        state.pluginProgress[id] = {
+          status: record ? "Updating" : "Downloading",
+          downloaded: 0,
+          total: remotePlugin.size || 0,
+          percent: 0
+        };
+        renderPlugins();
         send("installRemotePlugin", {
           pluginId: id,
           assetName: remotePlugin.asset_name,
@@ -642,7 +669,7 @@ function renderPlugins() {
       }));
     }
 
-    item.append(title, meta, badges, actions);
+    item.append(title, meta, badges, progressRow, actions);
     item.addEventListener("click", () => {
       state.selectedPluginId = id;
       el.pluginDetail.textContent = JSON.stringify({ local: record || null, remote: remotePlugin || null, source: validation || null }, null, 2);
@@ -721,23 +748,93 @@ function renderGit(git) {
 
 function renderSearch() {
   const query = (el.globalSearchInput.value || "").toLowerCase();
-  const rows = [];
+  const groups = [
+    { type: "chat", title: "Chats", rows: [] },
+    { type: "plugin", title: "Plugins", rows: [] },
+    { type: "tool", title: "Tools", rows: [] },
+    { type: "model", title: "Models", rows: [] },
+    { type: "setting", title: "Settings", rows: [] },
+    { type: "automation", title: "Automations", rows: [] }
+  ];
+  const byType = Object.fromEntries(groups.map(group => [group.type, group]));
   for (const session of state.sessions?.sessions || []) {
-    rows.push({ type: "chat", title: session.name || session.id, detail: `${session.message_count || 0} messages`, action: () => send("switchSession", { sessionId: session.id }) });
+    byType.chat.rows.push({
+      type: "chat",
+      title: session.name || session.id,
+      detail: `${session.message_count || 0} messages | ${formatDate(session.updated_at)}`,
+      open: () => {
+        activateView("chat");
+        send("switchSession", { sessionId: session.id });
+      },
+      remove: () => deleteSession(session)
+    });
   }
-  for (const tool of state.tools || []) rows.push({ type: "tool", title: tool.name, detail: tool.description || tool.category || "" });
-  for (const model of state.config?.models || []) rows.push({ type: "model", title: model.model_display_name || model.model, detail: model.provider || "" });
-  for (const plugin of state.plugins?.records || []) rows.push({ type: "plugin", title: plugin.name || plugin.id, detail: plugin.description || plugin.status || "", action: () => activateView("plugins") });
-  for (const setting of state.settings?.items || []) rows.push({ type: "setting", title: setting.name, detail: setting.description || "", action: () => activateView("settings") });
-  const visible = rows.filter(row => !query || `${row.type} ${row.title} ${row.detail}`.toLowerCase().includes(query)).slice(0, 80);
+  for (const plugin of state.plugins?.records || []) {
+    byType.plugin.rows.push({
+      type: "plugin",
+      title: plugin.name || plugin.id,
+      detail: `${plugin.status_label || plugin.status || ""} | ${plugin.tool_count || 0} tools | ${(plugin.capabilities || []).slice(0, 4).join(", ")}`,
+      open: () => {
+        state.selectedPluginId = plugin.id;
+        activateView("plugins");
+      }
+    });
+  }
+  for (const plugin of state.plugins?.remote?.manifest?.plugins || []) {
+    byType.plugin.rows.push({
+      type: "plugin",
+      title: `${plugin.name || plugin.id} (remote)`,
+      detail: `${plugin.version || "latest"} | ${formatBytes(plugin.size || 0)} | ${plugin.asset_name || ""}`,
+      open: () => activateView("plugins")
+    });
+  }
+  for (const tool of state.tools || []) byType.tool.rows.push({ type: "tool", title: tool.name, detail: tool.description || tool.category || "" });
+  for (const model of state.config?.models || []) byType.model.rows.push({ type: "model", title: model.model_display_name || model.model, detail: `${model.provider || ""} | ${model.base_url || ""}` });
+  for (const setting of state.settings?.items || []) byType.setting.rows.push({ type: "setting", title: setting.name, detail: setting.description || "", open: () => activateView("settings") });
+  for (const automation of state.automations?.automations || []) byType.automation.rows.push({
+    type: "automation",
+    title: automation.name || automation.id,
+    detail: `${automation.enabled ? "enabled" : "paused"} | every ${automation.schedule?.interval_minutes || 60} min`,
+    open: () => activateView("automations")
+  });
+
   el.searchResults.replaceChildren();
-  for (const row of visible) {
-    const item = document.createElement("button");
-    item.type = "button";
-    item.className = "result-item";
-    item.innerHTML = `<div class="setting-name">${escapeHtml(row.title)}</div><div class="setting-meta">${escapeHtml(row.type)} | ${escapeHtml(row.detail)}</div>`;
-    if (row.action) item.addEventListener("click", row.action);
-    el.searchResults.append(item);
+  let total = 0;
+  for (const group of groups) {
+    const visible = group.rows
+      .filter(row => !query || `${row.type} ${row.title} ${row.detail}`.toLowerCase().includes(query))
+      .slice(0, 30);
+    total += visible.length;
+    if (!visible.length) continue;
+
+    const section = document.createElement("section");
+    section.className = "search-section";
+    const header = document.createElement("div");
+    header.className = "search-section-header";
+    header.innerHTML = `<span>${escapeHtml(group.title)}</span><strong>${visible.length}</strong>`;
+    section.append(header);
+
+    for (const row of visible) {
+      const item = document.createElement("article");
+      item.className = "result-item";
+      const body = document.createElement("button");
+      body.type = "button";
+      body.className = "result-body";
+      body.innerHTML = `<div class="setting-name">${escapeHtml(row.title)}</div><div class="setting-meta">${escapeHtml(row.detail)}</div>`;
+      body.addEventListener("click", row.open || (() => {}));
+      const actions = document.createElement("div");
+      actions.className = "result-actions";
+      if (row.remove) actions.append(makeButton("Delete", row.remove));
+      item.append(body, actions);
+      section.append(item);
+    }
+    el.searchResults.append(section);
+  }
+  if (!total) {
+    const empty = document.createElement("div");
+    empty.className = "empty-results";
+    empty.textContent = query ? "No matching chats, plugins, tools, models, settings, or automations." : "No searchable data loaded yet.";
+    el.searchResults.append(empty);
   }
 }
 
@@ -869,13 +966,47 @@ function handleBridgeMessage(message) {
     case "plugin.deploy.complete":
     case "plugin.command.complete":
     case "plugin.installed":
+      if (message.plugin_id && state.pluginProgress[message.plugin_id]) {
+        state.pluginProgress[message.plugin_id] = {
+          ...state.pluginProgress[message.plugin_id],
+          status: message.type === "plugin.installed" ? "Installed" : "Complete",
+          percent: 100
+        };
+        renderPlugins();
+      }
       el.pluginDetail.textContent = JSON.stringify(message, null, 2);
       setBusy(false, "Ready");
       break;
     case "plugin.install.started":
+      if (message.plugin_id) {
+        state.pluginProgress[message.plugin_id] = {
+          status: "Starting download",
+          downloaded: 0,
+          total: 0,
+          percent: 0
+        };
+        renderPlugins();
+      }
+      log(`${message.type}: ${message.plugin_id || ""} ${message.asset_name || ""}`);
+      break;
+    case "plugin.install.progress":
+      if (message.plugin_id) {
+        state.pluginProgress[message.plugin_id] = {
+          status: "Downloading",
+          downloaded: message.downloaded || 0,
+          total: message.total || 0,
+          percent: message.percent || 0
+        };
+        renderPlugins();
+      }
+      break;
     case "plugin.build.started":
     case "plugin.command.started":
       log(`${message.type}: ${message.plugin_id || ""} ${message.command || ""}`);
+      break;
+    case "error":
+      if (message.id) setBusy(false, "Ready");
+      log(`error: ${message.error || "Unknown error"}`);
       break;
     case "automations":
       state.automations = message.automations || {};

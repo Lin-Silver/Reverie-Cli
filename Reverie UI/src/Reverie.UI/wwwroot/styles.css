@@ -261,7 +261,8 @@ textarea:focus {
 .session-item:hover,
 .plugin-item:hover,
 .automation-item:hover,
-.setting-item:hover {
+.setting-item:hover,
+.result-item:hover {
   background: #252525;
 }
 
@@ -759,6 +760,90 @@ textarea {
 .setting-meta {
   overflow-wrap: anywhere;
   line-height: 1.45;
+}
+
+.plugin-progress {
+  display: none;
+  gap: 6px;
+}
+
+.plugin-progress.visible {
+  display: grid;
+}
+
+.plugin-progress-label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.plugin-progress-track {
+  height: 7px;
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  background: #111;
+}
+
+.plugin-progress-meter {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), #2dd4bf);
+  transition: width 120ms ease;
+}
+
+.search-section {
+  display: grid;
+  gap: 8px;
+}
+
+.search-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 2px 2px;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.search-section-header strong {
+  min-width: 22px;
+  border-radius: 999px;
+  background: #282828;
+  color: var(--text);
+  text-align: center;
+  font-size: 11px;
+  line-height: 20px;
+}
+
+.result-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.result-body {
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  text-align: left;
+}
+
+.result-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.empty-results {
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  padding: 18px;
+  color: var(--muted);
+  text-align: center;
 }
 
 .setting-control {

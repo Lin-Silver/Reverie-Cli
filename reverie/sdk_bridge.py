@@ -802,6 +802,9 @@ class ReverieUiBridge:
         hasher = hashlib.sha256()
         request = urllib.request.Request(download_url, headers={"User-Agent": "Reverie-UI-SDK/1.0"})
         with urllib.request.urlopen(request, timeout=120) as response:
+            total = int(response.headers.get("Content-Length") or 0)
+            downloaded = 0
+            last_percent = -1
             with open(temp_path, "wb") as handle:
                 while True:
                     chunk = response.read(1024 * 1024)
@@ -809,6 +812,33 @@ class ReverieUiBridge:
                         break
                     hasher.update(chunk)
                     handle.write(chunk)
+                    downloaded += len(chunk)
+                    percent = int(downloaded * 100 / total) if total else 0
+                    if total and (percent >= last_percent + 2 or percent == 100):
+                        last_percent = percent
+                        emit(
+                            {
+                                "id": request_id,
+                                "type": "plugin.install.progress",
+                                "plugin_id": plugin_id,
+                                "asset_name": asset_name,
+                                "downloaded": downloaded,
+                                "total": total,
+                                "percent": percent,
+                            }
+                        )
+                    elif not total:
+                        emit(
+                            {
+                                "id": request_id,
+                                "type": "plugin.install.progress",
+                                "plugin_id": plugin_id,
+                                "asset_name": asset_name,
+                                "downloaded": downloaded,
+                                "total": 0,
+                                "percent": 0,
+                            }
+                        )
         digest = hasher.hexdigest()
         if sha256 and digest.lower() != sha256:
             temp_path.unlink(missing_ok=True)

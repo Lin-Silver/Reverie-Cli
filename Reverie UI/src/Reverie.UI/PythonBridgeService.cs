@@ -6,6 +6,7 @@ namespace Reverie.UI;
 public sealed class ReverieBridgeService : IDisposable
 {
     private readonly SemaphoreSlim _startLock = new(1, 1);
+    private readonly SemaphoreSlim _sendLock = new(1, 1);
     private Process? _process;
     private StreamWriter? _stdin;
     private bool _disposed;
@@ -19,13 +20,21 @@ public sealed class ReverieBridgeService : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         await EnsureStartedAsync();
 
-        if (_stdin is null)
+        await _sendLock.WaitAsync();
+        try
         {
-            throw new InvalidOperationException("Reverie bridge stdin is not available.");
-        }
+            if (_stdin is null)
+            {
+                throw new InvalidOperationException("Reverie bridge stdin is not available.");
+            }
 
-        await _stdin.WriteLineAsync(json);
-        await _stdin.FlushAsync();
+            await _stdin.WriteLineAsync(json);
+            await _stdin.FlushAsync();
+        }
+        finally
+        {
+            _sendLock.Release();
+        }
     }
 
     private async Task EnsureStartedAsync()
@@ -71,22 +80,33 @@ public sealed class ReverieBridgeService : IDisposable
 
     private static IEnumerable<BridgeLaunch> BuildLaunches()
     {
-        if (!string.IsNullOrWhiteSpace(RuntimePaths.ReverieCliPath))
-        {
-            yield return new BridgeLaunch("embedded-exe", RuntimePaths.ReverieCliPath, "--sdk-bridge", RuntimePaths.WorkspaceRoot);
-        }
-
-        var python = Environment.GetEnvironmentVariable("REVERIE_UI_PYTHON");
-        if (string.IsNullOrWhiteSpace(python))
-        {
-            var repoVenv = Path.Combine(RuntimePaths.WorkspaceRoot, "venv", "Scripts", "python.exe");
-            python = File.Exists(repoVenv) ? repoVenv : "python";
-        }
-
         var scriptPath = Path.Combine(RuntimePaths.RuntimeRoot, "reverie_ui_bridge.py");
         if (File.Exists(scriptPath))
         {
-            yield return new BridgeLaunch("python-source", python, $"\"{scriptPath}\"", RuntimePaths.RuntimeRoot);
+            var repoVenv = Path.Combine(RuntimePaths.WorkspaceRoot, "venv", "Scripts", "python.exe");
+            foreach (var python in new[]
+            {
+                Environment.GetEnvironmentVariable("REVERIE_UI_PYTHON"),
+                "python",
+                File.Exists(repoVenv) ? repoVenv : null,
+                "py"
+            })
+            {
+                if (string.IsNullOrWhiteSpace(python))
+                {
+                    continue;
+                }
+
+                var arguments = string.Equals(python, "py", StringComparison.OrdinalIgnoreCase)
+                    ? $"-3 \"{scriptPath}\""
+                    : $"\"{scriptPath}\"";
+                yield return new BridgeLaunch("python-source", python, arguments, RuntimePaths.RuntimeRoot);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(RuntimePaths.ReverieCliPath))
+        {
+            yield return new BridgeLaunch("embedded-exe", RuntimePaths.ReverieCliPath, "--sdk-bridge", RuntimePaths.WorkspaceRoot);
         }
     }
 
@@ -256,6 +276,7 @@ public sealed class ReverieBridgeService : IDisposable
             _stdin?.Dispose();
             _process?.Dispose();
             _startLock.Dispose();
+            _sendLock.Dispose();
         }
     }
 

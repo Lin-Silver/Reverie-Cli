@@ -53,8 +53,6 @@ const el = {
   turnStatus: $("turnStatus"),
   modeSelect: $("modeSelect"),
   thinkingStyleSelect: $("thinkingStyleSelect"),
-  globalSearchInput: $("globalSearchInput"),
-  searchResults: $("searchResults"),
   pluginSummary: $("pluginSummary"),
   pluginRemoteSummary: $("pluginRemoteSummary"),
   pluginRefreshButton: $("pluginRefreshButton"),
@@ -118,6 +116,48 @@ function rememberProject(path) {
   state.recentProjects = [value, ...state.recentProjects.filter(item => item !== value)].slice(0, 8);
   localStorage.setItem("reverie.recentProjects", JSON.stringify(state.recentProjects));
   renderProjects();
+}
+
+function applyShellLayout() {
+  const sidebar = Number(localStorage.getItem("reverie.sidebarWidth") || 260);
+  const inspector = Number(localStorage.getItem("reverie.inspectorWidth") || 354);
+  document.documentElement.style.setProperty("--sidebar-width", `${Math.max(220, Math.min(420, sidebar))}px`);
+  document.documentElement.style.setProperty("--inspector-width", `${Math.max(280, Math.min(560, inspector))}px`);
+}
+
+function setupShellResizers() {
+  applyShellLayout();
+  for (const handle of document.querySelectorAll(".shell-resizer")) {
+    handle.addEventListener("pointerdown", event => {
+      event.preventDefault();
+      handle.setPointerCapture(event.pointerId);
+      document.body.classList.add("is-resizing");
+      const mode = handle.dataset.resizer;
+      const startX = event.clientX;
+      const initialSidebar = Number(localStorage.getItem("reverie.sidebarWidth") || 260);
+      const initialInspector = Number(localStorage.getItem("reverie.inspectorWidth") || 354);
+      const move = moveEvent => {
+        if (mode === "sidebar") {
+          const width = Math.max(220, Math.min(420, initialSidebar + moveEvent.clientX - startX));
+          localStorage.setItem("reverie.sidebarWidth", String(width));
+        } else {
+          const width = Math.max(280, Math.min(560, initialInspector - (moveEvent.clientX - startX)));
+          localStorage.setItem("reverie.inspectorWidth", String(width));
+        }
+        applyShellLayout();
+      };
+      const stop = stopEvent => {
+        document.body.classList.remove("is-resizing");
+        handle.releasePointerCapture(stopEvent.pointerId);
+        handle.removeEventListener("pointermove", move);
+        handle.removeEventListener("pointerup", stop);
+        handle.removeEventListener("pointercancel", stop);
+      };
+      handle.addEventListener("pointermove", move);
+      handle.addEventListener("pointerup", stop);
+      handle.addEventListener("pointercancel", stop);
+    });
+  }
 }
 
 function log(message) {
@@ -236,10 +276,6 @@ function activateView(name) {
   if (name === "plugins" && !state.plugins) send("listPlugins");
   if (name === "settings" && !state.settings) send("listSettings");
   if (name === "automations" && !state.automations) send("listAutomations");
-  if (name === "search") {
-    renderSearch();
-    el.globalSearchInput.focus();
-  }
 }
 
 function activateTab(name) {
@@ -278,7 +314,6 @@ function renderState(message) {
   renderModels();
   renderTools();
   renderGit(state.git);
-  renderSearch();
 
   if (state.sessions?.messages && !state.busy) {
     el.messageList.replaceChildren();
@@ -381,6 +416,16 @@ function renameSession(session) {
 
 function deleteSession(session) {
   if (!confirm(`Delete chat "${session.name || session.id}"?`)) return;
+  state.sessions = state.sessions || {};
+  state.sessions.sessions = (state.sessions.sessions || []).filter(item => item.id !== session.id);
+  if (state.sessions.current_session_id === session.id) {
+    state.sessions.current_session_id = "";
+    state.sessions.current_session_name = "";
+    state.sessions.messages = [];
+    el.messageList.replaceChildren();
+    el.emptyState.hidden = false;
+  }
+  renderSessions();
   send("deleteSession", { sessionId: session.id });
 }
 
@@ -746,98 +791,6 @@ function renderGit(git) {
   renderStatusPills();
 }
 
-function renderSearch() {
-  const query = (el.globalSearchInput.value || "").toLowerCase();
-  const groups = [
-    { type: "chat", title: "Chats", rows: [] },
-    { type: "plugin", title: "Plugins", rows: [] },
-    { type: "tool", title: "Tools", rows: [] },
-    { type: "model", title: "Models", rows: [] },
-    { type: "setting", title: "Settings", rows: [] },
-    { type: "automation", title: "Automations", rows: [] }
-  ];
-  const byType = Object.fromEntries(groups.map(group => [group.type, group]));
-  for (const session of state.sessions?.sessions || []) {
-    byType.chat.rows.push({
-      type: "chat",
-      title: session.name || session.id,
-      detail: `${session.message_count || 0} messages | ${formatDate(session.updated_at)}`,
-      open: () => {
-        activateView("chat");
-        send("switchSession", { sessionId: session.id });
-      },
-      remove: () => deleteSession(session)
-    });
-  }
-  for (const plugin of state.plugins?.records || []) {
-    byType.plugin.rows.push({
-      type: "plugin",
-      title: plugin.name || plugin.id,
-      detail: `${plugin.status_label || plugin.status || ""} | ${plugin.tool_count || 0} tools | ${(plugin.capabilities || []).slice(0, 4).join(", ")}`,
-      open: () => {
-        state.selectedPluginId = plugin.id;
-        activateView("plugins");
-      }
-    });
-  }
-  for (const plugin of state.plugins?.remote?.manifest?.plugins || []) {
-    byType.plugin.rows.push({
-      type: "plugin",
-      title: `${plugin.name || plugin.id} (remote)`,
-      detail: `${plugin.version || "latest"} | ${formatBytes(plugin.size || 0)} | ${plugin.asset_name || ""}`,
-      open: () => activateView("plugins")
-    });
-  }
-  for (const tool of state.tools || []) byType.tool.rows.push({ type: "tool", title: tool.name, detail: tool.description || tool.category || "" });
-  for (const model of state.config?.models || []) byType.model.rows.push({ type: "model", title: model.model_display_name || model.model, detail: `${model.provider || ""} | ${model.base_url || ""}` });
-  for (const setting of state.settings?.items || []) byType.setting.rows.push({ type: "setting", title: setting.name, detail: setting.description || "", open: () => activateView("settings") });
-  for (const automation of state.automations?.automations || []) byType.automation.rows.push({
-    type: "automation",
-    title: automation.name || automation.id,
-    detail: `${automation.enabled ? "enabled" : "paused"} | every ${automation.schedule?.interval_minutes || 60} min`,
-    open: () => activateView("automations")
-  });
-
-  el.searchResults.replaceChildren();
-  let total = 0;
-  for (const group of groups) {
-    const visible = group.rows
-      .filter(row => !query || `${row.type} ${row.title} ${row.detail}`.toLowerCase().includes(query))
-      .slice(0, 30);
-    total += visible.length;
-    if (!visible.length) continue;
-
-    const section = document.createElement("section");
-    section.className = "search-section";
-    const header = document.createElement("div");
-    header.className = "search-section-header";
-    header.innerHTML = `<span>${escapeHtml(group.title)}</span><strong>${visible.length}</strong>`;
-    section.append(header);
-
-    for (const row of visible) {
-      const item = document.createElement("article");
-      item.className = "result-item";
-      const body = document.createElement("button");
-      body.type = "button";
-      body.className = "result-body";
-      body.innerHTML = `<div class="setting-name">${escapeHtml(row.title)}</div><div class="setting-meta">${escapeHtml(row.detail)}</div>`;
-      body.addEventListener("click", row.open || (() => {}));
-      const actions = document.createElement("div");
-      actions.className = "result-actions";
-      if (row.remove) actions.append(makeButton("Delete", row.remove));
-      item.append(body, actions);
-      section.append(item);
-    }
-    el.searchResults.append(section);
-  }
-  if (!total) {
-    const empty = document.createElement("div");
-    empty.className = "empty-results";
-    empty.textContent = query ? "No matching chats, plugins, tools, models, settings, or automations." : "No searchable data loaded yet.";
-    el.searchResults.append(empty);
-  }
-}
-
 function renderDiagnostics(items) {
   el.diagnosticsList.replaceChildren();
   for (const item of items) {
@@ -945,7 +898,6 @@ function handleBridgeMessage(message) {
     case "settings":
       state.settings = message.settings || {};
       renderSettings();
-      renderSearch();
       break;
     case "setting.updated":
       log(message.message || `Setting ${message.key} updated`);
@@ -953,7 +905,6 @@ function handleBridgeMessage(message) {
     case "plugins":
       state.plugins = message.plugins || {};
       renderPlugins();
-      renderSearch();
       setBusy(false, "Ready");
       break;
     case "remote.release":
@@ -1004,14 +955,9 @@ function handleBridgeMessage(message) {
     case "plugin.command.started":
       log(`${message.type}: ${message.plugin_id || ""} ${message.command || ""}`);
       break;
-    case "error":
-      if (message.id) setBusy(false, "Ready");
-      log(`error: ${message.error || "Unknown error"}`);
-      break;
     case "automations":
       state.automations = message.automations || {};
       renderAutomations();
-      renderSearch();
       setBusy(false, "Ready");
       break;
     case "automation.saved":
@@ -1069,7 +1015,14 @@ function handleBridgeMessage(message) {
     case "tools":
       state.tools = message.tools || [];
       renderTools();
-      renderSearch();
+      break;
+    case "session.deleted":
+      log(`Deleted session ${message.session_id || ""}${message.file_exists_after ? " (file still exists)" : ""}`);
+      if (message.session_id && state.sessions?.sessions) {
+        state.sessions.sessions = state.sessions.sessions.filter(item => item.id !== message.session_id);
+        renderSessions();
+      }
+      setBusy(false, "Ready");
       break;
     case "git.status":
       renderGit(message.git);
@@ -1148,7 +1101,6 @@ el.pluginFilter.addEventListener("input", renderPlugins);
 el.settingsRefreshButton.addEventListener("click", () => send("listSettings"));
 el.sessionSearch.addEventListener("input", renderSessions);
 el.toolFilter.addEventListener("input", renderTools);
-el.globalSearchInput.addEventListener("input", renderSearch);
 el.automationResetButton.addEventListener("click", resetAutomationForm);
 
 el.modelForm.addEventListener("submit", event => {
@@ -1209,5 +1161,6 @@ document.querySelectorAll(".suggestion").forEach(button => {
 
 window.chrome.webview.addEventListener("message", event => handleBridgeMessage(event.data || {}));
 
+setupShellResizers();
 updateEmptyState();
 send("hostInfo");

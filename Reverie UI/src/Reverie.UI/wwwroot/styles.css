@@ -18,6 +18,8 @@
   --yellow: #e8b85a;
   --red: #ef6f78;
   --radius: 8px;
+  --sidebar-width: 260px;
+  --inspector-width: 354px;
   --shadow: 0 18px 60px rgba(0, 0, 0, .34);
   font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
 }
@@ -56,10 +58,38 @@ button:disabled {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 260px minmax(620px, 1fr) 354px;
+  grid-template-columns: var(--sidebar-width) 6px minmax(620px, 1fr) 6px var(--inspector-width);
   height: 100vh;
   min-width: 1080px;
   background: var(--bg);
+}
+
+.shell-resizer {
+  position: relative;
+  z-index: 4;
+  min-width: 6px;
+  cursor: col-resize;
+  background: var(--bg);
+}
+
+.shell-resizer::before {
+  content: "";
+  position: absolute;
+  inset: 0 2px;
+  border-radius: 999px;
+  background: transparent;
+  transition: background 120ms ease;
+}
+
+.shell-resizer:hover::before,
+.shell-resizer:active::before,
+.is-resizing .shell-resizer::before {
+  background: #3f3f3f;
+}
+
+.is-resizing {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .sidebar,
@@ -240,8 +270,7 @@ textarea:focus {
 .diagnostic-item,
 .plugin-item,
 .automation-item,
-.setting-item,
-.result-item {
+.setting-item {
   width: 100%;
   border: 1px solid var(--line-soft);
   border-radius: var(--radius);
@@ -261,8 +290,7 @@ textarea:focus {
 .session-item:hover,
 .plugin-item:hover,
 .automation-item:hover,
-.setting-item:hover,
-.result-item:hover {
+.setting-item:hover {
   background: #252525;
 }
 
@@ -743,8 +771,7 @@ textarea {
 
 .plugin-list,
 .automation-list,
-.settings-list,
-.result-list {
+.settings-list {
   max-height: calc(100vh - 250px);
 }
 
@@ -789,61 +816,6 @@ textarea {
   border-radius: inherit;
   background: linear-gradient(90deg, var(--accent), #2dd4bf);
   transition: width 120ms ease;
-}
-
-.search-section {
-  display: grid;
-  gap: 8px;
-}
-
-.search-section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 2px 2px;
-  color: var(--muted);
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0;
-}
-
-.search-section-header strong {
-  min-width: 22px;
-  border-radius: 999px;
-  background: #282828;
-  color: var(--text);
-  text-align: center;
-  font-size: 11px;
-  line-height: 20px;
-}
-
-.result-item {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: center;
-}
-
-.result-body {
-  min-width: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  padding: 0;
-  text-align: left;
-}
-
-.result-actions {
-  display: flex;
-  gap: 6px;
-}
-
-.empty-results {
-  border: 1px dashed var(--line);
-  border-radius: var(--radius);
-  padding: 18px;
-  color: var(--muted);
-  text-align: center;
 }
 
 .setting-control {
@@ -980,10 +952,11 @@ textarea {
 
 @media (max-width: 1260px) {
   .app-shell {
-    grid-template-columns: 260px minmax(520px, 1fr);
+    grid-template-columns: var(--sidebar-width) 6px minmax(520px, 1fr);
   }
 
-  .inspector {
+  .inspector,
+  .shell-resizer-right {
     display: none;
   }
 }
@@ -995,6 +968,10 @@ textarea {
   }
 
   .sidebar {
+    display: none;
+  }
+
+  .shell-resizer {
     display: none;
   }
 

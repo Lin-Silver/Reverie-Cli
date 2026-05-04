@@ -741,13 +741,30 @@ class ReverieUiBridge:
 
     def handle_delete_session(self, request_id: Any, payload: Dict[str, Any]) -> None:
         interface = self.ensure_interface()
-        ok = interface.session_manager.delete_session(str(payload.get("sessionId") or ""))
-        replacement = interface.session_manager.restore_last_session()
+        session_id = str(payload.get("sessionId") or "").strip()
+        if not session_id:
+            raise ValueError("Session id is required.")
+        session_path = interface.session_manager.sessions_dir / f"{session_id}.json"
+        existed_before = session_path.exists()
+        ok = interface.session_manager.delete_session(session_id)
+        remaining = [item for item in interface.session_manager.list_sessions() if item.id != session_id]
+        replacement = interface.session_manager.load_session(remaining[0].id) if remaining else None
         if replacement is None:
             replacement = interface.session_manager.create_session(name=f"GUI Session {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         if interface.agent is not None and replacement is not None:
             interface.agent.set_history(replacement.messages)
-        emit({"id": request_id, "type": "session.deleted", "success": ok})
+        emit(
+            {
+                "id": request_id,
+                "type": "session.deleted",
+                "success": ok,
+                "session_id": session_id,
+                "session_path": str(session_path),
+                "existed_before": existed_before,
+                "file_exists_after": session_path.exists(),
+                "replacement_session_id": getattr(replacement, "id", ""),
+            }
+        )
         self.emit_state(request_id, event_type="state")
 
     def handle_clear_session(self, request_id: Any, payload: Dict[str, Any]) -> None:

@@ -6,6 +6,7 @@ from reverie.automation_local import LocalAutomationManager
 from reverie.config import Config
 from reverie.plugin.runtime_manager import RuntimePluginManager
 from reverie.sdk_bridge import ReverieUiBridge
+from reverie.session.manager import SessionManager
 from reverie.settings_catalog import apply_setting_value, get_setting_items
 
 
@@ -119,3 +120,16 @@ def test_local_automation_manager_file_backed_save(tmp_path: Path) -> None:
     assert len(listed) == 1
     assert listed[0]["schedule"]["interval_minutes"] == 30
     assert Path(listed[0]["runtime"]["prompt_path"]).exists()
+
+
+def test_session_delete_removes_json_and_index_entry(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path, project_root=tmp_path / "workspace")
+    first = manager.create_session("First")
+    first_path = manager.sessions_dir / f"{first.id}.json"
+    second = manager.create_session("Second")
+
+    assert first_path.exists()
+    assert manager.delete_session(first.id)
+    assert not first_path.exists()
+    assert first.id not in {item.id for item in manager.list_sessions()}
+    assert second.id in {item.id for item in manager.list_sessions()}

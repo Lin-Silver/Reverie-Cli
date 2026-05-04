@@ -19,7 +19,6 @@
 
       <nav class="nav-stack" aria-label="Primary">
         <button class="nav-item active" data-view="chat" type="button">New chat</button>
-        <button class="nav-item" data-view="search" type="button">Search</button>
         <button class="nav-item" data-view="plugins" type="button">Plugins</button>
         <button class="nav-item" data-view="automations" type="button">Automations</button>
       </nav>
@@ -44,6 +43,8 @@
 
       <button id="settingsNavButton" class="settings-button" data-view="settings" type="button">Settings</button>
     </aside>
+
+    <div class="shell-resizer shell-resizer-left" data-resizer="sidebar" role="separator" aria-label="Resize sidebar"></div>
 
     <main class="workspace">
       <header class="topbar">
@@ -106,17 +107,6 @@
               </div>
             </div>
           </form>
-        </section>
-
-        <section id="searchView" class="main-view page-view">
-          <div class="page-header">
-            <div>
-              <h1>Search</h1>
-              <p>Search local chats, tools, models, and plugin capabilities.</p>
-            </div>
-          </div>
-          <input id="globalSearchInput" class="text-input large-input" placeholder="Search Reverie UI">
-          <div id="searchResults" class="result-list"></div>
         </section>
 
         <section id="pluginsView" class="main-view page-view">
@@ -201,6 +191,8 @@
         </section>
       </div>
     </main>
+
+    <div class="shell-resizer shell-resizer-right" data-resizer="inspector" role="separator" aria-label="Resize inspector"></div>
 
     <aside class="inspector">
       <div class="tabs">

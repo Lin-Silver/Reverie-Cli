@@ -9,13 +9,16 @@ Provides:
 """
 
 from pathlib import Path
-from typing import List, Dict, Optional, Set, Tuple
+from typing import Any, List, Dict, Optional, Set, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime
+import hashlib
 import json
 import re
 import logging
 from collections import defaultdict
+
+from ..context_engine.fragments import ContextFragment, make_context_fragment, truncate_to_token_cap
 
 
 logger = logging.getLogger(__name__)
@@ -94,6 +97,41 @@ class ProjectIndex:
         )
 
 
+@dataclass
+class AutoMemoryItem:
+    """A compact learned memory distilled from prior sessions."""
+    id: str
+    content: str
+    score: float
+    source_session_id: str
+    updated_at: str
+    keywords: List[str] = field(default_factory=list)
+    entities: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {
+            'id': self.id,
+            'content': self.content,
+            'score': self.score,
+            'source_session_id': self.source_session_id,
+            'updated_at': self.updated_at,
+            'keywords': self.keywords,
+            'entities': self.entities,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'AutoMemoryItem':
+        return cls(
+            id=str(data.get('id') or ''),
+            content=str(data.get('content') or ''),
+            score=float(data.get('score') or 0.0),
+            source_session_id=str(data.get('source_session_id') or ''),
+            updated_at=str(data.get('updated_at') or ''),
+            keywords=list(data.get('keywords') or []),
+            entities=list(data.get('entities') or []),
+        )
+
+
 class MemoryIndexer:
     """
     Indexes project database for persistent memory retrieval.
@@ -112,9 +150,12 @@ class MemoryIndexer:
         
         self.index_path = project_data_dir / 'project_index.json'
         self.fragments_path = self.indexes_dir / 'memory_fragments.jsonl'
+        self.auto_memory_path = self.indexes_dir / 'auto_memory.json'
         
         self.index: Optional[ProjectIndex] = None
         self.fragments: Dict[str, MemoryFragment] = {}
+        self.auto_memory: List[AutoMemoryItem] = []
+        self._auto_memory_loaded = False
 
     def get_scope_label(self) -> str:
         """Return a human-readable label for the current memory archive."""
@@ -122,6 +163,36 @@ class MemoryIndexer:
         if scope_name in {"computer-controller", "computer_controller"}:
             return "Computer Controller History"
         return "Workspace Global Memory"
+
+    def _redact_memory_text(self, text: str) -> str:
+        """Remove secrets and highly personal path segments before persistence."""
+        safe = str(text or "")
+        if not safe:
+            return ""
+
+        secret_patterns = [
+            r"(?i)\b(sk-[A-Za-z0-9_\-]{16,})\b",
+            r"(?i)\b(ms-[A-Za-z0-9_\-]{16,})\b",
+            r"(?i)\b(nvapi-[A-Za-z0-9_\-]{16,})\b",
+            r"(?i)\b(gh[pousr]_[A-Za-z0-9_]{20,})\b",
+            r"(?i)\b(api[_-]?key|token|secret|password)\s*[:=]\s*['\"]?[^'\"\s,;]{8,}",
+        ]
+        for pattern in secret_patterns:
+            safe = re.sub(pattern, lambda match: self._redacted_secret_replacement(match), safe)
+
+        safe = re.sub(r"(?i)\b([A-Z]:\\Users\\)[^\\\s]+", r"\1[USER]", safe)
+        safe = re.sub(r"(?i)\b(/home/)[^/\s]+", r"\1[USER]", safe)
+        safe = re.sub(r"(?i)\b(/Users/)[^/\s]+", r"\1[USER]", safe)
+        return safe
+
+    @staticmethod
+    def _redacted_secret_replacement(match: re.Match) -> str:
+        text = match.group(0)
+        if re.match(r"(?i)^(api[_-]?key|token|secret|password)", text):
+            key = text.split("=", 1)[0].split(":", 1)[0]
+            separator = "=" if "=" in text else ":"
+            return f"{key}{separator}[REDACTED]"
+        return "[REDACTED_SECRET]"
     
     def _extract_keywords(self, text: str) -> List[str]:
         """Extract keywords from text using simple heuristics"""
@@ -247,6 +318,8 @@ class MemoryIndexer:
                 
                 if not content or role == 'system':
                     continue
+
+                safe_content = self._redact_memory_text(str(content))
                 
                 # Create fragment
                 fragment_id = self._create_fragment_id(session_id, idx)
@@ -255,10 +328,10 @@ class MemoryIndexer:
                     session_id=session_id,
                     message_index=idx,
                     role=role,
-                    content=content[:1000],  # Limit content length
+                    content=safe_content[:1000],  # Limit content length
                     timestamp=session_data.get('updated_at', ''),
-                    keywords=self._extract_keywords(content),
-                    entities=self._extract_entities(content),
+                    keywords=self._extract_keywords(safe_content),
+                    entities=self._extract_entities(safe_content),
                     tool_calls=self._extract_tool_calls(message)
                 )
                 
@@ -396,6 +469,222 @@ class MemoryIndexer:
         except Exception as e:
             logger.warning("Error loading memory index: %s", e)
             return False
+
+    def _load_auto_memory(self) -> List[AutoMemoryItem]:
+        """Load distilled automatic memories from disk."""
+        if self._auto_memory_loaded:
+            return self.auto_memory
+        self._auto_memory_loaded = True
+        self.auto_memory = []
+        if not self.auto_memory_path.exists():
+            return self.auto_memory
+        try:
+            payload = json.loads(self.auto_memory_path.read_text(encoding='utf-8'))
+            items = payload.get('items', []) if isinstance(payload, dict) else []
+            self.auto_memory = [
+                item
+                for item in (AutoMemoryItem.from_dict(raw) for raw in items if isinstance(raw, dict))
+                if item.id and item.content
+            ]
+        except Exception as exc:
+            logger.warning("Error loading auto memory: %s", exc)
+            self.auto_memory = []
+        return self.auto_memory
+
+    def _save_auto_memory(self) -> None:
+        """Persist distilled automatic memories."""
+        payload = {
+            'schema': 'reverie.auto_memory.v1',
+            'updated_at': datetime.now().isoformat(),
+            'items': [item.to_dict() for item in self.auto_memory],
+        }
+        self.indexes_dir.mkdir(parents=True, exist_ok=True)
+        self.auto_memory_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding='utf-8')
+        self._auto_memory_loaded = True
+
+    @staticmethod
+    def _normalize_memory_key(text: str) -> str:
+        compact = re.sub(r'\s+', ' ', str(text or '').strip().lower())
+        compact = re.sub(r'[^a-z0-9_\-./\\: ]+', '', compact)
+        return compact[:800]
+
+    def _auto_memory_id(self, text: str) -> str:
+        digest = hashlib.sha256(self._normalize_memory_key(text).encode('utf-8', errors='replace')).hexdigest()
+        return digest[:20]
+
+    def _score_auto_memory_candidate(self, fragment: MemoryFragment, content: str) -> float:
+        """Score whether a fragment is durable enough to become auto memory."""
+        compact = str(content or '').strip()
+        if len(compact) < 48:
+            return 0.0
+        score = 0.0
+        if fragment.role == 'user':
+            score += 0.5
+        if fragment.tool_calls:
+            score += 0.8
+        score += min(1.0, len(fragment.entities) * 0.14)
+        score += min(0.45, len(fragment.keywords) * 0.03)
+        if re.search(r'(?i)\b(always|never|prefer|remember|default|must|should|fixed|implemented|changed|added|removed|migrat|config|workspace|context|memory|provider|api|stream|timeout|retry|test)\b', compact):
+            score += 0.9
+        if re.search(r'[\w./\\-]+\.(py|ts|tsx|js|jsx|cs|json|toml|yaml|yml|md)\b', compact, flags=re.I):
+            score += 0.8
+        if re.search(r'(需要|应该|默认|不要|修复|优化|迁移|工作区|上下文|记忆|模型|调用|测试)', compact):
+            score += 0.9
+        if len(compact) > 900:
+            score -= 0.25
+        return max(0.0, score)
+
+    def auto_learn_from_sessions(
+        self,
+        *,
+        max_items: int = 36,
+        max_sessions: int = 40,
+        min_score: float = 1.35,
+    ) -> List[AutoMemoryItem]:
+        """
+        Distill durable cross-session facts from indexed sessions.
+
+        This is a local, deterministic learning loop: it redacts secrets, de-dupes
+        fragments, ranks durable facts/preferences/workspace decisions, and stores
+        them for automatic prompt injection.
+        """
+        if not self.index:
+            self.load_index()
+        if not self.index and self.sessions_dir.exists():
+            self.build_index()
+
+        existing_by_id = {item.id: item for item in self._load_auto_memory()}
+        candidates: Dict[str, AutoMemoryItem] = dict(existing_by_id)
+
+        if self.index:
+            for session_id, summary in list(self.index.session_summaries.items())[-max_sessions:]:
+                safe_summary = truncate_to_token_cap(self._redact_memory_text(summary), 80).strip()
+                if len(safe_summary) < 48:
+                    continue
+                item_id = self._auto_memory_id(safe_summary)
+                item = AutoMemoryItem(
+                    id=item_id,
+                    content=safe_summary,
+                    score=max(1.6, existing_by_id.get(item_id, AutoMemoryItem(item_id, '', 0.0, '', '')).score),
+                    source_session_id=session_id,
+                    updated_at=datetime.now().isoformat(),
+                    keywords=self._extract_keywords(safe_summary),
+                    entities=self._extract_entities(safe_summary),
+                )
+                if item.score >= candidates.get(item_id, item).score:
+                    candidates[item_id] = item
+
+        fragments = sorted(
+            self.fragments.values(),
+            key=lambda fragment: (fragment.timestamp, fragment.message_index),
+            reverse=True,
+        )[: max(1, max_sessions * 16)]
+
+        for fragment in fragments:
+            safe_content = truncate_to_token_cap(self._redact_memory_text(fragment.content), 120).strip()
+            score = self._score_auto_memory_candidate(fragment, safe_content)
+            if score < min_score:
+                continue
+            item_id = self._auto_memory_id(safe_content)
+            current = candidates.get(item_id)
+            if current and current.score > score:
+                continue
+            candidates[item_id] = AutoMemoryItem(
+                id=item_id,
+                content=safe_content,
+                score=score,
+                source_session_id=fragment.session_id,
+                updated_at=fragment.timestamp or datetime.now().isoformat(),
+                keywords=fragment.keywords,
+                entities=fragment.entities,
+            )
+
+        ranked = sorted(
+            candidates.values(),
+            key=lambda item: (-float(item.score or 0.0), str(item.updated_at or ''), item.id),
+        )
+        self.auto_memory = ranked[: max(1, int(max_items or 36))]
+        self._save_auto_memory()
+        return self.auto_memory
+
+    def search_auto_memory(
+        self,
+        query: str = "",
+        *,
+        max_items: int = 6,
+        max_chars: int = 1200,
+    ) -> List[AutoMemoryItem]:
+        """Retrieve learned auto-memory items with query-aware scoring."""
+        items = self._load_auto_memory()
+        if not items and self.sessions_dir.exists():
+            items = self.auto_learn_from_sessions(max_items=max(12, max_items))
+        if not items:
+            return []
+
+        query_terms = set(self._extract_keywords(query)) | {entity.lower() for entity in self._extract_entities(query)}
+        scored: List[Tuple[float, AutoMemoryItem]] = []
+        for item in items:
+            score = float(item.score or 0.0)
+            item_terms = set(item.keywords or []) | {entity.lower() for entity in (item.entities or [])}
+            if query_terms:
+                score += len(query_terms & item_terms) * 0.75
+                content_lower = item.content.lower()
+                score += sum(0.35 for term in query_terms if term and term in content_lower)
+            scored.append((score, item))
+
+        total_chars = 0
+        selected: List[AutoMemoryItem] = []
+        for _, item in sorted(scored, key=lambda pair: (-pair[0], pair[1].id)):
+            item_chars = len(item.content)
+            if selected and total_chars + item_chars > max_chars:
+                break
+            selected.append(item)
+            total_chars += item_chars
+            if len(selected) >= max_items:
+                break
+        return selected
+
+    def build_context_fragments(
+        self,
+        query: str = "",
+        *,
+        max_fragments: int = 8,
+        max_chars: int = 3200,
+    ) -> List[ContextFragment]:
+        """Build typed bounded memory fragments for prompt assembly."""
+        fragments: List[ContextFragment] = []
+        auto_items = self.search_auto_memory(query, max_items=4, max_chars=max(600, max_chars // 3))
+        for order, item in enumerate(auto_items):
+            fragments.append(
+                make_context_fragment(
+                    "auto_memory",
+                    f"auto:{item.source_session_id or item.id}",
+                    item.content,
+                    token_cap=160,
+                    priority=3.0 + float(item.score or 0.0),
+                    stable_order=order,
+                    metadata={"memory_id": item.id, "updated_at": item.updated_at},
+                )
+            )
+
+        memory_fragments = (
+            self.search(query, max_results=max_fragments, max_tokens=max_chars // 4)
+            if str(query or "").strip()
+            else self.get_recent_fragments(limit=max_fragments)
+        )
+        for order, fragment in enumerate(memory_fragments, start=len(fragments)):
+            fragments.append(
+                make_context_fragment(
+                    "session_memory",
+                    f"{fragment.session_id}:{fragment.message_index}",
+                    f"[{fragment.role}] {fragment.content}",
+                    token_cap=120,
+                    priority=1.0,
+                    stable_order=order,
+                    metadata={"timestamp": fragment.timestamp},
+                )
+            )
+        return fragments
     
     def search(
         self,
@@ -426,6 +715,8 @@ class MemoryIndexer:
         query_keywords = self._extract_keywords(query)
         query_entities = self._extract_entities(query)
         
+        query_terms = set(query_keywords) | {entity.lower() for entity in query_entities}
+
         # Score fragments
         scores: Dict[str, float] = defaultdict(float)
         
@@ -440,6 +731,21 @@ class MemoryIndexer:
             fragment_ids = self.index.entity_index.get(entity, [])
             for fragment_id in fragment_ids:
                 scores[fragment_id] += 2.0
+
+        # Content overlap and recency scoring catch useful fragments whose
+        # extracted keyword/entity list was too sparse.
+        now = datetime.now()
+        for fragment_id, fragment in self.fragments.items():
+            content_lower = str(fragment.content or "").lower()
+            for term in query_terms:
+                if term and term in content_lower:
+                    scores[fragment_id] += 0.35
+            try:
+                fragment_time = datetime.fromisoformat(str(fragment.timestamp or ""))
+                age_days = max(0.0, (now - fragment_time).total_seconds() / 86400.0)
+                scores[fragment_id] += max(0.0, 0.35 * (1.0 - min(age_days / 30.0, 1.0)))
+            except Exception:
+                pass
         
         # Sort by score
         sorted_fragments = sorted(
@@ -543,6 +849,14 @@ class MemoryIndexer:
         if top_tools:
             tool_text = ", ".join(f"{name}({len(refs)})" for name, refs in top_tools)
             lines.append(f"- Common tools: {tool_text}")
+
+        auto_items = self.search_auto_memory(query, max_items=5, max_chars=max(800, max_chars // 3))
+        if auto_items:
+            lines.append("- Auto memory:")
+            for item in auto_items:
+                compact = " ".join(str(item.content or "").split())
+                compact = compact[:260] + ("..." if len(compact) > 260 else "")
+                lines.append(f"  - {compact}")
 
         summary_ids = sorted(self.index.session_summaries.keys(), reverse=True)[:4]
         if summary_ids:

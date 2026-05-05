@@ -11,7 +11,6 @@ const state = {
   git: null,
   plugins: null,
   settings: null,
-  automations: null,
   currentAssistant: null,
   currentAssistantText: "",
   pendingAssistantChunk: "",
@@ -20,6 +19,7 @@ const state = {
   logs: [],
   selectedSettingKey: "",
   selectedPluginId: "",
+  selectedBuiltinSource: "",
   pluginProgress: {},
   recentProjects: loadRecentProjects()
 };
@@ -60,16 +60,6 @@ const el = {
   pluginFilter: $("pluginFilter"),
   pluginList: $("pluginList"),
   pluginDetail: $("pluginDetail"),
-  automationSummary: $("automationSummary"),
-  automationForm: $("automationForm"),
-  automationId: $("automationId"),
-  automationName: $("automationName"),
-  automationInterval: $("automationInterval"),
-  automationEnabled: $("automationEnabled"),
-  automationPrompt: $("automationPrompt"),
-  automationResetButton: $("automationResetButton"),
-  automationList: $("automationList"),
-  automationLog: $("automationLog"),
   settingsSummary: $("settingsSummary"),
   settingsRefreshButton: $("settingsRefreshButton"),
   settingsList: $("settingsList"),
@@ -87,6 +77,17 @@ const el = {
   modelProvider: $("modelProvider"),
   modelContextTokens: $("modelContextTokens"),
   modelList: $("modelList"),
+  builtinSourceList: $("builtinSourceList"),
+  builtinSourceSelect: $("builtinSourceSelect"),
+  builtinSourceModel: $("builtinSourceModel"),
+  builtinSourceApiKey: $("builtinSourceApiKey"),
+  builtinSourceApiUrl: $("builtinSourceApiUrl"),
+  builtinSourceEndpoint: $("builtinSourceEndpoint"),
+  builtinSourceProject: $("builtinSourceProject"),
+  builtinSourceThinking: $("builtinSourceThinking"),
+  builtinSourceSave: $("builtinSourceSave"),
+  providerSmokeButton: $("providerSmokeButton"),
+  providerSmokeStatus: $("providerSmokeStatus"),
   toolSummary: $("toolSummary"),
   toolFilter: $("toolFilter"),
   toolList: $("toolList"),
@@ -275,7 +276,6 @@ function activateView(name) {
   el.settingsNavButton.classList.toggle("active", name === "settings");
   if (name === "plugins" && !state.plugins) send("listPlugins");
   if (name === "settings" && !state.settings) send("listSettings");
-  if (name === "automations" && !state.automations) send("listAutomations");
 }
 
 function activateTab(name) {
@@ -367,7 +367,6 @@ function renderProjects() {
       send("setWorkspace", { projectRoot: project });
       send("listSettings");
       send("listPlugins");
-      send("listAutomations");
     });
     el.projectList.append(button);
   }
@@ -430,6 +429,7 @@ function deleteSession(session) {
 }
 
 function renderModels() {
+  renderBuiltinSources();
   el.modelList.replaceChildren();
   const activeIndex = state.config?.active_model_index ?? -1;
   for (const model of state.config?.models || []) {
@@ -451,6 +451,91 @@ function renderModels() {
     item.append(name, meta, badges);
     el.modelList.append(item);
   }
+}
+
+function getBuiltinSources() {
+  return state.config?.builtin_sources || [];
+}
+
+function getBuiltinSource(sourceId = "") {
+  const sources = getBuiltinSources();
+  const wanted = sourceId || state.selectedBuiltinSource || sources.find(item => item.active)?.source || sources[0]?.source || "modelscope";
+  return sources.find(item => item.source === wanted) || sources[0] || null;
+}
+
+function renderBuiltinSources() {
+  const sources = getBuiltinSources();
+  if (!state.selectedBuiltinSource) {
+    state.selectedBuiltinSource = sources.find(item => item.active)?.source || sources[0]?.source || "modelscope";
+  }
+  el.builtinSourceList.replaceChildren();
+  for (const source of sources) {
+    const item = document.createElement("div");
+    item.className = `source-item ${source.active ? "active" : ""}`;
+    const name = document.createElement("div");
+    name.className = "model-name";
+    name.textContent = source.label || source.source;
+    const meta = document.createElement("div");
+    meta.className = "model-meta";
+    const selected = source.selected_model_display_name || source.selected_model_id || "no model selected";
+    meta.textContent = `${selected} | ${source.credential === "found" ? "credentials ready" : "credentials missing"}`;
+    const actions = document.createElement("div");
+    actions.className = "badge-row";
+    actions.append(
+      makeBadge(source.active ? "active" : "idle", source.active ? "ok" : ""),
+      makeButton("Edit", () => {
+        state.selectedBuiltinSource = source.source;
+        fillBuiltinSourceForm(source.source);
+      }),
+      makeButton("Use", () => send("selectBuiltinSource", { source: source.source }))
+    );
+    item.append(name, meta, actions);
+    el.builtinSourceList.append(item);
+  }
+  fillBuiltinSourceForm(state.selectedBuiltinSource);
+}
+
+function fillBuiltinSourceForm(sourceId = "") {
+  const source = getBuiltinSource(sourceId);
+  if (!source) return;
+  state.selectedBuiltinSource = source.source;
+  el.builtinSourceSelect.value = source.source;
+  el.builtinSourceModel.replaceChildren();
+  for (const model of source.models || []) {
+    const option = document.createElement("option");
+    option.value = model.id;
+    option.textContent = model.display_name ? `${model.display_name} (${model.id})` : model.id;
+    option.selected = model.id === source.selected_model_id;
+    el.builtinSourceModel.append(option);
+  }
+  if (!el.builtinSourceModel.value && source.selected_model_id) {
+    const option = document.createElement("option");
+    option.value = source.selected_model_id;
+    option.textContent = source.selected_model_display_name || source.selected_model_id;
+    option.selected = true;
+    el.builtinSourceModel.prepend(option);
+  }
+  el.builtinSourceApiKey.value = "";
+  el.builtinSourceApiKey.disabled = !["nvidia", "modelscope"].includes(source.source);
+  el.builtinSourceApiUrl.value = source.api_url || "";
+  el.builtinSourceEndpoint.value = source.endpoint || "";
+  el.builtinSourceEndpoint.disabled = source.source === "modelscope";
+  el.builtinSourceProject.value = source.project_id || "";
+  el.builtinSourceProject.disabled = source.source !== "geminicli";
+  el.builtinSourceThinking.value = source.reasoning_effort || source.thinking_choice || "";
+  el.builtinSourceThinking.disabled = !["codex", "nvidia"].includes(source.source);
+}
+
+function renderProviderSmoke(results = []) {
+  if (!results.length) {
+    el.providerSmokeStatus.textContent = "Provider smoke test pending.";
+    return;
+  }
+  el.providerSmokeStatus.textContent = results.map(item => {
+    const status = item.status || "unknown";
+    const detail = item.error_class ? ` ${item.error_class}` : "";
+    return `${item.provider}\t${item.model || "-"}\t${status}\t${item.latency_ms || 0}ms${detail}`;
+  }).join("\n");
 }
 
 function renderTools() {
@@ -723,60 +808,6 @@ function renderPlugins() {
   }
 }
 
-function renderAutomations() {
-  const payload = state.automations || {};
-  const items = payload.automations || [];
-  el.automationSummary.textContent = `${items.length} task(s) | ${payload.scheduler || "local"} | ${payload.root || ""}`;
-  el.automationList.replaceChildren();
-  for (const automation of items) {
-    const item = document.createElement("article");
-    item.className = "automation-item";
-    const title = document.createElement("div");
-    title.className = "automation-title-row";
-    const name = document.createElement("div");
-    name.className = "automation-name";
-    name.textContent = automation.name || automation.id;
-    title.append(name, makeBadge(automation.enabled ? "enabled" : "paused", automation.enabled ? "ok" : "warn"));
-    const meta = document.createElement("div");
-    meta.className = "automation-meta";
-    meta.textContent = `Every ${automation.schedule?.interval_minutes || 60} min | ${automation.workspace || ""}`;
-    const actions = document.createElement("div");
-    actions.className = "badge-row";
-    actions.append(
-      makeButton("Edit", () => fillAutomationForm(automation)),
-      makeButton(automation.enabled ? "Pause" : "Resume", () => send("toggleAutomation", { id: automation.id, enabled: !automation.enabled })),
-      makeButton("Run", () => {
-        setBusy(true, "Running automation");
-        send("runAutomation", { id: automation.id });
-      }),
-      makeButton("Delete", () => {
-        if (confirm(`Delete automation "${automation.name || automation.id}"?`)) send("deleteAutomation", { id: automation.id });
-      })
-    );
-    item.append(title, meta, actions);
-    item.addEventListener("click", () => {
-      el.automationLog.textContent = automation.runtime?.last_log || "No run log yet.";
-    });
-    el.automationList.append(item);
-  }
-}
-
-function fillAutomationForm(automation) {
-  el.automationId.value = automation.id || "";
-  el.automationName.value = automation.name || "";
-  el.automationInterval.value = automation.schedule?.interval_minutes || 60;
-  el.automationEnabled.checked = Boolean(automation.enabled);
-  el.automationPrompt.value = automation.prompt || "";
-}
-
-function resetAutomationForm() {
-  el.automationId.value = "";
-  el.automationName.value = "";
-  el.automationInterval.value = 60;
-  el.automationEnabled.checked = true;
-  el.automationPrompt.value = "";
-}
-
 function renderGit(git) {
   if (!git) return;
   state.git = git;
@@ -890,7 +921,6 @@ function handleBridgeMessage(message) {
       send("initialize", { projectRoot: el.workspaceInput.value });
       send("listSettings");
       send("listPlugins");
-      send("listAutomations");
       break;
     case "state":
       renderState(message);
@@ -901,6 +931,18 @@ function handleBridgeMessage(message) {
       break;
     case "setting.updated":
       log(message.message || `Setting ${message.key} updated`);
+      break;
+    case "builtin.source.saved":
+    case "builtin.source.selected":
+      log(`${message.source || "source"} ${message.type.endsWith("saved") ? "saved" : "selected"}`);
+      break;
+    case "provider.smoke.started":
+      el.providerSmokeStatus.textContent = `Testing ${((message.providers || []).join(", ")) || "providers"}...`;
+      setBusy(true, "Testing APIs");
+      break;
+    case "provider.smoke":
+      renderProviderSmoke(message.results || []);
+      setBusy(false, "Ready");
       break;
     case "plugins":
       state.plugins = message.plugins || {};
@@ -954,18 +996,6 @@ function handleBridgeMessage(message) {
     case "plugin.build.started":
     case "plugin.command.started":
       log(`${message.type}: ${message.plugin_id || ""} ${message.command || ""}`);
-      break;
-    case "automations":
-      state.automations = message.automations || {};
-      renderAutomations();
-      setBusy(false, "Ready");
-      break;
-    case "automation.saved":
-    case "automation.deleted":
-    case "automation.toggled":
-    case "automation.run.complete":
-      el.automationLog.textContent = JSON.stringify(message.result || message, null, 2);
-      setBusy(false, "Ready");
       break;
     case "chat.started":
       activateView("chat");
@@ -1057,7 +1087,6 @@ el.workspaceApply.addEventListener("click", () => {
   send("setWorkspace", { projectRoot: el.workspaceInput.value });
   send("listSettings");
   send("listPlugins");
-  send("listAutomations");
 });
 
 el.modeSelect.addEventListener("change", () => send("setMode", { mode: el.modeSelect.value }));
@@ -1101,7 +1130,32 @@ el.pluginFilter.addEventListener("input", renderPlugins);
 el.settingsRefreshButton.addEventListener("click", () => send("listSettings"));
 el.sessionSearch.addEventListener("input", renderSessions);
 el.toolFilter.addEventListener("input", renderTools);
-el.automationResetButton.addEventListener("click", resetAutomationForm);
+el.builtinSourceSelect.addEventListener("change", () => {
+  state.selectedBuiltinSource = el.builtinSourceSelect.value;
+  fillBuiltinSourceForm(state.selectedBuiltinSource);
+});
+el.providerSmokeButton.addEventListener("click", () => {
+  activateTab("models");
+  send("testProviders", {
+    providers: getBuiltinSources().map(item => item.source),
+    timeout_seconds: 45
+  });
+});
+el.builtinSourceSave.addEventListener("click", () => {
+  const source = el.builtinSourceSelect.value;
+  send("saveBuiltinSource", {
+    source,
+    selected_model_id: el.builtinSourceModel.value,
+    api_key: el.builtinSourceApiKey.value,
+    api_url: el.builtinSourceApiUrl.value,
+    endpoint: el.builtinSourceEndpoint.value,
+    project_id: el.builtinSourceProject.value,
+    reasoning_effort: source === "codex" ? el.builtinSourceThinking.value : "",
+    thinking_choice: source === "nvidia" ? el.builtinSourceThinking.value : "",
+    activate: true
+  });
+  el.builtinSourceApiKey.value = "";
+});
 
 el.modelForm.addEventListener("submit", event => {
   event.preventDefault();
@@ -1117,18 +1171,6 @@ el.modelForm.addEventListener("submit", event => {
   el.modelForm.reset();
   el.modelIndex.value = "-1";
   el.modelContextTokens.value = "128000";
-});
-
-el.automationForm.addEventListener("submit", event => {
-  event.preventDefault();
-  send("saveAutomation", {
-    id: el.automationId.value,
-    name: el.automationName.value,
-    prompt: el.automationPrompt.value,
-    enabled: el.automationEnabled.checked,
-    workspace: el.workspaceInput.value,
-    schedule: { type: "interval", interval_minutes: Number(el.automationInterval.value || 60) }
-  });
 });
 
 el.composer.addEventListener("submit", event => {

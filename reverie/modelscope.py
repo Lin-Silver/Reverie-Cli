@@ -174,11 +174,16 @@ def resolve_modelscope_anthropic_base_url(api_url: Any) -> str:
     """
     base = _normalize_api_url(api_url)
     lower_base = base.lower()
-    for suffix in ("/v1/messages", "/messages", "/v1"):
+    for suffix in ("/v1/chat/completions", "/chat/completions", "/v1/messages", "/messages", "/v1"):
         if lower_base.endswith(suffix):
             base = base[: -len(suffix)]
             lower_base = base.lower()
     return base.rstrip("/") or MODELSCOPE_DEFAULT_API_URL
+
+
+def resolve_modelscope_openai_base_url(api_url: Any) -> str:
+    """Backward-compatible alias for older callers."""
+    return resolve_modelscope_anthropic_base_url(api_url)
 
 
 def resolve_modelscope_api_key(modelscope_config: Any) -> str:
@@ -278,6 +283,11 @@ def build_modelscope_anthropic_options(modelscope_config: Any, model_id: Optiona
     if configured_limit <= 0:
         configured_limit = MODELSCOPE_DEFAULT_MAX_TOKENS
     return {"max_tokens": min(configured_limit, model_limit)}
+
+
+def build_modelscope_openai_options(modelscope_config: Any, model_id: Optional[str] = None) -> Dict[str, Any]:
+    """Backward-compatible alias for older callers."""
+    return build_modelscope_anthropic_options(modelscope_config, model_id)
 
 
 def mask_secret(secret: str) -> str:

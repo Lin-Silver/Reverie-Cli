@@ -93,6 +93,9 @@ class ReverieUiBridge:
             "saveModel": self.handle_save_model,
             "deleteModel": self.handle_delete_model,
             "selectModel": self.handle_select_model,
+            "saveBuiltinSource": self.handle_save_builtin_source,
+            "selectBuiltinSource": self.handle_select_builtin_source,
+            "testProviders": self.handle_test_providers,
             "chat": self.handle_chat,
             "indexWorkspace": self.handle_index_workspace,
             "newSession": self.handle_new_session,
@@ -108,11 +111,6 @@ class ReverieUiBridge:
             "deployPlugin": self.handle_deploy_plugin,
             "inspectPlugin": self.handle_inspect_plugin,
             "callPluginCommand": self.handle_call_plugin_command,
-            "listAutomations": self.handle_list_automations,
-            "saveAutomation": self.handle_save_automation,
-            "deleteAutomation": self.handle_delete_automation,
-            "toggleAutomation": self.handle_toggle_automation,
-            "runAutomation": self.handle_run_automation,
             "listTools": self.handle_list_tools,
             "gitStatus": self.handle_git_status,
             "diagnostics": self.handle_diagnostics,
@@ -194,10 +192,127 @@ class ReverieUiBridge:
             if active_model
             else None,
             "models": models,
+            "builtin_sources": self.summarize_builtin_sources(config),
             "config_path": str(interface.config_manager.config_path),
             "app_root": str(interface.config_manager.app_root),
             "sdk": self.runtime_info(),
         }
+
+    def summarize_builtin_sources(self, config: Any) -> list[Dict[str, Any]]:
+        """Return safe GUI metadata for Reverie's first-party model sources."""
+        from reverie.codex import (
+            detect_codex_cli_credentials,
+            get_codex_model_catalog,
+            normalize_codex_config,
+            resolve_codex_selected_model,
+        )
+        from reverie.geminicli import (
+            detect_geminicli_cli_credentials,
+            get_geminicli_model_catalog,
+            normalize_geminicli_config,
+            resolve_geminicli_selected_model,
+        )
+        from reverie.modelscope import (
+            get_modelscope_model_catalog,
+            normalize_modelscope_config,
+            resolve_modelscope_api_key,
+            resolve_modelscope_selected_model,
+        )
+        from reverie.nvidia import (
+            get_nvidia_model_catalog,
+            normalize_nvidia_config,
+            resolve_nvidia_api_key,
+            resolve_nvidia_selected_model,
+            resolve_nvidia_thinking_choice,
+        )
+
+        active_source = str(getattr(config, "active_model_source", "standard") or "standard").strip().lower()
+        sources: list[Dict[str, Any]] = []
+
+        geminicli_cfg = normalize_geminicli_config(getattr(config, "geminicli", {}))
+        geminicli_cred = detect_geminicli_cli_credentials(refresh_if_needed=False)
+        geminicli_selected = resolve_geminicli_selected_model(geminicli_cfg)
+        sources.append(
+            {
+                "source": "geminicli",
+                "label": "Gemini CLI",
+                "active": active_source == "geminicli",
+                "credential": "found" if geminicli_cred.get("found") else "missing",
+                "has_api_key": bool(geminicli_cred.get("found")),
+                "selected_model_id": str(geminicli_cfg.get("selected_model_id", "") or ""),
+                "selected_model_display_name": str(
+                    (geminicli_selected or {}).get("display_name") or geminicli_cfg.get("selected_model_display_name") or ""
+                ),
+                "api_url": str(geminicli_cfg.get("api_url", "") or ""),
+                "endpoint": str(geminicli_cfg.get("endpoint", "") or ""),
+                "project_id": str(geminicli_cfg.get("project_id", "") or ""),
+                "models": get_geminicli_model_catalog(),
+            }
+        )
+
+        codex_cfg = normalize_codex_config(getattr(config, "codex", {}))
+        codex_cred = detect_codex_cli_credentials()
+        codex_selected = resolve_codex_selected_model(codex_cfg)
+        sources.append(
+            {
+                "source": "codex",
+                "label": "Codex",
+                "active": active_source == "codex",
+                "credential": "found" if codex_cred.get("found") else "missing",
+                "has_api_key": bool(codex_cred.get("found")),
+                "selected_model_id": str(codex_cfg.get("selected_model_id", "") or ""),
+                "selected_model_display_name": str(
+                    (codex_selected or {}).get("display_name") or codex_cfg.get("selected_model_display_name") or ""
+                ),
+                "api_url": str(codex_cfg.get("api_url", "") or ""),
+                "endpoint": str(codex_cfg.get("endpoint", "") or ""),
+                "reasoning_effort": str(codex_cfg.get("reasoning_effort", "") or ""),
+                "models": get_codex_model_catalog(),
+            }
+        )
+
+        nvidia_cfg = normalize_nvidia_config(getattr(config, "nvidia", {}))
+        nvidia_key = resolve_nvidia_api_key(nvidia_cfg)
+        nvidia_selected = resolve_nvidia_selected_model(nvidia_cfg)
+        selected_nvidia_id = str((nvidia_selected or {}).get("id") or nvidia_cfg.get("selected_model_id") or "")
+        sources.append(
+            {
+                "source": "nvidia",
+                "label": "NVIDIA",
+                "active": active_source == "nvidia",
+                "credential": "found" if nvidia_key else "missing",
+                "has_api_key": bool(nvidia_key),
+                "selected_model_id": selected_nvidia_id,
+                "selected_model_display_name": str(
+                    (nvidia_selected or {}).get("display_name") or nvidia_cfg.get("selected_model_display_name") or ""
+                ),
+                "api_url": str(nvidia_cfg.get("api_url", "") or ""),
+                "endpoint": str(nvidia_cfg.get("endpoint", "") or ""),
+                "thinking_choice": resolve_nvidia_thinking_choice(nvidia_cfg, selected_nvidia_id),
+                "models": get_nvidia_model_catalog(),
+            }
+        )
+
+        modelscope_cfg = normalize_modelscope_config(getattr(config, "modelscope", {}))
+        modelscope_key = resolve_modelscope_api_key(modelscope_cfg)
+        modelscope_selected = resolve_modelscope_selected_model(modelscope_cfg)
+        sources.append(
+            {
+                "source": "modelscope",
+                "label": "ModelScope",
+                "active": active_source == "modelscope",
+                "credential": "found" if modelscope_key else "missing",
+                "has_api_key": bool(modelscope_key),
+                "selected_model_id": str(modelscope_cfg.get("selected_model_id", "") or ""),
+                "selected_model_display_name": str(
+                    (modelscope_selected or {}).get("display_name") or modelscope_cfg.get("selected_model_display_name") or ""
+                ),
+                "api_url": str(modelscope_cfg.get("api_url", "") or ""),
+                "endpoint": "",
+                "models": get_modelscope_model_catalog(),
+            }
+        )
+        return json_safe(sources)
 
     def summarize_sessions(self) -> Dict[str, Any]:
         interface = self.ensure_interface()
@@ -506,12 +621,6 @@ class ReverieUiBridge:
             "inferred": True,
         }
 
-    def automation_manager(self) -> Any:
-        from reverie.automation_local import LocalAutomationManager
-        from reverie.config import get_app_root
-
-        return LocalAutomationManager(get_app_root(), reverie_executable=Path(sys.executable))
-
     def emit_state(self, request_id: Any, event_type: str = "state") -> None:
         emit(
             {
@@ -705,6 +814,109 @@ class ReverieUiBridge:
         ok = interface.config_manager.set_active_model(index)
         emit({"id": request_id, "type": "model.selected", "success": ok})
         self.emit_state(request_id, event_type="state")
+
+    def handle_save_builtin_source(self, request_id: Any, payload: Dict[str, Any]) -> None:
+        from reverie.codex import normalize_codex_config
+        from reverie.config import EXTERNAL_MODEL_SOURCES
+        from reverie.geminicli import normalize_geminicli_config
+        from reverie.modelscope import normalize_modelscope_config
+        from reverie.nvidia import apply_nvidia_thinking_choice, normalize_nvidia_config
+
+        interface = self.ensure_interface()
+        source = str(payload.get("source") or "").strip().lower()
+        if source not in EXTERNAL_MODEL_SOURCES:
+            raise ValueError(f"Unsupported built-in source: {source}")
+
+        config = interface.config_manager.load()
+        selected_model_id = str(payload.get("selected_model_id") or payload.get("model") or "").strip()
+        api_key = str(payload.get("api_key") or "").strip()
+        api_url = str(payload.get("api_url") or "").strip()
+        endpoint = str(payload.get("endpoint") or "").strip()
+
+        if source == "geminicli":
+            cfg = normalize_geminicli_config(getattr(config, "geminicli", {}))
+            if selected_model_id:
+                cfg["selected_model_id"] = selected_model_id
+            if api_url:
+                cfg["api_url"] = api_url
+            cfg["endpoint"] = endpoint
+            if "project_id" in payload:
+                cfg["project_id"] = str(payload.get("project_id") or "").strip()
+            config.geminicli = normalize_geminicli_config(cfg)
+        elif source == "codex":
+            cfg = normalize_codex_config(getattr(config, "codex", {}))
+            if selected_model_id:
+                cfg["selected_model_id"] = selected_model_id
+            if api_url:
+                cfg["api_url"] = api_url
+            cfg["endpoint"] = endpoint
+            if payload.get("reasoning_effort"):
+                cfg["reasoning_effort"] = str(payload.get("reasoning_effort") or "").strip().lower()
+            config.codex = normalize_codex_config(cfg)
+        elif source == "nvidia":
+            cfg = normalize_nvidia_config(getattr(config, "nvidia", {}))
+            if api_key:
+                cfg["api_key"] = api_key
+            if selected_model_id:
+                cfg["selected_model_id"] = selected_model_id
+            if api_url:
+                cfg["api_url"] = api_url
+            cfg["endpoint"] = endpoint
+            if payload.get("thinking_choice"):
+                cfg = apply_nvidia_thinking_choice(cfg, selected_model_id or cfg.get("selected_model_id"), payload.get("thinking_choice"))
+            config.nvidia = normalize_nvidia_config(cfg)
+        elif source == "modelscope":
+            cfg = normalize_modelscope_config(getattr(config, "modelscope", {}))
+            if api_key:
+                cfg["api_key"] = api_key
+            if selected_model_id:
+                cfg["selected_model_id"] = selected_model_id
+            if api_url:
+                cfg["api_url"] = api_url
+            config.modelscope = normalize_modelscope_config(cfg)
+
+        if bool(payload.get("activate", True)):
+            config.active_model_source = source
+        interface.config_manager.save(config)
+        if interface.agent is not None:
+            interface._init_agent(config_override=interface.config_manager.load(), persist_config_changes=False)
+        emit({"id": request_id, "type": "builtin.source.saved", "source": source, "success": True})
+        self.emit_state(request_id, event_type="state")
+
+    def handle_select_builtin_source(self, request_id: Any, payload: Dict[str, Any]) -> None:
+        from reverie.config import EXTERNAL_MODEL_SOURCES
+
+        interface = self.ensure_interface()
+        source = str(payload.get("source") or "").strip().lower()
+        if source not in EXTERNAL_MODEL_SOURCES:
+            raise ValueError(f"Unsupported built-in source: {source}")
+        config = interface.config_manager.load()
+        config.active_model_source = source
+        interface.config_manager.save(config)
+        if interface.agent is not None:
+            interface._init_agent(config_override=interface.config_manager.load(), persist_config_changes=False)
+        emit({"id": request_id, "type": "builtin.source.selected", "source": source, "success": True})
+        self.emit_state(request_id, event_type="state")
+
+    def handle_test_providers(self, request_id: Any, payload: Dict[str, Any]) -> None:
+        from reverie.provider_smoke import BUILTIN_PROVIDER_NAMES, run_provider_smoke
+
+        providers = payload.get("providers")
+        if isinstance(providers, str):
+            wanted = [part.strip().lower() for part in providers.split(",") if part.strip()]
+        elif isinstance(providers, list):
+            wanted = [str(part or "").strip().lower() for part in providers if str(part or "").strip()]
+        else:
+            wanted = list(BUILTIN_PROVIDER_NAMES)
+        timeout_seconds = max(5, int(payload.get("timeout_seconds") or payload.get("timeout") or 45))
+        config_path = payload.get("config_path")
+        emit({"id": request_id, "type": "provider.smoke.started", "providers": wanted})
+        results = run_provider_smoke(
+            wanted,
+            config_path=Path(str(config_path)).expanduser() if config_path else None,
+            timeout_seconds=timeout_seconds,
+        )
+        emit({"id": request_id, "type": "provider.smoke", "results": [result.to_dict() for result in results]})
 
     def handle_new_session(self, request_id: Any, payload: Dict[str, Any]) -> None:
         interface = self.ensure_interface()
@@ -932,32 +1144,6 @@ class ReverieUiBridge:
         emit({"id": request_id, "type": "plugin.command.started", "plugin_id": plugin_id, "command": command_name})
         result = manager.call_tool(plugin_id, command_name, arguments)
         emit({"id": request_id, "type": "plugin.command.complete", "plugin_id": plugin_id, "command": command_name, "result": json_safe(result)})
-
-    def handle_list_automations(self, request_id: Any, payload: Dict[str, Any]) -> None:
-        emit({"id": request_id, "type": "automations", "automations": json_safe(self.automation_manager().list_automations())})
-
-    def handle_save_automation(self, request_id: Any, payload: Dict[str, Any]) -> None:
-        result = self.automation_manager().save_automation(payload)
-        emit({"id": request_id, "type": "automation.saved", "result": json_safe(result)})
-        emit({"id": request_id, "type": "automations", "automations": json_safe(self.automation_manager().list_automations())})
-
-    def handle_delete_automation(self, request_id: Any, payload: Dict[str, Any]) -> None:
-        result = self.automation_manager().delete_automation(str(payload.get("id") or payload.get("automationId") or ""))
-        emit({"id": request_id, "type": "automation.deleted", "result": json_safe(result)})
-        emit({"id": request_id, "type": "automations", "automations": json_safe(self.automation_manager().list_automations())})
-
-    def handle_toggle_automation(self, request_id: Any, payload: Dict[str, Any]) -> None:
-        result = self.automation_manager().toggle_automation(
-            str(payload.get("id") or payload.get("automationId") or ""),
-            bool(payload.get("enabled")),
-        )
-        emit({"id": request_id, "type": "automation.toggled", "result": json_safe(result)})
-        emit({"id": request_id, "type": "automations", "automations": json_safe(self.automation_manager().list_automations())})
-
-    def handle_run_automation(self, request_id: Any, payload: Dict[str, Any]) -> None:
-        result = self.automation_manager().run_automation(str(payload.get("id") or payload.get("automationId") or ""))
-        emit({"id": request_id, "type": "automation.run.complete", "result": json_safe(result)})
-        emit({"id": request_id, "type": "automations", "automations": json_safe(self.automation_manager().list_automations())})
 
     def handle_list_tools(self, request_id: Any, payload: Dict[str, Any]) -> None:
         emit({"id": request_id, "type": "tools", "tools": self.summarize_tools(payload.get("mode"))})

@@ -1,3 +1,8 @@
+import sys
+import types
+from types import SimpleNamespace
+
+from reverie.agent.agent import ReverieAgent
 from reverie.config import Config
 from reverie.modelscope import (
     MODELSCOPE_DEFAULT_API_URL,
@@ -10,6 +15,7 @@ from reverie.modelscope import (
     normalize_modelscope_config,
     resolve_modelscope_anthropic_base_url,
 )
+from reverie.provider_smoke import _redact, parse_model_overrides, run_provider_smoke
 
 
 def test_modelscope_default_model_is_glm_51() -> None:
@@ -43,6 +49,7 @@ def test_modelscope_catalog_context_lengths_match_model_cards() -> None:
 def test_modelscope_base_url_normalizes_anthropic_messages_paths() -> None:
     assert resolve_modelscope_anthropic_base_url("api-inference.modelscope.cn/v1/messages") == MODELSCOPE_DEFAULT_API_URL
     assert resolve_modelscope_anthropic_base_url("https://api-inference.modelscope.cn/v1") == MODELSCOPE_DEFAULT_API_URL
+    assert resolve_modelscope_anthropic_base_url("https://api-inference.modelscope.cn/v1/chat/completions") == MODELSCOPE_DEFAULT_API_URL
     assert resolve_modelscope_anthropic_base_url("https://proxy.example.com/messages") == "https://proxy.example.com"
 
 
@@ -101,3 +108,89 @@ def test_config_active_model_resolves_modelscope(monkeypatch) -> None:
     assert active_model.model == "MiniMax/MiniMax-M2.7"
     assert active_model.base_url == MODELSCOPE_DEFAULT_API_URL
     assert active_model.max_context_tokens == 204800
+
+
+def test_modelscope_anthropic_stream_does_not_pass_stream_kwarg(monkeypatch, tmp_path) -> None:
+    seen = {}
+
+    class FakeStream:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def __iter__(self):
+            return iter([SimpleNamespace(type="message_stop")])
+
+        def get_final_message(self):
+            return SimpleNamespace(content=[], stop_reason="end_turn", usage=None)
+
+    class FakeMessages:
+        def stream(self, **kwargs):
+            seen["stream_kwargs"] = dict(kwargs)
+            return FakeStream()
+
+    class FakeAnthropic:
+        def __init__(self, **kwargs):
+            seen["init_kwargs"] = dict(kwargs)
+            self.messages = FakeMessages()
+
+    fake_module = types.ModuleType("anthropic")
+    fake_module.Anthropic = FakeAnthropic
+    monkeypatch.setitem(sys.modules, "anthropic", fake_module)
+
+    config = SimpleNamespace(
+        api_max_retries=1,
+        api_initial_backoff=0.01,
+        api_timeout=17,
+        api_enable_debug_logging=False,
+        active_model_source="modelscope",
+        modelscope={
+            "selected_model_id": "deepseek-ai/DeepSeek-V4-Pro",
+            "selected_model_display_name": "DeepSeek V4 Pro",
+            "max_tokens": 700000,
+            "timeout": 29,
+        },
+    )
+    agent = ReverieAgent(
+        base_url=MODELSCOPE_DEFAULT_API_URL,
+        api_key="ms-test",
+        model="deepseek-ai/DeepSeek-V4-Pro",
+        project_root=tmp_path,
+        provider="anthropic",
+        config=config,
+    )
+    agent.tool_executor.get_tool_schemas = lambda mode="reverie": []
+    agent.messages.append({"role": "user", "content": "hello"})
+
+    list(agent._process_streaming_anthropic())
+
+    assert seen["init_kwargs"]["base_url"] == MODELSCOPE_DEFAULT_API_URL
+    assert seen["init_kwargs"]["timeout"] == 29
+    assert seen["stream_kwargs"]["model"] == "deepseek-ai/DeepSeek-V4-Pro"
+    assert seen["stream_kwargs"]["max_tokens"] == 393216
+    assert "stream" not in seen["stream_kwargs"]
+
+
+def test_provider_smoke_redacts_secrets_and_skips_unknown(tmp_path) -> None:
+    fake_modelscope_token = "ms-" + "abcdef1234567890"
+    assert fake_modelscope_token[:9] not in _redact(f"Authorization: Bearer {fake_modelscope_token}")
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text("{}", encoding="utf-8")
+    results = run_provider_smoke(["unknown"], config_path=config_path, timeout_seconds=5)
+
+    assert results[0].status == "skipped"
+    assert results[0].error_class == "unknown_provider"
+
+
+def test_provider_smoke_parses_model_overrides() -> None:
+    single = parse_model_overrides("z-ai/glm-5.1,z-ai/glm4.7", ["nvidia"])
+    multi = parse_model_overrides("nvidia:z-ai/glm-5.1|z-ai/glm4.7,modelscope:ZhipuAI/GLM-5.1", ["nvidia", "modelscope"])
+
+    assert single == {"nvidia": ["z-ai/glm-5.1", "z-ai/glm4.7"]}
+    assert multi == {
+        "nvidia": ["z-ai/glm-5.1", "z-ai/glm4.7"],
+        "modelscope": ["ZhipuAI/GLM-5.1"],
+    }

@@ -152,7 +152,6 @@ button:disabled {
 .hint-line,
 .turn-status,
 .plugin-meta,
-.automation-meta,
 .setting-meta {
   color: var(--muted);
   font-size: 12px;
@@ -246,9 +245,9 @@ textarea:focus {
 .session-list,
 .tool-list,
 .model-list,
+.source-list,
 .diagnostics-list,
 .plugin-list,
-.automation-list,
 .settings-list,
 .result-list {
   display: flex;
@@ -267,9 +266,9 @@ textarea:focus {
 .session-item,
 .tool-item,
 .model-item,
+.source-item,
 .diagnostic-item,
 .plugin-item,
-.automation-item,
 .setting-item {
   width: 100%;
   border: 1px solid var(--line-soft);
@@ -289,7 +288,6 @@ textarea:focus {
 .project-item:hover,
 .session-item:hover,
 .plugin-item:hover,
-.automation-item:hover,
 .setting-item:hover {
   background: #252525;
 }
@@ -297,6 +295,7 @@ textarea:focus {
 .session-item.active,
 .project-item.active,
 .model-item.active,
+.source-item.active,
 .setting-item.active {
   border-color: #4d4d4d;
   background: #282828;
@@ -304,7 +303,6 @@ textarea:focus {
 
 .session-row,
 .plugin-title-row,
-.automation-title-row,
 .setting-title-row {
   display: flex;
   align-items: center;
@@ -315,9 +313,9 @@ textarea:focus {
 .session-title,
 .tool-name,
 .model-name,
+.source-name,
 .diagnostic-title,
 .plugin-name,
-.automation-name,
 .setting-name {
   min-width: 0;
   overflow: hidden;
@@ -770,20 +768,17 @@ textarea {
 }
 
 .plugin-list,
-.automation-list,
 .settings-list {
   max-height: calc(100vh - 250px);
 }
 
 .plugin-item,
-.automation-item,
 .setting-item {
   display: grid;
   gap: 8px;
 }
 
 .plugin-meta,
-.automation-meta,
 .setting-meta {
   overflow-wrap: anywhere;
   line-height: 1.45;
@@ -916,6 +911,47 @@ textarea {
   display: grid;
   gap: 10px;
   margin-bottom: 16px;
+}
+
+.builtin-source-panel {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.section-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.section-header.compact {
+  margin-top: 8px;
+}
+
+.section-header h3 {
+  margin: 0 0 3px;
+  font-size: 13px;
+  font-weight: 680;
+}
+
+.section-header p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.source-editor {
+  display: grid;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+.provider-smoke-output {
+  min-height: 76px;
+  max-height: 150px;
 }
 
 .form-grid {

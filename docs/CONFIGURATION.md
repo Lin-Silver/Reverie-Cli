@@ -15,8 +15,8 @@ For each project Reverie creates a cache directory:
 <app_root>/
 `-- .reverie/
     |-- config.json
-    `-- project_caches/
-        `-- <project-key>/
+    `-- projects/
+        `-- <project-path-key>/
             |-- config.json
             |-- rules.txt
             |-- context_cache/
@@ -31,16 +31,16 @@ For each project Reverie creates a cache directory:
 
 Additional subdirectories such as `indexes/`, `computer_control/`, `nexus/`, or `runtime_sandbox/` are created on demand under the same project cache root.
 
-`<project-key>` is derived from the absolute project path plus a short hash so different workspaces stay isolated.
+`<project-path-key>` is derived from the full absolute project path by replacing drive separators, path separators, and invalid filename characters. It does not append a hash. For example, `G:\Reverie\Reverie-Cli` becomes `G_Reverie_Reverie-Cli`.
 
 ## Profile Selection
 
 Reverie keeps two profile files:
 
 - Global profile: `<app_root>/.reverie/config.json`
-- Workspace profile: `<app_root>/.reverie/project_caches/<project-key>/config.json`
+- Workspace profile: `<app_root>/.reverie/projects/<project-path-key>/config.json`
 
-`<app_root>/.reverie/config.json` is used when workspace mode is off. The project-cache `config.json` is used when workspace mode is on for that specific project.
+`<app_root>/.reverie/config.json` is used by default. The project `config.json` is used only when workspace mode is explicitly enabled for that specific project.
 
 Use the built-in commands to inspect or switch profile mode:
 
@@ -55,12 +55,13 @@ Use the built-in commands to inspect or switch profile mode:
 
 ## Legacy Migration
 
-Older builds stored configuration and some workspace state in `.reverie/`.
+Older builds stored configuration and some workspace state in `.reverie/` and `.reverie/project_caches/`.
 
 - Legacy config files such as `<app_root>/.reverie/project_caches/<project-key>/config.global.json` and `<project_root>/.reverie/config.json` are still read for migration.
 - Legacy rules files such as `<app_root>/.reverie/rules.txt` are still read for migration.
+- Legacy project cache contents are copied into `<app_root>/.reverie/projects/<project-path-key>/` on first use when the new directory is empty.
 - Global writes now go to `<app_root>/.reverie/config.json`.
-- Workspace writes go to `<app_root>/.reverie/project_caches/<project-key>/config.json`.
+- Workspace writes go to `<app_root>/.reverie/projects/<project-path-key>/config.json`.
 - `/clean` removes the active project's cache and also cleans legacy workspace-local `.reverie/context_cache` or `.reverie/security` folders if they still exist.
 
 ## Top-Level Config Structure
@@ -91,9 +92,9 @@ Common top-level keys:
 }
 ```
 
-## Standard Models
+## Custom Compatibility Providers
 
-`models` stores regular OpenAI-compatible model presets. Each item can include:
+`models` stores manually configured OpenAI-compatible or Anthropic-compatible model presets. This compatibility layer is for user-provided third-party services; built-in Gemini CLI, Codex, NVIDIA, and ModelScope sources use their own first-party runtime paths instead.
 
 - `model`
 - `model_display_name`
@@ -123,9 +124,10 @@ Open runtime SDKs live under the executable-local `.reverie/plugins/<plugin-id>`
 
 - Godot uses `rc_godot_list_versions`, `rc_godot_install_runtime`, `rc_godot_ensure_runtime`, and `rc_godot_clone_source` for GitHub release discovery, plugin-local downloads, and source checkouts.
 - O3DE uses `rc_o3de_list_versions`, `rc_o3de_clone_source`, and `rc_o3de_ensure_runtime` to create a plugin-local source SDK and `runtime/sdk_manifest.json`.
+- Blender uses `rc_blender_mcp_install`, `rc_blender_mcp_start`, `rc_blender_mcp_stop`, `rc_blender_mcp_status`, and `rc_blender_mcp_info` to deploy and control the plugin-local Blender MCP bridge.
 - Do not place cloned engine source or SDK payloads in global user folders; Reverie expects them beside the executable under `.reverie/plugins`.
 
-## External Model Sources
+## Built-In Model Sources
 
 Supported values for `active_model_source`:
 
@@ -177,11 +179,13 @@ Use `/nvidia model` or `/nvidia model <model-id>` to select the model. When the 
 
 NVIDIA request timeouts default to 60 seconds and follow the global `/setting timeout` unless the `nvidia.timeout` value is explicitly set to another value.
 
+NVIDIA GLM catalog entries include `z-ai/glm-5.1` and `z-ai/glm4.7`. The `z-ai/glm-4.7` spelling is accepted as an alias for selection, but NVIDIA's hosted chat-completions endpoint reports the canonical GLM-4.7 model id as `z-ai/glm4.7`.
+
 ### ModelScope
 
 The `modelscope` section stores the ModelScope token, selected ModelScope model id, Anthropic SDK base URL, timeout, context limit, and default max output tokens.
 
-ModelScope is called through the Anthropic SDK. Keep `api_url` as the provider root, usually `https://api-inference.modelscope.cn`; Reverie normalizes pasted `/v1` or `/v1/messages` URLs back to the root because the SDK appends the Messages path.
+ModelScope is called through the Anthropic SDK. Keep `api_url` as the provider root, usually `https://api-inference.modelscope.cn`; Reverie normalizes pasted `/v1`, `/v1/messages`, or `/v1/chat/completions` URLs back to the root because the SDK appends the Messages path.
 
 Get the token from `https://www.modelscope.cn/my/access/token`.
 Reverie also reads `MODELSCOPE_API_KEY`, `MODELSCOPE_TOKEN`, or `MODELSCOPE_ACCESS_TOKEN` from the environment when present.
@@ -221,6 +225,8 @@ For Blender portable deployment, use:
 The official Blender plugin embeds `blender-5.1.1-windows-x64.zip` inside `reverie-blender.exe` at build time. `/plugins deploy blender` or the `rc_blender_ensure_runtime` tool asks that plugin executable to extract the portable runtime into the depot, so the installed `dist/.reverie/plugins/blender/` folder does not need to keep a separate zip file.
 
 For MMD assets, the same plugin can prepare `blender_mmd_tools` under `.reverie/plugins/blender/addons/blender_mmd_tools/`. Use `rc_blender_ensure_mmd_tools` for a one-time checkout/update or `rc_blender_import_mmd_model` to automatically prepare the add-on while importing `.pmx`/`.pmd` models with optional `.vmd` motion or `.vpd` pose files.
+
+For Blender MCP, the same plugin can deploy the `ahujasid/blender-mcp` runtime under `.reverie/plugins/blender/mcp/blender-mcp/` and install its Blender addon into the plugin-managed Blender user scripts path. `rc_blender_mcp_info` returns the MCP server command, args, cwd, environment, static tool names, and health status. Reverie should only inject Blender MCP prompt/tool metadata after the MCP server is reachable and `tools/list` succeeds.
 
 The built-in Blender workflow also checks `REVERIE_BLENDER_PATH`, `BLENDER_PATH`, `PATH`, and common system install folders.
 

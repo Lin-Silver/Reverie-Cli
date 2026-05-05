@@ -26,6 +26,8 @@ _OPENAI_PROFILES: Dict[str, ProfileBuilder] = {
     "nvidia/nemotron-3-super-120b-a12b": nemotron_3_super.build_openai_options,
     "minimaxai/minimax-m2.7": minimax.build_m27_openai_options,
     "z-ai/glm-5.1": glm_5_1.build_openai_options,
+    "z-ai/glm4.7": glm_5_1.build_openai_options,
+    "z-ai/glm-4.7": glm_5_1.build_openai_options,
     "stepfun-ai/step-3.5-flash": step_35_flash.build_openai_options,
     "deepseek-ai/deepseek-v4-pro": deepseek_v4.build_openai_options,
     "deepseek-ai/deepseek-v4-flash": deepseek_v4.build_openai_options,

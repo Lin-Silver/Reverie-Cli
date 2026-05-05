@@ -359,18 +359,18 @@ DEFAULT_RUNTIME_PLUGIN_CATALOG: tuple[RuntimePluginSpec, ...] = (
         plugin_id="blender",
         display_name="Blender",
         runtime_family="dcc",
-        description="Authoring/runtime-adjacent DCC for mesh processing, baking, export automation, and plugin-local MMD import workflows.",
+        description="Authoring/runtime-adjacent DCC for mesh processing, baking, export automation, plugin-local MMD import workflows, and optional plugin-managed Blender MCP.",
         source_repo_hint="https://projects.blender.org/blender/blender",
         delivery="sdk-runtime",
-        capabilities=("mesh", "rigging", "bake", "export", "mmd", "pmx", "pmd", "vmd", "vpd"),
+        capabilities=("mesh", "rigging", "bake", "export", "mmd", "pmx", "pmd", "vmd", "vpd", "mcp", "blender-mcp"),
         entry_candidates={
             "windows": ("runtime/blender.exe", "runtime/blender/blender.exe", "runtime/**/blender.exe", "blender.exe", "Blender.exe", "bin/blender.exe"),
             "linux": ("runtime/blender", "runtime/blender/blender", "runtime/**/blender", "blender", "bin/blender"),
             "darwin": ("runtime/Blender.app", "runtime/**/Blender.app", "Blender.app", "Blender*.app"),
         },
         sdk_download_page="https://www.blender.org/download/",
-        sdk_archive_hint="Unpack Blender Portable/ZIP into `.reverie/plugins/blender/runtime/`; the official plugin can also clone MMD Tools into `.reverie/plugins/blender/addons/`.",
-        sdk_install_hint="Expected entry: `.reverie/plugins/blender/runtime/blender.exe`; optional MMD add-on checkout: `.reverie/plugins/blender/addons/blender_mmd_tools/`.",
+        sdk_archive_hint="Unpack Blender Portable/ZIP into `.reverie/plugins/blender/runtime/`; the official plugin can also clone MMD Tools and deploy Blender MCP into plugin-local folders.",
+        sdk_install_hint="Expected entry: `.reverie/plugins/blender/runtime/blender.exe`; optional MMD add-on checkout: `.reverie/plugins/blender/addons/blender_mmd_tools/`; Blender MCP source lives under `.reverie/plugins/blender/mcp/blender-mcp/`.",
         bundled_archive_candidates={
             "windows": ("blender-5.1.1-windows-x64.zip", "blender-*-windows-x64.zip", "plugins/blender/*.zip"),
         },
@@ -1181,7 +1181,7 @@ class RuntimePluginManager:
             "- Plugins provide portable, plugin-local SDK/runtime environments under the app data `.reverie/plugins` directory.",
             "- Protocol-ready plugins expose `rc_<plugin>_<command>` tools directly to the model when their command metadata allows the active mode.",
             "- Use plugin tools for environment deployment, executable discovery, software launch, and runtime execution; use built-in authoring tools for planning and content generation.",
-            "- The official Blender plugin embeds Blender Portable in its plugin executable; call `rc_blender_ensure_runtime` before `rc_blender_run_script` when direct Blender execution is needed, and use `rc_blender_ensure_mmd_tools` / `rc_blender_import_mmd_model` for PMD/PMX/VMD/VPD MMD assets.",
+            "- The official Blender plugin embeds Blender Portable in its plugin executable; call `rc_blender_ensure_runtime` before `rc_blender_run_script` when direct Blender execution is needed, use `rc_blender_ensure_mmd_tools` / `rc_blender_import_mmd_model` for PMD/PMX/VMD/VPD MMD assets, and use `rc_blender_mcp_install` / `rc_blender_mcp_start` / `rc_blender_mcp_info` for optional plugin-managed Blender MCP. Only treat Blender MCP as prompt-available after its MCP tools/list discovery succeeds.",
         ]
         if not snapshot.records:
             lines.append("- No plugin directories are currently detected under `.reverie/plugins`.")

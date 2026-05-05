@@ -47,7 +47,7 @@ def test_openai_sdk_client_receives_resolved_provider_timeout(monkeypatch, tmp_p
 
     ReverieAgent(
         base_url="https://integrate.api.nvidia.com/v1",
-        api_key="test-key",
+        api_key="x",
         model="deepseek-ai/deepseek-v4-pro",
         project_root=tmp_path,
         provider="openai-sdk",
@@ -66,7 +66,7 @@ def test_legacy_nvidia_default_timeout_does_not_override_global_timeout(monkeypa
 
     ReverieAgent(
         base_url="https://integrate.api.nvidia.com/v1",
-        api_key="test-key",
+        api_key="x",
         model="deepseek-ai/deepseek-v4-pro",
         project_root=tmp_path,
         provider="openai-sdk",
@@ -81,7 +81,7 @@ def test_openai_sdk_stream_emits_visible_wait_event_before_request(monkeypatch, 
     _install_fake_openai(monkeypatch, seen)
     agent = ReverieAgent(
         base_url="https://integrate.api.nvidia.com/v1",
-        api_key="test-key",
+        api_key="x",
         model="deepseek-ai/deepseek-v4-pro",
         project_root=tmp_path,
         provider="openai-sdk",
@@ -116,12 +116,91 @@ def test_openai_sdk_stream_emits_visible_wait_event_before_request(monkeypatch, 
     assert all(message["role"] != "system" for message in create_kwargs["messages"][1:])
 
 
+def test_openai_sdk_retries_transient_create_errors(monkeypatch, tmp_path):
+    seen = {"calls": 0}
+
+    class APIConnectionError(Exception):
+        pass
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            seen["calls"] += 1
+            if seen["calls"] == 1:
+                raise APIConnectionError("peer closed connection")
+            seen["create_kwargs"] = dict(kwargs)
+            return iter(())
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    fake_module = types.ModuleType("openai")
+    fake_module.OpenAI = FakeOpenAI
+    monkeypatch.setitem(sys.modules, "openai", fake_module)
+    config = _nvidia_config()
+    config.api_max_retries = 2
+    config.api_initial_backoff = 0.01
+    agent = ReverieAgent(
+        base_url="https://integrate.api.nvidia.com/v1",
+        api_key="x",
+        model="deepseek-ai/deepseek-v4-pro",
+        project_root=tmp_path,
+        provider="openai-sdk",
+        config=config,
+    )
+
+    response = agent._create_openai_chat_completion(model="m", messages=[], stream=True)
+
+    assert list(response) == []
+    assert seen["calls"] == 2
+    assert seen["create_kwargs"]["model"] == "m"
+
+
+def test_compaction_memory_is_persisted_to_memory_index(monkeypatch, tmp_path):
+    seen = {}
+    _install_fake_openai(monkeypatch, seen)
+
+    class FakeMemoryIndexer:
+        def __init__(self):
+            self.summary = None
+            self.refreshed = None
+
+        def set_session_summary(self, session_id, summary):
+            self.summary = (session_id, summary)
+
+        def refresh_session(self, session_id):
+            self.refreshed = session_id
+            return 0
+
+    memory_indexer = FakeMemoryIndexer()
+    agent = ReverieAgent(
+        base_url="https://integrate.api.nvidia.com/v1",
+        api_key="x",
+        model="deepseek-ai/deepseek-v4-pro",
+        project_root=tmp_path,
+        provider="openai-sdk",
+        config=_nvidia_config(),
+    )
+    agent.tool_executor.update_context("memory_indexer", memory_indexer)
+
+    agent._record_compaction_memory(
+        [
+            {"role": "system", "content": "[MEMORY CONSOLIDATION - Context Engine Cache]\nKeep retry policy.\n[END MEMORY]"},
+            {"role": "user", "content": "recent"},
+        ],
+        "session-1",
+    )
+
+    assert memory_indexer.summary == ("session-1", "Compaction memory: Keep retry policy.")
+    assert memory_indexer.refreshed == "session-1"
+
+
 def test_nvidia_short_turn_keeps_full_tools_and_reasoning(monkeypatch, tmp_path):
     seen = {}
     _install_fake_openai(monkeypatch, seen)
     agent = ReverieAgent(
         base_url="https://integrate.api.nvidia.com/v1",
-        api_key="test-key",
+        api_key="x",
         model="deepseek-ai/deepseek-v4-pro",
         project_root=tmp_path,
         provider="openai-sdk",
@@ -158,7 +237,7 @@ def test_nvidia_request_provider_clamps_output_to_remaining_context(tmp_path):
     }
     agent = ReverieAgent(
         base_url="https://integrate.api.nvidia.com/v1/chat/completions",
-        api_key="test-key",
+        api_key="x",
         model="mistralai/mistral-medium-3.5-128b",
         project_root=tmp_path,
         provider="request",

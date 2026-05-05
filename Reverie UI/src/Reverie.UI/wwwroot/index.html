@@ -20,7 +20,6 @@
       <nav class="nav-stack" aria-label="Primary">
         <button class="nav-item active" data-view="chat" type="button">New chat</button>
         <button class="nav-item" data-view="plugins" type="button">Plugins</button>
-        <button class="nav-item" data-view="automations" type="button">Automations</button>
       </nav>
 
       <section class="sidebar-section">
@@ -133,44 +132,6 @@
           </div>
         </section>
 
-        <section id="automationsView" class="main-view page-view">
-          <div class="page-header">
-            <div>
-              <h1>Automations</h1>
-              <p id="automationSummary">Local scheduled Reverie tasks.</p>
-            </div>
-          </div>
-          <div class="split-layout">
-            <form id="automationForm" class="form-pane">
-              <input id="automationId" type="hidden">
-              <label>
-                Name
-                <input id="automationName" class="text-input" required>
-              </label>
-              <label>
-                Interval minutes
-                <input id="automationInterval" class="text-input" type="number" min="1" max="10080" value="60">
-              </label>
-              <label class="toggle-row">
-                <span>Enabled</span>
-                <input id="automationEnabled" type="checkbox" checked>
-              </label>
-              <label>
-                Prompt
-                <textarea id="automationPrompt" rows="8" required></textarea>
-              </label>
-              <div class="button-row">
-                <button class="primary-button" type="submit">Save automation</button>
-                <button id="automationResetButton" class="toolbar-button" type="button">Reset</button>
-              </div>
-            </form>
-            <section class="list-pane">
-              <div id="automationList" class="automation-list"></div>
-              <pre id="automationLog" class="code-output compact-output">No automation selected.</pre>
-            </section>
-          </div>
-        </section>
-
         <section id="settingsView" class="main-view page-view">
           <div class="page-header">
             <div>
@@ -216,7 +177,66 @@
           <h2>Models</h2>
           <p id="configPath">Config path pending.</p>
         </div>
+        <div class="builtin-source-panel">
+          <div class="section-header">
+            <div>
+              <h3>Built-in Sources</h3>
+              <p>Gemini CLI, Codex, NVIDIA, and ModelScope use dedicated runtime paths.</p>
+            </div>
+            <button id="providerSmokeButton" class="micro-button" type="button">Test APIs</button>
+          </div>
+          <div id="builtinSourceList" class="source-list"></div>
+          <div class="source-editor">
+            <div class="form-grid">
+              <label>
+                Source
+                <select id="builtinSourceSelect" class="select-input">
+                  <option value="geminicli">Gemini CLI</option>
+                  <option value="codex">Codex</option>
+                  <option value="nvidia">NVIDIA</option>
+                  <option value="modelscope">ModelScope</option>
+                </select>
+              </label>
+              <label>
+                Model
+                <select id="builtinSourceModel" class="select-input"></select>
+              </label>
+            </div>
+            <label>
+              API key
+              <input id="builtinSourceApiKey" class="text-input" type="password" placeholder="Only needed for NVIDIA and ModelScope">
+            </label>
+            <div class="form-grid">
+              <label>
+                Base URL
+                <input id="builtinSourceApiUrl" class="text-input">
+              </label>
+              <label>
+                Endpoint
+                <input id="builtinSourceEndpoint" class="text-input">
+              </label>
+            </div>
+            <div class="form-grid">
+              <label>
+                Project ID
+                <input id="builtinSourceProject" class="text-input">
+              </label>
+              <label>
+                Thinking
+                <input id="builtinSourceThinking" class="text-input" placeholder="Codex effort or NVIDIA choice">
+              </label>
+            </div>
+            <button id="builtinSourceSave" class="primary-button" type="button">Save and use</button>
+          </div>
+          <pre id="providerSmokeStatus" class="code-output provider-smoke-output">Provider smoke test pending.</pre>
+        </div>
         <form id="modelForm" class="settings-form">
+          <div class="section-header compact">
+            <div>
+              <h3>Custom Compatibility Providers</h3>
+              <p>Use these for manually configured OpenAI-compatible or Anthropic-compatible services.</p>
+            </div>
+          </div>
           <input type="hidden" id="modelIndex" value="-1">
           <label>
             Display name

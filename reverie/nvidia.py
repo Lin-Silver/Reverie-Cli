@@ -309,6 +309,16 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         context_length=NVIDIA_GLM_CONTEXT_TOKENS,
     ),
     _openai_model(
+        "z-ai/glm4.7",
+        "GLM-4.7",
+        "OpenAI SDK transport with GLM preserved thinking controls.",
+        thinking=True,
+        thinking_control="toggle",
+        thinking_options=NVIDIA_THINKING_TOGGLE_OPTIONS,
+        default_thinking_choice="true",
+        context_length=NVIDIA_GLM_CONTEXT_TOKENS,
+    ),
+    _openai_model(
         "stepfun-ai/step-3.5-flash",
         "Step-3.5-Flash",
         "OpenAI SDK transport.",
@@ -369,6 +379,10 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
 _NVIDIA_MODEL_METADATA = {
     str(item["id"]).strip().lower(): dict(item) for item in _NVIDIA_MODEL_CATALOG
 }
+_NVIDIA_MODEL_ALIASES = {
+    "z-ai/glm5.1": "z-ai/glm-5.1",
+    "z-ai/glm-4.7": "z-ai/glm4.7",
+}
 _NVIDIA_API_HOSTS = ("integrate.api.nvidia.com",)
 
 
@@ -405,6 +419,7 @@ def get_nvidia_model_metadata(model_id: Any) -> Optional[Dict[str, Any]]:
     wanted = str(model_id or "").strip().lower()
     if not wanted:
         return None
+    wanted = _NVIDIA_MODEL_ALIASES.get(wanted, wanted)
     found = _NVIDIA_MODEL_METADATA.get(wanted)
     return dict(found) if found else None
 

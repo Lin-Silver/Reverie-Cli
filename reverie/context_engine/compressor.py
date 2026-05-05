@@ -1,5 +1,6 @@
 from typing import List, Dict, Any, Optional
 import json
+import re
 from pathlib import Path
 from datetime import datetime
 import requests
@@ -259,6 +260,93 @@ def build_memory_digest(messages: List[Dict[str, Any]]) -> str:
         sections.append("Recent tool activity\n" + "\n".join(tool_lines))
 
     return "\n\n".join(section for section in sections if section.strip())
+
+
+def _build_deterministic_compression_summary(
+    history_to_compress: List[Dict[str, Any]],
+    memory_blocks: List[str],
+    *,
+    max_chars: int = 8000,
+) -> str:
+    """Build a bounded local summary when provider compression is unavailable."""
+    important_user: List[str] = []
+    important_assistant: List[str] = []
+    important_tools: List[str] = []
+    file_mentions: List[str] = []
+    commands: List[str] = []
+    decisions: List[str] = []
+    seen: set[str] = set()
+
+    def add_unique(target: List[str], value: str, limit: int) -> None:
+        compact = _truncate_for_memory(value, limit=limit)
+        key = compact.lower()
+        if not compact or key in seen:
+            return
+        seen.add(key)
+        target.append(compact)
+
+    path_pattern = re.compile(r"[\w./\\:-]+\.(?:py|ts|tsx|js|jsx|md|json|toml|yaml|yml|rs|go|java|cpp|h|css|html)")
+    command_pattern = re.compile(r"`([^`\n]*(?:pytest|python|git|npm|pnpm|uv|pip|node)[^`\n]*)`")
+
+    for message in history_to_compress:
+        role = str(message.get("role", "") or "").strip().lower()
+        content = _get_message_text(message)
+        if not content:
+            tool_names = _tool_call_names(message)
+            if tool_names:
+                add_unique(important_tools, "Tool calls: " + ", ".join(tool_names), 280)
+            continue
+
+        for match in path_pattern.findall(content):
+            add_unique(file_mentions, match, 180)
+        for match in command_pattern.findall(content):
+            add_unique(commands, match, 220)
+
+        lower = content.lower()
+        if any(marker in lower for marker in ("decided", "fixed", "implemented", "changed", "must", "should", "bug", "error", "failed", "todo", "pending")):
+            add_unique(decisions, content, 420)
+
+        if role == "user":
+            add_unique(important_user, content, 360)
+        elif role == "assistant":
+            tool_names = _tool_call_names(message)
+            if tool_names:
+                add_unique(important_tools, "Tool calls: " + ", ".join(tool_names), 240)
+            add_unique(important_assistant, content, 360)
+        elif role == "tool":
+            tool_name = str(message.get("name") or message.get("tool_name") or message.get("tool_call_id") or "tool").strip()
+            add_unique(important_tools, f"{tool_name}: {content}", 360)
+
+    lines: List[str] = [
+        "Current Goal",
+        "- Continue the coding session using the preserved recent messages and this bounded fallback memory.",
+    ]
+    if memory_blocks:
+        lines.extend(["", "Durable Prior Memory"])
+        lines.extend(f"- {_truncate_for_memory(block, limit=520)}" for block in memory_blocks[-2:])
+    if important_user:
+        lines.extend(["", "Recent User Intent"])
+        lines.extend(f"- {item}" for item in important_user[-6:])
+    if decisions:
+        lines.extend(["", "Durable Decisions and Open Issues"])
+        lines.extend(f"- {item}" for item in decisions[-8:])
+    if file_mentions:
+        lines.extend(["", "Important Files"])
+        lines.extend(f"- {item}" for item in file_mentions[-16:])
+    if commands:
+        lines.extend(["", "Important Commands"])
+        lines.extend(f"- `{item}`" for item in commands[-8:])
+    if important_tools:
+        lines.extend(["", "Recent Tool Activity"])
+        lines.extend(f"- {item}" for item in important_tools[-8:])
+    if important_assistant:
+        lines.extend(["", "Assistant State"])
+        lines.extend(f"- {item}" for item in important_assistant[-5:])
+
+    summary = "\n".join(lines).strip()
+    if len(summary) > max_chars:
+        summary = summary[: max_chars - 3].rstrip() + "..."
+    return summary
 
 def validate_payload_for_compression(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -578,6 +666,19 @@ class ContextCompressor:
 
         prior_memory_text = "\n\n".join(memory_blocks[-2:]).strip()
         anchor_digest = build_memory_digest(other_msgs)
+        fallback_summary = _build_deterministic_compression_summary(
+            history_to_compress,
+            memory_blocks,
+        )
+
+        def compact_with_summary(summary_text: str, note: str) -> List[Dict]:
+            summary_message = {
+                "role": "system",
+                "content": f"{MEMORY_BLOCK_HEADER}\n{summary_text}\n{MEMORY_BLOCK_END}",
+            }
+            new_history = system_msgs + [summary_message] + recent_msgs
+            self.save_checkpoint(new_history, note, session_id)
+            return new_history
 
         prompt = [
             {
@@ -687,7 +788,7 @@ class ContextCompressor:
                 cred = detect_geminicli_cli_credentials(refresh_if_needed=True)
                 access_token = str(cred.get("api_key", "") or api_key or "").strip()
                 if not access_token:
-                    return messages
+                    return compact_with_summary(fallback_summary, "Post-compression deterministic fallback")
                 project_id = resolve_geminicli_project_id(
                     base_url=base_url,
                     access_token=access_token,
@@ -731,7 +832,7 @@ class ContextCompressor:
                 cred = detect_codex_cli_credentials()
                 access_token = str(cred.get("api_key", "") or api_key or "").strip()
                 if not access_token:
-                    return messages
+                    return compact_with_summary(fallback_summary, "Post-compression deterministic fallback")
 
                 payload = build_codex_request_payload(
                     model_name=model,
@@ -763,7 +864,7 @@ class ContextCompressor:
                 raise ValueError(f"Unknown provider: {provider}")
 
             if not str(summary or "").strip():
-                return messages
+                return compact_with_summary(fallback_summary, "Post-compression deterministic fallback")
 
             _record_compression_usage(
                 workspace_stats_manager,
@@ -776,22 +877,11 @@ class ContextCompressor:
                 session_id=session_id,
             )
             
-            # Construct new history
-            summary_message = {
-                "role": "system", 
-                "content": f"{MEMORY_BLOCK_HEADER}\n{summary}\n{MEMORY_BLOCK_END}"
-            }
-            
-            new_history = system_msgs + [summary_message] + recent_msgs
-            
-            # Save post-compression checkpoint
-            self.save_checkpoint(new_history, "Post-compression optimized summary", session_id)
-            
-            return new_history
+            return compact_with_summary(str(summary or "").strip(), "Post-compression optimized summary")
             
         except Exception as e:
-            # If summarization fails, safely return original messages
-            return messages
+            logger.warning("Provider compression failed; using deterministic local fallback: %s", e)
+            return compact_with_summary(fallback_summary, "Post-compression deterministic fallback")
 
     def list_checkpoints(self, session_id: Optional[str] = None) -> List[Dict]:
         """List all available checkpoints for a session."""

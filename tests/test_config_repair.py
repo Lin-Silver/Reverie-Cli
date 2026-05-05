@@ -9,6 +9,7 @@ from reverie.config import (
     _escape_invalid_json_string_control_chars,
     get_app_root,
     get_project_data_dir,
+    get_project_data_name,
     normalize_tti_models,
 )
 from reverie.tools.mcp_resource_tools import ReadMcpResourceTool
@@ -110,6 +111,46 @@ def test_get_app_root_uses_dist_depot_for_source_checkout(tmp_path: Path, monkey
 
     assert get_app_root() == (source_root / "dist").resolve()
     assert not (source_root / ".reverie").exists()
+
+
+def test_project_data_dir_uses_projects_safe_full_path_without_hash(tmp_path: Path, monkeypatch) -> None:
+    app_root = tmp_path / "app"
+    app_root.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr("reverie.config.get_app_root", lambda: app_root)
+
+    project_root = Path(r"G:\Reverie\Reverie-Cli")
+
+    assert get_project_data_name(project_root) == "G_Reverie_Reverie-Cli"
+    assert get_project_data_dir(project_root) == app_root / ".reverie" / "projects" / "G_Reverie_Reverie-Cli"
+
+
+def test_config_manager_migrates_legacy_project_cache_to_projects(tmp_path: Path, monkeypatch) -> None:
+    app_root = tmp_path / "app"
+    project_root = tmp_path / "workspace" / "Reverie-Cli"
+    project_root.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr("reverie.config.get_app_root", lambda: app_root)
+    monkeypatch.setattr("reverie.config.get_launcher_root", lambda: app_root)
+
+    legacy_name = config_module._get_hashed_project_data_name(project_root)
+    legacy_dir = app_root / ".reverie" / "project_caches" / legacy_name
+    legacy_sessions_dir = legacy_dir / "sessions"
+    legacy_sessions_dir.mkdir(parents=True, exist_ok=True)
+    (legacy_sessions_dir / "session.json").write_text('{"id":"legacy"}\n', encoding="utf-8")
+
+    manager = ConfigManager(project_root)
+    manager.ensure_dirs()
+
+    expected_dir = app_root / ".reverie" / "projects" / get_project_data_name(project_root)
+    assert manager.project_data_dir == expected_dir
+    assert manager.project_cache_migration["migrated"] is True
+    assert (expected_dir / "sessions" / "session.json").exists()
+    assert (legacy_sessions_dir / "session.json").exists()
+
+    metadata = json.loads((expected_dir / "project_metadata.json").read_text(encoding="utf-8"))
+    assert metadata["project_data_name"] == get_project_data_name(project_root)
+    assert metadata["hash_suffix_used"] is False
 
 
 def test_config_manager_creates_default_config_file_for_manual_editing(tmp_path: Path, monkeypatch) -> None:

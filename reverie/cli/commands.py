@@ -6772,7 +6772,7 @@ class CommandHandler:
                 f"[{self.theme.TEXT_DIM}]Current Anthropic base URL: {current_url}[/{self.theme.TEXT_DIM}]"
             )
             self.console.print(
-                f"[{self.theme.TEXT_DIM}]Use 'clear' to restore the default. Do not include /v1 for the Anthropic SDK path.[/{self.theme.TEXT_DIM}]"
+                f"[{self.theme.TEXT_DIM}]Use 'clear' to restore the default. You may paste /v1/messages; Reverie normalizes it to the provider root.[/{self.theme.TEXT_DIM}]"
             )
             candidate = Prompt.ask(
                 "ModelScope Anthropic base URL",

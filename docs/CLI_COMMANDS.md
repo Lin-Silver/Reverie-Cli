@@ -16,7 +16,7 @@ This reference is aligned with `reverie/cli/help_catalog.py`, which is the sourc
 
 Notes:
 
-- `/clean` removes the active project's cache root under `<app_root>/.reverie/project_caches/<project-key>/`.
+- `/clean` removes the active project's cache root under `<app_root>/.reverie/projects/<project-path-key>/`.
 - If legacy workspace-local `.reverie/context_cache` or `.reverie/security` folders still exist, `/clean` removes those too.
 
 ## Models and Modes
@@ -84,6 +84,8 @@ ModelScope is called through the Anthropic SDK and reads `MODELSCOPE_API_KEY`, `
 | `/tools` | Show tools visible to the active model/provider |
 | `/tools all` | Show every loaded tool across modes with required fields, parameters, and descriptions |
 | `/tools details` | Show detailed tool information for the current or selected mode |
+| `/mcp status` | Show configured MCP servers and discovery health |
+| `/mcp list` | Alias of `/mcp status` |
 | `/plugins` | Inspect the portable SDK/runtime depot and optional RC plugin tools |
 | `/plugins sdk <plugin-id>` | Prepare `.reverie/plugins/<plugin-id>/runtime` and write an SDK manifest |
 | `/plugins deploy <plugin-id>` | Let a plugin prepare its local SDK/runtime by downloading, extracting, or cloning into `.reverie/plugins/<plugin-id>/` |

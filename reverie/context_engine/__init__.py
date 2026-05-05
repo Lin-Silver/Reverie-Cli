@@ -43,6 +43,14 @@ from .knowledge_graph import KnowledgeGraph, Entity, Relation, RelationType, Pat
 from .commit_history_indexer import CommitHistoryIndexer, CommitPattern, CodeEvolution, TeamConvention, ChangeType
 from .context_engine_core import ContextEngineCore, ContextQuery, ContextResult
 from .lsp_manager import LSPManager
+from .fragments import (
+    ContextFragment,
+    estimate_tokens,
+    make_context_fragment,
+    render_context_fragments,
+    sort_context_fragments,
+    truncate_to_token_cap,
+)
 
 
 __all__ = [
@@ -102,4 +110,10 @@ __all__ = [
     'ContextQuery',
     'ContextResult',
     'LSPManager',
+    'ContextFragment',
+    'estimate_tokens',
+    'make_context_fragment',
+    'render_context_fragments',
+    'sort_context_fragments',
+    'truncate_to_token_cap',
 ]

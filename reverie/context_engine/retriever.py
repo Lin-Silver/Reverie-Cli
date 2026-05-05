@@ -127,6 +127,10 @@ class ContextRetriever:
         'queue': ['job', 'worker', 'task', 'scheduler', 'background'],
         'error': ['errors', 'exception', 'failure', 'retry', 'fallback'],
         'docs': ['documentation', 'readme', 'guide', 'runbook', 'spec'],
+        'cli': ['command', 'commands', 'terminal', 'shell', 'argparse', 'click', 'prompt'],
+        'context': ['retrieval', 'retriever', 'index', 'indexer', 'symbol', 'semantic', 'workspace'],
+        'stream': ['streaming', 'sse', 'delta', 'chunk', 'messages', 'completion'],
+        'model': ['provider', 'source', 'sdk', 'client', 'api'],
     }
     
     # Game-related keywords for prioritization
@@ -247,6 +251,91 @@ class ContextRetriever:
                     for synonym in synonyms:
                         weights[synonym] = max(weights.get(synonym, 0.0), 0.55)
         return weights
+
+    def _extract_query_anchors(self, query: str) -> Dict[str, List[str]]:
+        """Extract high-confidence file and symbol anchors from a free-form task."""
+        text = str(query or "")
+        file_like: List[str] = []
+        symbol_like: List[str] = []
+        seen_files: Set[str] = set()
+        seen_symbols: Set[str] = set()
+
+        for raw in re.findall(r"[\w./\\-]+\.[A-Za-z0-9_]{1,8}(?::\d+)?", text):
+            candidate = raw.strip("`'\".,;()[]{}")
+            if not candidate:
+                continue
+            if ":" in candidate:
+                candidate = candidate.split(":", 1)[0]
+            key = candidate.lower().replace("\\", "/")
+            if key not in seen_files:
+                seen_files.add(key)
+                file_like.append(candidate)
+
+        for raw in re.findall(r"\b[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+\b|\b[A-Z][A-Za-z0-9_]{2,}\b", text):
+            candidate = raw.strip("`'\".,;()[]{}")
+            if not candidate or "." in candidate and candidate.lower().endswith((".py", ".ts", ".js", ".md")):
+                continue
+            key = candidate.lower()
+            if key not in seen_symbols:
+                seen_symbols.add(key)
+                symbol_like.append(candidate)
+
+        return {"files": file_like[:12], "symbols": symbol_like[:20]}
+
+    def _query_role_boost(self, file_path: str, tags: List[str], query: str) -> Tuple[float, List[str]]:
+        """Bias files toward the role implied by the user's task."""
+        query_lower = str(query or "").lower()
+        path_lower = str(file_path or "").lower().replace("\\", "/")
+        tag_set = set(tags or [])
+        boost = 0.0
+        reasons: List[str] = []
+
+        role_rules = [
+            ("test", ("test", "tests", "pytest", "spec", "coverage", "assert")),
+            ("docs", ("doc", "docs", "readme", "documentation", "guide")),
+            ("config", ("config", "settings", "toml", "yaml", "json", "env")),
+            ("cli", ("cli", "command", "commands", "terminal", "shell")),
+            ("api", ("api", "endpoint", "route", "handler")),
+            ("engine", ("engine", "context", "retrieval", "indexer", "retriever")),
+        ]
+        for tag, terms in role_rules:
+            if not any(term in query_lower for term in terms):
+                continue
+            if tag in tag_set or f"/{tag}" in path_lower or tag in path_lower:
+                boost += 1.6
+                reasons.append(f"role:{tag}")
+
+        if any(term in query_lower for term in ("fix", "bug", "error", "exception", "traceback")) and "test" not in tag_set:
+            boost += 0.4
+            reasons.append("implementation-focus")
+        return boost, reasons
+
+    def _score_file_content_for_task(self, file_path: str, term_weights: Dict[str, float]) -> Tuple[float, List[str]]:
+        """Lightweight content scoring for files whose cached summaries are sparse."""
+        if not term_weights:
+            return 0.0, []
+        try:
+            path = Path(file_path)
+            if not path.exists() or not path.is_file() or path.stat().st_size > 256 * 1024:
+                return 0.0, []
+            text = path.read_text(encoding="utf-8", errors="ignore")[:120000].lower()
+        except Exception:
+            return 0.0, []
+
+        score = 0.0
+        reasons: List[str] = []
+        for term, weight in term_weights.items():
+            term_lower = term.lower()
+            if len(term_lower) < 3:
+                continue
+            count = text.count(term_lower)
+            if count <= 0:
+                continue
+            score += min(2.4, 0.35 * count) * weight
+            reasons.append(f"content:{term_lower}")
+            if len(reasons) >= 4:
+                break
+        return score, reasons
 
     def _get_file_meta(self, info: Any, key: str, default: Any = None) -> Any:
         if isinstance(info, dict):
@@ -634,6 +723,9 @@ class ContextRetriever:
         max_files = max(1, int(max_files or 6))
         max_symbols = max(1, int(max_symbols or 12))
         term_weights = self._build_task_term_weights(query_text)
+        anchors = self._extract_query_anchors(query_text)
+        anchor_file_terms = {item.lower().replace("\\", "/") for item in anchors.get("files", [])}
+        anchor_symbol_terms = {item.lower() for item in anchors.get("symbols", [])}
 
         cache_key = (
             query_text.lower(),
@@ -646,6 +738,8 @@ class ContextRetriever:
             tuple(sorted(str(path or "").strip() for path in (changed_files or []) if str(path or "").strip())),
             len(self.file_info) if isinstance(self.file_info, dict) else 0,
             len(self.symbol_table),
+            tuple(sorted(anchor_file_terms)),
+            tuple(sorted(anchor_symbol_terms)),
         )
         cached_entry = self._task_cache.get(cache_key)
         now = time.time()
@@ -681,10 +775,35 @@ class ContextRetriever:
                 term_weights=term_weights,
                 active_files=normalized_active_files,
                 changed_files=normalized_changed_files,
+                query_text=query_text,
+                anchor_file_terms=anchor_file_terms,
             )
             if candidate and file_path not in seen_file_candidates:
                 file_candidates.append(candidate)
                 seen_file_candidates.add(file_path)
+
+        for anchor in anchor_file_terms:
+            for raw_path, info in list((self.file_info or {}).items()):
+                file_path = self._normalize_file_path(raw_path)
+                normalized = file_path.lower().replace("\\", "/")
+                if anchor not in normalized and Path(normalized).name != anchor:
+                    continue
+                if file_path in seen_file_candidates:
+                    continue
+                candidate = self._score_file_for_task(
+                    file_path=file_path,
+                    info=info,
+                    term_weights=term_weights,
+                    active_files=normalized_active_files,
+                    changed_files=normalized_changed_files,
+                    base_score=6.0,
+                    reason_override=f"anchor-file:{anchor}",
+                    query_text=query_text,
+                    anchor_file_terms=anchor_file_terms,
+                )
+                if candidate:
+                    file_candidates.append(candidate)
+                    seen_file_candidates.add(file_path)
 
         file_candidates.sort(key=lambda item: item.score, reverse=True)
         selected_files: Dict[str, TaskContextFile] = {
@@ -697,6 +816,10 @@ class ContextRetriever:
             for symbol in self.symbol_table.search(term, limit=max_symbols * 6):
                 symbol_scores[symbol.qualified_name] += self._score_symbol_for_task(symbol, term, weight)
                 symbol_reasons[symbol.qualified_name].add(f"term:{term}")
+        for anchor in anchor_symbol_terms:
+            for symbol in self.symbol_table.search(anchor, limit=max_symbols * 4):
+                symbol_scores[symbol.qualified_name] += 7.5
+                symbol_reasons[symbol.qualified_name].add(f"anchor-symbol:{anchor}")
 
         for file_candidate in file_candidates[: max_files * 2]:
             file_symbols = self.symbol_table.get_all_in_file(file_candidate.file_path)
@@ -740,6 +863,8 @@ class ContextRetriever:
                     changed_files=normalized_changed_files,
                     base_score=max(0.5, expanded_symbols.get(qualified_name, 0.0) * 0.5),
                     reason_override=f"symbol:{symbol.name}",
+                    query_text=query_text,
+                    anchor_file_terms=anchor_file_terms,
                 ) or TaskContextFile(
                     file_path=normalized_symbol_file,
                     language=symbol.language,
@@ -755,7 +880,7 @@ class ContextRetriever:
         selected_file_list = sorted(selected_files.values(), key=lambda item: item.score, reverse=True)[:max_files]
         for item in selected_file_list:
             file_symbols = [symbol for symbol in selected_symbols if symbol.file_path == item.file_path][:3]
-            item.excerpt = self._build_file_excerpt(item.file_path, file_symbols)
+            item.excerpt = self._build_file_excerpt(item.file_path, file_symbols, term_weights=term_weights)
 
         memory_fragments: List[Dict[str, str]] = []
         if include_memory and self.memory_indexer:
@@ -847,6 +972,8 @@ class ContextRetriever:
         changed_files: Set[str],
         base_score: float = 0.0,
         reason_override: Optional[str] = None,
+        query_text: str = "",
+        anchor_file_terms: Optional[Set[str]] = None,
     ) -> Optional[TaskContextFile]:
         """Score a cached file record for a task-oriented retrieval request."""
         if info is None:
@@ -863,9 +990,17 @@ class ContextRetriever:
                 import_names.append(str(item.get("module") or item.get("name") or item.get("path") or "").lower())
         path_lower = file_path.lower().replace("\\", "/")
         summary_lower = summary.lower()
+        anchor_file_terms = anchor_file_terms or set()
 
         score = float(base_score)
         reasons: List[str] = [reason_override] if reason_override else []
+        for anchor in anchor_file_terms:
+            anchor_lower = str(anchor or "").lower().replace("\\", "/")
+            if not anchor_lower:
+                continue
+            if anchor_lower in path_lower or Path(path_lower).name == anchor_lower:
+                score += 8.0
+                reasons.append(f"anchor-file:{anchor_lower}")
         for term, weight in term_weights.items():
             term_lower = term.lower()
             if term_lower in keywords:
@@ -886,6 +1021,16 @@ class ContextRetriever:
             if any(term_lower == tag or term_lower in tag for tag in tags):
                 score += 1.1 * weight
                 reasons.append(f"tag:{term_lower}")
+
+        role_boost, role_reasons = self._query_role_boost(file_path, tags, query_text)
+        if role_boost:
+            score += role_boost
+            reasons.extend(role_reasons)
+
+        content_boost, content_reasons = self._score_file_content_for_task(file_path, term_weights)
+        if content_boost:
+            score += content_boost
+            reasons.extend(content_reasons)
 
         activity = self._activity_boost(self._activity_files.get(file_path))
         if file_path in active_files:
@@ -942,7 +1087,13 @@ class ContextRetriever:
         }.get(symbol.kind, 1.0)
         return (score + file_boost + symbol_boost) * kind_boost
 
-    def _build_file_excerpt(self, file_path: str, symbols: List[Symbol]) -> str:
+    def _build_file_excerpt(
+        self,
+        file_path: str,
+        symbols: List[Symbol],
+        *,
+        term_weights: Optional[Dict[str, float]] = None,
+    ) -> str:
         """Build a compact file excerpt focused on the most relevant symbols."""
         if symbols:
             parts: List[str] = []
@@ -956,6 +1107,32 @@ class ContextRetriever:
                 lines = handle.readlines()
         except Exception:
             return ""
+
+        terms = [
+            term.lower()
+            for term, _ in sorted((term_weights or {}).items(), key=lambda item: item[1], reverse=True)
+            if len(str(term or "")) >= 3
+        ][:8]
+        if terms:
+            windows: List[Tuple[int, int]] = []
+            for index, line in enumerate(lines):
+                lower_line = line.lower()
+                if not any(term in lower_line for term in terms):
+                    continue
+                start = max(0, index - 4)
+                end = min(len(lines), index + 8)
+                if windows and start <= windows[-1][1] + 2:
+                    windows[-1] = (windows[-1][0], max(windows[-1][1], end))
+                else:
+                    windows.append((start, end))
+                if len(windows) >= 3:
+                    break
+            if windows:
+                parts = []
+                for start, end in windows:
+                    parts.append(f"# lines {start + 1}-{end}")
+                    parts.extend(f"{line_no:4d} | {lines[line_no - 1].rstrip()}" for line_no in range(start + 1, end + 1))
+                return "\n".join(parts).strip()
 
         excerpt = "".join(lines[: min(len(lines), 40)]).strip()
         return excerpt

@@ -1,6 +1,23 @@
 ## Unreleased
 
-No unreleased changes yet.
+### Provider and Stability
+
+* Promoted Gemini CLI, Codex, NVIDIA, and ModelScope to first-class built-in sources with dedicated GUI state, source switching, credential discovery, and safe API smoke testing.
+* Added a redacted `reverie.provider_smoke` helper for live streaming checks across ModelScope Anthropic streams, NVIDIA hosted models, Gemini CLI, and Codex.
+* Added NVIDIA GLM-4.7 (`z-ai/glm4.7`) to the built-in catalog and let provider smoke tests temporarily override model ids without mutating persisted config.
+* Kept the standard model list for manually configured OpenAI-compatible or Anthropic-compatible services instead of routing first-party sources through the custom compatibility layer.
+
+### Context, Memory, and Workspace
+
+* Added typed Context Engine fragments with source, token cap, stable ordering, and cache keys for recent turns, summaries, auto memory, workspace index, active files, and tool outputs.
+* Added Auto Memory indexing that scans prior sessions, redacts secrets, deduplicates, scores, compresses, and automatically recalls memory snippets into future context.
+* Migrated project data from `.reverie/project_caches/<hashed-key>/` to `.reverie/projects/<project-path-key>/`, where the key is derived from the full project path without an appended hash.
+
+### Plugins and GUI
+
+* Added Blender MCP lifecycle commands to the official Blender plugin: `rc_blender_mcp_install`, `rc_blender_mcp_start`, `rc_blender_mcp_stop`, `rc_blender_mcp_status`, and `rc_blender_mcp_info`.
+* Updated Reverie UI models/settings surfaces for built-in source status, provider smoke output, Context Engine state, and removed the local Automations panel and bridge actions.
+* Added `/mcp list` to MCP help as an alias of `/mcp status`.
 
 ---
 

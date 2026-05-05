@@ -47,7 +47,7 @@ Streamed tool events now include `agent_id` and `agent_color`. The TUI uses thes
 Subagent run logs are persisted under the current project cache:
 
 ```text
-.reverie/project_caches/<project-key>/subagents/<subagent-id>/runs/<run-id>.json
+.reverie/projects/<project-path-key>/subagents/<subagent-id>/runs/<run-id>.json
 ```
 
 The run log records the Subagent ID, resolved model, task assignment, status, summary, and error details if the run failed.

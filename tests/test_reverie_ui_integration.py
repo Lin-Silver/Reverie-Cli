@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
 from pathlib import Path
 
-from reverie.automation_local import LocalAutomationManager
 from reverie.config import Config
 from reverie.plugin.runtime_manager import RuntimePluginManager
 from reverie.sdk_bridge import ReverieUiBridge
@@ -101,25 +103,38 @@ def test_official_source_plugins_validate(tmp_path: Path) -> None:
         assert result["success"], f"{plugin_id}: {result.get('errors')}"
 
 
-def test_local_automation_manager_file_backed_save(tmp_path: Path) -> None:
-    manager = LocalAutomationManager(tmp_path, reverie_executable=Path("reverie.exe"))
-    manager._sync_scheduler = lambda record: {"success": True, "kind": "test"}  # type: ignore[method-assign]
-
-    result = manager.save_automation(
-        {
-            "name": "Nightly check",
-            "prompt": "Run diagnostics",
-            "workspace": str(tmp_path),
-            "enabled": True,
-            "schedule": {"interval_minutes": 30},
-        }
+def test_blender_plugin_exposes_mcp_lifecycle_commands() -> None:
+    plugin_path = Path(__file__).resolve().parents[1] / "plugins" / "blender" / "plugin.py"
+    handshake = subprocess.run(
+        [sys.executable, str(plugin_path), "-RC"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=True,
     )
+    payload = json.loads(handshake.stdout)
+    command_names = {command["name"] for command in payload.get("commands", [])}
+    assert {
+        "mcp_install",
+        "mcp_start",
+        "mcp_stop",
+        "mcp_status",
+        "mcp_info",
+    } <= command_names
 
+    dry_run = subprocess.run(
+        [sys.executable, str(plugin_path), "-RC-CALL", "mcp_install", json.dumps({"dry_run": True})],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=True,
+    )
+    result = json.loads(dry_run.stdout)
     assert result["success"]
-    listed = manager.list_automations()["automations"]
-    assert len(listed) == 1
-    assert listed[0]["schedule"]["interval_minutes"] == 30
-    assert Path(listed[0]["runtime"]["prompt_path"]).exists()
+    assert result["data"]["storage_policy"] == "plugin-local"
+    assert result["data"]["mcp"]["server_name"] == "blender"
 
 
 def test_session_delete_removes_json_and_index_entry(tmp_path: Path) -> None:

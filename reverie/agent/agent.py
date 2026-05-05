@@ -1373,6 +1373,11 @@ def make_api_request_with_retry(
         raise
     
     last_error = None
+    try:
+        timeout_value = max(1, int(timeout or 60))
+    except (TypeError, ValueError):
+        timeout_value = 60
+    request_timeout = (min(15, timeout_value), timeout_value)
     for attempt in range(max_retries):
         try:
             logger.debug(f"API request attempt {attempt + 1}/{max_retries}")
@@ -1387,7 +1392,7 @@ def make_api_request_with_retry(
                 headers=request_headers,
                 json=sanitized_payload,
                 stream=stream,
-                timeout=timeout
+                timeout=request_timeout
             )
             
             # Check for HTTP errors
@@ -1416,7 +1421,7 @@ def make_api_request_with_retry(
                         headers=request_headers,
                         json=compatibility_payload,
                         stream=stream,
-                        timeout=timeout,
+                        timeout=request_timeout,
                     )
                     fallback_response.raise_for_status()
                     logger.debug("NVIDIA compatibility fallback succeeded")
@@ -1463,9 +1468,16 @@ def make_api_request_with_retry(
             last_error = e
             logger.warning(f"Request exception on attempt {attempt + 1}: {e}")
         
-        # Exponential backoff
         if attempt < max_retries - 1:
-            backoff = initial_backoff * (2 ** attempt)
+            retry_after = None
+            response = getattr(last_error, "response", None)
+            if response is not None:
+                try:
+                    retry_after = float(response.headers.get("Retry-After", ""))
+                except Exception:
+                    retry_after = None
+            backoff = retry_after if retry_after is not None else initial_backoff * (2 ** attempt)
+            backoff = min(30.0, max(0.1, float(backoff)))
             logger.debug(f"Waiting {backoff}s before retry...")
             time.sleep(backoff)
     
@@ -1891,7 +1903,7 @@ class ReverieAgent:
             except Exception:
                 return timeout_value
 
-        if self.provider == "anthropic" and self._is_active_model_source("modelscope"):
+        if self._is_active_model_source("modelscope") and self.provider in ("openai-sdk", "anthropic"):
             try:
                 cfg = getattr(config, "modelscope", {})
                 if isinstance(cfg, dict):
@@ -2160,15 +2172,40 @@ class ReverieAgent:
         return kwargs
 
     def _create_openai_chat_completion(self, **kwargs: Any) -> Any:
-        """Call OpenAI-compatible chat completions with timeout fallback for older SDKs."""
-        try:
-            return self._client.chat.completions.create(**kwargs)
-        except TypeError as exc:
-            if "timeout" not in kwargs or "timeout" not in str(exc).lower():
-                raise
-            fallback_kwargs = dict(kwargs)
-            fallback_kwargs.pop("timeout", None)
-            return self._client.chat.completions.create(**fallback_kwargs)
+        """Call OpenAI-compatible chat completions with SDK compatibility and transient retries."""
+        attempts = max(1, int(getattr(self, "api_max_retries", 1) or 1))
+        last_error: Optional[Exception] = None
+        call_kwargs = dict(kwargs)
+
+        for attempt in range(attempts):
+            try:
+                return self._client.chat.completions.create(**call_kwargs)
+            except TypeError as exc:
+                if "timeout" not in call_kwargs or "timeout" not in str(exc).lower():
+                    raise
+                call_kwargs = dict(call_kwargs)
+                call_kwargs.pop("timeout", None)
+                return self._client.chat.completions.create(**call_kwargs)
+            except Exception as exc:
+                last_error = exc
+                status_code = getattr(exc, "status_code", None)
+                if isinstance(status_code, int) and 400 <= status_code < 500 and status_code != 429:
+                    raise
+                if attempt >= attempts - 1 or not _is_recoverable_stream_exception(exc):
+                    raise
+                backoff = min(8.0, float(getattr(self, "api_initial_backoff", 1.0) or 1.0) * (2 ** attempt))
+                logger.warning(
+                    "OpenAI-compatible SDK call failed transiently; retrying in %.1fs (%s/%s): %s",
+                    backoff,
+                    attempt + 1,
+                    attempts,
+                    exc,
+                )
+                time.sleep(backoff)
+
+        if last_error:
+            raise last_error
+        raise RuntimeError("OpenAI-compatible SDK call failed without an exception")
 
     def _openai_sdk_provider_label(self) -> str:
         """Return a user-facing label for OpenAI SDK backed requests."""
@@ -3166,7 +3203,6 @@ class ReverieAgent:
                 "model": self.model,
                 "messages": anthropic_messages,
                 "max_tokens": self._resolve_anthropic_max_tokens(),
-                "stream": True
             }
             
             if system_message:
@@ -4012,6 +4048,39 @@ class ReverieAgent:
             logger.debug("Workspace memory fetch failed during auto-rotation", exc_info=True)
             return ""
 
+    def _record_compaction_memory(self, compressed_messages: List[Dict[str, Any]], session_id: str) -> None:
+        """Persist the latest compaction memory into the cross-session memory index."""
+        memory_indexer = self.tool_executor.context.get("memory_indexer")
+        if not memory_indexer:
+            return
+        try:
+            from ..context_engine.compressor import MEMORY_BLOCK_END, MEMORY_BLOCK_HEADER
+        except Exception:
+            return
+
+        summary = ""
+        for message in compressed_messages or []:
+            if str(message.get("role", "") or "").strip().lower() != "system":
+                continue
+            content = _coerce_text_fragments(message.get("content"))
+            stripped = content.strip()
+            if not stripped.startswith(MEMORY_BLOCK_HEADER):
+                continue
+            summary = stripped[len(MEMORY_BLOCK_HEADER):].strip()
+            if summary.endswith(MEMORY_BLOCK_END):
+                summary = summary[: -len(MEMORY_BLOCK_END)].strip()
+        if not summary:
+            return
+
+        try:
+            memory_indexer.set_session_summary(
+                str(session_id or "default"),
+                f"Compaction memory: {summary[:1800]}",
+            )
+            memory_indexer.refresh_session(str(session_id or "default"))
+        except Exception:
+            logger.debug("Failed to persist compaction memory summary", exc_info=True)
+
     def _handle_context_compaction(
         self,
         current_tokens: int,
@@ -4061,6 +4130,7 @@ class ReverieAgent:
             if new_history and new_history != self.messages:
                 self.messages = new_history
                 self._persist_history_to_session()
+                self._record_compaction_memory(compressed_messages, session_id)
                 self._auto_context_compaction_retry_after = 0.0
             else:
                 self._auto_context_compaction_retry_after = time.time() + 30.0

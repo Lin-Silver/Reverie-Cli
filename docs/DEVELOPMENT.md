@@ -36,12 +36,12 @@ reverie --no-index
 When running from source, Reverie treats the repository-local `dist/` folder as `app_root`. Project runtime data is written under:
 
 ```text
-<app_root>/.reverie/project_caches/<project-key>/
+<app_root>/.reverie/projects/<project-path-key>/
 ```
 
 That cache root holds the active project's config files, rules, indexes, sessions, checkpoints, specs, steering files, and related runtime artifacts.
 
-Legacy project-root `.reverie` files may still be read for migration, but new writes should stay inside `<app_root>/.reverie/project_caches/`.
+`<project-path-key>` is the full absolute project path made filename-safe, for example `G:\Reverie\Reverie-Cli` becomes `G_Reverie_Reverie-Cli`. Legacy project-root `.reverie` files and older `<app_root>/.reverie/project_caches/` directories may still be read for migration, but new writes should stay inside `<app_root>/.reverie/projects/`.
 
 ## Tests And Quality Checks
 

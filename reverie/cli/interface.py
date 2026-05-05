@@ -859,6 +859,10 @@ class ReverieInterface:
 
         from ..session import MemoryIndexer, WorkspaceStatsManager
         self.memory_indexer = MemoryIndexer(self.project_data_dir)
+        try:
+            self.memory_indexer.auto_learn_from_sessions(max_items=36, max_sessions=40)
+        except Exception:
+            pass
         self.workspace_stats_manager = WorkspaceStatsManager(
             self.project_data_dir,
             project_root=None if runtime_scope == "computer-controller" else self.project_root,

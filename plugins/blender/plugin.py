@@ -6,19 +6,29 @@ from pathlib import Path
 from typing import Any
 import json
 import os
+import queue
+import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import zipfile
 
 
-PLUGIN_VERSION = "0.3.0"
+PLUGIN_VERSION = "0.4.0"
 ARCHIVE_NAME = "blender-5.1.1-windows-x64.zip"
 MMD_TOOLS_REPO_URL = "https://github.com/MMD-Blender/blender_mmd_tools.git"
 MMD_TOOLS_MODULE = "mmd_tools"
 MMD_TOOLS_STATUS_MARKER = "REVERIE_MMD_TOOLS_STATUS="
 MMD_IMPORT_STATUS_MARKER = "REVERIE_MMD_IMPORT_RESULT="
+BLENDER_MCP_REPO_URL = "https://github.com/ahujasid/blender-mcp.git"
+BLENDER_MCP_SERVER_NAME = "blender"
+BLENDER_MCP_DEFAULT_HOST = "127.0.0.1"
+BLENDER_MCP_DEFAULT_PORT = 9876
+BLENDER_MCP_START_MARKER = "REVERIE_BLENDER_MCP_START="
 MMD_MODEL_EXTENSIONS = {".pmd", ".pmx"}
 MMD_MOTION_EXTENSIONS = {".vmd"}
 MMD_POSE_EXTENSIONS = {".vpd"}
@@ -100,6 +110,10 @@ class BlenderRuntimePlugin(ReverieRuntimePluginHost):
         self.scripts_root = self.plugin_root / "scripts"
         self.datafiles_root = self.plugin_root / "datafiles"
         self.tmp_root = self.plugin_root / "tmp"
+        self.mcp_root = self.plugin_root / "mcp"
+        self.blender_mcp_root = self.mcp_root / "blender-mcp"
+        self.blender_mcp_pid_path = self.blender_mcp_root / ".reverie-blender.pid.json"
+        self.blender_mcp_log_path = self.blender_mcp_root / "blender-socket.log"
 
     def build_handshake(self) -> dict[str, Any]:
         return {
@@ -112,13 +126,17 @@ class BlenderRuntimePlugin(ReverieRuntimePluginHost):
                 "Self-contained portable Blender plugin with an embedded Blender archive, "
                 "plugin-local deployment, version checks, launch, background bpy script "
                 "execution, scene metadata inspection, and plugin-local MMD Tools support "
-                "for PMD/PMX model, VMD motion, and VPD pose import."
+                "for PMD/PMX model, VMD motion, VPD pose import, and plugin-local "
+                "Blender MCP deployment."
             ),
             "tool_call_hint": (
                 "Use rc_blender_ensure_runtime to deploy the embedded portable Blender "
                 "environment, then rc_blender_run_script for background asset authoring. "
                 "Use rc_blender_ensure_mmd_tools or rc_blender_import_mmd_model when "
                 "working with MMD PMD/PMX/VMD/VPD assets. "
+                "Use rc_blender_mcp_install, rc_blender_mcp_start, and "
+                "rc_blender_mcp_info to expose Blender MCP from this plugin only after "
+                "installation and health checks succeed. "
                 "Use blender_modeling_workbench to generate production Blender scripts "
                 "and this plugin to provide the actual Blender executable."
             ),
@@ -129,11 +147,75 @@ class BlenderRuntimePlugin(ReverieRuntimePluginHost):
                 "It can also clone/update the open-source MMD Tools Blender add-on into "
                 "the plugin-local addons folder, enable it with plugin-local Blender user "
                 "config, and import .pmx/.pmd models with optional .vmd motion or .vpd pose. "
+                "It can deploy ahujasid/blender-mcp into the plugin's own mcp folder, "
+                "copy the Blender MCP addon into the plugin-managed Blender user scripts, "
+                "start/stop a background Blender socket server, and report MCP config "
+                "only when discovery or static health checks are available. "
                 "For AI modeling workflows, combine blender_modeling_workbench for script/"
                 "asset planning with rc_blender_ensure_runtime and rc_blender_run_script "
                 "for execution."
             ),
             "commands": [
+                {
+                    "name": "mcp_install",
+                    "description": "Deploy ahujasid/blender-mcp under the plugin-local mcp folder and install its Blender addon into the plugin-managed Blender user scripts.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "force": {"type": "boolean", "description": "Replace an existing plugin-local Blender MCP checkout."},
+                            "update": {"type": "boolean", "description": "Update or refresh from a local reference/source checkout when available. Defaults to true."},
+                            "source_path": {"type": "string", "description": "Optional local blender-mcp source checkout to copy instead of cloning."},
+                            "enable_addon": {"type": "boolean", "description": "Run Blender in background to enable the addon after installing it."},
+                            "blender_executable": {"type": "string", "description": "Optional absolute Blender executable path used for addon enablement."},
+                            "dry_run": {"type": "boolean", "description": "Report planned install paths without copying, cloning, or running Blender."},
+                            "timeout_seconds": {"type": "integer", "description": "Git/copy/Blender probe timeout."}
+                        },
+                        "required": []
+                    },
+                    "expose_as_tool": True,
+                    "include_modes": [],
+                    "guidance": "Call this before using Blender MCP. It stores MCP files under .reverie/plugins/blender/mcp/blender-mcp/."
+                },
+                {
+                    "name": "mcp_start",
+                    "description": "Start the plugin-managed Blender MCP addon socket server in a background Blender process.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "host": {"type": "string", "description": "Blender socket host. Defaults to 127.0.0.1."},
+                            "port": {"type": "integer", "description": "Blender socket port. Defaults to 9876."},
+                            "auto_install": {"type": "boolean", "description": "Install Blender MCP first when missing. Defaults to true."},
+                            "blender_executable": {"type": "string", "description": "Optional absolute Blender executable path."},
+                            "timeout_seconds": {"type": "integer", "description": "Startup/socket health timeout."}
+                        },
+                        "required": []
+                    },
+                    "expose_as_tool": True,
+                    "include_modes": [],
+                    "guidance": "Starts only the Blender-side socket server; use mcp_info to get the MCP stdio command for a client."
+                },
+                {
+                    "name": "mcp_stop",
+                    "description": "Stop the plugin-managed Blender MCP background Blender process when Reverie no longer needs it.",
+                    "parameters": {"type": "object", "properties": {"force": {"type": "boolean", "description": "Force-kill the process tree on Windows."}}, "required": []},
+                    "expose_as_tool": True,
+                    "include_modes": []
+                },
+                {
+                    "name": "mcp_status",
+                    "description": "Inspect Blender MCP install status, addon path, background process, socket reachability, and MCP command readiness.",
+                    "parameters": {"type": "object", "properties": {"host": {"type": "string"}, "port": {"type": "integer"}, "probe_tools": {"type": "boolean", "description": "Attempt a short MCP initialize/tools/list probe."}}, "required": []},
+                    "expose_as_tool": True,
+                    "include_modes": []
+                },
+                {
+                    "name": "mcp_info",
+                    "description": "Return Blender MCP server name, command, args, cwd, env, static/probed tool list, and health status for MCP registration.",
+                    "parameters": {"type": "object", "properties": {"host": {"type": "string"}, "port": {"type": "integer"}, "probe_tools": {"type": "boolean", "description": "Only marks tools_list_ok true if a real tools/list probe succeeds."}, "timeout_seconds": {"type": "integer"}}, "required": []},
+                    "expose_as_tool": True,
+                    "include_modes": [],
+                    "guidance": "Only add this MCP information to prompts after tools_list_ok is true."
+                },
                 {
                     "name": "ensure_runtime",
                     "description": "Deploy the Blender archive embedded in this plugin executable into the plugin-local runtime folder.",
@@ -403,6 +485,21 @@ class BlenderRuntimePlugin(ReverieRuntimePluginHost):
         }
 
     def handle_command(self, command_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if command_name == "mcp_install":
+            return self._mcp_install(payload)
+
+        if command_name == "mcp_start":
+            return self._mcp_start(payload)
+
+        if command_name == "mcp_stop":
+            return self._mcp_stop(payload)
+
+        if command_name == "mcp_status":
+            return self._mcp_status(payload)
+
+        if command_name == "mcp_info":
+            return self._mcp_info(payload)
+
         if command_name == "ensure_runtime":
             return self._ensure_runtime(payload)
 
@@ -1377,6 +1474,550 @@ if not result["success"]:
             return candidate.resolve(strict=False)
         except Exception:
             return candidate.absolute()
+
+    def _blender_mcp_source_candidates(self, payload: dict[str, Any] | None = None) -> list[Path]:
+        payload = payload or {}
+        candidates: list[Path] = []
+        raw_source = str(payload.get("source_path") or "").strip()
+        if raw_source:
+            candidates.append(Path(raw_source).expanduser())
+        try:
+            repo_root = Path(__file__).resolve(strict=False).parents[2]
+            candidates.append(repo_root / "references" / "blender-mcp")
+        except Exception:
+            pass
+        candidates.extend(
+            [
+                self.plugin_root / "references" / "blender-mcp",
+                self.plugin_root / "source" / "blender-mcp",
+            ]
+        )
+        unique: list[Path] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            try:
+                resolved = candidate.resolve(strict=False)
+            except Exception:
+                resolved = candidate.absolute()
+            key = str(resolved).lower()
+            if key not in seen:
+                unique.append(resolved)
+                seen.add(key)
+        return unique
+
+    def _valid_blender_mcp_source(self, path: Path) -> bool:
+        return (
+            path.exists()
+            and path.is_dir()
+            and (path / "pyproject.toml").exists()
+            and (path / "addon.py").exists()
+            and (path / "src" / "blender_mcp" / "server.py").exists()
+        )
+
+    def _blender_mcp_addon_target(self) -> Path:
+        return self.scripts_root / "addons" / "blender_mcp.py"
+
+    def _blender_mcp_tools_static(self) -> list[str]:
+        server_path = self.blender_mcp_root / "src" / "blender_mcp" / "server.py"
+        if not server_path.exists():
+            return []
+        try:
+            text = server_path.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            return []
+        tools: list[str] = []
+        pattern = re.compile(r"@mcp\.tool\(\)\s*(?:\n\s*@[\w.()\"', ]+\s*)*\n\s*def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", re.M)
+        for match in pattern.finditer(text):
+            name = match.group(1)
+            if name not in tools:
+                tools.append(name)
+        return tools
+
+    def _copy_blender_mcp_source(self, source: Path, target: Path, *, force: bool) -> dict[str, Any]:
+        if force and target.exists():
+            self._safe_remove_tree(self.plugin_root, target)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        ignore = shutil.ignore_patterns(".git", "__pycache__", ".venv", "venv", ".mypy_cache", ".pytest_cache")
+        shutil.copytree(source, target, dirs_exist_ok=True, ignore=ignore)
+        return {"source": str(source), "target": str(target), "copied": True}
+
+    def _mcp_install(self, payload: dict[str, Any]) -> dict[str, Any]:
+        force = bool(payload.get("force", False))
+        update = payload.get("update", True) is not False
+        dry_run = bool(payload.get("dry_run", False))
+        timeout = int(payload.get("timeout_seconds") or 900)
+        target = self.blender_mcp_root.resolve(strict=False)
+        addon_target = self._blender_mcp_addon_target().resolve(strict=False)
+        data = self._mcp_status_data(payload)
+        data.update(
+            {
+                "repo_url": BLENDER_MCP_REPO_URL,
+                "target": str(target),
+                "addon_target": str(addon_target),
+                "dry_run": dry_run,
+                "planned_commands": [],
+            }
+        )
+
+        if not self._is_inside(target, self.plugin_root):
+            return self._fail("Refusing to install Blender MCP outside the Blender plugin root.", data)
+        if not self._is_inside(addon_target, self.plugin_root):
+            return self._fail("Refusing to install Blender MCP addon outside the Blender plugin root.", data)
+
+        source = next((candidate for candidate in self._blender_mcp_source_candidates(payload) if self._valid_blender_mcp_source(candidate)), None)
+        if source is not None:
+            data["planned_commands"].append(f"copy {source} -> {target}")
+        elif not self._valid_blender_mcp_source(target):
+            data["planned_commands"].append(f"git clone --depth 1 {BLENDER_MCP_REPO_URL} {target}")
+        if update and self._valid_blender_mcp_source(target) and (target / ".git").exists():
+            data["planned_commands"].append(f"git -C {target} pull --ff-only")
+        data["planned_commands"].append(f"copy addon.py -> {addon_target}")
+        if payload.get("enable_addon", False):
+            data["planned_commands"].append("blender --background --python <enable blender_mcp addon>")
+
+        if dry_run:
+            return self._ok("Blender MCP install dry-run completed.", data)
+
+        if source is not None and (force or update or not self._valid_blender_mcp_source(target)):
+            try:
+                data["copy"] = self._copy_blender_mcp_source(source, target, force=force)
+            except Exception as exc:
+                return self._fail(f"Blender MCP source copy failed: {exc}", data | self._mcp_status_data(payload))
+        elif not self._valid_blender_mcp_source(target):
+            git = self._git_executable()
+            if not git:
+                return self._fail("git was not found on PATH, so Blender MCP cannot be cloned automatically.", data | self._mcp_status_data(payload))
+            try:
+                if force and target.exists():
+                    self._safe_remove_tree(self.plugin_root, target)
+                completed = subprocess.run(
+                    [git, "clone", "--depth", "1", BLENDER_MCP_REPO_URL, str(target)],
+                    cwd=str(self.plugin_root),
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=max(1, timeout),
+                    check=False,
+                )
+            except Exception as exc:
+                return self._fail(str(exc), data | self._mcp_status_data(payload))
+            data["clone"] = {"exit_code": completed.returncode, "stdout": completed.stdout[-4000:], "stderr": completed.stderr[-4000:]}
+            if completed.returncode != 0:
+                return self._fail("Blender MCP clone failed.", data | self._mcp_status_data(payload))
+        elif update and (target / ".git").exists() and self._git_executable():
+            completed = subprocess.run(
+                [self._git_executable(), "-C", str(target), "pull", "--ff-only"],
+                cwd=str(self.plugin_root),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=max(1, timeout),
+                check=False,
+            )
+            data["update"] = {"exit_code": completed.returncode, "stdout": completed.stdout[-4000:], "stderr": completed.stderr[-4000:]}
+            if completed.returncode != 0:
+                return self._fail("Blender MCP update failed.", data | self._mcp_status_data(payload))
+
+        if not self._valid_blender_mcp_source(target):
+            return self._fail("Blender MCP checkout is incomplete after installation.", data | self._mcp_status_data(payload))
+
+        addon_source = target / "addon.py"
+        addon_target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(addon_source, addon_target)
+        data["addon_install"] = {"source": str(addon_source), "target": str(addon_target), "installed": addon_target.exists()}
+
+        if payload.get("enable_addon", False):
+            detection, deploy_result = self._ensure_ready_detection(payload)
+            data["detected"] = detection
+            data["deployment"] = deploy_result
+            if not detection["available"]:
+                return self._fail("Blender MCP installed, but no Blender executable was detected for addon enablement.", data | self._mcp_status_data(payload))
+            data["enable_addon"] = self._enable_blender_mcp_addon(detection["path"], min(timeout, 120))
+            if not data["enable_addon"].get("success"):
+                return self._fail("Blender MCP installed, but Blender could not enable the addon.", data | self._mcp_status_data(payload))
+
+        return self._ok("Blender MCP is installed in the Blender plugin.", data | self._mcp_status_data(payload))
+
+    def _enable_blender_mcp_addon(self, blender_path: Any, timeout_seconds: int = 60) -> dict[str, Any]:
+        script = """
+import addon_utils
+import json
+import traceback
+result = {"success": False, "available": False, "enabled": False, "error": ""}
+try:
+    addon_utils.enable("blender_mcp", default_set=True, persistent=True)
+    available, enabled = addon_utils.check("blender_mcp")
+    result["available"] = bool(available)
+    result["enabled"] = bool(enabled)
+    result["success"] = bool(enabled)
+except Exception as exc:
+    result["error"] = str(exc)
+    result["traceback"] = traceback.format_exc()[-4000:]
+print("REVERIE_BLENDER_MCP_ENABLE=" + json.dumps(result, ensure_ascii=False, sort_keys=True))
+if not result["success"]:
+    raise SystemExit(25)
+""".strip()
+        completed = self._run_blender_python(blender_path, script, timeout_seconds)
+        probe = self._extract_marker_json(f"{completed.get('stdout', '')}\n{completed.get('stderr', '')}", "REVERIE_BLENDER_MCP_ENABLE=")
+        return {
+            "success": bool(completed.get("exit_code") == 0 and probe.get("success")),
+            "probe": probe,
+            "command": completed.get("command", []),
+            "exit_code": completed.get("exit_code"),
+            "stdout": str(completed.get("stdout", ""))[-3000:],
+            "stderr": str(completed.get("stderr", ""))[-3000:],
+        }
+
+    def _normalize_mcp_host_port(self, payload: dict[str, Any] | None = None) -> tuple[str, int]:
+        payload = payload or {}
+        host = str(payload.get("host") or os.environ.get("BLENDER_HOST") or BLENDER_MCP_DEFAULT_HOST).strip() or BLENDER_MCP_DEFAULT_HOST
+        try:
+            port = int(payload.get("port") or os.environ.get("BLENDER_PORT") or BLENDER_MCP_DEFAULT_PORT)
+        except (TypeError, ValueError):
+            port = BLENDER_MCP_DEFAULT_PORT
+        return host, max(1024, min(65535, port))
+
+    def _probe_tcp(self, host: str, port: int, timeout_seconds: float = 0.5) -> bool:
+        try:
+            with socket.create_connection((host, int(port)), timeout=max(0.1, timeout_seconds)):
+                return True
+        except Exception:
+            return False
+
+    def _read_mcp_pid(self) -> dict[str, Any]:
+        if not self.blender_mcp_pid_path.exists():
+            return {}
+        try:
+            payload = json.loads(self.blender_mcp_pid_path.read_text(encoding="utf-8"))
+            return payload if isinstance(payload, dict) else {}
+        except Exception:
+            return {}
+
+    def _pid_running(self, pid: Any) -> bool:
+        try:
+            pid_int = int(pid)
+        except (TypeError, ValueError):
+            return False
+        if pid_int <= 0:
+            return False
+        try:
+            os.kill(pid_int, 0)
+            return True
+        except OSError:
+            return False
+        except Exception:
+            return False
+
+    def _blender_mcp_command(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        host, port = self._normalize_mcp_host_port(payload)
+        uv = shutil.which("uv")
+        env = {"BLENDER_HOST": host, "BLENDER_PORT": str(port)}
+        if uv:
+            return {
+                "server_name": BLENDER_MCP_SERVER_NAME,
+                "command": uv,
+                "args": ["run", "--directory", str(self.blender_mcp_root), "blender-mcp"],
+                "cwd": str(self.blender_mcp_root),
+                "env": env,
+                "transport": "stdio",
+            }
+        source_path = self.blender_mcp_root / "src"
+        env["PYTHONPATH"] = str(source_path)
+        return {
+            "server_name": BLENDER_MCP_SERVER_NAME,
+            "command": sys.executable,
+            "args": ["-m", "blender_mcp.server"],
+            "cwd": str(self.blender_mcp_root),
+            "env": env,
+            "transport": "stdio",
+        }
+
+    def _write_blender_mcp_launcher_script(self, host: str, port: int) -> Path:
+        self.tmp_root.mkdir(parents=True, exist_ok=True)
+        script = f"""
+import importlib
+import json
+import time
+import traceback
+
+result = {{"success": False, "host": {json.dumps(host)}, "port": {int(port)}, "error": ""}}
+try:
+    import addon_utils
+    import bpy
+    addon_utils.enable("blender_mcp", default_set=True, persistent=True)
+    module = importlib.import_module("blender_mcp")
+    if hasattr(bpy.types, "blendermcp_server") and bpy.types.blendermcp_server:
+        try:
+            bpy.types.blendermcp_server.stop()
+        except Exception:
+            pass
+    bpy.types.blendermcp_server = module.BlenderMCPServer(host={json.dumps(host)}, port={int(port)})
+    bpy.types.blendermcp_server.start()
+    bpy.context.scene.blendermcp_port = {int(port)}
+    bpy.context.scene.blendermcp_server_running = True
+    result["success"] = True
+except Exception as exc:
+    result["error"] = str(exc)
+    result["traceback"] = traceback.format_exc()[-4000:]
+print({json.dumps(BLENDER_MCP_START_MARKER)} + json.dumps(result, ensure_ascii=False, sort_keys=True), flush=True)
+if not result["success"]:
+    raise SystemExit(26)
+while True:
+    time.sleep(1.0)
+""".strip()
+        path = self.tmp_root / "reverie_blender_mcp_socket_server.py"
+        path.write_text(script, encoding="utf-8")
+        return path
+
+    def _mcp_start(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if payload.get("auto_install", True) is not False and not self._valid_blender_mcp_source(self.blender_mcp_root):
+            install = self._mcp_install({"force": False, "update": False, "enable_addon": False, "timeout_seconds": payload.get("timeout_seconds")})
+            if not install.get("success"):
+                return self._fail("Blender MCP auto-install failed.", {"install": install, **self._mcp_status_data(payload)})
+        elif not self._valid_blender_mcp_source(self.blender_mcp_root):
+            return self._fail("Blender MCP is not installed. Run mcp_install first.", self._mcp_status_data(payload))
+
+        detection, deploy_result = self._ensure_ready_detection(payload)
+        if not detection["available"]:
+            return self._fail("No Blender executable detected for Blender MCP.", {"detected": detection, "deployment": deploy_result, **self._mcp_status_data(payload)})
+
+        addon_target = self._blender_mcp_addon_target()
+        if not addon_target.exists():
+            install = self._mcp_install({"force": False, "update": False, "enable_addon": False})
+            if not install.get("success"):
+                return self._fail("Blender MCP addon install failed.", {"install": install, **self._mcp_status_data(payload)})
+
+        host, port = self._normalize_mcp_host_port(payload)
+        status = self._mcp_status_data({"host": host, "port": port})
+        if status.get("socket_reachable") and status.get("process_running"):
+            return self._ok("Blender MCP socket server is already running.", status)
+
+        script_path = self._write_blender_mcp_launcher_script(host, port)
+        command = [detection["path"], "--background", "--python", str(script_path)]
+        self.blender_mcp_root.mkdir(parents=True, exist_ok=True)
+        log_handle = self.blender_mcp_log_path.open("a", encoding="utf-8", errors="replace")
+        creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" and hasattr(subprocess, "CREATE_NO_WINDOW") else 0
+        try:
+            process = subprocess.Popen(
+                command,
+                cwd=str(Path(detection["path"]).parent),
+                stdout=log_handle,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                shell=False,
+                env=self._blender_env(),
+                creationflags=creationflags,
+            )
+        except Exception as exc:
+            log_handle.close()
+            return self._fail(str(exc), {"command": command, **self._mcp_status_data({"host": host, "port": port})})
+        finally:
+            try:
+                log_handle.close()
+            except Exception:
+                pass
+
+        pid_payload = {
+            "pid": int(process.pid),
+            "host": host,
+            "port": port,
+            "command": command,
+            "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "log_path": str(self.blender_mcp_log_path),
+        }
+        self.blender_mcp_pid_path.write_text(json.dumps(pid_payload, indent=2), encoding="utf-8")
+
+        timeout = max(2, int(payload.get("timeout_seconds") or 20))
+        reachable = False
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if process.poll() is not None:
+                break
+            if self._probe_tcp(host, port, timeout_seconds=0.4):
+                reachable = True
+                break
+            time.sleep(0.25)
+
+        data = {"detected": detection, "deployment": deploy_result, "pid": int(process.pid), **self._mcp_status_data({"host": host, "port": port})}
+        if reachable:
+            return self._ok("Blender MCP socket server started.", data)
+        return self._fail("Blender MCP process started but the socket did not become reachable before timeout.", data)
+
+    def _mcp_stop(self, payload: dict[str, Any]) -> dict[str, Any]:
+        pid_data = self._read_mcp_pid()
+        pid = pid_data.get("pid")
+        data = {"pid_file": str(self.blender_mcp_pid_path), "pid_data": pid_data}
+        if not pid:
+            return self._ok("No Blender MCP background process is recorded.", data | self._mcp_status_data(payload))
+        try:
+            pid_int = int(pid)
+        except (TypeError, ValueError):
+            return self._fail("Recorded Blender MCP pid is invalid.", data | self._mcp_status_data(payload))
+
+        if os.name == "nt" and bool(payload.get("force", True)):
+            completed = subprocess.run(
+                ["taskkill", "/PID", str(pid_int), "/T", "/F"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=15,
+                check=False,
+            )
+            data["taskkill"] = {"exit_code": completed.returncode, "stdout": completed.stdout[-2000:], "stderr": completed.stderr[-2000:]}
+        else:
+            try:
+                os.kill(pid_int, 15)
+                data["terminated"] = True
+            except Exception as exc:
+                data["terminated"] = False
+                data["error"] = str(exc)
+
+        try:
+            self.blender_mcp_pid_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return self._ok("Blender MCP background process stop requested.", data | self._mcp_status_data(payload))
+
+    def _mcp_status_data(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        host, port = self._normalize_mcp_host_port(payload)
+        pid_data = self._read_mcp_pid()
+        pid = pid_data.get("pid")
+        process_running = self._pid_running(pid)
+        socket_reachable = self._probe_tcp(host, port, timeout_seconds=0.25)
+        command = self._blender_mcp_command({"host": host, "port": port})
+        addon_target = self._blender_mcp_addon_target()
+        return {
+            "repo_url": BLENDER_MCP_REPO_URL,
+            "installed": self._valid_blender_mcp_source(self.blender_mcp_root),
+            "source_dir": str(self.blender_mcp_root),
+            "addon_path": str(addon_target),
+            "addon_installed": addon_target.exists(),
+            "host": host,
+            "port": port,
+            "pid": int(pid) if str(pid or "").isdigit() else None,
+            "pid_file": str(self.blender_mcp_pid_path),
+            "process_running": process_running,
+            "socket_reachable": socket_reachable,
+            "log_path": str(self.blender_mcp_log_path),
+            "mcp": command,
+            "static_tools": self._blender_mcp_tools_static(),
+            "uv_available": bool(shutil.which("uv")),
+            "storage_policy": "plugin-local",
+        }
+
+    def _mcp_status(self, payload: dict[str, Any]) -> dict[str, Any]:
+        data = self._mcp_status_data(payload)
+        if bool(payload.get("probe_tools", False)):
+            data["tools_probe"] = self._probe_mcp_tools_list(payload)
+            data["tools_list_ok"] = bool(data["tools_probe"].get("success") and data["tools_probe"].get("tools"))
+        message = "Blender MCP is installed." if data["installed"] else "Blender MCP is not installed."
+        return self._ok(message, data)
+
+    def _mcp_info(self, payload: dict[str, Any]) -> dict[str, Any]:
+        data = self._mcp_status_data(payload)
+        data["server_name"] = BLENDER_MCP_SERVER_NAME
+        data["command"] = data["mcp"].get("command", "")
+        data["args"] = data["mcp"].get("args", [])
+        data["cwd"] = data["mcp"].get("cwd", "")
+        data["env"] = data["mcp"].get("env", {})
+        data["tools"] = [{"name": name} for name in data.get("static_tools", [])]
+        data["tools_list_ok"] = False
+        if bool(payload.get("probe_tools", False)):
+            probe = self._probe_mcp_tools_list(payload)
+            data["tools_probe"] = probe
+            if probe.get("success") and probe.get("tools"):
+                data["tools"] = probe["tools"]
+                data["tools_list_ok"] = True
+        message = "Blender MCP info is available." if data["installed"] else "Blender MCP is not installed."
+        return self._ok(message, data) if data["installed"] else self._fail(message, data)
+
+    def _probe_mcp_tools_list(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if not self._valid_blender_mcp_source(self.blender_mcp_root):
+            return {"success": False, "error": "Blender MCP is not installed.", "tools": []}
+        command_data = self._blender_mcp_command(payload)
+        timeout = max(3, int(payload.get("timeout_seconds") or 12))
+        env = os.environ.copy()
+        env.update({str(k): str(v) for k, v in command_data.get("env", {}).items()})
+        command = [command_data["command"], *command_data.get("args", [])]
+        try:
+            process = subprocess.Popen(
+                command,
+                cwd=command_data.get("cwd") or str(self.blender_mcp_root),
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=env,
+            )
+        except Exception as exc:
+            return {"success": False, "error": str(exc), "tools": [], "command": command}
+
+        stdout_queue: queue.Queue[str] = queue.Queue()
+        stderr_queue: queue.Queue[str] = queue.Queue()
+
+        def _reader(stream: Any, out_queue: queue.Queue[str]) -> None:
+            try:
+                for line in stream:
+                    out_queue.put(line)
+            except Exception:
+                pass
+
+        threading.Thread(target=_reader, args=(process.stdout, stdout_queue), daemon=True).start()
+        threading.Thread(target=_reader, args=(process.stderr, stderr_queue), daemon=True).start()
+        try:
+            assert process.stdin is not None
+            for message in (
+                {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "reverie-blender-plugin", "version": PLUGIN_VERSION}}},
+                {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+                {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+            ):
+                process.stdin.write(json.dumps(message, separators=(",", ":")) + "\n")
+                process.stdin.flush()
+
+            deadline = time.time() + timeout
+            seen_stdout: list[str] = []
+            while time.time() < deadline:
+                try:
+                    line = stdout_queue.get(timeout=0.15)
+                except queue.Empty:
+                    if process.poll() is not None:
+                        break
+                    continue
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                seen_stdout.append(stripped)
+                if not stripped.startswith("{"):
+                    continue
+                try:
+                    payload_obj = json.loads(stripped)
+                except Exception:
+                    continue
+                if payload_obj.get("id") == 2:
+                    result = payload_obj.get("result") if isinstance(payload_obj, dict) else {}
+                    tools = result.get("tools", []) if isinstance(result, dict) else []
+                    return {"success": bool(tools), "tools": tools if isinstance(tools, list) else [], "command": command, "stdout": seen_stdout[-10:]}
+            stderr_lines: list[str] = []
+            while not stderr_queue.empty() and len(stderr_lines) < 10:
+                stderr_lines.append(stderr_queue.get_nowait().strip())
+            return {"success": False, "error": "tools/list probe timed out or returned no tools", "tools": [], "command": command, "stdout": seen_stdout[-10:], "stderr": stderr_lines}
+        finally:
+            try:
+                process.terminate()
+            except Exception:
+                pass
+            try:
+                process.wait(timeout=3)
+            except Exception:
+                try:
+                    process.kill()
+                except Exception:
+                    pass
 
     def _is_inside(self, path: Path, root: Path) -> bool:
         try:

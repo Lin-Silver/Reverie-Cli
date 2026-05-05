@@ -71,7 +71,7 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
         "command": "/clean",
         "section": "Core",
         "summary": "Delete current-workspace memory, caches, checkpoints, and command audit history, then start fresh.",
-        "detail": "Only the active workspace is affected. Reverie removes the current workspace's cache under the app root at `.reverie/project_caches/<project-key>/` and also cleans legacy workspace-local `.reverie/context_cache` or `.reverie/security` folders when they still exist; config and rules remain intact.",
+        "detail": "Only the active workspace is affected. Reverie removes the current workspace's data under the app root at `.reverie/projects/<project-path-key>/` and also cleans legacy workspace-local `.reverie/context_cache` or `.reverie/security` folders when they still exist; config and rules remain intact.",
         "overview": "reset workspace memory, force",
         "subcommands": [
             {"usage": "/clean", "description": "Prompt for confirmation, then delete current-workspace sessions, caches, checkpoints, and audit logs."},
@@ -280,10 +280,11 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
         "section": "Tools & Context",
         "summary": "Open the MCP control panel or manage MCP servers directly from commands.",
         "detail": "Bare `/mcp` opens an interactive panel similar to `/setting`, with live MCP state, quick toggles, discovery refresh, and server add/remove flows. Reverie now stores MCP settings beside the executable in `.\\.reverie\\mcp.json` using a standard top-level `mcpServers` layout, while still loading legacy `.\\.Reverie\\MCP.json` files for compatibility. `url` follows the legacy SSE transport and `httpUrl` follows streamable HTTP, matching common MCP client conventions. Reverie-Gamer now seeds a built-in `ashfox` MCP server entry automatically.",
-        "overview": "panel/ui, status, reload, add stdio/http/sse, remove, enable, disable, trust, path",
+        "overview": "panel/ui, status/list, reload, add stdio/http/sse, remove, enable, disable, trust, path",
         "subcommands": [
             {"usage": "/mcp", "description": "Open the interactive MCP control panel."},
             {"usage": "/mcp status", "description": "Print a static MCP status table without entering the panel."},
+            {"usage": "/mcp list", "description": "Alias of `/mcp status`; list configured MCP servers and discovered tool counts."},
             {"usage": "/mcp reload", "description": "Reload `.reverie/mcp.json` (or a legacy MCP file) and refresh the discovered MCP catalog."},
             {"usage": "/mcp path", "description": "Show the active MCP configuration file path."},
             {"usage": "/mcp add <name> <command...>", "description": "Add a stdio MCP server, matching Gemini CLI's default add flow."},
@@ -295,7 +296,7 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
             {"usage": "/mcp disable <name>", "description": "Disable a configured MCP server."},
             {"usage": "/mcp trust <name> on|off", "description": "Mark a server as trusted or confirmation-required."},
         ],
-        "examples": ["/mcp", "/mcp add filesystem npx -y @modelcontextprotocol/server-filesystem .", "/mcp add http internal-api http://127.0.0.1:8080/mcp", "/mcp add sse legacy-api http://127.0.0.1:8081/sse", "/mcp trust filesystem on"],
+        "examples": ["/mcp", "/mcp list", "/mcp add filesystem npx -y @modelcontextprotocol/server-filesystem .", "/mcp add http internal-api http://127.0.0.1:8080/mcp", "/mcp add sse legacy-api http://127.0.0.1:8081/sse", "/mcp trust filesystem on"],
     },
     "search": {
         "command": "/search",

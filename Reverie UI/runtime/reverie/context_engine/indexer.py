@@ -325,7 +325,7 @@ class CodebaseIndexer:
                                 self._ignore_patterns.add(f'**/{line}')
             except Exception:
                 pass
-    
+
     def _should_ignore(self, path: Path) -> bool:
         """Check if a path should be ignored"""
         try:

@@ -1,5 +1,6 @@
 from reverie.agent.system_prompt import build_system_prompt
 from reverie.agent.tool_descriptions import get_tool_descriptions_for_mode
+from reverie.agent.tool_executor import ToolExecutor
 from reverie.modes import get_mode_tool_discovery_profile
 
 
@@ -76,8 +77,31 @@ def test_reverie_tool_workflow_comes_from_json_manifest() -> None:
     assert "`web_fetch`" in workflow
     assert "`command_exec`" in workflow
     assert "`task_manager`" in workflow
-    assert "`tool_catalog`" in workflow
-    assert "rc_blender_ensure_runtime" in workflow
+    assert "`blender_modeling_workbench`" in workflow
+    assert "`game_modeling_workbench`" in workflow
+    assert "`tool_catalog`" not in workflow
+    assert "`game_design_orchestrator`" not in workflow
+    assert "`reverie_engine`" not in workflow
+    assert "core Blender/modeling tools directly in Reverie" in workflow
+
+
+def test_reverie_default_tool_surface_keeps_core_modeling_without_runtime_tools(tmp_path) -> None:
+    executor = ToolExecutor(project_root=tmp_path)
+    tool_names = {
+        schema["function"]["name"]
+        for schema in executor.get_tool_schemas(mode="reverie")
+    }
+
+    assert "tool_catalog" not in tool_names
+    assert "blender_modeling_workbench" in tool_names
+    assert "game_modeling_workbench" in tool_names
+    assert "game_design_orchestrator" not in tool_names
+    assert "game_project_scaffolder" not in tool_names
+    assert "reverie_engine" not in tool_names
+    assert "reverie_engine_lite" not in tool_names
+    assert "codebase-retrieval" in tool_names
+    assert "command_exec" in tool_names
+    assert "task_manager" in tool_names
 
 
 def test_shared_coding_guardrails_are_injected_into_all_modes() -> None:

@@ -166,7 +166,7 @@ def test_reverie_gamer_workflow_and_discovery_profile_bias_toward_slice_executio
     assert "reduce scope to the first credible playable slice" in workflow
     assert "game_playtest_lab" in workflow
     assert "continuity artifacts" in str(metadata.get("description", ""))
-    assert "tool_catalog" in profile["boost_tools"]
+    assert "tool_catalog" not in profile["boost_tools"]
     assert "task_manager" in profile["boost_tools"]
     assert "retrieval" in profile["focus_categories"]
     assert "orchestration" in profile["focus_categories"]

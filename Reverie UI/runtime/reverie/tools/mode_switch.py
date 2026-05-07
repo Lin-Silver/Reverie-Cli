@@ -71,13 +71,20 @@ class ModeSwitchTool(BaseTool):
 
     def execute(
         self,
-        operation: str = "switch",
+        operation: str = "",
         mode: str = "",
         reason: str = "",
         query: str = "",
     ) -> ToolResult:
         current_mode = normalize_mode(getattr(self.context.get("agent"), "mode", "reverie"))
-        normalized_operation = str(operation or "").strip().lower() or "switch"
+        normalized_operation = str(operation or "").strip().lower()
+        if not normalized_operation:
+            if str(query or "").strip():
+                normalized_operation = "recommend"
+            elif str(mode or "").strip():
+                normalized_operation = "switch"
+            else:
+                normalized_operation = "list"
 
         if normalized_operation == "list":
             return self._list_modes(current_mode)
@@ -89,12 +96,55 @@ class ModeSwitchTool(BaseTool):
             return self._list_modes(current_mode)
         return self._switch_mode(current_mode, mode, reason)
 
+    def _visible_tool_names_for_mode(self, mode: str) -> list[str]:
+        agent = self.context.get("agent")
+        executor = getattr(agent, "tool_executor", None) if agent is not None else None
+        if executor is None or not callable(getattr(executor, "get_tool_schemas", None)):
+            return []
+
+        names: list[str] = []
+        try:
+            schemas = executor.get_tool_schemas(mode=mode)
+        except Exception:
+            return []
+
+        for schema in schemas or []:
+            if not isinstance(schema, dict):
+                continue
+            function = schema.get("function", {})
+            if not isinstance(function, dict):
+                continue
+            name = str(function.get("name", "") or "").strip()
+            if name and name not in names:
+                names.append(name)
+        return names
+
+    def _primary_tool_names_for_mode(self, mode: str, *, limit: int = 10) -> list[str]:
+        visible = self._visible_tool_names_for_mode(mode)
+        if not visible:
+            return []
+
+        visible_set = set(visible)
+        profile = get_mode_tool_discovery_profile(mode)
+        preferred: list[str] = []
+        for name in profile.get("boost_tools", ()):
+            if name in visible_set and name not in preferred:
+                preferred.append(name)
+        for name in visible:
+            if name == "switch_mode" or name in preferred:
+                continue
+            preferred.append(name)
+        return preferred[: max(1, limit)]
+
     def _list_modes(self, current_mode: str) -> ToolResult:
-        items: list[dict[str, str]] = []
+        items: list[dict[str, Any]] = []
         lines = [f"Available modes (current: {current_mode})"]
         for mode_name in list_modes(include_computer=False, switchable_only=True):
+            primary_tools = self._primary_tool_names_for_mode(mode_name, limit=8)
+            primary_tool_text = ", ".join(primary_tools) if primary_tools else "(tool surface will be shown in the next request)"
             lines.append(
-                f"- {mode_name}: {get_mode_display_name(mode_name)} :: {get_mode_description(mode_name)}"
+                f"- {mode_name}: {get_mode_display_name(mode_name)} :: {get_mode_description(mode_name)}\n"
+                f"  primary tools: {primary_tool_text}"
             )
             items.append(
                 {
@@ -102,6 +152,7 @@ class ModeSwitchTool(BaseTool):
                     "display_name": get_mode_display_name(mode_name),
                     "description": get_mode_description(mode_name),
                     "current": "true" if mode_name == current_mode else "false",
+                    "primary_tools": primary_tools,
                 }
             )
         return ToolResult.ok(
@@ -163,6 +214,7 @@ class ModeSwitchTool(BaseTool):
                 "description": get_mode_description(mode_name),
                 "score": score,
                 "reasons": reasons,
+                "primary_tools": self._primary_tool_names_for_mode(mode_name, limit=8),
             }
             for score, mode_name, reasons in scored[:3]
         ]
@@ -180,7 +232,7 @@ class ModeSwitchTool(BaseTool):
                     "",
                     "Top candidates:",
                     *[
-                        f"- {item['mode']} :: {item['description']} (score={item['score']})"
+                        f"- {item['mode']} :: {item['description']} (score={item['score']}; primary tools={', '.join(item['primary_tools']) or 'n/a'})"
                         for item in top_items
                     ],
                 ]
@@ -209,9 +261,18 @@ class ModeSwitchTool(BaseTool):
             return ToolResult.fail("Agent context is unavailable; cannot switch mode")
 
         if current_mode == normalized_mode:
+            visible_tools = self._visible_tool_names_for_mode(normalized_mode)
+            primary_tools = self._primary_tool_names_for_mode(normalized_mode, limit=12)
             return ToolResult.ok(
-                f"Mode already set to {normalized_mode}.",
-                data={"mode": normalized_mode, "previous_mode": current_mode},
+                f"Mode already set to {normalized_mode}.\n"
+                f"Primary tools: {', '.join(primary_tools) if primary_tools else 'unavailable until the next request'}",
+                data={
+                    "mode": normalized_mode,
+                    "previous_mode": current_mode,
+                    "visible_tools": visible_tools,
+                    "primary_tools": primary_tools,
+                    "tool_surface_changed": False,
+                },
             )
 
         agent.update_mode(normalized_mode)
@@ -229,24 +290,38 @@ class ModeSwitchTool(BaseTool):
             session_manager.save_session(session)
 
         reason_text = f" Reason: {reason.strip()}" if str(reason or "").strip() else ""
+        visible_tools = self._visible_tool_names_for_mode(normalized_mode)
+        primary_tools = self._primary_tool_names_for_mode(normalized_mode, limit=12)
+        tool_text = ", ".join(primary_tools) if primary_tools else "the target mode's schemas will be exposed on the next model request"
         return ToolResult.ok(
             f"Switched mode from {current_mode} to {normalized_mode}.{reason_text}\n"
-            f"New workflow: {get_mode_description(normalized_mode)}",
+            f"New workflow: {get_mode_description(normalized_mode)}\n"
+            f"Primary tools now available: {tool_text}",
             data={
                 "mode": normalized_mode,
                 "previous_mode": current_mode,
                 "reason": str(reason or "").strip(),
+                "visible_tools": visible_tools,
+                "primary_tools": primary_tools,
+                "tool_surface_changed": True,
             },
         )
 
     def get_execution_message(
         self,
-        operation: str = "switch",
+        operation: str = "",
         mode: str = "",
         reason: str = "",
         query: str = "",
     ) -> str:
-        normalized_operation = str(operation or "").strip().lower() or "switch"
+        normalized_operation = str(operation or "").strip().lower()
+        if not normalized_operation:
+            if str(query or "").strip():
+                normalized_operation = "recommend"
+            elif str(mode or "").strip():
+                normalized_operation = "switch"
+            else:
+                normalized_operation = "list"
         if normalized_operation == "list":
             return "Listing available modes"
         if normalized_operation == "recommend":

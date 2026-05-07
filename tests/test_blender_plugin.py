@@ -22,7 +22,7 @@ def test_blender_plugin_exposes_mmd_tools_commands(tmp_path: Path, monkeypatch) 
     handshake = plugin.build_handshake()
     command_names = {item["name"] for item in handshake["commands"]}
 
-    assert handshake["version"] == "0.3.0"
+    assert handshake["version"] == "0.4.0"
     assert "mmd_tools_status" in command_names
     assert "ensure_mmd_tools" in command_names
     assert "import_mmd_model" in command_names

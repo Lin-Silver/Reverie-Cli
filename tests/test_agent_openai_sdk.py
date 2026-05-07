@@ -41,11 +41,11 @@ def _install_fake_openai(monkeypatch, seen: dict):
     monkeypatch.setitem(sys.modules, "openai", fake_module)
 
 
-def test_openai_sdk_client_receives_resolved_provider_timeout(monkeypatch, tmp_path):
+def test_openai_sdk_client_receives_resolved_provider_timeout_when_needed(monkeypatch, tmp_path):
     seen = {}
     _install_fake_openai(monkeypatch, seen)
 
-    ReverieAgent(
+    agent = ReverieAgent(
         base_url="https://integrate.api.nvidia.com/v1",
         api_key="x",
         model="deepseek-ai/deepseek-v4-pro",
@@ -54,17 +54,20 @@ def test_openai_sdk_client_receives_resolved_provider_timeout(monkeypatch, tmp_p
         config=_nvidia_config(),
     )
 
+    assert "init_kwargs" not in seen
+    agent._ensure_client()
+
     assert seen["init_kwargs"]["timeout"] == 23
 
 
-def test_legacy_nvidia_default_timeout_does_not_override_global_timeout(monkeypatch, tmp_path):
+def test_legacy_nvidia_default_timeout_does_not_override_global_timeout_when_needed(monkeypatch, tmp_path):
     seen = {}
     _install_fake_openai(monkeypatch, seen)
     config = _nvidia_config()
     config.api_timeout = 41
     config.nvidia["timeout"] = 300
 
-    ReverieAgent(
+    agent = ReverieAgent(
         base_url="https://integrate.api.nvidia.com/v1",
         api_key="x",
         model="deepseek-ai/deepseek-v4-pro",
@@ -72,6 +75,9 @@ def test_legacy_nvidia_default_timeout_does_not_override_global_timeout(monkeypa
         provider="openai-sdk",
         config=config,
     )
+
+    assert "init_kwargs" not in seen
+    agent._ensure_client()
 
     assert seen["init_kwargs"]["timeout"] == 41
 

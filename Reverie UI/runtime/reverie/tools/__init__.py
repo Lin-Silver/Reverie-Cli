@@ -10,12 +10,11 @@ Tools available to the AI Agent:
 - command_exec: Execute audited workspace commands with move/delete blacklist
 - web_search: Search the web for candidate links
 - web_fetch: Fetch readable content from selected URLs
-- tool_catalog: Search and inspect the currently visible tool surface
+- tool_catalog: CLI-only helper for /tools diagnostics
 - task_manager: Organize complex work
 - subagent: Delegate bounded Reverie-mode work to configured Subagents
 - skill_lookup: Inspect discovered SKILL.md instructions
 - list_mcp_resources/read_mcp_resource: Inspect MCP resources exposed by connected servers
-- nexus: Large-scale project development with 24+ hour support
 - vision_upload: Upload and process visual files for AI analysis
 - count_tokens: Count tokens in text or current conversation
 """
@@ -41,7 +40,6 @@ from .ant_tools import TaskBoundaryTool, NotifyUserTool
 from .novel_context_manager import NovelContextManagerTool
 from .consistency_checker_tool import ConsistencyCheckerTool
 from .plot_analyzer_tool import PlotAnalyzerTool
-from .nexus import NexusTool
 from .game_asset_manager import GameAssetManagerTool
 from .game_balance_analyzer import GameBalanceAnalyzerTool
 from .level_design_tool import LevelDesignTool
@@ -92,7 +90,6 @@ __all__ = [
     "NovelContextManagerTool",
     "ConsistencyCheckerTool",
     "PlotAnalyzerTool",
-    "NexusTool",
     "GameAssetManagerTool",
     "GameBalanceAnalyzerTool",
     "LevelDesignTool",

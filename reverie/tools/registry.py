@@ -178,7 +178,8 @@ def get_supported_modes_for_tool(tool_name: str, *, include_hidden: bool = False
 
 
 def _register_builtin_tools() -> None:
-    reverie_game_modes = ("reverie", "reverie-gamer")
+    reverie_game_modes = ("reverie-gamer",)
+    reverie_modeling_modes = ("reverie", "reverie-gamer")
 
     register_tool_class(CodebaseRetrievalTool)
     register_tool_class(GitCommitRetrievalTool)
@@ -188,7 +189,7 @@ def _register_builtin_tools() -> None:
     register_tool_class(CommandExecTool)
     register_tool_class(WebSearchTool)
     register_tool_class(WebFetchTool)
-    register_tool_class(ToolCatalogTool)
+    register_tool_class(ToolCatalogTool, expose_schema=False)
     register_tool_class(TaskManagerTool, include_modes=("reverie", "reverie-gamer"))
     register_tool_class(SubagentTool, include_modes=("reverie",))
     register_tool_class(ContextManagementTool, expose_schema=False)
@@ -216,8 +217,8 @@ def _register_builtin_tools() -> None:
     register_tool_class(GameDesignOrchestratorTool, include_modes=reverie_game_modes)
     register_tool_class(GameProjectScaffolderTool, include_modes=reverie_game_modes)
     register_tool_class(GamePlaytestLabTool, include_modes=reverie_game_modes)
-    register_tool_class(GameModelingWorkbenchTool, include_modes=reverie_game_modes)
-    register_tool_class(BlenderModelingWorkbenchTool, include_modes=reverie_game_modes)
+    register_tool_class(GameModelingWorkbenchTool, include_modes=reverie_modeling_modes)
+    register_tool_class(BlenderModelingWorkbenchTool, include_modes=reverie_modeling_modes)
     register_tool_class(AtlasDeliveryOrchestratorTool, include_modes=("reverie-atlas",))
     register_tool_class(ReverieEngineTool, include_modes=reverie_game_modes)
     register_tool_class(ReverieEngineLiteTool, include_modes=reverie_game_modes)

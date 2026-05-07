@@ -11,6 +11,16 @@ internal static class WindowsChrome
 
     public static void ApplyDarkTitleBar(IntPtr hwnd)
     {
+        ApplyTitleBar(
+            hwnd,
+            dark: true,
+            captionColor: Color.FromArgb(20, 20, 20),
+            textColor: Color.FromArgb(240, 240, 240)
+        );
+    }
+
+    public static void ApplyTitleBar(IntPtr hwnd, bool dark, Color captionColor, Color textColor)
+    {
         if (!OperatingSystem.IsWindows())
         {
             return;
@@ -18,12 +28,12 @@ internal static class WindowsChrome
 
         try
         {
-            var enabled = 1;
+            var enabled = dark ? 1 : 0;
             DwmSetWindowAttribute(hwnd, DwmwaUseImmersiveDarkMode, ref enabled, sizeof(int));
             DwmSetWindowAttribute(hwnd, DwmwaUseImmersiveDarkModeBefore20h1, ref enabled, sizeof(int));
 
-            var caption = ColorTranslator.ToWin32(Color.FromArgb(20, 20, 20));
-            var text = ColorTranslator.ToWin32(Color.FromArgb(240, 240, 240));
+            var caption = ColorTranslator.ToWin32(captionColor);
+            var text = ColorTranslator.ToWin32(textColor);
             DwmSetWindowAttribute(hwnd, DwmwaCaptionColor, ref caption, sizeof(int));
             DwmSetWindowAttribute(hwnd, DwmwaTextColor, ref text, sizeof(int));
         }

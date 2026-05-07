@@ -33,13 +33,9 @@ class CodebaseRetrievalTool(BaseTool):
     read_only = True
     concurrency_safe = True
     
-    description = """Query the codebase for detailed information about symbols, files, and code structure.
+    description = """Augment-style codebase context tool for symbols, files, search, dependencies, and task worksets.
 
-IMPORTANT: You MUST call this tool before making any code edits to understand:
-- The exact implementation of functions/classes you want to modify
-- Dependencies and relationships between symbols
-- The correct signatures and types
-- Existing patterns in the codebase
+Use this when repository evidence is needed before edits or architectural claims. Prefer `task` for broad requests because it returns a ranked, compact workset instead of flooding the prompt.
 
 Query types:
 - symbol: Get detailed info about a specific function, class, or variable
@@ -162,23 +158,28 @@ Examples:
     
     def _get_retriever(self):
         """Get or create context retriever"""
-        if self._retriever is None and self.context:
-            self._retriever = self.context.get('retriever')
-            if self._retriever is None:
-                ensure_context_engine = self.context.get("ensure_context_engine")
-                if callable(ensure_context_engine):
+        if self.context:
+            ensure_context_engine = self.context.get("ensure_context_engine")
+            if callable(ensure_context_engine):
+                try:
+                    ensure_context_engine(wait_for_index=True)
+                except TypeError:
                     try:
                         ensure_context_engine()
                     except Exception:
                         pass
-                    self._retriever = self.context.get('retriever')
-                    if self._retriever is None:
-                        agent = self.context.get("agent")
-                        tool_executor = getattr(agent, "tool_executor", None) if agent is not None else None
-                        latest_context = getattr(tool_executor, "context", None) if tool_executor is not None else None
-                        if isinstance(latest_context, dict):
-                            self.context.update(latest_context)
-                            self._retriever = latest_context.get("retriever")
+                except Exception:
+                    pass
+
+            latest_context = self.context
+            agent = self.context.get("agent")
+            tool_executor = getattr(agent, "tool_executor", None) if agent is not None else None
+            executor_context = getattr(tool_executor, "context", None) if tool_executor is not None else None
+            if isinstance(executor_context, dict):
+                self.context.update(executor_context)
+                latest_context = executor_context
+
+            self._retriever = latest_context.get("retriever") or self.context.get("retriever") or self._retriever
         return self._retriever
 
     @staticmethod

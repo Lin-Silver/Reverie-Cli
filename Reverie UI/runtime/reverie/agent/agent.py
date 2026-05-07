@@ -1373,6 +1373,11 @@ def make_api_request_with_retry(
         raise
     
     last_error = None
+    try:
+        timeout_value = max(1, int(timeout or 60))
+    except (TypeError, ValueError):
+        timeout_value = 60
+    request_timeout = (min(15, timeout_value), timeout_value)
     for attempt in range(max_retries):
         try:
             logger.debug(f"API request attempt {attempt + 1}/{max_retries}")
@@ -1387,7 +1392,7 @@ def make_api_request_with_retry(
                 headers=request_headers,
                 json=sanitized_payload,
                 stream=stream,
-                timeout=timeout
+                timeout=request_timeout
             )
             
             # Check for HTTP errors
@@ -1416,7 +1421,7 @@ def make_api_request_with_retry(
                         headers=request_headers,
                         json=compatibility_payload,
                         stream=stream,
-                        timeout=timeout,
+                        timeout=request_timeout,
                     )
                     fallback_response.raise_for_status()
                     logger.debug("NVIDIA compatibility fallback succeeded")
@@ -1463,9 +1468,16 @@ def make_api_request_with_retry(
             last_error = e
             logger.warning(f"Request exception on attempt {attempt + 1}: {e}")
         
-        # Exponential backoff
         if attempt < max_retries - 1:
-            backoff = initial_backoff * (2 ** attempt)
+            retry_after = None
+            response = getattr(last_error, "response", None)
+            if response is not None:
+                try:
+                    retry_after = float(response.headers.get("Retry-After", ""))
+                except Exception:
+                    retry_after = None
+            backoff = retry_after if retry_after is not None else initial_backoff * (2 ** attempt)
+            backoff = min(30.0, max(0.1, float(backoff)))
             logger.debug(f"Waiting {backoff}s before retry...")
             time.sleep(backoff)
     
@@ -1549,9 +1561,9 @@ class ReverieAgent:
         else:
             logging.getLogger(__name__).setLevel(logging.WARNING)
         
-        # Initialize client based on provider
+        # Provider clients are initialized lazily on the first actual model call.
         self._client = None
-        self._init_client()
+        self._client_config_key: Optional[tuple[Any, ...]] = None
         
         # Initialize tool executor
         self.tool_executor = ToolExecutor(
@@ -1572,6 +1584,7 @@ class ReverieAgent:
         self._auto_context_compaction_retry_after = 0.0
         self._auto_context_rotation_active = False
         self._auto_context_rotation_retry_after = 0.0
+        self._last_context_safety_signature: Optional[tuple[Any, ...]] = None
         
         # Operation history and rollback support
         self.operation_history = operation_history
@@ -1675,7 +1688,7 @@ class ReverieAgent:
             logging.getLogger(__name__).setLevel(logging.WARNING)
 
         self._client = None
-        self._init_client()
+        self._client_config_key = None
         self._token_estimate_cache_key = None
         self._token_estimate_cache_value = 0
         self._token_estimate_cache_time = 0.0
@@ -1683,6 +1696,7 @@ class ReverieAgent:
         self._auto_context_compaction_retry_after = 0.0
         self._auto_context_rotation_active = False
         self._auto_context_rotation_retry_after = 0.0
+        self._last_context_safety_signature = None
         self.system_prompt = build_system_prompt(
             model_name=self.model_display_name,
             additional_rules=self.additional_rules,
@@ -1692,6 +1706,7 @@ class ReverieAgent:
     
     def _init_client(self) -> None:
         """Initialize client based on provider"""
+        self._client = None
         if self.provider == "openai-sdk":
             try:
                 from openai import OpenAI
@@ -1750,6 +1765,26 @@ class ReverieAgent:
                 f"Unknown provider: {self.provider}. "
                 f"Supported providers: openai-sdk, request, anthropic, gemini-cli, codex"
             )
+        self._client_config_key = self._provider_client_key()
+
+    def _provider_client_key(self) -> tuple[Any, ...]:
+        """Return the settings that define the reusable SDK client."""
+        return (
+            self.provider,
+            self.base_url,
+            self.api_key,
+            self._resolve_provider_timeout(),
+            tuple(sorted((self.custom_headers or {}).items())),
+        )
+
+    def _ensure_client(self) -> Any:
+        """Create the SDK client only when a model call actually needs it."""
+        if self.provider not in {"openai-sdk", "anthropic"}:
+            return None
+        client_key = self._provider_client_key()
+        if self._client is None or self._client_config_key != client_key:
+            self._init_client()
+        return self._client
 
     def _should_use_openai_http_fallback(self) -> bool:
         """
@@ -1891,7 +1926,7 @@ class ReverieAgent:
             except Exception:
                 return timeout_value
 
-        if self.provider == "anthropic" and self._is_active_model_source("modelscope"):
+        if self._is_active_model_source("modelscope") and self.provider in ("openai-sdk", "anthropic"):
             try:
                 cfg = getattr(config, "modelscope", {})
                 if isinstance(cfg, dict):
@@ -2160,15 +2195,42 @@ class ReverieAgent:
         return kwargs
 
     def _create_openai_chat_completion(self, **kwargs: Any) -> Any:
-        """Call OpenAI-compatible chat completions with timeout fallback for older SDKs."""
-        try:
-            return self._client.chat.completions.create(**kwargs)
-        except TypeError as exc:
-            if "timeout" not in kwargs or "timeout" not in str(exc).lower():
-                raise
-            fallback_kwargs = dict(kwargs)
-            fallback_kwargs.pop("timeout", None)
-            return self._client.chat.completions.create(**fallback_kwargs)
+        """Call OpenAI-compatible chat completions with SDK compatibility and transient retries."""
+        attempts = max(1, int(getattr(self, "api_max_retries", 1) or 1))
+        last_error: Optional[Exception] = None
+        call_kwargs = dict(kwargs)
+
+        for attempt in range(attempts):
+            try:
+                client = self._ensure_client()
+                return client.chat.completions.create(**call_kwargs)
+            except TypeError as exc:
+                if "timeout" not in call_kwargs or "timeout" not in str(exc).lower():
+                    raise
+                call_kwargs = dict(call_kwargs)
+                call_kwargs.pop("timeout", None)
+                client = self._ensure_client()
+                return client.chat.completions.create(**call_kwargs)
+            except Exception as exc:
+                last_error = exc
+                status_code = getattr(exc, "status_code", None)
+                if isinstance(status_code, int) and 400 <= status_code < 500 and status_code != 429:
+                    raise
+                if attempt >= attempts - 1 or not _is_recoverable_stream_exception(exc):
+                    raise
+                backoff = min(8.0, float(getattr(self, "api_initial_backoff", 1.0) or 1.0) * (2 ** attempt))
+                logger.warning(
+                    "OpenAI-compatible SDK call failed transiently; retrying in %.1fs (%s/%s): %s",
+                    backoff,
+                    attempt + 1,
+                    attempts,
+                    exc,
+                )
+                time.sleep(backoff)
+
+        if last_error:
+            raise last_error
+        raise RuntimeError("OpenAI-compatible SDK call failed without an exception")
 
     def _openai_sdk_provider_label(self) -> str:
         """Return a user-facing label for OpenAI SDK backed requests."""
@@ -3166,7 +3228,6 @@ class ReverieAgent:
                 "model": self.model,
                 "messages": anthropic_messages,
                 "max_tokens": self._resolve_anthropic_max_tokens(),
-                "stream": True
             }
             
             if system_message:
@@ -3176,7 +3237,8 @@ class ReverieAgent:
                 kwargs["tools"] = anthropic_tools
             
             # Make request
-            with self._client.messages.stream(**kwargs) as stream:
+            client = self._ensure_client()
+            with client.messages.stream(**kwargs) as stream:
                 state = _StreamingTurnState()
 
                 for event in stream:
@@ -3704,7 +3766,8 @@ class ReverieAgent:
                 kwargs["tools"] = anthropic_tools
             
             # Make request
-            response = self._client.messages.create(**kwargs)
+            client = self._ensure_client()
+            response = client.messages.create(**kwargs)
             
             # Extract content
             content_blocks = response.content
@@ -4012,6 +4075,39 @@ class ReverieAgent:
             logger.debug("Workspace memory fetch failed during auto-rotation", exc_info=True)
             return ""
 
+    def _record_compaction_memory(self, compressed_messages: List[Dict[str, Any]], session_id: str) -> None:
+        """Persist the latest compaction memory into the cross-session memory index."""
+        memory_indexer = self.tool_executor.context.get("memory_indexer")
+        if not memory_indexer:
+            return
+        try:
+            from ..context_engine.compressor import MEMORY_BLOCK_END, MEMORY_BLOCK_HEADER
+        except Exception:
+            return
+
+        summary = ""
+        for message in compressed_messages or []:
+            if str(message.get("role", "") or "").strip().lower() != "system":
+                continue
+            content = _coerce_text_fragments(message.get("content"))
+            stripped = content.strip()
+            if not stripped.startswith(MEMORY_BLOCK_HEADER):
+                continue
+            summary = stripped[len(MEMORY_BLOCK_HEADER):].strip()
+            if summary.endswith(MEMORY_BLOCK_END):
+                summary = summary[: -len(MEMORY_BLOCK_END)].strip()
+        if not summary:
+            return
+
+        try:
+            memory_indexer.set_session_summary(
+                str(session_id or "default"),
+                f"Compaction memory: {summary[:1800]}",
+            )
+            memory_indexer.refresh_session(str(session_id or "default"))
+        except Exception:
+            logger.debug("Failed to persist compaction memory summary", exc_info=True)
+
     def _handle_context_compaction(
         self,
         current_tokens: int,
@@ -4031,7 +4127,7 @@ class ReverieAgent:
         project_data_dir = self.tool_executor.context.get("project_data_dir")
         cache_dir = Path(project_data_dir) if project_data_dir else get_project_data_dir(Path(project_root))
         request_messages = self._build_messages()
-        client = self._client if self.provider in {"openai-sdk", "anthropic"} else None
+        client = self._ensure_client() if self.provider in {"openai-sdk", "anthropic"} else None
 
         self._auto_context_compaction_active = True
         try:
@@ -4061,6 +4157,7 @@ class ReverieAgent:
             if new_history and new_history != self.messages:
                 self.messages = new_history
                 self._persist_history_to_session()
+                self._record_compaction_memory(compressed_messages, session_id)
                 self._auto_context_compaction_retry_after = 0.0
             else:
                 self._auto_context_compaction_retry_after = time.time() + 30.0
@@ -4068,6 +4165,38 @@ class ReverieAgent:
             return self.get_token_estimate()
         finally:
             self._auto_context_compaction_active = False
+
+    def _context_safety_signature(self) -> tuple[Any, ...]:
+        """Cheap signature used to avoid repeated context scans for the same state."""
+        return self._token_estimate_signature()
+
+    def _quick_context_char_estimate(self) -> int:
+        """Fast lower-cost estimate for deciding whether a full token count is needed."""
+        total = len(str(getattr(self, "system_prompt", "") or ""))
+        for message in self.messages if isinstance(self.messages, list) else []:
+            if not isinstance(message, dict):
+                total += len(str(message))
+                continue
+            total += len(_coerce_text_fragments(message.get("content")))
+            total += len(_coerce_text_fragments(message.get("reasoning_content")))
+            tool_calls = message.get("tool_calls")
+            if isinstance(tool_calls, list) and tool_calls:
+                total += min(16000, len(str(tool_calls)))
+        return total
+
+    def _should_run_context_safety_check(self, max_tokens: int) -> bool:
+        """Return whether this turn is large enough to justify compaction checks."""
+        signature = self._context_safety_signature()
+        if self._last_context_safety_signature == signature:
+            return False
+
+        message_count = len(self.messages) if isinstance(self.messages, list) else 0
+        quick_tokens = self._quick_context_char_estimate() // 4
+        if message_count < 16 and quick_tokens < max(12000, int(max_tokens * 0.45)):
+            self._last_context_safety_signature = signature
+            return False
+
+        return True
     
     def _check_and_compress_context(self, session_id: str = "default") -> None:
         """
@@ -4083,8 +4212,11 @@ class ReverieAgent:
         max_tokens = self._resolve_max_context_tokens()
         if max_tokens <= 0:
             return
+        if not self._should_run_context_safety_check(max_tokens):
+            return
 
         token_estimate = self.get_token_estimate()
+        self._last_context_safety_signature = self._context_safety_signature()
         compaction_threshold = max_tokens * 0.7
         rotation_threshold = max_tokens * 0.82
 
@@ -4120,7 +4252,7 @@ class ReverieAgent:
             try:
                 handoff = build_session_handoff_packet(
                     messages=self._build_messages(),
-                    client=self._client,
+                    client=self._ensure_client() if self.provider in {"openai-sdk", "anthropic"} else None,
                     model=self.model,
                     provider=self.provider,
                     session_id=session_id,

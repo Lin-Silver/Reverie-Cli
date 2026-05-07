@@ -7,7 +7,7 @@ from pathlib import Path
 
 from reverie.config import Config
 from reverie.plugin.runtime_manager import RuntimePluginManager
-from reverie.sdk_bridge import ReverieUiBridge
+from reverie.sdk_bridge import ReverieUiBridge, normalize_jsonl_input
 from reverie.session.manager import SessionManager
 from reverie.settings_catalog import apply_setting_value, get_setting_items
 
@@ -76,6 +76,34 @@ def test_shared_settings_catalog_and_apply_setting_value() -> None:
     assert ok, message
     assert rules.get_rules() == ["Use tests", "Keep changes scoped"]
     assert reinit is True
+
+
+def test_reverie_ui_exposes_reverie_light_dark_theme_and_shortcuts() -> None:
+    ui_root = Path(__file__).resolve().parents[1] / "Reverie UI" / "src" / "Reverie.UI"
+    html = (ui_root / "wwwroot" / "index.html").read_text(encoding="utf-8")
+    css = (ui_root / "wwwroot" / "styles.css").read_text(encoding="utf-8")
+    js = (ui_root / "wwwroot" / "app.js").read_text(encoding="utf-8")
+
+    assert 'value="reverie-dark"' in html
+    assert 'value="reverie-light"' in html
+    assert 'class="shortcut-grid"' in html
+    assert ':root[data-theme="reverie"][data-appearance="dark"]' in css
+    assert ':root[data-theme="reverie"][data-appearance="light"]' in css
+    assert "--accent: #ff8fc7" in css
+    assert "--accent: #db4f9b" in css
+    assert "function applyTheme" in js
+    assert "setHostTheme" in js
+    assert "event.shiftKey && key === \"t\"" in js
+
+
+def test_sdk_bridge_accepts_bom_prefixed_jsonl_frames() -> None:
+    raw = "\ufeff{\"id\":\"init\",\"action\":\"initialize\",\"payload\":{}}\n"
+    mojibake_raw = "\xef\xbb\xbf{\"id\":\"init\",\"action\":\"initialize\",\"payload\":{}}\n"
+
+    assert normalize_jsonl_input(raw).startswith("{")
+    assert json.loads(normalize_jsonl_input(raw))["action"] == "initialize"
+    assert normalize_jsonl_input(mojibake_raw).startswith("{")
+    assert json.loads(normalize_jsonl_input(mojibake_raw))["action"] == "initialize"
 
 
 def test_remote_plugin_manifest_can_be_inferred_from_release_assets() -> None:

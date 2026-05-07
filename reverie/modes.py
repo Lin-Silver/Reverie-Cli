@@ -13,7 +13,7 @@ from typing import Any, Dict, List
 MODE_METADATA: Dict[str, Dict[str, object]] = {
     "reverie": {
         "display_name": "Reverie",
-        "description": "Full-spectrum Ultra Agentic mode that uses Context Engine plus the complete visible tool surface for software, automation, runtime, and end-to-end delivery.",
+        "description": "General coding and automation mode with Context Engine retrieval, core workspace tools, and direct Blender/3D modeling capability without the full game-runtime surface.",
         "switchable": True,
     },
     "reverie-atlas": {
@@ -105,8 +105,6 @@ MODE_TOOL_DISCOVERY_PROFILES: Dict[str, Dict[str, tuple[str, ...]]] = {
             "workspace",
             "context",
             "coordination",
-            "game-design",
-            "game-runtime",
             "game-modeling",
         ),
         "boost_tools": (
@@ -115,15 +113,11 @@ MODE_TOOL_DISCOVERY_PROFILES: Dict[str, Dict[str, tuple[str, ...]]] = {
             "str_replace_editor",
             "file_ops",
             "command_exec",
-            "tool_catalog",
-            "game_design_orchestrator",
-            "game_project_scaffolder",
-            "reverie_engine",
-            "reverie_engine_lite",
-            "game_modeling_workbench",
             "blender_modeling_workbench",
+            "game_modeling_workbench",
         ),
         "domain_tokens": (
+            "3d",
             "asset",
             "blender",
             "bug",
@@ -135,7 +129,11 @@ MODE_TOOL_DISCOVERY_PROFILES: Dict[str, Dict[str, tuple[str, ...]]] = {
             "fix",
             "function",
             "game",
+            "glb",
+            "gltf",
             "godot",
+            "mesh",
+            "model",
             "modeling",
             "repo",
             "repository",
@@ -145,7 +143,7 @@ MODE_TOOL_DISCOVERY_PROFILES: Dict[str, Dict[str, tuple[str, ...]]] = {
             "verify",
             "workspace",
         ),
-        "deemphasize_categories": ("writer", "atlas", "desktop"),
+        "deemphasize_categories": ("writer", "atlas", "desktop", "game-design", "game-runtime", "game-scaffold", "game-playtest", "game-data"),
     },
     "reverie-atlas": {
         "focus_categories": ("atlas", "retrieval", "workspace", "context", "planning"),
@@ -154,7 +152,6 @@ MODE_TOOL_DISCOVERY_PROFILES: Dict[str, Dict[str, tuple[str, ...]]] = {
             "codebase-retrieval",
             "create_file",
             "command_exec",
-            "tool_catalog",
         ),
         "domain_tokens": (
             "appendix",
@@ -188,7 +185,6 @@ MODE_TOOL_DISCOVERY_PROFILES: Dict[str, Dict[str, tuple[str, ...]]] = {
             "image-generation",
         ),
         "boost_tools": (
-            "tool_catalog",
             "task_manager",
             "game_design_orchestrator",
             "game_project_scaffolder",
@@ -261,7 +257,6 @@ MODE_TOOL_DISCOVERY_PROFILES: Dict[str, Dict[str, tuple[str, ...]]] = {
             "task_manager",
             "codebase-retrieval",
             "command_exec",
-            "tool_catalog",
         ),
         "domain_tokens": (
             "artifact",
@@ -284,7 +279,6 @@ MODE_TOOL_DISCOVERY_PROFILES: Dict[str, Dict[str, tuple[str, ...]]] = {
             "create_file",
             "str_replace_editor",
             "command_exec",
-            "tool_catalog",
         ),
         "domain_tokens": (
             "acceptance",
@@ -305,7 +299,6 @@ MODE_TOOL_DISCOVERY_PROFILES: Dict[str, Dict[str, tuple[str, ...]]] = {
             "str_replace_editor",
             "create_file",
             "command_exec",
-            "tool_catalog",
         ),
         "domain_tokens": ("approved", "execute", "implement", "refine", "ship", "spec", "wire"),
         "deemphasize_categories": ("game-design", "writer", "desktop"),
@@ -318,7 +311,6 @@ MODE_TOOL_DISCOVERY_PROFILES: Dict[str, Dict[str, tuple[str, ...]]] = {
             "userInput",
             "consistency_checker",
             "plot_analyzer",
-            "tool_catalog",
         ),
         "domain_tokens": (
             "arc",
@@ -344,7 +336,7 @@ MODE_TOOL_DISCOVERY_PROFILES: Dict[str, Dict[str, tuple[str, ...]]] = {
     },
     "computer-controller": {
         "focus_categories": ("desktop", "vision", "coordination"),
-        "boost_tools": ("computer_control", "vision_upload", "tool_catalog"),
+        "boost_tools": ("computer_control", "vision_upload"),
         "domain_tokens": (
             "app",
             "browser",

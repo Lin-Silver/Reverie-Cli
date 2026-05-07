@@ -2,11 +2,10 @@
   "schema_version": 1,
   "description": "Prompt-facing tool manifest. Runtime schemas remain authoritative; this file tells each mode which tools to emphasize and how to call them.",
   "discovery_rules": [
-    "If the right tool or exact schema is unclear, call `tool_catalog(operation=\"search\", query=\"...\")`.",
-    "Use `tool_catalog(operation=\"inspect\", tool_name=\"...\")` before first use of unfamiliar, dynamic, or high-impact tools.",
+    "The active tool schemas are already visible in this request; choose directly from them instead of calling a catalog tool.",
     "Use `skill_lookup` only when a discovered `SKILL.md` materially changes the workflow.",
-    "Use `list_mcp_resources` and `read_mcp_resource` for MCP resources; inspect dynamic `mcp_*` tools through `tool_catalog`.",
-    "Dynamic runtime-plugin tools such as `rc_*` may appear at startup; inspect them before first use."
+    "Use `list_mcp_resources` and `read_mcp_resource` for MCP resources.",
+    "Dynamic runtime-plugin tools such as `rc_*` may appear at startup; use their submitted schemas exactly."
   ],
   "calling_rules": [
     "Use exact tool names and exact schema field names.",
@@ -21,6 +20,8 @@
       "workflow": [
         "General-purpose execution loop: understand the goal, gather evidence, choose the best available method, implement, verify, and report.",
         "Use local repository tools for code and filesystem facts. Use web tools for current external information. Use command tools for scripts, builds, downloads, tests, and smoke checks.",
+        "Use core Blender/modeling tools directly in Reverie for 3D model creation, GLB/GLTF export planning, asset audits, and modeling workbench tasks.",
+        "For full game-production requests, playable vertical slices, balance/playtest loops, or built-in Reverie Engine work, switch to `reverie-gamer` instead of carrying the full game runtime surface in default mode.",
         "If a task is broad, continue through safe research, implementation, repair, and verification until the requested outcome is actually delivered or a real blocker remains.",
         "Switch modes only when another mode provides materially better workflow, artifacts, or continuity."
       ],
@@ -34,7 +35,6 @@
         "command_exec",
         "web_search",
         "web_fetch",
-        "tool_catalog",
         "skill_lookup",
         "list_mcp_resources",
         "read_mcp_resource",
@@ -45,22 +45,8 @@
         "subagent",
         "userInput",
         "switch_mode",
-        "game_design_orchestrator",
-        "game_project_scaffolder",
-        "reverie_engine",
-        "reverie_engine_lite",
-        "game_playtest_lab",
         "game_modeling_workbench",
-        "blender_modeling_workbench",
-        "game_asset_manager",
-        "game_balance_analyzer",
-        "level_design",
-        "game_config_editor",
-        "game_asset_packer",
-        "game_gdd_manager",
-        "story_design",
-        "game_math_simulator",
-        "game_stats_analyzer"
+        "blender_modeling_workbench"
       ]
     },
     "reverie-gamer": {
@@ -81,7 +67,6 @@
         "command_exec",
         "web_search",
         "web_fetch",
-        "tool_catalog",
         "skill_lookup",
         "list_mcp_resources",
         "read_mcp_resource",
@@ -126,7 +111,6 @@
         "command_exec",
         "web_search",
         "web_fetch",
-        "tool_catalog",
         "skill_lookup",
         "list_mcp_resources",
         "read_mcp_resource",
@@ -154,7 +138,6 @@
         "command_exec",
         "web_search",
         "web_fetch",
-        "tool_catalog",
         "skill_lookup",
         "list_mcp_resources",
         "read_mcp_resource",
@@ -181,7 +164,6 @@
         "command_exec",
         "web_search",
         "web_fetch",
-        "tool_catalog",
         "skill_lookup",
         "list_mcp_resources",
         "read_mcp_resource",
@@ -209,7 +191,6 @@
         "command_exec",
         "web_search",
         "web_fetch",
-        "tool_catalog",
         "skill_lookup",
         "list_mcp_resources",
         "read_mcp_resource",
@@ -240,7 +221,6 @@
         "command_exec",
         "web_search",
         "web_fetch",
-        "tool_catalog",
         "skill_lookup",
         "list_mcp_resources",
         "read_mcp_resource",
@@ -269,7 +249,6 @@
         "command_exec",
         "web_search",
         "web_fetch",
-        "tool_catalog",
         "skill_lookup",
         "list_mcp_resources",
         "read_mcp_resource",
@@ -398,20 +377,6 @@
         "web_fetch(url=\"https://docs.example.com/api/\", output_format=\"markdown\")"
       ]
     },
-    "tool_catalog": {
-      "purpose": "List, search, inspect, recommend, or group visible tools.",
-      "use_when": "The right tool or exact schema is unclear.",
-      "parameters": {
-        "operation": "list, search, inspect, recommend, or groups.",
-        "query": "Search/recommend text.",
-        "tool_name": "Tool to inspect.",
-        "mode": "Optional mode.",
-        "max_results": "Optional result limit."
-      },
-      "examples": [
-        "tool_catalog(operation=\"inspect\", tool_name=\"command_exec\")"
-      ]
-    },
     "skill_lookup": {
       "purpose": "Inspect discovered Codex-style SKILL.md instructions.",
       "use_when": "A skill may materially change the workflow.",
@@ -523,13 +488,15 @@
     },
     "switch_mode": {
       "purpose": "Switch to another workflow mode.",
-      "use_when": "Another mode materially improves artifacts, continuity, or control.",
+      "use_when": "Another mode materially improves artifacts, continuity, control, or access to a specialized tool surface.",
       "parameters": {
         "mode": "Target mode.",
         "reason": "Concrete reason for switching.",
-        "operation": "Optional list or recommend."
+        "operation": "Optional switch, list, or recommend.",
+        "query": "Optional task description for recommendation."
       },
       "examples": [
+        "switch_mode(operation=\"recommend\", query=\"build a playable Godot combat prototype\")",
         "switch_mode(mode=\"reverie-gamer\", reason=\"dedicated game production workflow\")"
       ]
     },
@@ -849,12 +816,12 @@
     {
       "pattern": "mcp_*",
       "purpose": "Tools discovered from configured MCP servers.",
-      "calling_method": "Inspect with `tool_catalog(operation=\"inspect\", tool_name=\"mcp_server_tool\")` before use."
+      "calling_method": "Use the submitted schema exactly before use."
     },
     {
       "pattern": "rc_*",
       "purpose": "Runtime-plugin tools discovered from protocol-ready plugins.",
-      "calling_method": "Inspect with `tool_catalog` before use; common examples include rc_blender_ensure_runtime and rc_blender_run_script."
+      "calling_method": "Use the submitted schema exactly; common examples include rc_blender_ensure_runtime and rc_blender_run_script."
     }
   ]
 }

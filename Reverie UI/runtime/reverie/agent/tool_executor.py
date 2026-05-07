@@ -357,10 +357,7 @@ class ToolExecutor:
         lines = [f"Unknown tool: {tool_name}."]
         if suggestions:
             lines.append(f"Did you mean: {', '.join(suggestions)}?")
-        lines.append(
-            "If the exact tool is unclear, inspect the live tool surface with "
-            "tool_catalog(operation=\"search\", query=\"...\")."
-        )
+        lines.append("Use one of the tool schemas included in the current request.")
         return ToolResult.fail(" ".join(lines))
 
     def _tool_result_dir(self) -> Path:

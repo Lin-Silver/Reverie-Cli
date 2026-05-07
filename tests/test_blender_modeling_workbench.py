@@ -377,7 +377,7 @@ def test_blender_repair_loop_records_blocked_attempt_without_blender(tmp_path: P
     assert Path(report["repair_report_path"]).exists()
 
 
-def test_blender_tool_is_visible_and_prompted_in_reverie_and_gamer(tmp_path: Path) -> None:
+def test_blender_tool_is_visible_in_reverie_and_gamer_without_engine_surface(tmp_path: Path) -> None:
     executor = ToolExecutor(project_root=tmp_path)
 
     reverie_names = {item["function"]["name"] for item in executor.get_tool_schemas(mode="reverie")}
@@ -386,9 +386,13 @@ def test_blender_tool_is_visible_and_prompted_in_reverie_and_gamer(tmp_path: Pat
     gamer_prompt = get_tool_descriptions_for_mode("reverie-gamer")
 
     assert "blender_modeling_workbench" in reverie_names
+    assert "game_modeling_workbench" in reverie_names
+    assert "reverie_engine" not in reverie_names
+    assert "reverie_engine_lite" not in reverie_names
     assert "blender_modeling_workbench" in gamer_names
-    assert "rc_blender_ensure_runtime" in reverie_prompt
-    assert "black-box iteration plan" in reverie_prompt
+    assert "rc_blender_ensure_runtime" in gamer_prompt
+    assert "black-box iteration plan" in gamer_prompt
+    assert "Blender DCC control" in reverie_prompt
     assert "Blender DCC control" in gamer_prompt
     assert "game_models" in gamer_prompt
 

@@ -21,6 +21,7 @@ const state = {
   selectedPluginId: "",
   selectedBuiltinSource: "",
   pluginProgress: {},
+  theme: loadThemePreference(),
   recentProjects: loadRecentProjects()
 };
 
@@ -42,6 +43,7 @@ const el = {
   bridgeStatusPill: $("bridgeStatusPill"),
   gitStatusPill: $("gitStatusPill"),
   configStatusPill: $("configStatusPill"),
+  themeSelect: $("themeSelect"),
   indexButton: $("indexButton"),
   diagnosticsButton: $("diagnosticsButton"),
   gitRefreshButton: $("gitRefreshButton"),
@@ -109,6 +111,41 @@ function loadRecentProjects() {
   } catch {
     return [];
   }
+}
+
+function loadThemePreference() {
+  const fallback = { name: "reverie-dark", theme: "reverie", appearance: "dark" };
+  try {
+    const saved = localStorage.getItem("reverie.uiTheme") || "";
+    if (saved) return normalizeThemePreference(saved);
+  } catch {
+  }
+  return fallback;
+}
+
+function normalizeThemePreference(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "reverie-light") {
+    return { name: "reverie-light", theme: "reverie", appearance: "light" };
+  }
+  if (normalized === "classic-dark") {
+    return { name: "classic-dark", theme: "classic", appearance: "dark" };
+  }
+  return { name: "reverie-dark", theme: "reverie", appearance: "dark" };
+}
+
+function applyTheme(value = state.theme.name, persist = true) {
+  state.theme = normalizeThemePreference(value);
+  document.documentElement.dataset.theme = state.theme.theme;
+  document.documentElement.dataset.appearance = state.theme.appearance;
+  if (el.themeSelect) el.themeSelect.value = state.theme.name;
+  if (persist) {
+    localStorage.setItem("reverie.uiTheme", state.theme.name);
+  }
+  send("setHostTheme", {
+    theme: state.theme.theme,
+    appearance: state.theme.appearance
+  });
 }
 
 function rememberProject(path) {
@@ -1091,6 +1128,7 @@ el.workspaceApply.addEventListener("click", () => {
 
 el.modeSelect.addEventListener("change", () => send("setMode", { mode: el.modeSelect.value }));
 el.thinkingStyleSelect.addEventListener("change", () => send("setSetting", { key: "thinking_output_style", value: el.thinkingStyleSelect.value }));
+el.themeSelect.addEventListener("change", () => applyTheme(el.themeSelect.value));
 
 el.newSessionButton.addEventListener("click", () => {
   el.messageList.replaceChildren();
@@ -1194,6 +1232,38 @@ el.messageInput.addEventListener("keydown", event => {
   }
 });
 
+document.addEventListener("keydown", event => {
+  const key = String(event.key || "").toLowerCase();
+  const command = event.ctrlKey || event.metaKey;
+  if (command && key === "k") {
+    event.preventDefault();
+    el.messageInput.focus();
+    return;
+  }
+  if (command && key === "l") {
+    event.preventDefault();
+    el.workspaceInput.focus();
+    el.workspaceInput.select();
+    return;
+  }
+  if (command && event.shiftKey && key === "t") {
+    event.preventDefault();
+    const themes = ["classic-dark", "reverie-dark", "reverie-light"];
+    const next = themes[(themes.indexOf(state.theme.name) + 1) % themes.length];
+    applyTheme(next);
+    return;
+  }
+  if (command && ["1", "2", "3"].includes(key)) {
+    event.preventDefault();
+    activateView({ "1": "chat", "2": "plugins", "3": "settings" }[key]);
+    return;
+  }
+  if (event.altKey && ["1", "2", "3", "4"].includes(key)) {
+    event.preventDefault();
+    activateTab({ "1": "context", "2": "models", "3": "tools", "4": "git" }[key]);
+  }
+});
+
 document.querySelectorAll(".suggestion").forEach(button => {
   button.addEventListener("click", () => {
     el.messageInput.value = button.textContent.trim();
@@ -1204,5 +1274,6 @@ document.querySelectorAll(".suggestion").forEach(button => {
 window.chrome.webview.addEventListener("message", event => handleBridgeMessage(event.data || {}));
 
 setupShellResizers();
+applyTheme(state.theme.name, false);
 updateEmptyState();
 send("hostInfo");

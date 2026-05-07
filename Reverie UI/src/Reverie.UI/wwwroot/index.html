@@ -52,6 +52,13 @@
           <div id="modelStatus" class="topbar-subtitle">No model loaded</div>
         </div>
         <div class="topbar-actions">
+          <label class="theme-switcher" aria-label="Theme">
+            <select id="themeSelect" class="theme-select">
+              <option value="classic-dark">Classic Dark</option>
+              <option value="reverie-dark">Reverie Dark</option>
+              <option value="reverie-light">Reverie Light</option>
+            </select>
+          </label>
           <button id="indexButton" class="toolbar-button" type="button">Index</button>
           <button id="diagnosticsButton" class="toolbar-button" type="button">Doctor</button>
           <button id="gitRefreshButton" class="toolbar-button" type="button">Git</button>
@@ -71,6 +78,24 @@
             <div class="empty-inner">
               <h1>What should we build in Reverie?</h1>
               <p>Use the composer below to inspect code, edit files, run tools, index context, manage sessions, or configure models.</p>
+              <div class="shortcut-grid" aria-label="Keyboard shortcuts">
+                <div class="shortcut-card">
+                  <div class="shortcut-keys"><kbd>Ctrl</kbd> <kbd>Enter</kbd></div>
+                  <div class="shortcut-label">Send message</div>
+                </div>
+                <div class="shortcut-card">
+                  <div class="shortcut-keys"><kbd>Ctrl</kbd> <kbd>K</kbd></div>
+                  <div class="shortcut-label">Focus composer</div>
+                </div>
+                <div class="shortcut-card">
+                  <div class="shortcut-keys"><kbd>Ctrl</kbd> <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></div>
+                  <div class="shortcut-label">Switch main views</div>
+                </div>
+                <div class="shortcut-card">
+                  <div class="shortcut-keys"><kbd>Alt</kbd> <kbd>1</kbd> - <kbd>4</kbd></div>
+                  <div class="shortcut-label">Switch inspector tabs</div>
+                </div>
+              </div>
             </div>
           </section>
 
@@ -99,6 +124,10 @@
                     <option value="full">Full</option>
                   </select>
                 </label>
+                <div class="shortcut-hints" aria-label="Composer shortcuts">
+                  <span><kbd>Ctrl</kbd> <kbd>Enter</kbd> send</span>
+                  <span><kbd>Ctrl</kbd> <kbd>K</kbd> focus</span>
+                </div>
               </div>
               <div class="composer-submit">
                 <span id="turnStatus" class="turn-status">Ready</span>

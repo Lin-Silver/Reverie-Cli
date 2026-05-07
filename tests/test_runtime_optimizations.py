@@ -17,10 +17,12 @@ from reverie.agent.agent import (
 )
 from reverie.cli.display import DisplayComponents
 from reverie.cli.interface import ReverieInterface, _load_task_drawer_snapshot
+from reverie.context_engine.dependency_graph import DependencyGraph
 from reverie.context_engine.parsers.python_parser import PythonParser
 from reverie.context_engine.symbol_table import Symbol, SymbolKind, SymbolTable
 from reverie.gamer import reference_intelligence as gamer_reference_intelligence
 from reverie.sse import iter_sse_data_strings
+from reverie.tools.codebase_retrieval import CodebaseRetrievalTool
 from reverie.tools.command_exec import CommandExecTool
 from reverie.tools.web_search import WebFetchTool, WebSearchTool
 
@@ -521,6 +523,92 @@ def test_context_engine_cold_index_runs_in_background() -> None:
     assert "full_index" in calls
     assert "refresh" in calls
     assert "sync" in calls
+
+
+def test_silent_context_engine_init_starts_background_without_activity(monkeypatch) -> None:
+    calls: list[str] = []
+
+    class FakeIndexer:
+        def __init__(self, project_root, cache_dir=None):
+            self.project_root = project_root
+            self.cache_dir = cache_dir
+            self.symbol_table = SymbolTable()
+            self.dependency_graph = DependencyGraph()
+            self._file_info = {}
+
+        def load_cache(self):
+            calls.append("load_cache")
+            return False
+
+    monkeypatch.setattr("reverie.cli.interface.CodebaseIndexer", FakeIndexer)
+
+    interface = ReverieInterface.__new__(ReverieInterface)
+    interface.project_root = Path.cwd()
+    interface.project_data_dir = Path.cwd()
+    interface.git_integration = None
+    interface.memory_indexer = None
+    interface.agent = None
+    interface.indexer = None
+    interface.retriever = None
+    interface._context_engine_ready = False
+    interface._indexing_thread = None
+    interface._indexing_in_progress = False
+    interface._context_engine_init_lock = threading.RLock()
+    interface._load_active_runtime_config = lambda: type("FakeConfig", (), {"auto_index": True})()
+    interface._show_activity_event = lambda *args, **kwargs: calls.append("activity")
+    interface._start_context_indexing_background = lambda: calls.append("start_background") or True
+    interface._refresh_command_context = lambda: calls.append("refresh")
+
+    interface._init_context_engine_with_options(announce=False)
+
+    assert "load_cache" in calls
+    assert "start_background" in calls
+    assert "activity" not in calls
+    assert interface.retriever is not None
+
+
+def test_context_engine_warmup_runs_beside_model_turn() -> None:
+    calls: list[dict] = []
+
+    interface = ReverieInterface.__new__(ReverieInterface)
+    interface.indexer = None
+    interface.retriever = None
+    interface._context_engine_ready = False
+    interface._context_engine_warmup_thread = None
+    interface._load_active_runtime_config = lambda: type("FakeConfig", (), {"auto_index": True})()
+
+    def fake_ensure_context_engine(**kwargs):
+        calls.append(kwargs)
+        return True
+
+    interface.ensure_context_engine = fake_ensure_context_engine
+    interface._show_activity_event = lambda *args, **kwargs: calls.append({"activity": True})
+
+    started = interface._prime_context_engine_background()
+
+    assert started is True
+    assert interface._context_engine_warmup_thread is not None
+    interface._context_engine_warmup_thread.join(timeout=2)
+    assert calls == [{"announce": False, "wait_for_index": False}]
+
+
+def test_codebase_retrieval_waits_for_background_index_when_invoked() -> None:
+    calls: list[dict] = []
+    retriever = object()
+
+    def fake_ensure_context_engine(**kwargs):
+        calls.append(kwargs)
+        return True
+
+    tool = CodebaseRetrievalTool(
+        {
+            "retriever": retriever,
+            "ensure_context_engine": fake_ensure_context_engine,
+        }
+    )
+
+    assert tool._get_retriever() is retriever
+    assert calls == [{"wait_for_index": True}]
 
 
 def test_streaming_footer_ticker_forces_timer_refresh() -> None:

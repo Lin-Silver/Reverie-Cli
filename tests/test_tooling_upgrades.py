@@ -249,6 +249,35 @@ def test_mode_switch_lists_recommends_and_switches(tmp_path: Path) -> None:
     assert agent.mode == "writer"
 
 
+def test_mode_switch_surfaces_target_mode_tools_for_active_agent(tmp_path: Path) -> None:
+    class ModeAwareAgent:
+        def __init__(self) -> None:
+            self.mode = "reverie"
+            self.tool_executor = ToolExecutor(project_root=tmp_path)
+
+        def update_mode(self, mode: str) -> None:
+            self.mode = mode
+
+    agent = ModeAwareAgent()
+    tool = ModeSwitchTool({"agent": agent, "project_root": tmp_path})
+
+    list_result = tool.execute(operation="list")
+    assert list_result.success is True
+    reverie_item = next(item for item in list_result.data["items"] if item["mode"] == "reverie")
+    assert "blender_modeling_workbench" in reverie_item["primary_tools"]
+
+    modeling_recommendation = tool.execute(query="create a Blender GLB 3D model")
+    assert modeling_recommendation.success is True
+    assert modeling_recommendation.data["recommended_mode"] == "reverie"
+
+    switch_result = tool.execute(mode="reverie-gamer", reason="playable game production workflow")
+    assert switch_result.success is True
+    assert agent.mode == "reverie-gamer"
+    assert switch_result.data["tool_surface_changed"] is True
+    assert "game_design_orchestrator" in switch_result.data["visible_tools"]
+    assert "reverie_engine" in switch_result.data["visible_tools"]
+
+
 def test_skill_lookup_lists_and_inspects_discovered_skills(tmp_path: Path) -> None:
     app_root = tmp_path / "app"
     project_root = tmp_path / "project"

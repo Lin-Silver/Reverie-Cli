@@ -750,6 +750,8 @@ class ReverieInterface:
         self._ensure_builtin_mcp_servers()
         self.mcp_runtime = MCPRuntime(self.mcp_config_manager, project_root=self.project_root)
         self.rules_manager = RulesManager(project_root)
+        self._context_engine_init_lock = threading.RLock()
+        self._context_engine_warmup_thread: Optional[threading.Thread] = None
         self._init_workspace_services()
         
         self.indexer: Optional[CodebaseIndexer] = None
@@ -856,6 +858,7 @@ class ReverieInterface:
         self._context_engine_ready = False
         self._indexing_in_progress = False
         self._indexing_thread = None
+        self._context_engine_warmup_thread = None
 
         from ..session import MemoryIndexer, WorkspaceStatsManager
         self.memory_indexer = MemoryIndexer(self.project_data_dir)
@@ -2019,7 +2022,7 @@ class ReverieInterface:
                 response_header_printed = True
             
             try:
-                self.ensure_context_engine()
+                self._prime_context_engine_background()
                 response_stream = self.agent.process_message(
                     outbound_message,
                     stream=config.stream_responses,
@@ -2353,38 +2356,80 @@ class ReverieInterface:
     def _init_context_engine(self) -> None:
         self._init_context_engine_with_options(announce=True)
 
+    def _get_context_engine_init_lock(self) -> threading.RLock:
+        lock = getattr(self, "_context_engine_init_lock", None)
+        if lock is None:
+            lock = threading.RLock()
+            self._context_engine_init_lock = lock
+        return lock
+
     def _init_context_engine_with_options(self, *, announce: bool = False) -> None:
+        with self._get_context_engine_init_lock():
+            if self._context_engine_ready and self.indexer and self.retriever:
+                return
+            cache_dir = self.project_data_dir / 'context_cache'
+            if announce:
+                self._show_activity_event(
+                    "Context Engine",
+                    "Initializing code index and retriever",
+                    status="working",
+                    detail="Lazy-loading the core retrieval services for this workspace.",
+                )
+            self.indexer = CodebaseIndexer(project_root=self.project_root, cache_dir=cache_dir)
+            config = self._load_active_runtime_config()
+            cached = self.indexer.load_cache()
+            if not cached and config.auto_index:
+                if announce:
+                    self._show_activity_event(
+                        "Context Engine",
+                        "No warm cache available, building a fresh index in the background.",
+                        status="working",
+                        detail="The first reply can continue while the status bar tracks indexing progress.",
+                    )
+                self._start_context_indexing_background()
+            elif cached and config.auto_index:
+                self._start_context_incremental_background()
+            self.retriever = ContextRetriever(
+                self.indexer.symbol_table,
+                self.indexer.dependency_graph,
+                self.project_root,
+                file_info=self.indexer._file_info,
+                git_integration=self.git_integration,
+                memory_indexer=self.memory_indexer,
+            )
+            self._context_engine_ready = True
+            self._refresh_command_context()
+
+    def _prime_context_engine_background(self) -> bool:
+        """Warm the Context Engine beside the model request without rendering a preflight event."""
         if self._context_engine_ready and self.indexer and self.retriever:
-            return
-        cache_dir = self.project_data_dir / 'context_cache'
-        if announce:
-            self._show_activity_event(
-                "Context Engine",
-                "Initializing code index and retriever",
-                status="working",
-                detail="Lazy-loading the core retrieval services for this workspace.",
-            )
-        self.indexer = CodebaseIndexer(project_root=self.project_root, cache_dir=cache_dir)
+            return False
         config = self._load_active_runtime_config()
-        cached = self.indexer.load_cache()
-        if not cached and config.auto_index:
-            self._show_activity_event(
-                "Context Engine",
-                "No warm cache available, building a fresh index in the background.",
-                status="working",
-                detail="The first reply can continue while the status bar tracks indexing progress.",
-            )
-            self._start_context_indexing_background()
-        self.retriever = ContextRetriever(
-            self.indexer.symbol_table,
-            self.indexer.dependency_graph,
-            self.project_root,
-            file_info=self.indexer._file_info,
-            git_integration=self.git_integration,
-            memory_indexer=self.memory_indexer,
+        if not getattr(config, "auto_index", False):
+            return False
+        thread = getattr(self, "_context_engine_warmup_thread", None)
+        if thread is not None and thread.is_alive():
+            return False
+
+        def _worker() -> None:
+            try:
+                self.ensure_context_engine(announce=False, wait_for_index=False)
+            except Exception as exc:
+                self._show_activity_event(
+                    "Context Engine",
+                    "Background warmup failed unexpectedly.",
+                    status="error",
+                    detail=str(exc),
+                    render=False,
+                )
+
+        self._context_engine_warmup_thread = threading.Thread(
+            target=_worker,
+            name="reverie-context-warmup",
+            daemon=True,
         )
-        self._context_engine_ready = True
-        self._refresh_command_context()
+        self._context_engine_warmup_thread.start()
+        return True
 
     def _start_context_indexing_background(self) -> bool:
         """Kick off a cold Context Engine index without blocking the active turn."""
@@ -2420,6 +2465,39 @@ class ReverieInterface:
         self._indexing_thread = threading.Thread(
             target=_worker,
             name="reverie-context-indexer",
+            daemon=True,
+        )
+        self._indexing_thread.start()
+        return True
+
+    def _start_context_incremental_background(self) -> bool:
+        """Refresh a warm Context Engine cache in the background without blocking chat."""
+        if not self.indexer:
+            return False
+        if self._indexing_thread and self._indexing_thread.is_alive():
+            return False
+
+        self._indexing_in_progress = True
+
+        def _worker() -> None:
+            try:
+                self.indexer.incremental_index()
+            except Exception as exc:
+                self._show_activity_event(
+                    "Context Engine",
+                    "Incremental refresh failed unexpectedly.",
+                    status="error",
+                    detail=str(exc),
+                    render=False,
+                )
+            finally:
+                self._indexing_in_progress = False
+                self._refresh_command_context()
+                self._sync_agent_context_engine()
+
+        self._indexing_thread = threading.Thread(
+            target=_worker,
+            name="reverie-context-incremental-indexer",
             daemon=True,
         )
         self._indexing_thread.start()
@@ -2551,14 +2629,41 @@ class ReverieInterface:
             self._sync_agent_context_engine()
         return result
 
-    def ensure_context_engine(self, *, announce: bool = False) -> bool:
+    def _wait_for_context_indexing(self, *, announce: bool = False) -> bool:
+        """Wait for a background index only when a Context Engine tool actually needs it."""
+        waited = False
+        while True:
+            thread = getattr(self, "_indexing_thread", None)
+            if thread is None or not thread.is_alive() or thread is threading.current_thread():
+                break
+            if announce and not waited:
+                self._show_activity_event(
+                    "Context Engine",
+                    "Waiting for codebase index to finish.",
+                    status="working",
+                    detail="The model requested Context Engine retrieval, so Reverie is joining the background index now.",
+                )
+            thread.join()
+            waited = True
+        if waited:
+            self._refresh_command_context()
+            self._sync_agent_context_engine()
+        return waited
+
+    def ensure_context_engine(self, *, announce: bool = False, wait_for_index: bool = False) -> bool:
         """Initialize the Context Engine on demand and synchronize it into the active agent."""
+        initialized = False
         if self._context_engine_ready and self.indexer and self.retriever:
+            if wait_for_index:
+                return self._wait_for_context_indexing(announce=announce)
             return False
         self._init_context_engine_with_options(announce=announce)
+        initialized = True
+        if wait_for_index:
+            self._wait_for_context_indexing(announce=announce)
         self._sync_agent_context_engine()
         self._refresh_command_context()
-        return True
+        return initialized
 
     def ensure_git_integration(self, *, announce: bool = False) -> bool:
         """Initialize git integration on demand."""

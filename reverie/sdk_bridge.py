@@ -43,6 +43,15 @@ def emit(payload: Dict[str, Any]) -> None:
     OUT.flush()
 
 
+def normalize_jsonl_input(raw: str) -> str:
+    """Normalize one host-provided JSONL frame before parsing."""
+    text = str(raw or "")
+    for prefix in ("\ufeff", "\xef\xbb\xbf"):
+        if text.startswith(prefix):
+            text = text[len(prefix):]
+    return text.strip()
+
+
 def json_safe(value: Any) -> Any:
     if dataclasses.is_dataclass(value):
         return json_safe(dataclasses.asdict(value))
@@ -1303,7 +1312,7 @@ def main() -> int:
     bridge = ReverieUiBridge()
     emit({"type": "ready", **bridge.runtime_info()})
     for raw in sys.stdin:
-        line = raw.strip()
+        line = normalize_jsonl_input(raw)
         if not line:
             continue
         try:

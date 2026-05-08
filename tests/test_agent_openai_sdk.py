@@ -231,7 +231,8 @@ def test_nvidia_short_turn_keeps_full_tools_and_reasoning(monkeypatch, tmp_path)
             "reasoning_effort": "max",
         }
     }
-    assert 900000 <= create_kwargs["max_tokens"] < 1000000
+    assert create_kwargs["max_tokens"] <= 262144
+    assert create_kwargs["max_tokens"] > 250000
 
 
 def test_nvidia_request_provider_clamps_output_to_remaining_context(tmp_path):

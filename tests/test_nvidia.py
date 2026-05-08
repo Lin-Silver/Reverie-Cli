@@ -48,10 +48,14 @@ def test_nvidia_openai_options_for_minimax_m27_match_expected_defaults():
     }
 
 
-def test_nvidia_profiles_raise_output_budget_to_full_context_window():
+def test_nvidia_profiles_raise_output_budget_to_model_output_limit():
     options = build_nvidia_openai_options(
         {"selected_model_id": "openai/gpt-oss-120b", "max_tokens": 32768},
         "openai/gpt-oss-120b",
+    )
+    deepseek_options = build_nvidia_openai_options(
+        {"selected_model_id": "deepseek-ai/deepseek-v4-pro", "max_tokens": 1_000_000},
+        "deepseek-ai/deepseek-v4-pro",
     )
     request_defaults = build_nvidia_request_defaults(
         {"selected_model_id": "mistralai/mistral-large-3-675b-instruct-2512", "max_tokens": 32768},
@@ -59,6 +63,7 @@ def test_nvidia_profiles_raise_output_budget_to_full_context_window():
     )
 
     assert options["max_tokens"] == 128000
+    assert deepseek_options["max_tokens"] == 262144
     assert request_defaults["max_tokens"] == 262144
 
 
@@ -287,6 +292,7 @@ def test_nvidia_catalog_contains_deepseek_v4_models_with_effort_control():
         metadata = catalog_by_id[model_id]
         assert metadata["transport"] == "openai-sdk"
         assert metadata["context_length"] == 1000000
+        assert metadata["max_output_tokens"] == 262144
         assert metadata["thinking"] is True
         assert metadata["thinking_control"] == "effort"
         assert [item["id"] for item in metadata["thinking_options"]] == ["high", "max", "none"]
@@ -311,7 +317,7 @@ def test_nvidia_openai_options_for_deepseek_v4_default_to_high_reasoning():
     assert options == {
         "temperature": 1.0,
         "top_p": 0.95,
-        "max_tokens": 1000000,
+        "max_tokens": 262144,
         "extra_body": {
             "chat_template_kwargs": {
                 "thinking": True,

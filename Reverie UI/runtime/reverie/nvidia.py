@@ -34,6 +34,7 @@ NVIDIA_STEP_FLASH_CONTEXT_TOKENS = 256_000
 NVIDIA_GPT_OSS_120B_CONTEXT_TOKENS = 128_000
 NVIDIA_KIMI_K2_6_CONTEXT_TOKENS = 262_144
 NVIDIA_DEEPSEEK_V4_CONTEXT_TOKENS = 1_000_000
+NVIDIA_DEEPSEEK_V4_MAX_OUTPUT_TOKENS = 262_144
 NVIDIA_DEFAULT_REASONING_EFFORT = "high"
 NVIDIA_DEFAULT_REASONING_BUDGET = 16_384
 NVIDIA_REASONING_EFFORTS = ("max", "high", "medium", "low", "none")
@@ -161,6 +162,7 @@ def _request_model(
     vision: bool = False,
     thinking: bool = False,
     context_length: Optional[int] = None,
+    max_output_tokens: Optional[int] = None,
     tool_calling: bool = True,
     system_message_first: bool = True,
     thinking_control: str = "none",
@@ -182,6 +184,7 @@ def _request_model(
         "vision": bool(vision),
         "thinking": bool(thinking),
         "context_length": profile_context_length,
+        "max_output_tokens": int(max_output_tokens) if max_output_tokens else None,
         "tool_calling": bool(tool_calling),
         "system_message_first": bool(system_message_first),
         "thinking_control": str(thinking_control or ("toggle" if thinking else "none")).strip().lower(),
@@ -204,6 +207,7 @@ def _openai_model(
     vision: bool = False,
     thinking: bool = False,
     context_length: Optional[int] = None,
+    max_output_tokens: Optional[int] = None,
     tool_calling: bool = True,
     system_message_first: bool = True,
     thinking_control: str = "none",
@@ -223,6 +227,7 @@ def _openai_model(
         "vision": bool(vision),
         "thinking": bool(thinking),
         "context_length": profile_context_length,
+        "max_output_tokens": int(max_output_tokens) if max_output_tokens else None,
         "tool_calling": bool(tool_calling),
         "system_message_first": bool(system_message_first),
         "thinking_control": str(thinking_control or ("toggle" if thinking else "none")).strip().lower(),
@@ -325,6 +330,7 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         thinking_options=list(NVIDIA_REASONING_NONE_HIGH_MAX_OPTIONS),
         default_thinking_choice="high",
         context_length=NVIDIA_DEEPSEEK_V4_CONTEXT_TOKENS,
+        max_output_tokens=NVIDIA_DEEPSEEK_V4_MAX_OUTPUT_TOKENS,
     ),
     _openai_model(
         "deepseek-ai/deepseek-v4-flash",
@@ -335,6 +341,7 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         thinking_options=list(NVIDIA_REASONING_NONE_HIGH_MAX_OPTIONS),
         default_thinking_choice="high",
         context_length=NVIDIA_DEEPSEEK_V4_CONTEXT_TOKENS,
+        max_output_tokens=NVIDIA_DEEPSEEK_V4_MAX_OUTPUT_TOKENS,
     ),
     _request_model(
         "mistralai/mistral-large-3-675b-instruct-2512",
@@ -612,6 +619,12 @@ def normalize_nvidia_config(raw_nvidia: Any) -> Dict[str, Any]:
         context_length = matched.get("context_length")
         if context_length:
             cfg["max_context_tokens"] = int(context_length)
+        max_output_tokens = matched.get("max_output_tokens")
+        if max_output_tokens:
+            try:
+                cfg["max_tokens"] = min(int(cfg.get("max_tokens", max_output_tokens) or max_output_tokens), int(max_output_tokens))
+            except (TypeError, ValueError):
+                cfg["max_tokens"] = int(max_output_tokens)
         thinking_control = str(matched.get("thinking_control", "none") or "none").strip().lower()
         raw_reasoning_effort = cfg.get("reasoning_effort") if raw_has_reasoning_effort else ""
         if thinking_control == "effort":
@@ -823,7 +836,12 @@ def build_nvidia_request_defaults(nvidia_config: Any, model_id: Optional[str] = 
         return {}
 
     try:
-        cfg["max_tokens"] = max(int(cfg.get("max_tokens", 0) or 0), int(selected.get("context_length") or 0))
+        output_limit = int(selected.get("max_output_tokens") or 0)
+        context_length = int(selected.get("context_length") or 0)
+        if output_limit > 0:
+            cfg["max_tokens"] = min(max(int(cfg.get("max_tokens", 0) or 0), output_limit), output_limit)
+        else:
+            cfg["max_tokens"] = max(int(cfg.get("max_tokens", 0) or 0), context_length)
     except (TypeError, ValueError):
         pass
     return build_nvidia_profile_request_defaults(selected["id"], cfg)
@@ -857,7 +875,12 @@ def build_nvidia_openai_options(nvidia_config: Any, model_id: Optional[str] = No
         return {}
 
     try:
-        cfg["max_tokens"] = max(int(cfg.get("max_tokens", 0) or 0), int(selected.get("context_length") or 0))
+        output_limit = int(selected.get("max_output_tokens") or 0)
+        context_length = int(selected.get("context_length") or 0)
+        if output_limit > 0:
+            cfg["max_tokens"] = min(max(int(cfg.get("max_tokens", 0) or 0), output_limit), output_limit)
+        else:
+            cfg["max_tokens"] = max(int(cfg.get("max_tokens", 0) or 0), context_length)
     except (TypeError, ValueError):
         pass
     return build_nvidia_profile_openai_options(selected["id"], cfg)

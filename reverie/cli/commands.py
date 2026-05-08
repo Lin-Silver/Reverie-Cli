@@ -5746,7 +5746,10 @@ class CommandHandler:
                 full_context_tokens = 0
             if full_context_tokens > 0:
                 provider_cfg["max_context_tokens"] = full_context_tokens
-                provider_cfg["max_tokens"] = full_context_tokens
+                try:
+                    provider_cfg["max_tokens"] = int(selected_model.get("max_output_tokens") or full_context_tokens)
+                except (TypeError, ValueError):
+                    provider_cfg["max_tokens"] = full_context_tokens
         if post_select_config is not None:
             provider_cfg = post_select_config(provider_cfg, selected_model)
         setattr(config, config_attr, provider_cfg)

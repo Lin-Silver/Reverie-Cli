@@ -18,7 +18,8 @@ MODELSCOPE_DEFAULT_MODEL_DISPLAY_NAME = "GLM-5.1"
 MODELSCOPE_API_KEY_HINT_URL = "https://www.modelscope.cn/my/access/token"
 MODELSCOPE_DEFAULT_CONTEXT_TOKENS = 202_752
 MODELSCOPE_DEFAULT_MAX_TOKENS = 16_384
-MODELSCOPE_DEEPSEEK_CONTEXT_TOKENS = 128_000
+MODELSCOPE_DEEPSEEK_CONTEXT_TOKENS = 1_048_576
+MODELSCOPE_DEEPSEEK_MAX_TOKENS = 393_216
 MODELSCOPE_GLM_CONTEXT_TOKENS = 202_752
 MODELSCOPE_KIMI_CONTEXT_TOKENS = 262_144
 MODELSCOPE_MINIMAX_CONTEXT_TOKENS = 204_800
@@ -59,11 +60,19 @@ _MODELSCOPE_MODEL_CATALOG: List[Dict[str, Any]] = [
         thinking=True,
     ),
     _modelscope_model(
-        "deepseek-ai/DeepSeek-V3.2",
-        "DeepSeek V3.2",
-        "Anthropic SDK transport through ModelScope API-Inference.",
+        "deepseek-ai/DeepSeek-V4-Pro",
+        "DeepSeek V4 Pro",
+        "DeepSeek V4 Pro flagship MoE model on ModelScope.",
         context_length=MODELSCOPE_DEEPSEEK_CONTEXT_TOKENS,
-        max_output_tokens=65_536,
+        max_output_tokens=MODELSCOPE_DEEPSEEK_MAX_TOKENS,
+        thinking=True,
+    ),
+    _modelscope_model(
+        "deepseek-ai/DeepSeek-V4-Flash",
+        "DeepSeek V4 Flash",
+        "DeepSeek V4 Flash fast MoE model on ModelScope.",
+        context_length=MODELSCOPE_DEEPSEEK_CONTEXT_TOKENS,
+        max_output_tokens=MODELSCOPE_DEEPSEEK_MAX_TOKENS,
         thinking=True,
     ),
     _modelscope_model(

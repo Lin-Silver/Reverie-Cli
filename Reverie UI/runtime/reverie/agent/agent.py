@@ -1297,9 +1297,45 @@ def _strip_tooling_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     messages = compatibility_payload.get("messages")
     if isinstance(messages, list):
-        compatibility_payload["messages"] = _strip_tooling_from_messages(messages)
+        compatibility_payload["messages"] = _coalesce_system_messages_to_front(
+            _strip_tooling_from_messages(messages)
+        )
 
     return compatibility_payload
+
+
+def _should_retry_without_tooling(status_code: Any) -> bool:
+    """Whether a provider error is worth retrying with plain chat messages."""
+    return isinstance(status_code, int) and 400 <= status_code < 600 and status_code != 429
+
+
+def _compact_payload_for_plain_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Build a minimal chat payload for small/local compatibility providers."""
+    compact_payload = _strip_tooling_from_payload(payload)
+    messages = compact_payload.get("messages")
+    if not isinstance(messages, list):
+        return compact_payload
+
+    compact_messages: List[Dict[str, Any]] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role", "") or "").strip().lower()
+        if role == "system":
+            compact_messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "You are Reverie, a concise coding assistant. "
+                        "Answer the user directly. Tools may be unavailable on this provider."
+                    ),
+                }
+            )
+            continue
+        compact_messages.append(dict(message))
+
+    compact_payload["messages"] = compact_messages
+    return compact_payload
 
 
 def _extract_safe_http_error_message(response: Any) -> str:
@@ -1408,31 +1444,47 @@ def make_api_request_with_retry(
             safe_error_message = _extract_safe_http_error_message(getattr(e, "response", None))
 
             if (
-                status_code == 400
-                and is_nvidia_api_url(url)
+                _should_retry_without_tooling(status_code)
                 and isinstance(sanitized_payload, dict)
                 and sanitized_payload.get("tools")
             ):
                 compatibility_payload = _strip_tooling_from_payload(sanitized_payload)
-                logger.warning("NVIDIA returned 400; retrying once with compatibility payload matching the hosted example shape")
-                try:
-                    fallback_response = requests.post(
-                        url,
-                        headers=request_headers,
-                        json=compatibility_payload,
-                        stream=stream,
-                        timeout=request_timeout,
-                    )
-                    fallback_response.raise_for_status()
-                    logger.debug("NVIDIA compatibility fallback succeeded")
-                    return fallback_response
-                except requests.exceptions.RequestException as fallback_error:
-                    last_error = fallback_error
-                    fallback_message = _extract_safe_http_error_message(getattr(fallback_error, "response", None))
-                    if fallback_message:
-                        logger.error("NVIDIA compatibility fallback failed: %s", fallback_message)
-                    else:
-                        logger.error("NVIDIA compatibility fallback failed: %s", fallback_error)
+                if compatibility_payload != sanitized_payload:
+                    provider_name = "NVIDIA" if is_nvidia_api_url(url) else "Provider"
+                    logger.warning("%s returned 400; retrying once without OpenAI tool-calling fields", provider_name)
+                    try:
+                        fallback_response = requests.post(
+                            url,
+                            headers=request_headers,
+                            json=compatibility_payload,
+                            stream=stream,
+                            timeout=request_timeout,
+                        )
+                        fallback_response.raise_for_status()
+                        logger.debug("%s tool-free compatibility fallback succeeded", provider_name)
+                        return fallback_response
+                    except requests.exceptions.RequestException as fallback_error:
+                        last_error = fallback_error
+                        fallback_message = _extract_safe_http_error_message(getattr(fallback_error, "response", None))
+                        if fallback_message:
+                            logger.error("%s tool-free compatibility fallback failed: %s", provider_name, fallback_message)
+                        else:
+                            logger.error("%s tool-free compatibility fallback failed: %s", provider_name, fallback_error)
+                        fallback_status = getattr(getattr(fallback_error, "response", None), "status_code", None)
+                        if _should_retry_without_tooling(fallback_status):
+                            compact_payload = _compact_payload_for_plain_chat(sanitized_payload)
+                            if compact_payload != compatibility_payload:
+                                logger.warning("%s retrying once with compact plain-chat payload", provider_name)
+                                compact_response = requests.post(
+                                    url,
+                                    headers=request_headers,
+                                    json=compact_payload,
+                                    stream=stream,
+                                    timeout=request_timeout,
+                                )
+                                compact_response.raise_for_status()
+                                logger.debug("%s compact plain-chat fallback succeeded", provider_name)
+                                return compact_response
             
             # Don't retry on client errors (4xx) except 429 (rate limit)
             if isinstance(status_code, int) and 400 <= status_code < 500 and status_code != 429:
@@ -1952,7 +2004,9 @@ class ReverieAgent:
         """Prepare request-provider payload for the generic request or NVIDIA direct API."""
         prepared = dict(payload)
         if isinstance(prepared.get("messages"), list):
-            prepared["messages"] = _sanitize_messages_for_relay(prepared["messages"])
+            prepared["messages"] = _coalesce_system_messages_to_front(
+                _sanitize_messages_for_relay(prepared["messages"])
+            )
 
         if self._openai_request_fallback_active:
             return prepared
@@ -2167,6 +2221,8 @@ class ReverieAgent:
 
         if self._is_active_model_source("nvidia") and nvidia_model_requires_system_message_first(model_for_sdk):
             prepared_messages = _coalesce_system_messages_to_front(prepared_messages)
+        elif prepared_messages:
+            prepared_messages = _coalesce_system_messages_to_front(prepared_messages)
         if self._is_active_model_source("nvidia"):
             nvidia_options = self._clamp_nvidia_options_for_messages(
                 nvidia_options,
@@ -2194,6 +2250,19 @@ class ReverieAgent:
         
         return kwargs
 
+    def _call_openai_chat_completion_once(self, call_kwargs: Dict[str, Any]) -> Any:
+        """Call the OpenAI SDK once, handling SDK versions without per-call timeout."""
+        try:
+            client = self._ensure_client()
+            return client.chat.completions.create(**call_kwargs)
+        except TypeError as exc:
+            if "timeout" not in call_kwargs or "timeout" not in str(exc).lower():
+                raise
+            retry_kwargs = dict(call_kwargs)
+            retry_kwargs.pop("timeout", None)
+            client = self._ensure_client()
+            return client.chat.completions.create(**retry_kwargs)
+
     def _create_openai_chat_completion(self, **kwargs: Any) -> Any:
         """Call OpenAI-compatible chat completions with SDK compatibility and transient retries."""
         attempts = max(1, int(getattr(self, "api_max_retries", 1) or 1))
@@ -2202,18 +2271,36 @@ class ReverieAgent:
 
         for attempt in range(attempts):
             try:
-                client = self._ensure_client()
-                return client.chat.completions.create(**call_kwargs)
-            except TypeError as exc:
-                if "timeout" not in call_kwargs or "timeout" not in str(exc).lower():
-                    raise
-                call_kwargs = dict(call_kwargs)
-                call_kwargs.pop("timeout", None)
-                client = self._ensure_client()
-                return client.chat.completions.create(**call_kwargs)
+                return self._call_openai_chat_completion_once(call_kwargs)
             except Exception as exc:
                 last_error = exc
                 status_code = getattr(exc, "status_code", None)
+                if (
+                    _should_retry_without_tooling(status_code)
+                    and isinstance(call_kwargs.get("tools"), list)
+                    and call_kwargs.get("tools")
+                ):
+                    compatibility_kwargs = _strip_tooling_from_payload(call_kwargs)
+                    if compatibility_kwargs != call_kwargs:
+                        logger.warning(
+                            "OpenAI-compatible SDK call failed with provider error; retrying once without tool-calling fields"
+                        )
+                        try:
+                            return self._call_openai_chat_completion_once(compatibility_kwargs)
+                        except Exception as fallback_exc:
+                            last_error = fallback_exc
+                            logger.warning(
+                                "OpenAI-compatible tool-free SDK fallback failed: %s",
+                                fallback_exc,
+                            )
+                            fallback_status = getattr(fallback_exc, "status_code", None)
+                            if _should_retry_without_tooling(fallback_status):
+                                compact_kwargs = _compact_payload_for_plain_chat(call_kwargs)
+                                if compact_kwargs != compatibility_kwargs:
+                                    logger.warning(
+                                        "OpenAI-compatible SDK retrying once with compact plain-chat payload"
+                                    )
+                                    return self._call_openai_chat_completion_once(compact_kwargs)
                 if isinstance(status_code, int) and 400 <= status_code < 500 and status_code != 429:
                     raise
                 if attempt >= attempts - 1 or not _is_recoverable_stream_exception(exc):
@@ -3021,6 +3108,8 @@ class ReverieAgent:
                 model_for_sdk = model_for_sdk.split("(", 1)[0].strip()
             if self._is_active_model_source("nvidia") and nvidia_model_requires_system_message_first(model_for_sdk):
                 messages = _coalesce_system_messages_to_front(messages)
+            elif messages:
+                messages = _coalesce_system_messages_to_front(messages)
             if self._is_active_model_source("nvidia"):
                 nvidia_options = self._clamp_nvidia_options_for_messages(
                     nvidia_options,
@@ -3351,6 +3440,8 @@ class ReverieAgent:
                 # Strip depth suffix for ordinary SDK calls — only send boolean thinking
                 model_for_sdk = model_for_sdk.split("(", 1)[0].strip()
             if self._is_active_model_source("nvidia") and nvidia_model_requires_system_message_first(model_for_sdk):
+                messages = _coalesce_system_messages_to_front(messages)
+            elif messages:
                 messages = _coalesce_system_messages_to_front(messages)
             if self._is_active_model_source("nvidia"):
                 nvidia_options = self._clamp_nvidia_options_for_messages(

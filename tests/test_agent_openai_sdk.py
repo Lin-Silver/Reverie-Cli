@@ -41,6 +41,16 @@ def _install_fake_openai(monkeypatch, seen: dict):
     monkeypatch.setitem(sys.modules, "openai", fake_module)
 
 
+def _standard_config() -> SimpleNamespace:
+    return SimpleNamespace(
+        api_max_retries=1,
+        api_initial_backoff=0.01,
+        api_timeout=17,
+        api_enable_debug_logging=False,
+        active_model_source="standard",
+    )
+
+
 def test_openai_sdk_client_receives_resolved_provider_timeout_when_needed(monkeypatch, tmp_path):
     seen = {}
     _install_fake_openai(monkeypatch, seen)
@@ -58,6 +68,110 @@ def test_openai_sdk_client_receives_resolved_provider_timeout_when_needed(monkey
     agent._ensure_client()
 
     assert seen["init_kwargs"]["timeout"] == 23
+
+
+def test_openai_sdk_provider_error_retries_once_without_tool_fields(tmp_path):
+    class FakeProviderError(Exception):
+        status_code = 502
+
+    calls = []
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            calls.append(dict(kwargs))
+            if len(calls) == 1:
+                raise FakeProviderError("tool calling is not supported")
+            return "ok"
+
+    fake_client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+    agent = ReverieAgent(
+        base_url="https://token.sensenova.cn/v1",
+        api_key="x",
+        model="sensenova-6.7-flash-lite",
+        project_root=tmp_path,
+        provider="openai-sdk",
+        config=_standard_config(),
+    )
+    agent._ensure_client = lambda: fake_client
+
+    response = agent._create_openai_chat_completion(
+        model="sensenova-6.7-flash-lite",
+        messages=[
+            {"role": "system", "content": "primary system"},
+            {"role": "system", "content": "workspace memory"},
+            {"role": "user", "content": "hello"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "read_file", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "result"},
+        ],
+        tools=[{"type": "function", "function": {"name": "read_file", "parameters": {"type": "object"}}}],
+        stream=True,
+        timeout=17,
+    )
+
+    assert response == "ok"
+    assert len(calls) == 2
+    assert "tools" in calls[0]
+    assert "tools" not in calls[1]
+    assert calls[1]["messages"] == [
+        {
+            "role": "system",
+            "content": "primary system\n\n[Merged System Note]\nworkspace memory",
+        },
+        {"role": "user", "content": "hello"},
+    ]
+
+
+def test_openai_sdk_provider_error_compacts_after_tool_free_failure(tmp_path):
+    class FakeProviderError(Exception):
+        status_code = 502
+
+    calls = []
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            calls.append(dict(kwargs))
+            if len(calls) < 3:
+                raise FakeProviderError("local server rejected payload")
+            return "ok"
+
+    fake_client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+    agent = ReverieAgent(
+        base_url="http://127.0.0.1:8080/v1",
+        api_key="x",
+        model="local.gguf",
+        project_root=tmp_path,
+        provider="openai-sdk",
+        config=_standard_config(),
+    )
+    agent._ensure_client = lambda: fake_client
+
+    response = agent._create_openai_chat_completion(
+        model="local.gguf",
+        messages=[
+            {"role": "system", "content": "large system" * 5000},
+            {"role": "user", "content": "hello"},
+        ],
+        tools=[{"type": "function", "function": {"name": "read_file", "parameters": {"type": "object"}}}],
+        stream=True,
+        timeout=17,
+    )
+
+    assert response == "ok"
+    assert len(calls) == 3
+    assert "tools" not in calls[2]
+    assert calls[2]["messages"][0]["role"] == "system"
+    assert "concise coding assistant" in calls[2]["messages"][0]["content"]
+    assert calls[2]["messages"][1] == {"role": "user", "content": "hello"}
 
 
 def test_legacy_nvidia_default_timeout_does_not_override_global_timeout_when_needed(monkeypatch, tmp_path):

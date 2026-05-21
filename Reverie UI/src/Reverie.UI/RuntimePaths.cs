@@ -25,6 +25,12 @@ public static class RuntimePaths
             return outputRuntime;
         }
 
+        var workspaceRuntime = FindWorkspaceRuntimeRoot();
+        if (!string.IsNullOrWhiteSpace(workspaceRuntime))
+        {
+            return workspaceRuntime;
+        }
+
         var cursor = new DirectoryInfo(AppContext.BaseDirectory);
         while (cursor is not null)
         {
@@ -38,6 +44,23 @@ public static class RuntimePaths
         }
 
         return outputRuntime;
+    }
+
+    private static string? FindWorkspaceRuntimeRoot()
+    {
+        var cursor = new DirectoryInfo(AppContext.BaseDirectory);
+        while (cursor is not null)
+        {
+            var candidate = Path.Combine(cursor.FullName, "ReverieCli-py", "ui-runtime");
+            if (File.Exists(Path.Combine(candidate, "reverie_ui_bridge.py")))
+            {
+                return candidate;
+            }
+
+            cursor = cursor.Parent;
+        }
+
+        return null;
     }
 
     private static string ResolveWorkspaceRoot()

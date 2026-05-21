@@ -7,6 +7,10 @@ set "ARCHIVE_NAME=blender-5.1.1-windows-x64.zip"
 set "ARCHIVE_SOURCE="
 set "PYTHON_EXE=python"
 
+if exist "%~dp0..\..\ReverieCli-py\venv\Scripts\python.exe" (
+  set "PYTHON_EXE=%~dp0..\..\ReverieCli-py\venv\Scripts\python.exe"
+)
+
 if exist "%~dp0..\..\venv\Scripts\python.exe" (
   set "PYTHON_EXE=%~dp0..\..\venv\Scripts\python.exe"
 )

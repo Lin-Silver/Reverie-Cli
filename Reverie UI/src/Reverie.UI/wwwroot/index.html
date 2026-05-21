@@ -4,13 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Reverie UI</title>
+  <link rel="icon" href="../Assets/reverie.ico">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <div class="app-shell">
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand-mark">R</div>
+        <div class="brand-mark"><img src="../Assets/reverie.ico" alt="" aria-hidden="true"></div>
         <div class="brand-copy">
           <div class="brand-name">Reverie UI</div>
           <div class="brand-subtitle" id="runtimeStatus">Starting</div>
@@ -19,6 +20,7 @@
 
       <nav class="nav-stack" aria-label="Primary">
         <button class="nav-item active" data-view="chat" type="button">New chat</button>
+        <button class="nav-item" data-view="totals" type="button">Runtime</button>
         <button class="nav-item" data-view="plugins" type="button">Plugins</button>
       </nav>
 
@@ -77,7 +79,7 @@
           <section id="emptyState" class="empty-state">
             <div class="empty-inner">
               <h1>What should we build in Reverie?</h1>
-              <p>Use the composer below to inspect code, edit files, run tools, index context, manage sessions, or configure models.</p>
+              <p>Work from the composer, keep runtime signals visible, and use the inspector when you need context, tools, or repository state.</p>
               <div class="shortcut-grid" aria-label="Keyboard shortcuts">
                 <div class="shortcut-card">
                   <div class="shortcut-keys"><kbd>Ctrl</kbd> <kbd>Enter</kbd></div>
@@ -88,7 +90,7 @@
                   <div class="shortcut-label">Focus composer</div>
                 </div>
                 <div class="shortcut-card">
-                  <div class="shortcut-keys"><kbd>Ctrl</kbd> <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></div>
+                  <div class="shortcut-keys"><kbd>Ctrl</kbd> <kbd>1</kbd> - <kbd>4</kbd></div>
                   <div class="shortcut-label">Switch main views</div>
                 </div>
                 <div class="shortcut-card">
@@ -135,6 +137,44 @@
               </div>
             </div>
           </form>
+        </section>
+
+        <section id="totalsView" class="main-view page-view">
+          <div class="page-header">
+            <div>
+              <h1>Runtime</h1>
+              <p id="totalsSummary">Agent lifecycle, audit trail, and behavior regression status pending.</p>
+            </div>
+            <div class="page-actions">
+              <button id="totalsRefreshButton" class="toolbar-button" type="button">Refresh</button>
+              <button id="runRegressionButton" class="toolbar-button primary" type="button">Run baseline</button>
+            </div>
+          </div>
+          <section id="totalsMetrics" class="metric-grid" aria-label="Runtime totals"></section>
+          <div class="split-layout totals-layout">
+            <section class="list-pane">
+              <div class="section-header compact">
+                <div>
+                  <h2>Hook Audit</h2>
+                  <p>Recent lifecycle events across tool calls and regression runs.</p>
+                </div>
+              </div>
+              <div id="auditList" class="audit-list"></div>
+            </section>
+            <section class="detail-pane">
+              <h2>Regression Baseline</h2>
+              <div id="regressionList" class="regression-list"></div>
+            </section>
+          </div>
+          <section class="total-rules">
+            <div class="section-header compact">
+              <div>
+                <h2>Hook Rules</h2>
+                <p>Workspace lifecycle policy currently loaded by the CLI runtime.</p>
+              </div>
+            </div>
+            <div id="hookRuleList" class="hook-rule-list"></div>
+          </section>
         </section>
 
         <section id="pluginsView" class="main-view page-view">
@@ -204,7 +244,7 @@
       <section id="modelsTab" class="tab-panel">
         <div class="panel-header">
           <h2>Models</h2>
-          <p id="configPath">Config path pending.</p>
+          <p id="configPath">Model profile pending.</p>
         </div>
         <div class="builtin-source-panel">
           <div class="section-header">
@@ -252,7 +292,7 @@
               </label>
               <label>
                 Thinking
-                <input id="builtinSourceThinking" class="text-input" placeholder="Codex effort or NVIDIA choice">
+                <select id="builtinSourceThinking" class="select-input"></select>
               </label>
             </div>
             <button id="builtinSourceSave" class="primary-button" type="button">Save and use</button>
@@ -297,6 +337,10 @@
             <label>
               Context tokens
               <input id="modelContextTokens" class="text-input" type="number" min="1000" value="128000">
+            </label>
+            <label class="checkbox-row">
+              <input id="modelSupportsVision" type="checkbox">
+              Supports vision input
             </label>
           </div>
           <button class="primary-button" type="submit">Save model</button>

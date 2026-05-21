@@ -80,10 +80,15 @@ public sealed class ReverieBridgeService : IDisposable
 
     private static IEnumerable<BridgeLaunch> BuildLaunches()
     {
+        if (!string.IsNullOrWhiteSpace(RuntimePaths.ReverieCliPath))
+        {
+            yield return new BridgeLaunch("rust-exe", RuntimePaths.ReverieCliPath, "--sdk-bridge", RuntimePaths.WorkspaceRoot);
+        }
+
         var scriptPath = Path.Combine(RuntimePaths.RuntimeRoot, "reverie_ui_bridge.py");
         if (File.Exists(scriptPath))
         {
-            var repoVenv = Path.Combine(RuntimePaths.WorkspaceRoot, "venv", "Scripts", "python.exe");
+            var repoVenv = Path.Combine(RuntimePaths.WorkspaceRoot, "ReverieCli-py", "venv", "Scripts", "python.exe");
             foreach (var python in new[]
             {
                 Environment.GetEnvironmentVariable("REVERIE_UI_PYTHON"),
@@ -104,10 +109,7 @@ public sealed class ReverieBridgeService : IDisposable
             }
         }
 
-        if (!string.IsNullOrWhiteSpace(RuntimePaths.ReverieCliPath))
-        {
-            yield return new BridgeLaunch("embedded-exe", RuntimePaths.ReverieCliPath, "--sdk-bridge", RuntimePaths.WorkspaceRoot);
-        }
+        // Python remains as a development fallback while the Rust runtime reaches full parity.
     }
 
     private async Task StartBridgeAsync(BridgeLaunch launch)

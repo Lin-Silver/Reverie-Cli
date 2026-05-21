@@ -44,42 +44,42 @@
 
 :root[data-theme="reverie"][data-appearance="dark"] {
   color-scheme: dark;
-  --bg: #111523;
-  --chrome: #171a2b;
-  --panel: #1d2235;
-  --panel-2: #252b42;
-  --panel-3: #2d3550;
-  --input: #12182a;
-  --control: #242a42;
-  --control-hover: #303858;
-  --control-active: #353d60;
-  --line: #3a4365;
-  --line-soft: #29314d;
-  --text: #f8f6ff;
-  --muted: #c5c8e4;
-  --faint: #858bb0;
-  --accent: #ff8fc7;
-  --accent-2: #8eb7ff;
-  --accent-3: #bda1ff;
-  --accent-soft: #30233f;
-  --blue: #8ec5ff;
-  --green: #7bdcc7;
-  --yellow: #ffd38b;
-  --red: #ff8aa3;
-  --send-text: #1a1020;
-  --code-bg: #0d1120;
-  --code-text: #edf0ff;
-  --message-user-bg: #1d2743;
-  --message-user-border: #43527d;
-  --message-assistant-bg: #241f3a;
-  --message-assistant-border: #5d4e87;
-  --message-system-bg: #161b2d;
-  --resizer-hover: #546196;
-  --brand-bg: linear-gradient(135deg, #332345, #1f3865);
-  --brand-border: #6f70ad;
-  --hero-border: rgba(189, 161, 255, .36);
-  --shadow: 0 22px 72px rgba(12, 16, 40, .5);
-  --glow: 0 0 0 1px rgba(255, 143, 199, .08), 0 18px 52px rgba(142, 197, 255, .18);
+  --bg: #0f1217;
+  --chrome: #151922;
+  --panel: #1a202b;
+  --panel-2: #212936;
+  --panel-3: #293342;
+  --input: #11161e;
+  --control: #202735;
+  --control-hover: #2a3445;
+  --control-active: #303b4f;
+  --line: #364150;
+  --line-soft: #28313d;
+  --text: #f3f6f8;
+  --muted: #aeb8c5;
+  --faint: #778391;
+  --accent: #ff9d45;
+  --accent-2: #6fc9ff;
+  --accent-3: #63d6a5;
+  --accent-soft: #30261d;
+  --blue: #6fc9ff;
+  --green: #63d6a5;
+  --yellow: #e8c36a;
+  --red: #f0707d;
+  --send-text: #101317;
+  --code-bg: #0b0f14;
+  --code-text: #e7eef5;
+  --message-user-bg: #172536;
+  --message-user-border: #35506b;
+  --message-assistant-bg: #18261f;
+  --message-assistant-border: #365a4a;
+  --message-system-bg: #161b22;
+  --resizer-hover: #3d4b5d;
+  --brand-bg: #202836;
+  --brand-border: #435367;
+  --hero-border: rgba(111, 201, 255, .24);
+  --shadow: 0 22px 72px rgba(0, 0, 0, .42);
+  --glow: 0 0 0 1px rgba(111, 201, 255, .07), 0 18px 48px rgba(0, 0, 0, .22);
 }
 
 :root[data-theme="reverie"][data-appearance="light"] {
@@ -98,13 +98,13 @@
   --text: #231a35;
   --muted: #6b5d83;
   --faint: #978aaa;
-  --accent: #db4f9b;
-  --accent-2: #4178d4;
-  --accent-3: #8358d8;
-  --accent-soft: #fde8f4;
-  --blue: #4178d4;
-  --green: #158f79;
-  --yellow: #a16a16;
+  --accent: #c96a1a;
+  --accent-2: #236fae;
+  --accent-3: #12866f;
+  --accent-soft: #fff0df;
+  --blue: #236fae;
+  --green: #12866f;
+  --yellow: #8b6818;
   --red: #c23d61;
   --send-text: #ffffff;
   --code-bg: #f6f1ff;
@@ -115,11 +115,11 @@
   --message-assistant-border: #f5c0df;
   --message-system-bg: #f8f4ff;
   --resizer-hover: #c8b8e6;
-  --brand-bg: linear-gradient(135deg, #ffe0f1, #e4efff);
-  --brand-border: #d3b9ef;
-  --hero-border: rgba(131, 88, 216, .22);
-  --shadow: 0 18px 54px rgba(87, 64, 134, .16);
-  --glow: 0 0 0 1px rgba(219, 79, 155, .08), 0 18px 48px rgba(65, 120, 212, .13);
+  --brand-bg: #eef4fa;
+  --brand-border: #b8c9d9;
+  --hero-border: rgba(35, 111, 174, .2);
+  --shadow: 0 18px 54px rgba(32, 54, 74, .14);
+  --glow: 0 0 0 1px rgba(35, 111, 174, .08), 0 18px 48px rgba(18, 134, 111, .1);
 }
 
 * {
@@ -221,14 +221,19 @@ button:disabled {
 .brand-mark {
   width: 34px;
   height: 34px;
-  display: grid;
-  place-items: center;
+  display: block;
+  overflow: hidden;
   border: 1px solid var(--brand-border);
   border-radius: 8px;
   background: var(--brand-bg);
-  color: var(--accent);
-  font-weight: 800;
   box-shadow: var(--glow);
+}
+
+.brand-mark img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .brand-copy {
@@ -515,6 +520,7 @@ textarea:focus {
 }
 
 .primary-button,
+.toolbar-button.primary,
 .send-button {
   padding: 0 14px;
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
@@ -621,7 +627,7 @@ textarea:focus {
   width: min(100%, 960px);
   border: 1px solid var(--hero-border);
   border-bottom: 0;
-  border-radius: 14px 14px 0 0;
+  border-radius: 8px 8px 0 0;
   pointer-events: none;
 }
 
@@ -903,6 +909,103 @@ textarea {
   grid-template-columns: minmax(360px, 540px) minmax(0, 1fr);
 }
 
+.totals-layout {
+  grid-template-columns: minmax(360px, 1fr) minmax(360px, 1fr);
+}
+
+#totalsView {
+  grid-template-rows: auto auto auto auto;
+  align-content: start;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-rows: minmax(92px, auto);
+  gap: 12px;
+  max-width: 1180px;
+  width: 100%;
+}
+
+.metric-card {
+  display: grid;
+  gap: 6px;
+  min-height: 92px;
+  padding: 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: var(--glow);
+}
+
+.metric-label,
+.metric-meta,
+.audit-meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.metric-value {
+  color: var(--text);
+  font-size: 22px;
+  font-weight: 720;
+  line-height: 1.2;
+}
+
+.audit-list,
+.regression-list,
+.hook-rule-list {
+  display: grid;
+  gap: 10px;
+  min-height: 0;
+}
+
+.audit-item,
+.regression-item,
+.hook-rule {
+  display: grid;
+  gap: 6px;
+  padding: 11px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+}
+
+.audit-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.audit-head strong,
+.hook-rule strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.regression-item.passed {
+  border-color: color-mix(in srgb, var(--green) 38%, var(--line-soft));
+}
+
+.regression-item.failed {
+  border-color: color-mix(in srgb, var(--red) 42%, var(--line-soft));
+}
+
+.total-rules {
+  display: grid;
+  gap: 12px;
+  max-width: 1180px;
+  width: 100%;
+  padding: 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
 .list-pane,
 .detail-pane,
 .form-pane {
@@ -1094,6 +1197,7 @@ textarea {
   margin-top: 8px;
 }
 
+.section-header h2,
 .section-header h3 {
   margin: 0 0 3px;
   font-size: 13px;
@@ -1122,6 +1226,13 @@ textarea {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 10px;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
 }
 
 .badge-row {
@@ -1161,6 +1272,10 @@ textarea {
   }
 
   .shortcut-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -1235,11 +1350,13 @@ textarea {
   }
 
   .split-layout,
-  .settings-layout {
+  .settings-layout,
+  .totals-layout {
     grid-template-columns: 1fr;
   }
 
-  .shortcut-grid {
+  .shortcut-grid,
+  .metric-grid {
     grid-template-columns: 1fr;
   }
 

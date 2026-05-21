@@ -9,6 +9,7 @@ const state = {
   sessions: null,
   tools: [],
   git: null,
+  totals: null,
   plugins: null,
   settings: null,
   currentAssistant: null,
@@ -56,6 +57,13 @@ const el = {
   modeSelect: $("modeSelect"),
   thinkingStyleSelect: $("thinkingStyleSelect"),
   pluginSummary: $("pluginSummary"),
+  totalsSummary: $("totalsSummary"),
+  totalsRefreshButton: $("totalsRefreshButton"),
+  runRegressionButton: $("runRegressionButton"),
+  totalsMetrics: $("totalsMetrics"),
+  auditList: $("auditList"),
+  regressionList: $("regressionList"),
+  hookRuleList: $("hookRuleList"),
   pluginRemoteSummary: $("pluginRemoteSummary"),
   pluginRefreshButton: $("pluginRefreshButton"),
   remoteRefreshButton: $("remoteRefreshButton"),
@@ -78,6 +86,7 @@ const el = {
   modelApiKey: $("modelApiKey"),
   modelProvider: $("modelProvider"),
   modelContextTokens: $("modelContextTokens"),
+  modelSupportsVision: $("modelSupportsVision"),
   modelList: $("modelList"),
   builtinSourceList: $("builtinSourceList"),
   builtinSourceSelect: $("builtinSourceSelect"),
@@ -217,6 +226,17 @@ function compactPath(path) {
   return `${text.slice(0, 26)}...${text.slice(-28)}`;
 }
 
+function modelSourceLabel(source) {
+  const labels = {
+    standard: "Custom Providers",
+    geminicli: "Gemini CLI",
+    codex: "Codex",
+    nvidia: "NVIDIA",
+    modelscope: "ModelScope"
+  };
+  return labels[String(source || "standard").trim().toLowerCase()] || "Custom Providers";
+}
+
 function setBusy(value, label = "Ready") {
   state.busy = value;
   el.sendButton.disabled = value;
@@ -312,6 +332,7 @@ function activateView(name) {
   });
   el.settingsNavButton.classList.toggle("active", name === "settings");
   if (name === "plugins" && !state.plugins) send("listPlugins");
+  if (name === "totals") send("getTotals");
   if (name === "settings" && !state.settings) send("listSettings");
 }
 
@@ -328,6 +349,7 @@ function renderState(message) {
   state.config = message.config || state.config;
   state.sessions = message.sessions || state.sessions;
   state.tools = message.tools || state.tools;
+  state.totals = message.totals || state.totals;
   state.runtime = message.runtime || state.runtime;
   state.git = message.git || state.git;
 
@@ -342,7 +364,9 @@ function renderState(message) {
     ? `${activeModel.model_display_name || activeModel.model} via ${activeModel.provider || "provider"}`
     : "No active model configured";
 
-  el.configPath.textContent = state.config?.config_path || "Config path pending.";
+  const activeSourceLabel = modelSourceLabel(state.config?.active_model_source);
+  const customProfileCount = state.config?.models?.length || 0;
+  el.configPath.textContent = `${activeSourceLabel} active | ${customProfileCount} custom profile${customProfileCount === 1 ? "" : "s"}`;
   renderStatusPills();
   renderModes();
   el.thinkingStyleSelect.value = state.config?.thinking_output_style || "full";
@@ -350,6 +374,7 @@ function renderState(message) {
   renderSessions();
   renderModels();
   renderTools();
+  renderTotals();
   renderGit(state.git);
 
   if (state.sessions?.messages && !state.busy) {
@@ -367,8 +392,7 @@ function renderStatusPills() {
   const cliPath = state.host.reverieCliPath || state.runtime.executable || "";
   setPill(el.cliStatusPill, cliPath ? `CLI ${compactPath(cliPath)}` : "CLI not found", cliPath ? "ok" : "warn");
   setPill(el.bridgeStatusPill, state.runtime.kind || state.host.bridgeKind || "Bridge starting", state.runtime.kind ? "ok" : "");
-  const configPath = state.config?.config_path || "";
-  setPill(el.configStatusPill, configPath ? `Config ${compactPath(configPath)}` : "Config pending", configPath ? "ok" : "");
+  setPill(el.configStatusPill, `Profile ${modelSourceLabel(state.config?.active_model_source)}`, state.config ? "ok" : "");
   if (state.git?.available) {
     setPill(el.gitStatusPill, state.git.dirty ? `Git dirty ${state.git.change_count || 0}` : "Git clean", state.git.dirty ? "hot" : "ok");
   } else {
@@ -402,6 +426,7 @@ function renderProjects() {
     button.addEventListener("click", () => {
       el.workspaceInput.value = project;
       send("setWorkspace", { projectRoot: project });
+      send("getTotals");
       send("listSettings");
       send("listPlugins");
     });
@@ -469,7 +494,23 @@ function renderModels() {
   renderBuiltinSources();
   el.modelList.replaceChildren();
   const activeIndex = state.config?.active_model_index ?? -1;
-  for (const model of state.config?.models || []) {
+  const models = state.config?.models || [];
+  if (!models.length) {
+    const item = document.createElement("div");
+    item.className = "model-item empty";
+    const name = document.createElement("div");
+    name.className = "model-name";
+    name.textContent = "No custom provider profiles";
+    const meta = document.createElement("div");
+    meta.className = "model-meta";
+    meta.textContent = "Use the form below to add an OpenAI-compatible model, or choose a built-in source above.";
+    const actions = document.createElement("div");
+    actions.className = "badge-row";
+    actions.append(makeBadge("manual profiles"));
+    item.append(name, meta, actions);
+    el.modelList.append(item);
+  }
+  for (const model of models) {
     const item = document.createElement("div");
     item.className = `model-item ${model.index === activeIndex ? "active" : ""}`;
     const name = document.createElement("div");
@@ -477,7 +518,7 @@ function renderModels() {
     name.textContent = model.model_display_name || model.model || "Unnamed model";
     const meta = document.createElement("div");
     meta.className = "model-meta";
-    meta.textContent = `${model.provider || "provider"} | ${model.base_url || "no base url"}`;
+    meta.textContent = `${model.provider || "provider"} | ${model.base_url || "no base url"} | vision ${model.supports_vision ? "on" : "off"}`;
     const badges = document.createElement("div");
     badges.className = "badge-row";
     badges.append(
@@ -500,12 +541,102 @@ function getBuiltinSource(sourceId = "") {
   return sources.find(item => item.source === wanted) || sources[0] || null;
 }
 
+function getVisibleBuiltinModels(source) {
+  const models = source?.models || [];
+  const visible = models.filter(model => String(model.visibility || "list").toLowerCase() !== "hide");
+  return visible.length ? visible : models;
+}
+
+function getSelectedBuiltinModel(source) {
+  const selectedId = el.builtinSourceModel?.value || source?.selected_model_id || "";
+  return (source?.models || []).find(model => String(model.id || "") === String(selectedId || "")) || null;
+}
+
+function appendSelectOption(select, value, label, selectedValue = "") {
+  const option = document.createElement("option");
+  option.value = value;
+  option.textContent = label || value || "Not applicable";
+  option.selected = String(value || "") === String(selectedValue || "");
+  select.append(option);
+  return option;
+}
+
+function normalizeThinkingChoice(choice) {
+  const value = String(choice || "").trim().toLowerCase();
+  return value.replaceAll(" ", "");
+}
+
+function thinkingChoiceLabel(choice) {
+  const labels = {
+    minimal: "Minimal",
+    low: "Low",
+    medium: "Medium",
+    high: "High",
+    xhigh: "Extra High",
+    max: "Max",
+    none: "Non-think",
+    true: "Thinking ON",
+    false: "Thinking OFF"
+  };
+  return labels[normalizeThinkingChoice(choice)] || String(choice || "").trim() || "Not applicable";
+}
+
+function populateBuiltinThinkingOptions(source) {
+  el.builtinSourceThinking.replaceChildren();
+  const sourceId = String(source?.source || "");
+  const selectedModel = getSelectedBuiltinModel(source);
+  let choices = [];
+  let selected = "";
+
+  if (sourceId === "codex") {
+    const catalogChoices = new Map((source.reasoning_choices || []).map(item => [normalizeThinkingChoice(item.id), item]));
+    const levels = selectedModel?.reasoning_levels || [];
+    choices = levels.map(level => {
+      const id = normalizeThinkingChoice(level);
+      const catalogItem = catalogChoices.get(id) || {};
+      return {
+        id,
+        label: catalogItem.label || thinkingChoiceLabel(id),
+        description: catalogItem.description || ""
+      };
+    }).filter(item => item.id);
+    if (!choices.length) {
+      choices = source.reasoning_choices || [];
+    }
+    selected = normalizeThinkingChoice(source.reasoning_effort || choices[0]?.id || "medium");
+  } else if (sourceId === "nvidia") {
+    choices = selectedModel?.thinking_options || source.thinking_options || [];
+    selected = normalizeThinkingChoice(source.thinking_choice || choices[0]?.id || "");
+  }
+
+  const seen = new Set();
+  for (const choice of choices) {
+    const id = normalizeThinkingChoice(choice.id);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    appendSelectOption(el.builtinSourceThinking, id, choice.label || thinkingChoiceLabel(id), selected);
+  }
+  if (selected && !seen.has(selected)) {
+    appendSelectOption(el.builtinSourceThinking, selected, thinkingChoiceLabel(selected), selected);
+  }
+  if (!el.builtinSourceThinking.options.length) {
+    const option = appendSelectOption(el.builtinSourceThinking, "", "Not applicable", "");
+    option.disabled = true;
+  }
+  el.builtinSourceThinking.disabled = !["codex", "nvidia"].includes(sourceId) || !seen.size;
+}
+
 function renderBuiltinSources() {
   const sources = getBuiltinSources();
   if (!state.selectedBuiltinSource) {
     state.selectedBuiltinSource = sources.find(item => item.active)?.source || sources[0]?.source || "modelscope";
   }
   el.builtinSourceList.replaceChildren();
+  if (!sources.length) {
+    el.builtinSourceList.append(makeValueLine("Built-in model source catalog is not available from the current SDK bridge."));
+    fillBuiltinSourceForm(state.selectedBuiltinSource);
+    return;
+  }
   for (const source of sources) {
     const item = document.createElement("div");
     item.className = `source-item ${source.active ? "active" : ""}`;
@@ -538,19 +669,29 @@ function fillBuiltinSourceForm(sourceId = "") {
   state.selectedBuiltinSource = source.source;
   el.builtinSourceSelect.value = source.source;
   el.builtinSourceModel.replaceChildren();
-  for (const model of source.models || []) {
+  for (const model of getVisibleBuiltinModels(source)) {
     const option = document.createElement("option");
     option.value = model.id;
     option.textContent = model.display_name ? `${model.display_name} (${model.id})` : model.id;
     option.selected = model.id === source.selected_model_id;
     el.builtinSourceModel.append(option);
   }
-  if (!el.builtinSourceModel.value && source.selected_model_id) {
+  const hasSelectedModelOption = Array.from(el.builtinSourceModel.options)
+    .some(option => option.value === source.selected_model_id);
+  if (source.selected_model_id && !hasSelectedModelOption) {
     const option = document.createElement("option");
     option.value = source.selected_model_id;
     option.textContent = source.selected_model_display_name || source.selected_model_id;
     option.selected = true;
     el.builtinSourceModel.prepend(option);
+  }
+  if (!el.builtinSourceModel.options.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No catalog models available";
+    option.disabled = true;
+    option.selected = true;
+    el.builtinSourceModel.append(option);
   }
   el.builtinSourceApiKey.value = "";
   el.builtinSourceApiKey.disabled = !["nvidia", "modelscope"].includes(source.source);
@@ -559,8 +700,7 @@ function fillBuiltinSourceForm(sourceId = "") {
   el.builtinSourceEndpoint.disabled = source.source === "modelscope";
   el.builtinSourceProject.value = source.project_id || "";
   el.builtinSourceProject.disabled = source.source !== "geminicli";
-  el.builtinSourceThinking.value = source.reasoning_effort || source.thinking_choice || "";
-  el.builtinSourceThinking.disabled = !["codex", "nvidia"].includes(source.source);
+  populateBuiltinThinkingOptions(source);
 }
 
 function renderProviderSmoke(results = []) {
@@ -632,6 +772,101 @@ function renderSettings() {
   }
   const selected = items.find(item => item.key === state.selectedSettingKey) || items[0];
   if (selected) selectSetting(selected, false);
+}
+
+function renderTotals() {
+  const totals = state.totals || {};
+  const usage = totals.usage || {};
+  const lifecycle = totals.lifecycle || {};
+  const regression = totals.regression || {};
+  const recent = lifecycle.recent || [];
+  const rules = lifecycle.rules || [];
+  const results = regression.results || [];
+
+  if (!el.totalsSummary) return;
+  const regressionLabel = regression.passed == null ? "baseline not run" : (regression.passed ? "baseline passing" : "baseline failing");
+  el.totalsSummary.textContent = `${usage.workspace_name || totals.workspace?.name || "Workspace"} | ${regressionLabel} | ${Number(lifecycle.events || 0).toLocaleString()} hook events`;
+
+  el.totalsMetrics.replaceChildren();
+  const metrics = [
+    ["Active work", formatDuration(usage.total_active_seconds || 0), `${Number(usage.total_calls || 0).toLocaleString()} model calls`],
+    ["Tokens", `${Number(usage.total_input_tokens || 0).toLocaleString()} in`, `${Number(usage.total_output_tokens || 0).toLocaleString()} out`],
+    ["Hooks", Number(lifecycle.events || 0).toLocaleString(), `${Number(lifecycle.denied || 0).toLocaleString()} denied`],
+    ["Regression", regression.passed == null ? "Not run" : `${regression.passed_count || 0}/${regression.total || 0}`, `score ${regression.score || 0}`]
+  ];
+  for (const [label, value, meta] of metrics) {
+    const card = document.createElement("article");
+    card.className = "metric-card";
+    const title = document.createElement("div");
+    title.className = "metric-label";
+    title.textContent = label;
+    const amount = document.createElement("div");
+    amount.className = "metric-value";
+    amount.textContent = value;
+    const hint = document.createElement("div");
+    hint.className = "metric-meta";
+    hint.textContent = meta;
+    card.append(title, amount, hint);
+    el.totalsMetrics.append(card);
+  }
+
+  el.auditList.replaceChildren();
+  if (!recent.length) {
+    el.auditList.append(makeValueLine("No lifecycle audit events yet."));
+  } else {
+    for (const item of recent.slice(-24).reverse()) {
+      const row = document.createElement("article");
+      row.className = "audit-item";
+      const head = document.createElement("div");
+      head.className = "audit-head";
+      const title = document.createElement("strong");
+      title.textContent = item.tool || "runtime";
+      const outcome = item.allowed === false ? "denied" : (item.success === false ? "failed" : "ok");
+      head.append(title, makeBadge(outcome, outcome === "ok" ? "ok" : "warn"));
+      const meta = document.createElement("div");
+      meta.className = "audit-meta";
+      meta.textContent = `${formatDate(item.timestamp)} | ${item.phase || "event"}${item.reason ? ` | ${item.reason}` : ""}`;
+      row.append(head, meta);
+      el.auditList.append(row);
+    }
+  }
+
+  el.regressionList.replaceChildren();
+  if (!results.length) {
+    el.regressionList.append(makeValueLine("Run the baseline to create deterministic agent behavior results."));
+  } else {
+    for (const item of results) {
+      const row = document.createElement("article");
+      row.className = `regression-item ${item.passed ? "passed" : "failed"}`;
+      const head = document.createElement("div");
+      head.className = "audit-head";
+      const title = document.createElement("strong");
+      title.textContent = item.title || item.id;
+      head.append(title, makeBadge(item.passed ? "pass" : "fail", item.passed ? "ok" : "warn"));
+      const meta = document.createElement("div");
+      meta.className = "audit-meta";
+      meta.textContent = `${item.duration_ms || 0}ms | ${item.detail || ""}`;
+      row.append(head, meta);
+      el.regressionList.append(row);
+    }
+  }
+
+  el.hookRuleList.replaceChildren();
+  if (!rules.length) {
+    el.hookRuleList.append(makeValueLine("No hook rules loaded."));
+  } else {
+    for (const rule of rules) {
+      const row = document.createElement("article");
+      row.className = "hook-rule";
+      const name = document.createElement("strong");
+      name.textContent = rule.id || "hook";
+      const meta = document.createElement("div");
+      meta.className = "audit-meta";
+      meta.textContent = `${rule.phase || "*"} | ${rule.tool || "*"} | ${rule.action || "audit"}${rule.message ? ` | ${rule.message}` : ""}`;
+      row.append(name, meta);
+      el.hookRuleList.append(row);
+    }
+  }
 }
 
 function buildSettingControl(item) {
@@ -884,6 +1119,7 @@ function fillModelForm(model) {
   el.modelApiKey.value = "";
   el.modelProvider.value = model.provider || "openai-sdk";
   el.modelContextTokens.value = model.max_context_tokens || 128000;
+  el.modelSupportsVision.checked = Boolean(model.supports_vision);
 }
 
 function makeBadge(text, className = "") {
@@ -926,6 +1162,13 @@ function formatBytes(value) {
   return `${Math.round(size / 1024 / 1024)} MB`;
 }
 
+function formatDuration(seconds) {
+  const total = Math.max(0, Number(seconds || 0));
+  if (total < 60) return `${Math.round(total)}s`;
+  if (total < 3600) return `${Math.floor(total / 60)}m ${Math.round(total % 60)}s`;
+  return `${Math.floor(total / 3600)}h ${Math.round((total % 3600) / 60)}m`;
+}
+
 function formatDate(value) {
   if (!value) return "";
   const date = new Date(value);
@@ -956,6 +1199,7 @@ function handleBridgeMessage(message) {
       rememberProject(el.workspaceInput.value);
       renderStatusPills();
       send("initialize", { projectRoot: el.workspaceInput.value });
+      send("getTotals");
       send("listSettings");
       send("listPlugins");
       break;
@@ -965,6 +1209,21 @@ function handleBridgeMessage(message) {
     case "settings":
       state.settings = message.settings || {};
       renderSettings();
+      break;
+    case "totals":
+      state.totals = message.totals || {};
+      renderTotals();
+      setBusy(false, "Ready");
+      break;
+    case "agent.regression.started":
+      setBusy(true, "Running baseline");
+      activateView("totals");
+      break;
+    case "agent.regression.complete":
+      state.totals = state.totals || {};
+      state.totals.regression = message.summary || {};
+      renderTotals();
+      setBusy(false, "Ready");
       break;
     case "setting.updated":
       log(message.message || `Setting ${message.key} updated`);
@@ -1118,10 +1377,16 @@ document.querySelectorAll(".tab-button").forEach(button => {
 });
 
 el.settingsNavButton.addEventListener("click", () => activateView("settings"));
+el.totalsRefreshButton.addEventListener("click", () => send("getTotals"));
+el.runRegressionButton.addEventListener("click", () => {
+  setBusy(true, "Running baseline");
+  send("runAgentRegression");
+});
 
 el.workspaceApply.addEventListener("click", () => {
   rememberProject(el.workspaceInput.value);
   send("setWorkspace", { projectRoot: el.workspaceInput.value });
+  send("getTotals");
   send("listSettings");
   send("listPlugins");
 });
@@ -1172,6 +1437,10 @@ el.builtinSourceSelect.addEventListener("change", () => {
   state.selectedBuiltinSource = el.builtinSourceSelect.value;
   fillBuiltinSourceForm(state.selectedBuiltinSource);
 });
+el.builtinSourceModel.addEventListener("change", () => {
+  const source = getBuiltinSource(el.builtinSourceSelect.value);
+  if (source) populateBuiltinThinkingOptions(source);
+});
 el.providerSmokeButton.addEventListener("click", () => {
   activateTab("models");
   send("testProviders", {
@@ -1204,11 +1473,13 @@ el.modelForm.addEventListener("submit", event => {
     base_url: el.modelBaseUrl.value,
     api_key: el.modelApiKey.value,
     provider: el.modelProvider.value,
-    max_context_tokens: Number(el.modelContextTokens.value || 128000)
+    max_context_tokens: Number(el.modelContextTokens.value || 128000),
+    supports_vision: Boolean(el.modelSupportsVision.checked)
   });
   el.modelForm.reset();
   el.modelIndex.value = "-1";
   el.modelContextTokens.value = "128000";
+  el.modelSupportsVision.checked = false;
 });
 
 el.composer.addEventListener("submit", event => {
@@ -1253,9 +1524,9 @@ document.addEventListener("keydown", event => {
     applyTheme(next);
     return;
   }
-  if (command && ["1", "2", "3"].includes(key)) {
+  if (command && ["1", "2", "3", "4"].includes(key)) {
     event.preventDefault();
-    activateView({ "1": "chat", "2": "plugins", "3": "settings" }[key]);
+    activateView({ "1": "chat", "2": "totals", "3": "plugins", "4": "settings" }[key]);
     return;
   }
   if (event.altKey && ["1", "2", "3", "4"].includes(key)) {

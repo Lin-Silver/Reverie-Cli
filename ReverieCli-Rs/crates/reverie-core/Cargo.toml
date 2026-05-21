@@ -1,0 +1,27 @@
+[package]
+name = "reverie-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+dirs.workspace = true
+encoding_rs.workspace = true
+regex.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha1.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+toml.workspace = true
+
+reverie-context = { path = "../reverie-context" }
+reverie-tools = { path = "../reverie-tools" }
+
+[dev-dependencies]
+tempfile.workspace = true

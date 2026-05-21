@@ -6,7 +6,7 @@ namespace Reverie.UI;
 
 public sealed class MainForm : Form
 {
-    private static readonly Color DefaultWindowBackground = Color.FromArgb(17, 21, 35);
+    private static readonly Color DefaultWindowBackground = Color.FromArgb(15, 18, 23);
 
     private readonly WebView2 _webView = new();
     private readonly ReverieBridgeService _bridge = new();
@@ -18,6 +18,7 @@ public sealed class MainForm : Form
     public MainForm()
     {
         Text = "Reverie UI";
+        Icon = LoadApplicationIcon();
         BackColor = _windowBackground;
         MinimumSize = new Size(1120, 720);
         StartPosition = FormStartPosition.CenterScreen;
@@ -29,6 +30,17 @@ public sealed class MainForm : Form
         Load += OnLoad;
         FormClosing += OnFormClosing;
         _bridge.OutputReceived += OnBridgeOutputReceived;
+    }
+
+    private static Icon? LoadApplicationIcon()
+    {
+        var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "reverie.ico");
+        if (!File.Exists(iconPath))
+        {
+            return null;
+        }
+
+        return new Icon(iconPath);
     }
 
     protected override void OnHandleCreated(EventArgs e)
@@ -144,9 +156,9 @@ public sealed class MainForm : Form
             );
         }
         return (
-            Color.FromArgb(17, 21, 35),
-            Color.FromArgb(17, 21, 35),
-            Color.FromArgb(248, 246, 255),
+            Color.FromArgb(15, 18, 23),
+            Color.FromArgb(15, 18, 23),
+            Color.FromArgb(243, 246, 248),
             true
         );
     }

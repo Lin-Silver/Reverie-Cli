@@ -39,5 +39,5 @@ env/
 .reverie/
 .env
 plugins/blender/*.zip
-Reverie UI/runtime/appdata/
+ReverieCli-py/ui-runtime/appdata/
 Reverie UI/artifacts/

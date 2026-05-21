@@ -176,8 +176,8 @@ impl McpServer {
         let tools = self.tools.read().await;
 
         let tool_list: Vec<Tool> = tools
-            .iter()
-            .map(|(name, _)| Tool {
+            .keys()
+            .map(|name| Tool {
                 name: name.clone(),
                 description: None,
                 input_schema: ToolInputSchema {
@@ -216,8 +216,8 @@ impl McpServer {
         let resources = self.resources.read().await;
 
         let resource_list: Vec<Resource> = resources
-            .iter()
-            .map(|(uri, _)| Resource {
+            .keys()
+            .map(|uri| Resource {
                 uri: uri.clone(),
                 name: uri.clone(),
                 mime_type: None,
@@ -250,8 +250,8 @@ impl McpServer {
         let prompts = self.prompts.read().await;
 
         let prompt_list: Vec<Prompt> = prompts
-            .iter()
-            .map(|(name, _)| Prompt {
+            .keys()
+            .map(|name| Prompt {
                 name: name.clone(),
                 description: None,
                 arguments: None,

@@ -62,18 +62,18 @@ impl TuiRenderer {
 
             // 渲染侧边栏（会话列表）
             if layout.sidebar_ratio > 0 {
-                Self::render_sidebar(frame, sidebar_area, &app_state);
+                Self::render_sidebar(frame, sidebar_area, app_state);
             }
 
             // 渲染消息区域
-            Self::render_messages(frame, message_area, &app_state);
+            Self::render_messages(frame, message_area, app_state);
 
             // 渲染输入区域
-            Self::render_input(frame, input_area, &app_state);
+            Self::render_input(frame, input_area, app_state);
 
             // 渲染状态行
             if app_state.settings.show_status_line {
-                Self::render_status_bar(frame, area, &app_state);
+                Self::render_status_bar(frame, area, app_state);
             }
         })?;
 
@@ -124,7 +124,7 @@ impl TuiRenderer {
             Self::render_search_highlight(
                 frame,
                 inner_area,
-                &visible_messages,
+                visible_messages,
                 &app_state.search_query,
             );
         }

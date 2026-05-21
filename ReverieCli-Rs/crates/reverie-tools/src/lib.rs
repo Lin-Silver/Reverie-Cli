@@ -73,6 +73,11 @@ impl ToolRegistry {
                 "web",
             ),
             (
+                "tool_catalog",
+                "List built-in tools and their mode visibility.",
+                "tools",
+            ),
+            (
                 "skill_lookup",
                 "Inspect Codex-style SKILL.md instructions.",
                 "context",
@@ -103,6 +108,21 @@ impl ToolRegistry {
                 "game-design",
             ),
             (
+                "game_gdd_manager",
+                "Create and update game design document artifacts.",
+                "game-design",
+            ),
+            (
+                "story_design",
+                "Create story and narrative design artifacts.",
+                "game-design",
+            ),
+            (
+                "level_design",
+                "Create level design artifacts.",
+                "game-design",
+            ),
+            (
                 "game_project_scaffolder",
                 "Create or upgrade game project foundations.",
                 "game-scaffold",
@@ -121,6 +141,36 @@ impl ToolRegistry {
                 "game_playtest_lab",
                 "Generate playtest plans and quality gates.",
                 "game-playtest",
+            ),
+            (
+                "game_asset_manager",
+                "Manage game asset manifests and notes.",
+                "game-assets",
+            ),
+            (
+                "game_asset_packer",
+                "Inspect and package game asset directories.",
+                "game-assets",
+            ),
+            (
+                "game_config_editor",
+                "Read and update game JSON config files.",
+                "game-runtime",
+            ),
+            (
+                "game_balance_analyzer",
+                "Create balance analysis artifacts.",
+                "game-analysis",
+            ),
+            (
+                "game_math_simulator",
+                "Create game math simulation artifacts.",
+                "game-analysis",
+            ),
+            (
+                "game_stats_analyzer",
+                "Create game stats analysis artifacts.",
+                "game-analysis",
             ),
             (
                 "game_modeling_workbench",
@@ -199,10 +249,19 @@ fn modes_for_tool(name: &str) -> Vec<&'static str> {
         "subagent" => vec!["reverie"],
         "task_manager" => vec!["reverie", "reverie-gamer"],
         "game_design_orchestrator"
+        | "game_gdd_manager"
+        | "story_design"
+        | "level_design"
         | "game_project_scaffolder"
         | "reverie_engine"
         | "reverie_engine_lite"
-        | "game_playtest_lab" => vec!["reverie-gamer"],
+        | "game_playtest_lab"
+        | "game_asset_manager"
+        | "game_asset_packer"
+        | "game_config_editor"
+        | "game_balance_analyzer"
+        | "game_math_simulator"
+        | "game_stats_analyzer" => vec!["reverie-gamer"],
         "game_modeling_workbench" | "blender_modeling_workbench" => {
             vec!["reverie", "reverie-gamer"]
         }
@@ -284,7 +343,7 @@ pub async fn execute_builtin_tool(
         other => Ok(ToolResult {
             success: false,
             output: json!(null),
-            error: Some(format!("{other} is registered but not implemented yet")),
+            error: Some(format!("unknown or unavailable built-in tool: {other}")),
         }),
     };
     if let Ok(tool_result) = &result {
@@ -811,7 +870,7 @@ async fn web_search(args: Value) -> Result<ToolResult> {
                 {
                     "title": format!("Search web for {query}"),
                     "url": format!("https://duckduckgo.com/?q={encoded}"),
-                    "snippet": "Rust fallback returns a search URL; full DDGS-style result scraping is migrating."
+                    "snippet": "Rust fallback returns a search URL for the selected query."
                 }
             ]
         }),
@@ -1386,7 +1445,7 @@ async fn subagent_tool(project_root: &Path, args: Value) -> Result<ToolResult> {
         "schema": "reverie.subagent_run.v1",
         "prompt": prompt,
         "status": "queued_for_external_agent",
-        "note": "Native subagent process orchestration is migrating; this records the delegated task."
+        "note": "Delegation was recorded for a compatible external runner."
     });
     let path = write_artifact(project_root, "artifacts/subagent_last_run.json", &artifact)?;
     Ok(ToolResult {

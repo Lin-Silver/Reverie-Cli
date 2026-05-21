@@ -325,14 +325,14 @@ impl ConfigManager {
 
     fn load_from(&self, path: &Path) -> ReverieResult<Config> {
         let raw = std::fs::read_to_string(path)?;
-        let repaired = escape_invalid_json_string_control_chars(&raw);
+        let repaired = escape_invalid_json_string_control_chars(raw.trim_start_matches('\u{feff}'));
         let parsed: Config = serde_json::from_str(&repaired)?;
         Ok(parsed.normalized())
     }
 
     fn load_toml_from(&self, path: &Path) -> ReverieResult<Config> {
         let raw = std::fs::read_to_string(path)?;
-        let repaired = escape_invalid_json_string_control_chars(&raw);
+        let repaired = escape_invalid_json_string_control_chars(raw.trim_start_matches('\u{feff}'));
         let parsed: Config = toml::from_str(&repaired)?;
         Ok(parsed.normalized())
     }

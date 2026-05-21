@@ -6,9 +6,10 @@
 use serde::{Deserialize, Serialize};
 
 /// Compaction strategy to use
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum CompactionStrategy {
     /// Keep only the most recent messages
+    #[default]
     SlidingWindow,
     /// Summarize older messages
     Summary,
@@ -16,12 +17,6 @@ pub enum CompactionStrategy {
     ImportanceBased,
     /// Adaptive strategy that chooses based on context size
     Adaptive,
-}
-
-impl Default for CompactionStrategy {
-    fn default() -> Self {
-        Self::SlidingWindow
-    }
 }
 
 /// Configuration for context compaction
@@ -350,7 +345,7 @@ fn estimate_tokens_in_string(s: &str) -> usize {
 }
 
 fn role_for_index(index: usize) -> String {
-    if index % 2 == 0 {
+    if index.is_multiple_of(2) {
         "user".to_string()
     } else {
         "assistant".to_string()

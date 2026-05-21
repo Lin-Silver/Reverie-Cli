@@ -24,6 +24,24 @@ pub const COMMANDS: &[CommandSpec] = &[
         category: "core",
     },
     CommandSpec {
+        name: "clear",
+        aliases: &[],
+        description: "Clear the terminal output in interactive shells.",
+        category: "core",
+    },
+    CommandSpec {
+        name: "clean",
+        aliases: &[],
+        description: "Delete workspace Reverie sessions, caches, checkpoints, and audit logs.",
+        category: "core",
+    },
+    CommandSpec {
+        name: "exit",
+        aliases: &["quit"],
+        description: "Exit the interactive shell.",
+        category: "core",
+    },
+    CommandSpec {
         name: "doctor",
         aliases: &["harness"],
         description: "Audit workspace harness and verification posture.",
@@ -90,6 +108,18 @@ pub const COMMANDS: &[CommandSpec] = &[
         category: "tools",
     },
     CommandSpec {
+        name: "subagent",
+        aliases: &["subagents"],
+        description: "Manage Rust subagent specs and delegated run records.",
+        category: "tools",
+    },
+    CommandSpec {
+        name: "tti",
+        aliases: &[],
+        description: "Inspect text-to-image config or create a generation request artifact.",
+        category: "tools",
+    },
+    CommandSpec {
         name: "plugins",
         aliases: &[],
         description: "Manage runtime plugins.",
@@ -114,8 +144,14 @@ pub const COMMANDS: &[CommandSpec] = &[
         category: "settings",
     },
     CommandSpec {
-        name: "sessions",
+        name: "rules",
         aliases: &[],
+        description: "List, add, or remove custom rules applied to session prompts.",
+        category: "settings",
+    },
+    CommandSpec {
+        name: "sessions",
+        aliases: &["history"],
         description: "Browse sessions.",
         category: "session",
     },
@@ -227,7 +263,7 @@ pub fn command_to_mode_hint(command: &str) -> Option<Mode> {
     match command.trim().to_ascii_lowercase().as_str() {
         "gdd" | "assets" | "blueprint" | "bp" | "scaffold" | "engine" | "modeling" | "blender"
         | "playtest" | "pt" => Some(Mode::ReverieGamer),
-        "ce" | "index" => Some(Mode::Reverie),
+        "ce" | "index" | "subagent" | "subagents" | "tti" => Some(Mode::Reverie),
         other => {
             let mode = normalize_mode(other);
             (mode != Mode::Reverie || other == "reverie").then_some(mode)

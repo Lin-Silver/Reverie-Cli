@@ -193,12 +193,7 @@ impl<'a> Widget for ToolCallPanel<'a> {
             } else {
                 Style::default().fg(Color::Red)
             };
-            buf.set_string(
-                area.left() + 1,
-                y,
-                &format!("{} {}", status, content),
-                style,
-            );
+            buf.set_string(area.left() + 1, y, format!("{} {}", status, content), style);
         }
     }
 }

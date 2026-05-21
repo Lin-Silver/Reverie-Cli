@@ -226,10 +226,8 @@ impl LspManager {
         let names: Vec<String> = self
             .servers
             .iter()
-            .filter_map(|(name, info)| {
-                (info.config.auto_start && info.state == LspServerState::Stopped)
-                    .then(|| name.clone())
-            })
+            .filter(|(_, info)| info.config.auto_start && info.state == LspServerState::Stopped)
+            .map(|(name, _)| name.clone())
             .collect();
         for name in names {
             self.start_server(&name).await?;

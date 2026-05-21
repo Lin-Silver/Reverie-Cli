@@ -133,7 +133,7 @@ impl LspTransport {
             .map_err(|_| LspTransportError::ConnectionClosed)?;
 
         // 等待响应（简化处理，实际应该使用异步）
-        return self.receive_response_timeout(Duration::from_secs(10));
+        self.receive_response_timeout(Duration::from_secs(10))
 
         // 这里应该实现真正的请求-响应匹配
     }

@@ -110,6 +110,95 @@ impl SessionStore {
         self.save_index(&records)?;
         Ok(record)
     }
+
+    pub fn find(&self, id: &str) -> ReverieResult<Option<SessionRecord>> {
+        Ok(self.list()?.into_iter().find(|record| record.id == id))
+    }
+
+    pub fn rename(&self, id: &str, title: impl Into<String>) -> ReverieResult<SessionRecord> {
+        let mut records = self.list()?;
+        let title = title.into();
+        let mut renamed = None;
+        for record in &mut records {
+            if record.id == id {
+                record.title = title.clone();
+                record.updated_at = Utc::now();
+                renamed = Some(record.clone());
+                break;
+            }
+        }
+        let record = renamed
+            .ok_or_else(|| crate::ReverieError::InvalidInput(format!("session not found: {id}")))?;
+        self.save_index(&records)?;
+        Ok(record)
+    }
+
+    pub fn delete(&self, id: &str) -> ReverieResult<bool> {
+        let mut records = self.list()?;
+        let before = records.len();
+        records.retain(|record| record.id != id);
+        let removed = records.len() != before;
+        if removed {
+            self.save_index(&records)?;
+            let session_file = self.root.join(format!("{id}.json"));
+            if session_file.is_file() {
+                std::fs::remove_file(session_file)?;
+            }
+        }
+        Ok(removed)
+    }
+
+    pub fn clear(&self, id: &str) -> ReverieResult<SessionRecord> {
+        let mut records = self.list()?;
+        let mut cleared = None;
+        for record in &mut records {
+            if record.id == id {
+                record.updated_at = Utc::now();
+                cleared = Some(record.clone());
+                break;
+            }
+        }
+        let record = cleared
+            .ok_or_else(|| crate::ReverieError::InvalidInput(format!("session not found: {id}")))?;
+        self.save_index(&records)?;
+        let session_file = self.root.join(format!("{id}.json"));
+        std::fs::write(
+            session_file,
+            serde_json::to_string_pretty(&serde_json::json!({
+                "id": id,
+                "messages": [],
+                "updated_at": Utc::now()
+            }))?,
+        )?;
+        Ok(record)
+    }
+
+    pub fn set_active(&self, id: &str) -> ReverieResult<SessionRecord> {
+        let record = self
+            .find(id)?
+            .ok_or_else(|| crate::ReverieError::InvalidInput(format!("session not found: {id}")))?;
+        std::fs::create_dir_all(&self.root)?;
+        std::fs::write(
+            self.root.join("active_session.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "id": record.id,
+                "updated_at": Utc::now()
+            }))?,
+        )?;
+        Ok(record)
+    }
+
+    pub fn active_id(&self) -> ReverieResult<Option<String>> {
+        let path = self.root.join("active_session.json");
+        if !path.is_file() {
+            return Ok(None);
+        }
+        let value: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path)?)?;
+        Ok(value
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string))
+    }
 }
 
 #[derive(Debug, Clone)]

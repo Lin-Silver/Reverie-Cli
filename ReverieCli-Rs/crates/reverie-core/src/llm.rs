@@ -628,9 +628,7 @@ pub async fn send_nvidia_compatible(
         .find(|item| item.name == model || item.model == model)
         .ok_or_else(|| ReverieError::InvalidInput(format!("model not configured: {model}")))?;
 
-    let api_key = std::env::var("NVIDIA_API_KEY").map_err(|_| {
-        ReverieError::InvalidInput("NVIDIA_API_KEY environment variable not set".to_string())
-    })?;
+    let api_key = provider_api_key(config, "nvidia", "NVIDIA_API_KEY")?;
 
     let base_url = selected
         .base_url
@@ -694,9 +692,7 @@ pub async fn send_modelscope_compatible(
         .find(|item| item.name == model || item.model == model)
         .ok_or_else(|| ReverieError::InvalidInput(format!("model not configured: {model}")))?;
 
-    let api_key = std::env::var("MODELSCOPE_API_KEY").map_err(|_| {
-        ReverieError::InvalidInput("MODELSCOPE_API_KEY environment variable not set".to_string())
-    })?;
+    let api_key = provider_api_key(config, "modelscope", "MODELSCOPE_API_KEY")?;
 
     let base_url = selected
         .base_url
@@ -741,9 +737,7 @@ pub async fn send_codex_compatible(
         .find(|item| item.name == model || item.model == model)
         .ok_or_else(|| ReverieError::InvalidInput(format!("model not configured: {model}")))?;
 
-    let api_key = std::env::var("OPENAI_API_KEY").map_err(|_| {
-        ReverieError::InvalidInput("OPENAI_API_KEY environment variable not set".to_string())
-    })?;
+    let api_key = provider_api_key(config, "codex", "OPENAI_API_KEY")?;
 
     let base_url = selected
         .base_url
@@ -782,6 +776,27 @@ pub async fn send_codex_compatible(
         output_text,
         raw: response,
     })
+}
+
+fn provider_api_key(config: &Config, provider: &str, env_name: &str) -> ReverieResult<String> {
+    if let Ok(value) = std::env::var(env_name) {
+        if !value.trim().is_empty() {
+            return Ok(value);
+        }
+    }
+    if let Some(value) = config
+        .extra
+        .get(provider)
+        .and_then(|value| value.get("api_key"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return Ok(value.to_string());
+    }
+    Err(ReverieError::InvalidInput(format!(
+        "{env_name} environment variable is not set and {provider}.api_key is not configured"
+    )))
 }
 
 #[cfg(test)]

@@ -1,7 +1,7 @@
 //! Skill types and data structures.
 
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// A skill definition loaded from a SKILL.md file
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,7 +61,7 @@ pub enum SkillScope {
 
 impl SkillScope {
     /// Get the directory path for this scope
-    pub fn path(&self, project_root: &PathBuf, user_home: &PathBuf) -> Option<PathBuf> {
+    pub fn path(&self, project_root: &Path, user_home: &Path) -> Option<PathBuf> {
         match self {
             SkillScope::Current => Some(PathBuf::from("./.agents/skills")),
             SkillScope::Parent => Some(PathBuf::from("../.agents/skills")),

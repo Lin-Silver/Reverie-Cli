@@ -136,18 +136,13 @@ pub struct SubagentSpawnResult {
 }
 
 /// Built-in subagent types
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum BuiltInSubagentType {
+    #[default]
     Default,
     Worker,
     Explorer,
-}
-
-impl Default for BuiltInSubagentType {
-    fn default() -> Self {
-        Self::Default
-    }
 }
 
 impl BuiltInSubagentType {

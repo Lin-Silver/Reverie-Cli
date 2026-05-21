@@ -120,8 +120,10 @@ mod tests {
 
     #[test]
     fn test_sandbox_file_access_allowed() {
-        let mut policy = SandboxPolicy::default();
-        policy.file_rules = vec![FileRule::allow_read_write("/tmp"), FileRule::deny_all()];
+        let policy = SandboxPolicy {
+            file_rules: vec![FileRule::allow_read_write("/tmp"), FileRule::deny_all()],
+            ..Default::default()
+        };
 
         let mut sandbox = SandboxInstance::new("test".to_string(), policy);
 
@@ -136,8 +138,10 @@ mod tests {
 
     #[test]
     fn test_sandbox_file_access_denied() {
-        let mut policy = SandboxPolicy::default();
-        policy.file_rules = vec![FileRule::deny_all()];
+        let policy = SandboxPolicy {
+            file_rules: vec![FileRule::deny_all()],
+            ..Default::default()
+        };
 
         let mut sandbox = SandboxInstance::new("test".to_string(), policy);
 
@@ -149,8 +153,10 @@ mod tests {
 
     #[test]
     fn test_sandbox_network_access_allowed() {
-        let mut policy = SandboxPolicy::default();
-        policy.network_rules = vec![NetworkRule::allow("localhost"), NetworkRule::deny_all()];
+        let policy = SandboxPolicy {
+            network_rules: vec![NetworkRule::allow("localhost"), NetworkRule::deny_all()],
+            ..Default::default()
+        };
 
         let mut sandbox = SandboxInstance::new("test".to_string(), policy);
 
@@ -161,8 +167,10 @@ mod tests {
 
     #[test]
     fn test_sandbox_network_access_denied() {
-        let mut policy = SandboxPolicy::default();
-        policy.network_rules = vec![NetworkRule::deny_all()];
+        let policy = SandboxPolicy {
+            network_rules: vec![NetworkRule::deny_all()],
+            ..Default::default()
+        };
 
         let mut sandbox = SandboxInstance::new("test".to_string(), policy);
 

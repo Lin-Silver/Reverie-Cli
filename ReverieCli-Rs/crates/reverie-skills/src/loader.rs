@@ -4,7 +4,7 @@ use crate::discovery::SkillDiscovery;
 use crate::types::*;
 use anyhow::Result;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::sync::RwLock;
 use tracing::{debug, info};
 
@@ -20,7 +20,7 @@ pub struct SkillLoader {
 
 impl SkillLoader {
     /// Create a new skill loader
-    pub fn new(project_root: impl AsRef<PathBuf>) -> Result<Self> {
+    pub fn new(project_root: impl AsRef<Path>) -> Result<Self> {
         Ok(Self {
             discovery: SkillDiscovery::new(project_root)?,
             cache: RwLock::new(HashMap::new()),
@@ -62,7 +62,8 @@ impl SkillLoader {
     /// Search skills by pattern
     pub async fn search(&self, pattern: &str) -> Vec<Skill> {
         let cache = self.cache.read().await;
-        cache.values()
+        cache
+            .values()
             .filter(|s| s.name.contains(pattern) || s.description.contains(pattern))
             .cloned()
             .collect()

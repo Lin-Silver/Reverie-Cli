@@ -1,5 +1,5 @@
 //! LSP 类型定义
-//! 
+//!
 //! 定义语言服务器协议的核心类型
 
 use serde::{Deserialize, Serialize};
@@ -61,6 +61,7 @@ pub struct TextDocumentPositionParams {
 
 /// 初始化参数
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct InitializeParams {
     pub process_id: Option<u32>,
     pub root_uri: Option<String>,
@@ -85,16 +86,16 @@ pub struct ClientCapabilities {
 pub struct WorkspaceClientCapabilities {
     pub apply_edit: Option<bool>,
     pub workspace_edit: Option<WorkspaceEditCapabilities>,
-    pub did_change_configuration: Option<DidChangeConfigurationClientCapabilities>,
-    pub did_change_watched_files: Option<DidChangeWatchedFilesClientCapabilities>,
-    pub symbol: Option<WorkspaceSymbolClientCapabilities>,
-    pub execute_command: Option<ExecuteCommandClientCapabilities>,
+    pub did_change_configuration: Option<serde_json::Value>,
+    pub did_change_watched_files: Option<serde_json::Value>,
+    pub symbol: Option<serde_json::Value>,
+    pub execute_command: Option<serde_json::Value>,
     pub will_save_wait_until: Option<bool>,
-    pub did_change_workspace_folders: Option<DidChangeWorkspaceFoldersClientCapabilities>,
+    pub did_change_workspace_folders: Option<serde_json::Value>,
     pub configuration: Option<bool>,
-    pub semantic_tokens: Option<SemanticTokensWorkspaceClientCapabilities>,
-    pub code_lens: Option<CodeLensWorkspaceClientCapabilities>,
-    pub file_operations: Option<FileOperationsWorkspaceClientCapabilities>,
+    pub semantic_tokens: Option<serde_json::Value>,
+    pub code_lens: Option<serde_json::Value>,
+    pub file_operations: Option<serde_json::Value>,
 }
 
 /// 工作区编辑能力
@@ -117,36 +118,36 @@ pub struct ChangeAnnotationSupport {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TextDocumentClientCapabilities {
     pub synchronization: Option<TextDocumentSyncCapabilities>,
-    pub completion: Option<CompletionCapabilities>,
-    pub hover: Option<HoverCapabilities>,
-    pub signature_help: Option<SignatureHelpCapabilities>,
-    pub declaration: Option<DeclarationCapabilities>,
-    pub definition: Option<DefinitionCapabilities>,
-    pub type_definition: Option<TypeDefinitionCapabilities>,
-    pub implementation: Option<ImplementationCapabilities>,
-    pub references: Option<ReferencesCapabilities>,
-    pub document_highlight: Option<DocumentHighlightCapabilities>,
-    pub document_symbol: Option<DocumentSymbolCapabilities>,
-    pub code_action: Option<CodeActionCapabilities>,
-    pub code_lens: Option<CodeLensCapabilities>,
-    pub document_link: Option<DocumentLinkCapabilities>,
-    pub color_provider: Option<ColorProviderCapabilities>,
-    pub formatting: Option<DocumentFormattingCapabilities>,
-    pub range_formatting: Option<DocumentRangeFormattingCapabilities>,
-    pub on_type_formatting: Option<DocumentOnTypeFormattingCapabilities>,
-    pub rename: Option<RenameCapabilities>,
-    pub folding_range: Option<FoldingRangeCapabilities>,
-    pub selection_range: Option<SelectionRangeCapabilities>,
-    pub publish_diagnostics: Option<PublishDiagnosticsCapabilities>,
-    pub call_hierarchy: Option<CallHierarchyCapabilities>,
-    pub semantic_tokens: Option<SemanticTokensClientCapabilities>,
-    pub linked_editing_range: Option<LinkedEditingRangeCapabilities>,
-    pub moniker: Option<MonikerCapabilities>,
-    pub type_hierarchy: Option<TypeHierarchyCapabilities>,
-    pub inline_value: Option<InlineValueCapabilities>,
-    pub inlay_hint: Option<InlayHintCapabilities>,
-    pub diagnostic: Option<DiagnosticCapabilities>,
-    pub inline_completion: Option<InlineCompletionCapabilities>,
+    pub completion: Option<serde_json::Value>,
+    pub hover: Option<serde_json::Value>,
+    pub signature_help: Option<serde_json::Value>,
+    pub declaration: Option<serde_json::Value>,
+    pub definition: Option<serde_json::Value>,
+    pub type_definition: Option<serde_json::Value>,
+    pub implementation: Option<serde_json::Value>,
+    pub references: Option<serde_json::Value>,
+    pub document_highlight: Option<serde_json::Value>,
+    pub document_symbol: Option<serde_json::Value>,
+    pub code_action: Option<serde_json::Value>,
+    pub code_lens: Option<serde_json::Value>,
+    pub document_link: Option<serde_json::Value>,
+    pub color_provider: Option<serde_json::Value>,
+    pub formatting: Option<serde_json::Value>,
+    pub range_formatting: Option<serde_json::Value>,
+    pub on_type_formatting: Option<serde_json::Value>,
+    pub rename: Option<serde_json::Value>,
+    pub folding_range: Option<serde_json::Value>,
+    pub selection_range: Option<serde_json::Value>,
+    pub publish_diagnostics: Option<serde_json::Value>,
+    pub call_hierarchy: Option<serde_json::Value>,
+    pub semantic_tokens: Option<serde_json::Value>,
+    pub linked_editing_range: Option<serde_json::Value>,
+    pub moniker: Option<serde_json::Value>,
+    pub type_hierarchy: Option<serde_json::Value>,
+    pub inline_value: Option<serde_json::Value>,
+    pub inlay_hint: Option<serde_json::Value>,
+    pub diagnostic: Option<serde_json::Value>,
+    pub inline_completion: Option<serde_json::Value>,
 }
 
 /// 文本文档同步能力
@@ -505,7 +506,9 @@ pub struct Request {
 pub struct Response {
     pub jsonrpc: String,
     pub id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<ResponseError>,
 }
 

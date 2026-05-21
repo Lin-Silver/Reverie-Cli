@@ -1,10 +1,10 @@
 //! Context compaction strategies for managing large conversation histories.
-//! 
+//!
 //! This module provides various strategies for reducing context size while
 //! preserving important information for LLM conversations.
 
-use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 
 /// Compaction strategy to use
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -133,7 +133,11 @@ impl ContextCompactor {
                     .enumerate()
                     .map(|(i, m)| WeightedMessage {
                         content: m.clone(),
-                        role: if i % 2 == 0 { "user".to_string() } else { "assistant".to_string() },
+                        role: if i % 2 == 0 {
+                            "user".to_string()
+                        } else {
+                            "assistant".to_string()
+                        },
                         importance: 1.0,
                         is_tool_call: false,
                         is_tool_result: false,
@@ -148,9 +152,9 @@ impl ContextCompactor {
 
         let keep_start = self.config.keep_start.min(messages.len() / 2);
         let keep_end = self.config.keep_end.min(messages.len() / 2);
-        
+
         let mut result = Vec::new();
-        
+
         // Keep start messages
         for msg in messages.iter().take(keep_start) {
             result.push(WeightedMessage {
@@ -161,7 +165,7 @@ impl ContextCompactor {
                 is_tool_result: false,
             });
         }
-        
+
         // Keep end messages
         for msg in messages.iter().skip(messages.len() - keep_end) {
             result.push(WeightedMessage {
@@ -172,11 +176,12 @@ impl ContextCompactor {
                 is_tool_result: false,
             });
         }
-        
+
+        let compacted_count = result.len();
         Ok(CompactionResult {
             messages: result,
             original_count: messages.len(),
-            compacted_count: result.len(),
+            compacted_count,
             tokens_saved: None,
             summary: Some(format!(
                 "Kept {} start and {} end messages",
@@ -201,24 +206,28 @@ impl ContextCompactor {
                 let importance = self.score_importance(m, i, messages.len());
                 WeightedMessage {
                     content: m.clone(),
-                    role: if i % 2 == 0 { "user".to_string() } else { "assistant".to_string() },
+                    role: if i % 2 == 0 {
+                        "user".to_string()
+                    } else {
+                        "assistant".to_string()
+                    },
                     importance,
                     is_tool_call: m.contains("tool_call"),
                     is_tool_result: m.contains("tool_result"),
                 }
             })
             .collect();
-        
+
         // Sort by importance (descending)
         weighted.sort_by(|a, b| b.importance.partial_cmp(&a.importance).unwrap());
-        
+
         // Keep top messages
         let keep_count = self.config.max_messages.min(weighted.len());
         weighted.truncate(keep_count);
-        
+
         // Re-sort by original order
         weighted.sort_by(|a, b| a.content.cmp(&b.content));
-        
+
         Ok(CompactionResult {
             messages: weighted,
             original_count: messages.len(),
@@ -231,7 +240,7 @@ impl ContextCompactor {
     /// Adaptive compaction: choose strategy based on context size
     fn compact_adaptive(&self, messages: &[String]) -> Result<CompactionResult, String> {
         let total_tokens = estimate_tokens(messages);
-        
+
         let strategy = if total_tokens < 4000 {
             CompactionStrategy::SlidingWindow
         } else if total_tokens < 16000 {
@@ -239,10 +248,10 @@ impl ContextCompactor {
         } else {
             CompactionStrategy::ImportanceBased
         };
-        
+
         let mut config = self.config.clone();
         config.strategy = strategy;
-        
+
         let compactor = ContextCompactor::new(config);
         compactor.compact(messages)
     }
@@ -250,26 +259,26 @@ impl ContextCompactor {
     /// Score the importance of a message
     fn score_importance(&self, content: &str, index: usize, total: usize) -> f64 {
         let mut score = 0.5;
-        
+
         // Recent messages are more important
         let recency = 1.0 - (index as f64 / total as f64);
         score += recency * 0.3;
-        
+
         // Tool calls and results are important
         if content.contains("tool_call") || content.contains("tool_result") {
             score += 0.2;
         }
-        
+
         // Messages with code are important
         if content.contains("```") || content.contains("fn ") || content.contains("const ") {
             score += 0.1;
         }
-        
+
         // System messages are important
         if content.contains("system") || content.contains("instruction") {
             score += 0.15;
         }
-        
+
         score.min(1.0)
     }
 }
@@ -298,10 +307,10 @@ mod tests {
             keep_end: 3,
             ..Default::default()
         });
-        
+
         let messages: Vec<String> = (0..20).map(|i| format!("Message {}", i)).collect();
         let result = compactor.compact(&messages).unwrap();
-        
+
         assert_eq!(result.original_count, 20);
         assert_eq!(result.compacted_count, 5); // 2 start + 3 end
     }
@@ -309,14 +318,14 @@ mod tests {
     #[test]
     fn test_importance_scoring() {
         let compactor = ContextCompactor::with_defaults();
-        
+
         // Tool call should be more important
         let tool_msg = "tool_call: read_file";
         let normal_msg = "What is the capital of France?";
-        
+
         let tool_score = compactor.score_importance(tool_msg, 0, 10);
         let normal_score = compactor.score_importance(normal_msg, 0, 10);
-        
+
         assert!(tool_score > normal_score);
     }
 
@@ -327,7 +336,7 @@ mod tests {
             ..Default::default()
         };
         let compactor = ContextCompactor::new(config);
-        
+
         // Small context should use sliding window
         let small_messages: Vec<String> = (0..10).map(|i| format!("Message {}", i)).collect();
         let result = compactor.compact(&small_messages).unwrap();

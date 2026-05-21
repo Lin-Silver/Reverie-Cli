@@ -361,16 +361,10 @@ pub struct ReadResourceResult {
 pub enum ResourceContents {
     /// Text resource
     #[serde(rename = "text/plain")]
-    Text {
-        uri: String,
-        text: String,
-    },
+    Text { uri: String, text: String },
     /// Binary resource
     #[serde(rename = "application/octet-stream")]
-    Binary {
-        uri: String,
-        blob: String,
-    },
+    Binary { uri: String, blob: String },
 }
 
 // ============================================================================

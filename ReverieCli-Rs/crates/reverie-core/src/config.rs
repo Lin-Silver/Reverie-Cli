@@ -1,13 +1,9 @@
 use crate::modes::{normalize_mode, Mode};
 use crate::ReverieResult;
-use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 use sha1::{Digest as Sha1Digest, Sha1};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::fs;
-use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ModelConfig {
@@ -101,107 +97,6 @@ pub fn app_root() -> PathBuf {
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("Reverie")
-}
-
-pub fn project_data_dir(project_root: &Path) -> PathBuf {
-    project_root.join(".reverie")
-}
-
-/// Configuration manager for loading and saving configuration
-pub struct ConfigManager {
-    project_root: PathBuf,
-    use_workspace_config: bool,
-    config_path: PathBuf,
-}
-
-impl ConfigManager {
-    /// Create a new config manager
-    pub fn new(project_root: impl AsRef<Path>, use_workspace_config: bool) -> Self {
-        let project_root = project_root.as_ref().to_path_buf();
-        let config_path = if use_workspace_config {
-            project_root.join(".reverie/config.json")
-        } else {
-            app_root().join("config.json")
-        };
-
-        Self {
-            project_root,
-            use_workspace_config,
-            config_path,
-        }
-    }
-
-    /// Get the active config path
-    pub fn active_config_path(&self) -> PathBuf {
-        self.config_path.clone()
-    }
-
-    /// Load configuration from disk
-    pub fn load(&self) -> Result<Config> {
-        info!("Loading configuration from: {}", self.config_path.display());
-
-        if !self.config_path.exists() {
-            debug!("Config file not found, using defaults");
-            return Ok(Config::default().normalized());
-        }
-
-        let content = fs::read_to_string(&self.config_path)
-            .context("Failed to read config file")?;
-
-        let mut config: Config = serde_json::from_str(&content)
-            .context("Failed to parse config JSON")?;
-
-        // Normalize the config
-        config = config.normalized();
-
-        info!("Loaded configuration: mode={}, model={:?}", 
-              config.active_mode, config.active_model);
-
-        Ok(config)
-    }
-
-    /// Save configuration to disk
-    pub fn save(&self, config: &Config) -> Result<()> {
-        info!("Saving configuration to: {}", self.config_path.display());
-
-        // Create directory if needed
-        if let Some(parent) = self.config_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        // Write with secure permissions
-        let content = serde_json::to_string_pretty(config)?;
-        fs::write(&self.config_path, content)?;
-
-        info!("Configuration saved successfully");
-        Ok(())
-    }
-
-    /// Update a specific setting
-    pub fn update_setting(&self, key: &str, value: serde_json::Value) -> Result<Config> {
-        let mut config = self.load()?;
-
-        match key {
-            "active_model" => config.active_model = value.as_str().map(|s| s.to_string()),
-            "active_mode" => config.active_mode = value.as_str()
-                .map(|s| normalize_mode(s).canonical().to_string())
-                .unwrap_or(config.active_mode),
-            "stream_responses" => config.stream_responses = value.as_bool().unwrap_or(config.stream_responses),
-            "api_timeout" => config.api_timeout = value.as_u64().unwrap_or(config.api_timeout),
-            "tool_output_style" => config.tool_output_style = value.as_str()
-                .map(|s| normalize_tool_output_style(s))
-                .unwrap_or(config.tool_output_style),
-            "thinking_output_style" => config.thinking_output_style = value.as_str()
-                .map(|s| normalize_thinking_output_style(s))
-                .unwrap_or(config.thinking_output_style),
-            _ => {
-                config.extra.insert(key.to_string(), value);
-            }
-        }
-
-        self.save(&config)?;
-        Ok(config)
-    }
 }
 
 pub fn project_data_name(project_path: &Path) -> String {

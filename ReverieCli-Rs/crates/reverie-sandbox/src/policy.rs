@@ -1,5 +1,5 @@
 //! 沙箱策略定义
-//! 
+//!
 //! 定义沙箱的安全策略、限制和规则
 
 use serde::{Deserialize, Serialize};
@@ -37,10 +37,7 @@ impl Default for SandboxPolicy {
                 FileRule::allow_read_write("/tmp/reverie"),
                 FileRule::deny_all(),
             ],
-            network_rules: vec![
-                NetworkRule::allow("localhost"),
-                NetworkRule::deny_all(),
-            ],
+            network_rules: vec![NetworkRule::allow("localhost"), NetworkRule::deny_all()],
             process_limits: ProcessLimits::default(),
             env_vars: HashMap::new(),
             resource_limits: ResourceLimits::default(),
@@ -82,7 +79,7 @@ impl FileRule {
             recursive: true,
         }
     }
-    
+
     /// 创建允许读写的规则
     pub fn allow_read_write(path: &str) -> Self {
         Self {
@@ -91,7 +88,7 @@ impl FileRule {
             recursive: true,
         }
     }
-    
+
     /// 创建拒绝所有的规则
     pub fn deny_all() -> Self {
         Self {
@@ -100,19 +97,19 @@ impl FileRule {
             recursive: true,
         }
     }
-    
+
     /// 检查路径是否匹配规则
     pub fn matches(&self, path: &Path) -> Option<FileAccessMode> {
         let path_str = path.to_string_lossy();
-        
+
         if self.path == "/" {
             return Some(self.mode);
         }
-        
+
         if path_str.starts_with(&self.path) {
             return Some(self.mode);
         }
-        
+
         None
     }
 }
@@ -137,7 +134,7 @@ impl NetworkRule {
             allowed: true,
         }
     }
-    
+
     /// 创建拒绝规则
     pub fn deny(host: &str) -> Self {
         Self {
@@ -146,7 +143,7 @@ impl NetworkRule {
             allowed: false,
         }
     }
-    
+
     /// 创建拒绝所有规则
     pub fn deny_all() -> Self {
         Self {
@@ -155,23 +152,23 @@ impl NetworkRule {
             allowed: false,
         }
     }
-    
+
     /// 检查主机是否匹配规则
     pub fn matches(&self, host: &str) -> bool {
         if self.host == "*" {
             return true;
         }
-        
+
         if self.host == host {
             return true;
         }
-        
+
         // 简单的通配符匹配
         if self.host.starts_with("*.") {
             let domain = &self.host[2..];
             return host.ends_with(domain);
         }
-        
+
         false
     }
 }
@@ -247,7 +244,7 @@ pub struct AuditEvent {
 }
 
 /// 审计事件类型
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum AuditEventType {
     FileAccess,
     NetworkAccess,
@@ -258,7 +255,7 @@ pub enum AuditEventType {
 }
 
 /// 审计事件详情
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AuditEventDetails {
     /// 路径（文件访问）
     pub path: Option<String>,
@@ -277,7 +274,7 @@ pub struct AuditEventDetails {
 }
 
 /// 审计结果
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum AuditResult {
     Allowed,
     Denied,
@@ -299,7 +296,9 @@ impl std::fmt::Display for SandboxError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SandboxError::PermissionDenied(msg) => write!(f, "Permission denied: {}", msg),
-            SandboxError::ResourceLimitExceeded(msg) => write!(f, "Resource limit exceeded: {}", msg),
+            SandboxError::ResourceLimitExceeded(msg) => {
+                write!(f, "Resource limit exceeded: {}", msg)
+            }
             SandboxError::InvalidPath(msg) => write!(f, "Invalid path: {}", msg),
             SandboxError::NetworkAccessDenied(msg) => write!(f, "Network access denied: {}", msg),
             SandboxError::ProcessLimitExceeded => write!(f, "Process limit exceeded"),

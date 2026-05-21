@@ -1,9 +1,9 @@
 //! TUI 状态管理
-//! 
+//!
 //! 管理应用状态、消息历史、会话等
 
-use std::collections::VecDeque;
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 
 /// 消息角色
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,7 +41,7 @@ impl Message {
             tool_result: None,
         }
     }
-    
+
     pub fn with_tool_call(
         role: MessageRole,
         content: String,
@@ -62,7 +62,7 @@ impl Message {
             tool_result: None,
         }
     }
-    
+
     pub fn with_tool_result(
         role: MessageRole,
         content: String,
@@ -109,7 +109,7 @@ impl Session {
             updated_at: 0,
         }
     }
-    
+
     pub fn add_message(&mut self, message: Message) {
         self.messages.push(message);
         self.updated_at = std::time::SystemTime::now()
@@ -117,7 +117,7 @@ impl Session {
             .unwrap_or_default()
             .as_millis() as u64;
     }
-    
+
     pub fn clear(&mut self) {
         self.messages.clear();
     }
@@ -281,56 +281,65 @@ impl AppState {
             tool_call_history: Vec::new(),
         }
     }
-    
+
     /// 创建新会话
     pub fn create_session(&mut self, title: String) -> String {
-        let id = format!("session-{}", chrono::Utc::now().timestamp_millis());
+        let id = format!(
+            "session-{}-{}",
+            chrono::Utc::now().timestamp_millis(),
+            self.sessions.len()
+        );
         let session = Session::new(id.clone(), title, self.mode.clone());
         self.sessions.push(session);
         self.current_session = self.sessions.last_mut().cloned();
         id
     }
-    
+
     /// 切换会话
     pub fn switch_session(&mut self, session_id: &str) {
         if let Some(session) = self.sessions.iter().find(|s| s.id == session_id) {
             self.current_session = Some(session.clone());
         }
     }
-    
+
     /// 添加消息到当前会话
     pub fn add_message(&mut self, message: Message) {
         if let Some(session) = self.current_session.as_mut() {
             session.add_message(message.clone());
         }
         self.message_history.push_back(message);
-        
+
         // 限制历史长度
         if self.message_history.len() > 1000 {
             self.message_history.pop_front();
         }
-        
+
         // 自动滚动
         if self.settings.auto_scroll {
             self.scroll_offset = usize::MAX;
         }
     }
-    
+
     /// 清除当前会话
     pub fn clear_current_session(&mut self) {
         if let Some(session) = self.current_session.as_mut() {
             session.clear();
         }
     }
-    
+
     /// 删除会话
     pub fn delete_session(&mut self, session_id: &str) {
         self.sessions.retain(|s| s.id != session_id);
-        if self.current_session.as_ref().map(|s| s.id == session_id).unwrap_or(false) {
+        if self
+            .current_session
+            .as_ref()
+            .map(|s| s.id == session_id)
+            .unwrap_or(false)
+        {
             self.current_session = self.sessions.first().cloned();
         }
     }
-    
+
     /// 获取当前消息
     pub fn current_messages(&self) -> Vec<&Message> {
         self.current_session
@@ -338,7 +347,7 @@ impl AppState {
             .map(|s| s.messages.iter().collect())
             .unwrap_or_default()
     }
-    
+
     /// 切换搜索模式
     pub fn toggle_search(&mut self) {
         self.is_searching = !self.is_searching;
@@ -347,34 +356,29 @@ impl AppState {
             self.search_index = 0;
         }
     }
-    
+
     /// 更新输入
     pub fn update_input(&mut self, input: String) {
         self.input = input;
         self.input_cursor = self.input.len();
     }
-    
+
     /// 在光标位置插入字符
     pub fn insert_char(&mut self, c: char) {
         self.input.insert(self.input_cursor, c);
         self.input_cursor += c.len_utf8();
     }
-    
+
     /// 删除光标前的字符
     pub fn delete_backward(&mut self) {
         if self.input_cursor > 0 {
-            // 找到前一个字符的起始位置
-            let mut pos = self.input_cursor;
-            while pos > 0 && !self.input.is_char_boundary(pos - 1) {
-                pos -= 1;
-            }
-            if pos > 0 {
+            if let Some((pos, _)) = self.input[..self.input_cursor].char_indices().last() {
                 self.input.drain(pos..self.input_cursor);
                 self.input_cursor = pos;
             }
         }
     }
-    
+
     /// 删除光标后的字符
     pub fn delete_forward(&mut self) {
         if self.input_cursor < self.input.len() {
@@ -388,7 +392,7 @@ impl AppState {
             }
         }
     }
-    
+
     /// 移动光标
     pub fn move_cursor(&mut self, direction: Direction) {
         match direction {

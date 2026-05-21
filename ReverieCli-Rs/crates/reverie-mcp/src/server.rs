@@ -3,12 +3,12 @@
 //! Allows Reverie to function as an MCP server, exposing its capabilities to orchestrating agents.
 
 use crate::types::*;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::sync::Arc;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, trace};
 
 /// Tool handler function type
 pub type ToolHandler = Box<dyn Fn(HashMap<String, Value>) -> Result<Value> + Send + Sync>;
@@ -17,7 +17,8 @@ pub type ToolHandler = Box<dyn Fn(HashMap<String, Value>) -> Result<Value> + Sen
 pub type ResourceHandler = Box<dyn Fn(&str) -> Result<ResourceContents> + Send + Sync>;
 
 /// Prompt handler function type
-pub type PromptHandler = Box<dyn Fn(&str, HashMap<String, String>) -> Result<GetPromptResult> + Send + Sync>;
+pub type PromptHandler =
+    Box<dyn Fn(&str, HashMap<String, String>) -> Result<GetPromptResult> + Send + Sync>;
 
 /// MCP Server that exposes Reverie capabilities
 pub struct McpServer {
@@ -59,9 +60,7 @@ impl McpServer {
 
     /// Enable tool capabilities
     pub fn with_tools(mut self) -> Self {
-        self.capabilities.tools = Some(ToolCapabilities {
-            listChanged: false,
-        });
+        self.capabilities.tools = Some(ToolCapabilities { listChanged: false });
         self
     }
 
@@ -76,9 +75,7 @@ impl McpServer {
 
     /// Enable prompt capabilities
     pub fn with_prompts(mut self) -> Self {
-        self.capabilities.prompts = Some(PromptCapabilities {
-            listChanged: false,
-        });
+        self.capabilities.prompts = Some(PromptCapabilities { listChanged: false });
         self
     }
 
@@ -90,20 +87,18 @@ impl McpServer {
         input_schema: ToolInputSchema,
         handler: ToolHandler,
     ) {
+        let name = name.into();
         let mut tools = self.tools.write().await;
-        tools.insert(name.into(), handler);
+        tools.insert(name.clone(), handler);
 
-        debug!("Registered tool: {}", name.into());
+        debug!("Registered tool: {}", name);
     }
 
     /// Register a resource handler
-    pub async fn register_resource(
-        &mut self,
-        uri: impl Into<String>,
-        handler: ResourceHandler,
-    ) {
+    pub async fn register_resource(&mut self, uri: impl Into<String>, handler: ResourceHandler) {
+        let uri = uri.into();
         let mut resources = self.resources.write().await;
-        resources.insert(uri.into(), handler);
+        resources.insert(uri, handler);
     }
 
     /// Register a prompt
@@ -114,8 +109,9 @@ impl McpServer {
         arguments: Option<Vec<PromptArgument>>,
         handler: PromptHandler,
     ) {
+        let name = name.into();
         let mut prompts = self.prompts.write().await;
-        prompts.insert(name.into(), handler);
+        prompts.insert(name, handler);
     }
 
     /// Check if initialized
@@ -136,10 +132,7 @@ impl McpServer {
             "prompts/list" => self.handle_prompts_list().await?,
             "prompts/get" => self.handle_prompts_get(request.params).await?,
             _ => {
-                return Err(anyhow!(
-                    "Method not found: {}",
-                    request.method
-                ));
+                return Err(anyhow!("Method not found: {}", request.method));
             }
         };
 
@@ -177,9 +170,10 @@ impl McpServer {
 
     async fn handle_tools_list(&self) -> Result<Value> {
         let tools = self.tools.read().await;
-        
-        let tool_list: Vec<Tool> = tools.iter().map(|(name, _)| {
-            Tool {
+
+        let tool_list: Vec<Tool> = tools
+            .iter()
+            .map(|(name, _)| Tool {
                 name: name.clone(),
                 description: None,
                 inputSchema: ToolInputSchema {
@@ -189,19 +183,20 @@ impl McpServer {
                     additional: HashMap::new(),
                 },
                 outputSchema: None,
-            }
-        }).collect();
+            })
+            .collect();
 
         Ok(json!(ListToolsResult { tools: tool_list }))
     }
 
     async fn handle_tools_call(&self, params: Option<Value>) -> Result<Value> {
         let params = params.ok_or_else(|| anyhow!("Missing parameters"))?;
-        let call_params: CallToolParams = serde_json::from_value(params)
-            .context("Invalid tool call parameters")?;
+        let call_params: CallToolParams =
+            serde_json::from_value(params).context("Invalid tool call parameters")?;
 
         let tools = self.tools.read().await;
-        let handler = tools.get(&call_params.name)
+        let handler = tools
+            .get(&call_params.name)
             .ok_or_else(|| anyhow!("Tool not found: {}", call_params.name))?;
 
         let result = handler(call_params.arguments)?;
@@ -215,26 +210,30 @@ impl McpServer {
 
     async fn handle_resources_list(&self) -> Result<Value> {
         let resources = self.resources.read().await;
-        
-        let resource_list: Vec<Resource> = resources.iter().map(|(uri, _)| {
-            Resource {
+
+        let resource_list: Vec<Resource> = resources
+            .iter()
+            .map(|(uri, _)| Resource {
                 uri: uri.clone(),
                 name: uri.clone(),
                 mimeType: None,
                 description: None,
-            }
-        }).collect();
+            })
+            .collect();
 
-        Ok(json!(ListResourcesResult { resources: resource_list }))
+        Ok(json!(ListResourcesResult {
+            resources: resource_list
+        }))
     }
 
     async fn handle_resources_read(&self, params: Option<Value>) -> Result<Value> {
         let params = params.ok_or_else(|| anyhow!("Missing parameters"))?;
-        let read_params: ReadResourceParams = serde_json::from_value(params)
-            .context("Invalid resource read parameters")?;
+        let read_params: ReadResourceParams =
+            serde_json::from_value(params).context("Invalid resource read parameters")?;
 
         let resources = self.resources.read().await;
-        let handler = resources.get(&read_params.uri)
+        let handler = resources
+            .get(&read_params.uri)
             .ok_or_else(|| anyhow!("Resource not found: {}", read_params.uri))?;
 
         let contents = handler(&read_params.uri)?;
@@ -245,25 +244,29 @@ impl McpServer {
 
     async fn handle_prompts_list(&self) -> Result<Value> {
         let prompts = self.prompts.read().await;
-        
-        let prompt_list: Vec<Prompt> = prompts.iter().map(|(name, _)| {
-            Prompt {
+
+        let prompt_list: Vec<Prompt> = prompts
+            .iter()
+            .map(|(name, _)| Prompt {
                 name: name.clone(),
                 description: None,
                 arguments: None,
-            }
-        }).collect();
+            })
+            .collect();
 
-        Ok(json!(ListPromptsResult { prompts: prompt_list }))
+        Ok(json!(ListPromptsResult {
+            prompts: prompt_list
+        }))
     }
 
     async fn handle_prompts_get(&self, params: Option<Value>) -> Result<Value> {
         let params = params.ok_or_else(|| anyhow!("Missing parameters"))?;
-        let get_params: GetPromptParams = serde_json::from_value(params)
-            .context("Invalid prompt get parameters")?;
+        let get_params: GetPromptParams =
+            serde_json::from_value(params).context("Invalid prompt get parameters")?;
 
         let prompts = self.prompts.read().await;
-        let handler = prompts.get(&get_params.name)
+        let handler = prompts
+            .get(&get_params.name)
             .ok_or_else(|| anyhow!("Prompt not found: {}", get_params.name))?;
 
         let result = handler(&get_params.name, get_params.arguments)?;
@@ -290,8 +293,8 @@ impl McpServer {
                 break;
             }
 
-            let request: Request = serde_json::from_str(&line)
-                .context("Failed to parse request")?;
+            let request: Request =
+                serde_json::from_str(&line).context("Failed to parse request")?;
 
             debug!("Received request: {} (id: {})", request.method, request.id);
 

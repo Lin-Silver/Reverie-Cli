@@ -2,7 +2,7 @@
 
 use crate::loader::SkillLoader;
 use crate::types::*;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use std::collections::HashMap;
 use tracing::{debug, info, warn};
 
@@ -24,7 +24,10 @@ impl SkillExecutor {
         name: &str,
         context: SkillInvocationContext,
     ) -> Result<SkillExecutionResult> {
-        let skill = self.loader.get(name).await
+        let skill = self
+            .loader
+            .get(name)
+            .await
             .ok_or_else(|| anyhow!("Skill not found: {}", name))?;
 
         info!("Executing skill: {}", name);
@@ -46,7 +49,12 @@ impl SkillExecutor {
         let mut errors = Vec::new();
 
         for (i, step) in instructions.iter().enumerate() {
-            debug!("Executing step {}/{}: {}", i + 1, instructions.len(), step.description);
+            debug!(
+                "Executing step {}/{}: {}",
+                i + 1,
+                instructions.len(),
+                step.description
+            );
 
             match self.execute_step(step, &context).await {
                 Ok(step_output) => {
@@ -138,7 +146,9 @@ fn parse_skill_instructions(content: &str) -> Result<Vec<SkillStep>> {
                     });
                 }
                 current_step = step_num as usize;
-                current_desc = trimmed[trimmed.find(|c: char| !c.is_ascii_digit()).unwrap_or(0)..].trim().to_string();
+                current_desc = trimmed[trimmed.find(|c: char| !c.is_ascii_digit()).unwrap_or(0)..]
+                    .trim()
+                    .to_string();
                 continue;
             }
         }

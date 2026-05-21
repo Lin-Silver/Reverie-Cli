@@ -55,7 +55,10 @@ impl SkillDiscovery {
         ];
 
         for scope in scopes {
-            match self.discover_from_scope(scope, &mut skills, &mut errors).await {
+            match self
+                .discover_from_scope(scope.clone(), &mut skills, &mut errors)
+                .await
+            {
                 Ok(count) => {
                     info!("Discovered {} skills from {:?}", count, scope);
                 }
@@ -99,7 +102,7 @@ impl SkillDiscovery {
             let path = entry.path();
 
             if path.file_name().map(|n| n == "SKILL.md").unwrap_or(false) {
-                match self.load_skill(path, scope.clone()) {
+                match self.load_skill(path, scope.clone()).await {
                     Ok(skill) => {
                         if !skills.iter().any(|s| s.name == skill.name) {
                             skills.push(skill);
@@ -119,11 +122,11 @@ impl SkillDiscovery {
     }
 
     /// Load a single skill from a SKILL.md file
-    fn load_skill(&self, path: &Path, scope: SkillScope) -> Result<Skill> {
+    async fn load_skill(&self, path: &Path, scope: SkillScope) -> Result<Skill> {
         let content = tokio::fs::read_to_string(path).await?;
-        
-        let (frontmatter, body) = parse_frontmatter(&content)
-            .context("Failed to parse skill frontmatter")?;
+
+        let (frontmatter, body) =
+            parse_frontmatter(&content).context("Failed to parse skill frontmatter")?;
 
         let skill = Skill {
             name: frontmatter.name,
@@ -143,13 +146,23 @@ impl SkillDiscovery {
     }
 
     /// Find a skill by name
-    pub fn find_skill(&self, name: &str, result: &SkillDiscoveryResult) -> Option<&Skill> {
+    pub fn find_skill<'a>(
+        &self,
+        name: &str,
+        result: &'a SkillDiscoveryResult,
+    ) -> Option<&'a Skill> {
         result.skills.iter().find(|s| s.name == name)
     }
 
     /// Get skills matching a pattern
-    pub fn find_by_pattern(&self, pattern: &str, result: &SkillDiscoveryResult) -> Vec<&Skill> {
-        result.skills.iter()
+    pub fn find_by_pattern<'a>(
+        &self,
+        pattern: &str,
+        result: &'a SkillDiscoveryResult,
+    ) -> Vec<&'a Skill> {
+        result
+            .skills
+            .iter()
             .filter(|s| s.name.contains(pattern) || s.description.contains(pattern))
             .collect()
     }
@@ -159,7 +172,7 @@ impl SkillDiscovery {
 fn parse_frontmatter(content: &str) -> Result<(SkillFrontmatter, String)> {
     // Look for frontmatter delimiters
     let pattern = regex::Regex::new(r"(?m)^---\s*\r?\n(.*?)\r?\n---\s*(?:\r?\n|$)").unwrap();
-    
+
     if let Some(caps) = pattern.captures(content) {
         let frontmatter_yaml = caps.get(1).map(|m| m.as_str()).unwrap_or("");
         let body = &content[caps.get(0).map(|m| m.end()).unwrap_or(0)..];
@@ -167,11 +180,14 @@ fn parse_frontmatter(content: &str) -> Result<(SkillFrontmatter, String)> {
         // Parse YAML using yaml-rust
         let docs = yaml_rust::YamlLoader::load_from_str(frontmatter_yaml)
             .context("Failed to parse YAML frontmatter")?;
-        
-        let frontmatter_doc = docs.into_iter().next()
+
+        let frontmatter_doc = docs
+            .into_iter()
+            .next()
             .ok_or_else(|| anyhow::anyhow!("Empty frontmatter"))?;
-        
-        let hash = frontmatter_doc.as_hash()
+
+        let hash = frontmatter_doc
+            .as_hash()
             .ok_or_else(|| anyhow::anyhow!("Frontmatter is not a hash"))?;
 
         let name = extract_string(hash, "name")?;
@@ -192,11 +208,13 @@ fn parse_frontmatter(content: &str) -> Result<(SkillFrontmatter, String)> {
 
         Ok((frontmatter, body.to_string()))
     } else {
-        let name = path::Path::new(content)
-            .file_stem()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "unnamed".to_string());
-        
+        let name = content
+            .lines()
+            .find_map(|line| line.strip_prefix("# ").map(str::trim))
+            .filter(|line| !line.is_empty())
+            .unwrap_or("unnamed")
+            .to_string();
+
         let frontmatter = SkillFrontmatter {
             name: name.clone(),
             description: name.clone(),

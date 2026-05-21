@@ -10,12 +10,12 @@
 //! https://modelcontextprotocol.io/specification
 
 pub mod client;
-pub mod server;
-pub mod types;
 pub mod registry;
+pub mod server;
 pub mod transport;
+pub mod types;
 
 pub use client::McpClient;
+pub use registry::McpRegistry;
 pub use server::McpServer;
 pub use types::*;
-pub use registry::McpRegistry;

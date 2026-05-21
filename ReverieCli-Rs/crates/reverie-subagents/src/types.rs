@@ -68,7 +68,7 @@ fn default_max_depth() -> usize {
 }
 
 /// A running subagent
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubagentRun {
     /// Unique run ID
     pub id: String,
@@ -93,7 +93,8 @@ pub struct SubagentRun {
 }
 
 /// Subagent status
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum SubagentStatus {
     Pending,
     Running,
@@ -124,6 +125,7 @@ pub struct SubagentSpawnRequest {
 }
 
 /// Subagent spawn result
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubagentSpawnResult {
     /// Run ID
     pub run_id: String,
@@ -152,8 +154,12 @@ impl BuiltInSubagentType {
     pub fn default_instructions(&self) -> &'static str {
         match self {
             BuiltInSubagentType::Default => "You are a general-purpose coding assistant.",
-            BuiltInSubagentType::Worker => "You are an execution-focused worker. Focus on implementing changes.",
-            BuiltInSubagentType::Explorer => "You are a read-heavy exploration agent. Focus on understanding codebases.",
+            BuiltInSubagentType::Worker => {
+                "You are an execution-focused worker. Focus on implementing changes."
+            }
+            BuiltInSubagentType::Explorer => {
+                "You are a read-heavy exploration agent. Focus on understanding codebases."
+            }
         }
     }
 }

@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::providers::{normalize_reasoning_effort, resolve_model};
 use crate::{ReverieError, ReverieResult};
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use regex::Regex;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -581,15 +581,17 @@ pub async fn send_model_compatible(
         .iter()
         .find(|item| item.name == model || item.model == model)
         .ok_or_else(|| ReverieError::InvalidInput(format!("model not configured: {model}")))?;
-    
+
     // Resolve model from provider catalog if available
     let provider = selected.provider.as_deref().unwrap_or("standard");
     let model_id = selected.model.as_str();
-    
+
     if let Some(provider_model) = resolve_model(provider, model_id) {
-        info!("Using provider catalog model: {} (transport: {})", 
-              provider_model.display_name, provider_model.transport);
-        
+        info!(
+            "Using provider catalog model: {} (transport: {})",
+            provider_model.display_name, provider_model.transport
+        );
+
         match provider_model.transport {
             "nvidia" => send_nvidia_compatible(config, request).await,
             "modelscope" => send_modelscope_compatible(config, request).await,
@@ -619,44 +621,51 @@ pub async fn send_nvidia_compatible(
     request: ChatRequest,
 ) -> ReverieResult<ChatResponse> {
     info!("Sending request to NVIDIA API");
-    
+
     let model = request.model.clone();
     let selected = config
         .models
         .iter()
         .find(|item| item.name == model || item.model == model)
         .ok_or_else(|| ReverieError::InvalidInput(format!("model not configured: {model}")))?;
-    
-    let api_key = std::env::var("NVIDIA_API_KEY")
-        .map_err(|_| ReverieError::InvalidInput("NVIDIA_API_KEY environment variable not set".to_string()))?;
-    
-    let base_url = selected.base_url.as_deref().unwrap_or("https://integrate.api.nvidia.com/v1");
-    
+
+    let api_key = std::env::var("NVIDIA_API_KEY").map_err(|_| {
+        ReverieError::InvalidInput("NVIDIA_API_KEY environment variable not set".to_string())
+    })?;
+
+    let base_url = selected
+        .base_url
+        .as_deref()
+        .unwrap_or("https://integrate.api.nvidia.com/v1");
+
     let mut payload = validate_and_sanitize_payload(json!({
         "model": selected.model,
         "messages": request.messages,
         "tools": request.tools,
         "stream": false
     }))?;
-    
+
     // Add NVIDIA-specific defaults
     if let Some(object) = payload.as_object_mut() {
         // NVIDIA-specific parameters
         object.entry("temperature").or_insert(json!(0.7));
-        
+
         if let Some(extra) = request.extra_body.as_object() {
             for (key, value) in extra {
                 object.insert(key.clone(), value.clone());
             }
         }
     }
-    
+
     let client = Client::builder()
         .timeout(Duration::from_secs(config.api_timeout))
         .build()?;
-    
+
     let response: Value = client
-        .post(format!("{}/chat/completions", base_url.trim_end_matches('/')))
+        .post(format!(
+            "{}/chat/completions",
+            base_url.trim_end_matches('/')
+        ))
         .bearer_auth(api_key)
         .json(&payload)
         .send()
@@ -664,7 +673,7 @@ pub async fn send_nvidia_compatible(
         .error_for_status()?
         .json()
         .await?;
-    
+
     let output_text = extract_openai_output_text(&response);
     Ok(ChatResponse {
         output_text,
@@ -678,25 +687,29 @@ pub async fn send_modelscope_compatible(
     request: ChatRequest,
 ) -> ReverieResult<ChatResponse> {
     info!("Sending request to ModelScope API");
-    
+
     let model = request.model.clone();
     let selected = config
         .models
         .iter()
         .find(|item| item.name == model || item.model == model)
         .ok_or_else(|| ReverieError::InvalidInput(format!("model not configured: {model}")))?;
-    
-    let api_key = std::env::var("MODELSCOPE_API_KEY")
-        .map_err(|_| ReverieError::InvalidInput("MODELSCOPE_API_KEY environment variable not set".to_string()))?;
-    
-    let base_url = selected.base_url.as_deref().unwrap_or("https://api-inference.modelscope.cn/v1");
-    
+
+    let api_key = std::env::var("MODELSCOPE_API_KEY").map_err(|_| {
+        ReverieError::InvalidInput("MODELSCOPE_API_KEY environment variable not set".to_string())
+    })?;
+
+    let base_url = selected
+        .base_url
+        .as_deref()
+        .unwrap_or("https://api-inference.modelscope.cn/v1");
+
     let payload = build_anthropic_payload(&selected.model, request);
-    
+
     let client = Client::builder()
         .timeout(Duration::from_secs(config.api_timeout))
         .build()?;
-    
+
     let response: Value = client
         .post(format!("{}/messages", base_url.trim_end_matches('/')))
         .header("x-api-key", api_key)
@@ -707,7 +720,7 @@ pub async fn send_modelscope_compatible(
         .error_for_status()?
         .json()
         .await?;
-    
+
     let output_text = extract_anthropic_output_text(&response);
     Ok(ChatResponse {
         output_text,
@@ -721,19 +734,23 @@ pub async fn send_codex_compatible(
     request: ChatRequest,
 ) -> ReverieResult<ChatResponse> {
     info!("Sending request to Codex API");
-    
+
     let model = request.model.clone();
     let selected = config
         .models
         .iter()
         .find(|item| item.name == model || item.model == model)
         .ok_or_else(|| ReverieError::InvalidInput(format!("model not configured: {model}")))?;
-    
-    let api_key = std::env::var("OPENAI_API_KEY")
-        .map_err(|_| ReverieError::InvalidInput("OPENAI_API_KEY environment variable not set".to_string()))?;
-    
-    let base_url = selected.base_url.as_deref().unwrap_or("https://api.openai.com/v1");
-    
+
+    let api_key = std::env::var("OPENAI_API_KEY").map_err(|_| {
+        ReverieError::InvalidInput("OPENAI_API_KEY environment variable not set".to_string())
+    })?;
+
+    let base_url = selected
+        .base_url
+        .as_deref()
+        .unwrap_or("https://api.openai.com/v1");
+
     let mut payload = validate_and_sanitize_payload(json!({
         "model": selected.model,
         "messages": request.messages,
@@ -743,13 +760,16 @@ pub async fn send_codex_compatible(
             .and_then(|v| v.as_str())
             .unwrap_or("medium")
     }))?;
-    
+
     let client = Client::builder()
         .timeout(Duration::from_secs(config.api_timeout))
         .build()?;
-    
+
     let response: Value = client
-        .post(format!("{}/chat/completions", base_url.trim_end_matches('/')))
+        .post(format!(
+            "{}/chat/completions",
+            base_url.trim_end_matches('/')
+        ))
         .bearer_auth(api_key)
         .json(&payload)
         .send()
@@ -757,7 +777,7 @@ pub async fn send_codex_compatible(
         .error_for_status()?
         .json()
         .await?;
-    
+
     let output_text = extract_openai_output_text(&response);
     Ok(ChatResponse {
         output_text,

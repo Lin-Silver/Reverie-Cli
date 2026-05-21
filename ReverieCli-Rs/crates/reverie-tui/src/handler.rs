@@ -1,11 +1,11 @@
 //! TUI 事件处理器
-//! 
+//!
 //! 处理键盘输入、鼠标事件和应用程序逻辑
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use std::sync::mpsc::{Receiver, Sender};
 
-use crate::event::{Event, keys};
+use crate::event::{keys, Event};
 use crate::state::{AppState, Direction, Message, MessageRole};
 
 /// 事件处理器
@@ -24,7 +24,7 @@ impl EventHandler {
     /// 创建新的事件处理器
     pub fn new(app_state: AppState) -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
-        
+
         Self {
             tx,
             rx,
@@ -32,38 +32,38 @@ impl EventHandler {
             should_quit: false,
         }
     }
-    
+
     /// 获取应用状态引用
     pub fn app_state(&self) -> &AppState {
         &self.app_state
     }
-    
+
     /// 获取应用状态可变引用
     pub fn app_state_mut(&mut self) -> &mut AppState {
         &mut self.app_state
     }
-    
+
     /// 获取下一个事件
     pub fn next(&self) -> Result<Event, Box<dyn std::error::Error>> {
         loop {
             if let Ok(event) = self.rx.try_recv() {
                 return Ok(event);
             }
-            
+
             if self.should_quit {
                 return Ok(Event::Quit);
             }
-            
+
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
     }
-    
+
     /// 发送事件
     pub fn send(&self, event: Event) -> Result<(), Box<dyn std::error::Error>> {
         self.tx.send(event)?;
         Ok(())
     }
-    
+
     /// 处理事件
     pub fn handle_event(&mut self, event: Event) {
         match event {
@@ -96,20 +96,21 @@ impl EventHandler {
             Event::Terminal(_) => {}
         }
     }
-    
+
     /// 处理键盘事件
     fn handle_key(&mut self, key: crossterm::event::KeyEvent) {
         // 如果显示帮助或设置面板，只处理关闭事件
         if self.app_state.show_help || self.app_state.show_settings || self.app_state.show_history {
-            if key.code == KeyCode::Esc || 
-               (key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL)) {
+            if key.code == KeyCode::Esc
+                || (key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL))
+            {
                 self.app_state.show_help = false;
                 self.app_state.show_settings = false;
                 self.app_state.show_history = false;
             }
             return;
         }
-        
+
         // 如果正在搜索
         if self.app_state.is_searching {
             match key.code {
@@ -132,13 +133,13 @@ impl EventHandler {
             }
             return;
         }
-        
+
         // 在输入框中输入
         if key.code == KeyCode::Char('v') && key.modifiers.contains(KeyModifiers::CONTROL) {
             // Ctrl+V 粘贴（简化处理）
             return;
         }
-        
+
         match key.code {
             KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.should_quit = true;
@@ -164,8 +165,13 @@ impl EventHandler {
                 self.handle_load_session();
             }
             KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                if let Some(session) = &self.app_state.current_session {
-                    self.handle_delete_session(&session.id);
+                if let Some(session_id) = self
+                    .app_state
+                    .current_session
+                    .as_ref()
+                    .map(|s| s.id.clone())
+                {
+                    self.handle_delete_session(&session_id);
                 }
             }
             KeyCode::Char('m') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -210,36 +216,38 @@ impl EventHandler {
             _ => {}
         }
     }
-    
+
     /// 处理发送消息
     fn handle_send_message(&mut self, content: String) {
         if content.trim().is_empty() {
             return;
         }
-        
+
         // 创建用户消息
         let message = Message::new(MessageRole::User, content.clone());
         self.app_state.add_message(message);
-        
+
         // 清空输入
         self.app_state.update_input(String::new());
     }
-    
+
     /// 处理选择会话
     fn handle_select_session(&mut self, session_id: &str) {
         self.app_state.switch_session(session_id);
     }
-    
+
     /// 处理切换模式
     fn handle_switch_mode(&mut self, mode: &str) {
         self.app_state.mode = mode.to_string();
     }
-    
+
     /// 处理工具调用
     fn handle_tool_call(&mut self, tool_name: &str, args: serde_json::Value) {
         // 记录工具调用历史
-        self.app_state.tool_call_history.push((tool_name.to_string(), args.clone()));
-        
+        self.app_state
+            .tool_call_history
+            .push((tool_name.to_string(), args.clone()));
+
         // 创建工具调用消息
         let message = Message::with_tool_call(
             MessageRole::Assistant,
@@ -250,7 +258,7 @@ impl EventHandler {
         );
         self.app_state.add_message(message);
     }
-    
+
     /// 处理工具结果
     fn handle_tool_result(&mut self, tool_name: &str, result: Result<String, String>) {
         // 查找对应的工具调用
@@ -264,71 +272,82 @@ impl EventHandler {
             self.app_state.add_message(message);
         }
     }
-    
+
     /// 处理复制
     fn handle_copy(&self, content: String) {
         // 简化处理：实际应该使用剪贴板库
         eprintln!("Copied: {}", content);
     }
-    
+
     /// 处理保存会话
     fn handle_save_session(&self) {
         // 简化处理：实际应该保存到文件
         eprintln!("Session saved");
     }
-    
+
     /// 处理加载会话
     fn handle_load_session(&mut self) {
         // 简化处理：实际应该从文件加载
         eprintln!("Session loaded");
     }
-    
+
     /// 处理删除会话
     fn handle_delete_session(&mut self, session_id: &str) {
         self.app_state.delete_session(session_id);
     }
-    
+
     /// 处理重新生成
     fn handle_regenerate(&self) {
         // 简化处理：实际应该请求重新生成最后一条助手消息
         eprintln!("Regenerating...");
     }
-    
+
     /// 处理停止生成
     fn handle_stop_generation(&mut self) {
         self.app_state.is_generating = false;
     }
-    
+
     /// 处理搜索
     fn handle_search(&mut self, query: String) {
         self.app_state.search_query = query;
         self.app_state.search_index = 0;
     }
-    
+
     /// 处理下一个搜索结果
     fn handle_next_search(&mut self) {
         self.app_state.search_index = self.app_state.search_index.saturating_add(1);
     }
-    
+
     /// 处理上一个搜索结果
     fn handle_previous_search(&mut self) {
         self.app_state.search_index = self.app_state.search_index.saturating_sub(1);
     }
-    
+
     /// 处理切换会话
     fn handle_switch_session(&mut self, delta: i32) {
         if self.app_state.sessions.is_empty() {
             return;
         }
-        
-        let current_index = self.app_state.sessions.iter().position(|s| {
-            self.app_state.current_session.as_ref().map(|cs| cs.id == s.id).unwrap_or(false)
-        }).unwrap_or(0);
-        
-        let new_index = ((current_index as i32) + delta).rem_euclid(self.app_state.sessions.len() as i32) as usize;
-        self.app_state.switch_session(&self.app_state.sessions[new_index].id);
+
+        let current_index = self
+            .app_state
+            .sessions
+            .iter()
+            .position(|s| {
+                self.app_state
+                    .current_session
+                    .as_ref()
+                    .map(|cs| cs.id == s.id)
+                    .unwrap_or(false)
+            })
+            .unwrap_or(0);
+
+        let new_index = ((current_index as i32) + delta)
+            .rem_euclid(self.app_state.sessions.len() as i32) as usize;
+        let session_id = self.app_state.sessions[new_index].id.clone();
+        self.app_state.switch_session(&session_id);
     }
-    
+
     /// 检查是否应该退出
     pub fn should_quit(&self) -> bool {
         self.should_quit

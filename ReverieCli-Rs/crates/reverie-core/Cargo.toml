@@ -10,6 +10,7 @@ anyhow.workspace = true
 chrono.workspace = true
 dirs.workspace = true
 encoding_rs.workspace = true
+futures.workspace = true
 regex.workspace = true
 reqwest.workspace = true
 serde.workspace = true
@@ -19,6 +20,7 @@ sha2.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 toml.workspace = true
+tracing.workspace = true
 
 reverie-context = { path = "../reverie-context" }
 reverie-tools = { path = "../reverie-tools" }

@@ -2,15 +2,14 @@
 //!
 //! The client connects to MCP servers, manages their lifecycle, and invokes tools.
 
+use crate::transport::{StdioTransport, Transport};
 use crate::types::*;
-use crate::transport::Transport;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::info;
 
 /// Request ID generator
 struct RequestIdGenerator {
@@ -56,6 +55,7 @@ pub struct McpClient {
 impl McpClient {
     /// Create a new MCP client from configuration
     pub fn new(config: McpServerConfig) -> Self {
+        let timeout_seconds = config.timeout_seconds;
         Self {
             config,
             transport: None,
@@ -66,7 +66,7 @@ impl McpClient {
             tools: RwLock::new(Vec::new()),
             resources: RwLock::new(Vec::new()),
             prompts: RwLock::new(Vec::new()),
-            timeout_seconds: config.timeout_seconds,
+            timeout_seconds,
         }
     }
 
@@ -76,9 +76,10 @@ impl McpClient {
         args: Vec<String>,
         env: HashMap<String, String>,
     ) -> Self {
+        let command = command.into();
         let config = McpServerConfig {
-            name: command.into(),
-            command: command.into(),
+            name: command.clone(),
+            command,
             args,
             env,
             enabled: true,
@@ -107,9 +108,17 @@ impl McpClient {
 
         info!("Connecting to MCP server: {}", self.config.name);
 
-        // For now, we'll use a placeholder transport
-        // A full implementation would use StdioTransport
-        return Err(anyhow!("Transport implementation pending"));
+        let transport = match self.config.transport {
+            McpTransport::Stdio => {
+                StdioTransport::spawn(&self.config.command, &self.config.args, &self.config.env)?
+            }
+            McpTransport::Sse | McpTransport::Websocket => {
+                return Err(anyhow!("Only stdio MCP transport is currently supported"));
+            }
+        };
+
+        self.transport = Some(Box::new(transport));
+        Ok(())
     }
 
     /// Initialize the MCP session

@@ -2,37 +2,42 @@
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::types::*;
-    
+    use reverie_lsp::types::*;
+
     #[test]
     fn test_position_serialization() {
         let pos = Position {
             line: 10,
             character: 5,
         };
-        
+
         let serialized = serde_json::to_string(&pos).unwrap();
         let deserialized: Position = serde_json::from_str(&serialized).unwrap();
-        
+
         assert_eq!(pos.line, deserialized.line);
         assert_eq!(pos.character, deserialized.character);
     }
-    
+
     #[test]
     fn test_range_serialization() {
         let range = Range {
-            start: Position { line: 0, character: 0 },
-            end: Position { line: 1, character: 10 },
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 1,
+                character: 10,
+            },
         };
-        
+
         let serialized = serde_json::to_string(&range).unwrap();
         let deserialized: Range = serde_json::from_str(&serialized).unwrap();
-        
+
         assert_eq!(range.start.line, deserialized.start.line);
         assert_eq!(range.end.character, deserialized.end.character);
     }
-    
+
     #[test]
     fn test_request_serialization() {
         let request = Request {
@@ -41,12 +46,12 @@ mod tests {
             method: "initialize".to_string(),
             params: None,
         };
-        
+
         let serialized = serde_json::to_string(&request).unwrap();
         assert!(serialized.contains("\"jsonrpc\":\"2.0\""));
         assert!(serialized.contains("\"method\":\"initialize\""));
     }
-    
+
     #[test]
     fn test_response_serialization() {
         let response = Response {
@@ -55,12 +60,12 @@ mod tests {
             result: Some(serde_json::json!({"capabilities": {}})),
             error: None,
         };
-        
+
         let serialized = serde_json::to_string(&response).unwrap();
         assert!(serialized.contains("\"result\""));
         assert!(!serialized.contains("\"error\""));
     }
-    
+
     #[test]
     fn test_error_response_serialization() {
         let response = Response {
@@ -73,12 +78,12 @@ mod tests {
                 data: None,
             }),
         };
-        
+
         let serialized = serde_json::to_string(&response).unwrap();
         assert!(serialized.contains("\"error\""));
         assert!(serialized.contains("-32600"));
     }
-    
+
     #[test]
     fn test_notification_serialization() {
         let notification = Notification {
@@ -86,12 +91,12 @@ mod tests {
             method: "textDocument/didOpen".to_string(),
             params: None,
         };
-        
+
         let serialized = serde_json::to_string(&notification).unwrap();
         assert!(serialized.contains("\"method\":\"textDocument/didOpen\""));
         assert!(!serialized.contains("\"id\""));
     }
-    
+
     #[test]
     fn test_completion_item_serialization() {
         let item = CompletionItem {
@@ -114,17 +119,23 @@ mod tests {
             command: None,
             data: None,
         };
-        
+
         let serialized = serde_json::to_string(&item).unwrap();
         assert!(serialized.contains("\"label\":\"println!\""));
     }
-    
+
     #[test]
     fn test_diagnostic_serialization() {
         let diagnostic = Diagnostic {
             range: Range {
-                start: Position { line: 0, character: 0 },
-                end: Position { line: 0, character: 5 },
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 0,
+                    character: 5,
+                },
             },
             severity: Some(1),
             code: None,
@@ -135,11 +146,11 @@ mod tests {
             related_information: None,
             data: None,
         };
-        
+
         let serialized = serde_json::to_string(&diagnostic).unwrap();
         assert!(serialized.contains("\"message\":\"unused variable\""));
     }
-    
+
     #[test]
     fn test_workspace_edit_serialization() {
         let edit = WorkspaceEdit {
@@ -149,8 +160,14 @@ mod tests {
                     "file:///test.rs".to_string(),
                     vec![TextEdit {
                         range: Range {
-                            start: Position { line: 0, character: 0 },
-                            end: Position { line: 0, character: 0 },
+                            start: Position {
+                                line: 0,
+                                character: 0,
+                            },
+                            end: Position {
+                                line: 0,
+                                character: 0,
+                            },
                         },
                         new_text: "fn main() {}".to_string(),
                     }],
@@ -160,11 +177,11 @@ mod tests {
             document_changes: None,
             change_annotations: None,
         };
-        
+
         let serialized = serde_json::to_string(&edit).unwrap();
         assert!(serialized.contains("\"changes\""));
     }
-    
+
     #[test]
     fn test_initialize_params_serialization() {
         let params = InitializeParams {
@@ -181,7 +198,7 @@ mod tests {
             trace: None,
             workspace_folders: None,
         };
-        
+
         let serialized = serde_json::to_string(&params).unwrap();
         assert!(serialized.contains("\"processId\":12345"));
         assert!(serialized.contains("\"rootUri\":\"file:///project\""));

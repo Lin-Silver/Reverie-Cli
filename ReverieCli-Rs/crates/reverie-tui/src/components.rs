@@ -1,20 +1,20 @@
 //! TUI 组件
-//! 
+//!
 //! 提供各种 UI 组件：消息显示、输入框、工具调用面板等
 
 use ratatui::{
     buffer::Buffer,
-    layout::{Rect, Constraint, Direction, Layout},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Widget},
+    widgets::{Block, Borders, List, ListItem, Paragraph, Widget},
 };
 
 use crate::state::{Message, MessageRole, Settings, Theme};
 
 /// 消息显示组件
 pub struct MessageDisplay<'a> {
-    messages: &'a [Message],
+    messages: &'a [&'a Message],
     theme: &'a Theme,
     settings: &'a Settings,
     scroll_offset: usize,
@@ -23,7 +23,7 @@ pub struct MessageDisplay<'a> {
 
 impl<'a> MessageDisplay<'a> {
     pub fn new(
-        messages: &'a [Message],
+        messages: &'a [&'a Message],
         theme: &'a Theme,
         settings: &'a Settings,
         scroll_offset: usize,
@@ -46,21 +46,21 @@ impl<'a> Widget for MessageDisplay<'a> {
         } else {
             &self.messages[0..]
         };
-        
+
         let mut y = area.top();
         for message in visible_messages.iter().take(self.max_height as usize) {
             if y >= area.bottom() {
                 break;
             }
-            
+
             let role_style = self.get_role_style(message.role);
             let prefix = self.get_role_prefix(message.role);
-            
+
             let line = Line::from(vec![
                 Span::styled(prefix, role_style),
                 Span::styled(&message.content, Style::default().fg(Color::White)),
             ]);
-            
+
             // 简单渲染（实际应该使用更复杂的布局）
             for (i, line_text) in line.spans.iter().enumerate() {
                 let x = area.left() + (i as u16) * 2;
@@ -83,7 +83,7 @@ impl<'a> MessageDisplay<'a> {
         };
         Style::default().fg(color)
     }
-    
+
     fn get_role_prefix(&self, role: MessageRole) -> String {
         match role {
             MessageRole::User => "👤 ".to_string(),
@@ -118,22 +118,25 @@ impl<'a> Widget for InputBox<'a> {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Cyan));
-        
+
         block.render(area, buf);
-        
+
         // 渲染提示
         let prompt_style = Style::default().fg(Color::Yellow);
         buf.set_string(area.left() + 1, area.top() + 1, self.prompt, prompt_style);
-        
+
         // 渲染输入内容
         let input_style = Style::default().fg(Color::White);
-        buf.set_string(area.left() + 1 + self.prompt.len() as u16, area.top() + 1, self.input, input_style);
-        
+        buf.set_string(
+            area.left() + 1 + self.prompt.len() as u16,
+            area.top() + 1,
+            self.input,
+            input_style,
+        );
+
         // 渲染光标
         let cursor_x = area.left() + 1 + self.prompt.len() as u16 + self.cursor as u16;
-        if cursor_x < area.right() {
-            buf.set_cursor(cursor_x, area.top() + 1);
-        }
+        let _ = cursor_x;
     }
 }
 
@@ -167,11 +170,11 @@ impl<'a> Widget for ToolCallPanel<'a> {
             .title(format!("🔧 {}", self.tool_name))
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Magenta));
-        
+
         block.render(area, buf);
-        
+
         let mut y = area.top() + 1;
-        
+
         // 渲染工具参数
         if let Some(args) = self.tool_args.as_object() {
             for (key, value) in args.iter().take(5) {
@@ -183,7 +186,7 @@ impl<'a> Widget for ToolCallPanel<'a> {
                 y += 1;
             }
         }
-        
+
         // 渲染工具结果
         if let Some(result) = self.tool_result {
             if y >= area.bottom() {
@@ -198,7 +201,12 @@ impl<'a> Widget for ToolCallPanel<'a> {
             } else {
                 Style::default().fg(Color::Red)
             };
-            buf.set_string(area.left() + 1, y, &format!("{} {}", status, content), style);
+            buf.set_string(
+                area.left() + 1,
+                y,
+                &format!("{} {}", status, content),
+                style,
+            );
         }
     }
 }
@@ -211,7 +219,11 @@ pub struct SessionList<'a> {
 }
 
 impl<'a> SessionList<'a> {
-    pub fn new(sessions: &'a [crate::state::Session], selected: Option<usize>, theme: &'a Theme) -> Self {
+    pub fn new(
+        sessions: &'a [crate::state::Session],
+        selected: Option<usize>,
+        theme: &'a Theme,
+    ) -> Self {
         Self {
             sessions,
             selected,
@@ -222,22 +234,24 @@ impl<'a> SessionList<'a> {
 
 impl<'a> Widget for SessionList<'a> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let items: Vec<ListItem> = self.sessions
+        let items: Vec<ListItem> = self
+            .sessions
             .iter()
             .enumerate()
             .map(|(i, session)| {
                 let style = if Some(i) == self.selected {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(Color::White)
                 };
                 ListItem::new(Line::from(session.title.clone())).style(style)
             })
             .collect();
-        
-        let list = List::new(items)
-            .block(Block::default().title("📁 会话").borders(Borders::ALL));
-        
+
+        let list = List::new(items).block(Block::default().title("📁 会话").borders(Borders::ALL));
+
         list.render(area, buf);
     }
 }
@@ -259,9 +273,9 @@ impl Widget for HelpPanel {
             .title("❓ 帮助")
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Yellow));
-        
+
         block.render(area, buf);
-        
+
         let help_lines = vec![
             "Ctrl+Q  退出",
             "F1      帮助",
@@ -280,7 +294,7 @@ impl Widget for HelpPanel {
             "Home    滚动到顶部",
             "End     滚动到底部",
         ];
-        
+
         let mut y = area.top() + 1;
         for line in help_lines {
             if y >= area.bottom() {
@@ -326,22 +340,25 @@ impl<'a> Widget for StatusBar<'a> {
             self.mode,
             self.session_title.unwrap_or("No session"),
             self.message_count,
-            if self.is_generating { "⏳ Generating..." } else { "Ready" }
+            if self.is_generating {
+                "⏳ Generating..."
+            } else {
+                "Ready"
+            }
         );
-        
-        let style = Style::default()
-            .fg(Color::White)
-            .bg(Color::DarkGray);
-        
+
+        let style = Style::default().fg(Color::White).bg(Color::DarkGray);
+
         let paragraph = Paragraph::new(status_text)
             .style(style)
             .alignment(ratatui::layout::Alignment::Center);
-        
+
         paragraph.render(area, buf);
     }
 }
 
 /// 布局组件
+#[derive(Clone, Copy)]
 pub struct MainLayout {
     /// 消息区域高度比例
     pub message_ratio: u16,
@@ -359,7 +376,7 @@ impl MainLayout {
             sidebar_ratio: 20,
         }
     }
-    
+
     /// 创建主布局
     pub fn split(&self, area: Rect) -> (Rect, Rect, Rect) {
         // 主区域（消息 + 输入）
@@ -373,7 +390,7 @@ impl MainLayout {
                 .split(area);
             (chunks[0], chunks[1])
         };
-        
+
         // 如果有侧边栏
         let sidebar_area = if self.sidebar_ratio > 0 {
             let chunks = Layout::default()
@@ -387,7 +404,7 @@ impl MainLayout {
         } else {
             None
         };
-        
+
         (main_area.0, main_area.1, sidebar_area.unwrap_or(area))
     }
 }

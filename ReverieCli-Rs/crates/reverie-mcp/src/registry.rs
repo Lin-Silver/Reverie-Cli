@@ -4,14 +4,14 @@
 
 use crate::client::McpClient;
 use crate::types::*;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
 /// Registry entry for an MCP server
-#[derive(Debug, Clone)]
 pub struct RegistryEntry {
     /// Server configuration
     pub config: McpServerConfig,
@@ -50,7 +50,7 @@ impl McpRegistry {
     /// Add a server to the registry
     pub async fn add_server(&mut self, config: McpServerConfig) -> Result<()> {
         let name = config.name.clone();
-        
+
         if !config.enabled {
             debug!("Skipping disabled server: {}", name);
             return Ok(());
@@ -84,8 +84,9 @@ impl McpRegistry {
     /// Connect to a server
     pub async fn connect(&mut self, name: &str) -> Result<()> {
         let mut servers = self.servers.write().await;
-        
-        let entry = servers.get_mut(name)
+
+        let entry = servers
+            .get_mut(name)
             .ok_or_else(|| anyhow!("Server not found: {}", name))?;
 
         if let Some(client) = &mut entry.client {
@@ -99,8 +100,9 @@ impl McpRegistry {
     /// Initialize a server
     pub async fn initialize(&mut self, name: &str) -> Result<InitializeResult> {
         let mut servers = self.servers.write().await;
-        
-        let entry = servers.get_mut(name)
+
+        let entry = servers
+            .get_mut(name)
             .ok_or_else(|| anyhow!("Server not found: {}", name))?;
 
         if let Some(client) = &mut entry.client {
@@ -139,8 +141,9 @@ impl McpRegistry {
         arguments: HashMap<String, Value>,
     ) -> Result<CallToolResult> {
         let servers = self.servers.read().await;
-        
-        let entry = servers.get(server_name)
+
+        let entry = servers
+            .get(server_name)
             .ok_or_else(|| anyhow!("Server not found: {}", server_name))?;
 
         if let Some(client) = &entry.client {
@@ -202,7 +205,7 @@ impl McpRegistry {
     /// Get server status
     pub async fn get_status(&self, name: &str) -> Option<McpServerStatus> {
         let servers = self.servers.read().await;
-        servers.get(name).cloned()
+        servers.get(name).map(|entry| entry.status.clone())
     }
 
     /// Disconnect from all servers

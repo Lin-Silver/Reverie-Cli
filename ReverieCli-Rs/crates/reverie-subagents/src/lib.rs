@@ -4,9 +4,9 @@
 //! Based on Codex-style subagent architecture.
 
 pub mod manager;
-pub mod types;
 pub mod spawn;
+pub mod types;
 
 pub use manager::SubagentManager;
-pub use types::*;
 pub use spawn::spawn_subagent;
+pub use types::*;

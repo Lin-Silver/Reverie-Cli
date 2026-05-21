@@ -1,9 +1,9 @@
 //! Streaming response handling for LLM conversations.
-//! 
+//!
 //! This module provides utilities for handling streaming responses from
 //! various LLM providers, including SSE (Server-Sent Events) handling.
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use futures::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -16,9 +16,7 @@ use tracing::{debug, error, info, warn};
 #[serde(tag = "type")]
 pub enum StreamingEvent {
     /// Start of streaming response
-    Start {
-        model: String,
-    },
+    Start { model: String },
     /// A chunk of the response
     Content {
         content: String,
@@ -36,9 +34,7 @@ pub enum StreamingEvent {
         usage: Option<UsageInfo>,
     },
     /// Error during streaming
-    Error {
-        message: String,
-    },
+    Error { message: String },
 }
 
 /// Usage information from the model
@@ -95,26 +91,27 @@ pub async fn handle_streaming(
     }
 
     let (tx, rx) = mpsc::channel(config.buffer_size);
-    
+    let url = url.to_string();
+
     let client = Client::builder()
         .timeout(Duration::from_secs(config.timeout_seconds))
         .build()?;
 
     tokio::spawn(async move {
         let mut request = client.post(url);
-        
+
         // Add headers
         for (key, value) in headers {
             request = request.header(key, value);
         }
-        
+
         // Add JSON body
         request = request.json(&body);
-        
+
         match request.send().await {
             Ok(response) => {
                 debug!("Received streaming response");
-                
+
                 // Process SSE stream
                 if let Err(e) = process_sse_stream(response, tx).await {
                     error!("Error processing SSE stream: {}", e);
@@ -122,9 +119,11 @@ pub async fn handle_streaming(
             }
             Err(e) => {
                 error!("Failed to send streaming request: {}", e);
-                let _ = tx.send(StreamingEvent::Error {
-                    message: e.to_string(),
-                }).await;
+                let _ = tx
+                    .send(StreamingEvent::Error {
+                        message: e.to_string(),
+                    })
+                    .await;
             }
         }
     });
@@ -142,28 +141,30 @@ async fn process_sse_stream(
     tx: mpsc::Sender<StreamingEvent>,
 ) -> Result<()> {
     let mut stream = response.bytes_stream();
-    
+
     let mut current_content = String::new();
     let mut tool_calls: Vec<(String, String, String)> = Vec::new();
-    
+
     while let Some(chunk_result) = stream.next().await {
         let chunk = chunk_result?;
         let chunk_str = String::from_utf8_lossy(&chunk);
-        
+
         // Parse SSE events
         for line in chunk_str.lines() {
             if line.starts_with("data: ") {
                 let data = &line[6..];
-                
+
                 if data == "[DONE]" {
                     // End of stream
-                    let _ = tx.send(StreamingEvent::End {
-                        finish_reason: "stop".to_string(),
-                        usage: None,
-                    }).await;
+                    let _ = tx
+                        .send(StreamingEvent::End {
+                            finish_reason: "stop".to_string(),
+                            usage: None,
+                        })
+                        .await;
                     return Ok(());
                 }
-                
+
                 // Try to parse as JSON
                 if let Ok(event_data) = serde_json::from_str::<serde_json::Value>(data) {
                     // Extract content
@@ -176,13 +177,15 @@ async fn process_sse_stream(
                         .and_then(|c| c.as_str())
                     {
                         current_content.push_str(content);
-                        
-                        let _ = tx.send(StreamingEvent::Content {
-                            content: content.to_string(),
-                            finish_reason: None,
-                        }).await;
+
+                        let _ = tx
+                            .send(StreamingEvent::Content {
+                                content: content.to_string(),
+                                finish_reason: None,
+                            })
+                            .await;
                     }
-                    
+
                     // Extract tool calls
                     if let Some(tool_calls_data) = event_data
                         .get("choices")
@@ -194,21 +197,35 @@ async fn process_sse_stream(
                     {
                         for tool_call in tool_calls_data {
                             if let Some(id) = tool_call.get("id").and_then(|i| i.as_str()) {
-                                if let Some(name) = tool_call.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()) {
-                                    if let Some(arguments) = tool_call.get("function").and_then(|f| f.get("arguments")).and_then(|a| a.as_str()) {
-                                        tool_calls.push((id.to_string(), name.to_string(), arguments.to_string()));
-                                        
-                                        let _ = tx.send(StreamingEvent::ToolCall {
-                                            tool_call_id: id.to_string(),
-                                            name: name.to_string(),
-                                            arguments: arguments.to_string(),
-                                        }).await;
+                                if let Some(name) = tool_call
+                                    .get("function")
+                                    .and_then(|f| f.get("name"))
+                                    .and_then(|n| n.as_str())
+                                {
+                                    if let Some(arguments) = tool_call
+                                        .get("function")
+                                        .and_then(|f| f.get("arguments"))
+                                        .and_then(|a| a.as_str())
+                                    {
+                                        tool_calls.push((
+                                            id.to_string(),
+                                            name.to_string(),
+                                            arguments.to_string(),
+                                        ));
+
+                                        let _ = tx
+                                            .send(StreamingEvent::ToolCall {
+                                                tool_call_id: id.to_string(),
+                                                name: name.to_string(),
+                                                arguments: arguments.to_string(),
+                                            })
+                                            .await;
                                     }
                                 }
                             }
                         }
                     }
-                    
+
                     // Extract finish reason
                     if let Some(finish_reason) = event_data
                         .get("choices")
@@ -218,13 +235,15 @@ async fn process_sse_stream(
                         .and_then(|f| f.as_str())
                     {
                         if finish_reason != "null" {
-                            let _ = tx.send(StreamingEvent::End {
-                                finish_reason: finish_reason.to_string(),
-                                usage: None,
-                            }).await;
+                            let _ = tx
+                                .send(StreamingEvent::End {
+                                    finish_reason: finish_reason.to_string(),
+                                    usage: None,
+                                })
+                                .await;
                         }
                     }
-                    
+
                     // Extract usage
                     if let Some(usage) = event_data.get("usage") {
                         if let Ok(usage_info) = serde_json::from_value::<UsageInfo>(usage.clone()) {
@@ -237,7 +256,7 @@ async fn process_sse_stream(
             }
         }
     }
-    
+
     Ok(())
 }
 
@@ -245,13 +264,17 @@ async fn process_sse_stream(
 pub fn aggregate_streaming_content(rx: &mut mpsc::Receiver<StreamingEvent>) -> Result<String> {
     let mut content = String::new();
     let mut tool_calls: Vec<(String, String, String)> = Vec::new();
-    
+
     while let Some(event) = rx.blocking_recv() {
         match event {
             StreamingEvent::Content { content: c, .. } => {
                 content.push_str(&c);
             }
-            StreamingEvent::ToolCall { tool_call_id, name, arguments } => {
+            StreamingEvent::ToolCall {
+                tool_call_id,
+                name,
+                arguments,
+            } => {
                 tool_calls.push((tool_call_id, name, arguments));
             }
             StreamingEvent::End { .. } => {
@@ -263,7 +286,7 @@ pub fn aggregate_streaming_content(rx: &mut mpsc::Receiver<StreamingEvent>) -> R
             _ => {}
         }
     }
-    
+
     Ok(content)
 }
 
@@ -272,13 +295,17 @@ pub fn streaming_events_to_messages(events: &[StreamingEvent]) -> Vec<serde_json
     let mut messages = Vec::new();
     let mut current_content = String::new();
     let mut current_tool_calls: Vec<serde_json::Value> = Vec::new();
-    
+
     for event in events {
         match event {
             StreamingEvent::Content { content, .. } => {
                 current_content.push_str(content);
             }
-            StreamingEvent::ToolCall { tool_call_id, name, arguments } => {
+            StreamingEvent::ToolCall {
+                tool_call_id,
+                name,
+                arguments,
+            } => {
                 current_tool_calls.push(serde_json::json!({
                     "id": tool_call_id,
                     "type": "function",
@@ -301,6 +328,6 @@ pub fn streaming_events_to_messages(events: &[StreamingEvent]) -> Vec<serde_json
             _ => {}
         }
     }
-    
+
     messages
 }

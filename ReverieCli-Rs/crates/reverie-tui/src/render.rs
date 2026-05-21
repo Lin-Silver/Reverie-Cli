@@ -211,7 +211,7 @@ impl TuiRenderer {
     fn render_settings_overlay(
         frame: &mut Frame,
         area: Rect,
-        theme: &crate::state::Theme,
+        _theme: &crate::state::Theme,
         settings: &crate::state::Settings,
     ) {
         let block = Block::default()
@@ -251,7 +251,7 @@ impl TuiRenderer {
     fn render_history_overlay(
         frame: &mut Frame,
         area: Rect,
-        theme: &crate::state::Theme,
+        _theme: &crate::state::Theme,
         sessions: &[crate::state::Session],
     ) {
         let block = Block::default()

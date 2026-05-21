@@ -5,7 +5,6 @@
 use crate::client::LspClient;
 use crate::types::*;
 use std::collections::HashMap;
-use std::path::Path;
 
 /// LSP 服务器配置
 #[derive(Debug, Clone)]
@@ -201,7 +200,7 @@ impl LspManager {
         }
 
         // 停止 LSP 客户端
-        if let Some(client) = self.clients.remove(name) {
+        if let Some(_client) = self.clients.remove(name) {
             // 这里应该调用 client.shutdown()
             // 简化处理
         }
@@ -369,13 +368,13 @@ impl LspManager {
     }
 
     /// 加载配置
-    pub fn load_config(&mut self, path: &str) -> Result<(), String> {
+    pub fn load_config(&mut self, _path: &str) -> Result<(), String> {
         // 简化处理：实际应该从 JSON 文件加载
         Ok(())
     }
 
     /// 保存配置
-    pub fn save_config(&self, path: &str) -> Result<(), String> {
+    pub fn save_config(&self, _path: &str) -> Result<(), String> {
         // 简化处理：实际应该保存到 JSON 文件
         Ok(())
     }

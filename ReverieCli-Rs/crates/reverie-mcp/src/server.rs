@@ -60,7 +60,9 @@ impl McpServer {
 
     /// Enable tool capabilities
     pub fn with_tools(mut self) -> Self {
-        self.capabilities.tools = Some(ToolCapabilities { listChanged: false });
+        self.capabilities.tools = Some(ToolCapabilities {
+            list_changed: false,
+        });
         self
     }
 
@@ -68,14 +70,16 @@ impl McpServer {
     pub fn with_resources(mut self) -> Self {
         self.capabilities.resources = Some(ResourceCapabilities {
             subscribe: false,
-            listChanged: false,
+            list_changed: false,
         });
         self
     }
 
     /// Enable prompt capabilities
     pub fn with_prompts(mut self) -> Self {
-        self.capabilities.prompts = Some(PromptCapabilities { listChanged: false });
+        self.capabilities.prompts = Some(PromptCapabilities {
+            list_changed: false,
+        });
         self
     }
 
@@ -83,8 +87,8 @@ impl McpServer {
     pub async fn register_tool(
         &mut self,
         name: impl Into<String>,
-        description: impl Into<String>,
-        input_schema: ToolInputSchema,
+        _description: impl Into<String>,
+        _input_schema: ToolInputSchema,
         handler: ToolHandler,
     ) {
         let name = name.into();
@@ -105,8 +109,8 @@ impl McpServer {
     pub async fn register_prompt(
         &mut self,
         name: impl Into<String>,
-        description: impl Into<String>,
-        arguments: Option<Vec<PromptArgument>>,
+        _description: impl Into<String>,
+        _arguments: Option<Vec<PromptArgument>>,
         handler: PromptHandler,
     ) {
         let name = name.into();
@@ -156,9 +160,9 @@ impl McpServer {
         *initialized = true;
 
         let result = InitializeResult {
-            protocolVersion: MCP_VERSION.to_string(),
+            protocol_version: MCP_VERSION.to_string(),
             capabilities: self.capabilities.clone(),
-            serverInfo: Implementation {
+            server_info: Implementation {
                 name: self.name.clone(),
                 version: self.version.clone(),
             },
@@ -176,13 +180,13 @@ impl McpServer {
             .map(|(name, _)| Tool {
                 name: name.clone(),
                 description: None,
-                inputSchema: ToolInputSchema {
+                input_schema: ToolInputSchema {
                     r#type: "object".to_string(),
                     properties: HashMap::new(),
                     required: Vec::new(),
                     additional: HashMap::new(),
                 },
-                outputSchema: None,
+                output_schema: None,
             })
             .collect();
 
@@ -216,7 +220,7 @@ impl McpServer {
             .map(|(uri, _)| Resource {
                 uri: uri.clone(),
                 name: uri.clone(),
-                mimeType: None,
+                mime_type: None,
                 description: None,
             })
             .collect();

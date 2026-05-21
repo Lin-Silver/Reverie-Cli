@@ -1,13 +1,12 @@
 use crate::config::Config;
-use crate::providers::{normalize_reasoning_effort, resolve_model};
+use crate::providers::resolve_model;
 use crate::{ReverieError, ReverieResult};
-use anyhow::{anyhow, Context, Result};
 use regex::Regex;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::time::Duration;
-use tracing::{debug, error, info, warn};
+use tracing::info;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
@@ -751,7 +750,7 @@ pub async fn send_codex_compatible(
         .as_deref()
         .unwrap_or("https://api.openai.com/v1");
 
-    let mut payload = validate_and_sanitize_payload(json!({
+    let payload = validate_and_sanitize_payload(json!({
         "model": selected.model,
         "messages": request.messages,
         "tools": request.tools,

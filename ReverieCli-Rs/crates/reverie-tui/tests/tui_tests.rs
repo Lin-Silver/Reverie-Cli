@@ -23,7 +23,7 @@ mod tests {
     #[test]
     fn test_session_creation() {
         let mut state = AppState::new("reverie".to_string());
-        let session_id = state.create_session("Test Session".to_string());
+        let _session_id = state.create_session("Test Session".to_string());
 
         assert_eq!(state.sessions.len(), 1);
         assert!(state.current_session.is_some());
@@ -100,7 +100,7 @@ mod tests {
     fn test_session_deletion() {
         let mut state = AppState::new("reverie".to_string());
         let id1 = state.create_session("Session 1".to_string());
-        let id2 = state.create_session("Session 2".to_string());
+        let _id2 = state.create_session("Session 2".to_string());
 
         assert_eq!(state.sessions.len(), 2);
 

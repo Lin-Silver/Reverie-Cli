@@ -4,7 +4,6 @@
 //! preserving important information for LLM conversations.
 
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
 
 /// Compaction strategy to use
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -192,9 +191,65 @@ impl ContextCompactor {
 
     /// Summary-based compaction: summarize older messages
     fn compact_with_summary(&self, messages: &[String]) -> Result<CompactionResult, String> {
-        // For now, just use sliding window as a placeholder
-        // In a real implementation, this would call an LLM to summarize
-        self.compact_sliding_window(messages)
+        if messages.len() <= self.config.max_messages {
+            return self.compact_sliding_window(messages);
+        }
+
+        let keep_start = self.config.keep_start.min(messages.len() / 2);
+        let keep_end = self.config.keep_end.min(messages.len() / 2);
+        let summary_start = keep_start;
+        let summary_end = messages.len().saturating_sub(keep_end);
+        let summarized = &messages[summary_start..summary_end];
+
+        let mut compacted = Vec::new();
+        for (index, msg) in messages.iter().take(keep_start).enumerate() {
+            compacted.push(WeightedMessage {
+                content: msg.clone(),
+                role: role_for_index(index),
+                importance: 1.0,
+                is_tool_call: msg.contains("tool_call"),
+                is_tool_result: msg.contains("tool_result"),
+            });
+        }
+
+        let summary = build_deterministic_summary(summarized);
+        if !summary.is_empty() {
+            compacted.push(WeightedMessage {
+                content: summary.clone(),
+                role: "system".to_string(),
+                importance: 0.8,
+                is_tool_call: false,
+                is_tool_result: false,
+            });
+        }
+
+        for (index, msg) in messages.iter().enumerate().skip(summary_end) {
+            compacted.push(WeightedMessage {
+                content: msg.clone(),
+                role: role_for_index(index),
+                importance: 1.0,
+                is_tool_call: msg.contains("tool_call"),
+                is_tool_result: msg.contains("tool_result"),
+            });
+        }
+
+        let original_tokens = estimate_tokens(messages);
+        let compacted_text: Vec<String> = compacted.iter().map(|msg| msg.content.clone()).collect();
+        let compacted_tokens = estimate_tokens(&compacted_text);
+        let compacted_count = compacted.len();
+
+        Ok(CompactionResult {
+            messages: compacted,
+            original_count: messages.len(),
+            compacted_count,
+            tokens_saved: Some(original_tokens.saturating_sub(compacted_tokens)),
+            summary: Some(format!(
+                "Summarized {} middle message(s) between {} preserved start and {} preserved recent message(s).",
+                summarized.len(),
+                keep_start,
+                keep_end
+            )),
+        })
     }
 
     /// Importance-based compaction: score and keep most important messages
@@ -292,6 +347,74 @@ fn estimate_tokens(messages: &[String]) -> usize {
 fn estimate_tokens_in_string(s: &str) -> usize {
     // Rough estimate: 1 token ≈ 4 characters
     s.len() / 4
+}
+
+fn role_for_index(index: usize) -> String {
+    if index % 2 == 0 {
+        "user".to_string()
+    } else {
+        "assistant".to_string()
+    }
+}
+
+fn build_deterministic_summary(messages: &[String]) -> String {
+    if messages.is_empty() {
+        return String::new();
+    }
+
+    let tool_events = messages
+        .iter()
+        .filter(|message| message.contains("tool_call") || message.contains("tool_result"))
+        .count();
+    let code_events = messages
+        .iter()
+        .filter(|message| {
+            message.contains("```") || message.contains("fn ") || message.contains("class ")
+        })
+        .count();
+    let mut highlights = Vec::new();
+    for message in messages
+        .iter()
+        .filter_map(|message| first_sentence(message))
+    {
+        if !highlights.iter().any(|item| item == &message) {
+            highlights.push(message);
+        }
+        if highlights.len() >= 6 {
+            break;
+        }
+    }
+
+    let mut summary = format!("Summary of {} compacted message(s):", messages.len());
+    if tool_events > 0 {
+        summary.push_str(&format!(" {tool_events} tool-related event(s)."));
+    }
+    if code_events > 0 {
+        summary.push_str(&format!(" {code_events} code-related event(s)."));
+    }
+    if !highlights.is_empty() {
+        summary.push_str(" Key points: ");
+        summary.push_str(&highlights.join(" | "));
+    }
+    summary
+}
+
+fn first_sentence(message: &str) -> Option<String> {
+    let trimmed = message.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let end = trimmed
+        .char_indices()
+        .find_map(|(index, ch)| matches!(ch, '.' | '!' | '?' | '\n').then_some(index))
+        .unwrap_or(trimmed.len());
+    let mut sentence = trimmed[..end].trim().to_string();
+    const MAX_LEN: usize = 180;
+    if sentence.len() > MAX_LEN {
+        sentence.truncate(MAX_LEN);
+        sentence.push_str("...");
+    }
+    (!sentence.is_empty()).then_some(sentence)
 }
 
 #[cfg(test)]

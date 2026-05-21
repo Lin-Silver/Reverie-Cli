@@ -1,15 +1,14 @@
-//! LSP 客户端
+﻿//! LSP å®¢æˆ·ç«¯
 //!
-//! 实现 LSP 客户端功能：初始化、文本编辑、诊断等
+//! å®žçŽ° LSP å®¢æˆ·ç«¯åŠŸèƒ½ï¼šåˆå§‹åŒ–ã€æ–‡æœ¬ç¼–è¾‘ã€è¯Šæ–­ç­‰
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use crate::transport::LspTransport;
 use crate::types::*;
 
-/// LSP 客户端错误
+// LSP å®¢æˆ·ç«¯é”™è¯¯
 #[derive(Debug)]
 pub enum LspClientError {
     TransportError(crate::transport::LspTransportError),
@@ -37,43 +36,40 @@ impl std::fmt::Display for LspClientError {
 
 impl std::error::Error for LspClientError {}
 
-/// LSP 客户端
+// LSP å®¢æˆ·ç«¯
 pub struct LspClient {
-    /// 传输层
+    // ä¼ è¾“å±‚
     transport: LspTransport,
-    /// 请求 ID 计数器
+    // è¯·æ±‚ ID è®¡æ•°å™¨
     next_id: AtomicU64,
-    /// 是否已初始化
+    // æ˜¯å¦å·²åˆå§‹åŒ–
     initialized: bool,
-    /// 服务器能力
+    // æœåŠ¡å™¨èƒ½åŠ›
     capabilities: Option<ServerCapabilities>,
-    /// 工作区根目录
+    // å·¥ä½œåŒºæ ¹ç›®å½•
     root_uri: Option<String>,
-    /// 打开的文档
+    // æ‰“å¼€çš„æ–‡æ¡£
     open_documents: std::collections::HashMap<String, DocumentState>,
-    /// 诊断接收器
+    // è¯Šæ–­æŽ¥æ”¶å™¨
     diagnostic_rx: Option<mpsc::Receiver<Diagnostic>>,
-    /// 诊断发送器
-    diagnostic_tx: Option<mpsc::Sender<Diagnostic>>,
+    // è¯Šæ–­å‘é€å™¨
 }
 
-/// 文档状态
+// æ–‡æ¡£çŠ¶æ€
 struct DocumentState {
-    /// 文档 URI
-    uri: String,
-    /// 文档版本
+    // æ–‡æ¡£ URI
+    // æ–‡æ¡£ç‰ˆæœ¬
     version: i32,
-    /// 文档内容
+    // æ–‡æ¡£å†…å®¹
     content: String,
-    /// 语言 ID
-    language_id: String,
+    // è¯­è¨€ ID
 }
 
 impl LspClient {
-    /// 创建新的 LSP 客户端
+    // åˆ›å»ºæ–°çš„ LSP å®¢æˆ·ç«¯
     pub fn new() -> Result<Self, LspClientError> {
         let transport = LspTransport::new()?;
-        let (tx, rx) = mpsc::channel(100);
+        let (_tx, rx) = mpsc::channel(100);
 
         Ok(Self {
             transport,
@@ -83,21 +79,20 @@ impl LspClient {
             root_uri: None,
             open_documents: std::collections::HashMap::new(),
             diagnostic_rx: Some(rx),
-            diagnostic_tx: Some(tx),
         })
     }
 
-    /// 初始化 LSP 客户端
+    // åˆå§‹åŒ– LSP å®¢æˆ·ç«¯
     pub async fn initialize(
         &mut self,
         root_uri: &str,
         command: &str,
         args: &[&str],
     ) -> Result<(), LspClientError> {
-        // 启动传输层
+        // å¯åŠ¨ä¼ è¾“å±‚
         self.transport.start(command, args)?;
 
-        // 准备初始化参数
+        // å‡†å¤‡åˆå§‹åŒ–å‚æ•°
         let params = InitializeParams {
             process_id: Some(std::process::id()),
             root_uri: Some(root_uri.to_string()),
@@ -177,7 +172,7 @@ impl LspClient {
             workspace_folders: None,
         };
 
-        // 发送初始化请求
+        // å‘é€åˆå§‹åŒ–è¯·æ±‚
         let request = Request {
             jsonrpc: "2.0".to_string(),
             id: self.next_id(),
@@ -188,15 +183,15 @@ impl LspClient {
             ),
         };
 
-        // 发送请求并等待响应
+        // å‘é€è¯·æ±‚å¹¶ç­‰å¾…å“åº”
         self.transport.send_request(request)?;
 
-        // 这里应该等待响应并解析
-        // 简化处理
+        // è¿™é‡Œåº”è¯¥ç­‰å¾…å“åº”å¹¶è§£æž
+        // ç®€åŒ–å¤„ç†
         self.initialized = true;
         self.root_uri = Some(root_uri.to_string());
 
-        // 发送 initialized 通知
+        // å‘é€ initialized é€šçŸ¥
         let notification = Notification {
             jsonrpc: "2.0".to_string(),
             method: "initialized".to_string(),
@@ -207,7 +202,7 @@ impl LspClient {
         Ok(())
     }
 
-    /// 打开文本文档
+    // æ‰“å¼€æ–‡æœ¬æ–‡æ¡£
     pub fn did_open(
         &mut self,
         uri: &str,
@@ -220,10 +215,8 @@ impl LspClient {
         }
 
         let document = DocumentState {
-            uri: uri.to_string(),
             version,
             content: text.to_string(),
-            language_id: language_id.to_string(),
         };
 
         self.open_documents.insert(uri.to_string(), document);
@@ -249,7 +242,7 @@ impl LspClient {
         Ok(())
     }
 
-    /// 更改文本文档
+    // æ›´æ”¹æ–‡æœ¬æ–‡æ¡£
     pub fn did_change(
         &mut self,
         uri: &str,
@@ -260,12 +253,12 @@ impl LspClient {
             return Err(LspClientError::NotInitialized);
         }
 
-        // 更新本地文档状态
+        // æ›´æ–°æœ¬åœ°æ–‡æ¡£çŠ¶æ€
         if let Some(doc) = self.open_documents.get_mut(uri) {
             doc.version = version;
             for change in &changes {
-                if let Some(range) = &change.range {
-                    // 简化处理：直接替换
+                if let Some(_range) = &change.range {
+                    // ç®€åŒ–å¤„ç†ï¼šç›´æŽ¥æ›¿æ¢
                     doc.content = change.text.clone();
                 } else {
                     doc.content = change.text.clone();
@@ -273,17 +266,17 @@ impl LspClient {
             }
         }
 
-        let params = VersionedTextDocumentIdentifier {
+        let _params = VersionedTextDocumentIdentifier {
             uri: uri.to_string(),
             version: Some(version),
         };
 
-        // 这里应该发送正确的 didChange 通知
-        // 简化处理
+        // è¿™é‡Œåº”è¯¥å‘é€æ­£ç¡®çš„ didChange é€šçŸ¥
+        // ç®€åŒ–å¤„ç†
         Ok(())
     }
 
-    /// 关闭文本文档
+    // å…³é—­æ–‡æœ¬æ–‡æ¡£
     pub fn did_close(&mut self, uri: &str) -> Result<(), LspClientError> {
         if !self.initialized {
             return Err(LspClientError::NotInitialized);
@@ -309,8 +302,8 @@ impl LspClient {
         Ok(())
     }
 
-    /// 保存文本文档
-    pub fn did_save(&mut self, uri: &str, text: Option<&str>) -> Result<(), LspClientError> {
+    // ä¿å­˜æ–‡æœ¬æ–‡æ¡£
+    pub fn did_save(&mut self, uri: &str, _text: Option<&str>) -> Result<(), LspClientError> {
         if !self.initialized {
             return Err(LspClientError::NotInitialized);
         }
@@ -333,38 +326,38 @@ impl LspClient {
         Ok(())
     }
 
-    /// 获取诊断
-    pub async fn get_diagnostics(&mut self, uri: &str) -> Result<Vec<Diagnostic>, LspClientError> {
+    // èŽ·å–è¯Šæ–­
+    pub async fn get_diagnostics(&mut self, _uri: &str) -> Result<Vec<Diagnostic>, LspClientError> {
         if !self.initialized {
             return Err(LspClientError::NotInitialized);
         }
 
-        // 这里应该请求诊断
-        // 简化处理：返回空列表
+        // è¿™é‡Œåº”è¯¥è¯·æ±‚è¯Šæ–­
+        // ç®€åŒ–å¤„ç†ï¼šè¿”å›žç©ºåˆ—è¡¨
         Ok(vec![])
     }
 
-    /// 获取诊断流
+    // èŽ·å–è¯Šæ–­æµ
     pub fn diagnostic_stream(&mut self) -> Option<mpsc::Receiver<Diagnostic>> {
         self.diagnostic_rx.take()
     }
 
-    /// 获取服务器能力
+    // èŽ·å–æœåŠ¡å™¨èƒ½åŠ›
     pub fn capabilities(&self) -> Option<&ServerCapabilities> {
         self.capabilities.as_ref()
     }
 
-    /// 检查是否已初始化
+    // æ£€æŸ¥æ˜¯å¦å·²åˆå§‹åŒ–
     pub fn is_initialized(&self) -> bool {
         self.initialized
     }
 
-    /// 获取下一个请求 ID
+    // èŽ·å–ä¸‹ä¸€ä¸ªè¯·æ±‚ ID
     fn next_id(&self) -> u64 {
         self.next_id.fetch_add(1, Ordering::SeqCst)
     }
 
-    /// 停止 LSP 客户端
+    // åœæ­¢ LSP å®¢æˆ·ç«¯
     pub async fn shutdown(&mut self) -> Result<(), LspClientError> {
         if !self.initialized {
             return Ok(());
@@ -379,7 +372,7 @@ impl LspClient {
 
         self.transport.send_request(request)?;
 
-        // 发送 exit 通知
+        // å‘é€ exit é€šçŸ¥
         let notification = Notification {
             jsonrpc: "2.0".to_string(),
             method: "exit".to_string(),

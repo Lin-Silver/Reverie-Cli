@@ -8,6 +8,7 @@ use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 use tokio::sync::RwLock;
 use tracing::info;
 
@@ -127,39 +128,46 @@ impl McpClient {
             self.connect().await?;
         }
 
-        let mut initialized = self.initialized.write().await;
-        if *initialized {
+        if *self.initialized.read().await {
             return Err(anyhow!("Already initialized"));
         }
 
         info!("Initializing MCP session with {}", self.config.name);
 
-        // Placeholder implementation
-        *initialized = true;
-
-        Ok(InitializeResult {
-            protocolVersion: MCP_VERSION.to_string(),
-            capabilities: ServerCapabilities::default(),
-            serverInfo: Implementation {
-                name: self.config.name.clone(),
-                version: "0.1.0".to_string(),
+        let params = InitializeParams {
+            protocol_version: MCP_VERSION.to_string(),
+            capabilities: ClientCapabilities::default(),
+            client_info: Implementation {
+                name: "reverie-cli".to_string(),
+                version: env!("CARGO_PKG_VERSION").to_string(),
             },
-            instructions: None,
-        })
+        };
+        let response = self
+            .send("initialize", Some(serde_json::to_value(params)?))
+            .await?;
+        let result: InitializeResult = serde_json::from_value(response)?;
+        *self.capabilities.write().await = Some(result.capabilities.clone());
+        *self.server_info.write().await = Some(result.server_info.clone());
+        *self.initialized.write().await = true;
+
+        let _ = self.refresh_catalogs().await;
+        Ok(result)
     }
 
     /// List available tools
-    pub async fn list_tools(&self) -> Result<Vec<Tool>> {
+    pub async fn list_tools(&mut self) -> Result<Vec<Tool>> {
         if !*self.initialized.read().await {
             return Err(anyhow!("Not initialized"));
         }
 
+        let result: ListToolsResult = serde_json::from_value(self.send("tools/list", None).await?)?;
+        *self.tools.write().await = result.tools.clone();
         Ok(self.tools.read().await.clone())
     }
 
     /// Call a tool
     pub async fn call_tool(
-        &self,
+        &mut self,
         name: &str,
         arguments: HashMap<String, Value>,
     ) -> Result<CallToolResult> {
@@ -167,39 +175,64 @@ impl McpClient {
             return Err(anyhow!("Not initialized"));
         }
 
-        Err(anyhow!("Tool calling pending implementation"))
+        let params = CallToolParams {
+            name: name.to_string(),
+            arguments,
+        };
+        serde_json::from_value(
+            self.send("tools/call", Some(serde_json::to_value(params)?))
+                .await?,
+        )
+        .map_err(Into::into)
     }
 
     /// List available resources
-    pub async fn list_resources(&self) -> Result<Vec<Resource>> {
+    pub async fn list_resources(&mut self) -> Result<Vec<Resource>> {
         if !*self.initialized.read().await {
             return Err(anyhow!("Not initialized"));
         }
 
+        let result: ListResourcesResult =
+            serde_json::from_value(self.send("resources/list", None).await?)?;
+        *self.resources.write().await = result.resources.clone();
         Ok(self.resources.read().await.clone())
     }
 
     /// Read a resource
-    pub async fn read_resource(&self, uri: &str) -> Result<ResourceContents> {
+    pub async fn read_resource(&mut self, uri: &str) -> Result<ResourceContents> {
         if !*self.initialized.read().await {
             return Err(anyhow!("Not initialized"));
         }
 
-        Err(anyhow!("Resource reading pending implementation"))
+        let params = ReadResourceParams {
+            uri: uri.to_string(),
+        };
+        let result: ReadResourceResult = serde_json::from_value(
+            self.send("resources/read", Some(serde_json::to_value(params)?))
+                .await?,
+        )?;
+        result
+            .contents
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow!("Resource returned no contents: {uri}"))
     }
 
     /// List available prompts
-    pub async fn list_prompts(&self) -> Result<Vec<Prompt>> {
+    pub async fn list_prompts(&mut self) -> Result<Vec<Prompt>> {
         if !*self.initialized.read().await {
             return Err(anyhow!("Not initialized"));
         }
 
+        let result: ListPromptsResult =
+            serde_json::from_value(self.send("prompts/list", None).await?)?;
+        *self.prompts.write().await = result.prompts.clone();
         Ok(self.prompts.read().await.clone())
     }
 
     /// Get a prompt
     pub async fn get_prompt(
-        &self,
+        &mut self,
         name: &str,
         arguments: HashMap<String, String>,
     ) -> Result<GetPromptResult> {
@@ -207,7 +240,15 @@ impl McpClient {
             return Err(anyhow!("Not initialized"));
         }
 
-        Err(anyhow!("Prompt retrieval pending implementation"))
+        let params = GetPromptParams {
+            name: name.to_string(),
+            arguments,
+        };
+        serde_json::from_value(
+            self.send("prompts/get", Some(serde_json::to_value(params)?))
+                .await?,
+        )
+        .map_err(Into::into)
     }
 
     /// Disconnect from the server
@@ -241,5 +282,35 @@ impl McpClient {
             prompt_count: prompts.len(),
             last_error: None,
         }
+    }
+
+    async fn refresh_catalogs(&mut self) -> Result<()> {
+        let _ = self.list_tools().await;
+        let _ = self.list_resources().await;
+        let _ = self.list_prompts().await;
+        Ok(())
+    }
+
+    async fn send(&mut self, method: &str, params: Option<Value>) -> Result<Value> {
+        let transport = self
+            .transport
+            .as_mut()
+            .ok_or_else(|| anyhow!("MCP transport is not connected"))?;
+        let request = Request {
+            id: self.request_id.next(),
+            method: method.to_string(),
+            params,
+        };
+        let response = tokio::time::timeout(
+            Duration::from_secs(self.timeout_seconds.max(1)),
+            transport.send_request(request),
+        )
+        .await
+        .map_err(|_| anyhow!("MCP request timed out: {method}"))??;
+
+        if let Some(error) = response.error {
+            return Err(anyhow!("MCP error {}: {}", error.code, error.message));
+        }
+        Ok(response.result.unwrap_or_else(|| json!({})))
     }
 }

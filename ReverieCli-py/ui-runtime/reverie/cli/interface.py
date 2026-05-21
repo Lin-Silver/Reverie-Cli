@@ -189,8 +189,8 @@ def _load_task_entries_from_markdown(raw_text: str) -> List[Dict[str, Any]]:
     return entries
 
 
-def _load_task_drawer_snapshot(project_root: Path, max_visible: int = 7) -> Dict[str, Any]:
-    """Build a compact task snapshot for the streaming todo drawer."""
+def _load_task_drawer_snapshot(project_root: Path, max_visible: Optional[int] = None) -> Dict[str, Any]:
+    """Build a complete task snapshot for the streaming todo drawer."""
     json_path, markdown_path = _task_artifact_paths(project_root)
 
     entries: List[Dict[str, Any]] = []
@@ -219,7 +219,6 @@ def _load_task_drawer_snapshot(project_root: Path, max_visible: int = 7) -> Dict
         state = str(entry.get("state", "NOT_STARTED") or "NOT_STARTED").upper()
         counts[state if state in counts else "NOT_STARTED"] += 1
 
-    visible_entries = entries[: max(0, int(max_visible or 0))]
     return {
         "source": source,
         "source_path": source_path,
@@ -228,8 +227,8 @@ def _load_task_drawer_snapshot(project_root: Path, max_visible: int = 7) -> Dict
         "in_progress": counts["IN_PROGRESS"],
         "cancelled": counts["CANCELLED"],
         "not_started": counts["NOT_STARTED"],
-        "hidden": max(0, len(entries) - len(visible_entries)),
-        "tasks": visible_entries,
+        "hidden": 0,
+        "tasks": entries,
     }
 
 
@@ -1392,7 +1391,7 @@ class ReverieInterface:
         if cache_key == self._task_drawer_cache_key:
             return self._task_drawer_cache_renderable
 
-        snapshot = _load_task_drawer_snapshot(self.project_root, max_visible=7)
+        snapshot = _load_task_drawer_snapshot(self.project_root)
         renderable = None
         if snapshot.get("source") != "empty" or int(snapshot.get("total", 0) or 0) > 0:
             renderable = self.display.build_task_drawer(snapshot, toggle_hint="Ctrl+T to toggle")

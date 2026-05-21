@@ -19,8 +19,10 @@ fn version_flag_prints_compatible_line() {
 #[test]
 fn prompt_mode_writes_report_json() {
     let temp = TempDir::new().unwrap();
+    let app_root = temp.path().join("app-root");
     let report = temp.path().join("artifacts/report.json");
     let output = Command::new(reverie_bin())
+        .env("REVERIE_APP_ROOT", &app_root)
         .arg(temp.path())
         .arg("--no-index")
         .arg("-p")
@@ -38,6 +40,8 @@ fn prompt_mode_writes_report_json() {
         .as_str()
         .unwrap_or_default()
         .contains("hello rust"));
+    assert!(app_root.join(".reverie/config.json").exists());
+    assert!(app_root.join(".reverie/projects").exists());
 }
 
 #[test]
@@ -53,4 +57,22 @@ fn index_only_scans_workspace() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Files scanned:"));
     assert!(stdout.contains("Symbols extracted:"));
+}
+
+#[test]
+fn init_creates_reverie_runtime_layout() {
+    let temp = TempDir::new().unwrap();
+    let app_root = temp.path().join("app-root");
+    let output = Command::new(reverie_bin())
+        .env("REVERIE_APP_ROOT", &app_root)
+        .arg("init")
+        .arg(temp.path())
+        .output()
+        .expect("run reverie init");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Initialized Reverie runtime data"));
+    assert!(app_root.join(".reverie/config.json").exists());
+    assert!(app_root.join(".reverie/projects").exists());
+    assert!(temp.path().join(".reverie").exists());
 }

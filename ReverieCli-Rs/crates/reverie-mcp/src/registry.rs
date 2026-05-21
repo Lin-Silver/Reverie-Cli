@@ -4,12 +4,12 @@
 
 use crate::client::McpClient;
 use crate::types::*;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 /// Registry entry for an MCP server
 pub struct RegistryEntry {
@@ -140,14 +140,16 @@ impl McpRegistry {
         tool_name: &str,
         arguments: HashMap<String, Value>,
     ) -> Result<CallToolResult> {
-        let servers = self.servers.read().await;
+        let mut servers = self.servers.write().await;
 
         let entry = servers
-            .get(server_name)
+            .get_mut(server_name)
             .ok_or_else(|| anyhow!("Server not found: {}", server_name))?;
 
-        if let Some(client) = &entry.client {
-            client.call_tool(tool_name, arguments).await
+        if let Some(client) = &mut entry.client {
+            let result = client.call_tool(tool_name, arguments).await;
+            entry.status = client.status();
+            result
         } else {
             Err(anyhow!("No client for server: {}", server_name))
         }
@@ -159,12 +161,15 @@ impl McpRegistry {
         tool_name: &str,
         arguments: HashMap<String, Value>,
     ) -> Result<(String, CallToolResult)> {
-        let servers = self.servers.read().await;
+        let mut servers = self.servers.write().await;
 
-        for (name, entry) in servers.iter() {
-            if let Some(client) = &entry.client {
+        for (name, entry) in servers.iter_mut() {
+            if let Some(client) = &mut entry.client {
                 match client.call_tool(tool_name, arguments.clone()).await {
-                    Ok(result) => return Ok((name.clone(), result)),
+                    Ok(result) => {
+                        entry.status = client.status();
+                        return Ok((name.clone(), result));
+                    }
                     Err(e) => {
                         debug!("Tool {} not available on {}: {}", tool_name, name, e);
                     }
@@ -177,13 +182,14 @@ impl McpRegistry {
 
     /// List all tools from all servers
     pub async fn list_all_tools(&self) -> Result<HashMap<String, Vec<Tool>>> {
-        let servers = self.servers.read().await;
+        let mut servers = self.servers.write().await;
         let mut all_tools = HashMap::new();
 
-        for (name, entry) in servers.iter() {
-            if let Some(client) = &entry.client {
+        for (name, entry) in servers.iter_mut() {
+            if let Some(client) = &mut entry.client {
                 match client.list_tools().await {
                     Ok(tools) => {
+                        entry.status = client.status();
                         all_tools.insert(name.clone(), tools);
                     }
                     Err(e) => {

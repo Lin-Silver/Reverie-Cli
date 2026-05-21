@@ -6,7 +6,7 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::sync::RwLock;
-use tracing::{debug, info};
+use tracing::info;
 
 /// Skill loader with caching
 pub struct SkillLoader {

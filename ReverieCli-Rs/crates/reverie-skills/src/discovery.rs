@@ -19,6 +19,41 @@ const SKIP_DIRS: &[&str] = &[
     ".agents",
 ];
 
+fn builtin_skill_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+
+    for env_name in ["REVERIE_SKILLS_ROOT", "REVERIE_BUILTIN_SKILLS_ROOT"] {
+        if let Ok(value) = std::env::var(env_name) {
+            let path = PathBuf::from(value);
+            roots.push(path);
+        }
+    }
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            roots.push(parent.join(".reverie").join("skills"));
+            roots.push(parent.join(".reverie").join("Skills"));
+        }
+    }
+
+    if let Ok(cwd) = std::env::current_dir() {
+        roots.push(cwd.join(".reverie").join("skills"));
+        roots.push(cwd.join(".reverie").join("Skills"));
+    }
+
+    let mut unique = Vec::new();
+    for root in roots {
+        let key = root.to_string_lossy().to_ascii_lowercase();
+        if !unique
+            .iter()
+            .any(|item: &PathBuf| item.to_string_lossy().to_ascii_lowercase() == key)
+        {
+            unique.push(root);
+        }
+    }
+    unique
+}
+
 /// Skill discovery engine
 pub struct SkillDiscovery {
     /// Project root
@@ -68,8 +103,9 @@ impl SkillDiscovery {
             }
         }
 
-        // Add built-in skills
-        self.discover_builtin(&mut skills);
+        if let Err(err) = self.discover_builtin(&mut skills, &mut errors).await {
+            warn!("Error discovering built-in skills: {}", err);
+        }
 
         SkillDiscoveryResult { skills, errors }
     }
@@ -141,8 +177,50 @@ impl SkillDiscovery {
     }
 
     /// Discover built-in skills
-    fn discover_builtin(&self, skills: &mut Vec<Skill>) {
-        debug!("Built-in skills discovery (placeholder)");
+    async fn discover_builtin(
+        &self,
+        skills: &mut Vec<Skill>,
+        errors: &mut Vec<String>,
+    ) -> Result<usize> {
+        let mut count = 0;
+        for root in builtin_skill_roots() {
+            if !root.exists() {
+                continue;
+            }
+
+            for entry in walkdir::WalkDir::new(&root)
+                .into_iter()
+                .filter_entry(|e| !SKIP_DIRS.contains(&e.file_name().to_str().unwrap_or("")))
+            {
+                let entry = entry?;
+                let path = entry.path();
+                if !path
+                    .file_name()
+                    .map(|name| name == "SKILL.md")
+                    .unwrap_or(false)
+                {
+                    continue;
+                }
+
+                match self.load_skill(path, SkillScope::BuiltIn).await {
+                    Ok(skill) => {
+                        if !skills.iter().any(|existing| existing.name == skill.name) {
+                            skills.push(skill);
+                            count += 1;
+                        }
+                    }
+                    Err(err) => {
+                        errors.push(format!(
+                            "Failed to load built-in skill at {:?}: {}",
+                            path, err
+                        ));
+                    }
+                }
+            }
+        }
+
+        debug!("Discovered {} built-in skills", count);
+        Ok(count)
     }
 
     /// Find a skill by name

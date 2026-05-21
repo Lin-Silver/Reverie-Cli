@@ -277,10 +277,11 @@ def test_task_drawer_snapshot_reads_json_artifact_in_display_order(tmp_path: Pat
 
     assert snapshot["total"] == 3
     assert snapshot["completed"] == 1
-    assert snapshot["hidden"] == 1
+    assert snapshot["hidden"] == 0
     assert [item["name"] for item in snapshot["tasks"]] == [
         "Refactor CLI surface",
         "Compact tool logs",
+        "Add todo drawer",
     ]
     assert snapshot["tasks"][1]["indent"] == 1
 

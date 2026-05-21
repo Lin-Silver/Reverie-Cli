@@ -1489,7 +1489,6 @@ class DisplayComponents:
         """Build a compact, toggleable todo drawer for the streaming footer."""
         total = max(0, int(snapshot.get("total", 0) or 0))
         completed = max(0, int(snapshot.get("completed", 0) or 0))
-        hidden = max(0, int(snapshot.get("hidden", 0) or 0))
         tasks = [item for item in snapshot.get("tasks", []) if isinstance(item, dict)]
         compact = self._is_compact(100)
 
@@ -1522,8 +1521,6 @@ class DisplayComponents:
             )
             lines.append(row)
 
-        if hidden:
-            lines.append(Text(f"+{hidden} more task(s)", style=self.theme.TEXT_DIM))
         if not tasks:
             lines.append(Text("No tracked tasks yet.", style=self.theme.TEXT_DIM))
 

@@ -8,7 +8,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::process::{Child, Command};
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, info, trace};
 
 /// Transport trait for MCP communication
 #[async_trait::async_trait]

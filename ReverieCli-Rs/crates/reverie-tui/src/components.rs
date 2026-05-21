@@ -15,8 +15,6 @@ use crate::state::{Message, MessageRole, Settings, Theme};
 /// 消息显示组件
 pub struct MessageDisplay<'a> {
     messages: &'a [&'a Message],
-    theme: &'a Theme,
-    settings: &'a Settings,
     scroll_offset: usize,
     max_height: u16,
 }
@@ -24,15 +22,13 @@ pub struct MessageDisplay<'a> {
 impl<'a> MessageDisplay<'a> {
     pub fn new(
         messages: &'a [&'a Message],
-        theme: &'a Theme,
-        settings: &'a Settings,
+        _theme: &'a Theme,
+        _settings: &'a Settings,
         scroll_offset: usize,
         max_height: u16,
     ) -> Self {
         Self {
             messages,
-            theme,
-            settings,
             scroll_offset,
             max_height,
         }
@@ -99,16 +95,14 @@ pub struct InputBox<'a> {
     input: &'a str,
     cursor: usize,
     prompt: &'a str,
-    theme: &'a Theme,
 }
 
 impl<'a> InputBox<'a> {
-    pub fn new(input: &'a str, cursor: usize, prompt: &'a str, theme: &'a Theme) -> Self {
+    pub fn new(input: &'a str, cursor: usize, prompt: &'a str, _theme: &'a Theme) -> Self {
         Self {
             input,
             cursor,
             prompt,
-            theme,
         }
     }
 }
@@ -145,7 +139,6 @@ pub struct ToolCallPanel<'a> {
     tool_name: &'a str,
     tool_args: &'a serde_json::Value,
     tool_result: Option<&'a Result<String, String>>,
-    theme: &'a Theme,
 }
 
 impl<'a> ToolCallPanel<'a> {
@@ -153,13 +146,12 @@ impl<'a> ToolCallPanel<'a> {
         tool_name: &'a str,
         tool_args: &'a serde_json::Value,
         tool_result: Option<&'a Result<String, String>>,
-        theme: &'a Theme,
+        _theme: &'a Theme,
     ) -> Self {
         Self {
             tool_name,
             tool_args,
             tool_result,
-            theme,
         }
     }
 }
@@ -215,20 +207,15 @@ impl<'a> Widget for ToolCallPanel<'a> {
 pub struct SessionList<'a> {
     sessions: &'a [crate::state::Session],
     selected: Option<usize>,
-    theme: &'a Theme,
 }
 
 impl<'a> SessionList<'a> {
     pub fn new(
         sessions: &'a [crate::state::Session],
         selected: Option<usize>,
-        theme: &'a Theme,
+        _theme: &'a Theme,
     ) -> Self {
-        Self {
-            sessions,
-            selected,
-            theme,
-        }
+        Self { sessions, selected }
     }
 }
 
@@ -257,13 +244,11 @@ impl<'a> Widget for SessionList<'a> {
 }
 
 /// 帮助面板
-pub struct HelpPanel {
-    theme: Theme,
-}
+pub struct HelpPanel;
 
 impl HelpPanel {
-    pub fn new(theme: Theme) -> Self {
-        Self { theme }
+    pub fn new(_theme: Theme) -> Self {
+        Self
     }
 }
 
@@ -312,7 +297,6 @@ pub struct StatusBar<'a> {
     session_title: Option<&'a str>,
     is_generating: bool,
     message_count: usize,
-    theme: &'a Theme,
 }
 
 impl<'a> StatusBar<'a> {
@@ -321,14 +305,13 @@ impl<'a> StatusBar<'a> {
         session_title: Option<&'a str>,
         is_generating: bool,
         message_count: usize,
-        theme: &'a Theme,
+        _theme: &'a Theme,
     ) -> Self {
         Self {
             mode,
             session_title,
             is_generating,
             message_count,
-            theme,
         }
     }
 }

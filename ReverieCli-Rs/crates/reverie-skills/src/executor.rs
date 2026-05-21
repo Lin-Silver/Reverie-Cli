@@ -2,8 +2,7 @@
 
 use crate::loader::SkillLoader;
 use crate::types::*;
-use anyhow::{anyhow, Context, Result};
-use std::collections::HashMap;
+use anyhow::{anyhow, Result};
 use tracing::{debug, info, warn};
 
 /// Skill executor
@@ -81,7 +80,7 @@ impl SkillExecutor {
     async fn execute_step(
         &self,
         step: &SkillStep,
-        context: &SkillInvocationContext,
+        _context: &SkillInvocationContext,
     ) -> Result<String> {
         Ok(format!("Executed: {}", step.description))
     }

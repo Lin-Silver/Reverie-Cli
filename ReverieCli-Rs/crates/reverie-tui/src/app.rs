@@ -80,6 +80,10 @@ impl TuiApp {
             // 渲染
             self.renderer.render(&self.app_state)?;
 
+            while let Ok(event) = self.event_rx.try_recv() {
+                self.event_handler.handle_event(event);
+            }
+
             // 处理事件
             match self.event_handler.next() {
                 Ok(Event::Quit) => {

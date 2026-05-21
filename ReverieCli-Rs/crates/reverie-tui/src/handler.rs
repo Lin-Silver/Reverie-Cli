@@ -5,7 +5,7 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 use std::sync::mpsc::{Receiver, Sender};
 
-use crate::event::{keys, Event};
+use crate::event::Event;
 use crate::state::{AppState, Direction, Message, MessageRole};
 
 /// 事件处理器

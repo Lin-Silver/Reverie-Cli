@@ -1,10 +1,11 @@
 use clap::{ArgGroup, Parser};
 use reverie_context::CodebaseIndexer;
 use reverie_core::agent::{AgentOptions, ReverieAgent};
+use reverie_core::config::ConfigManager;
 use reverie_core::modes::normalize_mode;
 use reverie_core::prompt::resolve_prompt_text;
 use reverie_core::sdk_bridge::run_sdk_bridge;
-use reverie_core::version::version_line;
+use reverie_core::version::{startup_banner, version_line};
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
 
@@ -49,6 +50,10 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    if let Some(code) = maybe_run_init_command()? {
+        std::process::exit(code);
+    }
+
     let args = Cli::parse();
 
     if args.sdk_bridge {
@@ -69,6 +74,9 @@ async fn main() -> anyhow::Result<()> {
     if !project_root.is_dir() {
         anyhow::bail!("Error: Path is not a directory: {}", project_root.display());
     }
+
+    let config_manager = ConfigManager::new(&project_root, false);
+    let _ = config_manager.initialize()?;
 
     if args.index_only {
         let result = CodebaseIndexer::new(&project_root).full_index()?;
@@ -133,8 +141,9 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn run_interactive(project_root: PathBuf, mode: &str) -> anyhow::Result<()> {
+    println!("{}", startup_banner());
     println!("{}", version_line());
-    println!("Rust interactive shell. Type /help for commands or /exit to quit.");
+    println!("Type /help for commands, /init to repair config, or /exit to quit.");
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();
     let agent = ReverieAgent::new(
@@ -159,6 +168,12 @@ async fn run_interactive(project_root: PathBuf, mode: &str) -> anyhow::Result<()
         if matches!(line, "/exit" | "/quit" | "exit" | "quit") {
             break;
         }
+        if matches!(line, "/init" | "init") {
+            let report = ConfigManager::new(&project_root, false).initialize()?;
+            println!("Initialized Reverie data at {}", report.data_root.display());
+            println!("Config: {}", report.active_config_path.display());
+            continue;
+        }
         match agent.run_prompt_once(line).await {
             Ok(result) => {
                 if !result.output_text.trim().is_empty() {
@@ -169,4 +184,46 @@ async fn run_interactive(project_root: PathBuf, mode: &str) -> anyhow::Result<()
         }
     }
     Ok(())
+}
+
+fn maybe_run_init_command() -> anyhow::Result<Option<i32>> {
+    let mut args = std::env::args_os();
+    let _exe = args.next();
+    let Some(first) = args.next() else {
+        return Ok(None);
+    };
+    if first != "init" {
+        return Ok(None);
+    }
+
+    let path = args
+        .next()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let project_root = path.canonicalize().map_err(|err| {
+        anyhow::anyhow!(
+            "Error: Path does not exist or cannot be resolved: {} ({err})",
+            path.display()
+        )
+    })?;
+    if !project_root.is_dir() {
+        anyhow::bail!("Error: Path is not a directory: {}", project_root.display());
+    }
+
+    let report = ConfigManager::new(&project_root, false).initialize()?;
+    println!("{}", version_line());
+    println!("Initialized Reverie runtime data");
+    println!("App root: {}", report.app_root.display());
+    println!("Data root: {}", report.data_root.display());
+    println!("Project data: {}", report.project_data_dir.display());
+    println!("Config: {}", report.active_config_path.display());
+    if report.created_paths.is_empty() {
+        println!("No new paths were needed.");
+    } else {
+        println!("Created/updated paths:");
+        for path in report.created_paths {
+            println!("  - {}", path.display());
+        }
+    }
+    Ok(Some(0))
 }

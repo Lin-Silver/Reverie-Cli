@@ -69,13 +69,14 @@ pub mod error_codes {
 
 /// Initialization request parameters
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct InitializeParams {
     /// Protocol version
-    pub protocolVersion: String,
+    pub protocol_version: String,
     /// Client capabilities
     pub capabilities: ClientCapabilities,
     /// Client information
-    pub clientInfo: Implementation,
+    pub client_info: Implementation,
 }
 
 /// Implementation information
@@ -104,13 +105,14 @@ pub struct SamplingCapabilities {}
 
 /// Initialization result
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct InitializeResult {
     /// Protocol version
-    pub protocolVersion: String,
+    pub protocol_version: String,
     /// Server capabilities
     pub capabilities: ServerCapabilities,
     /// Server information
-    pub serverInfo: Implementation,
+    pub server_info: Implementation,
     /// Instructions for the client
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instructions: Option<String>,
@@ -142,29 +144,32 @@ pub struct LoggingCapabilities {}
 
 /// Prompt capabilities
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct PromptCapabilities {
     /// Whether the server lists prompts
     #[serde(default)]
-    pub listChanged: bool,
+    pub list_changed: bool,
 }
 
 /// Resource capabilities
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct ResourceCapabilities {
     /// Whether the server subscribes to resources
     #[serde(default)]
     pub subscribe: bool,
     /// Whether the server lists resources
     #[serde(default)]
-    pub listChanged: bool,
+    pub list_changed: bool,
 }
 
 /// Tool capabilities
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct ToolCapabilities {
     /// Whether the server lists tools
     #[serde(default)]
-    pub listChanged: bool,
+    pub list_changed: bool,
 }
 
 // ============================================================================
@@ -173,16 +178,17 @@ pub struct ToolCapabilities {
 
 /// A tool that can be invoked
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Tool {
     /// Unique tool name
     pub name: String,
     /// Human-readable description
     pub description: Option<String>,
     /// Input schema (JSON Schema)
-    pub inputSchema: ToolInputSchema,
+    pub input_schema: ToolInputSchema,
     /// Optional output schema for structured output
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub outputSchema: Option<ToolOutputSchema>,
+    pub output_schema: Option<ToolOutputSchema>,
 }
 
 /// Tool input schema
@@ -263,13 +269,14 @@ pub enum ToolContent {
     /// Plain text content
     Text { text: String },
     /// Image content (base64 encoded)
-    Image { data: String, mimeType: String },
+    Image { data: String, mime_type: String },
     /// Embedded resource
     Resource { resource: EmbeddedResource },
 }
 
 /// Embedded resource
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EmbeddedResource {
     /// Resource URI
     pub uri: String,
@@ -277,7 +284,7 @@ pub struct EmbeddedResource {
     pub name: String,
     /// Optional MIME type
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub mimeType: Option<String>,
+    pub mime_type: Option<String>,
     /// Text content
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
@@ -299,6 +306,7 @@ pub struct ListToolsResult {
 
 /// A resource that can be read
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Resource {
     /// Resource URI
     pub uri: String,
@@ -306,7 +314,7 @@ pub struct Resource {
     pub name: String,
     /// Optional MIME type
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub mimeType: Option<String>,
+    pub mime_type: Option<String>,
     /// Human-readable description
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -321,14 +329,15 @@ pub struct ListResourcesResult {
 
 /// Resource template for parameterized URIs
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ResourceTemplate {
     /// URI template (RFC 6570)
-    pub uriTemplate: String,
+    pub uri_template: String,
     /// Template name
     pub name: String,
     /// Optional MIME type
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub mimeType: Option<String>,
+    pub mime_type: Option<String>,
     /// Human-readable description
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -336,9 +345,10 @@ pub struct ResourceTemplate {
 
 /// List of resource templates
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ListResourceTemplatesResult {
     /// Available templates
-    pub resourceTemplates: Vec<ResourceTemplate>,
+    pub resource_templates: Vec<ResourceTemplate>,
 }
 
 /// Read resource parameters
@@ -430,7 +440,7 @@ pub enum PromptContent {
     /// Plain text
     Text { text: String },
     /// Image
-    Image { data: String, mimeType: String },
+    Image { data: String, mime_type: String },
 }
 
 /// Get prompt result
@@ -503,9 +513,10 @@ pub mod notification_methods {
 
 /// Progress notification parameters
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProgressParams {
     /// Progress token
-    pub progressToken: String,
+    pub progress_token: String,
     /// Current progress
     pub progress: f64,
     /// Total work (optional)
@@ -519,6 +530,7 @@ pub struct ProgressParams {
 
 /// Sampling request (client asks server for model completion)
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SamplingParams {
     /// Messages for the model
     pub messages: Vec<SamplingMessage>,
@@ -530,16 +542,16 @@ pub struct SamplingParams {
     pub temperature: Option<f64>,
     /// Optional max tokens
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub maxTokens: Option<u32>,
+    pub max_tokens: Option<u32>,
     /// Optional stop sequences
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub stopSequences: Option<Vec<String>>,
+    pub stop_sequences: Option<Vec<String>>,
     /// Optional top P
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub topP: Option<f64>,
+    pub top_p: Option<f64>,
     /// Optional top K
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub topK: Option<u32>,
+    pub top_k: Option<u32>,
 }
 
 /// Sampling message
@@ -558,16 +570,17 @@ pub enum SamplingContent {
     /// Text content
     Text { text: String },
     /// Image content
-    Image { data: String, mimeType: String },
+    Image { data: String, mime_type: String },
 }
 
 /// Sampling result
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SamplingResult {
     /// Model response
     pub model: String,
     /// Stop reason
-    pub stopReason: String,
+    pub stop_reason: String,
     /// Usage statistics
     pub usage: Usage,
     /// Assistant message
@@ -576,11 +589,12 @@ pub struct SamplingResult {
 
 /// Usage statistics
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Usage {
     /// Input tokens
-    pub inputTokens: u32,
+    pub input_tokens: u32,
     /// Output tokens
-    pub outputTokens: u32,
+    pub output_tokens: u32,
 }
 
 // ============================================================================

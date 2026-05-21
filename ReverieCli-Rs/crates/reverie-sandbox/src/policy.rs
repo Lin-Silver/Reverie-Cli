@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// 沙箱策略
 #[derive(Debug, Clone, Serialize, Deserialize)]

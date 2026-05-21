@@ -1,6 +1,7 @@
 use crate::modes::{normalize_mode, Mode};
 use crate::ReverieResult;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sha1::{Digest as Sha1Digest, Sha1};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -91,9 +92,27 @@ pub fn normalize_thinking_output_style(value: &str) -> String {
 }
 
 pub fn app_root() -> PathBuf {
+    if let Ok(value) = std::env::var("REVERIE_APP_ROOT") {
+        return PathBuf::from(value);
+    }
     if let Ok(value) = std::env::var("REVERIE_HOME") {
         return PathBuf::from(value);
     }
+
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    for candidate in cwd.ancestors() {
+        if candidate.join("ReverieCli-Rs").exists() && candidate.join(".git").exists() {
+            return candidate.join("dist");
+        }
+        if candidate.file_name().and_then(|name| name.to_str()) == Some("ReverieCli-Rs") {
+            if let Some(parent) = candidate.parent() {
+                if parent.join(".git").exists() {
+                    return parent.join("dist");
+                }
+            }
+        }
+    }
+
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("Reverie")
@@ -120,6 +139,7 @@ pub fn project_data_name(project_path: &Path) -> String {
 
 pub fn project_data_dir(project_path: &Path) -> PathBuf {
     app_root()
+        .join(".reverie")
         .join("projects")
         .join(project_data_name(project_path))
 }
@@ -167,6 +187,18 @@ pub struct ConfigManager {
     pub force_workspace_config: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigInitReport {
+    pub app_root: PathBuf,
+    pub data_root: PathBuf,
+    pub project_root: PathBuf,
+    pub project_data_dir: PathBuf,
+    pub global_config_path: PathBuf,
+    pub workspace_config_path: PathBuf,
+    pub active_config_path: PathBuf,
+    pub created_paths: Vec<PathBuf>,
+}
+
 impl ConfigManager {
     pub fn new(project_root: impl AsRef<Path>, force_workspace_config: bool) -> Self {
         let project_root = project_root.as_ref().to_path_buf();
@@ -199,6 +231,7 @@ impl ConfigManager {
 
     pub fn load(&self) -> ReverieResult<Config> {
         let _ = migrate_legacy_project_cache(&self.project_root);
+        self.ensure_dirs()?;
         let path = self.active_config_path();
         if !path.exists() {
             let legacy_toml = path.with_extension("toml");
@@ -219,6 +252,75 @@ impl ConfigManager {
 
     pub fn save(&self, config: &Config) -> ReverieResult<()> {
         self.save_to(&self.active_config_path(), config)
+    }
+
+    pub fn data_root(&self) -> PathBuf {
+        app_root().join(".reverie")
+    }
+
+    pub fn project_data_dir(&self) -> PathBuf {
+        project_data_dir(&self.project_root)
+    }
+
+    pub fn ensure_dirs(&self) -> ReverieResult<Vec<PathBuf>> {
+        let mut created = Vec::new();
+        for path in [
+            self.data_root(),
+            app_root().join(".reverie").join("projects"),
+            self.project_data_dir(),
+            self.project_data_dir().join("context_cache"),
+            self.project_data_dir().join("specs"),
+            self.project_data_dir().join("steering"),
+            self.project_data_dir().join("sessions"),
+            self.project_data_dir().join("archives"),
+            self.project_data_dir().join("checkpoints"),
+            self.project_data_dir().join("mcp_resources"),
+            self.project_root.join(".reverie"),
+        ] {
+            if !path.exists() {
+                std::fs::create_dir_all(&path)?;
+                created.push(path);
+            }
+        }
+
+        let metadata_path = self.project_data_dir().join("project_metadata.json");
+        if !metadata_path.exists() {
+            let metadata = json!({
+                "schema": "reverie.project_data.v2",
+                "project_path": self.project_root.to_string_lossy(),
+                "project_data_name": project_data_name(&self.project_root),
+                "hash_suffix_used": false,
+                "updated_at": chrono::Utc::now().to_rfc3339(),
+            });
+            std::fs::write(&metadata_path, serde_json::to_string_pretty(&metadata)?)?;
+            created.push(metadata_path);
+        }
+
+        Ok(created)
+    }
+
+    pub fn initialize(&self) -> ReverieResult<ConfigInitReport> {
+        let mut created_paths = self.ensure_dirs()?;
+        let active_config_path = self.active_config_path();
+        let config_existed = active_config_path.exists();
+        let config = self.load()?;
+        if !config_existed {
+            created_paths.push(active_config_path.clone());
+        } else if !active_config_path.exists() {
+            self.save_to(&active_config_path, &config)?;
+            created_paths.push(active_config_path.clone());
+        }
+
+        Ok(ConfigInitReport {
+            app_root: app_root(),
+            data_root: self.data_root(),
+            project_root: self.project_root.clone(),
+            project_data_dir: self.project_data_dir(),
+            global_config_path: self.global_config_path.clone(),
+            workspace_config_path: self.workspace_config_path.clone(),
+            active_config_path,
+            created_paths,
+        })
     }
 
     fn load_from(&self, path: &Path) -> ReverieResult<Config> {

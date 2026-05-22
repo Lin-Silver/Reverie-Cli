@@ -15,11 +15,12 @@ from .security_utils import PROJECT_CACHE_AUDIT_REL_PATH
 from .tools.registry import get_tool_classes_for_mode
 
 
-_TASK_LINE_RE = re.compile(r"^(?P<indent>\s*)\[(?P<state> |/|x|-)\]\s+(?P<name>.+?)\s*$")
+_TASK_LINE_RE = re.compile(r"^(?P<indent>\s*)\[(?P<state> |/|x|X|-)\]\s+(?P<name>.+?)\s*$")
 _TASK_STATE_NAMES = {
     " ": "NOT_STARTED",
     "/": "IN_PROGRESS",
     "x": "COMPLETED",
+    "X": "COMPLETED",
     "-": "CANCELLED",
 }
 _TASK_STATE_MARKERS = {
@@ -252,25 +253,7 @@ def _parse_task_entries(project_root: Path) -> Dict[str, Any]:
     entries: List[Dict[str, Any]] = []
     source = "missing"
 
-    payload = _safe_json_load(json_path) if json_path.exists() else None
-    if isinstance(payload, dict):
-        source = "json"
-        for item in payload.get("tasks", []) or []:
-            if not isinstance(item, dict):
-                continue
-            state = str(item.get("state", "NOT_STARTED") or "NOT_STARTED").upper()
-            if state not in {"NOT_STARTED", "IN_PROGRESS", "COMPLETED", "CANCELLED"}:
-                state = "NOT_STARTED"
-            entry = {
-                "id": str(item.get("id", "") or "").strip(),
-                "name": str(item.get("name", "") or "").strip(),
-                "state": state,
-                "phase": str(item.get("phase", "") or "").strip(),
-            }
-            entries.append(entry)
-            counts[state] += 1
-
-    if not entries and markdown_path.exists():
+    if markdown_path.exists():
         source = "markdown"
         try:
             for raw_line in markdown_path.read_text(encoding="utf-8").splitlines():
@@ -288,6 +271,24 @@ def _parse_task_entries(project_root: Path) -> Dict[str, Any]:
                 counts[state] += 1
         except Exception:
             entries = []
+
+    payload = _safe_json_load(json_path) if not entries and json_path.exists() else None
+    if isinstance(payload, dict):
+        source = "json"
+        for item in payload.get("tasks", []) or []:
+            if not isinstance(item, dict):
+                continue
+            state = str(item.get("state", "NOT_STARTED") or "NOT_STARTED").upper()
+            if state not in {"NOT_STARTED", "IN_PROGRESS", "COMPLETED", "CANCELLED"}:
+                state = "NOT_STARTED"
+            entry = {
+                "id": str(item.get("id", "") or "").strip(),
+                "name": str(item.get("name", "") or "").strip(),
+                "state": state,
+                "phase": str(item.get("phase", "") or "").strip(),
+            }
+            entries.append(entry)
+            counts[state] += 1
 
     return {
         "source": source,

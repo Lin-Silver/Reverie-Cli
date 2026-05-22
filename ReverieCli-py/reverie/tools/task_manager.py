@@ -139,7 +139,7 @@ class Task:
 
 
 class TaskStore:
-    """In-memory task storage with JSON + checklist persistence."""
+    """In-memory task storage with Markdown persistence and legacy JSON import."""
     
     def __init__(self):
         self.tasks: Dict[str, Task] = {}
@@ -155,22 +155,7 @@ class TaskStore:
         self.load()
         
     def save(self):
-        """Persist tasks to JSON metadata and checklist markdown."""
-        data = {
-            "tasks": [task.to_dict() for task in self.tasks.values()],
-            "root_tasks": self.root_tasks,
-        }
-
-        if self.file_path:
-            try:
-                self.file_path.parent.mkdir(parents=True, exist_ok=True)
-                self.file_path.write_text(
-                    json.dumps(data, indent=2, ensure_ascii=False),
-                    encoding="utf-8",
-                )
-            except Exception as e:
-                print(f"Failed to save tasks JSON: {e}")
-
+        """Persist tasks to the canonical checklist markdown artifact."""
         if self.markdown_path:
             try:
                 self.markdown_path.parent.mkdir(parents=True, exist_ok=True)
@@ -178,19 +163,25 @@ class TaskStore:
             except Exception as e:
                 print(f"Failed to save tasks markdown: {e}")
 
+        if self.file_path and self.file_path.exists():
+            try:
+                self.file_path.unlink()
+            except Exception as e:
+                print(f"Failed to remove legacy tasks JSON: {e}")
+
     def load(self):
-        """Load tasks from JSON metadata or fallback checklist markdown."""
+        """Load tasks from canonical markdown, importing legacy JSON if needed."""
         self.tasks = {}
         self.root_tasks = []
 
-        prefer_markdown = False
-        if self.file_path and self.file_path.exists() and self.markdown_path and self.markdown_path.exists():
+        if self.markdown_path and self.markdown_path.exists():
             try:
-                prefer_markdown = self.markdown_path.stat().st_mtime_ns > self.file_path.stat().st_mtime_ns
-            except Exception:
-                prefer_markdown = False
+                self._load_from_checklist(self.markdown_path.read_text(encoding="utf-8"))
+                return
+            except Exception as e:
+                print(f"Failed to load tasks markdown: {e}")
 
-        if self.file_path and self.file_path.exists() and not prefer_markdown:
+        if self.file_path and self.file_path.exists():
             try:
                 data = json.loads(self.file_path.read_text(encoding="utf-8"))
                 for task_data in data.get("tasks", []):
@@ -200,17 +191,10 @@ class TaskStore:
                     task_id for task_id in data.get("root_tasks", []) if task_id in self.tasks
                 ]
                 self._repair_relationships()
+                self.save()
                 return
             except Exception as e:
                 print(f"Failed to load tasks JSON: {e}")
-
-        if self.markdown_path and self.markdown_path.exists():
-            try:
-                self._load_from_checklist(self.markdown_path.read_text(encoding="utf-8"))
-                if prefer_markdown:
-                    self.save()
-            except Exception as e:
-                print(f"Failed to load tasks markdown: {e}")
 
     def _repair_relationships(self):
         """Normalize parent/child/root relationships after loading."""
@@ -821,7 +805,7 @@ class TaskManagerTool(BaseTool):
             "checklist": _task_store.to_checklist_markdown(),
             "filtered_checklist": self._render_task_entries(filtered_entries),
             "task_markdown_path": str(_task_store.markdown_path) if _task_store.markdown_path else "",
-            "task_json_path": str(_task_store.file_path) if _task_store.file_path else "",
+            "legacy_task_json_path": str(_task_store.file_path) if _task_store.file_path else "",
         }
 
     def _build_task_result(

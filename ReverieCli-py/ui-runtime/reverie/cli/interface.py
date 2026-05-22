@@ -113,7 +113,7 @@ _TASK_COUNTER_FIELDS = ("NOT_STARTED", "IN_PROGRESS", "COMPLETED", "CANCELLED")
 
 
 def _task_artifact_paths(project_root: Path) -> tuple[Path, Path]:
-    """Return the canonical task JSON and checklist artifact paths."""
+    """Return the legacy JSON and canonical Markdown task artifact paths."""
     artifacts_dir = Path(project_root) / "artifacts"
     return artifacts_dir / "task_list.json", artifacts_dir / "Tasks.md"
 
@@ -198,27 +198,20 @@ def _load_task_drawer_snapshot(project_root: Path, max_visible: Optional[int] = 
     source = "empty"
     source_path = ""
 
-    prefer_markdown = False
-    if json_path.exists() and markdown_path.exists():
+    if markdown_path.exists():
+        source = "markdown"
+        source_path = str(markdown_path)
         try:
-            prefer_markdown = markdown_path.stat().st_mtime_ns > json_path.stat().st_mtime_ns
+            entries = _load_task_entries_from_markdown(markdown_path.read_text(encoding="utf-8"))
         except Exception:
-            prefer_markdown = False
+            entries = []
 
-    if json_path.exists() and not prefer_markdown:
+    if not entries and json_path.exists():
         source = "json"
         source_path = str(json_path)
         try:
             raw_data = json.loads(json_path.read_text(encoding="utf-8"))
             entries = _load_task_entries_from_json(raw_data)
-        except Exception:
-            entries = []
-
-    if (not entries or prefer_markdown) and markdown_path.exists():
-        source = "markdown"
-        source_path = str(markdown_path)
-        try:
-            entries = _load_task_entries_from_markdown(markdown_path.read_text(encoding="utf-8"))
         except Exception:
             entries = []
 

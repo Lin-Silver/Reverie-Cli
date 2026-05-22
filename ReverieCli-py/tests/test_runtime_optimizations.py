@@ -287,7 +287,7 @@ def test_task_drawer_snapshot_reads_json_artifact_in_display_order(tmp_path: Pat
     assert snapshot["tasks"][1]["indent"] == 1
 
 
-def test_task_drawer_prefers_newer_markdown_over_stale_json(tmp_path: Path) -> None:
+def test_task_drawer_prefers_markdown_over_stale_json(tmp_path: Path) -> None:
     artifacts_dir = tmp_path / "artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
     json_path = artifacts_dir / "task_list.json"
@@ -309,7 +309,6 @@ def test_task_drawer_prefers_newer_markdown_over_stale_json(tmp_path: Path) -> N
         ),
         encoding="utf-8",
     )
-    time.sleep(0.01)
     markdown_path.write_text("[x] Wire local repository\n[ ] Add persistence tests\n", encoding="utf-8")
 
     snapshot = _load_task_drawer_snapshot(tmp_path)
@@ -332,6 +331,47 @@ def test_task_manager_updates_by_exact_name_and_syncs_checklist(tmp_path: Path) 
     checklist = (tmp_path / "artifacts" / "Tasks.md").read_text(encoding="utf-8")
     assert "[x] Add DB schema" in checklist
     assert "[ ] Add repository tests" in checklist
+    assert not (tmp_path / "artifacts" / "task_list.json").exists()
+
+
+def test_task_manager_imports_legacy_json_then_saves_markdown_only(tmp_path: Path) -> None:
+    artifacts_dir = tmp_path / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    legacy_json = artifacts_dir / "task_list.json"
+    legacy_json.write_text(
+        json.dumps(
+            {
+                "tasks": [
+                    {
+                        "id": "root",
+                        "name": "Migrate task persistence",
+                        "state": "IN_PROGRESS",
+                        "children": ["child"],
+                        "parent_id": None,
+                    },
+                    {
+                        "id": "child",
+                        "name": "Keep checklist editable",
+                        "state": "COMPLETED",
+                        "children": [],
+                        "parent_id": "root",
+                    },
+                ],
+                "root_tasks": ["root"],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    tool = TaskManagerTool({"project_root": tmp_path})
+    result = tool.execute(action="list")
+
+    assert result.success is True
+    checklist = (artifacts_dir / "Tasks.md").read_text(encoding="utf-8")
+    assert "[/] Migrate task persistence" in checklist
+    assert "  [x] Keep checklist editable" in checklist
+    assert not legacy_json.exists()
 
 
 def test_model_config_omits_null_context_tokens_on_save() -> None:
@@ -836,6 +876,7 @@ def test_streaming_footer_signature_ignores_elapsed_timer() -> None:
     first = interface._build_streaming_footer_signature()
     interface.total_active_time = 99.0
     interface.current_task_start = time.time() - 30
+    interface._current_content_tokens = 999
 
     assert interface._build_streaming_footer_signature() == first
 

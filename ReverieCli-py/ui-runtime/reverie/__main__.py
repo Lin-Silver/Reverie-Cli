@@ -16,12 +16,17 @@ from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeEl
 
 try:
     from .version import __version__
+    from .tls import configure_tls_ca_bundle
 except ImportError:  # PyInstaller may execute this file as a top-level script.
     package_root = Path(__file__).resolve().parent.parent
     package_root_text = str(package_root)
     if package_root_text not in sys.path:
         sys.path.insert(0, package_root_text)
     from reverie.version import __version__
+    from reverie.tls import configure_tls_ca_bundle
+
+
+configure_tls_ca_bundle()
 
 
 def _configure_stdio_for_safe_output() -> None:

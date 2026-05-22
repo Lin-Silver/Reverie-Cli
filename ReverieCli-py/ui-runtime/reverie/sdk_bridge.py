@@ -29,6 +29,14 @@ RUNTIME_ROOT = PACKAGE_ROOT.parent
 if str(RUNTIME_ROOT) not in sys.path:
     sys.path.insert(0, str(RUNTIME_ROOT))
 
+try:
+    from .tls import configure_tls_ca_bundle
+except ImportError:  # Support direct script execution from ui-runtime.
+    from reverie.tls import configure_tls_ca_bundle
+
+
+configure_tls_ca_bundle()
+
 OUT = sys.stdout
 for stream in (sys.stdout, sys.stderr):
     if hasattr(stream, "reconfigure"):

@@ -93,6 +93,14 @@ for package_name in ('rich', 'bs4', 'pyglet', 'moderngl', 'glcontext'):
     except Exception:
         pass
 
+try:
+    import certifi
+
+    add_data_if_exists(Path(certifi.where()), "certifi")
+    hiddenimports.append("certifi")
+except Exception:
+    pass
+
 
 a = Analysis(
     [str(entry_script)],

@@ -3092,7 +3092,12 @@ Path: {TASKS_ARTIFACT_PATH}
 - `[x]` completed tasks
 - `[-]` cancelled tasks
 - Checklist items only; do not add headings, prose, summaries, IDs, or metadata blocks
-**Updating {TASKS_ARTIFACT_PATH}**: Mark items as `[/]` when starting work on them, and `[x]` when completed. Update `{TASKS_ARTIFACT_PATH}` after calling task_boundary as you make progress through your checklist.
+**Updating {TASKS_ARTIFACT_PATH}**: Use the `task_manager` tool to mark items as `[/]` when starting work and `[x]` when completed. Do not merely say an item is complete in prose; the visible Todo drawer updates only after `task_manager` changes the checklist.
+**Required task_manager calls**:
+- Start a task: `task_manager(action="update", target="<exact checklist item>", status="doing")`
+- Complete a task: `task_manager(action="update", target="<exact checklist item>", status="done")`
+- Complete several tasks: `task_manager(action="update", tasks=[{"target":"<exact checklist item>","status":"done"}])`
+- Inspect current state: `task_manager(action="list")`
 </description>
 </task_artifact>
 

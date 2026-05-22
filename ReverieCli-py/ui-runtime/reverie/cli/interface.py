@@ -88,7 +88,7 @@ _THINKING_LIST_PREFIX_RE = re.compile(r"^(?:[-*]|\d+\.)\s+")
 _MARKDOWN_FENCE_RE = re.compile(r"^\s*(```+|~~~+)")
 _TABLE_ROW_RE = re.compile(r"^\s*\|(.+)\|\s*$")
 _TABLE_SEPARATOR_RE = re.compile(r"^\s*\|?\s*(:?-+:?)\s*(\|\s*(:?-+:?)\s*)+\|?\s*$")
-_TASK_CHECKLIST_LINE_RE = re.compile(r"^(?P<indent>\s*)\[(?P<state> |/|x|-)\]\s+(?P<name>.+?)\s*$")
+_TASK_CHECKLIST_LINE_RE = re.compile(r"^(?P<indent>\s*)\[(?P<state> |/|x|X|-)\]\s+(?P<name>.+?)\s*$")
 _PROMPT_APPROVAL_RE = re.compile(
     r"(?is)\b(approve|approval|proceed to|should i proceed|would you like any adjustments|provide feedback)\b"
 )
@@ -106,6 +106,7 @@ _TASK_STATE_BY_MARKER = {
     " ": "NOT_STARTED",
     "/": "IN_PROGRESS",
     "x": "COMPLETED",
+    "X": "COMPLETED",
     "-": "CANCELLED",
 }
 _TASK_COUNTER_FIELDS = ("NOT_STARTED", "IN_PROGRESS", "COMPLETED", "CANCELLED")
@@ -197,7 +198,14 @@ def _load_task_drawer_snapshot(project_root: Path, max_visible: Optional[int] = 
     source = "empty"
     source_path = ""
 
-    if json_path.exists():
+    prefer_markdown = False
+    if json_path.exists() and markdown_path.exists():
+        try:
+            prefer_markdown = markdown_path.stat().st_mtime_ns > json_path.stat().st_mtime_ns
+        except Exception:
+            prefer_markdown = False
+
+    if json_path.exists() and not prefer_markdown:
         source = "json"
         source_path = str(json_path)
         try:
@@ -206,7 +214,7 @@ def _load_task_drawer_snapshot(project_root: Path, max_visible: Optional[int] = 
         except Exception:
             entries = []
 
-    if not entries and markdown_path.exists():
+    if (not entries or prefer_markdown) and markdown_path.exists():
         source = "markdown"
         source_path = str(markdown_path)
         try:
@@ -1565,15 +1573,6 @@ class ReverieInterface:
         except Exception:
             width_bucket = 10
 
-        elapsed_bucket = 0
-        try:
-            elapsed = float(getattr(self, "total_active_time", 0.0) or 0.0)
-            if getattr(self, "current_task_start", None):
-                elapsed += time.time() - float(self.current_task_start or 0.0)
-            elapsed_bucket = int(elapsed)
-        except Exception:
-            elapsed_bucket = 0
-
         active_config = getattr(self, "_streaming_footer_config", None)
         show_status_line = True
         if active_config is not None:
@@ -1592,13 +1591,15 @@ class ReverieInterface:
                 for item in self._active_tool_details.values()
             )
         stream_snapshot = self._stream_input_state.snapshot() if self._stream_input_state else {}
+        try:
+            task_cache_key = self._build_task_drawer_cache_key()
+        except Exception:
+            task_cache_key = getattr(self, "_task_drawer_cache_key", None)
         return (
-            int(getattr(self, "_current_content_tokens", 0) or 0),
             width_bucket,
-            elapsed_bucket,
             show_status_line,
             bool(getattr(self, "_task_drawer_visible", False)),
-            getattr(self, "_task_drawer_cache_key", None),
+            task_cache_key,
             active_tool_rows,
             str(stream_snapshot.get("buffer", "") or ""),
             bool(stream_snapshot.get("paused")),
@@ -3003,29 +3004,10 @@ class ReverieInterface:
             self._refresh_command_context()
             return
 
-        # Check for missing max_context_tokens
         if model.max_context_tokens is None:
-            if not self.headless:
-                self.console.print(f"\n[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Context window size not configured for model: {model.model_display_name}[/{self.theme.AMBER_GLOW}]")
-                val = Prompt.ask("Enter max context tokens for this model", default="128000")
-                try:
-                    model.max_context_tokens = int(val)
-                except ValueError:
-                    model.max_context_tokens = 128000
-            else:
-                model.max_context_tokens = 128000
-            
-            # Save back to config
-            if 0 <= getattr(config, "active_model_index", -1) < len(getattr(config, "models", []) or []):
-                config.models[config.active_model_index] = model
-            if persist_config_changes:
-                self.config_manager.save(config)
-            self._show_activity_event(
-                "Config",
-                "Model context window updated",
-                status="success",
-                detail=f"Saved max context tokens for {model.model_display_name}.",
-            )
+            runtime_payload = model.to_dict()
+            runtime_payload["max_context_tokens"] = int(getattr(config, "max_context_tokens", 128000) or 128000)
+            model = ModelConfig.from_dict(runtime_payload)
 
         reuse_candidate = (
             not scope_changed

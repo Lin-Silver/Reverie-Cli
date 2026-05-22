@@ -25,6 +25,7 @@ from reverie.gamer import reference_intelligence as gamer_reference_intelligence
 from reverie.sse import iter_sse_data_strings
 from reverie.tools.codebase_retrieval import CodebaseRetrievalTool
 from reverie.tools.command_exec import CommandExecTool
+from reverie.tools.task_manager import TaskManagerTool
 from reverie.tools.web_search import WebFetchTool, WebSearchTool
 from reverie.config import Config, ModelConfig
 
@@ -284,6 +285,64 @@ def test_task_drawer_snapshot_reads_json_artifact_in_display_order(tmp_path: Pat
         "Add todo drawer",
     ]
     assert snapshot["tasks"][1]["indent"] == 1
+
+
+def test_task_drawer_prefers_newer_markdown_over_stale_json(tmp_path: Path) -> None:
+    artifacts_dir = tmp_path / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    json_path = artifacts_dir / "task_list.json"
+    markdown_path = artifacts_dir / "Tasks.md"
+    json_path.write_text(
+        json.dumps(
+            {
+                "tasks": [
+                    {
+                        "id": "root",
+                        "name": "Wire local repository",
+                        "state": "NOT_STARTED",
+                        "children": [],
+                        "parent_id": None,
+                    }
+                ],
+                "root_tasks": ["root"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    time.sleep(0.01)
+    markdown_path.write_text("[x] Wire local repository\n[ ] Add persistence tests\n", encoding="utf-8")
+
+    snapshot = _load_task_drawer_snapshot(tmp_path)
+
+    assert snapshot["source"] == "markdown"
+    assert snapshot["total"] == 2
+    assert snapshot["completed"] == 1
+    assert [item["state"] for item in snapshot["tasks"]] == ["COMPLETED", "NOT_STARTED"]
+
+
+def test_task_manager_updates_by_exact_name_and_syncs_checklist(tmp_path: Path) -> None:
+    tool = TaskManagerTool({"project_root": tmp_path})
+
+    added = tool.execute(action="add", tasks=["Add DB schema", "Add repository tests"])
+    assert added.success is True
+
+    updated = tool.execute(action="update", target="Add DB schema", status="done")
+
+    assert updated.success is True
+    checklist = (tmp_path / "artifacts" / "Tasks.md").read_text(encoding="utf-8")
+    assert "[x] Add DB schema" in checklist
+    assert "[ ] Add repository tests" in checklist
+
+
+def test_model_config_omits_null_context_tokens_on_save() -> None:
+    payload = ModelConfig(
+        model="example-model",
+        model_display_name="Example",
+        base_url="https://example.invalid/v1",
+        max_context_tokens=None,
+    ).to_dict()
+
+    assert "max_context_tokens" not in payload
 
 
 def test_display_compacts_tool_result_into_single_row_with_preview() -> None:
@@ -759,6 +818,26 @@ def test_streaming_footer_ticker_uses_signature_gated_refresh() -> None:
     interface._streaming_footer_ticker_loop(stop_event)
 
     assert calls == [False]
+
+
+def test_streaming_footer_signature_ignores_elapsed_timer() -> None:
+    interface = ReverieInterface.__new__(ReverieInterface)
+    interface.console = Console(width=120)
+    interface._streaming_footer_config = None
+    interface._active_tool_lock = threading.Lock()
+    interface._active_tool_details = {}
+    interface._stream_input_state = None
+    interface._current_content_tokens = 100
+    interface._task_drawer_visible = True
+    interface._task_drawer_cache_key = ("tasks", 1)
+    interface.total_active_time = 10.0
+    interface.current_task_start = time.time() - 5
+
+    first = interface._build_streaming_footer_signature()
+    interface.total_active_time = 99.0
+    interface.current_task_start = time.time() - 30
+
+    assert interface._build_streaming_footer_signature() == first
 
 
 def test_streaming_footer_requires_real_tty_stdout() -> None:

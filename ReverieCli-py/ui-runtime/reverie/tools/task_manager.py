@@ -17,7 +17,7 @@ from pathlib import Path
 from .base import BaseTool, ToolResult
 
 
-CHECKLIST_LINE_RE = re.compile(r"^(?P<indent>\s*)\[(?P<state> |/|x|-)\]\s+(?P<name>.+?)\s*$")
+CHECKLIST_LINE_RE = re.compile(r"^(?P<indent>\s*)\[(?P<state> |/|x|X|-)\]\s+(?P<name>.+?)\s*$")
 ARTIFACTS_DIR_NAME = "artifacts"
 
 TASK_MANAGER_TOOL_DESCRIPTION = """Manage project work as a checklist-first task system.
@@ -44,6 +44,13 @@ Convenience:
 - Updates may target `task_id`, `id`, `target`, or an exact task name
 - Short states such as `todo`, `doing`, `done`, and `cancelled` are accepted
 
+Required calling pattern:
+- Start work: `task_manager(action="update", target="<exact task name>", status="doing")`
+- Finish work: `task_manager(action="update", target="<exact task name>", status="done")`
+- Batch finish: `task_manager(action="update", tasks=[{"target":"<exact task name>","status":"done"}])`
+- Inspect current state: `task_manager(action="list")`
+- Do not rely on prose like "✅ completed"; the visible Todo drawer changes only after this tool updates the checklist.
+
 Task states:
 - NOT_STARTED => [ ]
 - IN_PROGRESS => [/]
@@ -63,6 +70,7 @@ class TaskState(Enum):
             " ": cls.NOT_STARTED,
             "/": cls.IN_PROGRESS,
             "x": cls.COMPLETED,
+            "X": cls.COMPLETED,
             "-": cls.CANCELLED,
         }
         return mapping[marker]
@@ -175,7 +183,14 @@ class TaskStore:
         self.tasks = {}
         self.root_tasks = []
 
-        if self.file_path and self.file_path.exists():
+        prefer_markdown = False
+        if self.file_path and self.file_path.exists() and self.markdown_path and self.markdown_path.exists():
+            try:
+                prefer_markdown = self.markdown_path.stat().st_mtime_ns > self.file_path.stat().st_mtime_ns
+            except Exception:
+                prefer_markdown = False
+
+        if self.file_path and self.file_path.exists() and not prefer_markdown:
             try:
                 data = json.loads(self.file_path.read_text(encoding="utf-8"))
                 for task_data in data.get("tasks", []):
@@ -192,6 +207,8 @@ class TaskStore:
         if self.markdown_path and self.markdown_path.exists():
             try:
                 self._load_from_checklist(self.markdown_path.read_text(encoding="utf-8"))
+                if prefer_markdown:
+                    self.save()
             except Exception as e:
                 print(f"Failed to load tasks markdown: {e}")
 

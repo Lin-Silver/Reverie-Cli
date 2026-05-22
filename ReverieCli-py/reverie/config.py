@@ -768,11 +768,12 @@ class ModelConfig:
             "model_display_name": self.model_display_name,
             "base_url": self.base_url,
             "api_key": self.api_key,
-            "max_context_tokens": self.max_context_tokens,
             "provider": self.provider,
             "supports_vision": bool(self.supports_vision),
             "custom_headers": dict(self.custom_headers or {}),
         }
+        if self.max_context_tokens is not None:
+            payload["max_context_tokens"] = self.max_context_tokens
         endpoint = str(self.endpoint or "").strip()
         if endpoint:
             payload["endpoint"] = endpoint

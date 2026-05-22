@@ -1,12 +1,14 @@
 use crate::config::{Config, ModelConfig};
 use crate::providers::resolve_model;
 use crate::{ReverieError, ReverieResult};
+use base64::{engine::general_purpose, Engine as _};
 use futures::StreamExt;
 use regex::Regex;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tracing::info;
 
@@ -47,6 +49,13 @@ impl ChatMessage {
             tool_calls: Vec::new(),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InlineImage {
+    pub path: PathBuf,
+    pub media_type: String,
+    pub data_base64: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -178,6 +187,73 @@ pub fn parse_tool_arguments(raw: &str) -> Value {
     json!({"raw": raw})
 }
 
+pub fn user_content_with_inline_images(project_root: &Path, prompt: &str) -> ReverieResult<Value> {
+    let images = resolve_inline_images(project_root, prompt)?;
+    if images.is_empty() {
+        return Ok(json!(prompt));
+    }
+    let mut blocks = vec![json!({"type": "text", "text": prompt})];
+    for image in images {
+        blocks.push(json!({
+            "type": "image_url",
+            "image_url": {
+                "url": format!("data:{};base64,{}", image.media_type, image.data_base64),
+                "detail": "auto"
+            },
+            "source": {
+                "type": "base64",
+                "media_type": image.media_type,
+                "data": image.data_base64
+            },
+            "path": image.path
+        }));
+    }
+    Ok(Value::Array(blocks))
+}
+
+pub fn resolve_inline_images(project_root: &Path, prompt: &str) -> ReverieResult<Vec<InlineImage>> {
+    let markdown_re =
+        Regex::new(r"!\[[^\]]*\]\((?P<path>[^)\s]+(?:\s+[^)]*)?)\)").expect("static regex");
+    let at_re = Regex::new(r"(?i)(?:^|\s)@(?P<path>[^\s]+?\.(?:png|jpe?g|gif|webp))")
+        .expect("static regex");
+    let mut raw_paths = Vec::new();
+    for capture in markdown_re.captures_iter(prompt) {
+        if let Some(path) = capture.name("path") {
+            raw_paths.push(path.as_str().trim().trim_matches('"').to_string());
+        }
+    }
+    for capture in at_re.captures_iter(prompt) {
+        if let Some(path) = capture.name("path") {
+            raw_paths.push(path.as_str().trim().trim_matches('"').to_string());
+        }
+    }
+
+    let mut images = Vec::new();
+    for raw in raw_paths {
+        if raw.starts_with("http://") || raw.starts_with("https://") || raw.starts_with("data:") {
+            continue;
+        }
+        let path = if Path::new(&raw).is_absolute() {
+            PathBuf::from(&raw)
+        } else {
+            project_root.join(&raw)
+        };
+        if !path.is_file() {
+            continue;
+        }
+        let Some(media_type) = media_type_for_path(&path) else {
+            continue;
+        };
+        let bytes = std::fs::read(&path)?;
+        images.push(InlineImage {
+            path,
+            media_type: media_type.to_string(),
+            data_base64: general_purpose::STANDARD.encode(bytes),
+        });
+    }
+    Ok(images)
+}
+
 pub fn build_openai_tool_definitions(tools: &[reverie_tools::ToolSpec]) -> Vec<Value> {
     tools
         .iter()
@@ -281,9 +357,16 @@ fn builtin_tool_parameter_schema(name: &str) -> Value {
         "task_manager" => json!({
             "type": "object",
             "properties": {
+                "action": {"type": "string"},
                 "operation": {"type": "string"},
                 "tasks": {"type": "array", "items": {"type": "object"}},
-                "title": {"type": "string"}
+                "name": {"type": "string"},
+                "title": {"type": "string"},
+                "target": {"type": "string"},
+                "task_id": {"type": "string"},
+                "id": {"type": "string"},
+                "status": {"type": "string"},
+                "state": {"type": "string"}
             },
             "required": []
         }),
@@ -393,6 +476,8 @@ pub fn build_anthropic_payload(model: &str, request: ChatRequest) -> Value {
                     "tool_use_id": message.tool_call_id.unwrap_or_default(),
                     "content": content_to_text(&message.content)
                 }])
+            } else if message.content.is_array() {
+                openai_content_to_anthropic(&message.content)
             } else {
                 json!(content_to_text(&message.content))
             };
@@ -448,6 +533,65 @@ fn content_to_text(content: &Value) -> String {
         Value::String(text) => text.clone(),
         Value::Null => String::new(),
         other => other.to_string(),
+    }
+}
+
+fn openai_content_to_anthropic(content: &Value) -> Value {
+    let blocks = content
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|block| match block.get("type").and_then(Value::as_str) {
+            Some("text") => Some(json!({
+                "type": "text",
+                "text": block.get("text").and_then(Value::as_str).unwrap_or_default()
+            })),
+            Some("image_url") => {
+                if let Some(source) = block.get("source") {
+                    return Some(json!({
+                        "type": "image",
+                        "source": source
+                    }));
+                }
+                let url = block
+                    .pointer("/image_url/url")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let (media_type, data) = parse_data_url(url)?;
+                Some(json!({
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": media_type,
+                        "data": data
+                    }
+                }))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    Value::Array(blocks)
+}
+
+fn parse_data_url(url: &str) -> Option<(&str, &str)> {
+    let rest = url.strip_prefix("data:")?;
+    let (media_type, data) = rest.split_once(";base64,")?;
+    Some((media_type, data))
+}
+
+fn media_type_for_path(path: &Path) -> Option<&'static str> {
+    match path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "gif" => Some("image/gif"),
+        "webp" => Some("image/webp"),
+        _ => None,
     }
 }
 
@@ -1341,5 +1485,45 @@ mod tests {
         );
         assert_eq!(payload["messages"][0]["content"][0]["type"], "tool_use");
         assert_eq!(payload["messages"][1]["content"][0]["type"], "tool_result");
+    }
+
+    #[test]
+    fn inline_images_become_multimodal_content_blocks() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("shot.png"), [137, 80, 78, 71]).unwrap();
+        let content =
+            user_content_with_inline_images(temp.path(), "inspect ![](shot.png)").unwrap();
+        assert_eq!(content[0]["type"], "text");
+        assert_eq!(content[1]["type"], "image_url");
+        assert!(content[1]["image_url"]["url"]
+            .as_str()
+            .unwrap()
+            .starts_with("data:image/png;base64,"));
+    }
+
+    #[test]
+    fn anthropic_payload_converts_inline_image_blocks() {
+        let content = json!([
+            {"type": "text", "text": "inspect"},
+            {
+                "type": "image_url",
+                "source": {"type": "base64", "media_type": "image/png", "data": "aGVsbG8="}
+            }
+        ]);
+        let payload = build_anthropic_payload(
+            "claude-compatible",
+            ChatRequest {
+                model: "claude-compatible".to_string(),
+                messages: vec![ChatMessage::new("user", content)],
+                tools: Vec::new(),
+                stream: false,
+                extra_body: json!({}),
+            },
+        );
+        assert_eq!(payload["messages"][0]["content"][1]["type"], "image");
+        assert_eq!(
+            payload["messages"][0]["content"][1]["source"]["media_type"],
+            "image/png"
+        );
     }
 }

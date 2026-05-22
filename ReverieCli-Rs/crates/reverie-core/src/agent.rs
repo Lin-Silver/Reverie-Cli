@@ -3,7 +3,7 @@ use crate::config::{project_data_dir, Config, ConfigManager, ModelConfig};
 use crate::llm::{
     build_openai_tool_definitions, extract_anthropic_tool_calls, extract_openai_tool_calls,
     sanitize_prompt_output_text, send_model_compatible, send_model_streaming_compatible,
-    ChatMessage, ChatRequest, ModelStreamEvent,
+    user_content_with_inline_images, ChatMessage, ChatRequest, ModelStreamEvent,
 };
 use crate::modes::{normalize_mode, Mode};
 use crate::providers::{
@@ -143,7 +143,8 @@ impl ReverieAgent {
         let tool_definitions = build_openai_tool_definitions(&visible_tools);
         let mut events = Vec::new();
         let mut messages = self.context_messages(session_id)?;
-        messages.push(ChatMessage::new("user", json!(prompt)));
+        let user_content = user_content_with_inline_images(&self.project_root, prompt)?;
+        messages.push(ChatMessage::new("user", user_content.clone()));
         let use_streaming = config.stream_responses && stream_sink.is_some();
         let response = if use_streaming {
             let mut captured_events = Vec::new();
@@ -186,7 +187,7 @@ impl ReverieAgent {
         if tool_calls.is_empty() {
             tool_calls = extract_anthropic_tool_calls(&response.raw);
         }
-        let mut transcript_messages = vec![SessionMessage::new("user", json!(prompt))];
+        let mut transcript_messages = vec![SessionMessage::new("user", user_content)];
         if tool_calls.is_empty() {
             transcript_messages.push(SessionMessage::new(
                 "assistant",

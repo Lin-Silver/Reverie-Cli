@@ -2,6 +2,8 @@ use anyhow::{anyhow, Result};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::process::Command;
@@ -824,11 +826,26 @@ async fn text_to_image(project_root: &Path, args: Value) -> Result<ToolResult> {
             }),
             error: None,
         }),
-        "generate" => Ok(ToolResult {
-            success: false,
-            output: json!({"action": action}),
-            error: Some("Rust text-to-image generation runtime is not bundled yet".to_string()),
-        }),
+        "generate" => {
+            let prompt = args
+                .get("prompt")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .trim();
+            if prompt.is_empty() {
+                return Ok(ToolResult {
+                    success: false,
+                    output: json!({"action": action}),
+                    error: Some("prompt is required".to_string()),
+                });
+            }
+            let artifact = create_tti_preview_artifact(project_root, prompt, &args, &models)?;
+            Ok(ToolResult {
+                success: true,
+                output: artifact,
+                error: None,
+            })
+        }
         _ => Ok(ToolResult {
             success: false,
             output: json!({"action": action}),
@@ -938,72 +955,385 @@ async fn tool_catalog(args: Value) -> Result<ToolResult> {
     })
 }
 
+#[derive(Debug, Clone)]
+struct ChecklistTask {
+    id: String,
+    name: String,
+    state: String,
+    indent: usize,
+}
+
+impl ChecklistTask {
+    fn marker(&self) -> &'static str {
+        state_to_marker(&self.state)
+    }
+}
+
+fn create_tti_preview_artifact(
+    project_root: &Path,
+    prompt: &str,
+    args: &Value,
+    models: &[Value],
+) -> Result<Value> {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+    let mut hasher = DefaultHasher::new();
+    prompt.hash(&mut hasher);
+    now.hash(&mut hasher);
+    let digest = hasher.finish();
+    let request_id = format!("tti-{now}-{digest:016x}");
+    let root = writable_join(project_root, "artifacts/tti")?;
+    let preview_path = root.join(format!("{request_id}.ppm"));
+    let manifest_path = root.join(format!("{request_id}.json"));
+    std::fs::create_dir_all(&root)?;
+
+    let color = [
+        ((digest >> 16) & 0xff) as u8,
+        ((digest >> 8) & 0xff) as u8,
+        (digest & 0xff) as u8,
+    ];
+    let ppm = deterministic_ppm_preview(color);
+    std::fs::write(&preview_path, ppm)?;
+
+    let manifest = json!({
+        "schema": "reverie.tti.request.v1",
+        "request_id": request_id,
+        "prompt": prompt,
+        "negative_prompt": args.get("negative_prompt").and_then(Value::as_str).unwrap_or_default(),
+        "width": args.get("width").and_then(Value::as_u64).unwrap_or(512),
+        "height": args.get("height").and_then(Value::as_u64).unwrap_or(512),
+        "seed": args.get("seed").cloned().unwrap_or_else(|| json!(digest)),
+        "runtime": "rust-preview",
+        "status": "preview_generated",
+        "models": models,
+        "preview_path": preview_path,
+    });
+    std::fs::write(&manifest_path, serde_json::to_string_pretty(&manifest)?)?;
+    Ok(json!({
+        "artifact_path": manifest_path,
+        "preview_path": preview_path,
+        "request": manifest,
+        "message": "Generated a deterministic Rust preview artifact. Configure a native model runner to replace preview output with real image synthesis."
+    }))
+}
+
+fn deterministic_ppm_preview(color: [u8; 3]) -> Vec<u8> {
+    let width = 64usize;
+    let height = 64usize;
+    let mut output = format!("P6\n{width} {height}\n255\n").into_bytes();
+    for y in 0..height {
+        for x in 0..width {
+            let mix = ((x ^ y) as u8).saturating_mul(3);
+            output.push(color[0].saturating_add(mix / 4));
+            output.push(color[1].saturating_add(mix / 5));
+            output.push(color[2].saturating_add(mix / 6));
+        }
+    }
+    output
+}
+
 async fn task_manager(project_root: &Path, args: Value) -> Result<ToolResult> {
-    let state_path = writable_join(project_root, ".reverie/tasks.json")?;
-    let action = args.get("action").and_then(Value::as_str).unwrap_or("list");
-    let mut tasks = if state_path.exists() {
-        serde_json::from_str::<Vec<Value>>(&std::fs::read_to_string(&state_path)?)?
-    } else {
-        Vec::new()
-    };
-    match action {
-        "add" | "create" => {
-            let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
-            let task = json!({
-                "id": format!("task-{now}-{}", tasks.len() + 1),
-                "name": args.get("name").and_then(Value::as_str).unwrap_or("Task"),
-                "state": args.get("state").and_then(Value::as_str).unwrap_or("pending"),
-                "created_at": now
-            });
-            tasks.push(task.clone());
-            if let Some(parent) = state_path.parent() {
-                std::fs::create_dir_all(parent)?;
+    let markdown_path = writable_join(project_root, "artifacts/Tasks.md")?;
+    let legacy_json_path = writable_join(project_root, ".reverie/tasks.json")?;
+    let mut tasks = load_checklist_tasks(&markdown_path, &legacy_json_path)?;
+    let action = args
+        .get("action")
+        .or_else(|| args.get("operation"))
+        .and_then(Value::as_str)
+        .unwrap_or("list")
+        .to_ascii_lowercase();
+
+    match action.as_str() {
+        "add" | "create" | "add_task" | "add_tasks" => {
+            let new_tasks = task_inputs(&args);
+            for input in new_tasks {
+                let name = input
+                    .get("name")
+                    .or_else(|| input.get("title"))
+                    .or_else(|| input.get("target"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("Task")
+                    .trim();
+                if name.is_empty() {
+                    continue;
+                }
+                let state = input
+                    .get("status")
+                    .or_else(|| input.get("state"))
+                    .and_then(Value::as_str)
+                    .map(normalize_task_state)
+                    .unwrap_or_else(|| "NOT_STARTED".to_string());
+                tasks.push(ChecklistTask {
+                    id: format!("task-{}", tasks.len() + 1),
+                    name: name.to_string(),
+                    state,
+                    indent: input.get("indent").and_then(Value::as_u64).unwrap_or(0) as usize,
+                });
             }
-            std::fs::write(&state_path, serde_json::to_string_pretty(&tasks)?)?;
+            save_checklist_tasks(&markdown_path, &legacy_json_path, &tasks)?;
             Ok(ToolResult {
                 success: true,
-                output: json!({"task": task, "path": state_path}),
+                output: task_manager_output(&markdown_path, &legacy_json_path, &tasks),
                 error: None,
             })
         }
-        "update" => {
-            let id = args
-                .get("task_id")
-                .or_else(|| args.get("id"))
-                .and_then(Value::as_str)
-                .ok_or_else(|| anyhow!("task_id is required"))?;
-            let mut found = false;
-            for task in &mut tasks {
-                if task.get("id").and_then(Value::as_str) == Some(id) {
-                    if let Some(state) = args.get("state").and_then(Value::as_str) {
-                        task["state"] = json!(state);
-                    }
-                    if let Some(name) = args.get("name").and_then(Value::as_str) {
-                        task["name"] = json!(name);
-                    }
-                    found = true;
+        "update" | "update_task" | "update_tasks" => {
+            let updates = if args.get("tasks").and_then(Value::as_array).is_some() {
+                task_inputs(&args)
+            } else {
+                vec![args.clone()]
+            };
+            let mut missing = Vec::new();
+            for update in updates {
+                let target = update
+                    .get("target")
+                    .or_else(|| update.get("name"))
+                    .or_else(|| update.get("title"))
+                    .or_else(|| update.get("task_id"))
+                    .or_else(|| update.get("id"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .trim();
+                if target.is_empty() {
+                    missing.push("(empty target)".to_string());
+                    continue;
+                }
+                let Some(task) = find_checklist_task_mut(&mut tasks, target) else {
+                    missing.push(target.to_string());
+                    continue;
+                };
+                if let Some(name) = update
+                    .get("new_name")
+                    .or_else(|| update.get("rename_to"))
+                    .and_then(Value::as_str)
+                {
+                    task.name = name.trim().to_string();
+                }
+                if let Some(state) = update
+                    .get("status")
+                    .or_else(|| update.get("state"))
+                    .and_then(Value::as_str)
+                {
+                    task.state = normalize_task_state(state);
                 }
             }
-            if !found {
+            if !missing.is_empty() {
                 return Ok(ToolResult {
                     success: false,
-                    output: json!({"task_id": id}),
-                    error: Some("task not found".to_string()),
+                    output: json!({"missing": missing, "tasks": tasks_to_json(&tasks), "path": markdown_path}),
+                    error: Some("one or more tasks were not found".to_string()),
                 });
             }
-            std::fs::write(&state_path, serde_json::to_string_pretty(&tasks)?)?;
+            save_checklist_tasks(&markdown_path, &legacy_json_path, &tasks)?;
             Ok(ToolResult {
                 success: true,
-                output: json!({"tasks": tasks}),
+                output: task_manager_output(&markdown_path, &legacy_json_path, &tasks),
+                error: None,
+            })
+        }
+        "clear" => {
+            tasks.clear();
+            save_checklist_tasks(&markdown_path, &legacy_json_path, &tasks)?;
+            Ok(ToolResult {
+                success: true,
+                output: task_manager_output(&markdown_path, &legacy_json_path, &tasks),
                 error: None,
             })
         }
         _ => Ok(ToolResult {
             success: true,
-            output: json!({"tasks": tasks, "path": state_path}),
+            output: task_manager_output(&markdown_path, &legacy_json_path, &tasks),
             error: None,
         }),
     }
+}
+
+fn task_inputs(args: &Value) -> Vec<Value> {
+    args.get("tasks")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_else(|| vec![args.clone()])
+}
+
+fn load_checklist_tasks(
+    markdown_path: &Path,
+    legacy_json_path: &Path,
+) -> Result<Vec<ChecklistTask>> {
+    if markdown_path.is_file() {
+        return Ok(parse_checklist_markdown(&std::fs::read_to_string(
+            markdown_path,
+        )?));
+    }
+    if legacy_json_path.is_file() {
+        let values: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(legacy_json_path)?)?;
+        let tasks = values
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, value)| {
+                let name = value
+                    .get("name")
+                    .or_else(|| value.get("title"))
+                    .and_then(Value::as_str)?
+                    .trim()
+                    .to_string();
+                if name.is_empty() {
+                    return None;
+                }
+                Some(ChecklistTask {
+                    id: value
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                        .unwrap_or_else(|| format!("task-{}", index + 1)),
+                    name,
+                    state: value
+                        .get("status")
+                        .or_else(|| value.get("state"))
+                        .and_then(Value::as_str)
+                        .map(normalize_task_state)
+                        .unwrap_or_else(|| "NOT_STARTED".to_string()),
+                    indent: value.get("indent").and_then(Value::as_u64).unwrap_or(0) as usize,
+                })
+            })
+            .collect::<Vec<_>>();
+        save_checklist_tasks(markdown_path, legacy_json_path, &tasks)?;
+        return Ok(tasks);
+    }
+    Ok(Vec::new())
+}
+
+fn save_checklist_tasks(
+    markdown_path: &Path,
+    legacy_json_path: &Path,
+    tasks: &[ChecklistTask],
+) -> Result<()> {
+    if let Some(parent) = markdown_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(markdown_path, checklist_markdown(tasks))?;
+    if legacy_json_path.is_file() {
+        std::fs::remove_file(legacy_json_path)?;
+    }
+    Ok(())
+}
+
+fn parse_checklist_markdown(text: &str) -> Vec<ChecklistTask> {
+    text.lines()
+        .enumerate()
+        .filter_map(|(index, line)| parse_checklist_line(index, line))
+        .collect()
+}
+
+fn parse_checklist_line(index: usize, line: &str) -> Option<ChecklistTask> {
+    let trimmed_start = line.trim_start_matches([' ', '\t']);
+    let indent = line.len().saturating_sub(trimmed_start.len()) / 2;
+    let rest = trimmed_start.strip_prefix('[')?;
+    let (marker, name) = rest.split_once(']')?;
+    let name = name.trim();
+    if name.is_empty() {
+        return None;
+    }
+    Some(ChecklistTask {
+        id: format!("task-{}", index + 1),
+        name: name.to_string(),
+        state: marker_to_state(marker),
+        indent,
+    })
+}
+
+fn checklist_markdown(tasks: &[ChecklistTask]) -> String {
+    if tasks.is_empty() {
+        return String::new();
+    }
+    let mut output = tasks
+        .iter()
+        .map(|task| {
+            format!(
+                "{}{} {}",
+                "  ".repeat(task.indent),
+                task.marker(),
+                task.name
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    output.push('\n');
+    output
+}
+
+fn find_checklist_task_mut<'a>(
+    tasks: &'a mut [ChecklistTask],
+    target: &str,
+) -> Option<&'a mut ChecklistTask> {
+    let target_lower = target.to_ascii_lowercase();
+    tasks.iter_mut().find(|task| {
+        task.id.eq_ignore_ascii_case(target)
+            || task.name == target
+            || task.name.to_ascii_lowercase() == target_lower
+    })
+}
+
+fn marker_to_state(marker: &str) -> String {
+    match marker.trim() {
+        "x" | "X" => "COMPLETED",
+        "/" => "IN_PROGRESS",
+        "-" => "CANCELLED",
+        _ => "NOT_STARTED",
+    }
+    .to_string()
+}
+
+fn state_to_marker(state: &str) -> &'static str {
+    match normalize_task_state(state).as_str() {
+        "COMPLETED" => "[x]",
+        "IN_PROGRESS" => "[/]",
+        "CANCELLED" => "[-]",
+        _ => "[ ]",
+    }
+}
+
+fn normalize_task_state(state: &str) -> String {
+    match state.trim().to_ascii_lowercase().as_str() {
+        "done" | "complete" | "completed" | "success" | "x" | "[x]" => "COMPLETED",
+        "doing" | "in_progress" | "in-progress" | "progress" | "/" | "[/]" => "IN_PROGRESS",
+        "cancelled" | "canceled" | "skip" | "skipped" | "-" | "[-]" => "CANCELLED",
+        _ => "NOT_STARTED",
+    }
+    .to_string()
+}
+
+fn tasks_to_json(tasks: &[ChecklistTask]) -> Vec<Value> {
+    tasks
+        .iter()
+        .map(|task| {
+            json!({
+                "id": task.id,
+                "name": task.name,
+                "state": task.state,
+                "marker": task.marker(),
+                "indent": task.indent
+            })
+        })
+        .collect()
+}
+
+fn task_manager_output(
+    markdown_path: &Path,
+    legacy_json_path: &Path,
+    tasks: &[ChecklistTask],
+) -> Value {
+    let completed = tasks
+        .iter()
+        .filter(|task| normalize_task_state(&task.state) == "COMPLETED")
+        .count();
+    json!({
+        "tasks": tasks_to_json(tasks),
+        "completed": completed,
+        "total": tasks.len(),
+        "path": markdown_path,
+        "checklist_path": markdown_path,
+        "legacy_json_path": legacy_json_path,
+        "storage": "markdown"
+    })
 }
 
 async fn reverie_engine(project_root: &Path, args: Value) -> Result<ToolResult> {
@@ -1583,5 +1913,71 @@ mod tests {
         .unwrap();
         assert!(updated.success);
         assert_eq!(updated.output["summary"]["entity_count"], 1);
+    }
+
+    #[tokio::test]
+    async fn task_manager_uses_markdown_storage_and_imports_legacy_json() {
+        let temp = tempfile::tempdir().unwrap();
+        let legacy_path = temp.path().join(".reverie/tasks.json");
+        std::fs::create_dir_all(legacy_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &legacy_path,
+            serde_json::to_string_pretty(&vec![json!({
+                "id": "legacy-1",
+                "name": "Port task manager",
+                "state": "pending"
+            })])
+            .unwrap(),
+        )
+        .unwrap();
+
+        let listed = execute_builtin_tool(
+            temp.path(),
+            ToolInvocation {
+                name: "task_manager".to_string(),
+                arguments: json!({"action": "list"}),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(listed.success);
+        assert!(temp.path().join("artifacts/Tasks.md").is_file());
+        assert!(!legacy_path.exists());
+
+        let updated = execute_builtin_tool(
+            temp.path(),
+            ToolInvocation {
+                name: "task_manager".to_string(),
+                arguments: json!({
+                    "action": "update",
+                    "target": "Port task manager",
+                    "status": "done"
+                }),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(updated.success);
+        let checklist = std::fs::read_to_string(temp.path().join("artifacts/Tasks.md")).unwrap();
+        assert!(checklist.contains("[x] Port task manager"));
+    }
+
+    #[tokio::test]
+    async fn text_to_image_generate_creates_preview_artifacts() {
+        let temp = tempfile::tempdir().unwrap();
+        let result = execute_builtin_tool(
+            temp.path(),
+            ToolInvocation {
+                name: "text_to_image".to_string(),
+                arguments: json!({"action": "generate", "prompt": "neon terminal"}),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(result.success);
+        let manifest = PathBuf::from(result.output["artifact_path"].as_str().unwrap());
+        let preview = PathBuf::from(result.output["preview_path"].as_str().unwrap());
+        assert!(manifest.is_file());
+        assert!(preview.is_file());
     }
 }

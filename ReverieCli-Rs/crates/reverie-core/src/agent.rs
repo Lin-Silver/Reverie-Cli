@@ -2,14 +2,16 @@ use crate::cli_commands::{render_help, render_mode_list, render_tool_list};
 use crate::config::{project_data_dir, Config, ConfigManager, ModelConfig};
 use crate::llm::{
     build_openai_tool_definitions, extract_anthropic_tool_calls, extract_openai_tool_calls,
-    sanitize_prompt_output_text, send_model_compatible, ChatMessage, ChatRequest,
+    sanitize_prompt_output_text, send_model_compatible, send_model_streaming_compatible,
+    ChatMessage, ChatRequest, ModelStreamEvent,
 };
 use crate::modes::{normalize_mode, Mode};
 use crate::providers::{
     codex_catalog, modelscope_catalog, normalize_reasoning_effort, nvidia_catalog, ProviderModel,
 };
-use crate::session::PromptRunResult;
-use crate::session::{CheckpointStore, OperationStore, SessionStore};
+use crate::session::{
+    CheckpointStore, OperationStore, PromptRunResult, SessionMessage, SessionStore,
+};
 use crate::settings_catalog::{apply_setting, setting_items};
 use crate::{ReverieError, ReverieResult};
 use reverie_context::CodebaseIndexer;
@@ -39,6 +41,22 @@ impl ReverieAgent {
     }
 
     pub async fn run_prompt_once(&self, prompt: &str) -> ReverieResult<PromptRunResult> {
+        self.run_prompt_internal(prompt, None).await
+    }
+
+    pub async fn run_prompt_streaming(
+        &self,
+        prompt: &str,
+        stream_sink: &mut (dyn FnMut(ModelStreamEvent) + Send),
+    ) -> ReverieResult<PromptRunResult> {
+        self.run_prompt_internal(prompt, Some(stream_sink)).await
+    }
+
+    async fn run_prompt_internal(
+        &self,
+        prompt: &str,
+        stream_sink: Option<&mut (dyn FnMut(ModelStreamEvent) + Send)>,
+    ) -> ReverieResult<PromptRunResult> {
         let mut events = Vec::new();
         if !self.options.no_index {
             let indexer = CodebaseIndexer::new(&self.project_root)
@@ -52,20 +70,53 @@ impl ReverieAgent {
         }
 
         let trimmed = prompt.trim();
-        let output = if let Some(command) = trimmed.strip_prefix('/') {
-            self.handle_command(command).await?
+        let store = self.session_store();
+        let session = store.ensure_active(
+            "Rust Session",
+            self.project_root.clone(),
+            self.options.mode.canonical().to_string(),
+        )?;
+
+        let run = if let Some(command) = trimmed.strip_prefix('/') {
+            let output = self.handle_command(command).await?;
+            AgentRunOutput::simple(prompt, &output)
         } else if let Some(invocation) = parse_inline_tool_invocation(trimmed) {
             let result = execute_builtin_tool(&self.project_root, invocation)
                 .await
                 .map_err(|err| ReverieError::Unsupported(err.to_string()))?;
-            serde_json::to_string_pretty(&result)?
+            let output = serde_json::to_string_pretty(&result)?;
+            AgentRunOutput {
+                text: output.clone(),
+                transcript_messages: vec![
+                    SessionMessage::new("user", json!(prompt)),
+                    SessionMessage::new("tool", serde_json::to_value(&result)?),
+                    SessionMessage::new("assistant", json!(output)),
+                ],
+                events: vec![json!({
+                    "type": "inline_tool",
+                    "success": result.success,
+                    "error": result.error
+                })],
+            }
         } else {
-            self.run_model_or_local_fallback(trimmed).await?
+            match stream_sink {
+                Some(sink) => {
+                    self.run_model_or_local_fallback(trimmed, &session.id, Some(sink))
+                        .await?
+                }
+                None => {
+                    self.run_model_or_local_fallback(trimmed, &session.id, None)
+                        .await?
+                }
+            }
         };
+        events.extend(run.events);
+        store.append_messages(&session.id, &run.transcript_messages, &events)?;
+        let output_text = sanitize_prompt_output_text(&run.text);
 
         Ok(PromptRunResult {
             success: true,
-            output_text: sanitize_prompt_output_text(&output),
+            output_text,
             error: None,
             mode: self.options.mode.canonical().to_string(),
             project_root: self.project_root.clone(),
@@ -73,41 +124,96 @@ impl ReverieAgent {
         })
     }
 
-    async fn run_model_or_local_fallback(&self, prompt: &str) -> ReverieResult<String> {
+    async fn run_model_or_local_fallback(
+        &self,
+        prompt: &str,
+        session_id: &str,
+        mut stream_sink: Option<&mut (dyn FnMut(ModelStreamEvent) + Send)>,
+    ) -> ReverieResult<AgentRunOutput> {
         let config = ConfigManager::new(&self.project_root, false).load()?;
         let Some(model) = config.active_model.clone() else {
-            return Ok(format!(
+            let output = format!(
                 "Reverie Rust agent received prompt in {} mode.\n\n{}",
                 self.options.mode.display_name(),
                 prompt
-            ));
+            );
+            return Ok(AgentRunOutput::simple(prompt, &output));
         };
         let visible_tools = ToolRegistry::builtin().visible_for_mode(self.options.mode.canonical());
         let tool_definitions = build_openai_tool_definitions(&visible_tools);
-        let mut messages = vec![ChatMessage::new("user", serde_json::json!(prompt))];
-        let response = send_model_compatible(
-            &config,
-            ChatRequest {
-                model: model.clone(),
-                messages: messages.clone(),
-                tools: tool_definitions.clone(),
-                stream: false,
-                extra_body: serde_json::json!({}),
-            },
-        )
-        .await?;
+        let mut events = Vec::new();
+        let mut messages = self.context_messages(session_id)?;
+        messages.push(ChatMessage::new("user", json!(prompt)));
+        let use_streaming = config.stream_responses && stream_sink.is_some();
+        let response = if use_streaming {
+            let mut captured_events = Vec::new();
+            let response = send_model_streaming_compatible(
+                &config,
+                ChatRequest {
+                    model: model.clone(),
+                    messages: messages.clone(),
+                    tools: tool_definitions.clone(),
+                    stream: true,
+                    extra_body: json!({}),
+                },
+                |event| {
+                    captured_events.push(json!({
+                        "type": "stream",
+                        "event": event.clone()
+                    }));
+                    if let Some(sink) = stream_sink.as_deref_mut() {
+                        sink(event);
+                    }
+                },
+            )
+            .await?;
+            events.extend(captured_events);
+            response
+        } else {
+            send_model_compatible(
+                &config,
+                ChatRequest {
+                    model: model.clone(),
+                    messages: messages.clone(),
+                    tools: tool_definitions.clone(),
+                    stream: false,
+                    extra_body: json!({}),
+                },
+            )
+            .await?
+        };
         let mut tool_calls = extract_openai_tool_calls(&response.raw);
         if tool_calls.is_empty() {
             tool_calls = extract_anthropic_tool_calls(&response.raw);
         }
+        let mut transcript_messages = vec![SessionMessage::new("user", json!(prompt))];
         if tool_calls.is_empty() {
-            return Ok(response.output_text);
+            transcript_messages.push(SessionMessage::new(
+                "assistant",
+                json!(response.output_text.clone()),
+            ));
+            return Ok(AgentRunOutput {
+                text: response.output_text,
+                transcript_messages,
+                events,
+            });
         }
 
+        transcript_messages.push(SessionMessage::with_tool_calls(
+            "assistant",
+            json!(response.output_text.clone()),
+            tool_calls.iter().map(|call| call.raw.clone()).collect(),
+        ));
         messages.push(ChatMessage::assistant_with_tool_calls(
             tool_calls.iter().map(|call| call.raw.clone()).collect(),
         ));
         for call in tool_calls {
+            events.push(json!({
+                "type": "tool_call",
+                "id": call.id,
+                "name": call.name,
+                "arguments": call.arguments
+            }));
             let result = match execute_builtin_tool(
                 &self.project_root,
                 ToolInvocation {
@@ -124,23 +230,66 @@ impl ReverieAgent {
                     error: Some(err.to_string()),
                 },
             };
-            messages.push(ChatMessage::tool_result(
-                call.id,
-                serde_json::json!(serde_json::to_string(&result)?),
+            let result_text = serde_json::to_string(&result)?;
+            transcript_messages.push(SessionMessage::tool_result(
+                call.id.clone(),
+                json!(result_text.clone()),
             ));
+            events.push(json!({
+                "type": "tool_result",
+                "id": call.id,
+                "name": call.name,
+                "success": result.success,
+                "error": result.error
+            }));
+            messages.push(ChatMessage::tool_result(call.id, json!(result_text)));
         }
-        let follow_up = send_model_compatible(
-            &config,
-            ChatRequest {
-                model,
-                messages,
-                tools: tool_definitions,
-                stream: false,
-                extra_body: serde_json::json!({}),
-            },
-        )
-        .await?;
-        Ok(follow_up.output_text)
+        let follow_up = if use_streaming {
+            let mut captured_events = Vec::new();
+            let response = send_model_streaming_compatible(
+                &config,
+                ChatRequest {
+                    model,
+                    messages,
+                    tools: tool_definitions,
+                    stream: true,
+                    extra_body: json!({}),
+                },
+                |event| {
+                    captured_events.push(json!({
+                        "type": "stream",
+                        "event": event.clone()
+                    }));
+                    if let Some(sink) = stream_sink.as_deref_mut() {
+                        sink(event);
+                    }
+                },
+            )
+            .await?;
+            events.extend(captured_events);
+            response
+        } else {
+            send_model_compatible(
+                &config,
+                ChatRequest {
+                    model,
+                    messages,
+                    tools: tool_definitions,
+                    stream: false,
+                    extra_body: json!({}),
+                },
+            )
+            .await?
+        };
+        transcript_messages.push(SessionMessage::new(
+            "assistant",
+            json!(follow_up.output_text.clone()),
+        ));
+        Ok(AgentRunOutput {
+            text: follow_up.output_text,
+            transcript_messages,
+            events,
+        })
     }
 
     async fn handle_command(&self, command: &str) -> ReverieResult<String> {
@@ -260,6 +409,33 @@ impl ReverieAgent {
         .await
         .map_err(|err| ReverieError::Unsupported(err.to_string()))?;
         Ok(serde_json::to_string_pretty(&result)?)
+    }
+
+    fn session_store(&self) -> SessionStore {
+        SessionStore::new(project_data_dir(&self.project_root).join("sessions"))
+    }
+
+    fn context_messages(&self, session_id: &str) -> ReverieResult<Vec<ChatMessage>> {
+        let store = self.session_store();
+        let mut messages = Vec::new();
+        for message in store.compacted_messages_for_context(session_id, 40)? {
+            match message.role.as_str() {
+                "assistant" if !message.tool_calls.is_empty() => {
+                    messages.push(ChatMessage::assistant_with_tool_calls(message.tool_calls));
+                }
+                "tool" => messages.push(ChatMessage {
+                    role: "tool".to_string(),
+                    content: message.content,
+                    tool_call_id: message.tool_call_id,
+                    tool_calls: Vec::new(),
+                }),
+                "user" | "assistant" | "system" => {
+                    messages.push(ChatMessage::new(message.role, message.content));
+                }
+                _ => {}
+            }
+        }
+        Ok(messages)
     }
 
     fn render_model_status(&self) -> ReverieResult<String> {
@@ -917,6 +1093,25 @@ fn parse_action_args(args: &str, default_action: &str) -> Value {
 
 pub fn command_help() -> String {
     render_help()
+}
+
+struct AgentRunOutput {
+    text: String,
+    transcript_messages: Vec<SessionMessage>,
+    events: Vec<Value>,
+}
+
+impl AgentRunOutput {
+    fn simple(prompt: &str, output: &str) -> Self {
+        Self {
+            text: output.to_string(),
+            transcript_messages: vec![
+                SessionMessage::new("user", json!(prompt)),
+                SessionMessage::new("assistant", json!(output)),
+            ],
+            events: Vec::new(),
+        }
+    }
 }
 
 fn parse_inline_tool_invocation(prompt: &str) -> Option<ToolInvocation> {

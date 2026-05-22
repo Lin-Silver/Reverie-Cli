@@ -560,7 +560,24 @@ impl ReverieUiBridge {
                     .unwrap_or(false),
             },
         );
-        Ok(agent.run_prompt_once(prompt).await?.to_json_value())
+        if payload
+            .get("stream")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            let mut stream_events = Vec::new();
+            let mut sink = |event| {
+                stream_events.push(json!(event));
+            };
+            let mut value = agent
+                .run_prompt_streaming(prompt, &mut sink)
+                .await?
+                .to_json_value();
+            value["stream_events"] = json!(stream_events);
+            Ok(value)
+        } else {
+            Ok(agent.run_prompt_once(prompt).await?.to_json_value())
+        }
     }
 
     async fn handle_git_status(&mut self, payload: Value) -> ReverieResult<Value> {

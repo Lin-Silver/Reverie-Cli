@@ -2,6 +2,7 @@ use clap::{ArgGroup, Parser};
 use reverie_context::CodebaseIndexer;
 use reverie_core::agent::{AgentOptions, ReverieAgent};
 use reverie_core::config::ConfigManager;
+use reverie_core::llm::ModelStreamEvent;
 use reverie_core::modes::normalize_mode;
 use reverie_core::prompt::resolve_prompt_text;
 use reverie_core::sdk_bridge::run_sdk_bridge;
@@ -118,8 +119,25 @@ async fn main() -> anyhow::Result<()> {
                 no_index: args.no_index,
             },
         );
-        let result = agent.run_prompt_once(&prompt).await?;
-        if !result.output_text.trim().is_empty() {
+        let should_stream = should_stream_prompt(&project_root, &prompt)?;
+        let mut streamed_content = false;
+        let result = if should_stream {
+            let mut sink = |event: ModelStreamEvent| {
+                if let ModelStreamEvent::Content { content } = event {
+                    streamed_content = true;
+                    print!("{content}");
+                    let _ = std::io::stdout().flush();
+                }
+            };
+            let result = agent.run_prompt_streaming(&prompt, &mut sink).await?;
+            if streamed_content {
+                println!();
+            }
+            result
+        } else {
+            agent.run_prompt_once(&prompt).await?
+        };
+        if !streamed_content && !result.output_text.trim().is_empty() {
             println!("{}", result.output_text.trim());
         } else if let Some(error) = &result.error {
             println!("{error}");
@@ -174,9 +192,27 @@ async fn run_interactive(project_root: PathBuf, mode: &str) -> anyhow::Result<()
             println!("Config: {}", report.active_config_path.display());
             continue;
         }
-        match agent.run_prompt_once(line).await {
+        let should_stream = should_stream_prompt(&project_root, line)?;
+        let mut streamed_content = false;
+        let result = if should_stream {
+            let mut sink = |event: ModelStreamEvent| {
+                if let ModelStreamEvent::Content { content } = event {
+                    streamed_content = true;
+                    print!("{content}");
+                    let _ = std::io::stdout().flush();
+                }
+            };
+            let result = agent.run_prompt_streaming(line, &mut sink).await;
+            if streamed_content {
+                println!();
+            }
+            result
+        } else {
+            agent.run_prompt_once(line).await
+        };
+        match result {
             Ok(result) => {
-                if !result.output_text.trim().is_empty() {
+                if !streamed_content && !result.output_text.trim().is_empty() {
                     println!("{}", result.output_text.trim());
                 }
             }
@@ -184,6 +220,15 @@ async fn run_interactive(project_root: PathBuf, mode: &str) -> anyhow::Result<()
         }
     }
     Ok(())
+}
+
+fn should_stream_prompt(project_root: &std::path::Path, prompt: &str) -> anyhow::Result<bool> {
+    let trimmed = prompt.trim();
+    if trimmed.is_empty() || trimmed.starts_with('/') || trimmed.starts_with("tool:") {
+        return Ok(false);
+    }
+    let config = ConfigManager::new(project_root, false).load()?;
+    Ok(config.stream_responses && config.active_model.is_some())
 }
 
 fn maybe_run_init_command() -> anyhow::Result<Option<i32>> {

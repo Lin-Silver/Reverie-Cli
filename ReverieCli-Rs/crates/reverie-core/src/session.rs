@@ -15,6 +15,64 @@ pub struct SessionRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionMessage {
+    pub role: String,
+    pub content: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<serde_json::Value>,
+    pub created_at: DateTime<Utc>,
+}
+
+impl SessionMessage {
+    pub fn new(role: impl Into<String>, content: serde_json::Value) -> Self {
+        Self {
+            role: role.into(),
+            content,
+            tool_call_id: None,
+            tool_calls: Vec::new(),
+            created_at: Utc::now(),
+        }
+    }
+
+    pub fn with_tool_calls(
+        role: impl Into<String>,
+        content: serde_json::Value,
+        tool_calls: Vec<serde_json::Value>,
+    ) -> Self {
+        Self {
+            role: role.into(),
+            content,
+            tool_call_id: None,
+            tool_calls,
+            created_at: Utc::now(),
+        }
+    }
+
+    pub fn tool_result(tool_call_id: impl Into<String>, content: serde_json::Value) -> Self {
+        Self {
+            role: "tool".to_string(),
+            content,
+            tool_call_id: Some(tool_call_id.into()),
+            tool_calls: Vec::new(),
+            created_at: Utc::now(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionTranscript {
+    pub id: String,
+    pub record: SessionRecord,
+    #[serde(default)]
+    pub messages: Vec<SessionMessage>,
+    #[serde(default)]
+    pub events: Vec<serde_json::Value>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileCheckpoint {
     pub relative_path: PathBuf,
     pub sha256: String,
@@ -108,6 +166,29 @@ impl SessionStore {
         };
         records.push(record.clone());
         self.save_index(&records)?;
+        self.save_transcript(&SessionTranscript {
+            id: record.id.clone(),
+            record: record.clone(),
+            messages: Vec::new(),
+            events: Vec::new(),
+            updated_at: now,
+        })?;
+        Ok(record)
+    }
+
+    pub fn ensure_active(
+        &self,
+        title: impl Into<String>,
+        project_root: PathBuf,
+        mode: impl Into<String>,
+    ) -> ReverieResult<SessionRecord> {
+        if let Some(id) = self.active_id()? {
+            if let Some(record) = self.find(&id)? {
+                return Ok(record);
+            }
+        }
+        let record = self.create(title, project_root, mode.into())?;
+        self.set_active(&record.id)?;
         Ok(record)
     }
 
@@ -144,6 +225,10 @@ impl SessionStore {
             if session_file.is_file() {
                 std::fs::remove_file(session_file)?;
             }
+            let transcript_file = self.transcript_path(id);
+            if transcript_file.is_file() {
+                std::fs::remove_file(transcript_file)?;
+            }
         }
         Ok(removed)
     }
@@ -162,14 +247,22 @@ impl SessionStore {
             .ok_or_else(|| crate::ReverieError::InvalidInput(format!("session not found: {id}")))?;
         self.save_index(&records)?;
         let session_file = self.root.join(format!("{id}.json"));
+        let now = Utc::now();
         std::fs::write(
             session_file,
             serde_json::to_string_pretty(&serde_json::json!({
                 "id": id,
                 "messages": [],
-                "updated_at": Utc::now()
+                "updated_at": now
             }))?,
         )?;
+        self.save_transcript(&SessionTranscript {
+            id: id.to_string(),
+            record: record.clone(),
+            messages: Vec::new(),
+            events: Vec::new(),
+            updated_at: now,
+        })?;
         Ok(record)
     }
 
@@ -199,6 +292,130 @@ impl SessionStore {
             .and_then(serde_json::Value::as_str)
             .map(str::to_string))
     }
+
+    pub fn load_transcript(&self, id: &str) -> ReverieResult<Option<SessionTranscript>> {
+        let path = self.transcript_path(id);
+        if path.is_file() {
+            return Ok(Some(serde_json::from_str(&std::fs::read_to_string(path)?)?));
+        }
+        let Some(record) = self.find(id)? else {
+            return Ok(None);
+        };
+        let legacy_path = self.root.join(format!("{id}.json"));
+        let messages = if legacy_path.is_file() {
+            let value: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(legacy_path)?)?;
+            value
+                .get("messages")
+                .and_then(serde_json::Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(session_message_from_value)
+                .collect()
+        } else {
+            Vec::new()
+        };
+        Ok(Some(SessionTranscript {
+            id: id.to_string(),
+            record,
+            messages,
+            events: Vec::new(),
+            updated_at: Utc::now(),
+        }))
+    }
+
+    pub fn load_active_transcript(&self) -> ReverieResult<Option<SessionTranscript>> {
+        let Some(id) = self.active_id()? else {
+            return Ok(None);
+        };
+        self.load_transcript(&id)
+    }
+
+    pub fn append_messages(
+        &self,
+        id: &str,
+        messages: &[SessionMessage],
+        events: &[serde_json::Value],
+    ) -> ReverieResult<SessionTranscript> {
+        let Some(mut transcript) = self.load_transcript(id)? else {
+            return Err(crate::ReverieError::InvalidInput(format!(
+                "session not found: {id}"
+            )));
+        };
+        transcript.messages.extend_from_slice(messages);
+        transcript.events.extend_from_slice(events);
+        transcript.updated_at = Utc::now();
+        transcript.record.updated_at = transcript.updated_at;
+
+        let mut records = self.list()?;
+        for record in &mut records {
+            if record.id == id {
+                record.updated_at = transcript.updated_at;
+                break;
+            }
+        }
+        self.save_index(&records)?;
+        self.save_transcript(&transcript)?;
+        Ok(transcript)
+    }
+
+    pub fn compacted_messages_for_context(
+        &self,
+        id: &str,
+        max_messages: usize,
+    ) -> ReverieResult<Vec<SessionMessage>> {
+        let Some(transcript) = self.load_transcript(id)? else {
+            return Ok(Vec::new());
+        };
+        if transcript.messages.len() <= max_messages {
+            return Ok(transcript.messages);
+        }
+        let keep = max_messages.max(1);
+        Ok(transcript
+            .messages
+            .into_iter()
+            .rev()
+            .take(keep)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect())
+    }
+
+    fn transcript_path(&self, id: &str) -> PathBuf {
+        self.root.join(format!("{id}.transcript.json"))
+    }
+
+    fn save_transcript(&self, transcript: &SessionTranscript) -> ReverieResult<()> {
+        std::fs::create_dir_all(&self.root)?;
+        std::fs::write(
+            self.transcript_path(&transcript.id),
+            serde_json::to_string_pretty(transcript)?,
+        )?;
+        Ok(())
+    }
+}
+
+fn session_message_from_value(value: &serde_json::Value) -> Option<SessionMessage> {
+    let role = value.get("role").and_then(serde_json::Value::as_str)?;
+    let content = value
+        .get("content")
+        .cloned()
+        .unwrap_or_else(|| serde_json::Value::String(String::new()));
+    Some(SessionMessage {
+        role: role.to_string(),
+        content,
+        tool_call_id: value
+            .get("tool_call_id")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
+        tool_calls: value
+            .get("tool_calls")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default(),
+        created_at: Utc::now(),
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -378,4 +595,49 @@ fn collect_workspace_files(root: &Path) -> ReverieResult<Vec<PathBuf>> {
         .into_iter()
         .map(|path| root.join(path))
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use tempfile::TempDir;
+
+    #[test]
+    fn transcript_round_trips_and_context_compaction_keeps_full_history() {
+        let temp = TempDir::new().unwrap();
+        let project = temp.path().join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let store = SessionStore::new(temp.path().join("sessions"));
+
+        let record = store
+            .create("Test session", project, "reverie".to_string())
+            .unwrap();
+        store.set_active(&record.id).unwrap();
+
+        store
+            .append_messages(
+                &record.id,
+                &[
+                    SessionMessage::new("user", json!("first")),
+                    SessionMessage::new("assistant", json!("second")),
+                    SessionMessage::new("user", json!("third")),
+                ],
+                &[json!({"type": "stream", "content": "second"})],
+            )
+            .unwrap();
+
+        let active = store.load_active_transcript().unwrap().unwrap();
+        assert_eq!(active.id, record.id);
+        assert_eq!(active.messages.len(), 3);
+        assert_eq!(active.events.len(), 1);
+
+        let compacted = store.compacted_messages_for_context(&record.id, 2).unwrap();
+        assert_eq!(compacted.len(), 2);
+        assert_eq!(compacted[0].content, json!("second"));
+        assert_eq!(compacted[1].content, json!("third"));
+
+        let full = store.load_transcript(&record.id).unwrap().unwrap();
+        assert_eq!(full.messages.len(), 3);
+    }
 }

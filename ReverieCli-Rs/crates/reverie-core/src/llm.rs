@@ -1,10 +1,12 @@
-use crate::config::Config;
+use crate::config::{Config, ModelConfig};
 use crate::providers::resolve_model;
 use crate::{ReverieError, ReverieResult};
+use futures::StreamExt;
 use regex::Regex;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 use std::time::Duration;
 use tracing::info;
 
@@ -64,6 +66,29 @@ pub struct ChatResponse {
     pub output_text: String,
     #[serde(default)]
     pub raw: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type")]
+pub enum ModelStreamEvent {
+    Start {
+        model: String,
+    },
+    Content {
+        content: String,
+    },
+    ToolCallDelta {
+        index: usize,
+        id: Option<String>,
+        name: Option<String>,
+        arguments_delta: String,
+    },
+    End {
+        finish_reason: Option<String>,
+    },
+    Recovered {
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -614,6 +639,373 @@ pub async fn send_model_compatible(
     }
 }
 
+pub async fn send_model_streaming_compatible<F>(
+    config: &Config,
+    request: ChatRequest,
+    mut on_event: F,
+) -> ReverieResult<ChatResponse>
+where
+    F: FnMut(ModelStreamEvent) + Send,
+{
+    let model = request.model.clone();
+    let selected = config
+        .models
+        .iter()
+        .find(|item| item.name == model || item.model == model)
+        .ok_or_else(|| ReverieError::InvalidInput(format!("model not configured: {model}")))?;
+    let transport = selected.transport.as_deref().unwrap_or("openai");
+    on_event(ModelStreamEvent::Start {
+        model: selected.model.clone(),
+    });
+
+    let result = if transport.contains("anthropic") {
+        stream_anthropic_compatible(config, request, &mut on_event).await
+    } else {
+        stream_openai_compatible(config, request, &mut on_event).await
+    };
+
+    match result {
+        Ok(response) => Ok(response),
+        Err(err) if is_recoverable_stream_exception(&err.to_string()) => {
+            on_event(ModelStreamEvent::Recovered {
+                message: err.to_string(),
+            });
+            Err(err)
+        }
+        Err(err) => Err(err),
+    }
+}
+
+async fn stream_openai_compatible<F>(
+    config: &Config,
+    request: ChatRequest,
+    on_event: &mut F,
+) -> ReverieResult<ChatResponse>
+where
+    F: FnMut(ModelStreamEvent) + Send,
+{
+    let model = request.model.clone();
+    let selected = config
+        .models
+        .iter()
+        .find(|item| item.name == model || item.model == model)
+        .ok_or_else(|| ReverieError::InvalidInput(format!("model not configured: {model}")))?;
+    let base_url = selected
+        .base_url
+        .clone()
+        .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
+    let key = api_key_for_model(config, selected)?;
+    let mut payload = validate_and_sanitize_payload(json!({
+        "model": selected.model,
+        "messages": request.messages,
+        "tools": request.tools,
+        "stream": true
+    }))?;
+    if let Some(object) = payload.as_object_mut() {
+        if object
+            .get("tools")
+            .and_then(Value::as_array)
+            .map(|tools| tools.is_empty())
+            .unwrap_or(false)
+        {
+            object.remove("tools");
+        } else {
+            object.insert("tool_choice".to_string(), json!("auto"));
+        }
+        if selected.provider.as_deref() == Some("codex") {
+            object.insert(
+                "reasoning_effort".to_string(),
+                json!(request
+                    .extra_body
+                    .get("reasoning_effort")
+                    .and_then(Value::as_str)
+                    .unwrap_or("medium")),
+            );
+        }
+        if let Some(extra) = request.extra_body.as_object() {
+            for (key, value) in extra {
+                object.insert(key.clone(), value.clone());
+            }
+        }
+    }
+
+    let response = Client::builder()
+        .timeout(Duration::from_secs(config.api_timeout))
+        .build()?
+        .post(format!(
+            "{}/chat/completions",
+            base_url.trim_end_matches('/')
+        ))
+        .bearer_auth(key)
+        .header("Accept", "text/event-stream")
+        .json(&payload)
+        .send()
+        .await?
+        .error_for_status()?;
+
+    parse_openai_sse_response(response, on_event).await
+}
+
+async fn stream_anthropic_compatible<F>(
+    config: &Config,
+    request: ChatRequest,
+    on_event: &mut F,
+) -> ReverieResult<ChatResponse>
+where
+    F: FnMut(ModelStreamEvent) + Send,
+{
+    let model = request.model.clone();
+    let selected = config
+        .models
+        .iter()
+        .find(|item| item.name == model || item.model == model)
+        .ok_or_else(|| ReverieError::InvalidInput(format!("model not configured: {model}")))?;
+    let base_url = selected
+        .base_url
+        .clone()
+        .unwrap_or_else(|| "https://api.anthropic.com/v1".to_string());
+    let key = api_key_for_model(config, selected)?;
+    let mut payload = build_anthropic_payload(&selected.model, request);
+    if let Some(object) = payload.as_object_mut() {
+        object.insert("stream".to_string(), json!(true));
+    }
+
+    let response = Client::builder()
+        .timeout(Duration::from_secs(config.api_timeout))
+        .build()?
+        .post(format!("{}/messages", base_url.trim_end_matches('/')))
+        .header("x-api-key", key)
+        .header("anthropic-version", "2023-06-01")
+        .header("Accept", "text/event-stream")
+        .json(&payload)
+        .send()
+        .await?
+        .error_for_status()?;
+
+    parse_anthropic_sse_response(response, on_event).await
+}
+
+async fn parse_openai_sse_response<F>(
+    response: reqwest::Response,
+    on_event: &mut F,
+) -> ReverieResult<ChatResponse>
+where
+    F: FnMut(ModelStreamEvent) + Send,
+{
+    let mut content = String::new();
+    let mut finish_reason = None;
+    let mut tool_calls: BTreeMap<usize, StreamingToolCall> = BTreeMap::new();
+    let mut buffer = String::new();
+    let mut stream = response.bytes_stream();
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        buffer.push_str(&String::from_utf8_lossy(&chunk));
+        while let Some(index) = buffer.find('\n') {
+            let line = buffer[..index].trim_end_matches('\r').to_string();
+            buffer = buffer[index + 1..].to_string();
+            let Some(data) = line.strip_prefix("data:") else {
+                continue;
+            };
+            let data = data.trim();
+            if data.is_empty() {
+                continue;
+            }
+            if data == "[DONE]" {
+                on_event(ModelStreamEvent::End {
+                    finish_reason: finish_reason.clone(),
+                });
+                return Ok(stream_response(content, tool_calls, finish_reason));
+            }
+            let event: Value = serde_json::from_str(data)?;
+            let Some(choice) = event
+                .get("choices")
+                .and_then(Value::as_array)
+                .and_then(|choices| choices.first())
+            else {
+                continue;
+            };
+            if let Some(reason) = choice.get("finish_reason").and_then(Value::as_str) {
+                finish_reason = Some(reason.to_string());
+            }
+            if let Some(delta) = choice.get("delta") {
+                if let Some(piece) = delta.get("content").and_then(Value::as_str) {
+                    content.push_str(piece);
+                    on_event(ModelStreamEvent::Content {
+                        content: piece.to_string(),
+                    });
+                }
+                if let Some(items) = delta.get("tool_calls").and_then(Value::as_array) {
+                    for item in items {
+                        let index = item.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
+                        let current = tool_calls.entry(index).or_default();
+                        if let Some(id) = item.get("id").and_then(Value::as_str) {
+                            current.id = Some(id.to_string());
+                        }
+                        if let Some(name) = item.pointer("/function/name").and_then(Value::as_str) {
+                            current.name = Some(name.to_string());
+                        }
+                        let arguments_delta = item
+                            .pointer("/function/arguments")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default();
+                        current.arguments.push_str(arguments_delta);
+                        on_event(ModelStreamEvent::ToolCallDelta {
+                            index,
+                            id: current.id.clone(),
+                            name: current.name.clone(),
+                            arguments_delta: arguments_delta.to_string(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    if !content.is_empty() || !tool_calls.is_empty() {
+        on_event(ModelStreamEvent::Recovered {
+            message: "stream ended without a terminal [DONE] event".to_string(),
+        });
+        return Ok(stream_response(content, tool_calls, finish_reason));
+    }
+    Err(ReverieError::InvalidInput(
+        "stream ended without content".to_string(),
+    ))
+}
+
+async fn parse_anthropic_sse_response<F>(
+    response: reqwest::Response,
+    on_event: &mut F,
+) -> ReverieResult<ChatResponse>
+where
+    F: FnMut(ModelStreamEvent) + Send,
+{
+    let mut content = String::new();
+    let mut tool_calls: BTreeMap<usize, StreamingToolCall> = BTreeMap::new();
+    let mut current_tool_index: Option<usize> = None;
+    let mut buffer = String::new();
+    let mut stream = response.bytes_stream();
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        buffer.push_str(&String::from_utf8_lossy(&chunk));
+        while let Some(index) = buffer.find('\n') {
+            let line = buffer[..index].trim_end_matches('\r').to_string();
+            buffer = buffer[index + 1..].to_string();
+            let Some(data) = line.strip_prefix("data:") else {
+                continue;
+            };
+            let data = data.trim();
+            if data.is_empty() || data == "[DONE]" {
+                continue;
+            }
+            let event: Value = serde_json::from_str(data)?;
+            match event.get("type").and_then(Value::as_str) {
+                Some("content_block_delta") => {
+                    if let Some(piece) = event.pointer("/delta/text").and_then(Value::as_str) {
+                        content.push_str(piece);
+                        on_event(ModelStreamEvent::Content {
+                            content: piece.to_string(),
+                        });
+                    }
+                    if let Some(delta) =
+                        event.pointer("/delta/partial_json").and_then(Value::as_str)
+                    {
+                        let index = current_tool_index.unwrap_or(0);
+                        let current = tool_calls.entry(index).or_default();
+                        current.arguments.push_str(delta);
+                        on_event(ModelStreamEvent::ToolCallDelta {
+                            index,
+                            id: current.id.clone(),
+                            name: current.name.clone(),
+                            arguments_delta: delta.to_string(),
+                        });
+                    }
+                }
+                Some("content_block_start") => {
+                    if event.pointer("/content_block/type").and_then(Value::as_str)
+                        == Some("tool_use")
+                    {
+                        let index =
+                            event.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
+                        current_tool_index = Some(index);
+                        let current = tool_calls.entry(index).or_default();
+                        current.id = event
+                            .pointer("/content_block/id")
+                            .and_then(Value::as_str)
+                            .map(str::to_string);
+                        current.name = event
+                            .pointer("/content_block/name")
+                            .and_then(Value::as_str)
+                            .map(str::to_string);
+                    }
+                }
+                Some("message_stop") => {
+                    on_event(ModelStreamEvent::End {
+                        finish_reason: Some("stop".to_string()),
+                    });
+                    return Ok(stream_response(
+                        content,
+                        tool_calls,
+                        Some("stop".to_string()),
+                    ));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    if !content.is_empty() || !tool_calls.is_empty() {
+        on_event(ModelStreamEvent::Recovered {
+            message: "stream ended without message_stop".to_string(),
+        });
+        return Ok(stream_response(content, tool_calls, None));
+    }
+    Err(ReverieError::InvalidInput(
+        "stream ended without content".to_string(),
+    ))
+}
+
+#[derive(Debug, Clone, Default)]
+struct StreamingToolCall {
+    id: Option<String>,
+    name: Option<String>,
+    arguments: String,
+}
+
+fn stream_response(
+    content: String,
+    tool_calls: BTreeMap<usize, StreamingToolCall>,
+    finish_reason: Option<String>,
+) -> ChatResponse {
+    let tool_calls = tool_calls
+        .into_values()
+        .filter_map(|call| {
+            let name = call.name?;
+            Some(json!({
+                "id": call.id.unwrap_or_else(|| format!("call_{name}")),
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "arguments": call.arguments
+                }
+            }))
+        })
+        .collect::<Vec<_>>();
+    ChatResponse {
+        output_text: content.clone(),
+        raw: json!({
+            "choices": [{
+                "message": {
+                    "content": content,
+                    "tool_calls": tool_calls
+                },
+                "finish_reason": finish_reason
+            }]
+        }),
+    }
+}
+
 /// Send request to NVIDIA API
 pub async fn send_nvidia_compatible(
     config: &Config,
@@ -797,6 +1189,25 @@ fn provider_api_key(config: &Config, provider: &str, env_name: &str) -> ReverieR
     Err(ReverieError::InvalidInput(format!(
         "{env_name} environment variable is not set and {provider}.api_key is not configured"
     )))
+}
+
+fn api_key_for_model(config: &Config, selected: &ModelConfig) -> ReverieResult<String> {
+    if let Some(env_name) = selected.api_key_env.as_deref() {
+        if let Ok(value) = std::env::var(env_name) {
+            if !value.trim().is_empty() {
+                return Ok(value);
+            }
+        }
+    }
+    match selected.provider.as_deref() {
+        Some("nvidia") => provider_api_key(config, "nvidia", "NVIDIA_API_KEY"),
+        Some("modelscope") => provider_api_key(config, "modelscope", "MODELSCOPE_API_KEY"),
+        Some("codex") => provider_api_key(config, "codex", "OPENAI_API_KEY"),
+        _ => Err(ReverieError::InvalidInput(format!(
+            "API key env var is not configured or not set for {}",
+            selected.name
+        ))),
+    }
 }
 
 #[cfg(test)]

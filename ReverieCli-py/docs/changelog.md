@@ -6,6 +6,7 @@
 * Added a redacted `reverie.provider_smoke` helper for live streaming checks across ModelScope Anthropic streams, NVIDIA hosted models, Gemini CLI, and Codex.
 * Added NVIDIA GLM-4.7 (`z-ai/glm4.7`) to the built-in catalog and let provider smoke tests temporarily override model ids without mutating persisted config.
 * Kept the standard model list for manually configured OpenAI-compatible or Anthropic-compatible services instead of routing first-party sources through the custom compatibility layer.
+* Restored once-per-second streaming footer refreshes so the taskbar timer and live token count keep moving while a provider is quiet.
 
 ### Context, Memory, and Workspace
 

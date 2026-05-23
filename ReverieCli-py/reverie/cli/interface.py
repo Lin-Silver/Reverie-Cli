@@ -1340,14 +1340,22 @@ class ReverieInterface:
             meta=f"{stream_label} | thinking {thinking_label} | {status_label}",
         )
 
+    def _current_active_elapsed_seconds(self) -> int:
+        """Return the active session elapsed time rounded to the displayed second."""
+        elapsed = float(getattr(self, "total_active_time", 0.0) or 0.0)
+        current_start = getattr(self, "current_task_start", None)
+        if current_start:
+            try:
+                elapsed += time.time() - float(current_start)
+            except Exception:
+                pass
+        return max(0, int(elapsed))
+
     def _get_status_line(self, current_content_tokens: int = 0):
         """Generate a responsive live status panel."""
-        cache_now = time.time()
-        elapsed = self.total_active_time
-        if self.current_task_start:
-            elapsed += (cache_now - self.current_task_start)
+        elapsed_seconds = self._current_active_elapsed_seconds()
 
-        hours, remainder = divmod(int(elapsed), 3600)
+        hours, remainder = divmod(elapsed_seconds, 3600)
         minutes, seconds = divmod(remainder, 60)
         time_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
@@ -1708,6 +1716,8 @@ class ReverieInterface:
         show_status_line = True
         if active_config is not None:
             show_status_line = bool(getattr(active_config, "show_status_line", True))
+        elapsed_second = self._current_active_elapsed_seconds() if show_status_line else 0
+        content_tokens = int(getattr(self, "_current_content_tokens", 0) or 0) if show_status_line else 0
 
         with self._active_tool_lock:
             active_tool_rows = tuple(
@@ -1729,6 +1739,8 @@ class ReverieInterface:
         return (
             width_bucket,
             show_status_line,
+            elapsed_second,
+            content_tokens,
             bool(getattr(self, "_task_drawer_visible", False)),
             task_cache_key,
             active_tool_rows,

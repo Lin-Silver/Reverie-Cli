@@ -860,7 +860,7 @@ def test_streaming_footer_ticker_uses_signature_gated_refresh() -> None:
     assert calls == [False]
 
 
-def test_streaming_footer_signature_ignores_elapsed_timer() -> None:
+def test_streaming_footer_signature_tracks_elapsed_timer_and_output_tokens() -> None:
     interface = ReverieInterface.__new__(ReverieInterface)
     interface.console = Console(width=120)
     interface._streaming_footer_config = None
@@ -874,11 +874,15 @@ def test_streaming_footer_signature_ignores_elapsed_timer() -> None:
     interface.current_task_start = time.time() - 5
 
     first = interface._build_streaming_footer_signature()
-    interface.total_active_time = 99.0
-    interface.current_task_start = time.time() - 30
+    interface.total_active_time = 11.0
+    interface.current_task_start = None
+
+    assert interface._build_streaming_footer_signature() != first
+
+    first = interface._build_streaming_footer_signature()
     interface._current_content_tokens = 999
 
-    assert interface._build_streaming_footer_signature() == first
+    assert interface._build_streaming_footer_signature() != first
 
 
 def test_streaming_footer_requires_real_tty_stdout() -> None:

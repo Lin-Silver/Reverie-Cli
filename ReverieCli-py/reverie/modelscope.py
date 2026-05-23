@@ -21,7 +21,6 @@ MODELSCOPE_DEFAULT_MAX_TOKENS = 16_384
 MODELSCOPE_DEEPSEEK_CONTEXT_TOKENS = 1_048_576
 MODELSCOPE_DEEPSEEK_MAX_TOKENS = 393_216
 MODELSCOPE_GLM_CONTEXT_TOKENS = 202_752
-MODELSCOPE_KIMI_CONTEXT_TOKENS = 262_144
 MODELSCOPE_MINIMAX_CONTEXT_TOKENS = 204_800
 MODELSCOPE_QWEN_CONTEXT_TOKENS = 262_144
 
@@ -81,15 +80,6 @@ _MODELSCOPE_MODEL_CATALOG: List[Dict[str, Any]] = [
         "Z.ai GLM-5 model on ModelScope.",
         context_length=MODELSCOPE_GLM_CONTEXT_TOKENS,
         max_output_tokens=65_536,
-        thinking=True,
-    ),
-    _modelscope_model(
-        "moonshotai/Kimi-K2.6",
-        "Kimi K2.6",
-        "Moonshot Kimi K2.6 multimodal agentic model on ModelScope.",
-        context_length=MODELSCOPE_KIMI_CONTEXT_TOKENS,
-        max_output_tokens=98_304,
-        vision=True,
         thinking=True,
     ),
     _modelscope_model(

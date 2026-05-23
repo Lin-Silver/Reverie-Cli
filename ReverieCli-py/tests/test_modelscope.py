@@ -33,7 +33,6 @@ def test_modelscope_catalog_context_lengths_match_model_cards() -> None:
         "deepseek-ai/DeepSeek-V4-Pro": 1048576,
         "deepseek-ai/DeepSeek-V4-Flash": 1048576,
         "ZhipuAI/GLM-5": 202752,
-        "moonshotai/Kimi-K2.6": 262144,
         "MiniMax/MiniMax-M2.7": 204800,
         "Qwen/Qwen3.5-397B-A17B": 262144,
     }
@@ -88,9 +87,20 @@ def test_modelscope_latest_catalog_removes_superseded_models() -> None:
 
     assert "deepseek-ai/DeepSeek-V3.2" not in catalog_by_id
     assert "moonshotai/Kimi-K2.5" not in catalog_by_id
+    assert "moonshotai/Kimi-K2.6" not in catalog_by_id
     assert catalog_by_id["deepseek-ai/DeepSeek-V4-Pro"]["max_output_tokens"] == 393216
     assert catalog_by_id["deepseek-ai/DeepSeek-V4-Flash"]["max_output_tokens"] == 393216
-    assert catalog_by_id["moonshotai/Kimi-K2.6"]["max_output_tokens"] == 98304
+
+
+def test_modelscope_saved_kimi_selection_falls_back_to_available_model(monkeypatch) -> None:
+    monkeypatch.setenv("MODELSCOPE_TOKEN", "ms-token")
+
+    cfg = normalize_modelscope_config({"selected_model_id": "moonshotai/Kimi-K2.6"})
+    runtime = build_modelscope_runtime_model_data(cfg)
+
+    assert cfg["selected_model_id"] == "ZhipuAI/GLM-5.1"
+    assert runtime is not None
+    assert runtime["model"] == "ZhipuAI/GLM-5.1"
 
 
 def test_config_active_model_resolves_modelscope(monkeypatch) -> None:

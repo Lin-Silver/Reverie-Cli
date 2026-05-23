@@ -25,7 +25,7 @@ from reverie.gamer import reference_intelligence as gamer_reference_intelligence
 from reverie.sse import iter_sse_data_strings
 from reverie.tools.codebase_retrieval import CodebaseRetrievalTool
 from reverie.tools.command_exec import CommandExecTool
-from reverie.tools.task_manager import TaskManagerTool
+from reverie.tools.task_manager import TaskManagerTool, cleanup_completed_task_artifacts
 from reverie.tools.web_search import WebFetchTool, WebSearchTool
 from reverie.config import Config, ModelConfig
 
@@ -372,6 +372,36 @@ def test_task_manager_imports_legacy_json_then_saves_markdown_only(tmp_path: Pat
     assert "[/] Migrate task persistence" in checklist
     assert "  [x] Keep checklist editable" in checklist
     assert not legacy_json.exists()
+
+
+def test_completed_task_artifact_cleanup_removes_finished_checklists(tmp_path: Path) -> None:
+    artifacts_dir = tmp_path / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    canonical = artifacts_dir / "Tasks.md"
+    atlas = artifacts_dir / "task.md"
+    canonical.write_text("[x] Add task cleanup\n  [X] Verify cleanup\n", encoding="utf-8")
+    atlas.write_text("Main task\n\nSubgoal 1\n[x]Finish Atlas slice\n", encoding="utf-8")
+
+    deleted = cleanup_completed_task_artifacts(tmp_path)
+
+    assert set(path.name for path in deleted) == {"Tasks.md", "task.md"}
+    assert not canonical.exists()
+    assert not atlas.exists()
+
+
+def test_completed_task_artifact_cleanup_keeps_incomplete_checklists(tmp_path: Path) -> None:
+    artifacts_dir = tmp_path / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    canonical = artifacts_dir / "Tasks.md"
+    atlas = artifacts_dir / "task.md"
+    canonical.write_text("[x] Add task cleanup\n[ ] Verify cleanup\n", encoding="utf-8")
+    atlas.write_text("Main task\n\nSubgoal 1\n[x]Finish slice\n[/]Run validation\n", encoding="utf-8")
+
+    deleted = cleanup_completed_task_artifacts(tmp_path)
+
+    assert deleted == []
+    assert canonical.exists()
+    assert atlas.exists()
 
 
 def test_model_config_omits_null_context_tokens_on_save() -> None:

@@ -200,7 +200,6 @@ Built-in ModelScope catalog:
 - `deepseek-ai/DeepSeek-V4-Pro` - DeepSeek V4 Pro, 1,048,576 token context
 - `deepseek-ai/DeepSeek-V4-Flash` - DeepSeek V4 Flash, 1,048,576 token context
 - `ZhipuAI/GLM-5` - GLM-5, 202,752 token context
-- `moonshotai/Kimi-K2.6` - Kimi K2.6, 262,144 token context
 - `MiniMax/MiniMax-M2.7` - MiniMax M2.7, 204,800 token context
 - `Qwen/Qwen3.5-397B-A17B` - Qwen3.5 397B A17B, 262,144 token context
 

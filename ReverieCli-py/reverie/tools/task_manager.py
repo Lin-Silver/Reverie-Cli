@@ -18,6 +18,7 @@ from .base import BaseTool, ToolResult
 
 
 CHECKLIST_LINE_RE = re.compile(r"^(?P<indent>\s*)\[(?P<state> |/|x|X|-)\]\s+(?P<name>.+?)\s*$")
+CHECKLIST_CLEANUP_LINE_RE = re.compile(r"^\s*\[(?P<state> |/|x|X|-|!)\]\s*(?P<name>.+?)\s*$")
 ARTIFACTS_DIR_NAME = "artifacts"
 
 TASK_MANAGER_TOOL_DESCRIPTION = """Manage project work as a checklist-first task system.
@@ -485,6 +486,46 @@ class TaskStore:
 
 # Global task store (shared across tool instances)
 _task_store = TaskStore()
+
+
+def _checklist_artifact_is_fully_completed(text: str) -> bool:
+    """Return True when every checklist item in an artifact is marked completed."""
+    found_checklist_item = False
+    for raw_line in str(text or "").splitlines():
+        match = CHECKLIST_CLEANUP_LINE_RE.match(raw_line)
+        if not match:
+            continue
+        found_checklist_item = True
+        if match.group("state") not in {"x", "X"}:
+            return False
+    return found_checklist_item
+
+
+def cleanup_completed_task_artifacts(project_root: Path) -> List[Path]:
+    """Remove task artifacts once all visible checklist items are completed."""
+    artifacts_dir = Path(project_root) / ARTIFACTS_DIR_NAME
+    deleted_paths: List[Path] = []
+
+    for path in (artifacts_dir / "Tasks.md", artifacts_dir / "task.md"):
+        if not path.exists() or not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except Exception:
+            continue
+        if not _checklist_artifact_is_fully_completed(text):
+            continue
+        try:
+            path.unlink()
+        except Exception:
+            continue
+        deleted_paths.append(path)
+
+    if _task_store.markdown_path and _task_store.markdown_path in deleted_paths:
+        _task_store.tasks = {}
+        _task_store.root_tasks = []
+
+    return deleted_paths
 
 
 class TaskManagerTool(BaseTool):

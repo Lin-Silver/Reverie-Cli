@@ -26,6 +26,7 @@ from ..inline_images import resolve_inline_image_content_for_request
 from ..modes import normalize_mode
 from ..sse import iter_sse_data_strings as iter_provider_sse_data_strings
 from ..tools.base import ToolResult
+from ..tools.task_manager import cleanup_completed_task_artifacts
 from ..nvidia import (
     apply_nvidia_request_defaults,
     build_nvidia_openai_options,
@@ -3057,6 +3058,15 @@ class ReverieAgent:
         except Exception as e:
             error_msg = f"Error processing message: {str(e)}"
             yield error_msg
+        finally:
+            self._cleanup_completed_task_artifacts()
+
+    def _cleanup_completed_task_artifacts(self) -> None:
+        """Keep task drawer artifacts from lingering after a completed turn."""
+        try:
+            cleanup_completed_task_artifacts(self.project_root)
+        except Exception:
+            logger.debug("Completed task artifact cleanup failed", exc_info=True)
     
     def _process_streaming(self, session_id: str = "default") -> Generator[str, None, None]:
         """Process with streaming response"""

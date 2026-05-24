@@ -67,6 +67,41 @@ mod tests {
     }
 
     #[test]
+    fn test_development_toolchains_bypass_restrictive_allow_list() {
+        let mut limits = ProcessLimits::default();
+        limits.allowed_commands.insert("echo".to_string());
+        let policy = SandboxPolicy {
+            process_limits: limits,
+            ..Default::default()
+        };
+        let sandbox = SandboxInstance::new("test".to_string(), policy);
+
+        assert!(sandbox.check_command("node.exe").is_ok());
+        assert!(sandbox
+            .check_command("C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe")
+            .is_ok());
+        assert!(sandbox.check_command("/usr/bin/cargo").is_ok());
+        assert!(sandbox.check_command("unknown-tool").is_err());
+    }
+
+    #[test]
+    fn test_denied_commands_still_override_development_toolchains() {
+        let mut limits = ProcessLimits::default();
+        limits.allowed_commands.insert("echo".to_string());
+        limits.denied_commands.insert("docker".to_string());
+        let policy = SandboxPolicy {
+            process_limits: limits,
+            ..Default::default()
+        };
+        let sandbox = SandboxInstance::new("test".to_string(), policy);
+
+        assert!(sandbox.check_command("docker.exe").is_err());
+        assert!(sandbox
+            .check_command("C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe")
+            .is_err());
+    }
+
+    #[test]
     fn test_resource_limits_default() {
         let limits = ResourceLimits::default();
         assert_eq!(limits.max_open_files, Some(1024));

@@ -206,8 +206,13 @@ impl SandboxInstance {
 
     /// 检查命令是否允许
     pub fn check_command(&self, command: &str) -> SandboxResult<()> {
+        let command_keys = command_policy_keys(command);
+
         // 检查禁止的命令
-        if self.policy.process_limits.denied_commands.contains(command) {
+        if command_keys
+            .iter()
+            .any(|key| self.policy.process_limits.denied_commands.contains(key))
+        {
             return Err(SandboxError::PermissionDenied(format!(
                 "Command '{}' is denied",
                 command
@@ -216,11 +221,12 @@ impl SandboxInstance {
 
         // 如果没有允许的命令列表，或者命令在允许列表中
         if self.policy.process_limits.allowed_commands.is_empty()
-            || self
-                .policy
-                .process_limits
-                .allowed_commands
-                .contains(command)
+            || command_keys
+                .iter()
+                .any(|key| self.policy.process_limits.allowed_commands.contains(key))
+            || command_keys
+                .iter()
+                .any(|key| is_development_toolchain_command(key))
         {
             return Ok(());
         }
@@ -267,6 +273,72 @@ impl SandboxInstance {
     pub fn clear_audit_log(&mut self) {
         self.audit_log.clear();
     }
+}
+
+fn command_policy_keys(command: &str) -> Vec<String> {
+    let basename = command
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(command)
+        .trim();
+    let lowercase = basename.to_ascii_lowercase();
+    let mut keys = vec![command.to_string(), basename.to_string(), lowercase.clone()];
+    for suffix in [".exe", ".cmd"] {
+        if let Some(stripped) = lowercase.strip_suffix(suffix) {
+            keys.push(stripped.to_string());
+        }
+    }
+    keys.sort();
+    keys.dedup();
+    keys
+}
+
+fn is_development_toolchain_command(command: &str) -> bool {
+    matches!(
+        command.to_ascii_lowercase().as_str(),
+        "node"
+            | "node.exe"
+            | "npm"
+            | "npm.cmd"
+            | "npm.exe"
+            | "npx"
+            | "npx.cmd"
+            | "npx.exe"
+            | "pnpm"
+            | "pnpm.cmd"
+            | "pnpm.exe"
+            | "yarn"
+            | "yarn.cmd"
+            | "yarn.exe"
+            | "corepack"
+            | "corepack.cmd"
+            | "corepack.exe"
+            | "bun"
+            | "bun.exe"
+            | "deno"
+            | "deno.exe"
+            | "cargo"
+            | "cargo.exe"
+            | "rustc"
+            | "rustc.exe"
+            | "rustup"
+            | "rustup.exe"
+            | "rustfmt"
+            | "rustfmt.exe"
+            | "clippy-driver"
+            | "clippy-driver.exe"
+            | "docker"
+            | "docker.exe"
+            | "docker-compose"
+            | "docker-compose.exe"
+            | "podman"
+            | "podman.exe"
+            | "nerdctl"
+            | "nerdctl.exe"
+    )
 }
 
 /// 沙箱管理器

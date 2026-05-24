@@ -1705,6 +1705,21 @@ class ReverieInterface:
             return False
         return True
 
+    def _streaming_footer_live_options(self) -> Dict[str, Any]:
+        """Return Rich Live options for the streaming footer.
+
+        Keep the footer inside Rich's erasable live region. The ``visible``
+        overflow mode lets tall renderables spill into scrollback, and Windows
+        terminals can then append every refresh as a new block.
+        """
+        return {
+            "console": self.console,
+            "refresh_per_second": 8,
+            "auto_refresh": False,
+            "transient": True,
+            "vertical_overflow": "crop",
+        }
+
     def _build_streaming_footer_signature(self) -> tuple:
         """Build a lightweight signature so identical footer redraws can be skipped."""
         try:
@@ -2383,11 +2398,7 @@ class ReverieInterface:
         if self._streaming_footer_enabled:
             footer_live = Live(
                 self.streaming_footer,
-                console=self.console,
-                refresh_per_second=8,
-                auto_refresh=False,
-                transient=True,
-                vertical_overflow="visible",
+                **self._streaming_footer_live_options(),
             )
             footer_live.start()
             self._status_live = footer_live

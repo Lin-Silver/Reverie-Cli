@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import threading
 import time
 from pathlib import Path
@@ -236,6 +237,42 @@ def test_command_exec_builds_powershell_for_pipelines_and_cmdlets(tmp_path: Path
 
     assert cmdlet_invocation["executor"] == "powershell"
     assert cmdlet_invocation["argv"][0].lower().endswith(("powershell.exe", "pwsh"))
+
+
+def test_command_exec_allows_toolchain_registry_and_package_references(tmp_path: Path) -> None:
+    tool = CommandExecTool({"project_root": tmp_path})
+
+    npm_invocation = tool._build_invocation("npm install @types/node", tmp_path)
+    cargo_invocation = tool._build_invocation("cargo add serde/derive", tmp_path)
+    docker_invocation = tool._build_invocation("docker pull ghcr.io/example/app:latest", tmp_path)
+
+    assert npm_invocation["executor"] == "subprocess"
+    assert cargo_invocation["executor"] == "subprocess"
+    assert docker_invocation["executor"] == "subprocess"
+
+
+def test_command_exec_keeps_workspace_path_guard_for_toolchain_paths(tmp_path: Path) -> None:
+    tool = CommandExecTool({"project_root": tmp_path})
+
+    try:
+        tool._build_invocation("docker build -f ../Dockerfile .", tmp_path)
+    except ValueError as exc:
+        assert "parent-directory traversal" in str(exc)
+    else:
+        raise AssertionError("docker path traversal should be blocked")
+
+
+def test_command_exec_prefers_workspace_venv_for_python_package_installs(tmp_path: Path) -> None:
+    venv = tmp_path / ".venv"
+    bin_dir = venv / ("Scripts" if sys.platform == "win32" else "bin")
+    bin_dir.mkdir(parents=True)
+    tool = CommandExecTool({"project_root": tmp_path})
+
+    invocation = tool._build_invocation("python -m pip install requests", tmp_path)
+
+    env = invocation["env_overrides"]
+    assert env["VIRTUAL_ENV"] == str(venv)
+    assert env["PATH"].split(";")[0] == str(bin_dir) if sys.platform == "win32" else env["PATH"].split(":")[0] == str(bin_dir)
 
 
 def test_task_drawer_snapshot_reads_json_artifact_in_display_order(tmp_path: Path) -> None:
@@ -928,6 +965,18 @@ def test_streaming_footer_requires_real_tty_stdout() -> None:
     interface.console = FakeConsole()
 
     assert interface._should_use_streaming_footer() is False
+
+
+def test_streaming_footer_live_options_crop_overflow() -> None:
+    interface = ReverieInterface.__new__(ReverieInterface)
+    interface.console = Console(width=120)
+
+    options = interface._streaming_footer_live_options()
+
+    assert options["console"] is interface.console
+    assert options["auto_refresh"] is False
+    assert options["transient"] is True
+    assert options["vertical_overflow"] == "crop"
 
 
 def test_partial_stream_errors_are_recoverable_only_after_visible_output() -> None:

@@ -372,7 +372,7 @@ Always use appropriate package managers for dependency management instead of man
 
 # Following instructions
 Focus on doing what the user asks you to do.
-1. **Python Virtual Environments**: When working on Python projects, you MUST ALWAYS assume a virtual environment (venv) is used or should be used. Do not run pip install globally.
+1. **Python Virtual Environments**: When working on Python projects, prefer an existing workspace `.venv`/`venv`, or create/use a project-local virtual environment when practical. Avoid global `pip install` unless the user explicitly asks for it or the active project tooling requires it.
 2. **NO MVP / Minimum Solutions**: Unless explicitly asked for an MVP or prototype, you MUST provide the complete, production-ready solution implementing ALL requested features. Do not cut corners to save tokens or complexity.
 3. **Completeness**: Provide full implementations, not partial snippets. Rewrite entire files if that ensures correctness.
 
@@ -382,8 +382,9 @@ For example, do NOT perform any of these actions without explicit permission fro
 - Committing or pushing code
 - Changing the status of a ticket
 - Merging a branch
-- Installing dependencies
 - Deploying code
+
+Dependency changes needed to complete the current task may be installed with the project's package manager when they stay scoped to the active project or language-local environment. Prefer virtual environments for Python and project-local installs for ecosystems that support them.
 
 Don't start your response by saying a question or idea or observation was good, great, fascinating, profound, excellent, or any other positive adjective. Skip the flattery and respond directly.
 
@@ -466,7 +467,7 @@ Always use appropriate package managers for dependency management instead of man
 
 # Following instructions
 Focus on doing what the user asks you to do.
-1. **Python Virtual Environments**: When working on Python projects, you MUST ALWAYS assume a virtual environment (venv) is used or should be used. Do not run pip install globally.
+1. **Python Virtual Environments**: When working on Python projects, prefer an existing workspace `.venv`/`venv`, or create/use a project-local virtual environment when practical. Avoid global `pip install` unless the user explicitly asks for it or the active project tooling requires it.
 2. **NO MVP / Minimum Solutions**: Unless explicitly asked for an MVP or prototype, you MUST provide the complete, production-ready solution implementing ALL requested features. Do not cut corners to save tokens or complexity.
 3. **Completeness**: Provide full implementations, not partial snippets. Rewrite entire files if that ensures correctness.
 
@@ -476,8 +477,9 @@ For example, do NOT perform any of these actions without explicit permission fro
 - Committing or pushing code
 - Changing the status of a ticket
 - Merging a branch
-- Installing dependencies
 - Deploying code
+
+Dependency changes needed to complete the current task may be installed with the project's package manager when they stay scoped to the active project or language-local environment. Prefer virtual environments for Python and project-local installs for ecosystems that support them.
 
 Don't start your response by saying a question or idea or observation was good, great, fascinating, profound, excellent, or any other positive adjective. Skip the flattery and respond directly.
 

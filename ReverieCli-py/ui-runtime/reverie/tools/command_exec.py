@@ -132,6 +132,58 @@ Examples:
     CMD_EXECUTABLES = {"cmd", "cmd.exe"}
     SHELL_EXECUTABLES = {"bash", "sh", "zsh"}
     DOTNET_EXECUTABLES = {"dotnet", "dotnet.exe"}
+    PYTHON_PACKAGE_EXECUTABLES = {"pip", "pip.exe", "pip3", "pip3.exe", "uv", "uv.exe", "poetry", "poetry.exe"}
+    NODE_PACKAGE_EXECUTABLES = {
+        "npm",
+        "npm.cmd",
+        "npm.exe",
+        "npx",
+        "npx.cmd",
+        "npx.exe",
+        "pnpm",
+        "pnpm.cmd",
+        "pnpm.exe",
+        "yarn",
+        "yarn.cmd",
+        "yarn.exe",
+        "corepack",
+        "corepack.cmd",
+        "corepack.exe",
+        "bun",
+        "bun.exe",
+        "deno",
+        "deno.exe",
+    }
+    RUST_EXECUTABLES = {
+        "cargo",
+        "cargo.exe",
+        "rustc",
+        "rustc.exe",
+        "rustup",
+        "rustup.exe",
+        "rustfmt",
+        "rustfmt.exe",
+        "clippy-driver",
+        "clippy-driver.exe",
+    }
+    CONTAINER_EXECUTABLES = {
+        "docker",
+        "docker.exe",
+        "docker-compose",
+        "docker-compose.exe",
+        "podman",
+        "podman.exe",
+        "nerdctl",
+        "nerdctl.exe",
+    }
+    DEVELOPMENT_TOOL_EXECUTABLES = (
+        PYTHON_EXECUTABLES
+        | PYTHON_PACKAGE_EXECUTABLES
+        | NODE_EXECUTABLES
+        | NODE_PACKAGE_EXECUTABLES
+        | RUST_EXECUTABLES
+        | CONTAINER_EXECUTABLES
+    )
     INLINE_SCRIPT_FLAGS = {"-c", "-command", "--command", "-e", "--eval", "/c", "/k"}
     OPAQUE_SCRIPT_FLAGS = {"-enc", "-encodedcommand"}
 
@@ -397,7 +449,7 @@ Examples:
 
         tokens = self._normalize_alias(tokens)
         executable = tokens[0]
-        executable_lower = executable.lower()
+        executable_key = self._executable_key(executable)
 
         self._validate_command(tokens, command, work_dir)
         self._validate_argument_tokens(tokens, work_dir)
@@ -405,7 +457,7 @@ Examples:
         if self._should_use_powershell_invocation(executable):
             return self._build_powershell_invocation(tokens, original_command=command)
 
-        env_overrides = self._build_dotnet_sandbox_env() if executable_lower in self.DOTNET_EXECUTABLES else {}
+        env_overrides = self._build_toolchain_env(tokens, work_dir, executable_key)
         return {
             "argv": tokens,
             "executor": "subprocess",
@@ -415,7 +467,7 @@ Examples:
         }
 
     def _validate_command(self, tokens: List[str], command: str, work_dir: Path) -> None:
-        executable_lower = tokens[0].lower()
+        executable_lower = self._executable_key(tokens[0])
 
         if executable_lower in self.DIRECTLY_BLOCKED_EXECUTABLES:
             raise ValueError(
@@ -452,7 +504,7 @@ Examples:
         if not tokens:
             return
 
-        executable_lower = tokens[0].lower()
+        executable_lower = self._executable_key(tokens[0])
         skip_indices = self._build_skip_indices(tokens, executable_lower)
 
         for index, token in enumerate(tokens[1:], start=1):
@@ -481,7 +533,7 @@ Examples:
         if not tokens:
             return []
 
-        executable_lower = tokens[0].lower()
+        executable_lower = self._executable_key(tokens[0])
         scripts: List[Tuple[str, str]] = []
 
         for index, token in enumerate(tokens[1:], start=1):
@@ -506,7 +558,7 @@ Examples:
         if not tokens:
             return []
 
-        executable_lower = tokens[0].lower()
+        executable_lower = self._executable_key(tokens[0])
         runtime = self._runtime_for_executable(executable_lower)
         script_path = self._detect_script_path(tokens, executable_lower)
         if not script_path:
@@ -614,6 +666,14 @@ Examples:
             "env_overrides": {},
         }
 
+    def _build_toolchain_env(self, tokens: List[str], work_dir: Path, executable_key: str) -> Dict[str, str]:
+        env_overrides: Dict[str, str] = {}
+        if executable_key in self.DOTNET_EXECUTABLES:
+            env_overrides.update(self._build_dotnet_sandbox_env())
+        if self._is_python_package_command(tokens, executable_key):
+            env_overrides.update(self._build_python_package_env(work_dir))
+        return env_overrides
+
     def _build_dotnet_sandbox_env(self) -> Dict[str, str]:
         workspace_root = self.get_project_root()
         sandbox_root = get_project_data_dir(workspace_root) / "runtime_sandbox" / "dotnet"
@@ -666,10 +726,44 @@ Examples:
             "MSBUILDDISABLENODEREUSE": "1",
         }
 
+    def _build_python_package_env(self, work_dir: Path) -> Dict[str, str]:
+        venv_dir = self._find_workspace_venv(work_dir)
+        if not venv_dir:
+            return {"PIP_DISABLE_PIP_VERSION_CHECK": "1"}
+
+        bin_dir = venv_dir / ("Scripts" if sys.platform == "win32" else "bin")
+        current_path = os.environ.get("PATH", "")
+        env = {
+            "VIRTUAL_ENV": str(venv_dir),
+            "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+        }
+        if bin_dir.exists():
+            env["PATH"] = str(bin_dir) + os.pathsep + current_path
+        return env
+
+    def _find_workspace_venv(self, work_dir: Path) -> Optional[Path]:
+        candidates = []
+        for root in (work_dir, self.get_project_root()):
+            candidates.extend([root / ".venv", root / "venv"])
+        for candidate in candidates:
+            if candidate.is_dir():
+                return candidate
+        return None
+
+    def _is_python_package_command(self, tokens: List[str], executable_key: str) -> bool:
+        if executable_key in self.PYTHON_PACKAGE_EXECUTABLES:
+            return True
+        if executable_key not in self.PYTHON_EXECUTABLES:
+            return False
+        lowered = [str(token or "").lower() for token in tokens[1:4]]
+        return len(lowered) >= 2 and lowered[0] == "-m" and lowered[1] in {"pip", "pip3"}
+
     def _validate_token(self, token: str, *, command_name: str, work_dir: Path) -> None:
         text = str(token or "").strip()
         if not text:
             return
+
+        command_key = self._executable_key(command_name)
 
         if self._is_absolute_path_token(text):
             self._validate_workspace_path_token(text, command_name=command_name, work_dir=work_dir)
@@ -682,6 +776,9 @@ Examples:
             raise ValueError(
                 f"Blocked {command_name} argument '{text}': parent-directory traversal is not allowed."
             )
+
+        if self._is_toolchain_reference_token(command_key, text, work_dir):
+            return
 
         if self._looks_like_path_token(text):
             self._validate_workspace_path_token(text, command_name=command_name, work_dir=work_dir)
@@ -706,6 +803,87 @@ Examples:
     def _validate_workspace_path_token(self, token: str, *, command_name: str, work_dir: Path) -> None:
         self._resolve_path_like_token(token, command_name=command_name, work_dir=work_dir)
 
+    def _is_toolchain_reference_token(self, command_key: str, token: str, work_dir: Path) -> bool:
+        if command_key not in self.DEVELOPMENT_TOOL_EXECUTABLES:
+            return False
+
+        text = str(token or "").strip()
+        lowered = text.lower()
+        if not text or self._is_option_token(text) or "://" in lowered:
+            return False
+        if text.startswith((".", "~", "@.")):
+            return False
+        if self._looks_like_local_path(text, work_dir):
+            return False
+        if self._looks_like_known_project_file(text):
+            return False
+
+        if command_key in self.NODE_PACKAGE_EXECUTABLES and self._looks_like_node_package_spec(text):
+            return True
+        if command_key in self.RUST_EXECUTABLES and self._looks_like_package_or_registry_spec(text):
+            return True
+        if command_key in self.CONTAINER_EXECUTABLES and self._looks_like_container_reference(text):
+            return True
+        if command_key in self.PYTHON_PACKAGE_EXECUTABLES | self.PYTHON_EXECUTABLES:
+            return self._looks_like_package_or_registry_spec(text)
+        if command_key in self.NODE_EXECUTABLES:
+            return False
+        return False
+
+    @staticmethod
+    def _looks_like_node_package_spec(token: str) -> bool:
+        text = str(token or "").strip()
+        return bool(
+            re.match(r"^@?[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)?(?:@[A-Za-z0-9._~^<>=*-]+)?$", text)
+        )
+
+    @staticmethod
+    def _looks_like_package_or_registry_spec(token: str) -> bool:
+        text = str(token or "").strip()
+        return bool(re.match(r"^[A-Za-z0-9][A-Za-z0-9._~+:/@=-]*$", text))
+
+    @staticmethod
+    def _looks_like_container_reference(token: str) -> bool:
+        text = str(token or "").strip()
+        return bool(
+            re.match(
+                r"^(?:[A-Za-z0-9.-]+(?::[0-9]+)?/)?[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*(?::[A-Za-z0-9._-]+)?(?:@[A-Za-z0-9_+.-]+:[A-Fa-f0-9]+)?$",
+                text,
+            )
+        )
+
+    @staticmethod
+    def _looks_like_known_project_file(token: str) -> bool:
+        lowered = str(token or "").strip().lower()
+        return lowered in {
+            "package.json",
+            "package-lock.json",
+            "pnpm-lock.yaml",
+            "yarn.lock",
+            "cargo.toml",
+            "cargo.lock",
+            "requirements.txt",
+            "pyproject.toml",
+            "poetry.lock",
+            "dockerfile",
+            "docker-compose.yml",
+            "docker-compose.yaml",
+        }
+
+    @staticmethod
+    def _looks_like_local_path(token: str, work_dir: Path) -> bool:
+        text = str(token or "").strip()
+        if not text:
+            return False
+        expanded = os.path.expandvars(text)
+        candidate = Path(expanded).expanduser()
+        if not candidate.is_absolute():
+            candidate = work_dir / candidate
+        try:
+            return candidate.exists()
+        except OSError:
+            return False
+
     def _tokenize(self, command: str) -> List[str]:
         tokens = shlex.split(command, posix=(sys.platform != "win32"))
         normalized: List[str] = []
@@ -723,6 +901,13 @@ Examples:
         if not alias:
             return tokens
         return [alias, *tokens[1:]]
+
+    @staticmethod
+    def _executable_key(token: str) -> str:
+        text = str(token or "").strip().strip('"').strip("'")
+        if not text:
+            return ""
+        return re.split(r"[\\/]", text)[-1].lower()
 
     def _requires_raw_powershell_command(self, tokens: List[str], command: str) -> bool:
         if any(token in self.POWERSHELL_META_TOKENS for token in tokens):

@@ -1,7 +1,7 @@
 """
 Text-to-Image Tool
 
-Generate images from text prompts using the local Comfy runtime.
+Generate images from text prompts using local Comfy models, AIhubMix, or Pollinations.
 """
 
 from __future__ import annotations
@@ -18,6 +18,26 @@ from urllib.parse import unquote, urlparse
 from urllib.request import Request, urlopen
 
 from .base import BaseTool, ToolResult
+from ..aihubmix import (
+    AIHUBMIX_DEFAULT_API_URL,
+    normalize_aihubmix_config,
+    resolve_aihubmix_api_key,
+    resolve_aihubmix_sdk_base_url,
+)
+from ..aihubmix_tti_profiles.registry import (
+    get_aihubmix_tti_model_catalog,
+    get_aihubmix_tti_profile,
+    resolve_aihubmix_tti_model,
+)
+from ..pollinations_tti_profiles.common import (
+    POLLINATIONS_DEFAULT_BASE_URL,
+    normalize_pollinations_base_url,
+)
+from ..pollinations_tti_profiles.registry import (
+    get_pollinations_tti_model_catalog,
+    get_pollinations_tti_profile,
+    resolve_pollinations_tti_model,
+)
 from ..config import (
     default_text_to_image_config,
     get_app_root,
@@ -30,7 +50,7 @@ from ..security_utils import is_path_within_workspace
 
 
 class TextToImageTool(BaseTool):
-    """Generate images via the local Comfy runtime."""
+    """Generate images via local Comfy models, AIhubMix, or Pollinations."""
 
     name = "text_to_image"
     aliases = ("generate_image", "tti")
@@ -38,17 +58,23 @@ class TextToImageTool(BaseTool):
     tool_category = "image-generation"
     tool_tags = ("image", "generate", "art", "asset", "comfy", "prompt")
 
-    description = """Generate images from text prompts using configured local models.
+    description = """Generate images from text prompts using configured local, AIhubMix, or Pollinations models.
 
 Supports:
 - List configured text-to-image models from config.json
+- List AIhubMix image-generation models
+- List Pollinations free image-generation models
 - Generate images by selecting configured model display name
 - Local Comfy parameter tuning
+- AIhubMix image API parameters: n, size, quality, aspect_ratio
+- Pollinations image API parameters: n, size, quality, response_format, safe
 
 Examples:
 - List models: {"action": "list_models"}
 - Generate with default model: {"action": "generate", "prompt": "a cyberpunk city at dusk"}
-- Generate with model display name: {"action": "generate", "prompt": "anime portrait", "model": "anime-xl"}"""
+- Generate with model display name: {"action": "generate", "prompt": "anime portrait", "model": "anime-xl"}
+- Generate with AIhubMix: {"action": "generate", "source": "aihubmix", "model": "gpt-image-2-free", "prompt": "a vase of flowers"}
+- Generate with Pollinations: {"action": "generate", "source": "pollinations", "model": "flux", "prompt": "a vase of flowers"}"""
 
     parameters = {
         "type": "object",
@@ -81,13 +107,13 @@ Examples:
             },
             "source": {
                 "type": "string",
-                "description": "Optional source override. Only local is supported.",
+                "description": "Optional source override: local, aihubmix, or pollinations.",
             },
             "prompt": {"type": "string", "description": "Positive prompt for image generation"},
             "negative_prompt": {"type": "string", "description": "Negative prompt override"},
             "model": {
                 "type": "string",
-                "description": "Configured model display name override from text_to_image.models[].display_name",
+                "description": "Local display name, AIhubMix image model id/display name, or Pollinations model id/display name.",
             },
             "display_name": {
                 "type": "string",
@@ -109,6 +135,27 @@ Examples:
             "sampler": {"type": "string", "description": "Sampler name"},
             "scheduler": {"type": "string", "description": "Scheduler name"},
             "batch_size": {"type": "integer", "description": "Batch size"},
+            "n": {"type": "integer", "description": "Remote image count. AIhubMix supports 1-10; Pollinations currently supports 1."},
+            "size": {
+                "type": "string",
+                "description": "Remote image size: 1024x1024, 1024x1536, 1536x1024, or auto.",
+            },
+            "quality": {
+                "type": "string",
+                "description": "Remote image quality: high, medium, low, or auto.",
+            },
+            "aspect_ratio": {
+                "type": "string",
+                "description": "AIhubMix Gemini image aspect ratio, e.g. 1:1, 2:3, 16:9.",
+            },
+            "response_format": {
+                "type": "string",
+                "description": "Pollinations response format: b64_json or url.",
+            },
+            "safe": {
+                "type": "boolean",
+                "description": "Optional Pollinations safe-mode flag.",
+            },
             "use_cpu": {"type": "boolean", "description": "Force CPU mode"},
             "output_path": {
                 "type": "string",
@@ -215,7 +262,7 @@ Examples:
             return f"Diagnosing {source} text-to-image runtime"
         if action == "prepare_models":
             return "Preparing app-local text-to-image model package"
-        return "Generating image with local text-to-image model"
+        return f"Generating image with {source} text-to-image model"
 
     def execute(self, **kwargs) -> ToolResult:
         action = kwargs.get("action", "generate")
@@ -226,6 +273,8 @@ Examples:
         if action == "diagnose":
             return self._diagnose(source=source)
         if action == "prepare_models":
+            if source != "local":
+                return ToolResult.fail("prepare_models is only available for the local TTI source")
             try:
                 max_download_seconds = int(kwargs.get("max_download_seconds", 10 * 60) or 0)
                 max_files = int(kwargs.get("max_files", 0) or 0)
@@ -254,6 +303,11 @@ Examples:
 
         if not config.get("enabled", True):
             return ToolResult.fail("text_to_image is disabled in config.json (text_to_image.enabled=false)")
+
+        if source == "aihubmix":
+            return self._generate_aihubmix(config=config, prompt=prompt, kwargs=kwargs)
+        if source == "pollinations":
+            return self._generate_pollinations(config=config, prompt=prompt, kwargs=kwargs)
 
         script_path = self._resolve_script_path(config=config, script_override=None)
         if not script_path.exists():
@@ -470,20 +524,272 @@ Examples:
             )
         return ToolResult.partial("\n".join(output_lines), error_text)
 
+    def _get_aihubmix_tti_runtime_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        defaults = default_text_to_image_config().get("aihubmix", {})
+        tti_cfg = dict(defaults)
+        if isinstance(config.get("aihubmix"), dict):
+            tti_cfg.update(config.get("aihubmix", {}))
+
+        provider_cfg: Dict[str, Any] = {}
+        manager = self.context.get("config_manager")
+        if manager is not None:
+            try:
+                loaded = manager.load()
+                provider_cfg = normalize_aihubmix_config(getattr(loaded, "aihubmix", {}))
+            except Exception:
+                provider_cfg = {}
+        else:
+            provider_cfg = normalize_aihubmix_config({})
+
+        api_key = str(tti_cfg.get("api_key", "") or "").strip()
+        if not api_key:
+            api_key = resolve_aihubmix_api_key(provider_cfg)
+
+        base_url = str(
+            tti_cfg.get("base_url")
+            or tti_cfg.get("api_url")
+            or provider_cfg.get("api_url")
+            or AIHUBMIX_DEFAULT_API_URL
+        ).strip()
+
+        try:
+            timeout = int(tti_cfg.get("timeout", 300) or 300)
+        except (TypeError, ValueError):
+            timeout = 300
+
+        return {
+            "enabled": bool(tti_cfg.get("enabled", True)),
+            "api_key": api_key,
+            "base_url": resolve_aihubmix_sdk_base_url(base_url),
+            "default_model": str(tti_cfg.get("default_model", "gpt-image-2-free") or "gpt-image-2-free").strip(),
+            "timeout": max(1, timeout),
+            "default_size": str(tti_cfg.get("default_size", "auto") or "auto").strip(),
+            "default_quality": str(tti_cfg.get("default_quality", "auto") or "auto").strip(),
+            "default_aspect_ratio": str(tti_cfg.get("default_aspect_ratio", "1:1") or "1:1").strip(),
+        }
+
+    def _generate_aihubmix(self, *, config: Dict[str, Any], prompt: str, kwargs: Dict[str, Any]) -> ToolResult:
+        runtime_cfg = self._get_aihubmix_tti_runtime_config(config)
+        if not runtime_cfg.get("enabled", True):
+            return ToolResult.fail("text_to_image.aihubmix.enabled=false")
+        if not runtime_cfg.get("api_key"):
+            return ToolResult.fail(
+                "AIhubMix API key is required. Set text_to_image.aihubmix.api_key, "
+                "aihubmix.api_key, or AIHUBMIX_API_KEY."
+            )
+
+        model_request = kwargs.get("display_name") or kwargs.get("model") or runtime_cfg.get("default_model")
+        selected = resolve_aihubmix_tti_model(model_request)
+        if not selected:
+            available = ", ".join(item["id"] for item in get_aihubmix_tti_model_catalog())
+            return ToolResult.fail(f"Unknown AIhubMix TTI model '{model_request}'. Available models: {available}")
+
+        profile = get_aihubmix_tti_profile(selected["id"])
+        if profile is None:
+            return ToolResult.fail(f"AIhubMix TTI profile not found for model: {selected['id']}")
+
+        try:
+            output_path = self._resolve_output_path(
+                output_override=kwargs.get("output_path"),
+                configured_output=str(config.get("output_dir", ".")),
+            )
+        except ValueError as exc:
+            return ToolResult.fail(str(exc))
+
+        try:
+            from openai import OpenAI
+        except Exception as exc:
+            return ToolResult.fail(f"OpenAI Python SDK is required for AIhubMix TTI: {exc}")
+
+        client_kwargs = {
+            "api_key": runtime_cfg["api_key"],
+            "base_url": runtime_cfg["base_url"],
+            "timeout": runtime_cfg["timeout"],
+        }
+        try:
+            client = OpenAI(**client_kwargs)
+        except TypeError:
+            client_kwargs.pop("timeout", None)
+            client = OpenAI(**client_kwargs)
+
+        n_value = kwargs.get("n", kwargs.get("batch_size", 1))
+        try:
+            result = profile.generate_image(
+                client,
+                prompt=prompt,
+                output_path=output_path,
+                n=n_value,
+                size=kwargs.get("size", runtime_cfg.get("default_size", "auto")),
+                quality=kwargs.get("quality", runtime_cfg.get("default_quality", "auto")),
+                aspect_ratio=kwargs.get("aspect_ratio", runtime_cfg.get("default_aspect_ratio", "1:1")),
+            )
+        except Exception as exc:
+            return ToolResult.fail(f"AIhubMix TTI generation failed for {selected['id']}: {exc}")
+
+        saved_images = [str(path) for path in result.get("saved_images", []) if str(path).strip()]
+        text_parts = [str(text) for text in result.get("text_parts", []) if str(text).strip()]
+        output_lines = [
+            "AIhubMix text-to-image generation finished",
+            f"Model: {result.get('display_name', selected['display_name'])} ({selected['id']})",
+            f"Base URL: {runtime_cfg['base_url']}",
+            f"Output target: {output_path}",
+        ]
+        if saved_images:
+            output_lines.append("Generated images:")
+            output_lines.extend(f"- {path}" for path in saved_images)
+        if text_parts:
+            output_lines.append("\n--- TEXT ---")
+            output_lines.extend(text_parts)
+
+        payload = {
+            "source": "aihubmix",
+            "model": selected["id"],
+            "model_display_name": selected["display_name"],
+            "saved_images": saved_images,
+            "text_parts": text_parts,
+            "output_path": str(output_path),
+            "request": result.get("request", {}),
+        }
+        if saved_images:
+            return ToolResult.ok("\n".join(output_lines), payload)
+        return ToolResult.partial(
+            "\n".join(output_lines),
+            "AIhubMix response did not include image data.",
+            payload,
+        )
+
+    def _get_pollinations_tti_runtime_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        defaults = default_text_to_image_config().get("pollinations", {})
+        tti_cfg = dict(defaults)
+        if isinstance(config.get("pollinations"), dict):
+            tti_cfg.update(config.get("pollinations", {}))
+
+        api_key = str(tti_cfg.get("api_key", "") or "").strip()
+        if not api_key:
+            api_key = str(os.environ.get("POLLINATIONS_API_KEY") or os.environ.get("POLLINATIONS_TOKEN") or "").strip()
+
+        try:
+            timeout = int(tti_cfg.get("timeout", 300) or 300)
+        except (TypeError, ValueError):
+            timeout = 300
+
+        return {
+            "enabled": bool(tti_cfg.get("enabled", True)),
+            "api_key": api_key,
+            "base_url": normalize_pollinations_base_url(tti_cfg.get("base_url") or POLLINATIONS_DEFAULT_BASE_URL),
+            "default_model": str(tti_cfg.get("default_model", "flux") or "flux").strip(),
+            "timeout": max(1, timeout),
+            "default_size": str(tti_cfg.get("default_size", "1024x1024") or "1024x1024").strip(),
+            "default_quality": str(tti_cfg.get("default_quality", "medium") or "medium").strip(),
+            "response_format": str(tti_cfg.get("response_format", "b64_json") or "b64_json").strip(),
+            "safe": tti_cfg.get("safe", ""),
+        }
+
+    def _generate_pollinations(self, *, config: Dict[str, Any], prompt: str, kwargs: Dict[str, Any]) -> ToolResult:
+        runtime_cfg = self._get_pollinations_tti_runtime_config(config)
+        if not runtime_cfg.get("enabled", True):
+            return ToolResult.fail("text_to_image.pollinations.enabled=false")
+        if not runtime_cfg.get("api_key"):
+            return ToolResult.fail(
+                "Pollinations API key is required. Set text_to_image.pollinations.api_key, "
+                "POLLINATIONS_API_KEY, or POLLINATIONS_TOKEN. Get a key from https://enter.pollinations.ai."
+            )
+
+        model_request = kwargs.get("display_name") or kwargs.get("model") or runtime_cfg.get("default_model")
+        selected = resolve_pollinations_tti_model(model_request)
+        if not selected:
+            available = ", ".join(item["id"] for item in get_pollinations_tti_model_catalog())
+            return ToolResult.fail(f"Unknown Pollinations TTI model '{model_request}'. Available models: {available}")
+
+        profile = get_pollinations_tti_profile(selected["id"])
+        if profile is None:
+            return ToolResult.fail(f"Pollinations TTI profile not found for model: {selected['id']}")
+
+        try:
+            output_path = self._resolve_output_path(
+                output_override=kwargs.get("output_path"),
+                configured_output=str(config.get("output_dir", ".")),
+            )
+        except ValueError as exc:
+            return ToolResult.fail(str(exc))
+
+        n_value = kwargs.get("n", kwargs.get("batch_size", 1))
+        try:
+            result = profile.generate_image(
+                prompt=prompt,
+                output_path=output_path,
+                base_url=runtime_cfg["base_url"],
+                api_key=runtime_cfg.get("api_key", ""),
+                timeout=runtime_cfg["timeout"],
+                n=n_value,
+                size=kwargs.get("size", runtime_cfg.get("default_size", "1024x1024")),
+                quality=kwargs.get("quality", runtime_cfg.get("default_quality", "medium")),
+                response_format=kwargs.get("response_format", runtime_cfg.get("response_format", "b64_json")),
+                safe=kwargs.get("safe", runtime_cfg.get("safe", "")),
+            )
+        except Exception as exc:
+            return ToolResult.fail(f"Pollinations TTI generation failed for {selected['id']}: {exc}")
+
+        saved_images = [str(path) for path in result.get("saved_images", []) if str(path).strip()]
+        text_parts = [str(text) for text in result.get("text_parts", []) if str(text).strip()]
+        output_lines = [
+            "Pollinations text-to-image generation finished",
+            f"Model: {result.get('display_name', selected['display_name'])} ({selected['id']})",
+            f"Base URL: {runtime_cfg['base_url']}",
+            f"Output target: {output_path}",
+        ]
+        if saved_images:
+            output_lines.append("Generated images:")
+            output_lines.extend(f"- {path}" for path in saved_images)
+        if text_parts:
+            output_lines.append("\n--- TEXT ---")
+            output_lines.extend(text_parts)
+
+        payload = {
+            "source": "pollinations",
+            "model": selected["id"],
+            "model_display_name": selected["display_name"],
+            "saved_images": saved_images,
+            "text_parts": text_parts,
+            "output_path": str(output_path),
+            "request": result.get("request", {}),
+        }
+        if saved_images:
+            return ToolResult.ok("\n".join(output_lines), payload)
+        return ToolResult.partial(
+            "\n".join(output_lines),
+            "Pollinations response did not include image data.",
+            payload,
+        )
+
     def _get_t2i_config(self) -> Dict[str, Any]:
         cfg = default_text_to_image_config()
         manager = self.context.get("config_manager")
         if manager is None:
             cfg["models"] = normalize_tti_models(cfg.get("models", []), legacy_model_paths=cfg.get("model_paths", []))
             cfg["default_model_display_name"] = resolve_tti_default_display_name(cfg)
+            cfg["aihubmix"] = dict(default_text_to_image_config().get("aihubmix", {}))
+            cfg["pollinations"] = dict(default_text_to_image_config().get("pollinations", {}))
             return cfg
         try:
             loaded = manager.load()
             loaded_cfg = getattr(loaded, "text_to_image", None)
             if isinstance(loaded_cfg, dict):
                 cfg.update(loaded_cfg)
+                if isinstance(loaded_cfg.get("aihubmix"), dict):
+                    nested = dict(default_text_to_image_config().get("aihubmix", {}))
+                    nested.update(loaded_cfg.get("aihubmix", {}))
+                    cfg["aihubmix"] = nested
+                if isinstance(loaded_cfg.get("pollinations"), dict):
+                    nested = dict(default_text_to_image_config().get("pollinations", {}))
+                    nested.update(loaded_cfg.get("pollinations", {}))
+                    cfg["pollinations"] = nested
         except Exception:
             pass
+        if not isinstance(cfg.get("aihubmix"), dict):
+            cfg["aihubmix"] = dict(default_text_to_image_config().get("aihubmix", {}))
+        if not isinstance(cfg.get("pollinations"), dict):
+            cfg["pollinations"] = dict(default_text_to_image_config().get("pollinations", {}))
         cfg["models"] = normalize_tti_models(
             cfg.get("models", []),
             legacy_model_paths=cfg.get("model_paths", []),
@@ -505,6 +811,39 @@ Examples:
     def _list_models(self, source: str = "local") -> ToolResult:
         config = self._get_t2i_config()
         source = normalize_tti_source(source or config.get("active_source", "local"))
+        if source == "aihubmix":
+            runtime_cfg = self._get_aihubmix_tti_runtime_config(config)
+            models = get_aihubmix_tti_model_catalog()
+            default_model = str(runtime_cfg.get("default_model", "")).strip().lower()
+            rows = []
+            data_rows = []
+            for idx, item in enumerate(models):
+                marker = "*" if str(item.get("id", "")).lower() == default_model else " "
+                rows.append(
+                    f"{marker}[{idx}] {item['display_name']} | {item['id']} | API: {item.get('api', '')}"
+                )
+                data_rows.append({**item, "index": idx, "is_default": str(item.get("id", "")).lower() == default_model})
+            return ToolResult.ok(
+                "AIhubMix text-to-image models:\n" + "\n".join(rows),
+                data={"models": data_rows, "source": "aihubmix", "default_model": runtime_cfg.get("default_model", "")},
+            )
+        if source == "pollinations":
+            runtime_cfg = self._get_pollinations_tti_runtime_config(config)
+            models = get_pollinations_tti_model_catalog()
+            default_model = str(runtime_cfg.get("default_model", "")).strip().lower()
+            rows = []
+            data_rows = []
+            for idx, item in enumerate(models):
+                marker = "*" if str(item.get("id", "")).lower() == default_model else " "
+                input_modalities = ",".join(item.get("input_modalities", []))
+                rows.append(
+                    f"{marker}[{idx}] {item['display_name']} | {item['id']} | inputs: {input_modalities}"
+                )
+                data_rows.append({**item, "index": idx, "is_default": str(item.get("id", "")).lower() == default_model})
+            return ToolResult.ok(
+                "Pollinations free text-to-image models:\n" + "\n".join(rows),
+                data={"models": data_rows, "source": "pollinations", "default_model": runtime_cfg.get("default_model", "")},
+            )
         models = config.get("models", [])
         default_display_name = str(config.get("default_model_display_name", "")).strip()
 
@@ -753,6 +1092,58 @@ Examples:
     def _diagnose(self, source: str = "local") -> ToolResult:
         config = self._get_t2i_config()
         source = normalize_tti_source(source or config.get("active_source", "local"))
+        if source == "aihubmix":
+            runtime_cfg = self._get_aihubmix_tti_runtime_config(config)
+            models = get_aihubmix_tti_model_catalog()
+            default_model = resolve_aihubmix_tti_model(runtime_cfg.get("default_model"))
+            checks = [
+                {"id": "enabled", "ok": bool(config.get("enabled", True)), "detail": "text_to_image.enabled"},
+                {"id": "source", "ok": source == "aihubmix", "detail": f"active source: {source}"},
+                {"id": "aihubmix_enabled", "ok": bool(runtime_cfg.get("enabled", True)), "detail": "text_to_image.aihubmix.enabled"},
+                {"id": "api_key", "ok": bool(runtime_cfg.get("api_key")), "detail": "text_to_image.aihubmix.api_key, aihubmix.api_key, or AIHUBMIX_API_KEY"},
+                {"id": "base_url", "ok": bool(runtime_cfg.get("base_url")), "detail": runtime_cfg.get("base_url", "")},
+                {"id": "models", "ok": bool(models), "detail": f"{len(models)} AIhubMix TTI profiles available"},
+                {"id": "default_model", "ok": bool(default_model), "detail": runtime_cfg.get("default_model", "")},
+            ]
+            ready = all(item["ok"] for item in checks)
+            output = "Text-to-image AIhubMix diagnosis\n"
+            output += f"Ready: {'yes' if ready else 'no'}\n"
+            for check in checks:
+                output += f"- {check['id']}: {'ok' if check['ok'] else 'missing'} | {check['detail']}\n"
+            for item in models:
+                output += f"Model {item['display_name']}: {item['id']} | {item.get('api', '')}\n"
+            payload = {"ready": ready, "checks": checks, "models": models, "source": "aihubmix"}
+            return (
+                ToolResult.ok(output, payload)
+                if ready
+                else ToolResult.partial(output, "AIhubMix TTI is not ready; configure the missing API key or model.", payload)
+            )
+        if source == "pollinations":
+            runtime_cfg = self._get_pollinations_tti_runtime_config(config)
+            models = get_pollinations_tti_model_catalog()
+            default_model = resolve_pollinations_tti_model(runtime_cfg.get("default_model"))
+            checks = [
+                {"id": "enabled", "ok": bool(config.get("enabled", True)), "detail": "text_to_image.enabled"},
+                {"id": "source", "ok": source == "pollinations", "detail": f"active source: {source}"},
+                {"id": "pollinations_enabled", "ok": bool(runtime_cfg.get("enabled", True)), "detail": "text_to_image.pollinations.enabled"},
+                {"id": "api_key", "ok": bool(runtime_cfg.get("api_key")), "detail": "text_to_image.pollinations.api_key, POLLINATIONS_API_KEY, or POLLINATIONS_TOKEN"},
+                {"id": "base_url", "ok": bool(runtime_cfg.get("base_url")), "detail": runtime_cfg.get("base_url", "")},
+                {"id": "models", "ok": bool(models), "detail": f"{len(models)} free Pollinations TTI profiles available"},
+                {"id": "default_model", "ok": bool(default_model), "detail": runtime_cfg.get("default_model", "")},
+            ]
+            ready = all(item["ok"] for item in checks)
+            output = "Text-to-image Pollinations diagnosis\n"
+            output += f"Ready: {'yes' if ready else 'no'}\n"
+            for check in checks:
+                output += f"- {check['id']}: {'ok' if check['ok'] else 'missing'} | {check['detail']}\n"
+            for item in models:
+                output += f"Model {item['display_name']}: {item['id']} | {item.get('api', '')}\n"
+            payload = {"ready": ready, "checks": checks, "models": models, "source": "pollinations"}
+            return (
+                ToolResult.ok(output, payload)
+                if ready
+                else ToolResult.partial(output, "Pollinations TTI is not ready; configure the missing API key, endpoint, or model.", payload)
+            )
         script_path = self._resolve_script_path(config=config, script_override=None)
         python_exe = self._select_python_executable(config=config, script_path=script_path)
         models = []

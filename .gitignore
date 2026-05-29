@@ -30,6 +30,7 @@ __pycache__/
 venv/
 env/
 .venv/
+.claude/
 
 # 忽略日志和临时文件
 *.log

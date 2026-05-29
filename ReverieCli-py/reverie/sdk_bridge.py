@@ -232,6 +232,12 @@ class ReverieUiBridge:
             normalize_geminicli_config,
             resolve_geminicli_selected_model,
         )
+        from reverie.aihubmix import (
+            get_aihubmix_model_catalog,
+            normalize_aihubmix_config,
+            resolve_aihubmix_api_key,
+            resolve_aihubmix_selected_model,
+        )
         from reverie.modelscope import (
             get_modelscope_model_catalog,
             normalize_modelscope_config,
@@ -294,6 +300,26 @@ class ReverieUiBridge:
                     catalog=codex_catalog,
                 ),
                 "models": codex_catalog,
+            }
+        )
+
+        aihubmix_cfg = normalize_aihubmix_config(getattr(config, "aihubmix", {}))
+        aihubmix_key = resolve_aihubmix_api_key(aihubmix_cfg)
+        aihubmix_selected = resolve_aihubmix_selected_model(aihubmix_cfg)
+        sources.append(
+            {
+                "source": "aihubmix",
+                "label": "AIhubMix",
+                "active": active_source == "aihubmix",
+                "credential": "found" if aihubmix_key else "missing",
+                "has_api_key": bool(aihubmix_key),
+                "selected_model_id": str(aihubmix_cfg.get("selected_model_id", "") or ""),
+                "selected_model_display_name": str(
+                    (aihubmix_selected or {}).get("display_name") or aihubmix_cfg.get("selected_model_display_name") or ""
+                ),
+                "api_url": str(aihubmix_cfg.get("api_url", "") or ""),
+                "endpoint": str(aihubmix_cfg.get("endpoint", "") or ""),
+                "models": get_aihubmix_model_catalog(),
             }
         )
 
@@ -882,6 +908,7 @@ class ReverieUiBridge:
         self.emit_state(request_id, event_type="state")
 
     def handle_save_builtin_source(self, request_id: Any, payload: Dict[str, Any]) -> None:
+        from reverie.aihubmix import normalize_aihubmix_config
         from reverie.codex import normalize_codex_config
         from reverie.config import EXTERNAL_MODEL_SOURCES
         from reverie.geminicli import normalize_geminicli_config
@@ -919,6 +946,16 @@ class ReverieUiBridge:
             if payload.get("reasoning_effort"):
                 cfg["reasoning_effort"] = str(payload.get("reasoning_effort") or "").strip().lower()
             config.codex = normalize_codex_config(cfg)
+        elif source == "aihubmix":
+            cfg = normalize_aihubmix_config(getattr(config, "aihubmix", {}))
+            if api_key:
+                cfg["api_key"] = api_key
+            if selected_model_id:
+                cfg["selected_model_id"] = selected_model_id
+            if api_url:
+                cfg["api_url"] = api_url
+            cfg["endpoint"] = endpoint
+            config.aihubmix = normalize_aihubmix_config(cfg)
         elif source == "nvidia":
             cfg = normalize_nvidia_config(getattr(config, "nvidia", {}))
             if api_key:

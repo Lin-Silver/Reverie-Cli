@@ -41,7 +41,7 @@ pub const SETTINGS: &[SettingItem] = &[
         label: "Theme",
         kind: "choice",
         description: "Terminal display theme.",
-        options: &["dreamscape", "light", "dark"],
+        options: &["default", "dark", "light", "ocean"],
     },
     SettingItem {
         id: "auto_index",
@@ -95,8 +95,15 @@ pub const SETTINGS: &[SettingItem] = &[
     SettingItem {
         id: "workspace",
         label: "Workspace Config",
-        kind: "bool",
+        kind: "workspace",
         description: "Use workspace-local configuration.",
+        options: &[],
+    },
+    SettingItem {
+        id: "rules",
+        label: "Rules",
+        kind: "rules",
+        description: "Edit additional instruction rules applied to the active session.",
         options: &[],
     },
 ];
@@ -134,10 +141,23 @@ pub fn apply_setting(config: &mut Config, id: &str, value: Value) -> ReverieResu
         "model" => {
             config.active_model = value.as_str().map(str::to_string);
         }
+        "theme" => {
+            config.extra.insert(
+                "theme".to_string(),
+                Value::String(value.as_str().unwrap_or("default").to_string()),
+            );
+        }
         "auto_index" => config.auto_index = parse_bool(&value)?,
+        "auto-index" => config.auto_index = parse_bool(&value)?,
         "show_status_line" => config.show_status_line = parse_bool(&value)?,
+        "status-line" => config.show_status_line = parse_bool(&value)?,
         "stream_responses" => config.stream_responses = parse_bool(&value)?,
+        "stream" => config.stream_responses = parse_bool(&value)?,
         "tool_output_style" => {
+            config.tool_output_style =
+                normalize_tool_output_style(value.as_str().unwrap_or_default());
+        }
+        "tool-output" => {
             config.tool_output_style =
                 normalize_tool_output_style(value.as_str().unwrap_or_default());
         }
@@ -145,7 +165,20 @@ pub fn apply_setting(config: &mut Config, id: &str, value: Value) -> ReverieResu
             config.thinking_output_style =
                 normalize_thinking_output_style(value.as_str().unwrap_or_default());
         }
+        "thinking" => {
+            config.thinking_output_style =
+                normalize_thinking_output_style(value.as_str().unwrap_or_default());
+        }
         "api_timeout" => {
+            config.api_timeout = value
+                .as_u64()
+                .or_else(|| value.as_str()?.parse::<u64>().ok())
+                .ok_or_else(|| {
+                    ReverieError::InvalidInput("api_timeout must be an integer".to_string())
+                })?
+                .clamp(10, 3600);
+        }
+        "timeout" => {
             config.api_timeout = value
                 .as_u64()
                 .or_else(|| value.as_str()?.parse::<u64>().ok())
@@ -163,7 +196,21 @@ pub fn apply_setting(config: &mut Config, id: &str, value: Value) -> ReverieResu
                 })?
                 .min(12) as u8;
         }
-        "workspace" => config.use_workspace_config = parse_bool(&value)?,
+        "retries" => {
+            config.api_max_retries = value
+                .as_u64()
+                .or_else(|| value.as_str()?.parse::<u64>().ok())
+                .ok_or_else(|| {
+                    ReverieError::InvalidInput("api_max_retries must be an integer".to_string())
+                })?
+                .min(12) as u8;
+        }
+        "workspace" | "use_workspace_config" => config.use_workspace_config = parse_bool(&value)?,
+        "rules" => {
+            return Err(ReverieError::InvalidInput(
+                "rules are managed by RulesManager".to_string(),
+            ))
+        }
         other => {
             return Err(ReverieError::InvalidInput(format!(
                 "unknown setting: {other}"

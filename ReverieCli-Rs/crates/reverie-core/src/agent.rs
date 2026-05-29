@@ -1,7 +1,8 @@
 use crate::cli_commands::{render_help, render_mode_list, render_tool_list};
 use crate::config::{project_data_dir, Config, ConfigManager, ModelConfig};
 use crate::llm::{
-    build_openai_tool_definitions, extract_anthropic_tool_calls, extract_openai_tool_calls,
+    build_openai_tool_definitions, build_request_extra_body,
+    extract_anthropic_tool_calls, extract_openai_tool_calls,
     sanitize_prompt_output_text, send_model_compatible, send_model_streaming_compatible,
     user_content_with_inline_images, ChatMessage, ChatRequest, ModelStreamEvent,
 };
@@ -9,35 +10,104 @@ use crate::modes::{normalize_mode, Mode};
 use crate::providers::{
     codex_catalog, modelscope_catalog, normalize_reasoning_effort, nvidia_catalog, ProviderModel,
 };
+use crate::rules::{render_rules, RulesManager};
 use crate::session::{
     CheckpointStore, OperationStore, PromptRunResult, SessionMessage, SessionStore,
 };
 use crate::settings_catalog::{apply_setting, setting_items};
 use crate::{ReverieError, ReverieResult};
 use reverie_context::CodebaseIndexer;
+use reverie_mcp::{McpRegistry, McpServerConfig};
+use reverie_sandbox::SandboxManager;
+use reverie_skills::SkillLoader;
+use reverie_subagents::{SubagentManager, SubagentSpawnRequest};
 use reverie_tools::{execute_builtin_tool, ToolInvocation, ToolRegistry};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
+/// Maximum number of tool-call rounds before forcing a text response.
+pub const MAX_TOOL_ROUNDS: usize = 25;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentOptions {
     pub mode: Mode,
     pub no_index: bool,
+    #[serde(default)]
+    pub sandbox_enabled: bool,
+    #[serde(default = "default_max_tool_rounds")]
+    pub max_tool_rounds: usize,
 }
 
-#[derive(Debug)]
+fn default_max_tool_rounds() -> usize {
+    MAX_TOOL_ROUNDS
+}
+
 pub struct ReverieAgent {
     project_root: PathBuf,
     options: AgentOptions,
+    mcp_registry: McpRegistry,
+    skill_loader: Option<SkillLoader>,
+    subagent_manager: std::sync::Mutex<SubagentManager>,
+    sandbox_manager: SandboxManager,
 }
 
 impl ReverieAgent {
     pub fn new(project_root: impl AsRef<Path>, options: AgentOptions) -> Self {
-        Self {
-            project_root: project_root.as_ref().to_path_buf(),
-            options,
+        let project_root = project_root.as_ref().to_path_buf();
+        let mcp_registry = McpRegistry::new(&project_root);
+        let skill_loader = SkillLoader::new(&project_root).ok();
+        let subagent_manager = SubagentManager::default();
+        let mut sandbox_manager = SandboxManager::new();
+        if options.sandbox_enabled {
+            let mut policy = reverie_sandbox::SandboxPolicy {
+                name: "agent".to_string(),
+                ..Default::default()
+            };
+            let project_str = project_root.to_string_lossy().to_string();
+            policy.file_rules.insert(
+                0,
+                reverie_sandbox::policy::FileRule::allow_read_write(&project_str),
+            );
+            sandbox_manager.set_default_policy(policy);
         }
+        Self {
+            project_root,
+            options,
+            mcp_registry,
+            skill_loader,
+            subagent_manager: std::sync::Mutex::new(subagent_manager),
+            sandbox_manager,
+        }
+    }
+
+    /// Initialize MCP servers from config. Call once after construction.
+    pub async fn initialize_mcp(&mut self) -> ReverieResult<()> {
+        let config = ConfigManager::new(&self.project_root, false).load()?;
+        if let Some(mcp_config) = config.extra.get("mcp_servers") {
+            if let Ok(servers) = serde_json::from_value::<Vec<McpServerConfig>>(mcp_config.clone())
+            {
+                for server in servers {
+                    if let Err(err) = self.mcp_registry.add_server(server).await {
+                        tracing::warn!("Failed to add MCP server: {}", err);
+                    }
+                }
+            }
+        }
+        if let Err(err) = self.mcp_registry.initialize_all().await {
+            tracing::warn!("MCP initialization errors: {}", err);
+        }
+        Ok(())
+    }
+
+    /// Initialize skill loader cache. Call once after construction.
+    pub async fn initialize_skills(&mut self) -> ReverieResult<()> {
+        if let Some(loader) = &self.skill_loader {
+            if let Err(err) = loader.reload().await {
+                tracing::warn!("Skill reload error: {}", err);
+            }
+        }
+        Ok(())
     }
 
     pub async fn run_prompt_once(&self, prompt: &str) -> ReverieResult<PromptRunResult> {
@@ -140,157 +210,529 @@ impl ReverieAgent {
             return Ok(AgentRunOutput::simple(prompt, &output));
         };
         let visible_tools = ToolRegistry::builtin().visible_for_mode(self.options.mode.canonical());
-        let tool_definitions = build_openai_tool_definitions(&visible_tools);
-        let mut events = Vec::new();
-        let mut messages = self.context_messages(session_id)?;
-        let user_content = user_content_with_inline_images(&self.project_root, prompt)?;
-        messages.push(ChatMessage::new("user", user_content.clone()));
-        let use_streaming = config.stream_responses && stream_sink.is_some();
-        let response = if use_streaming {
-            let mut captured_events = Vec::new();
-            let response = send_model_streaming_compatible(
-                &config,
-                ChatRequest {
-                    model: model.clone(),
-                    messages: messages.clone(),
-                    tools: tool_definitions.clone(),
-                    stream: true,
-                    extra_body: json!({}),
-                },
-                |event| {
-                    captured_events.push(json!({
-                        "type": "stream",
-                        "event": event.clone()
+        let mut tool_definitions = build_openai_tool_definitions(&visible_tools);
+
+        // Inject MCP tools from connected servers
+        if let Ok(mcp_tools) = self.mcp_registry.list_all_tools().await {
+            for (server_name, tools) in &mcp_tools {
+                for tool in tools {
+                    let mcp_tool_name = format!("mcp_{}_{}", server_name, tool.name);
+                    let description = tool
+                        .description
+                        .clone()
+                        .unwrap_or_else(|| format!("MCP tool from {}", server_name));
+                    let schema = serde_json::to_value(&tool.input_schema).unwrap_or(json!({"type":"object","properties":{}}));
+                    tool_definitions.push(json!({
+                        "type": "function",
+                        "function": {
+                            "name": mcp_tool_name,
+                            "description": description,
+                            "parameters": schema
+                        }
                     }));
-                    if let Some(sink) = stream_sink.as_deref_mut() {
-                        sink(event);
-                    }
-                },
-            )
-            .await?;
-            events.extend(captured_events);
-            response
-        } else {
-            send_model_compatible(
-                &config,
-                ChatRequest {
-                    model: model.clone(),
-                    messages: messages.clone(),
-                    tools: tool_definitions.clone(),
-                    stream: false,
-                    extra_body: json!({}),
-                },
-            )
-            .await?
-        };
-        let mut tool_calls = extract_openai_tool_calls(&response.raw);
-        if tool_calls.is_empty() {
-            tool_calls = extract_anthropic_tool_calls(&response.raw);
-        }
-        let mut transcript_messages = vec![SessionMessage::new("user", user_content)];
-        if tool_calls.is_empty() {
-            transcript_messages.push(SessionMessage::new(
-                "assistant",
-                json!(response.output_text.clone()),
-            ));
-            return Ok(AgentRunOutput {
-                text: response.output_text,
-                transcript_messages,
-                events,
-            });
+                }
+            }
         }
 
-        transcript_messages.push(SessionMessage::with_tool_calls(
-            "assistant",
-            json!(response.output_text.clone()),
-            tool_calls.iter().map(|call| call.raw.clone()).collect(),
-        ));
-        messages.push(ChatMessage::assistant_with_tool_calls(
-            tool_calls.iter().map(|call| call.raw.clone()).collect(),
-        ));
-        for call in tool_calls {
-            events.push(json!({
-                "type": "tool_call",
-                "id": call.id,
-                "name": call.name,
-                "arguments": call.arguments
-            }));
-            let result = match execute_builtin_tool(
-                &self.project_root,
-                ToolInvocation {
-                    name: call.name.clone(),
-                    arguments: call.arguments.clone(),
-                },
-            )
-            .await
-            {
-                Ok(result) => result,
-                Err(err) => reverie_tools::ToolResult {
-                    success: false,
-                    output: serde_json::Value::Null,
-                    error: Some(err.to_string()),
-                },
-            };
-            let result_text = serde_json::to_string(&result)?;
-            transcript_messages.push(SessionMessage::tool_result(
-                call.id.clone(),
-                json!(result_text.clone()),
-            ));
-            events.push(json!({
-                "type": "tool_result",
-                "id": call.id,
-                "name": call.name,
-                "success": result.success,
-                "error": result.error
-            }));
-            messages.push(ChatMessage::tool_result(call.id, json!(result_text)));
+        let mut events = Vec::new();
+        let mut messages = self.context_messages(session_id)?;
+        // Inject mode-specific system prompt as the first message
+        let mode_prompt = self.options.mode.system_prompt();
+        messages.insert(
+            0,
+            ChatMessage::new("system", json!(mode_prompt)),
+        );
+        let rules_text = RulesManager::new(&self.project_root).get_rules_text()?;
+        if !rules_text.trim().is_empty() {
+            messages.insert(
+                1,
+                ChatMessage::new(
+                    "system",
+                    json!(format!(
+                        "Additional user rules for this Reverie session:\n{}",
+                        rules_text
+                    )),
+                ),
+            );
         }
-        let follow_up = if use_streaming {
-            let mut captured_events = Vec::new();
-            let response = send_model_streaming_compatible(
-                &config,
-                ChatRequest {
-                    model,
-                    messages,
-                    tools: tool_definitions,
-                    stream: true,
-                    extra_body: json!({}),
-                },
-                |event| {
-                    captured_events.push(json!({
-                        "type": "stream",
-                        "event": event.clone()
-                    }));
-                    if let Some(sink) = stream_sink.as_deref_mut() {
-                        sink(event);
-                    }
-                },
-            )
-            .await?;
-            events.extend(captured_events);
-            response
-        } else {
-            send_model_compatible(
-                &config,
-                ChatRequest {
-                    model,
-                    messages,
-                    tools: tool_definitions,
-                    stream: false,
-                    extra_body: json!({}),
-                },
-            )
-            .await?
-        };
+        let user_content = user_content_with_inline_images(&self.project_root, prompt)?;
+        messages.push(ChatMessage::new("user", user_content.clone()));
+
+        let mut transcript_messages = vec![SessionMessage::new("user", user_content)];
+        let use_streaming = config.stream_responses && stream_sink.is_some();
+        let max_rounds = self.options.max_tool_rounds.min(MAX_TOOL_ROUNDS);
+        let extra_body = build_request_extra_body(&config, &model);
+
+        // Multi-turn tool execution loop
+        for _round in 0..max_rounds {
+            let response = if use_streaming {
+                let mut captured_events = Vec::new();
+                let response = send_model_streaming_compatible(
+                    &config,
+                    ChatRequest {
+                        model: model.clone(),
+                        messages: messages.clone(),
+                        tools: tool_definitions.clone(),
+                        stream: true,
+                        extra_body: extra_body.clone(),
+                    },
+                    |event| {
+                        captured_events.push(json!({
+                            "type": "stream",
+                            "event": event.clone()
+                        }));
+                        if let Some(sink) = stream_sink.as_deref_mut() {
+                            sink(event);
+                        }
+                    },
+                )
+                .await?;
+                events.extend(captured_events);
+                response
+            } else {
+                send_model_compatible(
+                    &config,
+                    ChatRequest {
+                        model: model.clone(),
+                        messages: messages.clone(),
+                        tools: tool_definitions.clone(),
+                        stream: false,
+                        extra_body: extra_body.clone(),
+                    },
+                )
+                .await?
+            };
+
+            let mut tool_calls = extract_openai_tool_calls(&response.raw);
+            if tool_calls.is_empty() {
+                tool_calls = extract_anthropic_tool_calls(&response.raw);
+            }
+
+            // No tool calls — final text response, exit loop
+            if tool_calls.is_empty() {
+                transcript_messages.push(SessionMessage::new(
+                    "assistant",
+                    json!(response.output_text.clone()),
+                ));
+                return Ok(AgentRunOutput {
+                    text: response.output_text,
+                    transcript_messages,
+                    events,
+                });
+            }
+
+            // Process tool calls
+            transcript_messages.push(SessionMessage::with_tool_calls(
+                "assistant",
+                json!(response.output_text.clone()),
+                tool_calls.iter().map(|call| call.raw.clone()).collect(),
+            ));
+            messages.push(ChatMessage::assistant_with_tool_calls(
+                tool_calls.iter().map(|call| call.raw.clone()).collect(),
+            ));
+
+            for call in tool_calls {
+                events.push(json!({
+                    "type": "tool_call",
+                    "id": call.id,
+                    "name": call.name,
+                    "arguments": call.arguments
+                }));
+
+                if let Some(sink) = stream_sink.as_deref_mut() {
+                    sink(ModelStreamEvent::ToolExecStart {
+                        id: call.id.clone(),
+                        name: call.name.clone(),
+                    });
+                }
+
+                let result = self
+                    .execute_tool_with_integrations(&call.name, call.arguments.clone())
+                    .await;
+
+                if let Some(sink) = stream_sink.as_deref_mut() {
+                    sink(ModelStreamEvent::ToolExecComplete {
+                        id: call.id.clone(),
+                        name: call.name.clone(),
+                        success: result.success,
+                        error: result.error.clone(),
+                    });
+                }
+
+                let result_text = serde_json::to_string(&result)?;
+                transcript_messages.push(SessionMessage::tool_result(
+                    call.id.clone(),
+                    json!(result_text.clone()),
+                ));
+                events.push(json!({
+                    "type": "tool_result",
+                    "id": call.id,
+                    "name": call.name,
+                    "success": result.success,
+                    "error": result.error
+                }));
+                messages.push(ChatMessage::tool_result(call.id, json!(result_text)));
+            }
+            // Loop back for the next model call with tool results
+        }
+
+        // Exhausted tool rounds — force a final call without tools
+        let final_response = send_model_compatible(
+            &config,
+            ChatRequest {
+                model,
+                messages,
+                tools: Vec::new(),
+                stream: false,
+                extra_body: extra_body.clone(),
+            },
+        )
+        .await?;
         transcript_messages.push(SessionMessage::new(
             "assistant",
-            json!(follow_up.output_text.clone()),
+            json!(final_response.output_text.clone()),
         ));
         Ok(AgentRunOutput {
-            text: follow_up.output_text,
+            text: final_response.output_text,
             transcript_messages,
             events,
         })
+    }
+
+    /// Execute a single tool invocation routing through MCP, subagents, skills, and sandbox.
+    fn execute_tool_with_integrations<'a>(
+        &'a self,
+        name: &'a str,
+        arguments: Value,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = reverie_tools::ToolResult> + 'a>> {
+        Box::pin(async move {
+        // Route MCP tool calls to the appropriate server
+        if let Some(rest) = name.strip_prefix("mcp_") {
+            return self.execute_mcp_tool(rest, &arguments).await;
+        }
+
+        // Subagent tool — use the real SubagentManager
+        if name == "subagent" {
+            return self.execute_subagent_tool(&arguments).await;
+        }
+
+        // Skill execution — if the tool is skill_lookup with execute action
+        if name == "skill_lookup" {
+            if let Some("execute") = arguments.get("operation").and_then(Value::as_str) {
+                return self.execute_skill_tool(&arguments).await;
+            }
+        }
+
+        // Sandbox enforcement for file/command operations
+        if self.options.sandbox_enabled {
+            if let Some(violation) = self.check_sandbox(name, &arguments) {
+                return reverie_tools::ToolResult {
+                    success: false,
+                    output: Value::Null,
+                    error: Some(violation),
+                };
+            }
+        }
+
+        // Default: execute as builtin tool
+        match execute_builtin_tool(
+            &self.project_root,
+            ToolInvocation {
+                name: name.to_string(),
+                arguments,
+            },
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(err) => reverie_tools::ToolResult {
+                success: false,
+                output: Value::Null,
+                error: Some(err.to_string()),
+            },
+        }
+        })
+    }
+
+    /// Route a tool call to an MCP server.
+    async fn execute_mcp_tool(&self, rest: &str, arguments: &Value) -> reverie_tools::ToolResult {
+        // rest = "{server_name}_{tool_name}", split on first '_'
+        let (server_name, tool_name) = match rest.split_once('_') {
+            Some(pair) => pair,
+            None => {
+                return reverie_tools::ToolResult {
+                    success: false,
+                    output: Value::Null,
+                    error: Some(format!("Invalid MCP tool name format: mcp_{rest}")),
+                };
+            }
+        };
+        let args_map: std::collections::HashMap<String, Value> =
+            serde_json::from_value(arguments.clone()).unwrap_or_default();
+        match self
+            .mcp_registry
+            .call_tool(server_name, tool_name, args_map)
+            .await
+        {
+            Ok(result) => {
+                let text = result
+                    .content
+                    .iter()
+                    .filter_map(|c| match c {
+                        reverie_mcp::ToolContent::Text { text } => Some(text.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                reverie_tools::ToolResult {
+                    success: !result.is_error,
+                    output: json!({"text": text, "content": result.content}),
+                    error: if result.is_error {
+                        Some(text)
+                    } else {
+                        None
+                    },
+                }
+            }
+            Err(err) => reverie_tools::ToolResult {
+                success: false,
+                output: Value::Null,
+                error: Some(err.to_string()),
+            },
+        }
+    }
+
+    /// Execute a subagent via the SubagentManager.
+    async fn execute_subagent_tool(&self, arguments: &Value) -> reverie_tools::ToolResult {
+        let task = arguments
+            .get("prompt")
+            .or_else(|| arguments.get("task"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let name = arguments
+            .get("subagent_id")
+            .or_else(|| arguments.get("name"))
+            .and_then(Value::as_str)
+            .unwrap_or("default")
+            .to_string();
+
+        let request = SubagentSpawnRequest {
+            name: name.clone(),
+            task: task.clone(),
+            project_root: self.project_root.clone(),
+            cwd: self.project_root.clone(),
+            parent_id: None,
+            depth: 0,
+            timeout: Some(std::time::Duration::from_secs(300)),
+            inherit_env: true,
+        };
+
+        // Register the run in the SubagentManager
+        let spawn_result = {
+            let mut mgr = self.subagent_manager.lock().unwrap();
+            mgr.spawn(request)
+        };
+
+        let run_id = match spawn_result {
+            Ok(result) if result.success => result.run_id,
+            Ok(result) => {
+                return reverie_tools::ToolResult {
+                    success: false,
+                    output: Value::Null,
+                    error: Some(
+                        result
+                            .error
+                            .unwrap_or_else(|| "Failed to spawn subagent".to_string()),
+                    ),
+                };
+            }
+            Err(err) => {
+                return reverie_tools::ToolResult {
+                    success: false,
+                    output: Value::Null,
+                    error: Some(format!("SubagentManager error: {err}")),
+                };
+            }
+        };
+
+        // Execute the subagent as a nested single-shot agent prompt
+        let sub_agent = ReverieAgent::new(
+            &self.project_root,
+            AgentOptions {
+                mode: normalize_mode("reverie"),
+                no_index: true,
+                sandbox_enabled: self.options.sandbox_enabled,
+                max_tool_rounds: self.options.max_tool_rounds.min(10), // limit sub-depth
+            },
+        );
+
+        let sub_result = sub_agent.run_prompt_once(&task).await;
+
+        match sub_result {
+            Ok(result) => {
+                // Mark completed in manager
+                {
+                    let mut mgr = self.subagent_manager.lock().unwrap();
+                    let _ = mgr.complete(&run_id, &result.output_text);
+                }
+
+                // Persist the run record
+                let artifact_dir = self.project_root.join(".reverie").join("artifacts");
+                let _ = std::fs::create_dir_all(&artifact_dir);
+                let run_record = json!({
+                    "schema": "reverie.subagent_run.v1",
+                    "run_id": run_id,
+                    "name": name,
+                    "task": task,
+                    "status": "completed",
+                    "output": result.output_text
+                });
+                let artifact_path = artifact_dir.join("subagent_last_run.json");
+                let _ = std::fs::write(
+                    &artifact_path,
+                    serde_json::to_string_pretty(&run_record).unwrap_or_default(),
+                );
+
+                reverie_tools::ToolResult {
+                    success: true,
+                    output: json!({
+                        "run_id": run_id,
+                        "name": name,
+                        "status": "completed",
+                        "output": result.output_text
+                    }),
+                    error: None,
+                }
+            }
+            Err(err) => {
+                // Mark failed in manager
+                {
+                    let mut mgr = self.subagent_manager.lock().unwrap();
+                    let _ = mgr.fail(&run_id, err.to_string());
+                }
+
+                reverie_tools::ToolResult {
+                    success: false,
+                    output: json!({
+                        "run_id": run_id,
+                        "name": name,
+                        "status": "failed",
+                        "error": err.to_string()
+                    }),
+                    error: Some(err.to_string()),
+                }
+            }
+        }
+    }
+
+    /// Execute a skill via the SkillLoader/Executor.
+    async fn execute_skill_tool(&self, arguments: &Value) -> reverie_tools::ToolResult {
+        let skill_name = arguments
+            .get("query")
+            .or_else(|| arguments.get("skill_name"))
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+
+        let Some(loader) = &self.skill_loader else {
+            return reverie_tools::ToolResult {
+                success: false,
+                output: Value::Null,
+                error: Some("Skill loader not initialized".to_string()),
+            };
+        };
+
+        match loader.get(skill_name).await {
+            Some(skill) => {
+                let context = reverie_skills::SkillInvocationContext {
+                    project_root: self.project_root.clone(),
+                    cwd: self.project_root.clone(),
+                    skill_name: skill.name.clone(),
+                    arguments: std::collections::HashMap::new(),
+                };
+                let executor = reverie_skills::SkillExecutor::new(
+                    SkillLoader::new(&self.project_root).unwrap(),
+                );
+                match executor.execute(&skill.name, context).await {
+                    Ok(result) => reverie_tools::ToolResult {
+                        success: result.success,
+                        output: json!({
+                            "skill": skill.name,
+                            "output": result.output,
+                            "errors": result.errors
+                        }),
+                        error: if result.success {
+                            None
+                        } else {
+                            Some(result.errors.join("; "))
+                        },
+                    },
+                    Err(err) => reverie_tools::ToolResult {
+                        success: false,
+                        output: Value::Null,
+                        error: Some(err.to_string()),
+                    },
+                }
+            }
+            None => reverie_tools::ToolResult {
+                success: false,
+                output: json!({"available_skills": loader.list_all().await.iter().map(|s| &s.name).collect::<Vec<_>>()}),
+                error: Some(format!("Skill not found: {skill_name}")),
+            },
+        }
+    }
+
+    /// Check sandbox policy before executing a file/command tool.
+    fn check_sandbox(&self, tool_name: &str, arguments: &Value) -> Option<String> {
+        // Create a temporary sandbox instance for checking
+        let policy = self.sandbox_manager.get_default_policy().clone();
+        let mut instance =
+            reverie_sandbox::manager::SandboxInstance::new("check".to_string(), policy);
+
+        match tool_name {
+            "file_ops" | "create_file" | "str_replace_editor" => {
+                if let Some(path_str) = arguments
+                    .get("path")
+                    .or_else(|| arguments.get("file_path"))
+                    .and_then(Value::as_str)
+                {
+                    let target = self.project_root.join(path_str);
+                    let mode = if tool_name == "file_ops"
+                        && arguments
+                            .get("action")
+                            .and_then(Value::as_str)
+                            .unwrap_or("read")
+                            == "read"
+                    {
+                        reverie_sandbox::policy::FileAccessMode::Read
+                    } else {
+                        reverie_sandbox::policy::FileAccessMode::ReadWrite
+                    };
+                    if let Err(err) = instance.check_file_access(&target, mode) {
+                        return Some(format!("Sandbox: {err}"));
+                    }
+                }
+            }
+            "delete_file" => {
+                if let Some(path_str) = arguments.get("path").and_then(Value::as_str) {
+                    let target = self.project_root.join(path_str);
+                    if let Err(err) = instance
+                        .check_file_access(&target, reverie_sandbox::policy::FileAccessMode::Write)
+                    {
+                        return Some(format!("Sandbox: {err}"));
+                    }
+                }
+            }
+            "command_exec" => {
+                if let Some(cmd) = arguments.get("command").and_then(Value::as_str) {
+                    if let Err(err) = instance.check_command(cmd) {
+                        return Some(format!("Sandbox: {err}"));
+                    }
+                }
+            }
+            _ => {}
+        }
+        None
     }
 
     async fn handle_command(&self, command: &str) -> ReverieResult<String> {
@@ -417,9 +859,21 @@ impl ReverieAgent {
     }
 
     fn context_messages(&self, session_id: &str) -> ReverieResult<Vec<ChatMessage>> {
+        use crate::context_compaction::{compact_session_messages, compaction_config_from_extras};
+
         let store = self.session_store();
+        let config = ConfigManager::new(&self.project_root, false).load()?;
+
+        // Load full transcript from session store
+        let raw_messages = store.compacted_messages_for_context(session_id, usize::MAX)?;
+        // Apply context compaction if configured (default: enabled, sliding window)
+        let compacted = match compaction_config_from_extras(&config.extra) {
+            Some(cc) => compact_session_messages(&raw_messages, &cc),
+            None => raw_messages, // compaction disabled
+        };
+
         let mut messages = Vec::new();
-        for message in store.compacted_messages_for_context(session_id, 40)? {
+        for message in compacted {
             match message.role.as_str() {
                 "assistant" if !message.tool_calls.is_empty() => {
                     messages.push(ChatMessage::assistant_with_tool_calls(message.tool_calls));
@@ -548,11 +1002,8 @@ impl ReverieAgent {
     }
 
     fn handle_rules(&self, args: &str) -> ReverieResult<String> {
-        let path = self.project_root.join(".reverie").join("rules.txt");
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let rules = read_rules(&path)?;
+        let manager = RulesManager::new(&self.project_root);
+        let rules = manager.get_rules()?;
         let mut parts = args.trim().splitn(2, char::is_whitespace);
         let action = parts.next().unwrap_or_default();
         let rest = parts.next().unwrap_or_default().trim();
@@ -562,28 +1013,20 @@ impl ReverieAgent {
                 if rest.is_empty() {
                     return Ok("Usage: /rules add <text>".to_string());
                 }
-                let mut updated = rules;
-                updated.push(rest.to_string());
-                write_rules(&path, &updated)?;
+                let updated = manager.add_rule(rest)?;
                 Ok(format!("Rule added. {} rule(s) active.", updated.len()))
             }
             "remove" | "delete" => {
                 let index = rest.parse::<usize>().map_err(|_| {
                     ReverieError::InvalidInput("rule index must be a number".to_string())
                 })?;
-                let mut updated = rules;
-                if index == 0 || index > updated.len() {
-                    return Err(ReverieError::InvalidInput(format!(
-                        "rule index out of range: {index}"
-                    )));
-                }
-                let removed = updated.remove(index - 1);
-                write_rules(&path, &updated)?;
+                let (removed, _updated) = manager.remove_rule(index)?;
                 Ok(format!("Removed rule {index}: {removed}"))
             }
             "path" | "edit" => {
+                let path = manager.rules_txt_path();
                 if !path.exists() {
-                    std::fs::write(&path, "")?;
+                    manager.set_rules(&[])?;
                 }
                 Ok(format!("Rules file: {}", path.display()))
             }
@@ -920,35 +1363,6 @@ fn parse_setting_value(value: &str) -> Value {
         return parsed;
     }
     Value::String(value.to_string())
-}
-
-fn read_rules(path: &Path) -> ReverieResult<Vec<String>> {
-    if !path.is_file() {
-        return Ok(Vec::new());
-    }
-    Ok(std::fs::read_to_string(path)?
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(str::to_string)
-        .collect())
-}
-
-fn write_rules(path: &Path, rules: &[String]) -> ReverieResult<()> {
-    std::fs::write(path, format!("{}\n", rules.join("\n")))?;
-    Ok(())
-}
-
-fn render_rules(rules: &[String]) -> String {
-    if rules.is_empty() {
-        return "No custom rules defined.".to_string();
-    }
-    rules
-        .iter()
-        .enumerate()
-        .map(|(index, rule)| format!("{}. {}", index + 1, rule))
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 fn provider_catalog(provider: &str) -> Vec<ProviderModel> {

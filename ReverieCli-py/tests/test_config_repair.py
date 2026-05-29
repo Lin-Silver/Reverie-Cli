@@ -171,11 +171,17 @@ def test_config_manager_creates_default_config_file_for_manual_editing(tmp_path:
     assert config.tool_output_style == "compact"
     assert config.thinking_output_style == "full"
     assert config.text_to_image["active_source"] == "local"
+    assert config.text_to_image["aihubmix"]["default_model"] == "gpt-image-2-free"
+    assert config.text_to_image["pollinations"]["default_model"] == "flux"
+    assert config.aihubmix["selected_model_id"] == "gpt-5.5-free"
     assert config.modelscope["selected_model_id"] == "ZhipuAI/GLM-5.1"
     saved_payload = json.loads(config_path.read_text(encoding="utf-8"))
     assert saved_payload["tool_output_style"] == "compact"
     assert saved_payload["thinking_output_style"] == "full"
     assert saved_payload["text_to_image"]["active_source"] == "local"
+    assert saved_payload["text_to_image"]["aihubmix"]["default_model"] == "gpt-image-2-free"
+    assert saved_payload["text_to_image"]["pollinations"]["default_model"] == "flux"
+    assert saved_payload["aihubmix"]["selected_model_id"] == "gpt-5.5-free"
     assert saved_payload["modelscope"]["selected_model_id"] == "ZhipuAI/GLM-5.1"
     assert notice is not None
     assert notice["title"] == "Created default config"
@@ -209,6 +215,9 @@ def test_config_manager_auto_adds_tool_output_style_on_load(tmp_path: Path, monk
     assert loaded.thinking_output_style == "full"
     assert repaired_payload["thinking_output_style"] == "full"
     assert repaired_payload["text_to_image"]["active_source"] == "local"
+    assert repaired_payload["text_to_image"]["aihubmix"]["default_model"] == "gpt-image-2-free"
+    assert repaired_payload["text_to_image"]["pollinations"]["default_model"] == "flux"
+    assert repaired_payload["aihubmix"]["selected_model_id"] == "gpt-5.5-free"
     assert repaired_payload["modelscope"]["selected_model_id"] == "ZhipuAI/GLM-5.1"
 
 

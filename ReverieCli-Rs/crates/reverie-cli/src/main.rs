@@ -117,6 +117,8 @@ async fn main() -> anyhow::Result<()> {
             AgentOptions {
                 mode: normalize_mode(args.mode.as_deref().unwrap_or("reverie")),
                 no_index: args.no_index,
+                sandbox_enabled: false,
+                max_tool_rounds: 25,
             },
         );
         let should_stream = should_stream_prompt(&project_root, &prompt)?;
@@ -169,6 +171,8 @@ async fn run_interactive(project_root: PathBuf, mode: &str) -> anyhow::Result<()
         AgentOptions {
             mode: normalize_mode(mode),
             no_index: true,
+            sandbox_enabled: false,
+            max_tool_rounds: 25,
         },
     );
 

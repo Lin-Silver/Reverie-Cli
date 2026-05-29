@@ -1473,6 +1473,10 @@ dependencies = [
  "regex",
  "reqwest",
  "reverie-context",
+ "reverie-mcp",
+ "reverie-sandbox",
+ "reverie-skills",
+ "reverie-subagents",
  "reverie-tools",
  "serde",
  "serde_json",
@@ -1578,6 +1582,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "chrono",
  "git2",
  "regex",
  "reqwest",

@@ -8,6 +8,7 @@ authors.workspace = true
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
+chrono.workspace = true
 git2.workspace = true
 regex.workspace = true
 reqwest.workspace = true

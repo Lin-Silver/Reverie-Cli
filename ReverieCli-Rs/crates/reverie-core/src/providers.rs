@@ -171,6 +171,93 @@ pub fn codex_catalog() -> Vec<ProviderModel> {
     ]
 }
 
+pub fn gemini_catalog() -> Vec<ProviderModel> {
+    vec![
+        ProviderModel {
+            id: "gemini-2.5-pro",
+            display_name: "Gemini 2.5 Pro",
+            description: "Google Gemini 2.5 Pro with thinking and tool use.",
+            transport: "gemini",
+            context_length: 1_048_576,
+            output_limit: 65_536,
+            supports_vision: true,
+            supports_thinking: true,
+            provider: "gemini",
+        },
+        ProviderModel {
+            id: "gemini-2.5-flash",
+            display_name: "Gemini 2.5 Flash",
+            description: "Google Gemini 2.5 Flash — fast reasoning model.",
+            transport: "gemini",
+            context_length: 1_048_576,
+            output_limit: 65_536,
+            supports_vision: true,
+            supports_thinking: true,
+            provider: "gemini",
+        },
+        ProviderModel {
+            id: "gemini-2.0-flash",
+            display_name: "Gemini 2.0 Flash",
+            description: "Google Gemini 2.0 Flash multimodal model.",
+            transport: "gemini",
+            context_length: 1_048_576,
+            output_limit: 8_192,
+            supports_vision: true,
+            supports_thinking: false,
+            provider: "gemini",
+        },
+    ]
+}
+
+pub fn ollama_catalog() -> Vec<ProviderModel> {
+    vec![
+        ProviderModel {
+            id: "llama3.3",
+            display_name: "Llama 3.3 70B",
+            description: "Meta Llama 3.3 70B via Ollama local.",
+            transport: "ollama",
+            context_length: 131_072,
+            output_limit: 8_192,
+            supports_vision: false,
+            supports_thinking: false,
+            provider: "ollama",
+        },
+        ProviderModel {
+            id: "qwen3",
+            display_name: "Qwen3",
+            description: "Qwen3 model via Ollama local.",
+            transport: "ollama",
+            context_length: 131_072,
+            output_limit: 8_192,
+            supports_vision: false,
+            supports_thinking: true,
+            provider: "ollama",
+        },
+        ProviderModel {
+            id: "deepseek-r1",
+            display_name: "DeepSeek R1",
+            description: "DeepSeek R1 reasoning model via Ollama local.",
+            transport: "ollama",
+            context_length: 131_072,
+            output_limit: 8_192,
+            supports_vision: false,
+            supports_thinking: true,
+            provider: "ollama",
+        },
+        ProviderModel {
+            id: "codestral",
+            display_name: "Codestral",
+            description: "Mistral Codestral code model via Ollama local.",
+            transport: "ollama",
+            context_length: 32_768,
+            output_limit: 8_192,
+            supports_vision: false,
+            supports_thinking: false,
+            provider: "ollama",
+        },
+    ]
+}
+
 pub fn normalize_reasoning_effort(value: &str) -> &'static str {
     match value.trim().to_ascii_lowercase().as_str() {
         "0" | "minimal" | "min" => "minimal",
@@ -186,9 +273,15 @@ pub fn resolve_model(provider: &str, model_id: &str) -> Option<ProviderModel> {
         "nvidia" => nvidia_catalog(),
         "modelscope" => modelscope_catalog(),
         "codex" => codex_catalog(),
+        "gemini" | "google" => gemini_catalog(),
+        "ollama" | "local" => ollama_catalog(),
         _ => Vec::new(),
     };
     catalog
         .into_iter()
         .find(|model| model.id.eq_ignore_ascii_case(model_id))
+}
+
+pub fn all_provider_names() -> &'static [&'static str] {
+    &["nvidia", "modelscope", "codex", "gemini", "ollama"]
 }

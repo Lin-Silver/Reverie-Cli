@@ -97,6 +97,7 @@ def test_nvidia_catalog_context_lengths_match_model_cards():
         "z-ai/glm-5.1": 131072,
         "z-ai/glm4.7": 131072,
         "stepfun-ai/step-3.5-flash": 256000,
+        "stepfun-ai/step-3.7-flash": 256000,
         "deepseek-ai/deepseek-v4-pro": 1000000,
         "deepseek-ai/deepseek-v4-flash": 1000000,
         "mistralai/mistral-large-3-675b-instruct-2512": 262144,
@@ -282,6 +283,32 @@ def test_nvidia_openai_options_for_step_flash_use_deepseek_reasoning_format():
         "extra_body": {
             "reasoning_format": {"type": "deepseek-style"},
         },
+    }
+
+
+def test_nvidia_catalog_contains_step_37_flash_vision_request_model():
+    metadata = get_nvidia_model_metadata("stepfun-ai/step-3.7-flash")
+
+    assert metadata is not None
+    assert metadata["id"] == "stepfun-ai/step-3.7-flash"
+    assert metadata["display_name"] == "Step-3.7-Flash"
+    assert metadata["transport"] == "request"
+    assert metadata["vision"] is True
+    assert metadata["context_length"] == 256000
+    assert metadata["max_output_tokens"] == 16384
+    assert resolve_nvidia_model_profile_name("stepfun-ai/step-3.7-flash") == "step_37_flash"
+
+
+def test_nvidia_request_defaults_for_step_37_flash_match_provider_example():
+    options = build_nvidia_request_defaults(
+        {"selected_model_id": "stepfun-ai/step-3.7-flash"},
+        "stepfun-ai/step-3.7-flash",
+    )
+
+    assert options == {
+        "max_tokens": 16384,
+        "temperature": 1.00,
+        "top_p": 0.95,
     }
 
 

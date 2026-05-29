@@ -35,6 +35,7 @@ from ..nvidia import (
     nvidia_model_allows_tools,
     nvidia_model_requires_system_message_first,
 )
+from ..aihubmix import build_aihubmix_openai_options
 from ..modelscope import build_modelscope_anthropic_options
 
 # Special marker for thinking content (used in streaming)
@@ -1987,6 +1988,14 @@ class ReverieAgent:
             except Exception:
                 return timeout_value
 
+        if self._is_active_model_source("aihubmix") and self.provider == "openai-sdk":
+            try:
+                cfg = getattr(config, "aihubmix", {})
+                if isinstance(cfg, dict):
+                    return max(timeout_value, int(cfg.get("timeout", timeout_value)))
+            except Exception:
+                return timeout_value
+
         return timeout_value
 
     def _build_request_headers(self, stream: bool) -> Dict[str, str]:
@@ -2215,6 +2224,8 @@ class ReverieAgent:
                 if option_model:
                     model_for_sdk = option_model
                 extra_body = nvidia_options.get("extra_body")
+        elif self._is_active_model_source("aihubmix"):
+            nvidia_options = build_aihubmix_openai_options(getattr(self.config, "aihubmix", {}), model_for_sdk)
         else:
             extra_body = self._openai_extra_body_for_thinking()
             if extra_body is not None and isinstance(model_for_sdk, str) and "(" in model_for_sdk and ")" in model_for_sdk:
@@ -2243,7 +2254,7 @@ class ReverieAgent:
         if extra_body is not None:
             kwargs["extra_body"] = extra_body
         
-        # Add NVIDIA-specific options
+        # Add provider-specific OpenAI-compatible options.
         if nvidia_options:
             for key in ("temperature", "top_p", "max_tokens"):
                 if key in nvidia_options:
@@ -2324,6 +2335,8 @@ class ReverieAgent:
         """Return a user-facing label for OpenAI SDK backed requests."""
         if self._is_active_model_source("nvidia"):
             return "NVIDIA API"
+        if self._is_active_model_source("aihubmix"):
+            return "AIhubMix API"
         return "OpenAI-compatible API"
 
     def _model_request_stream_event(
@@ -3111,6 +3124,12 @@ class ReverieAgent:
                     model_for_sdk = option_model
                 # For NVIDIA models, use NVIDIA-specific extra_body (don't merge with generic thinking)
                 extra_body = nvidia_options.get("extra_body")
+            elif self._is_active_model_source("aihubmix"):
+                nvidia_options = build_aihubmix_openai_options(
+                    getattr(self.config, "aihubmix", {}),
+                    model_for_sdk,
+                )
+                extra_body = None
             else:
                 extra_body = self._openai_extra_body_for_thinking()
             if extra_body is not None and isinstance(model_for_sdk, str) and "(" in model_for_sdk and ")" in model_for_sdk:
@@ -3444,6 +3463,12 @@ class ReverieAgent:
                     model_for_sdk = option_model
                 # For NVIDIA models, use NVIDIA-specific extra_body (don't merge with generic thinking)
                 extra_body = nvidia_options.get("extra_body")
+            elif self._is_active_model_source("aihubmix"):
+                nvidia_options = build_aihubmix_openai_options(
+                    getattr(self.config, "aihubmix", {}),
+                    model_for_sdk,
+                )
+                extra_body = None
             else:
                 extra_body = self._openai_extra_body_for_thinking()
             if extra_body is not None and isinstance(model_for_sdk, str) and "(" in model_for_sdk and ")" in model_for_sdk:

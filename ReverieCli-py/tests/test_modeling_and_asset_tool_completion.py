@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 import json
+from types import SimpleNamespace
 
+from reverie.aihubmix_tti_profiles import gemini_31_flash_image_preview_free, gpt_image_2_free
+from reverie.pollinations_tti_profiles import flux
 from reverie.tools.game_asset_manager import GameAssetManagerTool
 from reverie.tools.game_modeling_workbench import GameModelingWorkbenchTool
 from reverie.tools.text_to_image import TextToImageTool
@@ -85,6 +89,139 @@ def test_text_to_image_diagnose_reports_local_runtime_readiness(tmp_path: Path) 
     assert result.status.value == "partial"
     assert result.data["ready"] is False
     assert any(check["id"] == "models" for check in result.data["checks"])
+
+
+def test_text_to_image_lists_aihubmix_models(tmp_path: Path) -> None:
+    tool = TextToImageTool({"project_root": tmp_path})
+
+    result = tool.execute(action="list_models", source="aihubmix")
+
+    assert result.success is True
+    ids = {item["id"] for item in result.data["models"]}
+    assert {"gpt-image-2-free", "gemini-3.1-flash-image-preview-free"} <= ids
+
+
+def test_text_to_image_lists_free_pollinations_models(tmp_path: Path) -> None:
+    tool = TextToImageTool({"project_root": tmp_path})
+
+    result = tool.execute(action="list_models", source="pollinations")
+
+    assert result.success is True
+    ids = {item["id"] for item in result.data["models"]}
+    assert {
+        "flux",
+        "gptimage",
+        "gptimage-large",
+        "kontext",
+        "zimage",
+        "wan-image",
+        "qwen-image",
+        "klein",
+        "nova-canvas",
+    } <= ids
+    assert "seedream" not in ids
+    assert "nanobanana" not in ids
+
+
+def test_text_to_image_pollinations_diagnose_requires_api_key(tmp_path: Path) -> None:
+    tool = TextToImageTool({"project_root": tmp_path})
+
+    result = tool.execute(action="diagnose", source="pollinations")
+
+    assert result.status.value == "partial"
+    assert result.data["ready"] is False
+    assert any(check["id"] == "api_key" and check["ok"] is False for check in result.data["checks"])
+
+
+def test_aihubmix_gpt_image_profile_saves_base64_response(tmp_path: Path) -> None:
+    image_bytes = b"fake-png-bytes"
+    encoded = base64.b64encode(image_bytes).decode("ascii")
+
+    class FakeImages:
+        def generate(self, **kwargs):
+            assert kwargs["model"] == "gpt-image-2-free"
+            assert kwargs["n"] == 1
+            assert kwargs["size"] == "auto"
+            assert kwargs["quality"] == "auto"
+            return SimpleNamespace(data=[SimpleNamespace(b64_json=encoded)])
+
+    result = gpt_image_2_free.generate_image(
+        SimpleNamespace(images=FakeImages()),
+        prompt="flowers",
+        output_path=tmp_path / "out",
+    )
+
+    saved = Path(result["saved_images"][0])
+    assert saved.exists()
+    assert saved.read_bytes() == image_bytes
+
+
+def test_aihubmix_gemini_image_profile_saves_inline_data(tmp_path: Path) -> None:
+    image_bytes = b"fake-gemini-png"
+    encoded = base64.b64encode(image_bytes).decode("ascii")
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            assert kwargs["model"] == "gemini-3.1-flash-image-preview-free"
+            assert kwargs["messages"][0]["content"] == "aspect_ratio=2:3"
+            assert kwargs["modalities"] == ["text", "image"]
+            message = SimpleNamespace(
+                multi_mod_content=[
+                    {"text": "done"},
+                    {"inline_data": {"mime_type": "image/png", "data": encoded}},
+                ]
+            )
+            return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+    client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+    result = gemini_31_flash_image_preview_free.generate_image(
+        client,
+        prompt="butterfly",
+        output_path=tmp_path / "out",
+        aspect_ratio="2:3",
+    )
+
+    saved = Path(result["saved_images"][0])
+    assert saved.exists()
+    assert saved.read_bytes() == image_bytes
+    assert result["text_parts"] == ["done"]
+
+
+def test_pollinations_flux_profile_saves_base64_response(tmp_path: Path, monkeypatch) -> None:
+    image_bytes = b"fake-pollinations-png"
+    encoded = base64.b64encode(image_bytes).decode("ascii")
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"data": [{"b64_json": encoded}]}
+
+    def fake_post(url, headers, json, timeout):
+        assert url == "https://gen.pollinations.ai/v1/images/generations"
+        assert "Authorization" not in headers
+        assert json["model"] == "flux"
+        assert json["n"] == 1
+        assert json["size"] == "1024x1024"
+        assert json["quality"] == "medium"
+        assert json["response_format"] == "b64_json"
+        assert timeout == 30
+        return FakeResponse()
+
+    monkeypatch.setattr("reverie.pollinations_tti_profiles.common.requests.post", fake_post)
+
+    result = flux.generate_image(
+        prompt="flowers",
+        output_path=tmp_path / "out",
+        base_url="https://gen.pollinations.ai/v1",
+        api_key="",
+        timeout=30,
+    )
+
+    saved = Path(result["saved_images"][0])
+    assert saved.exists()
+    assert saved.read_bytes() == image_bytes
 
 
 def test_text_to_image_gguf_model_metadata_tracks_auxiliary_models(tmp_path: Path) -> None:

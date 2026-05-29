@@ -6,7 +6,7 @@ use sha1::{Digest as Sha1Digest, Sha1};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct ModelConfig {
     #[serde(default)]
     pub name: String,
@@ -86,7 +86,7 @@ pub fn normalize_tool_output_style(value: &str) -> String {
 pub fn normalize_thinking_output_style(value: &str) -> String {
     match value.trim().to_ascii_lowercase().as_str() {
         "hidden" | "off" | "none" => "hidden".to_string(),
-        "summary" | "summarized" => "summary".to_string(),
+        "compact" | "summary" | "summarized" => "compact".to_string(),
         _ => "full".to_string(),
     }
 }

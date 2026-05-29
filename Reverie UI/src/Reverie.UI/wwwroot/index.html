@@ -250,7 +250,7 @@
           <div class="section-header">
             <div>
               <h3>Built-in Sources</h3>
-              <p>Gemini CLI, Codex, NVIDIA, and ModelScope use dedicated runtime paths.</p>
+              <p>Gemini CLI, Codex, AIhubMix, NVIDIA, and ModelScope use dedicated runtime paths.</p>
             </div>
             <button id="providerSmokeButton" class="micro-button" type="button">Test APIs</button>
           </div>
@@ -262,6 +262,7 @@
                 <select id="builtinSourceSelect" class="select-input">
                   <option value="geminicli">Gemini CLI</option>
                   <option value="codex">Codex</option>
+                  <option value="aihubmix">AIhubMix</option>
                   <option value="nvidia">NVIDIA</option>
                   <option value="modelscope">ModelScope</option>
                 </select>
@@ -273,7 +274,7 @@
             </div>
             <label>
               API key
-              <input id="builtinSourceApiKey" class="text-input" type="password" placeholder="Only needed for NVIDIA and ModelScope">
+              <input id="builtinSourceApiKey" class="text-input" type="password" placeholder="Only needed for AIhubMix, NVIDIA, and ModelScope">
             </label>
             <div class="form-grid">
               <label>

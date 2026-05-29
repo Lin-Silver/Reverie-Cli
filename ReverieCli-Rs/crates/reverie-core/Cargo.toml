@@ -25,6 +25,10 @@ tracing.workspace = true
 
 reverie-context = { path = "../reverie-context" }
 reverie-tools = { path = "../reverie-tools" }
+reverie-mcp = { path = "../reverie-mcp" }
+reverie-skills = { path = "../reverie-skills" }
+reverie-subagents = { path = "../reverie-subagents" }
+reverie-sandbox = { path = "../reverie-sandbox" }
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -17,6 +17,7 @@ from . import (
     nemotron_3_super,
     qwen_35,
     step_35_flash,
+    step_37_flash,
 )
 
 
@@ -37,6 +38,7 @@ _REQUEST_PROFILES: Dict[str, ProfileBuilder] = {
     "mistralai/mistral-medium-3.5-128b": mistral_medium_35.build_request_defaults,
     "qwen/qwen3.5-122b-a10b": qwen_35.build_122b_request_defaults,
     "qwen/qwen3.5-397b-a17b": qwen_35.build_397b_request_defaults,
+    "stepfun-ai/step-3.7-flash": step_37_flash.build_request_defaults,
     "mistralai/mistral-large-3-675b-instruct-2512": mistral_large_3.build_request_defaults,
     "moonshotai/kimi-k2.6": kimi_k2_6.build_request_defaults,
 }

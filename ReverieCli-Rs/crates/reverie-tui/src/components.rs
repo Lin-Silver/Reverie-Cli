@@ -43,8 +43,9 @@ impl<'a> Widget for MessageDisplay<'a> {
             &self.messages[0..]
         };
 
-        let mut y = area.top();
-        for message in visible_messages.iter().take(self.max_height as usize) {
+        for (y, message) in
+            (area.top()..).zip(visible_messages.iter().take(self.max_height as usize))
+        {
             if y >= area.bottom() {
                 break;
             }
@@ -64,7 +65,6 @@ impl<'a> Widget for MessageDisplay<'a> {
                     buf.set_string(x, y, &line_text.content, role_style);
                 }
             }
-            y += 1;
         }
     }
 }
@@ -275,13 +275,11 @@ impl Widget for HelpPanel {
             "End     滚动到底部",
         ];
 
-        let mut y = area.top() + 1;
-        for line in help_lines {
+        for (y, line) in (area.top() + 1..).zip(help_lines) {
             if y >= area.bottom() {
                 break;
             }
             buf.set_string(area.left() + 1, y, line, Style::default().fg(Color::White));
-            y += 1;
         }
     }
 }

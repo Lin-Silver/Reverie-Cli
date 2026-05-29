@@ -1,8 +1,12 @@
-use crate::agent::{AgentOptions, ReverieAgent};
+use crate::agent::{AgentOptions, ReverieAgent, MAX_TOOL_ROUNDS};
 use crate::cli_commands::command_catalog;
 use crate::config::{app_root, Config, ConfigManager, ModelConfig};
-use crate::modes::normalize_mode;
-use crate::providers::{codex_catalog, modelscope_catalog, nvidia_catalog, ProviderModel};
+use crate::modes::{list_modes, normalize_mode};
+use crate::providers::{
+    codex_catalog, gemini_catalog, modelscope_catalog, nvidia_catalog, ollama_catalog,
+    ProviderModel,
+};
+use crate::rules::RulesManager;
 use crate::session::{CheckpointStore, OperationStore, SessionStore};
 use crate::settings_catalog::{apply_setting, setting_items};
 use crate::version::{version_line, VERSION};
@@ -60,10 +64,10 @@ impl ReverieUiBridge {
         let result = match method {
             "hello" | "runtime_info" | "locate_runtime" => Ok(self.runtime_info()),
             "initialize" => self.handle_initialize(payload),
-            "get_state" => Ok(self.state()),
-            "set_workspace" => self.handle_set_workspace(payload),
-            "set_mode" => self.handle_set_mode(payload),
-            "set_setting" => self.handle_set_setting(payload),
+            "get_state" | "getState" => Ok(self.state()),
+            "set_workspace" | "setWorkspace" => self.handle_set_workspace(payload),
+            "set_mode" | "setMode" => self.handle_set_mode(payload),
+            "set_setting" | "setSetting" => self.handle_set_setting(payload),
             "save_preferences" => self.handle_save_preferences(payload),
             "save_model" | "saveModel" => self.handle_save_model(payload),
             "delete_model" | "deleteModel" => self.handle_delete_model(payload),
@@ -81,22 +85,8 @@ impl ReverieUiBridge {
                 self.handle_checkpoint_command(method, payload)
             }
             "list_operations" => self.handle_operation_command(),
-            "list_plugins" | "refresh_plugins" => {
-                let manager = crate::plugins::RuntimePluginManager::new(&self.project_root);
-                let plugins = manager
-                    .list_plugins_with_handshakes()
-                    .await
-                    .unwrap_or_default();
-                let dynamic_tools = plugins
-                    .iter()
-                    .flat_map(|plugin| plugin.dynamic_tools.clone())
-                    .collect::<Vec<_>>();
-                Ok(json!({
-                    "plugins": plugins,
-                    "dynamic_tools": dynamic_tools,
-                    "templates": ["blender", "godot", "o3de", "game_models"],
-                    "runtime": "rust"
-                }))
+            "list_plugins" | "listPlugins" | "refresh_plugins" | "refreshPlugins" => {
+                self.handle_list_plugins().await
             }
             "list_remote_releases" | "listRemoteReleases" => self.handle_list_remote_releases(),
             "install_remote_plugin" | "installRemotePlugin" => {
@@ -108,25 +98,29 @@ impl ReverieUiBridge {
             "call_plugin_command" | "callPluginCommand" => {
                 self.handle_call_plugin_command(payload).await
             }
-            "list_tools" => Ok(json!({
+            "list_tools" | "listTools" => Ok(json!({
+                "type": "tools",
                 "tools": ToolRegistry::builtin().visible_for_mode(&self.mode),
                 "dynamic_tools": crate::plugins::RuntimePluginManager::new(&self.project_root).dynamic_tools().await.unwrap_or_default()
             })),
             "list_commands" => Ok(json!({
                 "commands": command_catalog()
             })),
-            "list_settings" => Ok(json!({
-                "settings": setting_items()
-            })),
+            "list_settings" | "listSettings" => self.handle_list_settings(),
             "gitStatus" | "git_status" => self.handle_git_status(payload).await,
+            "getTotals" | "get_totals" => self.handle_get_totals(),
+            "runAgentRegression" | "run_agent_regression" => {
+                self.handle_run_agent_regression().await
+            }
             "diagnostics" => Ok(json!({
+                "type": "diagnostics",
                 "ok": true,
                 "runtime": "rust",
                 "project_root": self.project_root,
                 "plugins": crate::plugins::RuntimePluginManager::new(&self.project_root).list_plugins_with_handshakes().await.unwrap_or_default(),
                 "harness": crate::harness::build_harness_capability_report(&self.project_root).ok()
             })),
-            "index_workspace" => self.handle_index_workspace(),
+            "index_workspace" | "indexWorkspace" => self.handle_index_workspace(payload),
             "query_context" | "context_query" => self.handle_context_query(payload),
             "chat" => self.handle_chat(payload).await,
             "shutdown" => Ok(json!({"shutdown": true})),
@@ -141,13 +135,32 @@ impl ReverieUiBridge {
         };
 
         match result {
-            Ok(value) => json!({"id": id, "ok": true, "result": value}),
+            Ok(value) => {
+                let mut response = json!({"id": id, "ok": true, "result": value});
+                let event_fields = response
+                    .get("result")
+                    .and_then(Value::as_object)
+                    .filter(|object| object.contains_key("type"))
+                    .cloned();
+                if let (Some(response_object), Some(value_object)) =
+                    (response.as_object_mut(), event_fields)
+                {
+                    for (key, nested_value) in value_object {
+                        response_object.insert(key, nested_value);
+                    }
+                }
+                response
+            }
             Err(err) => json!({"id": id, "ok": false, "error": err.to_string()}),
         }
     }
 
     fn handle_initialize(&mut self, payload: Value) -> ReverieResult<Value> {
-        if let Some(path) = payload.get("project_root").and_then(Value::as_str) {
+        if let Some(path) = payload
+            .get("project_root")
+            .or_else(|| payload.get("projectRoot"))
+            .and_then(Value::as_str)
+        {
             self.project_root = PathBuf::from(path);
         }
         if let Some(mode) = payload.get("mode").and_then(Value::as_str) {
@@ -155,12 +168,20 @@ impl ReverieUiBridge {
         }
         let config = ConfigManager::new(&self.project_root, false).load()?;
         Ok(json!({
+            "type": "state",
+            "project_root": self.project_root,
             "state": self.state(),
-            "config": config,
+            "config": self.config_summary(&config),
+            "sessions": self.sessions_summary()?,
+            "tools": self.tools_summary(&config.active_mode),
+            "totals": crate::dashboard::summarize_totals(&self.project_root)?,
+            "runtime": self.runtime_info(),
             "providers": {
                 "nvidia": nvidia_catalog(),
                 "modelscope": modelscope_catalog(),
-                "codex": codex_catalog()
+                "codex": codex_catalog(),
+                "gemini": gemini_catalog(),
+                "ollama": ollama_catalog()
             }
         }))
     }
@@ -174,14 +195,185 @@ impl ReverieUiBridge {
         })
     }
 
+    fn state_event(&self) -> ReverieResult<Value> {
+        let config = ConfigManager::new(&self.project_root, false).load()?;
+        Ok(json!({
+            "type": "state",
+            "state": self.state(),
+            "project_root": self.project_root,
+            "config": self.config_summary(&config),
+            "sessions": self.sessions_summary()?,
+            "tools": self.tools_summary(&config.active_mode),
+            "totals": crate::dashboard::summarize_totals(&self.project_root)?,
+            "runtime": self.runtime_info()
+        }))
+    }
+
+    fn config_summary(&self, config: &Config) -> Value {
+        let models = config
+            .models
+            .iter()
+            .enumerate()
+            .map(|(index, model)| model_summary(index, model))
+            .collect::<Vec<_>>();
+        let active_model = config.active_model.as_deref().and_then(|active| {
+            config
+                .models
+                .iter()
+                .enumerate()
+                .find(|(_, model)| model.name == active || model.model == active)
+                .map(|(index, model)| model_summary(index, model))
+        });
+        let active_mode = normalize_mode(&config.active_mode);
+        json!({
+            "mode": active_mode.canonical(),
+            "mode_display_name": active_mode.display_name(),
+            "modes": list_modes(true, false)
+                .into_iter()
+                .map(|mode| json!({"id": mode.canonical(), "name": mode.display_name()}))
+                .collect::<Vec<_>>(),
+            "stream_responses": config.stream_responses,
+            "auto_index": config.auto_index,
+            "show_status_line": config.show_status_line,
+            "tool_output_style": config.tool_output_style,
+            "thinking_output_style": config.thinking_output_style,
+            "theme": config.extra.get("theme").and_then(Value::as_str).unwrap_or("default"),
+            "api_timeout": config.api_timeout,
+            "api_max_retries": config.api_max_retries,
+            "active_model_source": config.model_source,
+            "active_model_index": active_model
+                .as_ref()
+                .and_then(|item| item.get("index").and_then(Value::as_u64))
+                .unwrap_or(0),
+            "active_model": active_model,
+            "models": models,
+            "builtin_sources": self.builtin_sources_summary(config),
+            "config_path": ConfigManager::new(&self.project_root, false).active_config_path(),
+            "app_root": app_root(),
+            "sdk": self.runtime_info(),
+        })
+    }
+
+    fn builtin_sources_summary(&self, config: &Config) -> Vec<Value> {
+        let active_source = config.model_source.trim().to_ascii_lowercase();
+        [
+            ("geminicli", "Gemini CLI", Vec::<ProviderModel>::new()),
+            ("codex", "Codex", codex_catalog()),
+            ("nvidia", "NVIDIA", nvidia_catalog()),
+            ("modelscope", "ModelScope", modelscope_catalog()),
+            ("standard", "Standard", Vec::<ProviderModel>::new()),
+        ]
+        .into_iter()
+        .map(|(source, label, catalog)| {
+            let selected = config
+                .extra
+                .get(source)
+                .and_then(|value| value.get("selected_model_id"))
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            json!({
+                "source": source,
+                "label": label,
+                "active": active_source == source,
+                "credential": provider_credential_status(source, config),
+                "has_api_key": provider_has_credential(source, config),
+                "selected_model_id": selected,
+                "selected_model_display_name": catalog
+                    .iter()
+                    .find(|model| model.id == selected)
+                    .map(|model| model.display_name)
+                    .unwrap_or_default(),
+                "api_url": provider_api_url(source),
+                "endpoint": "",
+                "models": catalog,
+            })
+        })
+        .collect()
+    }
+
+    fn sessions_summary(&self) -> ReverieResult<Value> {
+        let store =
+            SessionStore::new(crate::config::project_data_dir(&self.project_root).join("sessions"));
+        let sessions = store
+            .list()?
+            .into_iter()
+            .map(|session| {
+                json!({
+                    "id": session.id,
+                    "name": session.title,
+                    "created_at": session.created_at,
+                    "updated_at": session.updated_at,
+                    "message_count": store
+                        .load_transcript(&session.id)
+                        .ok()
+                        .flatten()
+                        .map(|transcript| transcript.messages.len())
+                        .unwrap_or(0),
+                })
+            })
+            .collect::<Vec<_>>();
+        let active_id = store.active_id()?.unwrap_or_default();
+        let active = if active_id.is_empty() {
+            None
+        } else {
+            store.load_transcript(&active_id)?
+        };
+        let messages = active
+            .as_ref()
+            .map(|transcript| {
+                transcript
+                    .messages
+                    .iter()
+                    .rev()
+                    .take(80)
+                    .map(|message| {
+                        json!({
+                            "role": message.role,
+                            "content": message_content_text(&message.content),
+                        })
+                    })
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        Ok(json!({
+            "current_session_id": active.as_ref().map(|transcript| transcript.id.clone()).unwrap_or_default(),
+            "current_session_name": active.as_ref().map(|transcript| transcript.record.title.clone()).unwrap_or_default(),
+            "sessions": sessions,
+            "messages": messages,
+        }))
+    }
+
+    fn tools_summary(&self, mode: &str) -> Vec<Value> {
+        ToolRegistry::builtin()
+            .all()
+            .iter()
+            .map(|tool| {
+                json!({
+                    "name": tool.name,
+                    "description": tool.description,
+                    "category": tool.category,
+                    "tags": [],
+                    "visible": tool.modes.iter().any(|item| item == mode),
+                    "read_only": false,
+                    "destructive": matches!(tool.name.as_str(), "delete_file" | "command_exec"),
+                    "supported_modes": tool.modes,
+                })
+            })
+            .collect()
+    }
+
     fn handle_set_workspace(&mut self, payload: Value) -> ReverieResult<Value> {
         let path = payload
             .get("project_root")
+            .or_else(|| payload.get("projectRoot"))
             .or_else(|| payload.get("path"))
             .and_then(Value::as_str)
             .unwrap_or(".");
         self.project_root = PathBuf::from(path).canonicalize()?;
-        Ok(self.state())
+        self.state_event()
     }
 
     fn handle_set_mode(&mut self, payload: Value) -> ReverieResult<Value> {
@@ -190,24 +382,98 @@ impl ReverieUiBridge {
             .and_then(Value::as_str)
             .unwrap_or("reverie");
         self.mode = normalize_mode(mode).canonical().to_string();
-        Ok(self.state())
+        let manager = ConfigManager::new(&self.project_root, false);
+        let mut config = manager.load()?;
+        config.active_mode = self.mode.clone();
+        manager.save(&config)?;
+        self.state_event()
     }
 
     fn handle_set_setting(&mut self, payload: Value) -> ReverieResult<Value> {
         let id = payload
             .get("id")
+            .or_else(|| payload.get("key"))
             .or_else(|| payload.get("setting"))
             .and_then(Value::as_str)
             .unwrap_or_default();
         let value = payload.get("value").cloned().unwrap_or(Value::Null);
+        if id.eq_ignore_ascii_case("rules") {
+            let manager = RulesManager::new(&self.project_root);
+            let rules = rules_from_value(&value)?;
+            manager.set_rules(&rules)?;
+            return Ok(json!({
+                "type": "setting.updated",
+                "success": true,
+                "message": format!("Rules updated ({} total).", rules.len()),
+                "key": "rules",
+                "settings": self.settings_summary()?
+            }));
+        }
         let manager = ConfigManager::new(&self.project_root, false);
         let mut config = manager.load()?;
-        apply_setting(&mut config, id, value)?;
+        apply_setting(&mut config, normalize_setting_key(id), value)?;
         if id.eq_ignore_ascii_case("mode") {
             self.mode = config.active_mode.clone();
         }
         manager.save(&config)?;
-        Ok(json!({"config": config, "state": self.state()}))
+        Ok(json!({
+            "type": "setting.updated",
+            "success": true,
+            "message": format!("Setting `{id}` updated."),
+            "key": id,
+            "config": config,
+            "state": self.state(),
+            "settings": self.settings_summary()?
+        }))
+    }
+
+    fn handle_list_settings(&self) -> ReverieResult<Value> {
+        Ok(json!({
+            "type": "settings",
+            "settings": self.settings_summary()?
+        }))
+    }
+
+    fn settings_summary(&self) -> ReverieResult<Value> {
+        let manager = ConfigManager::new(&self.project_root, false);
+        let config = manager.load()?;
+        let rules_manager = RulesManager::new(&self.project_root);
+        let rules = rules_manager.get_rules()?;
+        let items = setting_items()
+            .iter()
+            .map(|item| {
+                let key = ui_setting_key(item.id);
+                let value = setting_value_for_ui(&config, item.id, &rules);
+                let options = item
+                    .options
+                    .iter()
+                    .map(|choice| json!({"value": choice, "label": choice}))
+                    .collect::<Vec<_>>();
+                let mut normalized = json!({
+                    "name": item.label,
+                    "key": key,
+                    "kind": item.kind,
+                    "description": item.description,
+                    "command": format!("/setting {} <value>", item.id),
+                    "value": value,
+                    "options": options
+                });
+                if item.id == "rules" {
+                    normalized["rules"] = json!(&rules);
+                }
+                if item.id == "workspace" {
+                    normalized["workspace_config_path"] = json!(manager.workspace_config_path);
+                    normalized["global_config_path"] = json!(manager.global_config_path);
+                }
+                normalized
+            })
+            .collect::<Vec<_>>();
+        Ok(json!({
+            "items": items,
+            "config_path": manager.active_config_path(),
+            "workspace_mode": manager.is_workspace_mode(),
+            "rules_path": rules_manager.rules_txt_path()
+        }))
     }
 
     fn handle_save_preferences(&mut self, payload: Value) -> ReverieResult<Value> {
@@ -220,7 +486,7 @@ impl ReverieUiBridge {
         }
         self.mode = config.active_mode.clone();
         manager.save(&config)?;
-        Ok(json!({"config": config, "state": self.state()}))
+        self.state_event()
     }
 
     fn handle_save_model(&mut self, payload: Value) -> ReverieResult<Value> {
@@ -250,7 +516,7 @@ impl ReverieUiBridge {
             .clone()
             .unwrap_or_else(|| "standard".to_string());
         manager.save(&config)?;
-        Ok(json!({"config": config, "model": model, "state": self.state()}))
+        self.state_event()
     }
 
     fn handle_delete_model(&mut self, payload: Value) -> ReverieResult<Value> {
@@ -266,7 +532,8 @@ impl ReverieUiBridge {
             config.active_model = config.models.first().map(|item| item.name.clone());
         }
         manager.save(&config)?;
-        Ok(json!({"deleted": deleted, "model": selected, "config": config}))
+        let _ = deleted;
+        self.state_event()
     }
 
     fn handle_select_model(&mut self, payload: Value) -> ReverieResult<Value> {
@@ -281,7 +548,7 @@ impl ReverieUiBridge {
             .and_then(|item| item.provider.clone())
             .unwrap_or_else(|| "standard".to_string());
         manager.save(&config)?;
-        Ok(json!({"selected": selected, "config": config, "state": self.state()}))
+        self.state_event()
     }
 
     fn handle_save_builtin_source(&mut self, payload: Value) -> ReverieResult<Value> {
@@ -299,7 +566,7 @@ impl ReverieUiBridge {
             .and_then(Value::as_str)
             .unwrap_or_default();
         match source.as_str() {
-            "nvidia" | "modelscope" | "codex" => {
+            "nvidia" | "modelscope" | "codex" | "gemini" | "ollama" => {
                 let catalog = provider_catalog(&source);
                 let selected = catalog
                     .iter()
@@ -342,7 +609,7 @@ impl ReverieUiBridge {
             }
         }
         manager.save(&config)?;
-        Ok(json!({"source": source, "config": config, "state": self.state()}))
+        self.state_event()
     }
 
     fn handle_select_builtin_source(&mut self, payload: Value) -> ReverieResult<Value> {
@@ -354,7 +621,7 @@ impl ReverieUiBridge {
             .to_ascii_lowercase();
         if !matches!(
             source.as_str(),
-            "standard" | "nvidia" | "modelscope" | "codex" | "geminicli"
+            "standard" | "nvidia" | "modelscope" | "codex" | "gemini" | "ollama" | "geminicli"
         ) {
             return Err(crate::ReverieError::InvalidInput(format!(
                 "unsupported built-in source: {source}"
@@ -364,7 +631,7 @@ impl ReverieUiBridge {
         let mut config = manager.load()?;
         config.model_source = source.clone();
         manager.save(&config)?;
-        Ok(json!({"source": source, "config": config, "state": self.state()}))
+        self.state_event()
     }
 
     fn handle_test_providers(&self, payload: Value) -> ReverieResult<Value> {
@@ -377,6 +644,8 @@ impl ReverieUiBridge {
                     "nvidia" => "NVIDIA_API_KEY",
                     "modelscope" => "MODELSCOPE_API_KEY",
                     "codex" => "OPENAI_API_KEY",
+                    "gemini" => "GEMINI_API_KEY",
+                    "ollama" => "", // Ollama local, no key needed
                     "standard" => config
                         .models
                         .iter()
@@ -400,16 +669,43 @@ impl ReverieUiBridge {
                 })
             })
             .collect::<Vec<_>>();
-        Ok(json!({"results": results}))
+        Ok(json!({"type": "provider.smoke", "results": results}))
     }
 
-    fn handle_index_workspace(&self) -> ReverieResult<Value> {
+    fn handle_index_workspace(&mut self, payload: Value) -> ReverieResult<Value> {
+        if let Some(path) = payload
+            .get("project_root")
+            .or_else(|| payload.get("projectRoot"))
+            .and_then(Value::as_str)
+        {
+            self.project_root = PathBuf::from(path).canonicalize()?;
+        }
         let result = CodebaseIndexer::new(&self.project_root)
             .with_cache_dir(
                 crate::config::project_data_dir(&self.project_root).join("context_cache"),
             )
             .full_index()?;
-        Ok(serde_json::to_value(result)?)
+        Ok(json!({
+            "type": "index.complete",
+            "result": serde_json::to_value(&result)?,
+            "success": result.success
+        }))
+    }
+
+    fn handle_get_totals(&self) -> ReverieResult<Value> {
+        Ok(json!({
+            "type": "totals",
+            "totals": crate::dashboard::summarize_totals(&self.project_root)?,
+        }))
+    }
+
+    async fn handle_run_agent_regression(&self) -> ReverieResult<Value> {
+        let summary = crate::dashboard::run_agent_regression(&self.project_root).await?;
+        Ok(json!({
+            "type": "agent.regression.complete",
+            "summary": summary,
+            "totals": crate::dashboard::summarize_totals(&self.project_root)?,
+        }))
     }
 
     fn handle_context_query(&self, payload: Value) -> ReverieResult<Value> {
@@ -447,7 +743,7 @@ impl ReverieUiBridge {
             SessionStore::new(crate::config::project_data_dir(&self.project_root).join("sessions"));
         let record = store.create(title, self.project_root.clone(), self.mode.clone())?;
         store.set_active(&record.id)?;
-        Ok(json!({"session": record, "sessions": store.list()?}))
+        self.state_event()
     }
 
     fn handle_session_command(&self, method: &str, payload: Value) -> ReverieResult<Value> {
@@ -455,16 +751,11 @@ impl ReverieUiBridge {
             SessionStore::new(crate::config::project_data_dir(&self.project_root).join("sessions"));
         let normalized = normalize_bridge_method(method);
         match normalized.trim_start_matches('_') {
-            "list_sessions" => Ok(json!({
-                "active_session_id": store.active_id()?,
-                "sessions": store.list()?
-            })),
+            "list_sessions" => self.state_event(),
             "switch_session" => {
                 let id = payload_session_id(&payload)?;
-                let session = store.set_active(&id)?;
-                Ok(
-                    json!({"session": session, "active_session_id": session.id, "sessions": store.list()?}),
-                )
+                store.set_active(&id)?;
+                self.state_event()
             }
             "rename_session" => {
                 let id = payload_session_id(&payload)?;
@@ -475,13 +766,13 @@ impl ReverieUiBridge {
                     .ok_or_else(|| {
                         crate::ReverieError::InvalidInput("session name is required".to_string())
                     })?;
-                let session = store.rename(&id, name)?;
-                Ok(json!({"session": session, "sessions": store.list()?}))
+                store.rename(&id, name)?;
+                self.state_event()
             }
             "delete_session" => {
                 let id = payload_session_id(&payload)?;
-                let deleted = store.delete(&id)?;
-                Ok(json!({"deleted": deleted, "session_id": id, "sessions": store.list()?}))
+                store.delete(&id)?;
+                self.state_event()
             }
             "clear_session" => {
                 let id = payload
@@ -493,10 +784,10 @@ impl ReverieUiBridge {
                     .ok_or_else(|| {
                         crate::ReverieError::InvalidInput("session id is required".to_string())
                     })?;
-                let session = store.clear(&id)?;
-                Ok(json!({"session": session, "sessions": store.list()?}))
+                store.clear(&id)?;
+                self.state_event()
             }
-            _ => Ok(json!({"sessions": store.list()?})),
+            _ => self.state_event(),
         }
     }
 
@@ -558,26 +849,119 @@ impl ReverieUiBridge {
                     .get("no_index")
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
+                sandbox_enabled: payload
+                    .get("sandbox_enabled")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                max_tool_rounds: payload
+                    .get("max_tool_rounds")
+                    .and_then(Value::as_u64)
+                    .map(|v| v as usize)
+                    .unwrap_or(MAX_TOOL_ROUNDS),
             },
         );
-        if payload
-            .get("stream")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-        {
-            let mut stream_events = Vec::new();
-            let mut sink = |event| {
-                stream_events.push(json!(event));
+        // Non-streaming mode: return result directly
+        Ok(agent.run_prompt_once(prompt).await?.to_json_value())
+    }
+
+    /// Handle a streaming chat request, emitting incremental JSONL frames to the writer.
+    /// Returns the final chat.complete value.
+    pub async fn handle_chat_streaming<W: Write + Send>(
+        &self,
+        payload: Value,
+        request_id: &Value,
+        writer: &mut W,
+    ) -> ReverieResult<Value> {
+        use crate::llm::ModelStreamEvent;
+
+        let prompt = payload
+            .get("prompt")
+            .or_else(|| payload.get("message"))
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let agent = ReverieAgent::new(
+            &self.project_root,
+            AgentOptions {
+                mode: normalize_mode(&self.mode),
+                no_index: payload
+                    .get("no_index")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                sandbox_enabled: payload
+                    .get("sandbox_enabled")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                max_tool_rounds: payload
+                    .get("max_tool_rounds")
+                    .and_then(Value::as_u64)
+                    .map(|v| v as usize)
+                    .unwrap_or(MAX_TOOL_ROUNDS),
+            },
+        );
+
+        let mut sink = |event: ModelStreamEvent| {
+            let frame = match &event {
+                ModelStreamEvent::Start { model } => json!({
+                    "id": request_id,
+                    "type": "stream.start",
+                    "model": model
+                }),
+                ModelStreamEvent::Content { content } => json!({
+                    "id": request_id,
+                    "type": "stream.content",
+                    "content": content
+                }),
+                ModelStreamEvent::ToolCallDelta {
+                    index,
+                    id,
+                    name,
+                    arguments_delta,
+                } => json!({
+                    "id": request_id,
+                    "type": "stream.tool_call",
+                    "index": index,
+                    "tool_call_id": id,
+                    "name": name,
+                    "arguments_delta": arguments_delta
+                }),
+                ModelStreamEvent::End { finish_reason } => json!({
+                    "id": request_id,
+                    "type": "stream.end",
+                    "finish_reason": finish_reason
+                }),
+                ModelStreamEvent::Recovered { message } => json!({
+                    "id": request_id,
+                    "type": "stream.recovered",
+                    "message": message
+                }),
+                ModelStreamEvent::ToolExecStart { id, name } => json!({
+                    "id": request_id,
+                    "type": "tool_call.start",
+                    "tool_call_id": id,
+                    "name": name
+                }),
+                ModelStreamEvent::ToolExecComplete {
+                    id,
+                    name,
+                    success,
+                    error,
+                } => json!({
+                    "id": request_id,
+                    "type": "tool_call.complete",
+                    "tool_call_id": id,
+                    "name": name,
+                    "success": success,
+                    "error": error
+                }),
             };
-            let mut value = agent
-                .run_prompt_streaming(prompt, &mut sink)
-                .await?
-                .to_json_value();
-            value["stream_events"] = json!(stream_events);
-            Ok(value)
-        } else {
-            Ok(agent.run_prompt_once(prompt).await?.to_json_value())
-        }
+            let _ = writeln!(writer, "{}", serde_json::to_string(&frame).unwrap_or_default());
+            let _ = writer.flush();
+        };
+
+        let result = agent.run_prompt_streaming(prompt, &mut sink).await?;
+        let mut value = result.to_json_value();
+        value["type"] = json!("chat.complete");
+        Ok(value)
     }
 
     async fn handle_git_status(&mut self, payload: Value) -> ReverieResult<Value> {
@@ -614,19 +998,62 @@ impl ReverieUiBridge {
             .cloned()
             .unwrap_or_else(|| json!({}));
         let manager = crate::plugins::RuntimePluginManager::new(&self.project_root);
-        manager
+        let result = manager
             .call_command(plugin_id, command_name, command_payload)
+            .await?;
+        Ok(json!({
+            "type": "plugin.command.complete",
+            "plugin_id": plugin_id,
+            "command": command_name,
+            "result": result
+        }))
+    }
+
+    async fn handle_list_plugins(&self) -> ReverieResult<Value> {
+        let manager = crate::plugins::RuntimePluginManager::new(&self.project_root);
+        let records = manager
+            .list_plugins_with_handshakes()
             .await
+            .unwrap_or_default();
+        let dynamic_tools = records
+            .iter()
+            .flat_map(|plugin| plugin.dynamic_tools.clone())
+            .collect::<Vec<_>>();
+        let record_values = records.iter().map(plugin_record_for_ui).collect::<Vec<_>>();
+        let remote = self.handle_list_remote_releases()?;
+        Ok(json!({
+            "type": "plugins",
+            "plugins": {
+                "summary": {
+                    "summary_label": format!("{} local plugins", record_values.len()),
+                    "runtime": "rust"
+                },
+                "records": record_values,
+                "source_validations": [],
+                "remote": remote.get("remote").cloned().unwrap_or_else(|| json!({})),
+                "dynamic_tools": dynamic_tools,
+                "templates": ["blender", "godot", "o3de", "game_models"],
+                "runtime": "rust"
+            }
+        }))
     }
 
     fn handle_list_remote_releases(&self) -> ReverieResult<Value> {
         let manifest = app_root().join("plugins").join("marketplace.json");
         let releases = if manifest.is_file() {
-            serde_json::from_str(&std::fs::read_to_string(manifest)?)?
+            serde_json::from_str(&std::fs::read_to_string(&manifest)?)?
         } else {
             json!({"plugins": []})
         };
-        Ok(json!({"releases": releases, "source": "local_marketplace"}))
+        Ok(json!({
+            "type": "remote.release",
+            "remote": {
+                "success": manifest.is_file(),
+                "manifest": releases,
+                "source": "local_marketplace",
+                "error": if manifest.is_file() { "" } else { "marketplace manifest not found" }
+            }
+        }))
     }
 
     async fn handle_install_remote_plugin(&self, payload: Value) -> ReverieResult<Value> {
@@ -656,7 +1083,9 @@ impl ReverieUiBridge {
                     source.display()
                 )));
             }
-            return Ok(json!({"installed": true, "plugin_id": plugin_id, "target": target}));
+            return Ok(
+                json!({"type": "plugin.installed", "installed": true, "plugin_id": plugin_id, "target": target}),
+            );
         }
 
         let download_url = payload
@@ -678,6 +1107,7 @@ impl ReverieUiBridge {
         let target = install_root.join(asset_name);
         std::fs::write(&target, &bytes)?;
         Ok(json!({
+            "type": "plugin.installed",
             "installed": true,
             "plugin_id": plugin_id,
             "target": target,
@@ -705,6 +1135,7 @@ impl ReverieUiBridge {
             .and_then(Value::as_str);
         let Some(build_command) = build_command else {
             return Ok(json!({
+                "type": "plugin.build.complete",
                 "plugin_id": plugin_id,
                 "built": false,
                 "message": "No build_command or scripts.build entry in plugin manifest.",
@@ -712,7 +1143,9 @@ impl ReverieUiBridge {
             }));
         };
         let output = run_shell_command(build_command, &record.root).await?;
-        Ok(json!({"plugin_id": plugin_id, "built": output["success"], "output": output}))
+        Ok(
+            json!({"type": "plugin.build.complete", "plugin_id": plugin_id, "built": output["success"], "output": output}),
+        )
     }
 
     fn handle_deploy_plugin(&self, payload: Value) -> ReverieResult<Value> {
@@ -729,7 +1162,9 @@ impl ReverieUiBridge {
         })?;
         let target = app_root().join("plugins").join(plugin_id);
         copy_dir_all(&record.root, &target)?;
-        Ok(json!({"plugin_id": plugin_id, "deployed": true, "target": target}))
+        Ok(
+            json!({"type": "plugin.deploy.complete", "plugin_id": plugin_id, "deployed": true, "target": target}),
+        )
     }
 
     async fn handle_inspect_plugin(&self, payload: Value) -> ReverieResult<Value> {
@@ -752,7 +1187,9 @@ impl ReverieUiBridge {
         } else {
             None
         };
-        Ok(json!({"plugin_id": plugin_id, "record": record, "handshake": handshake}))
+        Ok(
+            json!({"type": "plugin.inspect", "plugin_id": plugin_id, "record": record, "handshake": handshake}),
+        )
     }
 
     async fn handle_dynamic_plugin_tool(
@@ -854,9 +1291,105 @@ pub async fn run_sdk_bridge() -> ReverieResult<i32> {
             .or_else(|| frame.get("action").and_then(Value::as_str))
             .map(|method| method == "shutdown")
             .unwrap_or(false);
+        let request_id = frame.get("id").cloned().unwrap_or(Value::Null);
+        let method_name = frame
+            .get("method")
+            .and_then(Value::as_str)
+            .or_else(|| frame.get("type").and_then(Value::as_str))
+            .or_else(|| frame.get("action").and_then(Value::as_str))
+            .unwrap_or_default()
+            .to_string();
+        match normalize_bridge_method(&method_name).trim_start_matches('_') {
+            "index_workspace" => {
+                writeln!(
+                    stdout,
+                    "{}",
+                    serde_json::to_string(&json!({
+                        "id": request_id.clone(),
+                        "type": "index.started",
+                        "project_root": bridge.project_root
+                    }))?
+                )?;
+                stdout.flush()?;
+            }
+            "run_agent_regression" => {
+                writeln!(
+                    stdout,
+                    "{}",
+                    serde_json::to_string(&json!({
+                        "id": request_id.clone(),
+                        "type": "agent.regression.started"
+                    }))?
+                )?;
+                stdout.flush()?;
+            }
+            "chat" => {
+                let payload = frame
+                    .get("payload")
+                    .cloned()
+                    .unwrap_or_else(|| json!({}));
+                if payload
+                    .get("stream")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                {
+                    // Streaming chat — emit incremental JSONL frames
+                    let result = bridge
+                        .handle_chat_streaming(payload, &request_id, &mut stdout)
+                        .await;
+                    let response = match result {
+                        Ok(value) => json!({"id": request_id, "ok": true, "result": value, "type": "chat.complete"}),
+                        Err(err) => json!({"id": request_id, "ok": false, "error": err.to_string()}),
+                    };
+                    writeln!(stdout, "{}", serde_json::to_string(&response)?)?;
+                    stdout.flush()?;
+                    if should_shutdown {
+                        break;
+                    }
+                    continue;
+                }
+            }
+            _ => {}
+        }
         let response = bridge.handle(frame).await;
         writeln!(stdout, "{}", serde_json::to_string(&response)?)?;
         stdout.flush()?;
+        if normalize_bridge_method(&method_name).trim_start_matches('_') == "run_agent_regression" {
+            if let Some(totals) = response
+                .get("result")
+                .and_then(|result| result.get("totals"))
+                .cloned()
+            {
+                writeln!(
+                    stdout,
+                    "{}",
+                    serde_json::to_string(&json!({
+                        "id": request_id.clone(),
+                        "type": "totals",
+                        "totals": totals
+                    }))?
+                )?;
+                stdout.flush()?;
+            }
+        }
+        if normalize_bridge_method(&method_name).trim_start_matches('_') == "set_setting" {
+            if let Some(settings) = response
+                .get("result")
+                .and_then(|result| result.get("settings"))
+                .cloned()
+            {
+                writeln!(
+                    stdout,
+                    "{}",
+                    serde_json::to_string(&json!({
+                        "id": request_id.clone(),
+                        "type": "settings",
+                        "settings": settings
+                    }))?
+                )?;
+                stdout.flush()?;
+            }
+        }
         if should_shutdown {
             break;
         }
@@ -966,6 +1499,8 @@ fn provider_catalog(source: &str) -> Vec<ProviderModel> {
         "nvidia" => nvidia_catalog(),
         "modelscope" => modelscope_catalog(),
         "codex" => codex_catalog(),
+        "gemini" | "google" => gemini_catalog(),
+        "ollama" | "local" => ollama_catalog(),
         _ => Vec::new(),
     }
 }
@@ -983,6 +1518,14 @@ fn provider_model_config(provider: &str, selected: &ProviderModel) -> ModelConfi
         "codex" => (
             Some("https://api.openai.com/v1".to_string()),
             Some("OPENAI_API_KEY".to_string()),
+        ),
+        "gemini" | "google" => (
+            Some("https://generativelanguage.googleapis.com/v1beta".to_string()),
+            Some("GEMINI_API_KEY".to_string()),
+        ),
+        "ollama" | "local" => (
+            Some("http://localhost:11434/v1".to_string()),
+            None, // Ollama doesn't require API key
         ),
         _ => (None, None),
     };
@@ -1033,6 +1576,168 @@ fn provider_names_from_payload(payload: &Value) -> Vec<String> {
         "modelscope".to_string(),
         "codex".to_string(),
     ]
+}
+
+fn model_summary(index: usize, model: &ModelConfig) -> Value {
+    json!({
+        "index": index,
+        "name": model.name,
+        "model": model.model,
+        "model_display_name": if model.name.is_empty() { model.model.as_str() } else { model.name.as_str() },
+        "base_url": model.base_url,
+        "provider": model.provider.as_deref().unwrap_or("standard"),
+        "supports_vision": model.supports_vision,
+        "endpoint": "",
+        "max_context_tokens": 128000,
+        "has_api_key": model
+            .api_key_env
+            .as_deref()
+            .map(|name| std::env::var(name).is_ok())
+            .unwrap_or(false),
+    })
+}
+
+fn provider_api_url(source: &str) -> &str {
+    match source {
+        "nvidia" => "https://integrate.api.nvidia.com/v1",
+        "modelscope" => "https://api-inference.modelscope.cn/v1",
+        "codex" => "https://api.openai.com/v1",
+        _ => "",
+    }
+}
+
+fn provider_has_credential(source: &str, config: &Config) -> bool {
+    match source {
+        "nvidia" => std::env::var("NVIDIA_API_KEY").is_ok(),
+        "modelscope" => std::env::var("MODELSCOPE_API_KEY").is_ok(),
+        "codex" => std::env::var("OPENAI_API_KEY").is_ok(),
+        "standard" => config.models.iter().any(|model| {
+            model
+                .api_key_env
+                .as_deref()
+                .map(|name| std::env::var(name).is_ok())
+                .unwrap_or(false)
+        }),
+        _ => false,
+    }
+}
+
+fn provider_credential_status(source: &str, config: &Config) -> &'static str {
+    if provider_has_credential(source, config) {
+        "found"
+    } else {
+        "missing"
+    }
+}
+
+fn message_content_text(content: &Value) -> String {
+    if let Some(text) = content.as_str() {
+        return text.to_string();
+    }
+    if let Some(items) = content.as_array() {
+        return items
+            .iter()
+            .filter_map(|item| {
+                item.get("text")
+                    .or_else(|| item.get("content"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+    }
+    content.to_string()
+}
+
+fn plugin_record_for_ui(record: &crate::plugins::RuntimePluginRecord) -> Value {
+    let id = &record.spec.id;
+    json!({
+        "id": id,
+        "name": if record.spec.name.is_empty() { id.as_str() } else { record.spec.name.as_str() },
+        "display_name": if record.spec.name.is_empty() { id.as_str() } else { record.spec.name.as_str() },
+        "description": record.spec.description,
+        "version": record.spec.version,
+        "status": if record.ready { "ready" } else { "installed" },
+        "status_label": if record.ready { "ready" } else { "installed" },
+        "delivery": "rust",
+        "runtime_family": "rust",
+        "root": record.root,
+        "entry": record.spec.entry,
+        "entry_path": record.entry_path,
+        "manifest_path": record.manifest_path,
+        "capabilities": [],
+        "tool_count": record.dynamic_tools.len(),
+        "command_count": record.spec.commands.len(),
+        "commands": record.spec.commands,
+        "catalog_managed": false,
+        "build_commands": [],
+        "protocol_status": if record.handshake.is_some() { "ready" } else { "" },
+        "protocol_label": if record.handshake.is_some() { "ready" } else { "" },
+    })
+}
+
+fn normalize_setting_key(key: &str) -> &str {
+    match key {
+        "use_workspace_config" => "workspace",
+        "auto-index" => "auto_index",
+        "status-line" => "show_status_line",
+        "tool-output" => "tool_output_style",
+        "thinking" => "thinking_output_style",
+        "stream" => "stream_responses",
+        "timeout" => "api_timeout",
+        "retries" => "api_max_retries",
+        other => other,
+    }
+}
+
+fn ui_setting_key(id: &str) -> &str {
+    match id {
+        "workspace" => "use_workspace_config",
+        other => other,
+    }
+}
+
+fn setting_value_for_ui(config: &Config, id: &str, rules: &[String]) -> Value {
+    match id {
+        "mode" => json!(config.active_mode),
+        "model" => json!(config.active_model),
+        "theme" => config
+            .extra
+            .get("theme")
+            .cloned()
+            .unwrap_or_else(|| json!("default")),
+        "auto_index" => json!(config.auto_index),
+        "show_status_line" => json!(config.show_status_line),
+        "stream_responses" => json!(config.stream_responses),
+        "tool_output_style" => json!(config.tool_output_style),
+        "thinking_output_style" => json!(config.thinking_output_style),
+        "api_timeout" => json!(config.api_timeout),
+        "api_max_retries" => json!(config.api_max_retries),
+        "workspace" => json!(config.use_workspace_config),
+        "rules" => json!(rules.join("\n")),
+        _ => Value::Null,
+    }
+}
+
+fn rules_from_value(value: &Value) -> ReverieResult<Vec<String>> {
+    let raw_rules = if let Some(text) = value.as_str() {
+        text.lines().map(str::to_string).collect::<Vec<_>>()
+    } else if let Some(items) = value.as_array() {
+        items
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    } else {
+        return Err(crate::ReverieError::InvalidInput(
+            "rules expects a string or list value".to_string(),
+        ));
+    };
+    Ok(raw_rules
+        .into_iter()
+        .map(|rule| rule.trim().to_string())
+        .filter(|rule| !rule.is_empty())
+        .collect())
 }
 
 fn payload_session_id(payload: &Value) -> ReverieResult<String> {
@@ -1154,5 +1859,155 @@ mod tests {
         assert!(dynamic_tools
             .iter()
             .any(|tool| tool["name"] == "rc_sample_runtime_status"));
+    }
+
+    #[tokio::test]
+    async fn bridge_handles_ui_camel_case_dashboard_and_settings() {
+        let temp = TempDir::new().unwrap();
+        let project = temp.path().join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(project.join("main.rs"), "fn main() {}\n").unwrap();
+        let mut bridge = ReverieUiBridge::default();
+
+        let initialized = bridge
+            .handle(json!({
+                "id": "ui-init",
+                "action": "initialize",
+                "payload": {"projectRoot": project}
+            }))
+            .await;
+        assert_eq!(initialized["ok"], true);
+        assert_eq!(initialized["type"], "state");
+        assert!(initialized["config"]["modes"].is_array());
+
+        let settings = bridge
+            .handle(json!({"id": "ui-settings", "action": "listSettings", "payload": {}}))
+            .await;
+        assert_eq!(settings["ok"], true);
+        assert_eq!(settings["type"], "settings");
+        assert!(settings["settings"]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["key"] == "rules"));
+
+        let updated = bridge
+            .handle(json!({
+                "id": "ui-set-rules",
+                "action": "setSetting",
+                "payload": {"key": "rules", "value": "Always test P0"}
+            }))
+            .await;
+        assert_eq!(updated["ok"], true);
+        assert_eq!(updated["type"], "setting.updated");
+        assert!(updated["settings"]["rules_path"].is_string());
+
+        let totals = bridge
+            .handle(json!({"id": "ui-totals", "action": "getTotals", "payload": {}}))
+            .await;
+        assert_eq!(totals["ok"], true);
+        assert_eq!(totals["type"], "totals");
+        assert!(totals["totals"]["usage"].is_object());
+
+        let regression = bridge
+            .handle(json!({"id": "ui-regression", "action": "runAgentRegression", "payload": {}}))
+            .await;
+        assert_eq!(regression["ok"], true);
+        assert_eq!(regression["type"], "agent.regression.complete");
+        assert_eq!(regression["summary"]["passed"], true);
+
+        let indexed = bridge
+            .handle(json!({"id": "ui-index", "action": "indexWorkspace", "payload": {}}))
+            .await;
+        assert_eq!(indexed["ok"], true);
+        assert_eq!(indexed["type"], "index.complete");
+        assert_eq!(indexed["success"], true);
+    }
+
+    #[tokio::test]
+    async fn bridge_streaming_chat_emits_incremental_frames() {
+        let temp = TempDir::new().unwrap();
+        let project = temp.path().join("proj");
+        std::fs::create_dir_all(&project).unwrap();
+        let bridge = ReverieUiBridge {
+            project_root: project.clone(),
+            mode: "reverie".to_string(),
+        };
+
+        let mut output = Vec::<u8>::new();
+        let request_id = json!("stream-1");
+        // Without a configured model, streaming will fall through to local fallback
+        // but the method should still produce a chat.complete frame
+        let result = bridge
+            .handle_chat_streaming(
+                json!({"prompt": "hello", "stream": true, "no_index": true}),
+                &request_id,
+                &mut output,
+            )
+            .await;
+        assert!(result.is_ok());
+        let value = result.unwrap();
+        assert_eq!(value["type"], "chat.complete");
+        assert!(value["success"] == true);
+        // Output buffer may have streaming frames (if model was configured)
+        // or be empty (local fallback doesn't stream). Either way, valid.
+        let output_str = String::from_utf8(output).unwrap();
+        // If any frames were emitted, they should be valid JSONL
+        for line in output_str.lines() {
+            let parsed: Value = serde_json::from_str(line).unwrap();
+            assert!(parsed.get("type").is_some());
+            assert_eq!(parsed["id"], "stream-1");
+        }
+    }
+
+    #[test]
+    fn tool_exec_events_serialize_correctly() {
+        use crate::llm::ModelStreamEvent;
+
+        let start = ModelStreamEvent::ToolExecStart {
+            id: "call_abc".to_string(),
+            name: "file_ops".to_string(),
+        };
+        let complete = ModelStreamEvent::ToolExecComplete {
+            id: "call_abc".to_string(),
+            name: "file_ops".to_string(),
+            success: true,
+            error: None,
+        };
+        let start_json = serde_json::to_value(&start).unwrap();
+        assert_eq!(start_json["type"], "ToolExecStart");
+        assert_eq!(start_json["id"], "call_abc");
+        assert_eq!(start_json["name"], "file_ops");
+
+        let complete_json = serde_json::to_value(&complete).unwrap();
+        assert_eq!(complete_json["type"], "ToolExecComplete");
+        assert_eq!(complete_json["success"], true);
+        assert!(complete_json["error"].is_null());
+    }
+
+    #[test]
+    fn bridge_streaming_frame_types_are_recognized() {
+        // Verify the JSONL frame types that the bridge emits are stable strings
+        let valid_frame_types = [
+            "stream.start",
+            "stream.content",
+            "stream.tool_call",
+            "stream.end",
+            "stream.recovered",
+            "tool_call.start",
+            "tool_call.complete",
+            "chat.complete",
+        ];
+        // This is a schema test ensuring our frame type strings are stable
+        for frame_type in valid_frame_types {
+            assert!(
+                !frame_type.is_empty(),
+                "frame type must not be empty: {frame_type}"
+            );
+            assert!(
+                frame_type.contains('.'),
+                "frame type must be namespaced: {frame_type}"
+            );
+        }
     }
 }

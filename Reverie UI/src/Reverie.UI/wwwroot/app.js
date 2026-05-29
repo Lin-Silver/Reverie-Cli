@@ -231,6 +231,7 @@ function modelSourceLabel(source) {
     standard: "Custom Providers",
     geminicli: "Gemini CLI",
     codex: "Codex",
+    aihubmix: "AIhubMix",
     nvidia: "NVIDIA",
     modelscope: "ModelScope"
   };
@@ -694,7 +695,7 @@ function fillBuiltinSourceForm(sourceId = "") {
     el.builtinSourceModel.append(option);
   }
   el.builtinSourceApiKey.value = "";
-  el.builtinSourceApiKey.disabled = !["nvidia", "modelscope"].includes(source.source);
+  el.builtinSourceApiKey.disabled = !["aihubmix", "nvidia", "modelscope"].includes(source.source);
   el.builtinSourceApiUrl.value = source.api_url || "";
   el.builtinSourceEndpoint.value = source.endpoint || "";
   el.builtinSourceEndpoint.disabled = source.source === "modelscope";

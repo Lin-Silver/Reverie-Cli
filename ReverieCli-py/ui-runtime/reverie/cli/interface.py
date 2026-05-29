@@ -489,6 +489,9 @@ def _build_batch_prompt_rules() -> str:
 - Do not pause for approvals, confirmation checkpoints, or review requests that would normally require a second turn.
 - Avoid `userInput` and similar follow-up tools unless the task is impossible or unsafe without a clarifying answer.
 - For document-driven modes, continue through the requested document chain inside this same run when the prompt already authorizes the work.
+- For code repair or implementation tasks, actually edit the workspace files with the available editing tools. Do not stop after describing the patch or saying you are about to edit.
+- After code edits, run the most relevant visible test, build, or lint command before finalizing. If the user provided a test file, run it.
+- Handle edge cases from the written requirements, not only the visible sample tests.
 - Keep the final user-facing response compact. Prefer a short outcome-and-verification summary over long file inventories or repeated artifact descriptions.
 - For small bounded tasks, avoid extra files, checklists, or narrative detours beyond what the request needs.
 """.strip()
@@ -497,6 +500,141 @@ def _build_batch_prompt_rules() -> str:
 def _prompt_requests_followup_approval(output_text: str) -> bool:
     """Heuristic for prompt-mode responses that stop for approval instead of finishing."""
     return bool(_PROMPT_APPROVAL_RE.search(str(output_text or "")))
+
+
+_PROMPT_CODE_TASK_RE = re.compile(
+    r"\b("
+    r"fix|repair|implement|complete|update|modify|edit|refactor|debug|"
+    r"bug|failing|tests?|unittest|pytest|build|lint|compile"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _prompt_looks_like_code_task(prompt_text: str) -> bool:
+    """Return true when one-shot prompt mode likely needs file edits and verification."""
+    text = str(prompt_text or "")
+    if not text.strip():
+        return False
+    if re.search(r"[\w./\\-]+\.(py|js|ts|tsx|jsx|cs|rs|go|java|cpp|c|h|hpp|md|json|toml|yaml|yml)\b", text, re.IGNORECASE):
+        return True
+    return bool(_PROMPT_CODE_TASK_RE.search(text))
+
+
+def _prompt_tool_usage_counts(ui_events: List[Dict[str, Any]]) -> Dict[str, int]:
+    """Summarize tool use from captured prompt-mode UI events."""
+    edit_tools = {"str_replace_editor", "create_file", "delete_file"}
+    edit_commands = {"str_replace", "create", "insert"}
+    counts = {"edits": 0, "verification": 0}
+    for event in ui_events or []:
+        if not isinstance(event, dict) or str(event.get("event") or "") != "tool_result":
+            continue
+        if not bool(event.get("success", False)):
+            continue
+        tool_name = str(event.get("tool_name") or "").strip()
+        args = event.get("arguments") if isinstance(event.get("arguments"), dict) else {}
+        command = str((args or {}).get("command") or "").strip()
+        if tool_name in edit_tools and (tool_name != "str_replace_editor" or command in edit_commands):
+            counts["edits"] += 1
+        if tool_name == "command_exec":
+            output = " ".join(
+                str(part or "")
+                for part in [
+                    (args or {}).get("command"),
+                    event.get("message"),
+                    event.get("output"),
+                ]
+            ).lower()
+            if any(marker in output for marker in ("test", "pytest", "unittest", "lint", "build", "compile", "mypy", "ruff")):
+                counts["verification"] += 1
+    return counts
+
+
+def _prompt_needs_requirement_coverage_pass(prompt_text: str) -> bool:
+    """Return true for coding prompts that spell out behavioral requirements."""
+    text = str(prompt_text or "")
+    if not _prompt_looks_like_code_task(text):
+        return False
+    lowered = text.lower()
+    requirement_markers = (
+        "requirements:",
+        "requirement:",
+        "must ",
+        "must support",
+        "must handle",
+        "raise ",
+        "return ",
+        "preserve ",
+        "do not ",
+        "hidden",
+        "edge",
+        "boundary",
+        "tie",
+        "deterministic",
+        "zero",
+        "non-positive",
+        "duplicate",
+        "missing",
+        "unreachable",
+        "negative",
+        "empty",
+    )
+    return any(marker in lowered for marker in requirement_markers)
+
+
+def _prompt_had_requirement_coverage_followup(ui_events: List[Dict[str, Any]]) -> bool:
+    """Detect whether the one-shot safety net already requested requirement-derived checks."""
+    needle = "requirement-derived edge-case checks"
+    for event in ui_events or []:
+        if not isinstance(event, dict):
+            continue
+        text = " ".join(str(event.get(key) or "") for key in ("message", "detail", "output"))
+        if needle in text.lower():
+            return True
+    return False
+
+
+def _build_prompt_completion_followup_message(
+    mode: str,
+    original_prompt: str,
+    latest_output: str,
+    ui_events: List[Dict[str, Any]],
+    auto_followup_count: int = 0,
+) -> Optional[str]:
+    """Continue code tasks that ended without observable edits or verification."""
+    if normalize_mode(mode) not in {"reverie", "reverie-ant"}:
+        return None
+    if not _prompt_looks_like_code_task(original_prompt):
+        return None
+
+    counts = _prompt_tool_usage_counts(ui_events)
+    missing: List[str] = []
+    if counts["edits"] <= 0:
+        missing.append("actual file edits")
+    if counts["verification"] <= 0:
+        missing.append("a visible test/build/lint verification command")
+    if not missing:
+        output_lower = str(latest_output or "").lower()
+        if (
+            int(auto_followup_count or 0) <= 0
+            and
+            _prompt_needs_requirement_coverage_pass(original_prompt)
+            and not _prompt_had_requirement_coverage_followup(ui_events)
+            and "requirement-derived edge-case checks" not in output_lower
+        ):
+            return (
+                "Continue once more before finalizing: visible tests are not enough for this requirements-style coding task. "
+                "Derive requirement-derived edge-case checks from every explicit requirement in the original prompt, especially boundary values, zero or negative values, missing inputs, duplicate/tie cases, ordering/determinism, unreachable cases, and any special operators or semantics. "
+                "Run those checks with command_exec or a temporary workspace-local test script, fix any failures, delete temporary files if you created them, and then finish with a concise summary that says the requirement-derived edge-case checks passed."
+            )
+        return None
+
+    missing_text = " and ".join(missing)
+    return (
+        f"Continue now: the one-shot run is not complete because it has no recorded {missing_text}. "
+        "Use the workspace editing tools to make the requested code changes on disk, then run the most relevant visible tests or verification command. "
+        "Do not merely describe the patch or say you are about to edit; perform the tool calls and finish with a concise result summary."
+    )
 
 
 def _extract_requested_file_names(prompt_text: str) -> List[str]:
@@ -1085,6 +1223,7 @@ class ReverieInterface:
             "anthropic": "Anthropic",
             "gemini-cli": "Gemini",
             "codex": "Codex",
+            "aihubmix": "AIhubMix",
             "nvidia": "NVIDIA",
             "modelscope": "ModelScope",
         }
@@ -1092,6 +1231,7 @@ class ReverieInterface:
             "standard": "config.json",
             "geminicli": "Gemini CLI",
             "codex": "Codex",
+            "aihubmix": "AIhubMix",
             "nvidia": "NVIDIA",
             "modelscope": "ModelScope",
         }
@@ -3247,6 +3387,14 @@ class ReverieInterface:
                     self.project_root,
                 )
                 if not followup_message:
+                    followup_message = _build_prompt_completion_followup_message(
+                        base_config.mode,
+                        prompt_text,
+                        output_text,
+                        ui_events,
+                        auto_followup_count,
+                    )
+                if not followup_message:
                     break
 
                 auto_followup_count += 1
@@ -3347,16 +3495,28 @@ class ReverieInterface:
             tti_cfg.get("models", []),
             legacy_model_paths=tti_cfg.get("model_paths", []),
         )
+        from ..aihubmix_tti_profiles.registry import get_aihubmix_tti_model_catalog
+        from ..pollinations_tti_profiles.registry import get_pollinations_tti_model_catalog
+
+        aihubmix_tti_cfg = tti_cfg.get("aihubmix", {}) if isinstance(tti_cfg.get("aihubmix"), dict) else {}
+        aihubmix_tti_default = str(aihubmix_tti_cfg.get("default_model", "gpt-image-2-free") or "gpt-image-2-free").strip()
+        aihubmix_tti_models = get_aihubmix_tti_model_catalog()
+        pollinations_tti_cfg = tti_cfg.get("pollinations", {}) if isinstance(tti_cfg.get("pollinations"), dict) else {}
+        pollinations_tti_default = str(pollinations_tti_cfg.get("default_model", "flux") or "flux").strip()
+        pollinations_tti_models = get_pollinations_tti_model_catalog()
         default_display_name = resolve_tti_default_display_name(tti_cfg)
         active_tti_source = normalize_tti_source(tti_cfg.get("active_source", "local"))
 
         lines = [
             "## TTI Models (from config.json)",
             f"- Tool: `text_to_image`",
-            f"- Source selection: use `source=local` when overriding the default local TTI runtime.",
+            f"- Source selection: use `source=local`, `source=aihubmix`, or `source=pollinations` when overriding the default TTI runtime.",
             f"- Active source: {active_tti_source}",
             f"- Local selection rule: use configured local `display_name` values (not raw paths).",
             f"- Default local model: {default_display_name if default_display_name else '(none)'}",
+            f"- Default AIhubMix model: {aihubmix_tti_default}",
+            f"- Default Pollinations model: {pollinations_tti_default}",
+            f"- Pollinations authentication: generation requires `text_to_image.pollinations.api_key`, `POLLINATIONS_API_KEY`, or `POLLINATIONS_TOKEN`.",
         ]
 
         if not tti_models:
@@ -3369,6 +3529,16 @@ class ReverieInterface:
                 lines.append(
                     f"  [{idx}] display_name={item['display_name']}; path={item['path']}; introduction={intro_text}"
                 )
+        lines.append("- AIhubMix models:")
+        for idx, item in enumerate(aihubmix_tti_models):
+            lines.append(
+                f"  [{idx}] id={item['id']}; display_name={item['display_name']}; api={item.get('api', '')}"
+            )
+        lines.append("- Pollinations models:")
+        for idx, item in enumerate(pollinations_tti_models):
+            lines.append(
+                f"  [{idx}] id={item['id']}; display_name={item['display_name']}; api={item.get('api', '')}"
+            )
 
         memory_title = "Computer Controller History" if normalized_mode == "computer-controller" else "Workspace Global Memory"
         memory_label = "computer-control history archive" if normalized_mode == "computer-controller" else "workspace global memory"

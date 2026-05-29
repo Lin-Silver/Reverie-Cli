@@ -1223,6 +1223,7 @@ class ReverieInterface:
             "anthropic": "Anthropic",
             "gemini-cli": "Gemini",
             "codex": "Codex",
+            "aihubmix": "AIhubMix",
             "nvidia": "NVIDIA",
             "modelscope": "ModelScope",
         }
@@ -1230,6 +1231,7 @@ class ReverieInterface:
             "standard": "config.json",
             "geminicli": "Gemini CLI",
             "codex": "Codex",
+            "aihubmix": "AIhubMix",
             "nvidia": "NVIDIA",
             "modelscope": "ModelScope",
         }
@@ -3493,16 +3495,28 @@ class ReverieInterface:
             tti_cfg.get("models", []),
             legacy_model_paths=tti_cfg.get("model_paths", []),
         )
+        from ..aihubmix_tti_profiles.registry import get_aihubmix_tti_model_catalog
+        from ..pollinations_tti_profiles.registry import get_pollinations_tti_model_catalog
+
+        aihubmix_tti_cfg = tti_cfg.get("aihubmix", {}) if isinstance(tti_cfg.get("aihubmix"), dict) else {}
+        aihubmix_tti_default = str(aihubmix_tti_cfg.get("default_model", "gpt-image-2-free") or "gpt-image-2-free").strip()
+        aihubmix_tti_models = get_aihubmix_tti_model_catalog()
+        pollinations_tti_cfg = tti_cfg.get("pollinations", {}) if isinstance(tti_cfg.get("pollinations"), dict) else {}
+        pollinations_tti_default = str(pollinations_tti_cfg.get("default_model", "flux") or "flux").strip()
+        pollinations_tti_models = get_pollinations_tti_model_catalog()
         default_display_name = resolve_tti_default_display_name(tti_cfg)
         active_tti_source = normalize_tti_source(tti_cfg.get("active_source", "local"))
 
         lines = [
             "## TTI Models (from config.json)",
             f"- Tool: `text_to_image`",
-            f"- Source selection: use `source=local` when overriding the default local TTI runtime.",
+            f"- Source selection: use `source=local`, `source=aihubmix`, or `source=pollinations` when overriding the default TTI runtime.",
             f"- Active source: {active_tti_source}",
             f"- Local selection rule: use configured local `display_name` values (not raw paths).",
             f"- Default local model: {default_display_name if default_display_name else '(none)'}",
+            f"- Default AIhubMix model: {aihubmix_tti_default}",
+            f"- Default Pollinations model: {pollinations_tti_default}",
+            f"- Pollinations authentication: generation requires `text_to_image.pollinations.api_key`, `POLLINATIONS_API_KEY`, or `POLLINATIONS_TOKEN`.",
         ]
 
         if not tti_models:
@@ -3515,6 +3529,16 @@ class ReverieInterface:
                 lines.append(
                     f"  [{idx}] display_name={item['display_name']}; path={item['path']}; introduction={intro_text}"
                 )
+        lines.append("- AIhubMix models:")
+        for idx, item in enumerate(aihubmix_tti_models):
+            lines.append(
+                f"  [{idx}] id={item['id']}; display_name={item['display_name']}; api={item.get('api', '')}"
+            )
+        lines.append("- Pollinations models:")
+        for idx, item in enumerate(pollinations_tti_models):
+            lines.append(
+                f"  [{idx}] id={item['id']}; display_name={item['display_name']}; api={item.get('api', '')}"
+            )
 
         memory_title = "Computer Controller History" if normalized_mode == "computer-controller" else "Workspace Global Memory"
         memory_label = "computer-control history archive" if normalized_mode == "computer-controller" else "workspace global memory"

@@ -31,6 +31,7 @@ NVIDIA_NEMOTRON_3_SUPER_CONTEXT_TOKENS = 1_000_000
 NVIDIA_MINIMAX_CONTEXT_TOKENS = 204_800
 NVIDIA_GLM_CONTEXT_TOKENS = 131_072
 NVIDIA_STEP_FLASH_CONTEXT_TOKENS = 256_000
+NVIDIA_STEP_37_FLASH_MAX_OUTPUT_TOKENS = 16_384
 NVIDIA_GPT_OSS_120B_CONTEXT_TOKENS = 128_000
 NVIDIA_KIMI_K2_6_CONTEXT_TOKENS = 262_144
 NVIDIA_DEEPSEEK_V4_CONTEXT_TOKENS = 1_000_000
@@ -330,6 +331,14 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         thinking=True,
         thinking_control="fixed",
         context_length=NVIDIA_STEP_FLASH_CONTEXT_TOKENS,
+    ),
+    _request_model(
+        "stepfun-ai/step-3.7-flash",
+        "Step-3.7-Flash",
+        "Request transport with multimodal image input defaults.",
+        vision=True,
+        context_length=NVIDIA_STEP_FLASH_CONTEXT_TOKENS,
+        max_output_tokens=NVIDIA_STEP_37_FLASH_MAX_OUTPUT_TOKENS,
     ),
     _openai_model(
         "deepseek-ai/deepseek-v4-pro",

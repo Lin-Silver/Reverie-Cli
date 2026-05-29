@@ -30,6 +30,11 @@ from .codex import (
     default_codex_config,
     normalize_codex_config,
 )
+from .aihubmix import (
+    build_aihubmix_runtime_model_data,
+    default_aihubmix_config,
+    normalize_aihubmix_config,
+)
 from .atlas import (
     default_atlas_mode_config,
     normalize_atlas_mode_config,
@@ -50,11 +55,11 @@ from .modelscope import (
 from .modes import normalize_mode
 from .version import CONFIG_VERSION, __version__
 
-EXTERNAL_MODEL_SOURCES = ("geminicli", "codex", "nvidia", "modelscope")
+EXTERNAL_MODEL_SOURCES = ("geminicli", "codex", "aihubmix", "nvidia", "modelscope")
 SUPPORTED_ACTIVE_MODEL_SOURCES = ("standard",) + EXTERNAL_MODEL_SOURCES
 SUPPORTED_TOOL_OUTPUT_STYLES = ("compact", "condensed", "full")
 SUPPORTED_THINKING_OUTPUT_STYLES = ("hidden", "compact", "full")
-SUPPORTED_TTI_SOURCES = ("local",)
+SUPPORTED_TTI_SOURCES = ("local", "aihubmix", "pollinations")
 PROJECTS_DATA_DIRNAME = "projects"
 LEGACY_PROJECT_CACHES_DIRNAME = "project_caches"
 
@@ -175,6 +180,27 @@ def default_text_to_image_config() -> Dict[str, Any]:
         "force_cpu": False,
         "auto_install_missing_deps": False,
         "auto_install_max_missing_deps": 6,
+        "aihubmix": {
+            "enabled": True,
+            "api_key": "",
+            "base_url": "https://aihubmix.com/v1",
+            "default_model": "gpt-image-2-free",
+            "timeout": 300,
+            "default_size": "auto",
+            "default_quality": "auto",
+            "default_aspect_ratio": "1:1",
+        },
+        "pollinations": {
+            "enabled": True,
+            "api_key": "",
+            "base_url": "https://gen.pollinations.ai/v1",
+            "default_model": "flux",
+            "timeout": 300,
+            "default_size": "1024x1024",
+            "default_quality": "medium",
+            "response_format": "b64_json",
+            "safe": "",
+        },
     }
 
 def default_writer_mode_config() -> Dict[str, Any]:
@@ -809,7 +835,7 @@ class Config:
     """Main configuration"""
     models: List[ModelConfig] = field(default_factory=list)
     active_model_index: int = 0
-    active_model_source: str = "standard"  # standard | geminicli | codex | nvidia | modelscope
+    active_model_source: str = "standard"  # standard | geminicli | codex | aihubmix | nvidia | modelscope
     mode: str = "reverie"
     theme: str = "default"
     max_context_tokens: int = 128000
@@ -833,6 +859,7 @@ class Config:
     text_to_image: Dict[str, Any] = field(default_factory=default_text_to_image_config)
     geminicli: Dict[str, Any] = field(default_factory=dict)
     codex: Dict[str, Any] = field(default_factory=dict)
+    aihubmix: Dict[str, Any] = field(default_factory=default_aihubmix_config)
     nvidia: Dict[str, Any] = field(default_factory=default_nvidia_config)
     modelscope: Dict[str, Any] = field(default_factory=default_modelscope_config)
     atlas_mode: Dict[str, Any] = field(default_factory=default_atlas_mode_config)
@@ -881,6 +908,11 @@ class Config:
             if runtime_codex_model:
                 return ModelConfig.from_dict(runtime_codex_model)
 
+        if source == "aihubmix":
+            runtime_aihubmix_model = build_aihubmix_runtime_model_data(self.aihubmix)
+            if runtime_aihubmix_model:
+                return ModelConfig.from_dict(runtime_aihubmix_model)
+
         if source == "nvidia":
             runtime_nvidia_model = build_nvidia_runtime_model_data(runtime_nvidia_config)
             if runtime_nvidia_model:
@@ -896,7 +928,23 @@ class Config:
         return None
     
     def to_dict(self) -> dict:
-        text_to_image = dict(self.text_to_image) if isinstance(self.text_to_image, dict) else default_text_to_image_config()
+        text_to_image_defaults = default_text_to_image_config()
+        text_to_image = dict(self.text_to_image) if isinstance(self.text_to_image, dict) else dict(text_to_image_defaults)
+        for key, value in text_to_image_defaults.items():
+            if key not in text_to_image:
+                text_to_image[key] = value
+        if isinstance(text_to_image.get("aihubmix"), dict):
+            nested_aihubmix = dict(text_to_image_defaults["aihubmix"])
+            nested_aihubmix.update(text_to_image.get("aihubmix", {}))
+            text_to_image["aihubmix"] = nested_aihubmix
+        else:
+            text_to_image["aihubmix"] = dict(text_to_image_defaults["aihubmix"])
+        if isinstance(text_to_image.get("pollinations"), dict):
+            nested_pollinations = dict(text_to_image_defaults["pollinations"])
+            nested_pollinations.update(text_to_image.get("pollinations", {}))
+            text_to_image["pollinations"] = nested_pollinations
+        else:
+            text_to_image["pollinations"] = dict(text_to_image_defaults["pollinations"])
         text_to_image['active_source'] = normalize_tti_source(text_to_image.get('active_source', 'local'))
         text_to_image['models'] = normalize_tti_models(
             text_to_image.get('models', []),
@@ -908,6 +956,7 @@ class Config:
         tti_models = text_to_image['models']
         geminicli = normalize_geminicli_config(self.geminicli)
         codex = normalize_codex_config(self.codex)
+        aihubmix = normalize_aihubmix_config(self.aihubmix)
         nvidia = normalize_nvidia_config(self.nvidia)
         modelscope = normalize_modelscope_config(self.modelscope)
         atlas_mode = normalize_atlas_mode_config(self.atlas_mode)
@@ -939,6 +988,7 @@ class Config:
             'text_to_image': text_to_image,
             'geminicli': geminicli,
             'codex': codex,
+            'aihubmix': aihubmix,
             'nvidia': nvidia,
             'modelscope': modelscope,
             'atlas_mode': atlas_mode,
@@ -955,6 +1005,14 @@ class Config:
         loaded_t2i = data.get('text_to_image', data.get('tti', {}))
         if isinstance(loaded_t2i, dict):
             text_to_image.update(loaded_t2i)
+            if isinstance(loaded_t2i.get("aihubmix"), dict):
+                nested_aihubmix = dict(default_text_to_image_config()["aihubmix"])
+                nested_aihubmix.update(loaded_t2i.get("aihubmix", {}))
+                text_to_image["aihubmix"] = nested_aihubmix
+            if isinstance(loaded_t2i.get("pollinations"), dict):
+                nested_pollinations = dict(default_text_to_image_config()["pollinations"])
+                nested_pollinations.update(loaded_t2i.get("pollinations", {}))
+                text_to_image["pollinations"] = nested_pollinations
         top_level_tti_models = data.get('tti-models', None)
         if top_level_tti_models is not None:
             text_to_image['models'] = top_level_tti_models
@@ -970,6 +1028,8 @@ class Config:
         geminicli = normalize_geminicli_config(raw_geminicli)
         raw_codex = data.get('codex', {})
         codex = normalize_codex_config(raw_codex)
+        raw_aihubmix = data.get('aihubmix', {})
+        aihubmix = normalize_aihubmix_config(raw_aihubmix)
         raw_nvidia = data.get('nvidia', {})
         nvidia = normalize_nvidia_config(raw_nvidia)
         raw_modelscope = data.get('modelscope', {})
@@ -1005,6 +1065,7 @@ class Config:
             text_to_image=text_to_image,
             geminicli=geminicli,
             codex=codex,
+            aihubmix=aihubmix,
             nvidia=nvidia,
             modelscope=modelscope,
             atlas_mode=atlas_mode,
@@ -1623,6 +1684,17 @@ class ConfigManager:
                     needs_update = True
                     break
 
+        # Check if aihubmix section is missing
+        if 'aihubmix' not in data:
+            needs_update = True
+        elif not isinstance(data.get('aihubmix'), dict):
+            needs_update = True
+        else:
+            for field_name in default_aihubmix_config().keys():
+                if field_name not in data.get('aihubmix', {}):
+                    needs_update = True
+                    break
+
         # Check if nvidia section is missing
         if 'nvidia' not in data:
             needs_update = True
@@ -1694,6 +1766,24 @@ class ConfigManager:
                     if field_name not in text_to_image:
                         needs_update = True
                         break
+                tti_aihubmix_defaults = default_text_to_image_config().get("aihubmix", {})
+                tti_aihubmix = text_to_image.get("aihubmix", {})
+                if not isinstance(tti_aihubmix, dict):
+                    needs_update = True
+                else:
+                    for field_name in tti_aihubmix_defaults.keys():
+                        if field_name not in tti_aihubmix:
+                            needs_update = True
+                            break
+                tti_pollinations_defaults = default_text_to_image_config().get("pollinations", {})
+                tti_pollinations = text_to_image.get("pollinations", {})
+                if not isinstance(tti_pollinations, dict):
+                    needs_update = True
+                else:
+                    for field_name in tti_pollinations_defaults.keys():
+                        if field_name not in tti_pollinations:
+                            needs_update = True
+                            break
                 models = text_to_image.get('models', [])
                 if not isinstance(models, list):
                     needs_update = True
@@ -1761,6 +1851,8 @@ class ConfigManager:
             return True
         if normalize_codex_config(getattr(config, "codex", {})).get("selected_model_id"):
             return True
+        if build_aihubmix_runtime_model_data(getattr(config, "aihubmix", {})):
+            return True
         if build_modelscope_runtime_model_data(getattr(config, "modelscope", {})):
             return True
         nvidia = normalize_nvidia_config(getattr(config, "nvidia", {}))
@@ -1791,6 +1883,8 @@ class ConfigManager:
                     config.active_model_source = "geminicli"
                 elif normalize_codex_config(getattr(config, "codex", {})).get("selected_model_id"):
                     config.active_model_source = "codex"
+                elif build_aihubmix_runtime_model_data(getattr(config, "aihubmix", {})):
+                    config.active_model_source = "aihubmix"
                 elif build_nvidia_runtime_model_data(getattr(config, "nvidia", {})):
                     config.active_model_source = "nvidia"
                 elif build_modelscope_runtime_model_data(getattr(config, "modelscope", {})):

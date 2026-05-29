@@ -7,6 +7,7 @@ Handles all commands starting with / with dreamy pink-purple-blue aesthetics
 from typing import Optional, Callable, Dict, Any, List
 from pathlib import Path
 import json
+import os
 import re
 import shlex
 import time
@@ -68,6 +69,8 @@ class CommandHandler:
             'subagents': self.cmd_subagent,
             'geminicli': self.cmd_geminicli,
             'codex': self.cmd_codex,
+            'aihubmix': self.cmd_aihubmix,
+            'aihub': self.cmd_aihubmix,
             'nvidia': self.cmd_nvidia,
             'modelscope': self.cmd_modelscope,
             'mode': self.cmd_mode,
@@ -3492,14 +3495,14 @@ class CommandHandler:
         Supported:
         - /tti models      -> list TTI models and pick default model
         - /tti add         -> add a TTI model to config
-        - /tti source      -> confirm the active local TTI source
+        - /tti source      -> select local, AIhubMix, or Pollinations TTI source
         - /tti <prompt>    -> generate one image with default model/default params
         """
         raw = args.strip()
         if not raw:
             self.console.print(
                 f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} "
-                f"Usage: /tti models OR /tti source [local] OR /tti add OR /tti <your prompt>"
+                f"Usage: /tti models OR /tti source [local|aihubmix|pollinations] OR /tti add OR /tti <your prompt>"
                 f"[/{self.theme.AMBER_GLOW}]"
             )
             return True
@@ -3650,7 +3653,7 @@ class CommandHandler:
         return True
 
     def _cmd_tti_source(self, value: str) -> bool:
-        """Keep text-to-image source pinned to the local runtime."""
+        """Select the active text-to-image source."""
         loaded = self._load_tti_config()
         if not loaded:
             self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]")
@@ -3663,13 +3666,34 @@ class CommandHandler:
         candidate = normalize_tti_source(raw_value, default="") if raw_value else ""
         if raw_value and not candidate:
             self.console.print(
-                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid TTI source: {escape(raw_value)}. Use local.[/{self.theme.CORAL_SOFT}]"
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid TTI source: {escape(raw_value)}. Use local, aihubmix, or pollinations.[/{self.theme.CORAL_SOFT}]"
             )
             return True
         if not candidate:
             current = normalize_tti_source(tti_cfg.get("active_source", "local"))
-            candidate = Prompt.ask("TTI source", default=current, choices=["local"]).strip().lower()
+            candidate = Prompt.ask("TTI source", default=current, choices=["local", "aihubmix", "pollinations"]).strip().lower()
             candidate = normalize_tti_source(candidate)
+
+        if candidate == "pollinations":
+            tti_pollinations = tti_cfg.get("pollinations", {}) if isinstance(tti_cfg.get("pollinations"), dict) else {}
+            configured_key = str(tti_pollinations.get("api_key", "") or "").strip()
+            env_key = str(os.environ.get("POLLINATIONS_API_KEY") or os.environ.get("POLLINATIONS_TOKEN") or "").strip()
+            if not configured_key and not env_key:
+                self.console.print()
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Pollinations requires an API key for image generation. Get one from https://enter.pollinations.ai and paste it here to continue.[/{self.theme.TEXT_DIM}]"
+                )
+                configured_key = Prompt.ask(
+                    f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Pollinations API Key",
+                    password=True,
+                ).strip()
+                if not configured_key:
+                    self.console.print(
+                        f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Pollinations API key is required to activate this TTI source.[/{self.theme.CORAL_SOFT}]"
+                    )
+                    return True
+                tti_pollinations["api_key"] = configured_key
+                tti_cfg["pollinations"] = tti_pollinations
 
         tti_cfg["active_source"] = candidate
         config.text_to_image = tti_cfg
@@ -3684,12 +3708,106 @@ class CommandHandler:
 
     def _cmd_tti_models(self) -> bool:
         """Show TTI model selector and set default model."""
+        from ..config import normalize_tti_source
+
         loaded = self._load_tti_config()
         if not loaded:
             self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]")
             return True
 
         config_manager, config, tti_cfg, models, default_display_name = loaded
+        if normalize_tti_source(tti_cfg.get("active_source", "local")) == "aihubmix":
+            from ..aihubmix_tti_profiles.registry import get_aihubmix_tti_model_catalog
+            from .tui_selector import ModelSelector, SelectorAction
+
+            tti_aihubmix = tti_cfg.get("aihubmix", {}) if isinstance(tti_cfg.get("aihubmix"), dict) else {}
+            default_model = str(tti_aihubmix.get("default_model", "gpt-image-2-free") or "gpt-image-2-free").strip()
+            catalog = get_aihubmix_tti_model_catalog()
+            models_data = []
+            current_model_id = None
+            for i, model in enumerate(catalog):
+                model_id = str(model.get("id", ""))
+                models_data.append(
+                    {
+                        "id": str(i),
+                        "name": str(model.get("display_name", model_id)),
+                        "description": f"{model_id} | {model.get('api', '')} | {model.get('description', '')}",
+                        "model": model,
+                    }
+                )
+                if model_id.lower() == default_model.lower():
+                    current_model_id = str(i)
+
+            selector = ModelSelector(console=self.console, models=models_data, current_model=current_model_id)
+            result = selector.run()
+            if result.action != SelectorAction.SELECT or not result.selected_item:
+                return True
+            try:
+                selected_idx = int(result.selected_item.id)
+            except (TypeError, ValueError):
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid model selection.[/{self.theme.CORAL_SOFT}]")
+                return True
+            if selected_idx < 0 or selected_idx >= len(catalog):
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid model index.[/{self.theme.CORAL_SOFT}]")
+                return True
+            selected_model = catalog[selected_idx]
+            tti_aihubmix["default_model"] = selected_model["id"]
+            tti_cfg["aihubmix"] = tti_aihubmix
+            config.text_to_image = tti_cfg
+            config_manager.save(config)
+            self.console.print(
+                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Default AIhubMix TTI model set to: {selected_model['display_name']}[/{self.theme.MINT_VIBRANT}]"
+            )
+            if self.app.get('reinit_agent'):
+                self.app['reinit_agent']()
+            return True
+
+        if normalize_tti_source(tti_cfg.get("active_source", "local")) == "pollinations":
+            from ..pollinations_tti_profiles.registry import get_pollinations_tti_model_catalog
+            from .tui_selector import ModelSelector, SelectorAction
+
+            tti_pollinations = tti_cfg.get("pollinations", {}) if isinstance(tti_cfg.get("pollinations"), dict) else {}
+            default_model = str(tti_pollinations.get("default_model", "flux") or "flux").strip()
+            catalog = get_pollinations_tti_model_catalog()
+            models_data = []
+            current_model_id = None
+            for i, model in enumerate(catalog):
+                model_id = str(model.get("id", ""))
+                input_modalities = ",".join(model.get("input_modalities", []))
+                models_data.append(
+                    {
+                        "id": str(i),
+                        "name": str(model.get("display_name", model_id)),
+                        "description": f"{model_id} | inputs: {input_modalities} | {model.get('description', '')}",
+                        "model": model,
+                    }
+                )
+                if model_id.lower() == default_model.lower():
+                    current_model_id = str(i)
+
+            selector = ModelSelector(console=self.console, models=models_data, current_model=current_model_id)
+            result = selector.run()
+            if result.action != SelectorAction.SELECT or not result.selected_item:
+                return True
+            try:
+                selected_idx = int(result.selected_item.id)
+            except (TypeError, ValueError):
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid model selection.[/{self.theme.CORAL_SOFT}]")
+                return True
+            if selected_idx < 0 or selected_idx >= len(catalog):
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid model index.[/{self.theme.CORAL_SOFT}]")
+                return True
+            selected_model = catalog[selected_idx]
+            tti_pollinations["default_model"] = selected_model["id"]
+            tti_cfg["pollinations"] = tti_pollinations
+            config.text_to_image = tti_cfg
+            config_manager.save(config)
+            self.console.print(
+                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Default Pollinations TTI model set to: {selected_model['display_name']}[/{self.theme.MINT_VIBRANT}]"
+            )
+            if self.app.get('reinit_agent'):
+                self.app['reinit_agent']()
+            return True
 
         if not models:
             self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} No TTI models configured in config.json.[/{self.theme.AMBER_GLOW}]")
@@ -5516,6 +5634,7 @@ class CommandHandler:
             "standard": "Custom Providers",
             "geminicli": "Gemini CLI",
             "codex": "Codex",
+            "aihubmix": "AIhubMix",
             "nvidia": "NVIDIA",
             "modelscope": "ModelScope",
         }
@@ -6586,6 +6705,233 @@ class CommandHandler:
             return self._cmd_codex_thinking("")
 
         return True
+
+    def cmd_aihubmix(self, args: str) -> bool:
+        """Manage AIhubMix source settings."""
+        raw = args.strip()
+        if not raw:
+            return self._cmd_aihubmix_status()
+
+        lowered = raw.lower()
+        if lowered in ("status", "check"):
+            return self._cmd_aihubmix_status()
+        if lowered in ("key", "apikey", "api-key", "login"):
+            return self._cmd_aihubmix_key()
+        if lowered in ("activate", "use"):
+            return self._cmd_aihubmix_activate()
+        if lowered == "model":
+            return self._cmd_aihubmix_model("")
+        if lowered.startswith("model "):
+            return self._cmd_aihubmix_model(raw[6:].strip())
+        if lowered in ("endpoint", "url", "base-url", "baseurl"):
+            return self._cmd_aihubmix_endpoint("")
+        if lowered.startswith("endpoint "):
+            return self._cmd_aihubmix_endpoint(raw[9:].strip())
+        if lowered.startswith("url "):
+            return self._cmd_aihubmix_endpoint(raw[4:].strip())
+        if lowered.startswith("base-url "):
+            return self._cmd_aihubmix_endpoint(raw[9:].strip())
+        if lowered.startswith("baseurl "):
+            return self._cmd_aihubmix_endpoint(raw[8:].strip())
+
+        self.console.print(
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /aihubmix [status|key|activate|model|endpoint][/{self.theme.AMBER_GLOW}]"
+        )
+        return True
+
+    def _ensure_aihubmix_configuration(self, config) -> bool:
+        """Prompt for AIhubMix API key when needed and bind the source."""
+        from ..aihubmix import (
+            AIHUBMIX_API_KEY_HINT_URL,
+            normalize_aihubmix_config,
+            resolve_aihubmix_api_key,
+        )
+
+        aihubmix_cfg = normalize_aihubmix_config(getattr(config, "aihubmix", {}))
+        api_key = resolve_aihubmix_api_key(aihubmix_cfg)
+        if not api_key:
+            self.console.print()
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Get your AIhubMix API key here: {AIHUBMIX_API_KEY_HINT_URL}[/{self.theme.TEXT_DIM}]"
+            )
+            api_key = Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] AIhubMix API Key",
+                password=True,
+            ).strip()
+            if not api_key:
+                self.console.print(
+                    f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} AIhubMix API key is required to activate this source.[/{self.theme.CORAL_SOFT}]"
+                )
+                return False
+        aihubmix_cfg["api_key"] = api_key
+        config.aihubmix = normalize_aihubmix_config(aihubmix_cfg)
+        config.active_model_source = "aihubmix"
+        return True
+
+    def _cmd_aihubmix_status(self) -> bool:
+        from ..aihubmix import (
+            AIHUBMIX_API_KEY_HINT_URL,
+            mask_secret,
+            normalize_aihubmix_config,
+            resolve_aihubmix_api_key,
+            resolve_aihubmix_selected_model,
+        )
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        aihubmix_cfg = normalize_aihubmix_config(getattr(config, "aihubmix", {}))
+        selected = resolve_aihubmix_selected_model(aihubmix_cfg)
+        effective_api_key = resolve_aihubmix_api_key(aihubmix_cfg)
+        key_origin = " (from environment)" if effective_api_key and not str(aihubmix_cfg.get("api_key", "") or "").strip() else ""
+        model_source = str(getattr(config, "active_model_source", "standard") or "standard").strip().lower()
+
+        lines = [
+            f"[{self.theme.BLUE_SOFT}]Active model source:[/{self.theme.BLUE_SOFT}] {self._format_model_source_label(model_source)}",
+            f"[{self.theme.BLUE_SOFT}]Configured key:[/{self.theme.BLUE_SOFT}] {mask_secret(effective_api_key) if effective_api_key else '(not set)'}{key_origin}",
+            f"[{self.theme.BLUE_SOFT}]OpenAI base URL:[/{self.theme.BLUE_SOFT}] {escape(str(aihubmix_cfg.get('api_url', '')))}",
+            f"[{self.theme.BLUE_SOFT}]Endpoint:[/{self.theme.BLUE_SOFT}] {escape(str(aihubmix_cfg.get('endpoint', '')))}",
+            f"[{self.theme.BLUE_SOFT}]Temperature:[/{self.theme.BLUE_SOFT}] {aihubmix_cfg.get('temperature', 0.7)}",
+            f"[{self.theme.BLUE_SOFT}]Default max tokens:[/{self.theme.BLUE_SOFT}] {aihubmix_cfg.get('max_tokens', 16384)}",
+            f"[{self.theme.BLUE_SOFT}]API key help:[/{self.theme.BLUE_SOFT}] {escape(AIHUBMIX_API_KEY_HINT_URL)}",
+        ]
+        if selected:
+            lines.insert(1, f"[{self.theme.BLUE_SOFT}]Selected model:[/{self.theme.BLUE_SOFT}] {escape(selected['display_name'])} ({escape(selected['id'])})")
+            lines.insert(2, f"[{self.theme.BLUE_SOFT}]Transport:[/{self.theme.BLUE_SOFT}] OpenAI SDK")
+            lines.insert(3, f"[{self.theme.BLUE_SOFT}]Context:[/{self.theme.BLUE_SOFT}] {int(selected.get('context_length') or 0):,} tokens")
+
+        self.console.print()
+        self.console.print(
+            Panel(
+                Text.from_markup("\n".join(lines)),
+                title=f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} AIhubMix Source {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]",
+                border_style=self.theme.BORDER_PRIMARY,
+                box=box.ROUNDED,
+                padding=(1, 2),
+            )
+        )
+        self.console.print()
+        return True
+
+    def _cmd_aihubmix_key(self) -> bool:
+        from ..aihubmix import AIHUBMIX_API_KEY_HINT_URL, normalize_aihubmix_config
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        aihubmix_cfg = normalize_aihubmix_config(getattr(config, "aihubmix", {}))
+        self.console.print(
+            f"[{self.theme.TEXT_DIM}]Get your AIhubMix API key here: {AIHUBMIX_API_KEY_HINT_URL}[/{self.theme.TEXT_DIM}]"
+        )
+        api_key = Prompt.ask(
+            f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] AIhubMix API Key",
+            password=True,
+        ).strip()
+        if not api_key:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} AIhubMix API key cannot be empty.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        aihubmix_cfg["api_key"] = api_key
+        config.aihubmix = normalize_aihubmix_config(aihubmix_cfg)
+        config_manager.save(config)
+
+        if self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} AIhubMix API key saved.[/{self.theme.MINT_VIBRANT}]"
+        )
+        return True
+
+    def _cmd_aihubmix_activate(self) -> bool:
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        if not self._ensure_aihubmix_configuration(config):
+            return True
+        config.active_model_source = "aihubmix"
+        config_manager.save(config)
+        if self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} AIhubMix source activated.[/{self.theme.MINT_VIBRANT}]"
+        )
+        return True
+
+    def _cmd_aihubmix_endpoint(self, endpoint_value: str) -> bool:
+        from ..aihubmix import AIHUBMIX_DEFAULT_API_URL, normalize_aihubmix_config
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        aihubmix_cfg = normalize_aihubmix_config(getattr(config, "aihubmix", {}))
+        candidate = str(endpoint_value or "").strip()
+        if not candidate:
+            current_url = str(aihubmix_cfg.get("api_url", AIHUBMIX_DEFAULT_API_URL)).strip()
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Current OpenAI-compatible base URL: {current_url}[/{self.theme.TEXT_DIM}]"
+            )
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Use 'clear' to restore the default. You may paste /v1/chat/completions; Reverie normalizes it to /v1.[/{self.theme.TEXT_DIM}]"
+            )
+            candidate = Prompt.ask(
+                "AIhubMix OpenAI base URL",
+                default=current_url
+            ).strip()
+
+        if candidate.lower() in ("clear", "default", "none", "off"):
+            candidate = AIHUBMIX_DEFAULT_API_URL
+
+        if candidate and not candidate.startswith(("http://", "https://")):
+            candidate = f"https://{candidate}"
+
+        aihubmix_cfg["api_url"] = candidate or AIHUBMIX_DEFAULT_API_URL
+        config.aihubmix = normalize_aihubmix_config(aihubmix_cfg)
+        config_manager.save(config)
+
+        if self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+
+        self.console.print()
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} AIhubMix OpenAI base URL set to: {escape(config.aihubmix.get('api_url', AIHUBMIX_DEFAULT_API_URL))}[/{self.theme.MINT_VIBRANT}]"
+        )
+        self.console.print()
+        return True
+
+    def _cmd_aihubmix_model(self, model_query: str) -> bool:
+        from ..aihubmix import get_aihubmix_model_catalog, normalize_aihubmix_config
+
+        return self._select_external_provider_model(
+            config_attr="aihubmix",
+            normalize_config=normalize_aihubmix_config,
+            catalog=get_aihubmix_model_catalog(),
+            provider_label="AIhubMix",
+            active_source="aihubmix",
+            model_query=model_query,
+        )
 
     def cmd_modelscope(self, args: str) -> bool:
         """Manage ModelScope source settings."""

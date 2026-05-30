@@ -17,6 +17,9 @@ Features:
 - Search/filter support
 """
 
+import os
+import sys
+import time
 from typing import List, Dict, Optional, Callable, Any
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -30,6 +33,70 @@ from rich.columns import Columns
 from rich import box
 
 from .theme import THEME, DECO
+
+
+_IS_WINDOWS = os.name == "nt"
+
+
+def _getch() -> bytes:
+    if _IS_WINDOWS:
+        import msvcrt
+        return msvcrt.getch()
+    else:
+        import termios
+        import tty
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            ch = sys.stdin.buffer.read(1)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        return ch
+
+
+def _kbhit() -> bool:
+    if _IS_WINDOWS:
+        import msvcrt
+        return msvcrt.kbhit()
+    else:
+        import select
+        return select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], [])
+
+
+def _read_key() -> bytes:
+    if _IS_WINDOWS:
+        import msvcrt
+        key = msvcrt.getch()
+        if key in (b'\x00', b'\xe0'):
+            seq = msvcrt.getch()
+            if seq == b'H':
+                return b'\x1b[A'
+            elif seq == b'P':
+                return b'\x1b[B'
+            elif seq == b'M':
+                return b'\x1b[C'
+            elif seq == b'K':
+                return b'\x1b[D'
+            elif seq == b'I':
+                return b'\x1b[5~'
+            elif seq == b'Q':
+                return b'\x1b[6~'
+            elif seq == b'G':
+                return b'\x1b[H'
+            elif seq == b'O':
+                return b'\x1b[F'
+            return key
+        return key
+    else:
+        ch = _getch()
+        if ch == b'\x1b':
+            seq = ch
+            if _kbhit():
+                for _ in range(2):
+                    seq += _getch()
+            return seq
+        return ch
 
 
 class SelectorAction(Enum):
@@ -210,8 +277,6 @@ class TUISelector:
         
         This method blocks until the user makes a selection or cancels.
         """
-        import msvcrt
-        import time
         from rich.live import Live
         
         # Initial render
@@ -228,105 +293,89 @@ class TUISelector:
         ) as live:
             last_size = (self._console_width(), self._console_height())
             while True:
-                # Wait for key press
-                if msvcrt.kbhit():
-                    key = msvcrt.getch()
-                    state_changed = False
-                    
-                    # Handle special keys
-                    if key == b'\x00' or key == b'\xe0':  # Function key
-                        key = msvcrt.getch()
-                        
-                        if key == b'H':  # Up arrow
-                            self._navigate_up()
-                            state_changed = True
-                        elif key == b'P':  # Down arrow
-                            self._navigate_down()
-                            state_changed = True
-                        elif key == b'I':  # Page Up
-                            self._page_up()
-                            state_changed = True
-                        elif key == b'Q':  # Page Down
-                            self._page_down()
-                            state_changed = True
-                        elif key == b'G':  # Home
-                            self._go_home()
-                            state_changed = True
-                        elif key == b'O':  # End
-                            self._go_end()
-                            state_changed = True
-                    
-                    elif key == b'\r':  # Enter
-                        if self.filtered_items:
-                            return SelectorResult(
-                                action=SelectorAction.SELECT,
-                                selected_item=self.filtered_items[self.selected_index],
-                                search_query=self.search_query
-                            )
-                    
-                    elif key == b'\x1b':  # Escape
-                        if self.allow_cancel:
-                            return SelectorResult(action=SelectorAction.CANCEL)
-                        else:
-                            # Clear search if searching
-                            if self.is_searching:
-                                self.is_searching = False
-                                self.search_query = ""
-                                self.filtered_items = self.items.copy()
-                                self.selected_index = 0
-                                self.scroll_offset = 0
-                                state_changed = True
-                    
-                    elif key == b'/':  # Slash to start search
-                        if self.allow_search and not self.is_searching:
-                            self.is_searching = True
+                key = _read_key()
+                state_changed = False
+                
+                # Escape sequences (Linux) or function key prefix (Windows)
+                if key == b'\x1b[A':  # Up arrow
+                    self._navigate_up()
+                    state_changed = True
+                elif key == b'\x1b[B':  # Down arrow
+                    self._navigate_down()
+                    state_changed = True
+                elif key == b'\x1b[5~':  # Page Up
+                    self._page_up()
+                    state_changed = True
+                elif key == b'\x1b[6~':  # Page Down
+                    self._page_down()
+                    state_changed = True
+                elif key == b'\x1b[H' or key == b'\x1b[1~':  # Home
+                    self._go_home()
+                    state_changed = True
+                elif key == b'\x1b[F' or key == b'\x1b[4~':  # End
+                    self._go_end()
+                    state_changed = True
+                
+                elif key == b'\r':  # Enter
+                    if self.filtered_items:
+                        return SelectorResult(
+                            action=SelectorAction.SELECT,
+                            selected_item=self.filtered_items[self.selected_index],
+                            search_query=self.search_query
+                        )
+                
+                elif key == b'\x1b':  # Escape (bare, not part of sequence)
+                    if self.allow_cancel:
+                        return SelectorResult(action=SelectorAction.CANCEL)
+                    else:
+                        if self.is_searching:
+                            self.is_searching = False
                             self.search_query = ""
+                            self.filtered_items = self.items.copy()
+                            self.selected_index = 0
+                            self.scroll_offset = 0
                             state_changed = True
-                    
-                    elif self.is_searching:
-                        # Handle search input
-                        if key == b'\x08':  # Backspace
-                            if self.search_query:
-                                self.search_query = self.search_query[:-1]
-                                self._apply_search()
-                                state_changed = True
-                            else:
-                                self.is_searching = False
-                                state_changed = True
-                        elif 32 <= key[0] <= 126:  # Printable characters
-                            self.search_query += key.decode('ascii')
+                
+                elif key == b'/':  # Slash to start search
+                    if self.allow_search and not self.is_searching:
+                        self.is_searching = True
+                        self.search_query = ""
+                        state_changed = True
+                
+                elif self.is_searching:
+                    if key == b'\x7f' or key == b'\x08':  # Backspace
+                        if self.search_query:
+                            self.search_query = self.search_query[:-1]
                             self._apply_search()
                             state_changed = True
-                    
-                    elif key in (b'k', b'K'):
-                        self._navigate_up()
+                        else:
+                            self.is_searching = False
+                            state_changed = True
+                    elif len(key) == 1 and 32 <= key[0] <= 126:  # Printable characters
+                        self.search_query += key.decode('ascii', errors='replace')
+                        self._apply_search()
                         state_changed = True
-                    elif key in (b'j', b'J'):
-                        self._navigate_down()
-                        state_changed = True
-                    elif key in (b'g',):
-                        self._go_home()
-                        state_changed = True
-                    elif key in (b'G',):
-                        self._go_end()
-                        state_changed = True
-                    
-                    current_size = (self._console_width(), self._console_height())
-                    if current_size != last_size:
-                        last_size = current_size
-                        state_changed = True
-                    
-                    # Update only when state changes so the terminal keeps normal scroll behavior.
-                    if state_changed:
-                        live.update(self._build_content(), refresh=True)
-
+                
+                elif key in (b'k', b'K'):
+                    self._navigate_up()
+                    state_changed = True
+                elif key in (b'j', b'J'):
+                    self._navigate_down()
+                    state_changed = True
+                elif key in (b'g',):
+                    self._go_home()
+                    state_changed = True
+                elif key in (b'G',):
+                    self._go_end()
+                    state_changed = True
+                
                 current_size = (self._console_width(), self._console_height())
                 if current_size != last_size:
                     last_size = current_size
+                    state_changed = True
+                
+                if state_changed:
                     live.update(self._build_content(), refresh=True)
-
-                # Small sleep to prevent CPU spinning
-                time.sleep(0.025)
     
     def _navigate_up(self) -> None:
         """Navigate up in the list"""

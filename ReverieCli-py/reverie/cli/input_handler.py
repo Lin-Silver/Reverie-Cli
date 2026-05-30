@@ -124,7 +124,11 @@ class InputHandler:
         
         Returns None if user wants to exit (Ctrl+C twice)
         """
-        import msvcrt
+        try:
+            import msvcrt
+            _has_msvcrt = True
+        except ImportError:
+            _has_msvcrt = False
 
         seeded_text = str(initial_text or "")
         if seeded_text:
@@ -146,15 +150,15 @@ class InputHandler:
                 # Paste detection: Check if more input is immediately available in buffer.
                 # Preserve pasted newlines so long specs, logs, and code blocks remain intact.
                 # Only trigger if there's significant buffered content (more than just the enter key)
-                if not in_multiline and msvcrt.kbhit():
+                if _has_msvcrt and not in_multiline and msvcrt.kbhit():
                     # Small delay to let the buffer fill if it's a real paste
                     import time
                     time.sleep(0.05)
                     
                     # Only treat as paste if there's still content after the delay
-                    if msvcrt.kbhit():
+                    if _has_msvcrt and msvcrt.kbhit():
                         pasted_lines = [line]
-                        while msvcrt.kbhit():
+                        while _has_msvcrt and msvcrt.kbhit():
                             try:
                                 # Read subsequent lines without prompting
                                 pasted_lines.append(input(""))

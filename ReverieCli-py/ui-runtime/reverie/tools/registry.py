@@ -14,6 +14,7 @@ from .file_ops import FileOpsTool
 from .delete_file import DeleteFileTool
 from .command_exec import CommandExecTool
 from .web_search import WebFetchTool, WebSearchTool
+from .browser_controler import BrowserControlerTool
 from .tool_catalog import ToolCatalogTool
 from .task_manager import TaskManagerTool
 from .context_management import ContextManagementTool
@@ -188,6 +189,7 @@ def _register_builtin_tools() -> None:
     register_tool_class(CommandExecTool)
     register_tool_class(WebSearchTool)
     register_tool_class(WebFetchTool)
+    register_tool_class(BrowserControlerTool)
     register_tool_class(ToolCatalogTool, expose_schema=False)
     register_tool_class(TaskManagerTool, include_modes=("reverie", "reverie-gamer"))
     register_tool_class(SubagentTool, include_modes=("reverie",))

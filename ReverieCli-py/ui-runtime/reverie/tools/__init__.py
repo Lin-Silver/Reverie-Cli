@@ -10,6 +10,7 @@ Tools available to the AI Agent:
 - command_exec: Execute audited workspace commands with move/delete blacklist
 - web_search: Search the web for candidate links
 - web_fetch: Fetch readable content from selected URLs
+- browser_controler: Open and control browser pages and web AI services
 - tool_catalog: CLI-only helper for /tools diagnostics
 - task_manager: Organize complex work
 - subagent: Delegate bounded Reverie-mode work to configured Subagents
@@ -26,6 +27,7 @@ from .file_ops import FileOpsTool
 from .delete_file import DeleteFileTool
 from .command_exec import CommandExecTool
 from .web_search import WebFetchTool, WebSearchTool
+from .browser_controler import BrowserControlerTool
 from .tool_catalog import ToolCatalogTool
 from .task_manager import TaskManagerTool
 from .subagent import SubagentTool
@@ -74,6 +76,7 @@ __all__ = [
     'CommandExecTool',
     'WebSearchTool',
     'WebFetchTool',
+    "BrowserControlerTool",
     'ToolCatalogTool',
     'TaskManagerTool',
     "SubagentTool",

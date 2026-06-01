@@ -205,7 +205,9 @@ class SkillsManager:
         self._signature = ""
 
     def _build_root_candidates(self) -> tuple[SkillRoot, ...]:
+        package_root = Path(__file__).resolve().parent
         candidates = [
+            SkillRoot("builtin", "builtin_skills", package_root / "builtin_skills", -10),
             SkillRoot("app", ".reverie/Skills", self.app_root / ".reverie" / "Skills", 0),
             SkillRoot("app", ".reverie/skills", self.app_root / ".reverie" / "skills", 1),
         ]
@@ -529,7 +531,7 @@ class SkillsManager:
         lines = [
             "## Skills",
             "- Reverie supports Codex/Claude-style skills: directories that contain a `SKILL.md` entrypoint.",
-            "- Skills are loaded only from the application root under `.reverie/Skills` or `.reverie/skills` beside the executable.",
+            "- Skills are loaded from built-in package skills and from the application root under `.reverie/Skills` or `.reverie/skills` beside the executable.",
             "- Nested repository layouts like `.reverie/skills/<repo>/skills/<skill>/SKILL.md` are supported when they live under that application root.",
             "- If a listed skill clearly matches the user's request, inspect that skill's `SKILL.md` before implementing the task.",
             "- Users can explicitly activate a skill for the current turn by writing `$skill-name` in their message.",

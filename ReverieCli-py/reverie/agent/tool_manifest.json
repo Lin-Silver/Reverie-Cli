@@ -35,6 +35,7 @@
         "command_exec",
         "web_search",
         "web_fetch",
+        "browser_controler",
         "skill_lookup",
         "list_mcp_resources",
         "read_mcp_resource",
@@ -66,6 +67,7 @@
         "command_exec",
         "web_search",
         "web_fetch",
+        "browser_controler",
         "skill_lookup",
         "list_mcp_resources",
         "read_mcp_resource",
@@ -109,6 +111,7 @@
         "command_exec",
         "web_search",
         "web_fetch",
+        "browser_controler",
         "skill_lookup",
         "list_mcp_resources",
         "read_mcp_resource",
@@ -135,6 +138,7 @@
         "command_exec",
         "web_search",
         "web_fetch",
+        "browser_controler",
         "skill_lookup",
         "list_mcp_resources",
         "read_mcp_resource",
@@ -160,6 +164,7 @@
         "command_exec",
         "web_search",
         "web_fetch",
+        "browser_controler",
         "skill_lookup",
         "list_mcp_resources",
         "read_mcp_resource",
@@ -186,6 +191,7 @@
         "command_exec",
         "web_search",
         "web_fetch",
+        "browser_controler",
         "skill_lookup",
         "list_mcp_resources",
         "read_mcp_resource",
@@ -215,6 +221,7 @@
         "command_exec",
         "web_search",
         "web_fetch",
+        "browser_controler",
         "skill_lookup",
         "list_mcp_resources",
         "read_mcp_resource",
@@ -242,6 +249,7 @@
         "command_exec",
         "web_search",
         "web_fetch",
+        "browser_controler",
         "skill_lookup",
         "list_mcp_resources",
         "read_mcp_resource",
@@ -367,6 +375,27 @@
       },
       "examples": [
         "web_fetch(url=\"https://docs.example.com/api/\", output_format=\"markdown\")"
+      ]
+    },
+    "browser_controler": {
+      "purpose": "Open and control the system browser, open DevTools, inspect dynamic pages, diagnose page resources, upload files, and check web/server endpoints.",
+      "use_when": "A task needs real browser automation, frontend runtime inspection, DevTools-oriented investigation, form/upload/login flow testing, dynamic page text, or server/API endpoint verification beyond static fetches.",
+      "parameters": {
+        "action": "open_browser, open_page, open_devtools, diagnose_page, check_endpoint, current_url, extract_page, copy_page_text, observe, click, scroll, paste_text, key_press, hotkey, upload_file, close_page, wait, or optional open_ai_service/ai_chat.",
+        "url": "Optional URL to open or extract.",
+        "private": "Open private/incognito mode when true.",
+        "text": "Text to paste/type into the active browser page.",
+        "file_path": "Workspace-relative file to upload through the browser file picker.",
+        "x/y": "Optional screen coordinates for click or upload targets.",
+        "method": "HTTP method for check_endpoint.",
+        "check_assets": "When true, diagnose_page checks linked scripts, stylesheets, and images."
+      },
+      "examples": [
+        "browser_controler(action=\"diagnose_page\", url=\"http://localhost:3000\", check_assets=true)",
+        "browser_controler(action=\"open_page\", url=\"http://localhost:3000\", private=true)",
+        "browser_controler(action=\"open_devtools\")",
+        "browser_controler(action=\"observe\", grid_cols=4, grid_rows=4)",
+        "browser_controler(action=\"check_endpoint\", method=\"POST\", url=\"http://localhost:3000/api/upload\")"
       ]
     },
     "skill_lookup": {

@@ -3098,7 +3098,7 @@ Path: {TASKS_ARTIFACT_PATH}
 **Required task_manager calls**:
 - Start a task: `task_manager(action="update", target="<exact checklist item>", status="doing")`
 - Complete a task: `task_manager(action="update", target="<exact checklist item>", status="done")`
-- Complete several tasks: `task_manager(action="update", tasks=[{"target":"<exact checklist item>","status":"done"}])`
+- Complete several tasks: `task_manager(action="update", tasks=[{{"target":"<exact checklist item>","status":"done"}}])`
 - Inspect current state: `task_manager(action="list")`
 </description>
 </task_artifact>

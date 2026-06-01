@@ -19,7 +19,6 @@ Features:
 
 import os
 import sys
-import time
 from typing import List, Dict, Optional, Callable, Any
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -295,7 +294,7 @@ class TUISelector:
             while True:
                 key = _read_key()
                 state_changed = False
-                
+
                 # Escape sequences (Linux) or function key prefix (Windows)
                 if key == b'\x1b[A':  # Up arrow
                     self._navigate_up()
@@ -315,7 +314,7 @@ class TUISelector:
                 elif key == b'\x1b[F' or key == b'\x1b[4~':  # End
                     self._go_end()
                     state_changed = True
-                
+
                 elif key == b'\r':  # Enter
                     if self.filtered_items:
                         return SelectorResult(
@@ -323,7 +322,7 @@ class TUISelector:
                             selected_item=self.filtered_items[self.selected_index],
                             search_query=self.search_query
                         )
-                
+
                 elif key == b'\x1b':  # Escape (bare, not part of sequence)
                     if self.allow_cancel:
                         return SelectorResult(action=SelectorAction.CANCEL)
@@ -335,13 +334,13 @@ class TUISelector:
                             self.selected_index = 0
                             self.scroll_offset = 0
                             state_changed = True
-                
+
                 elif key == b'/':  # Slash to start search
                     if self.allow_search and not self.is_searching:
                         self.is_searching = True
                         self.search_query = ""
                         state_changed = True
-                
+
                 elif self.is_searching:
                     if key == b'\x7f' or key == b'\x08':  # Backspace
                         if self.search_query:
@@ -355,7 +354,7 @@ class TUISelector:
                         self.search_query += key.decode('ascii', errors='replace')
                         self._apply_search()
                         state_changed = True
-                
+
                 elif key in (b'k', b'K'):
                     self._navigate_up()
                     state_changed = True
@@ -368,12 +367,12 @@ class TUISelector:
                 elif key in (b'G',):
                     self._go_end()
                     state_changed = True
-                
+
                 current_size = (self._console_width(), self._console_height())
                 if current_size != last_size:
                     last_size = current_size
                     state_changed = True
-                
+
                 if state_changed:
                     live.update(self._build_content(), refresh=True)
     

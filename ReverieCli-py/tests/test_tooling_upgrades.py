@@ -18,6 +18,7 @@ from reverie.harness import (
 from reverie.skills_manager import SkillsManager
 from reverie.tools.mcp_resource_tools import ListMcpResourcesTool, ReadMcpResourceTool
 from reverie.tools.mode_switch import ModeSwitchTool
+from reverie.tools.browser_controler import BrowserControlerTool
 from reverie.tools.skill_lookup import SkillLookupTool
 from reverie.tools.tool_catalog import ToolCatalogTool
 
@@ -278,6 +279,59 @@ def test_mode_switch_surfaces_target_mode_tools_for_active_agent(tmp_path: Path)
     assert "reverie_engine" in switch_result.data["visible_tools"]
 
 
+def test_browser_controler_is_registered_and_summarizes_html(tmp_path: Path) -> None:
+    executor = ToolExecutor(project_root=tmp_path)
+    tool = executor.get_tool("browser_controller")
+
+    assert tool is not None
+    assert tool.name == "browser_controler"
+
+    summary = BrowserControlerTool._summarize_html(
+        "https://example.test",
+        """
+        <html>
+          <head><title>Example</title><meta name="description" content="Demo page"></head>
+          <body>
+            <h1>Welcome</h1>
+            <p>Hello browser control.</p>
+            <a href="/docs">Docs</a>
+            <form action="/upload"><input type="file" name="image"></form>
+          </body>
+        </html>
+        """,
+        include_links=True,
+    )
+
+    rendered = BrowserControlerTool._render_page_summary(summary, max_chars=200)
+
+    assert summary["title"] == "Example"
+    assert summary["meta_description"] == "Demo page"
+    assert "Hello browser control." in summary["text"]
+    assert summary["links"][0]["href"] == "/docs"
+    assert summary["forms"][0]["inputs"][0]["type"] == "file"
+    assert "Headings:" in rendered
+
+
+def test_browser_controler_diagnoses_page_assets_without_network() -> None:
+    html = """
+    <html>
+      <head>
+        <script src="/app.js"></script>
+        <link rel="stylesheet" href="/app.css">
+      </head>
+      <body><img src="images/logo.png"></body>
+    </html>
+    """
+
+    assets = BrowserControlerTool._asset_urls_from_html("https://example.test/base/index.html", html)
+
+    assert assets == [
+        {"kind": "script", "url": "https://example.test/app.js"},
+        {"kind": "stylesheet", "url": "https://example.test/app.css"},
+        {"kind": "image", "url": "https://example.test/base/images/logo.png"},
+    ]
+
+
 def test_skill_lookup_lists_and_inspects_discovered_skills(tmp_path: Path) -> None:
     app_root = tmp_path / "app"
     project_root = tmp_path / "project"
@@ -308,6 +362,21 @@ def test_skill_lookup_lists_and_inspects_discovered_skills(tmp_path: Path) -> No
     assert inspect_result.success is True
     assert "Skill: openai-docs" in inspect_result.output
     assert inspect_result.data["truncated"] is True
+
+
+def test_skills_manager_discovers_builtin_browser_controler_skill(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    project_root = tmp_path / "project"
+    project_root.mkdir(parents=True, exist_ok=True)
+
+    manager = SkillsManager(project_root=project_root, app_root=app_root)
+    record = manager.get_record("browser-controler", force_refresh=True)
+
+    assert record is not None
+    assert record.root.scope == "builtin"
+    assert "browser_controler" in record.body
+    assert "diagnose_page" in record.body
+    assert "check_endpoint" in record.body
 
 
 def test_mcp_resource_tools_list_and_read(tmp_path: Path) -> None:

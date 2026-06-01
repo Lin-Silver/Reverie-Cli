@@ -11,83 +11,91 @@ import base64
 import ctypes
 import json
 import subprocess
+import sys
 import time
 from pathlib import Path
-from ctypes import wintypes
 from typing import Any, Dict, List, Optional, Sequence
 
 from .base import BaseTool, ToolResult
 from ..config import get_project_data_dir
 
 
-user32 = ctypes.windll.user32
+_IS_WINDOWS = sys.platform == "win32"
 
-MOUSEEVENTF_MOVE = 0x0001
-MOUSEEVENTF_LEFTDOWN = 0x0002
-MOUSEEVENTF_LEFTUP = 0x0004
-MOUSEEVENTF_RIGHTDOWN = 0x0008
-MOUSEEVENTF_RIGHTUP = 0x0010
-MOUSEEVENTF_WHEEL = 0x0800
+if _IS_WINDOWS:
+    from ctypes import wintypes
 
-VK_SHIFT = 0x10
-VK_CONTROL = 0x11
-VK_MENU = 0x12
-VK_RETURN = 0x0D
-VK_TAB = 0x09
-VK_ESCAPE = 0x1B
-VK_SPACE = 0x20
-VK_BACK = 0x08
-VK_DELETE = 0x2E
-VK_UP = 0x26
-VK_DOWN = 0x28
-VK_LEFT = 0x25
-VK_RIGHT = 0x27
-VK_F_KEYS = {f"f{index}": 0x6F + index for index in range(1, 13)}
-KEYEVENTF_KEYUP = 0x0002
-KEYEVENTF_UNICODE = 0x0004
-INPUT_KEYBOARD = 1
+    user32 = ctypes.windll.user32
 
+    MOUSEEVENTF_MOVE = 0x0001
+    MOUSEEVENTF_LEFTDOWN = 0x0002
+    MOUSEEVENTF_LEFTUP = 0x0004
+    MOUSEEVENTF_RIGHTDOWN = 0x0008
+    MOUSEEVENTF_RIGHTUP = 0x0010
+    MOUSEEVENTF_WHEEL = 0x0800
 
-class POINT(ctypes.Structure):
-    _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
-
-
-class RECT(ctypes.Structure):
-    _fields_ = [
-        ("left", ctypes.c_long),
-        ("top", ctypes.c_long),
-        ("right", ctypes.c_long),
-        ("bottom", ctypes.c_long),
-    ]
+    VK_SHIFT = 0x10
+    VK_CONTROL = 0x11
+    VK_MENU = 0x12
+    VK_RETURN = 0x0D
+    VK_TAB = 0x09
+    VK_ESCAPE = 0x1B
+    VK_SPACE = 0x20
+    VK_BACK = 0x08
+    VK_DELETE = 0x2E
+    VK_UP = 0x26
+    VK_DOWN = 0x28
+    VK_LEFT = 0x25
+    VK_RIGHT = 0x27
+    VK_F_KEYS = {f"f{index}": 0x6F + index for index in range(1, 13)}
+    KEYEVENTF_KEYUP = 0x0002
+    KEYEVENTF_UNICODE = 0x0004
+    INPUT_KEYBOARD = 1
 
 
-class KEYBDINPUT(ctypes.Structure):
-    _fields_ = [
-        ("wVk", wintypes.WORD),
-        ("wScan", wintypes.WORD),
-        ("dwFlags", wintypes.DWORD),
-        ("time", wintypes.DWORD),
-        ("dwExtraInfo", ctypes.c_size_t),
-    ]
+    class POINT(ctypes.Structure):
+        _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
 
 
-class _INPUTUNION(ctypes.Union):
-    _fields_ = [("ki", KEYBDINPUT)]
+    class RECT(ctypes.Structure):
+        _fields_ = [
+            ("left", ctypes.c_long),
+            ("top", ctypes.c_long),
+            ("right", ctypes.c_long),
+            ("bottom", ctypes.c_long),
+        ]
 
 
-class INPUT(ctypes.Structure):
-    _anonymous_ = ("union",)
-    _fields_ = [
-        ("type", wintypes.DWORD),
-        ("union", _INPUTUNION),
-    ]
+    class KEYBDINPUT(ctypes.Structure):
+        _fields_ = [
+            ("wVk", wintypes.WORD),
+            ("wScan", wintypes.WORD),
+            ("dwFlags", wintypes.DWORD),
+            ("time", wintypes.DWORD),
+            ("dwExtraInfo", ctypes.c_size_t),
+        ]
 
 
-try:
-    user32.SendInput.argtypes = (wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int)
-    user32.SendInput.restype = wintypes.UINT
-except Exception:
-    pass
+    class _INPUTUNION(ctypes.Union):
+        _fields_ = [("ki", KEYBDINPUT)]
+
+
+    class INPUT(ctypes.Structure):
+        _anonymous_ = ("union",)
+        _fields_ = [
+            ("type", wintypes.DWORD),
+            ("union", _INPUTUNION),
+        ]
+
+
+    try:
+        user32.SendInput.argtypes = (wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int)
+        user32.SendInput.restype = wintypes.UINT
+    except Exception:
+        pass
+
+
+_UNSUPPORTED_MESSAGE = "The 'computer_control' tool is only supported on Windows."
 
 
 class ComputerControlTool(BaseTool):
@@ -158,6 +166,8 @@ class ComputerControlTool(BaseTool):
 
     def __init__(self, context: Optional[Dict] = None):
         super().__init__(context)
+        if not _IS_WINDOWS:
+            return
         self.project_root = self.get_project_root()
         self.output_dir = get_project_data_dir(self.project_root) / "computer_control" / "observations"
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -184,6 +194,8 @@ class ComputerControlTool(BaseTool):
         return mapping.get(action_name, "Controlling the desktop")
 
     def execute(self, action: str, **kwargs) -> ToolResult:
+        if not _IS_WINDOWS:
+            return ToolResult.fail(_UNSUPPORTED_MESSAGE)
         action_name = str(action or "").strip().lower()
         try:
             if action_name == "observe":

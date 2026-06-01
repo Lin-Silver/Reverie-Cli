@@ -1758,6 +1758,34 @@ class ReverieAgent:
             ant_phase=self.ant_phase
         )
     
+    @staticmethod
+    def _fix_proxy_url(url_str: Optional[str]) -> Optional[str]:
+        if not url_str:
+            return url_str
+        url_str = url_str.strip()
+        if url_str.startswith("socks://"):
+            return "socks5://" + url_str[len("socks://"):]
+        return url_str
+
+    def _build_proxied_http_client(self) -> Any:
+        import os
+        import httpx
+        proxy_val = (
+            os.environ.get("ALL_PROXY")
+            or os.environ.get("all_proxy")
+            or os.environ.get("HTTPS_PROXY")
+            or os.environ.get("https_proxy")
+            or os.environ.get("HTTP_PROXY")
+            or os.environ.get("http_proxy")
+        )
+        if proxy_val:
+            proxy_val = self._fix_proxy_url(proxy_val)
+            try:
+                return httpx.Client(proxy=proxy_val, trust_env=False)
+            except Exception:
+                pass
+        return None
+
     def _init_client(self) -> None:
         """Initialize client based on provider"""
         self._client = None
@@ -1769,9 +1797,12 @@ class ReverieAgent:
                     "api_key": self.api_key,
                     "timeout": self._resolve_provider_timeout(),
                 }
+                http_client = self._build_proxied_http_client()
+                if http_client is not None:
+                    client_kwargs["http_client"] = http_client
                 if self.custom_headers:
                     client_kwargs["default_headers"] = dict(self.custom_headers)
-                optional_kwargs = ("default_headers", "timeout")
+                optional_kwargs = ("default_headers", "timeout", "http_client")
                 while True:
                     try:
                         self._client = OpenAI(**client_kwargs)

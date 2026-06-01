@@ -11,7 +11,7 @@ hiddenimports = ['rich', 'rich.console', 'rich.panel', 'rich.table', 'rich.synta
                  'reverie.cli.input_handler', 'reverie.cli.commands', 'reverie.cli.display', 'reverie.cli.theme', 'reverie.cli.markdown_formatter', 'reverie.cli.session_ui',
                  'reverie.config', 'reverie.sdk_bridge', 'reverie.rules_manager', 'reverie.session', 'reverie.agent', 'reverie.context_engine',
                  'reverie.engine_lite', 'reverie.engine_lite.video', 'reverie.engine_lite.renpy_import', 'reverie.engine_lite.procedural_assets', 'reverie.engine_lite.blender_modeling',
-                 'reverie.tools.registry', 'reverie.tools.reverie_engine', 'reverie.tools.reverie_engine_lite', 'reverie.tools.game_modeling_workbench', 'reverie.tools.blender_modeling_workbench']
+                 'reverie.tools.registry', 'reverie.tools.browser_controler', 'reverie.tools.reverie_engine', 'reverie.tools.reverie_engine_lite', 'reverie.tools.game_modeling_workbench', 'reverie.tools.blender_modeling_workbench']
 
 
 def add_data_if_exists(source_path: Path, target_dir: str) -> None:
@@ -22,6 +22,15 @@ def add_data_if_exists(source_path: Path, target_dir: str) -> None:
 def add_binary_if_exists(source_path: Path, target_dir: str) -> None:
     if source_path.exists() and source_path.is_file():
         binaries.append((str(source_path), target_dir))
+
+
+def add_tree_if_exists(source_path: Path, target_dir: str) -> None:
+    if not source_path.exists() or not source_path.is_dir():
+        return
+    for path in source_path.rglob("*"):
+        if path.is_file():
+            relative_parent = path.parent.relative_to(source_path)
+            datas.append((str(path), str(Path(target_dir) / relative_parent)))
 
 
 def resolve_ffmpeg_binary() -> Path | None:
@@ -79,6 +88,7 @@ add_data_if_exists(comfy_src / "generate_image.py", "reverie_resources/comfy")
 add_data_if_exists(comfy_src / "embedded_comfy.b64", "reverie_resources/comfy")
 add_data_if_exists(repo_root / "reverie" / "agent" / "tool_manifest.json", "reverie/agent")
 add_data_if_exists(repo_root / "reverie" / "engine_lite" / "vendor" / "live2d" / "live2dcubismcore.min.js", "reverie/engine_lite/vendor/live2d")
+add_tree_if_exists(repo_root / "reverie" / "builtin_skills", "reverie/builtin_skills")
 
 ffmpeg_binary = resolve_ffmpeg_binary()
 if ffmpeg_binary is not None:

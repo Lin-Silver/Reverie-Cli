@@ -2005,7 +2005,7 @@ class ReverieInterface:
         if active_source in {"geminicli", "codex"}:
             return True, ""
 
-        if active_source == "standard":
+        if active_source in {"standard", "aihubmix"}:
             if bool(getattr(active_model, "supports_vision", False)):
                 return True, ""
             return False, f"{model_name} is not configured with supports_vision=true."
@@ -2127,8 +2127,84 @@ class ReverieInterface:
             size_text = f"{max(size / 1024, 0):.1f} KB"
         return f"{item.get('path', '')}  ({size_text})"
 
+    def _format_inline_image_mention(self, path_text: str) -> str:
+        normalized = str(path_text or "").replace("\\", "/").strip()
+        if not normalized:
+            return "@"
+        if any(char.isspace() for char in normalized) or any(char in normalized for char in ('"', "'")):
+            escaped_path = normalized.replace('"', '\\"')
+            return f'@"{escaped_path}"'
+        return f"@{normalized}"
+
+    def _attachment_browser_entries(
+        self,
+        candidates: List[Dict[str, Any]],
+        current_dir: str,
+    ) -> List[Dict[str, Any]]:
+        current = str(current_dir or "").strip("/").replace("\\", "/")
+        child_dirs: Dict[str, Dict[str, Any]] = {}
+        files: List[Dict[str, Any]] = []
+
+        for item in candidates:
+            rel_path = str(item.get("path", "") or "").replace("\\", "/").strip("/")
+            if not rel_path:
+                continue
+            parent = str(Path(rel_path).parent).replace("\\", "/")
+            if parent == ".":
+                parent = ""
+
+            if current:
+                prefix = f"{current}/"
+                if not rel_path.startswith(prefix):
+                    continue
+                remainder = rel_path[len(prefix):]
+            else:
+                remainder = rel_path
+
+            if "/" in remainder:
+                dirname = remainder.split("/", 1)[0]
+                child_path = f"{current}/{dirname}".strip("/")
+                entry = child_dirs.setdefault(
+                    child_path,
+                    {
+                        "kind": "dir",
+                        "path": child_path,
+                        "name": dirname,
+                        "count": 0,
+                        "score": 0.0,
+                    },
+                )
+                entry["count"] = int(entry.get("count", 0) or 0) + 1
+                entry["score"] = max(float(entry.get("score", 0.0) or 0.0), float(item.get("score", 0.0) or 0.0))
+                continue
+
+            if parent == current:
+                file_entry = dict(item)
+                file_entry["kind"] = "file"
+                file_entry["name"] = Path(rel_path).name
+                files.append(file_entry)
+
+        entries = list(child_dirs.values()) + files
+        entries.sort(
+            key=lambda item: (
+                0 if item.get("kind") == "dir" else 1,
+                -float(item.get("score", 0.0) or 0.0),
+                str(item.get("name") or item.get("path") or "").lower(),
+            )
+        )
+        return entries
+
+    def _format_attachment_browser_entry(self, item: Dict[str, Any]) -> str:
+        kind = str(item.get("kind", "") or "")
+        name = str(item.get("name") or item.get("path") or "").strip()
+        if kind == "dir":
+            count = int(item.get("count", 0) or 0)
+            suffix = "image" if count == 1 else "images"
+            return f"[dir] {name}/  ({count} {suffix})"
+        return self._format_attachment_candidate(item)
+
     def _select_inline_image_candidate(self, candidates: List[Dict[str, Any]], query: str = "") -> Optional[Dict[str, Any]]:
-        """Tiny arrow-key selector for image attachment candidates."""
+        """Arrow-key directory browser for image attachment candidates."""
         if not candidates:
             return None
         if self.headless:
@@ -2146,26 +2222,30 @@ class ReverieInterface:
             return candidates[selected_index]
 
         selected = 0
-        visible_count = min(10, len(candidates))
+        current_dir = ""
+        visible_count = 10
 
         def render() -> None:
             self.console.print()
             title = "Select Image Attachment"
             if query:
                 title += f" - {query}"
+            if current_dir:
+                title += f" / {current_dir}"
+            entries = self._attachment_browser_entries(candidates, current_dir)
             table = Table(show_header=False, box=box.SIMPLE, border_style=self.theme.BORDER_SUBTLE, expand=True)
             table.add_column(no_wrap=True, width=2)
             table.add_column()
-            start = max(0, min(selected - visible_count // 2, len(candidates) - visible_count))
-            for offset, item in enumerate(candidates[start:start + visible_count], start=start):
+            start = max(0, min(selected - visible_count // 2, max(0, len(entries) - visible_count)))
+            for offset, item in enumerate(entries[start:start + visible_count], start=start):
                 marker = ">" if offset == selected else " "
                 style = f"bold {self.theme.BLUE_SOFT}" if offset == selected else self.theme.TEXT_DIM
-                table.add_row(marker, Text(self._format_attachment_candidate(item), style=style))
+                table.add_row(marker, Text(self._format_attachment_browser_entry(item), style=style))
             self.console.print(
                 Panel(
                     table,
                     title=f"[bold {self.theme.PURPLE_SOFT}]{escape(title)}[/bold {self.theme.PURPLE_SOFT}]",
-                    subtitle=f"[{self.theme.TEXT_DIM}]↑/↓ select · Enter attach · Esc cancel[/{self.theme.TEXT_DIM}]",
+                    subtitle=f"[{self.theme.TEXT_DIM}]↑/↓ select · Enter open/attach · Backspace up · Esc cancel[/{self.theme.TEXT_DIM}]",
                     border_style=self.theme.BORDER_PRIMARY,
                     box=box.ROUNDED,
                 )
@@ -2173,6 +2253,10 @@ class ReverieInterface:
 
         render()
         while True:
+            entries = self._attachment_browser_entries(candidates, current_dir)
+            if not entries:
+                return None
+            selected = max(0, min(selected, len(entries) - 1))
             key = msvcrt.getwch()
             if key in ("\x00", "\xe0"):
                 code = msvcrt.getwch()
@@ -2184,9 +2268,57 @@ class ReverieInterface:
                     render()
                 continue
             if key in ("\r", "\n"):
-                return candidates[selected]
+                chosen = entries[selected]
+                if chosen.get("kind") == "dir":
+                    current_dir = str(chosen.get("path") or "").strip("/")
+                    selected = 0
+                    render()
+                    continue
+                return chosen
+            if key == "\x08":
+                if current_dir:
+                    parent = str(Path(current_dir).parent).replace("\\", "/")
+                    current_dir = "" if parent == "." else parent.strip("/")
+                    selected = 0
+                    render()
+                    continue
+                return None
             if key == "\x1b":
                 return None
+
+    def _select_inline_image_mention_for_prompt(self, query: str = "") -> Optional[str]:
+        """Return a ready-to-insert `@path` mention for the interactive input line."""
+        config = self.config_manager.load()
+        allowed, detail = self._can_attach_inline_images(config)
+        if not allowed:
+            self._show_activity_event(
+                "Attachment",
+                "The current model doesn't support vision input.",
+                status="warning",
+                detail=detail,
+            )
+            return None
+        candidates = self._collect_inline_image_candidates(query=query, limit=500)
+        if not candidates:
+            self._show_activity_event(
+                "Attachment",
+                "No supported image files found in this workspace.",
+                status="warning",
+                detail=", ".join(sorted(SUPPORTED_INLINE_IMAGE_EXTENSIONS)),
+            )
+            return None
+        selected = self._select_inline_image_candidate(candidates, query=query)
+        if not selected:
+            self._show_activity_event("Attachment", "Image attachment cancelled", status="info")
+            return None
+        mention = self._format_inline_image_mention(str(selected.get("path", "") or ""))
+        self._show_activity_event(
+            "Attachment",
+            "Image selected",
+            status="success",
+            detail=f"Queued {mention} in the prompt.",
+        )
+        return mention
 
     def _handle_attachment_picker_request(self, user_input: str) -> bool:
         config = self.config_manager.load()
@@ -2200,7 +2332,7 @@ class ReverieInterface:
             )
             return True
         query = self._attachment_query_from_input(user_input)
-        candidates = self._collect_inline_image_candidates(query=query)
+        candidates = self._collect_inline_image_candidates(query=query, limit=500)
         if not candidates:
             self._show_activity_event(
                 "Attachment",
@@ -2213,7 +2345,7 @@ class ReverieInterface:
         if not selected:
             self._show_activity_event("Attachment", "Image attachment cancelled", status="info")
             return True
-        self._store_pending_input_draft(f"@{selected['path']} ")
+        self._store_pending_input_draft(f"{self._format_inline_image_mention(str(selected['path']))} ")
         self._show_activity_event(
             "Attachment",
             "Image selected",
@@ -2241,7 +2373,10 @@ class ReverieInterface:
 
     def main_loop(self) -> None:
         """Main interaction loop"""
-        self.input_handler = InputHandler(self.console)
+        self.input_handler = InputHandler(
+            self.console,
+            attachment_selector=self._select_inline_image_mention_for_prompt,
+        )
         
         while True:
             try:

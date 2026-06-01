@@ -712,6 +712,27 @@ def test_inline_image_vision_gate_rejects_unmarked_standard_models() -> None:
     assert "supports_vision=true" in detail
 
 
+def test_inline_image_vision_gate_accepts_aihubmix_models_marked_vision() -> None:
+    interface = ReverieInterface.__new__(ReverieInterface)
+    config = Config(
+        models=[
+            ModelConfig(
+                model="aihubmix-vision",
+                model_display_name="AIhubMix Vision",
+                base_url="https://example.com/v1",
+                supports_vision=True,
+            )
+        ],
+        active_model_index=0,
+        active_model_source="aihubmix",
+    )
+
+    allowed, detail = interface._can_attach_inline_images(config)
+
+    assert allowed is True
+    assert detail == ""
+
+
 def test_command_exec_emits_incremental_ui_progress(tmp_path: Path) -> None:
     events = []
     tool = CommandExecTool(

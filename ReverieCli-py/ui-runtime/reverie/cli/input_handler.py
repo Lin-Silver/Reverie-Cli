@@ -33,12 +33,17 @@ class InputHandler:
     Features Dreamscape themed prompts and visual feedback.
     """
     
-    def __init__(self, console: Console):
+    def __init__(
+        self,
+        console: Console,
+        attachment_selector: Optional[Callable[[str], Optional[str]]] = None,
+    ):
         self.console = console
         self.history: List[str] = []
         self.history_index = 0
         self.theme = THEME
         self.deco = DECO
+        self.attachment_selector = attachment_selector
 
     def _console_width(self) -> int:
         """Best-effort terminal width."""
@@ -67,7 +72,41 @@ class InputHandler:
             prompt_parts.append(f" {self.deco.CHEVRON_RIGHT} ", style=self.theme.BLUE_SOFT)
             self.console.print(prompt_parts, end="")
 
-    def _get_seeded_single_line_input(self, prompt_text: str, initial_text: str) -> Optional[str]:
+    def _should_open_attachment_selector(self, buffer: str) -> bool:
+        """Open the image picker only when `@` starts a mention token."""
+        if self.attachment_selector is None:
+            return False
+        if not buffer:
+            return True
+        return bool(buffer[-1].isspace())
+
+    def _insert_attachment_mention(self, prompt_text: str, buffer: str) -> str:
+        """Run the attachment selector and redraw the current input buffer."""
+        selector = self.attachment_selector
+        if selector is None:
+            return f"{buffer}@"
+
+        mention = selector("")
+        if mention:
+            insertion = str(mention).strip()
+            if insertion:
+                buffer = f"{buffer}{insertion} "
+        else:
+            buffer = f"{buffer}@"
+
+        self.console.print()
+        self._render_prompt(prompt_text, is_continuation=False)
+        if buffer:
+            self.console.print(buffer, end="")
+        return buffer
+
+    def _get_seeded_single_line_input(
+        self,
+        prompt_text: str,
+        initial_text: str,
+        *,
+        record_history: bool = True,
+    ) -> Optional[str]:
         """Capture a single line while preserving an existing draft buffer."""
         try:
             import msvcrt
@@ -95,7 +134,7 @@ class InputHandler:
                 continue
             if key in ("\r", "\n"):
                 self.console.print()
-                if buffer.strip():
+                if record_history and buffer.strip():
                     self.history.append(buffer)
                     self.history_index = len(self.history)
                 return buffer
@@ -107,6 +146,9 @@ class InputHandler:
                     buffer = buffer[:-1]
                     sys.stdout.write("\b \b")
                     sys.stdout.flush()
+                continue
+            if key == "@" and self._should_open_attachment_selector(buffer):
+                buffer = self._insert_attachment_mention(prompt_text, buffer)
                 continue
             if key.isprintable():
                 buffer += key
@@ -124,7 +166,10 @@ class InputHandler:
         
         Returns None if user wants to exit (Ctrl+C twice)
         """
-        import msvcrt
+        try:
+            import msvcrt
+        except ImportError:
+            msvcrt = None
 
         seeded_text = str(initial_text or "")
         if seeded_text:
@@ -138,15 +183,27 @@ class InputHandler:
             try:
                 if in_multiline:
                     self._render_prompt(prompt_text, is_continuation=True)
+                elif self.attachment_selector is not None and msvcrt is not None:
+                    line = self._get_seeded_single_line_input(
+                        prompt_text,
+                        "",
+                        record_history=False,
+                    )
+                    if line is None:
+                        return None
+                    # Skip the standard input() path; this line was captured by
+                    # the interactive reader so `@` can open the attachment picker.
+                    pass
                 else:
                     self._render_prompt(prompt_text, is_continuation=False)
-                
-                line = input("")
+
+                if not (not in_multiline and self.attachment_selector is not None and msvcrt is not None):
+                    line = input("")
                 
                 # Paste detection: Check if more input is immediately available in buffer.
                 # Preserve pasted newlines so long specs, logs, and code blocks remain intact.
                 # Only trigger if there's significant buffered content (more than just the enter key)
-                if not in_multiline and msvcrt.kbhit():
+                if not in_multiline and msvcrt is not None and msvcrt.kbhit():
                     # Small delay to let the buffer fill if it's a real paste
                     import time
                     time.sleep(0.05)

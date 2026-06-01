@@ -332,6 +332,17 @@ def test_browser_controler_diagnoses_page_assets_without_network() -> None:
     ]
 
 
+def test_browser_controler_exposes_window_state_actions() -> None:
+    actions = BrowserControlerTool.parameters["properties"]["action"]["enum"]
+
+    assert "active_window" in actions
+    assert "list_browser_windows" in actions
+    assert "activate_browser" in actions
+    assert BrowserControlerTool._is_browser_process("chrome.exe")
+    assert BrowserControlerTool._is_browser_process("msedge.exe")
+    assert not BrowserControlerTool._is_browser_process("vmware.exe")
+
+
 def test_skill_lookup_lists_and_inspects_discovered_skills(tmp_path: Path) -> None:
     app_root = tmp_path / "app"
     project_root = tmp_path / "project"
@@ -375,6 +386,8 @@ def test_skills_manager_discovers_builtin_browser_controler_skill(tmp_path: Path
     assert record is not None
     assert record.root.scope == "builtin"
     assert "browser_controler" in record.body
+    assert "list_browser_windows" in record.body
+    assert "activate_browser" in record.body
     assert "diagnose_page" in record.body
     assert "check_endpoint" in record.body
 

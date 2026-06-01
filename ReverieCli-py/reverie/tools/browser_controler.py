@@ -31,19 +31,81 @@ if IS_WINDOWS:
     import winreg
     from ctypes import wintypes
 
+    ENUM_WINDOWS_PROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
     user32 = ctypes.windll.user32
     kernel32 = ctypes.windll.kernel32
 
+    class RECT(ctypes.Structure):
+        _fields_ = [
+            ("left", ctypes.c_long),
+            ("top", ctypes.c_long),
+            ("right", ctypes.c_long),
+            ("bottom", ctypes.c_long),
+        ]
+
+    user32.OpenClipboard.argtypes = (ctypes.c_void_p,)
+    user32.OpenClipboard.restype = wintypes.BOOL
+    user32.EmptyClipboard.argtypes = ()
+    user32.EmptyClipboard.restype = wintypes.BOOL
+    user32.CloseClipboard.argtypes = ()
+    user32.CloseClipboard.restype = wintypes.BOOL
+    user32.GetClipboardData.argtypes = (wintypes.UINT,)
     user32.GetClipboardData.restype = ctypes.c_void_p
+    user32.SetClipboardData.argtypes = (wintypes.UINT, ctypes.c_void_p)
     user32.SetClipboardData.restype = ctypes.c_void_p
+    user32.GetForegroundWindow.argtypes = ()
+    user32.GetForegroundWindow.restype = wintypes.HWND
+    user32.GetWindowTextLengthW.argtypes = (wintypes.HWND,)
+    user32.GetWindowTextLengthW.restype = ctypes.c_int
+    user32.GetWindowTextW.argtypes = (wintypes.HWND, wintypes.LPWSTR, ctypes.c_int)
+    user32.GetWindowTextW.restype = ctypes.c_int
+    user32.IsWindowVisible.argtypes = (wintypes.HWND,)
+    user32.IsWindowVisible.restype = wintypes.BOOL
+    user32.GetWindowThreadProcessId.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.DWORD))
+    user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+    user32.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
+    user32.ShowWindow.restype = wintypes.BOOL
+    user32.SetForegroundWindow.argtypes = (wintypes.HWND,)
+    user32.SetForegroundWindow.restype = wintypes.BOOL
+    user32.BringWindowToTop.argtypes = (wintypes.HWND,)
+    user32.BringWindowToTop.restype = wintypes.BOOL
+    user32.SetActiveWindow.argtypes = (wintypes.HWND,)
+    user32.SetActiveWindow.restype = wintypes.HWND
+    user32.SetFocus.argtypes = (wintypes.HWND,)
+    user32.SetFocus.restype = wintypes.HWND
+    user32.AttachThreadInput.argtypes = (wintypes.DWORD, wintypes.DWORD, wintypes.BOOL)
+    user32.AttachThreadInput.restype = wintypes.BOOL
+    user32.GetWindowRect.argtypes = (wintypes.HWND, ctypes.POINTER(RECT))
+    user32.GetWindowRect.restype = wintypes.BOOL
+    user32.EnumWindows.argtypes = (ENUM_WINDOWS_PROC, wintypes.LPARAM)
+    user32.EnumWindows.restype = wintypes.BOOL
+    kernel32.GlobalAlloc.argtypes = (wintypes.UINT, ctypes.c_size_t)
     kernel32.GlobalAlloc.restype = ctypes.c_void_p
+    kernel32.GlobalLock.argtypes = (ctypes.c_void_p,)
     kernel32.GlobalLock.restype = ctypes.c_void_p
+    kernel32.GlobalUnlock.argtypes = (ctypes.c_void_p,)
+    kernel32.GlobalUnlock.restype = wintypes.BOOL
+    kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    kernel32.OpenProcess.restype = ctypes.c_void_p
+    kernel32.QueryFullProcessImageNameW.argtypes = (
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        wintypes.LPWSTR,
+        ctypes.POINTER(wintypes.DWORD),
+    )
+    kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    kernel32.GetCurrentThreadId.argtypes = ()
+    kernel32.GetCurrentThreadId.restype = wintypes.DWORD
 else:
     ctypes = None  # type: ignore[assignment]
     winreg = None  # type: ignore[assignment]
     wintypes = None  # type: ignore[assignment]
     user32 = None  # type: ignore[assignment]
     kernel32 = None  # type: ignore[assignment]
+    ENUM_WINDOWS_PROC = None  # type: ignore[assignment]
+    RECT = None  # type: ignore[assignment]
 
 
 CF_UNICODETEXT = 13
@@ -54,6 +116,8 @@ MOUSEEVENTF_LEFTUP = 0x0004
 MOUSEEVENTF_RIGHTDOWN = 0x0008
 MOUSEEVENTF_RIGHTUP = 0x0010
 MOUSEEVENTF_WHEEL = 0x0800
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+SW_RESTORE = 9
 
 VK_CODES = {
     "ctrl": 0x11,
@@ -94,6 +158,19 @@ AI_SERVICE_URLS = {
     "perplexity": "https://www.perplexity.ai/",
 }
 
+BROWSER_PROCESS_NAMES = {
+    "chrome.exe",
+    "msedge.exe",
+    "firefox.exe",
+    "brave.exe",
+    "brave-browser.exe",
+    "opera.exe",
+    "opera_gx.exe",
+    "vivaldi.exe",
+    "arc.exe",
+    "browser.exe",
+}
+
 
 class BrowserControlerTool(BaseTool):
     """Control the default browser and extract page information."""
@@ -116,6 +193,9 @@ class BrowserControlerTool(BaseTool):
             "action": {
                 "type": "string",
                 "enum": [
+                    "active_window",
+                    "list_browser_windows",
+                    "activate_browser",
                     "open_browser",
                     "open_page",
                     "open_devtools",
@@ -145,6 +225,9 @@ class BrowserControlerTool(BaseTool):
             "browser_path": {"type": "string", "description": "Optional explicit browser executable path."},
             "private": {"type": "boolean", "description": "Open a private/incognito window when possible."},
             "new_window": {"type": "boolean", "description": "Open in a new browser window."},
+            "include_all_windows": {"type": "boolean", "description": "For list_browser_windows, include non-browser top-level windows too."},
+            "title_contains": {"type": "string", "description": "For activate_browser, choose a browser window whose title contains this text."},
+            "window_index": {"type": "integer", "description": "For activate_browser, zero-based index among matching browser windows."},
             "text": {"type": "string", "description": "Text to type or paste into the active browser page."},
             "prompt": {"type": "string", "description": "Prompt text for ai_chat."},
             "send": {"type": "boolean", "description": "Press Enter after pasting text in ai_chat or paste_text."},
@@ -185,6 +268,9 @@ class BrowserControlerTool(BaseTool):
     def get_execution_message(self, action: str, **kwargs) -> str:
         action_name = str(action or "").strip().lower()
         return {
+            "active_window": "Inspecting active window",
+            "list_browser_windows": "Listing browser windows",
+            "activate_browser": "Activating browser window",
             "open_browser": "Opening browser window",
             "open_page": "Opening browser page",
             "open_devtools": "Opening browser developer tools",
@@ -210,6 +296,15 @@ class BrowserControlerTool(BaseTool):
     def execute(self, action: str, **kwargs) -> ToolResult:
         action_name = str(action or "").strip().lower()
         try:
+            if action_name == "active_window":
+                return self._active_window()
+            if action_name == "list_browser_windows":
+                return self._list_browser_windows(include_all=bool(kwargs.get("include_all_windows", False)))
+            if action_name == "activate_browser":
+                return self._activate_browser(
+                    title_contains=str(kwargs.get("title_contains") or ""),
+                    window_index=int(kwargs.get("window_index", 0) or 0),
+                )
             if action_name in {"open_browser", "open_page"}:
                 return self._open_page(**kwargs)
             if action_name == "open_devtools":
@@ -263,6 +358,71 @@ class BrowserControlerTool(BaseTool):
         except Exception as exc:
             return ToolResult.fail(f"Browser Controler failed: {exc}")
 
+    def _active_window(self) -> ToolResult:
+        self._require_windows_desktop()
+        info = self._foreground_window_info()
+        return ToolResult.ok(self._render_window_info(info, prefix="Active window"), data={"window": info})
+
+    def _list_browser_windows(self, *, include_all: bool = False) -> ToolResult:
+        self._require_windows_desktop()
+        windows = self._top_level_windows()
+        browser_windows = [item for item in windows if item.get("is_browser")]
+        selected = windows if include_all else browser_windows
+        if not selected:
+            return ToolResult.ok(
+                "No browser windows were found." if not include_all else "No top-level windows were found.",
+                data={"windows": selected, "browser_count": len(browser_windows), "window_count": len(windows)},
+            )
+        lines = [
+            f"Browser windows: {len(browser_windows)}",
+            f"Top-level windows: {len(windows)}",
+            "",
+        ]
+        for index, item in enumerate(selected):
+            marker = "browser" if item.get("is_browser") else "window"
+            lines.append(
+                f"[{index}] {marker}: {item.get('title') or '(untitled)'} "
+                f"({item.get('process_name') or 'unknown'}, pid={item.get('process_id') or 0})"
+            )
+        return ToolResult.ok(
+            "\n".join(lines).strip(),
+            data={"windows": selected, "browser_count": len(browser_windows), "window_count": len(windows)},
+        )
+
+    def _activate_browser(self, *, title_contains: str = "", window_index: int = 0) -> ToolResult:
+        self._require_windows_desktop()
+        browser_windows = [item for item in self._top_level_windows() if item.get("is_browser")]
+        needle = str(title_contains or "").strip().lower()
+        if needle:
+            browser_windows = [item for item in browser_windows if needle in str(item.get("title") or "").lower()]
+        if not browser_windows:
+            return ToolResult.fail(
+                "No matching browser window found."
+                + (f" title_contains={title_contains!r}" if title_contains else "")
+            )
+        index = max(0, min(int(window_index or 0), len(browser_windows) - 1))
+        selected = browser_windows[index]
+        hwnd = int(selected.get("handle") or 0)
+        if not hwnd:
+            return ToolResult.fail("Selected browser window has no handle.")
+        activated = self._activate_window_handle(hwnd)
+        if not activated:
+            active = self._foreground_window_info()
+            return ToolResult.fail(
+                "Tried to activate the browser window, but Windows kept another foreground window. "
+                f"{self._render_window_info(active, prefix='Active window')}"
+            )
+        return ToolResult.ok(self._render_window_info(selected, prefix="Activated browser window"), data={"window": selected})
+
+    def _activate_first_browser_window(self) -> bool:
+        browser_windows = [item for item in self._top_level_windows() if item.get("is_browser")]
+        if not browser_windows:
+            return False
+        hwnd = int(browser_windows[0].get("handle") or 0)
+        if not hwnd:
+            return False
+        return self._activate_window_handle(hwnd)
+
     def _open_page(self, **kwargs) -> ToolResult:
         url = str(kwargs.get("url") or "about:blank").strip() or "about:blank"
         private = bool(kwargs.get("private", False))
@@ -270,6 +430,16 @@ class BrowserControlerTool(BaseTool):
         browser = str(kwargs.get("browser") or "default").strip()
         browser_path = str(kwargs.get("browser_path") or "").strip()
         wait_seconds = float(kwargs.get("wait_seconds", 0.75) or 0.75)
+        before_browser_handles: set[int] = set()
+        if IS_WINDOWS:
+            try:
+                before_browser_handles = {
+                    int(item.get("handle") or 0)
+                    for item in self._top_level_windows()
+                    if item.get("is_browser")
+                }
+            except Exception:
+                before_browser_handles = set()
 
         if private or browser_path or browser.lower() not in {"", "default", "system"}:
             executable = self._resolve_browser_executable(browser=browser, browser_path=browser_path)
@@ -287,8 +457,24 @@ class BrowserControlerTool(BaseTool):
 
         if wait_seconds > 0:
             time.sleep(min(wait_seconds, 10.0))
+        activated = False
+        if IS_WINDOWS:
+            try:
+                browser_windows = [item for item in self._top_level_windows() if item.get("is_browser")]
+                new_browser_windows = [
+                    item for item in browser_windows
+                    if int(item.get("handle") or 0) not in before_browser_handles
+                ]
+                for candidate in new_browser_windows + browser_windows:
+                    handle = int(candidate.get("handle") or 0)
+                    if handle and self._activate_window_handle(handle):
+                        activated = True
+                        break
+            except Exception:
+                activated = False
         mode = "private " if private else ""
-        return ToolResult.ok(f"Opened {mode}browser page: {url}", data={"url": url, "private": private})
+        suffix = " Activated a browser window." if activated else ""
+        return ToolResult.ok(f"Opened {mode}browser page: {url}.{suffix}", data={"url": url, "private": private, "activated": activated})
 
     def _open_devtools(self, **kwargs) -> ToolResult:
         url = str(kwargs.get("url") or "").strip()
@@ -347,11 +533,17 @@ class BrowserControlerTool(BaseTool):
 
     def _close_page(self, *, close_window: bool = False) -> ToolResult:
         self._require_windows_desktop()
+        active_error = self._active_browser_error()
+        if active_error:
+            return active_error
         self._send_hotkey(["alt", "f4"] if close_window else ["ctrl", "w"])
         return ToolResult.ok("Closed the active browser window." if close_window else "Closed the active browser tab.")
 
     def _current_url(self) -> ToolResult:
         self._require_windows_desktop()
+        active_error = self._active_browser_error()
+        if active_error:
+            return active_error
         old_clipboard = self._get_clipboard_text()
         try:
             self._send_hotkey(["ctrl", "l"])
@@ -474,8 +666,12 @@ class BrowserControlerTool(BaseTool):
 
     def _copy_page_text(self, *, max_chars: int = 30000) -> ToolResult:
         self._require_windows_desktop()
+        active_error = self._active_browser_error()
+        if active_error:
+            return active_error
         old_clipboard = self._get_clipboard_text()
         try:
+            self._focus_active_browser_page()
             self._send_hotkey(["ctrl", "a"])
             time.sleep(0.1)
             self._send_hotkey(["ctrl", "c"])
@@ -494,6 +690,9 @@ class BrowserControlerTool(BaseTool):
 
     def _observe(self, **kwargs) -> ToolResult:
         self._require_windows_desktop()
+        active_error = self._active_browser_error()
+        if active_error:
+            return active_error
         try:
             from PIL import ImageDraw, ImageGrab
         except Exception as exc:
@@ -519,6 +718,9 @@ class BrowserControlerTool(BaseTool):
 
     def _click(self, x: Any, y: Any, *, button: str = "left") -> ToolResult:
         self._require_windows_desktop()
+        active_error = self._active_browser_error()
+        if active_error:
+            return active_error
         x_value = int(x)
         y_value = int(y)
         user32.SetCursorPos(x_value, y_value)
@@ -534,6 +736,9 @@ class BrowserControlerTool(BaseTool):
 
     def _scroll(self, delta: int) -> ToolResult:
         self._require_windows_desktop()
+        active_error = self._active_browser_error()
+        if active_error:
+            return active_error
         user32.mouse_event(MOUSEEVENTF_WHEEL, 0, 0, int(delta), 0)
         return ToolResult.ok(f"Scrolled browser surface by {int(delta)}.")
 
@@ -542,6 +747,9 @@ class BrowserControlerTool(BaseTool):
 
     def _paste_text(self, text: str, *, press_enter: bool = False) -> ToolResult:
         self._require_windows_desktop()
+        active_error = self._active_browser_error()
+        if active_error:
+            return active_error
         if not text:
             return ToolResult.fail("text is required")
         old_clipboard = self._get_clipboard_text()
@@ -557,11 +765,17 @@ class BrowserControlerTool(BaseTool):
 
     def _key_press(self, key: str) -> ToolResult:
         self._require_windows_desktop()
+        active_error = self._active_browser_error()
+        if active_error:
+            return active_error
         self._send_key(key)
         return ToolResult.ok(f"Pressed key: {key}")
 
     def _hotkey(self, keys: Sequence[Any]) -> ToolResult:
         self._require_windows_desktop()
+        active_error = self._active_browser_error()
+        if active_error:
+            return active_error
         key_list = [str(key or "").strip() for key in keys if str(key or "").strip()]
         if not key_list:
             return ToolResult.fail("keys is required for hotkey")
@@ -570,6 +784,9 @@ class BrowserControlerTool(BaseTool):
 
     def _upload_file(self, file_path: Any, *, x: Any = None, y: Any = None) -> ToolResult:
         self._require_windows_desktop()
+        active_error = self._active_browser_error()
+        if active_error:
+            return active_error
         if not file_path:
             return ToolResult.fail("file_path is required")
         resolved = self.resolve_workspace_path(file_path, purpose="upload browser file")
@@ -599,6 +816,149 @@ class BrowserControlerTool(BaseTool):
     def _require_windows_desktop(self) -> None:
         if not IS_WINDOWS or user32 is None:
             raise RuntimeError("desktop browser control currently requires Windows")
+
+    def _active_browser_error(self) -> Optional[ToolResult]:
+        active = self._foreground_window_info()
+        if active.get("is_browser"):
+            return None
+        return ToolResult.fail(
+            "Active window is not a recognized browser. "
+            f"{self._render_window_info(active, prefix='Active window')}. "
+            "Use list_browser_windows and activate_browser first."
+        )
+
+    def _activate_window_handle(self, hwnd: int) -> bool:
+        self._require_windows_desktop()
+        hwnd_value = wintypes.HWND(int(hwnd or 0))
+        if not hwnd_value:
+            return False
+
+        foreground_hwnd = user32.GetForegroundWindow()
+        foreground_thread = user32.GetWindowThreadProcessId(foreground_hwnd, None) if foreground_hwnd else 0
+        target_thread = user32.GetWindowThreadProcessId(hwnd_value, None)
+        current_thread = kernel32.GetCurrentThreadId()
+        attached: List[tuple[int, int]] = []
+
+        for source, target in ((current_thread, target_thread), (current_thread, foreground_thread), (foreground_thread, target_thread)):
+            if source and target and source != target:
+                if user32.AttachThreadInput(wintypes.DWORD(source), wintypes.DWORD(target), True):
+                    attached.append((source, target))
+        try:
+            user32.ShowWindow(hwnd_value, SW_RESTORE)
+            user32.BringWindowToTop(hwnd_value)
+            user32.SetActiveWindow(hwnd_value)
+            user32.SetFocus(hwnd_value)
+            user32.SetForegroundWindow(hwnd_value)
+            time.sleep(0.25)
+        finally:
+            for source, target in reversed(attached):
+                user32.AttachThreadInput(wintypes.DWORD(source), wintypes.DWORD(target), False)
+
+        active = self._foreground_window_info()
+        return int(active.get("handle") or 0) == int(hwnd or 0) or bool(active.get("is_browser"))
+
+    def _focus_active_browser_page(self) -> None:
+        self._send_key("esc")
+        time.sleep(0.08)
+        hwnd = user32.GetForegroundWindow()
+        rect = RECT()
+        if not hwnd or not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+            return
+        width = max(1, int(rect.right - rect.left))
+        height = max(1, int(rect.bottom - rect.top))
+        x = int(rect.left + width * 0.5)
+        y = int(rect.top + max(140, height * 0.45))
+        user32.SetCursorPos(x, y)
+        time.sleep(0.03)
+        user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+        time.sleep(0.02)
+        user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+        time.sleep(0.08)
+
+    def _foreground_window_info(self) -> Dict[str, Any]:
+        self._require_windows_desktop()
+        hwnd = user32.GetForegroundWindow()
+        return self._window_info(hwnd)
+
+    def _top_level_windows(self) -> List[Dict[str, Any]]:
+        self._require_windows_desktop()
+        windows: List[Dict[str, Any]] = []
+
+        @ENUM_WINDOWS_PROC
+        def enum_callback(hwnd: Any, _lparam: Any) -> bool:
+            try:
+                if not user32.IsWindowVisible(hwnd):
+                    return True
+                title = self._window_title(hwnd)
+                if not title:
+                    return True
+                windows.append(self._window_info(hwnd, title=title))
+            except Exception:
+                return True
+            return True
+
+        user32.EnumWindows(enum_callback, 0)
+        return windows
+
+    def _window_info(self, hwnd: Any, *, title: Optional[str] = None) -> Dict[str, Any]:
+        self._require_windows_desktop()
+        hwnd_int = int(hwnd or 0)
+        pid_value = 0
+        if hwnd_int:
+            pid = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(wintypes.HWND(hwnd_int), ctypes.byref(pid))
+            pid_value = int(pid.value or 0)
+        process_path = self._process_path(pid_value)
+        process_name = Path(process_path).name.lower() if process_path else ""
+        return {
+            "handle": hwnd_int,
+            "title": title if title is not None else self._window_title(hwnd),
+            "process_id": pid_value,
+            "process_name": process_name,
+            "process_path": process_path,
+            "is_browser": self._is_browser_process(process_name, process_path),
+        }
+
+    @staticmethod
+    def _render_window_info(info: Dict[str, Any], *, prefix: str = "Window") -> str:
+        title = str(info.get("title") or "(untitled)")
+        process_name = str(info.get("process_name") or "unknown")
+        pid = int(info.get("process_id") or 0)
+        browser_flag = "browser" if info.get("is_browser") else "not-browser"
+        return f"{prefix}: {title} ({process_name}, pid={pid}, {browser_flag})"
+
+    def _window_title(self, hwnd: Any) -> str:
+        self._require_windows_desktop()
+        hwnd_value = wintypes.HWND(int(hwnd or 0))
+        length = int(user32.GetWindowTextLengthW(hwnd_value) or 0)
+        if length <= 0:
+            return ""
+        buffer = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(hwnd_value, buffer, length + 1)
+        return str(buffer.value or "").strip()
+
+    def _process_path(self, process_id: int) -> str:
+        if not process_id:
+            return ""
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(process_id))
+        if not handle:
+            return ""
+        try:
+            buffer = ctypes.create_unicode_buffer(32768)
+            size = wintypes.DWORD(len(buffer))
+            if not kernel32.QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(size)):
+                return ""
+            return str(buffer.value or "")
+        finally:
+            kernel32.CloseHandle(handle)
+
+    @staticmethod
+    def _is_browser_process(process_name: str, process_path: str = "") -> bool:
+        lowered_name = str(process_name or "").strip().lower()
+        if lowered_name in BROWSER_PROCESS_NAMES:
+            return True
+        lowered_path = str(process_path or "").replace("\\", "/").lower()
+        return any(f"/{name[:-4]}/" in lowered_path for name in BROWSER_PROCESS_NAMES if name.endswith(".exe"))
 
     def _vk_for_key(self, key: Any) -> int:
         text = str(key or "").strip().lower()

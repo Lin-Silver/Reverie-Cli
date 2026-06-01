@@ -381,9 +381,11 @@
       "purpose": "Open and control the system browser, open DevTools, inspect dynamic pages, diagnose page resources, upload files, and check web/server endpoints.",
       "use_when": "A task needs real browser automation, frontend runtime inspection, DevTools-oriented investigation, form/upload/login flow testing, dynamic page text, or server/API endpoint verification beyond static fetches.",
       "parameters": {
-        "action": "open_browser, open_page, open_devtools, diagnose_page, check_endpoint, current_url, extract_page, copy_page_text, observe, click, scroll, paste_text, key_press, hotkey, upload_file, close_page, wait, or optional open_ai_service/ai_chat.",
+        "action": "active_window, list_browser_windows, activate_browser, open_browser, open_page, open_devtools, diagnose_page, check_endpoint, current_url, extract_page, copy_page_text, observe, click, scroll, paste_text, key_press, hotkey, upload_file, close_page, wait, or optional open_ai_service/ai_chat.",
         "url": "Optional URL to open or extract.",
         "private": "Open private/incognito mode when true.",
+        "title_contains": "Optional browser window title filter for activate_browser.",
+        "include_all_windows": "Include non-browser top-level windows when listing windows.",
         "text": "Text to paste/type into the active browser page.",
         "file_path": "Workspace-relative file to upload through the browser file picker.",
         "x/y": "Optional screen coordinates for click or upload targets.",
@@ -391,6 +393,8 @@
         "check_assets": "When true, diagnose_page checks linked scripts, stylesheets, and images."
       },
       "examples": [
+        "browser_controler(action=\"list_browser_windows\")",
+        "browser_controler(action=\"activate_browser\", title_contains=\"localhost\")",
         "browser_controler(action=\"diagnose_page\", url=\"http://localhost:3000\", check_assets=true)",
         "browser_controler(action=\"open_page\", url=\"http://localhost:3000\", private=true)",
         "browser_controler(action=\"open_devtools\")",

@@ -10,10 +10,11 @@ Use `browser_controler` when the task needs evidence from a real browser session
 ## Core Loop
 
 1. Establish the target: URL, local dev server, route, form, upload, login flow, or endpoint.
-2. Collect cheap evidence first: `diagnose_page` for HTML/status/forms/assets, `check_endpoint` for API/server behavior, or `extract_page` for static content.
+2. Collect cheap evidence first: `active_window`/`list_browser_windows` for desktop state, `diagnose_page` for HTML/status/forms/assets, `check_endpoint` for API/server behavior, or `extract_page` for static content.
 3. Open the browser with `open_page`; use `private=true` only when isolation, logged-out state, or privacy mode matters.
-4. Use `observe` with a grid before coordinate actions. Then apply one small action at a time: `click`, `scroll`, `paste_text`, `key_press`, `hotkey`, `upload_file`, `wait`.
-5. Re-observe or use `copy_page_text` after each meaningful step. Report what was actually observed, not what you expected.
+4. Use `activate_browser` before browser-specific shortcuts when the active window is not already a browser.
+5. Use `observe` with a grid before coordinate actions. Then apply one small action at a time: `click`, `scroll`, `paste_text`, `key_press`, `hotkey`, `upload_file`, `wait`.
+6. Re-observe or use `copy_page_text` after each meaningful step. Report what was actually observed, not what you expected.
 
 ## DevTools And Diagnostics
 

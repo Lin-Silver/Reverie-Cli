@@ -8,14 +8,20 @@ web/server endpoints without turning the workflow into a static fetch-only pass.
 from __future__ import annotations
 
 import os
+import base64
+import json
 import re
+import secrets
 import shutil
+import socket
+import ssl
 import subprocess
+import struct
 import time
 import webbrowser
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
-from urllib.parse import urljoin
+from urllib.parse import quote, urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -171,6 +177,222 @@ BROWSER_PROCESS_NAMES = {
     "browser.exe",
 }
 
+DEFAULT_CDP_PORT = 9222
+CDP_HOST = "127.0.0.1"
+
+
+class _CdpWebSocket:
+    """Small WebSocket client for Chrome DevTools Protocol JSON messages."""
+
+    def __init__(self, websocket_url: str, *, timeout: float = 5.0):
+        self.websocket_url = websocket_url
+        self.timeout = max(0.5, float(timeout or 5.0))
+        self.sock: Optional[socket.socket] = None
+
+    def __enter__(self) -> "_CdpWebSocket":
+        self.connect()
+        return self
+
+    def __exit__(self, _exc_type: Any, _exc: Any, _tb: Any) -> None:
+        self.close()
+
+    def connect(self) -> None:
+        parsed = urlparse(self.websocket_url)
+        if parsed.scheme not in {"ws", "wss"}:
+            raise RuntimeError(f"Unsupported DevTools WebSocket URL: {self.websocket_url}")
+        host = parsed.hostname or CDP_HOST
+        port = int(parsed.port or (443 if parsed.scheme == "wss" else 80))
+        path = parsed.path or "/"
+        if parsed.query:
+            path += f"?{parsed.query}"
+
+        raw_sock = socket.create_connection((host, port), timeout=self.timeout)
+        if parsed.scheme == "wss":
+            raw_sock = ssl.create_default_context().wrap_socket(raw_sock, server_hostname=host)
+        raw_sock.settimeout(self.timeout)
+        key = base64.b64encode(secrets.token_bytes(16)).decode("ascii")
+        request = (
+            f"GET {path} HTTP/1.1\r\n"
+            f"Host: {host}:{port}\r\n"
+            "Connection: Upgrade\r\n"
+            "Upgrade: websocket\r\n"
+            "Sec-WebSocket-Version: 13\r\n"
+            f"Sec-WebSocket-Key: {key}\r\n"
+            "\r\n"
+        )
+        raw_sock.sendall(request.encode("ascii"))
+
+        response = b""
+        deadline = time.time() + self.timeout
+        while b"\r\n\r\n" not in response:
+            if time.time() > deadline:
+                raw_sock.close()
+                raise RuntimeError("Timed out during DevTools WebSocket handshake")
+            chunk = raw_sock.recv(4096)
+            if not chunk:
+                break
+            response += chunk
+        first_line = response.split(b"\r\n", 1)[0]
+        if b" 101 " not in first_line:
+            raw_sock.close()
+            preview = response[:300].decode("utf-8", errors="replace")
+            raise RuntimeError(f"DevTools WebSocket handshake failed: {preview}")
+        self.sock = raw_sock
+
+    def close(self) -> None:
+        sock = self.sock
+        self.sock = None
+        if not sock:
+            return
+        try:
+            self._send_frame(b"", opcode=0x8)
+        except Exception:
+            pass
+        try:
+            sock.close()
+        except Exception:
+            pass
+
+    def send_json(self, payload: Dict[str, Any]) -> None:
+        text = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+        self._send_frame(text.encode("utf-8"), opcode=0x1)
+
+    def recv_json(self, *, timeout: Optional[float] = None) -> Optional[Dict[str, Any]]:
+        payload = self._recv_frame(timeout=timeout)
+        if payload is None:
+            return None
+        try:
+            return json.loads(payload.decode("utf-8"))
+        except Exception:
+            return {"method": "_rawWebSocketMessage", "params": {"payload": payload.decode("utf-8", errors="replace")}}
+
+    def _send_frame(self, payload: bytes, *, opcode: int = 0x1) -> None:
+        if not self.sock:
+            raise RuntimeError("DevTools WebSocket is not connected")
+        first = 0x80 | int(opcode)
+        length = len(payload)
+        if length < 126:
+            header = struct.pack("!BB", first, 0x80 | length)
+        elif length < 65536:
+            header = struct.pack("!BBH", first, 0x80 | 126, length)
+        else:
+            header = struct.pack("!BBQ", first, 0x80 | 127, length)
+        mask_key = secrets.token_bytes(4)
+        masked = bytes(byte ^ mask_key[index % 4] for index, byte in enumerate(payload))
+        self.sock.sendall(header + mask_key + masked)
+
+    def _recv_frame(self, *, timeout: Optional[float] = None) -> Optional[bytes]:
+        while True:
+            header = self._recv_exact(2, timeout=timeout)
+            if not header:
+                return None
+            first, second = header[0], header[1]
+            opcode = first & 0x0F
+            masked = bool(second & 0x80)
+            length = second & 0x7F
+            if length == 126:
+                extended = self._recv_exact(2, timeout=timeout)
+                if not extended:
+                    return None
+                length = struct.unpack("!H", extended)[0]
+            elif length == 127:
+                extended = self._recv_exact(8, timeout=timeout)
+                if not extended:
+                    return None
+                length = struct.unpack("!Q", extended)[0]
+            mask_key = self._recv_exact(4, timeout=timeout) if masked else b""
+            payload = self._recv_exact(length, timeout=timeout) if length else b""
+            if payload is None:
+                return None
+            if masked and mask_key:
+                payload = bytes(byte ^ mask_key[index % 4] for index, byte in enumerate(payload))
+            if opcode == 0x8:
+                return None
+            if opcode == 0x9:
+                self._send_frame(payload, opcode=0xA)
+                continue
+            if opcode == 0xA:
+                continue
+            if opcode in {0x1, 0x2}:
+                return payload
+
+    def _recv_exact(self, count: int, *, timeout: Optional[float] = None) -> Optional[bytes]:
+        if not self.sock:
+            raise RuntimeError("DevTools WebSocket is not connected")
+        old_timeout = self.sock.gettimeout()
+        if timeout is not None:
+            self.sock.settimeout(max(0.01, float(timeout)))
+        try:
+            chunks: List[bytes] = []
+            remaining = int(count)
+            while remaining > 0:
+                try:
+                    chunk = self.sock.recv(remaining)
+                except socket.timeout:
+                    return None
+                if not chunk:
+                    return None
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            return b"".join(chunks)
+        finally:
+            if timeout is not None:
+                self.sock.settimeout(old_timeout)
+
+
+class _CdpConnection:
+    """Request/response helper for one DevTools Protocol page target."""
+
+    def __init__(self, websocket_url: str, *, timeout: float = 5.0):
+        self.websocket_url = websocket_url
+        self.timeout = max(0.5, float(timeout or 5.0))
+        self.websocket: Optional[_CdpWebSocket] = None
+        self.next_id = 1
+        self.events: List[Dict[str, Any]] = []
+
+    def __enter__(self) -> "_CdpConnection":
+        self.websocket = _CdpWebSocket(self.websocket_url, timeout=self.timeout)
+        self.websocket.connect()
+        return self
+
+    def __exit__(self, _exc_type: Any, _exc: Any, _tb: Any) -> None:
+        if self.websocket:
+            self.websocket.close()
+
+    def call(self, method: str, params: Optional[Dict[str, Any]] = None, *, timeout: Optional[float] = None) -> Dict[str, Any]:
+        if not self.websocket:
+            raise RuntimeError("DevTools connection is not open")
+        message_id = self.next_id
+        self.next_id += 1
+        self.websocket.send_json({"id": message_id, "method": method, "params": params or {}})
+        wait_timeout = max(0.5, float(timeout or self.timeout))
+        deadline = time.time() + wait_timeout
+        while time.time() < deadline:
+            remaining = max(0.01, min(0.5, deadline - time.time()))
+            message = self.websocket.recv_json(timeout=remaining)
+            if not message:
+                continue
+            if message.get("id") == message_id:
+                if message.get("error"):
+                    error = message.get("error") or {}
+                    raise RuntimeError(f"{method} failed: {error.get('message') or error}")
+                return message.get("result") or {}
+            self.events.append(message)
+        raise RuntimeError(f"Timed out waiting for DevTools method {method}")
+
+    def collect(self, seconds: float) -> List[Dict[str, Any]]:
+        if not self.websocket:
+            raise RuntimeError("DevTools connection is not open")
+        collected: List[Dict[str, Any]] = []
+        deadline = time.time() + max(0.0, float(seconds or 0.0))
+        while time.time() < deadline:
+            remaining = max(0.01, min(0.5, deadline - time.time()))
+            message = self.websocket.recv_json(timeout=remaining)
+            if message:
+                collected.append(message)
+        self.events.extend(collected)
+        return collected
+
 
 class BrowserControlerTool(BaseTool):
     """Control the default browser and extract page information."""
@@ -183,9 +405,9 @@ class BrowserControlerTool(BaseTool):
     max_result_chars = 80_000
     description = (
         "Browser Controler opens the system browser, including private windows when possible, "
-        "controls visible browser pages with mouse/keyboard/scroll actions, opens DevTools, uploads "
-        "workspace files through file dialogs, copies or extracts page text, diagnoses page structure, "
-        "and checks web/server endpoints."
+        "controls visible browser pages with mouse/keyboard/scroll actions, opens DevTools, talks to "
+        "Chromium DevTools Protocol for console/network/DOM inspection, uploads workspace files through "
+        "file dialogs, copies or extracts page text, diagnoses page structure, and checks web/server endpoints."
     )
     parameters = {
         "type": "object",
@@ -198,7 +420,13 @@ class BrowserControlerTool(BaseTool):
                     "activate_browser",
                     "open_browser",
                     "open_page",
+                    "open_debug_page",
                     "open_devtools",
+                    "devtools_targets",
+                    "devtools_snapshot",
+                    "devtools_eval",
+                    "devtools_console",
+                    "devtools_network",
                     "diagnose_page",
                     "check_endpoint",
                     "open_ai_service",
@@ -225,6 +453,17 @@ class BrowserControlerTool(BaseTool):
             "browser_path": {"type": "string", "description": "Optional explicit browser executable path."},
             "private": {"type": "boolean", "description": "Open a private/incognito window when possible."},
             "new_window": {"type": "boolean", "description": "Open in a new browser window."},
+            "port": {"type": "integer", "description": "Chrome DevTools Protocol remote debugging port for open_debug_page/devtools_* actions."},
+            "target_id": {"type": "string", "description": "Optional DevTools target id for devtools_* actions."},
+            "url_contains": {"type": "string", "description": "Optional target URL/title substring for activate_browser or devtools_* target selection."},
+            "expression": {"type": "string", "description": "JavaScript expression to run through DevTools Runtime.evaluate."},
+            "await_promise": {"type": "boolean", "description": "For devtools_eval, wait for returned promises."},
+            "return_by_value": {"type": "boolean", "description": "For devtools_eval, return JSON-serializable values by value."},
+            "include_bodies": {"type": "boolean", "description": "For devtools_network, include response body previews when available."},
+            "max_body_chars": {"type": "integer", "description": "For devtools_network, maximum characters per captured response body preview."},
+            "max_events": {"type": "integer", "description": "For devtools_console/devtools_network, maximum events/items to render."},
+            "reload": {"type": "boolean", "description": "For devtools_network, reload the selected page after enabling Network."},
+            "user_data_dir": {"type": "string", "description": "Optional isolated browser profile directory for open_debug_page."},
             "include_all_windows": {"type": "boolean", "description": "For list_browser_windows, include non-browser top-level windows too."},
             "title_contains": {"type": "string", "description": "For activate_browser, choose a browser window whose title contains this text."},
             "window_index": {"type": "integer", "description": "For activate_browser, zero-based index among matching browser windows."},
@@ -262,8 +501,10 @@ class BrowserControlerTool(BaseTool):
         self.output_dir = get_project_data_dir(self.project_root) / "browser_controler"
         self.pages_dir = self.output_dir / "pages"
         self.observations_dir = self.output_dir / "observations"
+        self.debug_profiles_dir = self.output_dir / "debug-profiles"
         self.pages_dir.mkdir(parents=True, exist_ok=True)
         self.observations_dir.mkdir(parents=True, exist_ok=True)
+        self.debug_profiles_dir.mkdir(parents=True, exist_ok=True)
 
     def get_execution_message(self, action: str, **kwargs) -> str:
         action_name = str(action or "").strip().lower()
@@ -273,7 +514,13 @@ class BrowserControlerTool(BaseTool):
             "activate_browser": "Activating browser window",
             "open_browser": "Opening browser window",
             "open_page": "Opening browser page",
+            "open_debug_page": "Opening browser page with DevTools Protocol enabled",
             "open_devtools": "Opening browser developer tools",
+            "devtools_targets": "Listing DevTools Protocol page targets",
+            "devtools_snapshot": "Reading live DOM text through DevTools Protocol",
+            "devtools_eval": "Running JavaScript in the browser through DevTools Protocol",
+            "devtools_console": "Reading browser console and log events",
+            "devtools_network": "Reading browser network events and responses",
             "diagnose_page": "Diagnosing web page structure and resources",
             "check_endpoint": "Checking web/server endpoint",
             "open_ai_service": "Opening web AI service",
@@ -307,8 +554,57 @@ class BrowserControlerTool(BaseTool):
                 )
             if action_name in {"open_browser", "open_page"}:
                 return self._open_page(**kwargs)
+            if action_name == "open_debug_page":
+                return self._open_debug_page(**kwargs)
             if action_name == "open_devtools":
                 return self._open_devtools(**kwargs)
+            if action_name == "devtools_targets":
+                return self._devtools_targets(
+                    port=int(kwargs.get("port", DEFAULT_CDP_PORT) or DEFAULT_CDP_PORT),
+                    url_contains=str(kwargs.get("url_contains") or ""),
+                    timeout=float(kwargs.get("timeout", 5) or 5),
+                )
+            if action_name == "devtools_snapshot":
+                return self._devtools_snapshot(
+                    port=int(kwargs.get("port", DEFAULT_CDP_PORT) or DEFAULT_CDP_PORT),
+                    target_id=str(kwargs.get("target_id") or ""),
+                    url_contains=str(kwargs.get("url_contains") or ""),
+                    max_chars=int(kwargs.get("max_chars", 30000) or 30000),
+                    timeout=float(kwargs.get("timeout", 5) or 5),
+                )
+            if action_name == "devtools_eval":
+                return self._devtools_eval(
+                    expression=str(kwargs.get("expression") or ""),
+                    port=int(kwargs.get("port", DEFAULT_CDP_PORT) or DEFAULT_CDP_PORT),
+                    target_id=str(kwargs.get("target_id") or ""),
+                    url_contains=str(kwargs.get("url_contains") or ""),
+                    await_promise=bool(kwargs.get("await_promise", True)),
+                    return_by_value=bool(kwargs.get("return_by_value", True)),
+                    timeout=float(kwargs.get("timeout", 5) or 5),
+                )
+            if action_name == "devtools_console":
+                return self._devtools_console(
+                    expression=str(kwargs.get("expression") or ""),
+                    port=int(kwargs.get("port", DEFAULT_CDP_PORT) or DEFAULT_CDP_PORT),
+                    target_id=str(kwargs.get("target_id") or ""),
+                    url_contains=str(kwargs.get("url_contains") or ""),
+                    wait_seconds=float(kwargs.get("wait_seconds", 1.0) or 1.0),
+                    max_events=int(kwargs.get("max_events", 80) or 80),
+                    timeout=float(kwargs.get("timeout", 5) or 5),
+                )
+            if action_name == "devtools_network":
+                return self._devtools_network(
+                    url=kwargs.get("url"),
+                    port=int(kwargs.get("port", DEFAULT_CDP_PORT) or DEFAULT_CDP_PORT),
+                    target_id=str(kwargs.get("target_id") or ""),
+                    url_contains=str(kwargs.get("url_contains") or ""),
+                    wait_seconds=float(kwargs.get("wait_seconds", 3.0) or 3.0),
+                    include_bodies=bool(kwargs.get("include_bodies", False)),
+                    max_body_chars=int(kwargs.get("max_body_chars", 2000) or 2000),
+                    max_events=int(kwargs.get("max_events", 120) or 120),
+                    reload=bool(kwargs.get("reload", False)),
+                    timeout=float(kwargs.get("timeout", 5) or 5),
+                )
             if action_name == "diagnose_page":
                 return self._diagnose_page(
                     url=kwargs.get("url"),
@@ -486,6 +782,304 @@ class BrowserControlerTool(BaseTool):
         self._require_windows_desktop()
         self._send_key("f12")
         return ToolResult.ok("Opened DevTools for the active browser page." + (f" Page: {url}" if url else ""))
+
+    def _open_debug_page(self, **kwargs) -> ToolResult:
+        url = str(kwargs.get("url") or "about:blank").strip() or "about:blank"
+        port = self._normalize_cdp_port(kwargs.get("port", DEFAULT_CDP_PORT))
+        browser = str(kwargs.get("browser") or "chrome").strip() or "chrome"
+        if browser.lower() in {"default", "system"}:
+            browser = "chrome"
+        browser_path = str(kwargs.get("browser_path") or "").strip()
+        executable = self._resolve_browser_executable(browser=browser, browser_path=browser_path)
+        if not executable and not browser_path:
+            for fallback_browser in ("edge", "brave", "default"):
+                if fallback_browser == browser.lower():
+                    continue
+                candidate = self._resolve_browser_executable(browser=fallback_browser, browser_path="")
+                if candidate and "firefox" not in candidate.name.lower():
+                    executable = candidate
+                    break
+        if not executable:
+            return ToolResult.fail("Could not resolve Chrome/Edge/Brave for DevTools Protocol browser control.")
+        if "firefox" in executable.name.lower():
+            return ToolResult.fail("open_debug_page requires a Chromium-based browser for DevTools Protocol.")
+
+        user_data_dir = str(kwargs.get("user_data_dir") or "").strip()
+        profile_dir = Path(user_data_dir).expanduser() if user_data_dir else self.debug_profiles_dir / f"port-{port}"
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        wait_seconds = max(1.0, min(float(kwargs.get("wait_seconds", 3.0) or 3.0), 20.0))
+        before_browser_handles: set[int] = set()
+        if IS_WINDOWS:
+            try:
+                before_browser_handles = {
+                    int(item.get("handle") or 0)
+                    for item in self._top_level_windows()
+                    if item.get("is_browser")
+                }
+            except Exception:
+                before_browser_handles = set()
+
+        args = [
+            str(executable),
+            f"--remote-debugging-port={port}",
+            f"--user-data-dir={profile_dir}",
+            "--remote-allow-origins=*",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-popup-blocking",
+        ]
+        for flag in self._browser_window_flags(executable, private=bool(kwargs.get("private", False)), new_window=True):
+            if flag not in args:
+                args.append(flag)
+        if "--new-window" not in args:
+            args.append("--new-window")
+        args.append(url)
+
+        process = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        version: Dict[str, Any] = {}
+        deadline = time.time() + wait_seconds
+        last_error = ""
+        while time.time() < deadline:
+            try:
+                version = self._cdp_version(port, timeout=1.0)
+                break
+            except Exception as exc:
+                last_error = str(exc)
+                time.sleep(0.2)
+        if not version:
+            return ToolResult.fail(
+                f"Opened browser process pid={process.pid}, but DevTools Protocol on port {port} did not respond. {last_error}"
+            )
+
+        activated = False
+        if IS_WINDOWS:
+            try:
+                browser_windows = [item for item in self._top_level_windows() if item.get("is_browser")]
+                new_browser_windows = [
+                    item for item in browser_windows
+                    if int(item.get("handle") or 0) not in before_browser_handles
+                ]
+                for candidate in new_browser_windows + browser_windows:
+                    handle = int(candidate.get("handle") or 0)
+                    if handle and self._activate_window_handle(handle):
+                        activated = True
+                        break
+            except Exception:
+                activated = False
+
+        output = [
+            f"Opened DevTools-enabled browser page: {url}",
+            f"CDP: http://{CDP_HOST}:{port}",
+            f"Profile: {profile_dir}",
+            f"Browser: {version.get('Browser') or executable.name}",
+        ]
+        if activated:
+            output.append("Activated a browser window.")
+        return ToolResult.ok(
+            "\n".join(output),
+            data={
+                "url": url,
+                "port": port,
+                "profile_dir": str(profile_dir),
+                "browser": str(executable),
+                "process_id": process.pid,
+                "version": version,
+                "activated": activated,
+            },
+        )
+
+    def _devtools_targets(self, *, port: int, url_contains: str = "", timeout: float = 5.0) -> ToolResult:
+        targets = self._cdp_list_targets(port, timeout=timeout)
+        needle = str(url_contains or "").strip().lower()
+        if needle:
+            targets = [
+                item for item in targets
+                if needle in str(item.get("url") or "").lower() or needle in str(item.get("title") or "").lower()
+            ]
+        lines = [f"DevTools targets on {CDP_HOST}:{port}: {len(targets)}"]
+        for index, item in enumerate(targets[:60]):
+            websocket = "yes" if item.get("webSocketDebuggerUrl") else "no"
+            lines.append(
+                f"[{index}] id={item.get('id')} type={item.get('type')} websocket={websocket}\n"
+                f"    title={item.get('title') or '(untitled)'}\n"
+                f"    url={item.get('url') or '(empty)'}"
+            )
+        return ToolResult.ok("\n".join(lines), data={"port": port, "targets": targets})
+
+    def _devtools_snapshot(
+        self,
+        *,
+        port: int,
+        target_id: str = "",
+        url_contains: str = "",
+        max_chars: int = 30000,
+        timeout: float = 5.0,
+    ) -> ToolResult:
+        expression = (
+            "(() => ({"
+            "url: location.href,"
+            "title: document.title,"
+            "text: document.body ? document.body.innerText : '',"
+            "html: document.documentElement ? document.documentElement.outerHTML : ''"
+            "}))()"
+        )
+        target = self._cdp_select_target(port, target_id=target_id, url_contains=url_contains, timeout=timeout)
+        with _CdpConnection(str(target["webSocketDebuggerUrl"]), timeout=timeout) as cdp:
+            self._safe_cdp_call(cdp, "Runtime.enable", timeout=timeout)
+            result = cdp.call(
+                "Runtime.evaluate",
+                {
+                    "expression": expression,
+                    "awaitPromise": True,
+                    "returnByValue": True,
+                    "userGesture": True,
+                },
+                timeout=timeout,
+            )
+        if result.get("exceptionDetails"):
+            details = self._format_cdp_exception(result.get("exceptionDetails") or {})
+            return ToolResult.partial(f"DevTools DOM snapshot raised an exception:\n{details}", details, data={"target": target})
+        value = (result.get("result") or {}).get("value") or {}
+        page_url = str(value.get("url") or target.get("url") or "")
+        title = str(value.get("title") or target.get("title") or "")
+        text = str(value.get("text") or "")
+        html = str(value.get("html") or "")
+        saved = self._persist_page_artifacts(page_url or "devtools-snapshot", html, text)
+        clipped = text[: max(1, int(max_chars))]
+        lines = [
+            f"URL: {page_url}",
+            f"Title: {title or '(missing)'}",
+            f"Text chars: {len(text)}",
+            f"HTML chars: {len(html)}",
+            "",
+            "Live DOM Text:",
+            clipped,
+        ]
+        if len(text) > len(clipped):
+            lines.append(f"\n[truncated; full text saved to {saved.get('text_path')}]")
+        lines.append(f"\nSaved full page text: {saved.get('text_path')}")
+        lines.append(f"Saved HTML: {saved.get('html_path')}")
+        return ToolResult.ok(
+            "\n".join(lines).strip(),
+            data={"target": target, "url": page_url, "title": title, "text_chars": len(text), "html_chars": len(html), **saved},
+        )
+
+    def _devtools_eval(
+        self,
+        *,
+        expression: str,
+        port: int,
+        target_id: str = "",
+        url_contains: str = "",
+        await_promise: bool = True,
+        return_by_value: bool = True,
+        timeout: float = 5.0,
+    ) -> ToolResult:
+        if not str(expression or "").strip():
+            return ToolResult.fail("expression is required for devtools_eval")
+        target = self._cdp_select_target(port, target_id=target_id, url_contains=url_contains, timeout=timeout)
+        with _CdpConnection(str(target["webSocketDebuggerUrl"]), timeout=timeout) as cdp:
+            self._safe_cdp_call(cdp, "Runtime.enable", timeout=timeout)
+            result = cdp.call(
+                "Runtime.evaluate",
+                {
+                    "expression": expression,
+                    "awaitPromise": bool(await_promise),
+                    "returnByValue": bool(return_by_value),
+                    "userGesture": True,
+                },
+                timeout=timeout,
+            )
+        remote = result.get("result") or {}
+        value = self._format_cdp_remote_object(remote)
+        lines = [
+            "DevTools Console Evaluation:",
+            f"Target: {target.get('title') or '(untitled)'}",
+            f"URL: {target.get('url') or '(empty)'}",
+            f"Type: {remote.get('type') or 'unknown'}",
+            f"Value: {value}",
+        ]
+        if result.get("exceptionDetails"):
+            details = self._format_cdp_exception(result.get("exceptionDetails") or {})
+            lines.append("\nException:\n" + details)
+            return ToolResult.partial("\n".join(lines), "DevTools expression raised an exception.", data={"target": target, "result": result})
+        return ToolResult.ok("\n".join(lines), data={"target": target, "result": result, "value": remote.get("value")})
+
+    def _devtools_console(
+        self,
+        *,
+        expression: str = "",
+        port: int,
+        target_id: str = "",
+        url_contains: str = "",
+        wait_seconds: float = 1.0,
+        max_events: int = 80,
+        timeout: float = 5.0,
+    ) -> ToolResult:
+        target = self._cdp_select_target(port, target_id=target_id, url_contains=url_contains, timeout=timeout)
+        eval_result: Dict[str, Any] = {}
+        with _CdpConnection(str(target["webSocketDebuggerUrl"]), timeout=timeout) as cdp:
+            self._safe_cdp_call(cdp, "Runtime.enable", timeout=timeout)
+            self._safe_cdp_call(cdp, "Log.enable", timeout=timeout)
+            if expression.strip():
+                eval_result = cdp.call(
+                    "Runtime.evaluate",
+                    {
+                        "expression": expression,
+                        "awaitPromise": True,
+                        "returnByValue": True,
+                        "userGesture": True,
+                    },
+                    timeout=timeout,
+                )
+            cdp.collect(max(0.0, min(float(wait_seconds or 0.0), 30.0)))
+            events = list(cdp.events)
+        lines = [
+            f"DevTools console/log events for {target.get('title') or '(untitled)'}",
+            f"URL: {target.get('url') or '(empty)'}",
+        ]
+        if eval_result:
+            remote = eval_result.get("result") or {}
+            lines.append(f"Evaluation value: {self._format_cdp_remote_object(remote)}")
+            if eval_result.get("exceptionDetails"):
+                lines.append("Evaluation exception: " + self._format_cdp_exception(eval_result.get("exceptionDetails") or {}))
+        rendered = self._render_cdp_console_events(events, max_events=max_events)
+        if rendered:
+            lines.append("\nEvents:")
+            lines.extend(rendered)
+        else:
+            lines.append("\nNo console/log events were observed after Runtime/Log were enabled.")
+        return ToolResult.ok("\n".join(lines), data={"target": target, "events": events, "evaluation": eval_result})
+
+    def _devtools_network(
+        self,
+        *,
+        url: Any = None,
+        port: int,
+        target_id: str = "",
+        url_contains: str = "",
+        wait_seconds: float = 3.0,
+        include_bodies: bool = False,
+        max_body_chars: int = 2000,
+        max_events: int = 120,
+        reload: bool = False,
+        timeout: float = 5.0,
+    ) -> ToolResult:
+        target = self._cdp_select_target(port, target_id=target_id, url_contains=url_contains, timeout=timeout)
+        navigate_url = str(url or "").strip()
+        with _CdpConnection(str(target["webSocketDebuggerUrl"]), timeout=timeout) as cdp:
+            self._safe_cdp_call(cdp, "Network.enable", timeout=timeout)
+            self._safe_cdp_call(cdp, "Page.enable", timeout=timeout)
+            if navigate_url:
+                cdp.call("Page.navigate", {"url": navigate_url}, timeout=timeout)
+            elif reload:
+                cdp.call("Page.reload", {"ignoreCache": True}, timeout=timeout)
+            cdp.collect(max(0.1, min(float(wait_seconds or 0.0), 60.0)))
+            summary = self._summarize_cdp_network_events(cdp.events, max_events=max_events)
+            if include_bodies:
+                self._attach_cdp_response_bodies(cdp, summary["responses"], max_body_chars=max_body_chars, timeout=min(timeout, 3.0))
+        output = self._render_cdp_network_summary(summary, target=target)
+        return ToolResult.ok(output, data={"target": target, **summary})
 
     def _ai_chat(self, **kwargs) -> ToolResult:
         service_url = self._resolve_service_url(kwargs.get("service"), kwargs.get("url"))
@@ -959,6 +1553,286 @@ class BrowserControlerTool(BaseTool):
             return True
         lowered_path = str(process_path or "").replace("\\", "/").lower()
         return any(f"/{name[:-4]}/" in lowered_path for name in BROWSER_PROCESS_NAMES if name.endswith(".exe"))
+
+    @staticmethod
+    def _normalize_cdp_port(port: Any) -> int:
+        value = int(port or DEFAULT_CDP_PORT)
+        if value <= 0 or value > 65535:
+            raise ValueError(f"Invalid DevTools Protocol port: {port}")
+        return value
+
+    @staticmethod
+    def _cdp_base_url(port: int) -> str:
+        return f"http://{CDP_HOST}:{BrowserControlerTool._normalize_cdp_port(port)}"
+
+    def _cdp_version(self, port: int, *, timeout: float = 5.0) -> Dict[str, Any]:
+        response = requests.get(f"{self._cdp_base_url(port)}/json/version", timeout=max(0.5, float(timeout or 5.0)))
+        response.raise_for_status()
+        return response.json()
+
+    def _cdp_list_targets(self, port: int, *, timeout: float = 5.0) -> List[Dict[str, Any]]:
+        response = requests.get(f"{self._cdp_base_url(port)}/json/list", timeout=max(0.5, float(timeout or 5.0)))
+        response.raise_for_status()
+        targets = response.json()
+        if not isinstance(targets, list):
+            raise RuntimeError("DevTools /json/list did not return a target list")
+        return [item for item in targets if isinstance(item, dict)]
+
+    def _cdp_create_target(self, port: int, url: str, *, timeout: float = 5.0) -> Dict[str, Any]:
+        endpoint = f"{self._cdp_base_url(port)}/json/new?{quote(str(url or 'about:blank'), safe=':/?&=%#')}"
+        try:
+            response = requests.put(endpoint, timeout=max(0.5, float(timeout or 5.0)))
+            response.raise_for_status()
+            result = response.json()
+        except Exception:
+            response = requests.get(endpoint, timeout=max(0.5, float(timeout or 5.0)))
+            response.raise_for_status()
+            result = response.json()
+        if not isinstance(result, dict):
+            raise RuntimeError("DevTools target creation did not return a target object")
+        return result
+
+    def _cdp_select_target(
+        self,
+        port: int,
+        *,
+        target_id: str = "",
+        url_contains: str = "",
+        timeout: float = 5.0,
+    ) -> Dict[str, Any]:
+        targets = self._cdp_list_targets(port, timeout=timeout)
+        if target_id:
+            for item in targets:
+                if str(item.get("id") or "") == str(target_id):
+                    if item.get("webSocketDebuggerUrl"):
+                        return item
+                    raise RuntimeError(f"DevTools target has no WebSocket URL: {target_id}")
+            raise RuntimeError(f"No DevTools target matched id={target_id}")
+
+        pages = [
+            item for item in targets
+            if item.get("webSocketDebuggerUrl") and str(item.get("type") or "").lower() == "page"
+        ]
+        needle = str(url_contains or "").strip().lower()
+        if needle:
+            pages = [
+                item for item in pages
+                if needle in str(item.get("url") or "").lower() or needle in str(item.get("title") or "").lower()
+            ]
+        pages = [item for item in pages if not str(item.get("url") or "").startswith("devtools://")] or pages
+        pages.sort(key=self._cdp_target_score, reverse=True)
+        if not pages:
+            raise RuntimeError(
+                f"No DevTools page targets were available on {self._cdp_base_url(port)}. "
+                "Use open_debug_page first, or pass the correct port."
+            )
+        return pages[0]
+
+    @staticmethod
+    def _cdp_target_score(target: Dict[str, Any]) -> int:
+        url = str(target.get("url") or "").strip().lower()
+        title = str(target.get("title") or "").strip()
+        score = 0
+        if url.startswith(("http://", "https://")):
+            score += 100
+        elif url and url not in {"about:blank", "chrome://newtab/"}:
+            score += 30
+        if title:
+            score += 10
+        if str(target.get("type") or "").lower() == "page":
+            score += 5
+        if target.get("webSocketDebuggerUrl"):
+            score += 5
+        if url.startswith(("devtools://", "chrome-extension://")):
+            score -= 100
+        if url in {"about:blank", "chrome://newtab/"}:
+            score -= 20
+        return score
+
+    @staticmethod
+    def _safe_cdp_call(cdp: _CdpConnection, method: str, params: Optional[Dict[str, Any]] = None, *, timeout: float = 5.0) -> Dict[str, Any]:
+        try:
+            return cdp.call(method, params or {}, timeout=timeout)
+        except Exception:
+            return {}
+
+    @staticmethod
+    def _format_cdp_remote_object(remote: Dict[str, Any]) -> str:
+        if not isinstance(remote, dict):
+            return str(remote)
+        if "unserializableValue" in remote:
+            return str(remote.get("unserializableValue"))
+        if "value" in remote:
+            value = remote.get("value")
+            if isinstance(value, (dict, list)):
+                return json.dumps(value, ensure_ascii=False, indent=2)
+            return str(value)
+        if remote.get("description"):
+            return str(remote.get("description"))
+        if remote.get("type"):
+            return str(remote.get("type"))
+        return ""
+
+    @staticmethod
+    def _format_cdp_exception(details: Dict[str, Any]) -> str:
+        exception = details.get("exception") if isinstance(details, dict) else None
+        if isinstance(exception, dict):
+            description = exception.get("description") or exception.get("value")
+            if description:
+                return str(description)
+        text = details.get("text") if isinstance(details, dict) else ""
+        line = details.get("lineNumber") if isinstance(details, dict) else None
+        column = details.get("columnNumber") if isinstance(details, dict) else None
+        suffix = f" at {line}:{column}" if line is not None and column is not None else ""
+        return (str(text or "unknown exception") + suffix).strip()
+
+    @classmethod
+    def _render_cdp_console_events(cls, events: Sequence[Dict[str, Any]], *, max_events: int = 80) -> List[str]:
+        lines: List[str] = []
+        limit = max(1, int(max_events or 80))
+        for event in events:
+            method = str(event.get("method") or "")
+            params = event.get("params") or {}
+            if method == "Runtime.consoleAPICalled":
+                level = str(params.get("type") or "console")
+                args = [
+                    cls._format_cdp_remote_object(arg)
+                    for arg in (params.get("args") or [])
+                    if isinstance(arg, dict)
+                ]
+                lines.append(f"- console.{level}: {' '.join(arg for arg in args if arg)}".rstrip())
+            elif method == "Runtime.exceptionThrown":
+                lines.append(f"- exception: {cls._format_cdp_exception(params.get('exceptionDetails') or {})}")
+            elif method == "Log.entryAdded":
+                entry = params.get("entry") or {}
+                level = entry.get("level") or "log"
+                text = entry.get("text") or entry.get("url") or ""
+                source = entry.get("source") or "unknown"
+                lines.append(f"- {source}.{level}: {text}")
+            if len(lines) >= limit:
+                lines.append(f"- [truncated at {limit} rendered console/log events]")
+                break
+        return lines
+
+    @classmethod
+    def _summarize_cdp_network_events(cls, events: Sequence[Dict[str, Any]], *, max_events: int = 120) -> Dict[str, Any]:
+        requests_by_id: Dict[str, Dict[str, Any]] = {}
+        responses_by_id: Dict[str, Dict[str, Any]] = {}
+        failures: List[Dict[str, Any]] = []
+        finished: set[str] = set()
+        for event in events:
+            method = str(event.get("method") or "")
+            params = event.get("params") or {}
+            request_id = str(params.get("requestId") or "")
+            if not request_id:
+                continue
+            if method == "Network.requestWillBeSent":
+                request = params.get("request") or {}
+                requests_by_id[request_id] = {
+                    "request_id": request_id,
+                    "url": request.get("url") or "",
+                    "method": request.get("method") or "GET",
+                    "resource_type": params.get("type") or "",
+                    "document_url": params.get("documentURL") or "",
+                }
+            elif method == "Network.responseReceived":
+                response = params.get("response") or {}
+                request = requests_by_id.get(request_id) or {}
+                responses_by_id[request_id] = {
+                    "request_id": request_id,
+                    "url": response.get("url") or request.get("url") or "",
+                    "method": request.get("method") or "",
+                    "status": int(response.get("status") or 0),
+                    "status_text": response.get("statusText") or "",
+                    "mime_type": response.get("mimeType") or "",
+                    "resource_type": params.get("type") or request.get("resource_type") or "",
+                    "headers": response.get("headers") or {},
+                }
+            elif method == "Network.loadingFailed":
+                request = requests_by_id.get(request_id) or {}
+                failures.append(
+                    {
+                        "request_id": request_id,
+                        "url": request.get("url") or "",
+                        "method": request.get("method") or "",
+                        "resource_type": request.get("resource_type") or params.get("type") or "",
+                        "error_text": params.get("errorText") or "failed",
+                    }
+                )
+            elif method == "Network.loadingFinished":
+                finished.add(request_id)
+
+        responses = list(responses_by_id.values())[: max(1, int(max_events or 120))]
+        for item in responses:
+            item["finished"] = item.get("request_id") in finished
+        return {
+            "request_count": len(requests_by_id),
+            "response_count": len(responses_by_id),
+            "failure_count": len(failures),
+            "requests": list(requests_by_id.values())[: max(1, int(max_events or 120))],
+            "responses": responses,
+            "failures": failures[: max(1, int(max_events or 120))],
+            "events": list(events)[: max(1, int(max_events or 120))],
+        }
+
+    @classmethod
+    def _attach_cdp_response_bodies(
+        cls,
+        cdp: _CdpConnection,
+        responses: List[Dict[str, Any]],
+        *,
+        max_body_chars: int,
+        timeout: float = 3.0,
+    ) -> None:
+        limit = max(1, int(max_body_chars or 2000))
+        for item in responses[:20]:
+            request_id = str(item.get("request_id") or "")
+            if not request_id:
+                continue
+            try:
+                result = cdp.call("Network.getResponseBody", {"requestId": request_id}, timeout=timeout)
+                body = str(result.get("body") or "")
+                if result.get("base64Encoded"):
+                    try:
+                        body = base64.b64decode(body).decode("utf-8", errors="replace")
+                    except Exception:
+                        body = "[base64 response body omitted]"
+                item["body_preview"] = body[:limit]
+                item["body_truncated"] = len(body) > limit
+            except Exception as exc:
+                item["body_error"] = str(exc)
+
+    @staticmethod
+    def _render_cdp_network_summary(summary: Dict[str, Any], *, target: Dict[str, Any]) -> str:
+        lines = [
+            f"DevTools network events for {target.get('title') or '(untitled)'}",
+            f"URL: {target.get('url') or '(empty)'}",
+            (
+                "Counts: "
+                f"requests={summary.get('request_count', 0)}, "
+                f"responses={summary.get('response_count', 0)}, "
+                f"failures={summary.get('failure_count', 0)}"
+            ),
+        ]
+        responses = list(summary.get("responses") or [])
+        if responses:
+            lines.append("\nResponses:")
+            for item in responses[:60]:
+                method = item.get("method") or ""
+                status = item.get("status") or 0
+                resource_type = item.get("resource_type") or ""
+                mime_type = item.get("mime_type") or ""
+                lines.append(f"- {status} {method} {item.get('url') or ''} [{resource_type} {mime_type}]".strip())
+                if item.get("body_preview"):
+                    lines.append("  Body Preview:\n" + str(item.get("body_preview")))
+                elif item.get("body_error"):
+                    lines.append(f"  Body unavailable: {item.get('body_error')}")
+        failures = list(summary.get("failures") or [])
+        if failures:
+            lines.append("\nFailures:")
+            for item in failures[:40]:
+                lines.append(f"- {item.get('method') or ''} {item.get('url') or ''}: {item.get('error_text') or 'failed'}")
+        return "\n".join(lines).strip()
 
     def _vk_for_key(self, key: Any) -> int:
         text = str(key or "").strip().lower()

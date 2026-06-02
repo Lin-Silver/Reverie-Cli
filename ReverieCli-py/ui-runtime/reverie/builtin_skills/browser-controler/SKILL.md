@@ -10,16 +10,20 @@ Use `browser_controler` when the task needs evidence from a real browser session
 ## Core Loop
 
 1. Establish the target: URL, local dev server, route, form, upload, login flow, or endpoint.
-2. Collect cheap evidence first: `active_window`/`list_browser_windows` for desktop state, `diagnose_page` for HTML/status/forms/assets, `check_endpoint` for API/server behavior, or `extract_page` for static content.
-3. Open the browser with `open_page`; use `private=true` only when isolation, logged-out state, or privacy mode matters.
+2. Collect cheap evidence first: `active_window`/`list_browser_windows` for desktop state, `diagnose_page` for HTML/status/forms/assets, `check_endpoint` for API/server behavior, `extract_page` for static content, or `devtools_targets` when a DevTools-enabled browser is already open.
+3. Open the browser with `open_page` for normal visible interaction. Use `open_debug_page` when the task needs structured DevTools evidence such as live DOM content, Console output, JavaScript execution, or Network responses. Use `private=true` only when isolation, logged-out state, or privacy mode matters.
 4. Use `activate_browser` before browser-specific shortcuts when the active window is not already a browser.
 5. Use `observe` with a grid before coordinate actions. Then apply one small action at a time: `click`, `scroll`, `paste_text`, `key_press`, `hotkey`, `upload_file`, `wait`.
-6. Re-observe or use `copy_page_text` after each meaningful step. Report what was actually observed, not what you expected.
+6. Re-observe, use `copy_page_text`, or use `devtools_snapshot` after each meaningful step. Report what was actually observed, not what you expected.
 
 ## DevTools And Diagnostics
 
-- Use `open_devtools` when visual browser evidence is not enough and the user asks for browser/developer inspection.
-- Use DevTools manually through browser controls: focus panels, search console/network text, copy visible errors, and re-observe.
+- Prefer `open_debug_page` plus DevTools Protocol actions for structured evidence. This supports Chromium-based browsers such as Chrome, Edge, and Brave with an isolated debug profile.
+- Use `devtools_snapshot` to read the live rendered DOM text/HTML, including client-rendered content that static fetches miss.
+- Use `devtools_eval(expression="...")` to run JavaScript in the selected page, equivalent to entering a command in the browser Console. Good examples: inspect `document.title`, query DOM nodes, check app globals, localStorage, route state, or run a small diagnostic expression.
+- Use `devtools_console` to read Console API events, browser log entries, and runtime exceptions. Pass `expression` when you need to deliberately emit or test a Console command.
+- Use `devtools_network(url=..., include_bodies=true)` to enable Network, navigate or reload, and capture request/response status, resource type, MIME type, failures, and optional response body previews.
+- Use `open_devtools` when the user specifically wants the visual DevTools panel opened. For logs/responses, still prefer `devtools_console` and `devtools_network` because they return structured evidence.
 - Use `diagnose_page(check_assets=true)` to find HTTP status, missing title/content, form structure, and broken scripts/styles/images.
 - Use `check_endpoint(method="GET"|"POST"|...)` for server/API routes, health checks, auth callbacks, upload endpoints, and form actions.
 - Prefer local command-line tests for code-level verification, then use Browser Controler for the final in-browser proof.
@@ -27,16 +31,18 @@ Use `browser_controler` when the task needs evidence from a real browser session
 ## Practical Patterns
 
 - Page smoke test: `diagnose_page`, `open_page`, `observe`, interact with the main path, `copy_page_text` or screenshot evidence.
-- UI bug investigation: reproduce in browser, open DevTools, copy console/network clues, inspect related source files, patch, rebuild, retest.
+- UI bug investigation: reproduce in browser, use `devtools_console` and `devtools_network` for logs/responses, inspect related source files, patch, rebuild, retest.
 - Server feature check: identify endpoint or form action, call `check_endpoint`, compare response with UI behavior, then test through the browser.
 - Upload flow: click the upload control, call `upload_file` for a workspace file, wait, observe the resulting UI state.
-- Dynamic app content: use `copy_page_text` after rendering or interaction because static `extract_page` may miss client-rendered state.
+- Dynamic app content: use `devtools_snapshot` or `copy_page_text` after rendering or interaction because static `extract_page` may miss client-rendered state.
+- Console command check: `open_debug_page(url=...)`, then `devtools_eval(expression="document.body.innerText")` or `devtools_console(expression="console.log('probe', location.href)")`.
+- Network response check: `open_debug_page(url="about:blank")`, then `devtools_network(url=target_url, include_bodies=true)` and verify the relevant response status/body.
 - Web AI engineering help: when explicitly useful, operate a web AI service as a browser page to ask for code ideas, OCR, or debugging suggestions, then verify any advice against the local codebase and tests before applying it.
 
 ## Guardrails
 
 - Do not treat Browser Controler as a replacement for reading the codebase. Use it to verify runtime behavior.
-- Do not claim a UI state, console error, network result, or endpoint behavior unless `observe`, `copy_page_text`, `diagnose_page`, or `check_endpoint` produced evidence.
+- Do not claim a UI state, console error, network result, or endpoint behavior unless `observe`, `copy_page_text`, `devtools_snapshot`, `devtools_eval`, `devtools_console`, `devtools_network`, `diagnose_page`, or `check_endpoint` produced evidence.
 - Upload only files inside the workspace or files the user explicitly provided.
 - Avoid entering credentials unless the user explicitly asks and provides them in the current context.
 - Keep external web AI/OCR use as an optional fallback for tasks that specifically require it; browser control and diagnostics are the default purpose.

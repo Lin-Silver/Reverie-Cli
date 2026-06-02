@@ -378,11 +378,16 @@
       ]
     },
     "browser_controler": {
-      "purpose": "Open and control the system browser, open DevTools, inspect dynamic pages, diagnose page resources, upload files, and check web/server endpoints.",
-      "use_when": "A task needs real browser automation, frontend runtime inspection, DevTools-oriented investigation, form/upload/login flow testing, dynamic page text, or server/API endpoint verification beyond static fetches.",
+      "purpose": "Open and control the system browser, open DevTools, inspect dynamic pages through Chrome DevTools Protocol, diagnose page resources, upload files, and check web/server endpoints.",
+      "use_when": "A task needs real browser automation, frontend runtime inspection, DevTools Console/Network/DOM evidence, form/upload/login flow testing, dynamic page text, or server/API endpoint verification beyond static fetches.",
       "parameters": {
-        "action": "active_window, list_browser_windows, activate_browser, open_browser, open_page, open_devtools, diagnose_page, check_endpoint, current_url, extract_page, copy_page_text, observe, click, scroll, paste_text, key_press, hotkey, upload_file, close_page, wait, or optional open_ai_service/ai_chat.",
+        "action": "active_window, list_browser_windows, activate_browser, open_browser, open_page, open_debug_page, open_devtools, devtools_targets, devtools_snapshot, devtools_eval, devtools_console, devtools_network, diagnose_page, check_endpoint, current_url, extract_page, copy_page_text, observe, click, scroll, paste_text, key_press, hotkey, upload_file, close_page, wait, or optional open_ai_service/ai_chat.",
         "url": "Optional URL to open or extract.",
+        "port": "Remote debugging port for open_debug_page/devtools_* actions.",
+        "expression": "JavaScript expression for devtools_eval or devtools_console.",
+        "target_id": "Optional DevTools target id.",
+        "url_contains": "Optional DevTools target URL/title filter.",
+        "include_bodies": "Include Network response body previews for devtools_network.",
         "private": "Open private/incognito mode when true.",
         "title_contains": "Optional browser window title filter for activate_browser.",
         "include_all_windows": "Include non-browser top-level windows when listing windows.",
@@ -397,6 +402,11 @@
         "browser_controler(action=\"activate_browser\", title_contains=\"localhost\")",
         "browser_controler(action=\"diagnose_page\", url=\"http://localhost:3000\", check_assets=true)",
         "browser_controler(action=\"open_page\", url=\"http://localhost:3000\", private=true)",
+        "browser_controler(action=\"open_debug_page\", url=\"http://localhost:3000\", port=9222)",
+        "browser_controler(action=\"devtools_snapshot\", port=9222)",
+        "browser_controler(action=\"devtools_eval\", port=9222, expression=\"document.title\")",
+        "browser_controler(action=\"devtools_console\", port=9222, expression=\"console.log('probe', location.href)\")",
+        "browser_controler(action=\"devtools_network\", port=9222, url=\"http://localhost:3000\", include_bodies=true)",
         "browser_controler(action=\"open_devtools\")",
         "browser_controler(action=\"observe\", grid_cols=4, grid_rows=4)",
         "browser_controler(action=\"check_endpoint\", method=\"POST\", url=\"http://localhost:3000/api/upload\")"

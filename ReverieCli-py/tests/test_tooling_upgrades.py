@@ -343,6 +343,82 @@ def test_browser_controler_exposes_window_state_actions() -> None:
     assert not BrowserControlerTool._is_browser_process("vmware.exe")
 
 
+def test_browser_controler_exposes_structured_devtools_actions() -> None:
+    parameters = BrowserControlerTool.parameters["properties"]
+    actions = parameters["action"]["enum"]
+
+    assert "open_debug_page" in actions
+    assert "devtools_targets" in actions
+    assert "devtools_snapshot" in actions
+    assert "devtools_eval" in actions
+    assert "devtools_console" in actions
+    assert "devtools_network" in actions
+    assert "port" in parameters
+    assert "expression" in parameters
+    assert "include_bodies" in parameters
+
+
+def test_browser_controler_prefers_real_page_devtools_targets() -> None:
+    about_blank = {"type": "page", "url": "about:blank", "title": "", "webSocketDebuggerUrl": "ws://example/blank"}
+    real_page = {"type": "page", "url": "http://127.0.0.1:3000/", "title": "App", "webSocketDebuggerUrl": "ws://example/app"}
+
+    assert BrowserControlerTool._cdp_target_score(real_page) > BrowserControlerTool._cdp_target_score(about_blank)
+
+
+def test_browser_controler_renders_devtools_console_and_network_events() -> None:
+    console_events = [
+        {
+            "method": "Runtime.consoleAPICalled",
+            "params": {
+                "type": "log",
+                "args": [
+                    {"type": "string", "value": "probe"},
+                    {"type": "number", "value": 42},
+                ],
+            },
+        },
+        {
+            "method": "Runtime.exceptionThrown",
+            "params": {"exceptionDetails": {"text": "boom", "lineNumber": 1, "columnNumber": 2}},
+        },
+    ]
+    rendered_console = BrowserControlerTool._render_cdp_console_events(console_events)
+
+    assert "console.log: probe 42" in rendered_console[0]
+    assert "exception: boom at 1:2" in rendered_console[1]
+
+    network_summary = BrowserControlerTool._summarize_cdp_network_events(
+        [
+            {
+                "method": "Network.requestWillBeSent",
+                "params": {
+                    "requestId": "1",
+                    "type": "XHR",
+                    "request": {"url": "https://example.test/api", "method": "POST"},
+                },
+            },
+            {
+                "method": "Network.responseReceived",
+                "params": {
+                    "requestId": "1",
+                    "type": "XHR",
+                    "response": {"url": "https://example.test/api", "status": 201, "mimeType": "application/json"},
+                },
+            },
+            {"method": "Network.loadingFinished", "params": {"requestId": "1"}},
+        ]
+    )
+    rendered_network = BrowserControlerTool._render_cdp_network_summary(
+        network_summary,
+        target={"title": "Example", "url": "https://example.test"},
+    )
+
+    assert network_summary["request_count"] == 1
+    assert network_summary["response_count"] == 1
+    assert network_summary["responses"][0]["finished"] is True
+    assert "201 POST https://example.test/api" in rendered_network
+
+
 def test_skill_lookup_lists_and_inspects_discovered_skills(tmp_path: Path) -> None:
     app_root = tmp_path / "app"
     project_root = tmp_path / "project"
@@ -388,6 +464,10 @@ def test_skills_manager_discovers_builtin_browser_controler_skill(tmp_path: Path
     assert "browser_controler" in record.body
     assert "list_browser_windows" in record.body
     assert "activate_browser" in record.body
+    assert "open_debug_page" in record.body
+    assert "devtools_eval" in record.body
+    assert "devtools_console" in record.body
+    assert "devtools_network" in record.body
     assert "diagnose_page" in record.body
     assert "check_endpoint" in record.body
 

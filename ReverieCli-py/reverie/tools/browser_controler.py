@@ -67,6 +67,8 @@ if IS_WINDOWS:
     user32.GetWindowTextW.restype = ctypes.c_int
     user32.IsWindowVisible.argtypes = (wintypes.HWND,)
     user32.IsWindowVisible.restype = wintypes.BOOL
+    user32.IsIconic.argtypes = (wintypes.HWND,)
+    user32.IsIconic.restype = wintypes.BOOL
     user32.GetWindowThreadProcessId.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.DWORD))
     user32.GetWindowThreadProcessId.restype = wintypes.DWORD
     user32.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
@@ -124,6 +126,7 @@ MOUSEEVENTF_RIGHTUP = 0x0010
 MOUSEEVENTF_WHEEL = 0x0800
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 SW_RESTORE = 9
+SW_SHOWMINNOACTIVE = 7
 
 VK_CODES = {
     "ctrl": 0x11,
@@ -453,6 +456,9 @@ class BrowserControlerTool(BaseTool):
             "browser_path": {"type": "string", "description": "Optional explicit browser executable path."},
             "private": {"type": "boolean", "description": "Open a private/incognito window when possible."},
             "new_window": {"type": "boolean", "description": "Open in a new browser window."},
+            "background": {"type": "boolean", "description": "For open_debug_page, keep the browser in the background and use CDP actions without stealing foreground focus."},
+            "minimized": {"type": "boolean", "description": "Open or move the browser window minimized when possible. Pair with background=true for non-disruptive CDP runs."},
+            "activate": {"type": "boolean", "description": "Whether to activate the opened browser window. Defaults false for background/minimized open_debug_page."},
             "port": {"type": "integer", "description": "Chrome DevTools Protocol remote debugging port for open_debug_page/devtools_* actions."},
             "target_id": {"type": "string", "description": "Optional DevTools target id for devtools_* actions."},
             "url_contains": {"type": "string", "description": "Optional target URL/title substring for activate_browser or devtools_* target selection."},
@@ -723,12 +729,16 @@ class BrowserControlerTool(BaseTool):
         url = str(kwargs.get("url") or "about:blank").strip() or "about:blank"
         private = bool(kwargs.get("private", False))
         new_window = bool(kwargs.get("new_window", True))
+        minimized = bool(kwargs.get("minimized", False))
+        activate = bool(kwargs.get("activate")) if kwargs.get("activate") is not None else not minimized
         browser = str(kwargs.get("browser") or "default").strip()
         browser_path = str(kwargs.get("browser_path") or "").strip()
         wait_seconds = float(kwargs.get("wait_seconds", 0.75) or 0.75)
         before_browser_handles: set[int] = set()
+        previous_foreground = 0
         if IS_WINDOWS:
             try:
+                previous_foreground = int(user32.GetForegroundWindow() or 0)
                 before_browser_handles = {
                     int(item.get("handle") or 0)
                     for item in self._top_level_windows()
@@ -737,7 +747,7 @@ class BrowserControlerTool(BaseTool):
             except Exception:
                 before_browser_handles = set()
 
-        if private or browser_path or browser.lower() not in {"", "default", "system"}:
+        if private or browser_path or minimized or browser.lower() not in {"", "default", "system"}:
             executable = self._resolve_browser_executable(browser=browser, browser_path=browser_path)
             if not executable:
                 if private:
@@ -745,7 +755,7 @@ class BrowserControlerTool(BaseTool):
                 webbrowser.open_new(url) if new_window else webbrowser.open(url)
             else:
                 args = [str(executable)]
-                args.extend(self._browser_window_flags(executable, private=private, new_window=new_window))
+                args.extend(self._browser_window_flags(executable, private=private, new_window=new_window, minimized=minimized))
                 args.append(url)
                 subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         else:
@@ -754,6 +764,8 @@ class BrowserControlerTool(BaseTool):
         if wait_seconds > 0:
             time.sleep(min(wait_seconds, 10.0))
         activated = False
+        minimized_handles: List[int] = []
+        restored_foreground = False
         if IS_WINDOWS:
             try:
                 browser_windows = [item for item in self._top_level_windows() if item.get("is_browser")]
@@ -761,16 +773,38 @@ class BrowserControlerTool(BaseTool):
                     item for item in browser_windows
                     if int(item.get("handle") or 0) not in before_browser_handles
                 ]
-                for candidate in new_browser_windows + browser_windows:
-                    handle = int(candidate.get("handle") or 0)
-                    if handle and self._activate_window_handle(handle):
-                        activated = True
-                        break
+                if minimized:
+                    minimized_handles = self._minimize_browser_window_handles(new_browser_windows)
+                if activate:
+                    for candidate in new_browser_windows + browser_windows:
+                        handle = int(candidate.get("handle") or 0)
+                        if handle and self._activate_window_handle(handle):
+                            activated = True
+                            break
+                elif previous_foreground:
+                    restored_foreground = self._restore_foreground_window(previous_foreground)
             except Exception:
                 activated = False
         mode = "private " if private else ""
-        suffix = " Activated a browser window." if activated else ""
-        return ToolResult.ok(f"Opened {mode}browser page: {url}.{suffix}", data={"url": url, "private": private, "activated": activated})
+        details = [f"Opened {mode}browser page: {url}."]
+        if activated:
+            details.append("Activated a browser window.")
+        if minimized_handles:
+            details.append(f"Minimized {len(minimized_handles)} browser window(s).")
+        if not activate and restored_foreground:
+            details.append("Restored the previous foreground window.")
+        return ToolResult.ok(
+            " ".join(details),
+            data={
+                "url": url,
+                "private": private,
+                "activated": activated,
+                "activate": activate,
+                "minimized": bool(minimized_handles),
+                "minimized_handles": minimized_handles,
+                "restored_foreground": restored_foreground,
+            },
+        )
 
     def _open_devtools(self, **kwargs) -> ToolResult:
         url = str(kwargs.get("url") or "").strip()
@@ -808,9 +842,14 @@ class BrowserControlerTool(BaseTool):
         profile_dir = Path(user_data_dir).expanduser() if user_data_dir else self.debug_profiles_dir / f"port-{port}"
         profile_dir.mkdir(parents=True, exist_ok=True)
         wait_seconds = max(1.0, min(float(kwargs.get("wait_seconds", 3.0) or 3.0), 20.0))
+        background = bool(kwargs.get("background", False))
+        minimized = bool(kwargs.get("minimized", background))
+        activate = bool(kwargs.get("activate")) if kwargs.get("activate") is not None else not (background or minimized)
         before_browser_handles: set[int] = set()
+        previous_foreground = 0
         if IS_WINDOWS:
             try:
+                previous_foreground = int(user32.GetForegroundWindow() or 0)
                 before_browser_handles = {
                     int(item.get("handle") or 0)
                     for item in self._top_level_windows()
@@ -828,7 +867,12 @@ class BrowserControlerTool(BaseTool):
             "--no-default-browser-check",
             "--disable-popup-blocking",
         ]
-        for flag in self._browser_window_flags(executable, private=bool(kwargs.get("private", False)), new_window=True):
+        for flag in self._browser_window_flags(
+            executable,
+            private=bool(kwargs.get("private", False)),
+            new_window=True,
+            minimized=minimized,
+        ):
             if flag not in args:
                 args.append(flag)
         if "--new-window" not in args:
@@ -852,6 +896,8 @@ class BrowserControlerTool(BaseTool):
             )
 
         activated = False
+        minimized_handles: List[int] = []
+        restored_foreground = False
         if IS_WINDOWS:
             try:
                 browser_windows = [item for item in self._top_level_windows() if item.get("is_browser")]
@@ -859,11 +905,16 @@ class BrowserControlerTool(BaseTool):
                     item for item in browser_windows
                     if int(item.get("handle") or 0) not in before_browser_handles
                 ]
-                for candidate in new_browser_windows + browser_windows:
-                    handle = int(candidate.get("handle") or 0)
-                    if handle and self._activate_window_handle(handle):
-                        activated = True
-                        break
+                if minimized:
+                    minimized_handles = self._minimize_browser_window_handles(new_browser_windows)
+                if activate:
+                    for candidate in new_browser_windows + browser_windows:
+                        handle = int(candidate.get("handle") or 0)
+                        if handle and self._activate_window_handle(handle):
+                            activated = True
+                            break
+                elif previous_foreground:
+                    restored_foreground = self._restore_foreground_window(previous_foreground)
             except Exception:
                 activated = False
 
@@ -873,8 +924,16 @@ class BrowserControlerTool(BaseTool):
             f"Profile: {profile_dir}",
             f"Browser: {version.get('Browser') or executable.name}",
         ]
+        if background:
+            output.append("Background mode: CDP actions can control this page without foreground focus.")
+        if minimized_handles:
+            output.append(f"Minimized {len(minimized_handles)} browser window(s).")
         if activated:
             output.append("Activated a browser window.")
+        elif not activate:
+            output.append("Did not activate the browser window.")
+        if restored_foreground:
+            output.append("Restored the previous foreground window.")
         return ToolResult.ok(
             "\n".join(output),
             data={
@@ -885,6 +944,12 @@ class BrowserControlerTool(BaseTool):
                 "process_id": process.pid,
                 "version": version,
                 "activated": activated,
+                "activate": activate,
+                "background": background,
+                "minimized": bool(minimized_handles),
+                "minimized_requested": minimized,
+                "minimized_handles": minimized_handles,
+                "restored_foreground": restored_foreground,
             },
         )
 
@@ -1451,6 +1516,46 @@ class BrowserControlerTool(BaseTool):
         active = self._foreground_window_info()
         return int(active.get("handle") or 0) == int(hwnd or 0) or bool(active.get("is_browser"))
 
+    def _restore_foreground_window(self, hwnd: int) -> bool:
+        self._require_windows_desktop()
+        hwnd_value = int(hwnd or 0)
+        if not hwnd_value:
+            return False
+        try:
+            if int(user32.GetForegroundWindow() or 0) == hwnd_value:
+                return True
+            self._activate_window_handle(hwnd_value)
+            return int(user32.GetForegroundWindow() or 0) == hwnd_value
+        except Exception:
+            return False
+
+    def _minimize_browser_window_handles(self, windows: Sequence[Dict[str, Any]]) -> List[int]:
+        self._require_windows_desktop()
+        minimized: List[int] = []
+        seen: set[int] = set()
+        for item in windows:
+            if not item.get("is_browser"):
+                continue
+            hwnd = int(item.get("handle") or 0)
+            if not hwnd or hwnd in seen:
+                continue
+            seen.add(hwnd)
+            if self._minimize_window_handle(hwnd):
+                minimized.append(hwnd)
+        return minimized
+
+    def _minimize_window_handle(self, hwnd: int) -> bool:
+        self._require_windows_desktop()
+        hwnd_value = wintypes.HWND(int(hwnd or 0))
+        if not hwnd_value:
+            return False
+        try:
+            user32.ShowWindow(hwnd_value, SW_SHOWMINNOACTIVE)
+            time.sleep(0.1)
+            return bool(user32.IsIconic(hwnd_value))
+        except Exception:
+            return False
+
     def _focus_active_browser_page(self) -> None:
         self._send_key("esc")
         time.sleep(0.08)
@@ -2000,7 +2105,7 @@ class BrowserControlerTool(BaseTool):
         return candidates
 
     @staticmethod
-    def _browser_window_flags(executable: Path, *, private: bool, new_window: bool) -> List[str]:
+    def _browser_window_flags(executable: Path, *, private: bool, new_window: bool, minimized: bool = False) -> List[str]:
         name = executable.name.lower()
         flags: List[str] = []
         if private:
@@ -2012,6 +2117,8 @@ class BrowserControlerTool(BaseTool):
                 flags.append("--incognito")
         if new_window and "firefox" not in name:
             flags.append("--new-window")
+        if minimized and "firefox" not in name:
+            flags.append("--start-minimized")
         return flags
 
     def _persist_text(self, stem: str, text: str) -> Path:

@@ -356,6 +356,21 @@ def test_browser_controler_exposes_structured_devtools_actions() -> None:
     assert "port" in parameters
     assert "expression" in parameters
     assert "include_bodies" in parameters
+    assert "background" in parameters
+    assert "minimized" in parameters
+    assert "activate" in parameters
+
+
+def test_browser_controler_chromium_flags_support_minimized_background_launch() -> None:
+    flags = BrowserControlerTool._browser_window_flags(
+        Path("chrome.exe"),
+        private=False,
+        new_window=True,
+        minimized=True,
+    )
+
+    assert "--new-window" in flags
+    assert "--start-minimized" in flags
 
 
 def test_browser_controler_prefers_real_page_devtools_targets() -> None:
@@ -468,6 +483,8 @@ def test_skills_manager_discovers_builtin_browser_controler_skill(tmp_path: Path
     assert "devtools_eval" in record.body
     assert "devtools_console" in record.body
     assert "devtools_network" in record.body
+    assert "background=true" in record.body
+    assert "minimized=true" in record.body
     assert "diagnose_page" in record.body
     assert "check_endpoint" in record.body
 

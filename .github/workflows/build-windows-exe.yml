@@ -17,11 +17,11 @@ permissions:
 
 concurrency:
   group: build-windows-exe-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build-windows-exe:
-    name: Build Windows executables and official plugins
+    name: Build Python Windows exe and official plugins
     runs-on: windows-latest
     timeout-minutes: 150
 
@@ -166,7 +166,8 @@ jobs:
             }
           }
 
-      - name: Build Rust exe
+      - name: Build Rust preview exe
+        continue-on-error: true
         shell: pwsh
         run: |
           $dist = Join-Path $env:GITHUB_WORKSPACE "dist"
@@ -174,9 +175,12 @@ jobs:
             Remove-Item -LiteralPath $dist -Recurse -Force
           }
           & "$env:GITHUB_WORKSPACE\ReverieCli-Rs\build-windows.ps1" -Release -SkipTests
-          if (-not (Test-Path (Join-Path $dist "reverie.exe"))) {
-            throw "Rust build completed without producing dist\reverie.exe"
+          $rustExe = Join-Path $dist "reverie.exe"
+          if (-not (Test-Path $rustExe)) {
+            throw "Rust preview build completed without producing dist\reverie.exe"
           }
+          Copy-Item -LiteralPath $rustExe -Destination (Join-Path $dist "reverie-rust-preview.exe") -Force
+          Remove-Item -LiteralPath $rustExe -Force
 
       - name: Generate plugin release manifest
         shell: pwsh
@@ -186,13 +190,25 @@ jobs:
           }
 
           $releaseBase = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/latest"
+          $dist = Join-Path $env:GITHUB_WORKSPACE "dist"
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
           $cliPath = Join-Path $env:GITHUB_WORKSPACE "dist\reverie.exe"
           $pythonCliSource = Join-Path $env:GITHUB_WORKSPACE "dist-python\reverie.exe"
-          $pythonCliPath = Join-Path $env:GITHUB_WORKSPACE "dist\reverie-python.exe"
           if (-not (Test-Path $pythonCliSource)) {
             throw "Missing Python CLI asset: $pythonCliSource"
           }
-          Copy-Item -LiteralPath $pythonCliSource -Destination $pythonCliPath -Force
+          Copy-Item -LiteralPath $pythonCliSource -Destination $cliPath -Force
+          $rustCliPath = Join-Path $env:GITHUB_WORKSPACE "dist\reverie-rust-preview.exe"
+          $rustCliAsset = $null
+          if (Test-Path $rustCliPath) {
+            $rustCliAsset = [ordered]@{
+              name = "reverie-rust-preview.exe"
+              download_url = "$releaseBase/reverie-rust-preview.exe"
+              sha256 = Get-Sha256 $rustCliPath
+              size = (Get-Item -LiteralPath $rustCliPath).Length
+              preview = $true
+            }
+          }
           $plugins = @(
             @{ Id = "blender"; Manifest = "plugins\blender\plugin.json"; Asset = "reverie-blender.exe"; Path = "plugins\blender\dist\reverie-blender.exe" },
             @{ Id = "godot"; Manifest = "plugins\godot\plugin.json"; Asset = "reverie-godot.exe"; Path = "plugins\godot\dist\reverie-godot.exe" },
@@ -212,14 +228,10 @@ jobs:
               download_url = "$releaseBase/reverie.exe"
               sha256 = Get-Sha256 $cliPath
               size = (Get-Item -LiteralPath $cliPath).Length
-            }
-            python_cli_asset = [ordered]@{
-              name = "reverie-python.exe"
-              download_url = "$releaseBase/reverie-python.exe"
-              sha256 = Get-Sha256 $pythonCliPath
-              size = (Get-Item -LiteralPath $pythonCliPath).Length
               includes_builtin_skills = $true
+              runtime = "python"
             }
+            rust_cli_asset = $rustCliAsset
             plugins = @()
           }
 
@@ -251,7 +263,6 @@ jobs:
         shell: pwsh
         run: |
           .\dist\reverie.exe --version
-          .\dist\reverie-python.exe --version
           $bridgeOutput = '{"action":"shutdown"}' | .\dist\reverie.exe --sdk-bridge
           if ($LASTEXITCODE -ne 0) {
             throw "SDK bridge smoke test failed with exit code $LASTEXITCODE"
@@ -282,7 +293,6 @@ jobs:
           retention-days: 14
           path: |
             dist/reverie.exe
-            dist/reverie-python.exe
             dist/plugins-manifest.json
             plugins/blender/dist/reverie-blender.exe
             plugins/godot/dist/reverie-godot.exe
@@ -301,11 +311,16 @@ jobs:
           git push origin refs/tags/latest --force
 
           $notes = @"
-          Automated Windows executable and official plugin build.
+          Automated Windows release build from main.
 
-          Assets:
-          - reverie.exe: Rust SDK bridge / current UI default.
-          - reverie-python.exe: Python PyInstaller build with bundled Python tools and built-in skills.
+          Files:
+          - reverie.exe: primary Windows CLI executable. This is the full Python PyInstaller build with bundled Python runtime, built-in skills, tool manifests, and the current Browser Controler skill.
+          - plugins-manifest.json: release metadata consumed by Reverie UI/plugin download surfaces, including SHA-256 and file sizes.
+          - reverie-blender.exe: official Blender runtime plugin executable.
+          - reverie-godot.exe: official Godot runtime plugin executable.
+          - reverie-o3de.exe: official O3DE runtime plugin executable.
+          - reverie-game-models.exe: official Game Models runtime plugin executable.
+          - reverie-rust-preview.exe: optional Rust SDK bridge preview, uploaded only when the non-blocking preview build succeeds. It is not the default release executable.
 
           Commit: $env:GITHUB_SHA
           Event: $env:GITHUB_EVENT_NAME
@@ -320,14 +335,18 @@ jobs:
           }
 
           $assets = @(
-            "dist\reverie.exe",
-            "dist\reverie-python.exe",
-            "dist\plugins-manifest.json",
-            "plugins\blender\dist\reverie-blender.exe",
-            "plugins\godot\dist\reverie-godot.exe",
-            "plugins\o3de\dist\reverie-o3de.exe",
-            "plugins\game_models\dist\reverie-game-models.exe"
+            @{ Path = "dist\reverie.exe"; Label = "Reverie CLI for Windows (Python full build)" },
+            @{ Path = "dist\plugins-manifest.json"; Label = "Release manifest with hashes and plugin metadata" },
+            @{ Path = "plugins\blender\dist\reverie-blender.exe"; Label = "Official Blender runtime plugin" },
+            @{ Path = "plugins\godot\dist\reverie-godot.exe"; Label = "Official Godot runtime plugin" },
+            @{ Path = "plugins\o3de\dist\reverie-o3de.exe"; Label = "Official O3DE runtime plugin" },
+            @{ Path = "plugins\game_models\dist\reverie-game-models.exe"; Label = "Official Game Models runtime plugin" }
           )
+          $rustPreview = "dist\reverie-rust-preview.exe"
+          if (Test-Path $rustPreview) {
+            $assets += @{ Path = $rustPreview; Label = "Rust SDK bridge preview (optional)" }
+          }
           foreach ($asset in $assets) {
-            gh release upload latest $asset --repo $env:GITHUB_REPOSITORY --clobber
+            $uploadSpec = "$($asset.Path)#$($asset.Label)"
+            gh release upload latest $uploadSpec --repo $env:GITHUB_REPOSITORY --clobber
           }

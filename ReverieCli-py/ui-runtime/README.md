@@ -4,19 +4,19 @@ Reverie CLI is a context-engine-powered AI coding assistant for large repositori
 
 ## Highlights
 
-- **Context Engine** — shared by every mode for symbol lookup, dependency tracking, semantic retrieval, commit-history learning, and workspace memory
-- **Multiple Workflow Modes** — `Reverie`, `Reverie-Atlas`, `Reverie-Gamer`, `Reverie-Ant`, `Spec-Driven`, `Spec-Vibe`, `Writer`, `Computer Controller`
-- **Multi-Provider** — standard OpenAI-compatible models plus `Gemini CLI`, `Codex`, `NVIDIA`, and `ModelScope`
-- **Rich TUI** — selectors, streaming output, help browser, status panels, session browsing, checkpoint rollback, command discovery
-- **Workspace Safety** — file-access sandboxing, audited command execution, archive extraction hardening
-- **Game Tooling** — built-in `Reverie Engine` runtime, prompt-to-vertical-slice Reverie-Gamer workflow, direct Blender authoring, Godot/O3DE open-runtime plugins, and a built-in Ashfox MCP bridge for optional Blockbench sessions
+- **Context Engine** - shared by every mode for symbol lookup, dependency tracking, semantic retrieval, commit-history learning, and workspace memory
+- **Multiple Workflow Modes** - `Reverie`, `Reverie-Atlas`, `Reverie-Gamer`, `Reverie-Ant`, `Spec-Driven`, `Spec-Vibe`, `Writer`, `Computer Controller`
+- **Multi-Provider** - standard OpenAI-compatible models plus `Gemini CLI`, `Codex`, `NVIDIA`, and `ModelScope`
+- **Rich TUI** - selectors, streaming output, help browser, status panels, session browsing, checkpoint rollback, command discovery
+- **Workspace Safety** - file-access sandboxing, audited command execution, archive extraction hardening
+- **Game Tooling** - built-in `Reverie Engine` runtime, prompt-to-vertical-slice Reverie-Gamer workflow, direct Blender authoring, Godot/O3DE open-runtime plugins, and a built-in Ashfox MCP bridge for optional Blockbench sessions
 
 ## Latest Update
 
 Current stable repository version: `v2.3.3`.
 
 - Reverie UI now uses the CLI as an embedded SDK bridge with real Plugins, Settings, Chats, Automations, and Release lookup surfaces.
-- GitHub Release publishing now builds the Python `reverie.exe`, the four official plugin executables, and `plugins-manifest.json` directly into the latest Release.
+- GitHub Release publishing now builds the Python `reverie.exe`, the four plugin executables, and `plugins-manifest.json` directly into the latest Release.
 - Desktop startup, bridge event handling, plugin refresh, and long transcript rendering were optimized for lower UI churn.
 
 For the full release notes, see [docs/changelog.md](docs/changelog.md).
@@ -125,25 +125,25 @@ For the full reference, see [docs/CLI_COMMANDS.md](docs/CLI_COMMANDS.md).
 
 ```text
 reverie/
-├── __main__.py              # CLI entry point
-├── config.py                # config loading, migration, model source state
-├── modes.py                 # mode registry and aliases
-├── atlas.py                 # Atlas mode config and rules
-├── codex.py                 # Codex provider integration
-├── modelscope.py            # ModelScope provider integration
-├── agent/                   # agent prompts, tool execution, orchestration
-├── cli/                     # command handling, TUI, display helpers
-├── context_engine/          # indexing, retrieval, semantic analysis, graph data
-├── gamer/                   # Gamer production pipeline and runtime generation
-│   ├── runtime_adapters/    # built-in runtime targets such as Godot / Reverie Engine / O3DE
-│   ├── system_generators/   # combat, quest, progression, save/load, and world packets
-│   └── verification/        # slice scoring and quality-gate helpers
-├── session/                 # sessions, checkpoints, rollback, archives, memory
-├── tools/                   # tool implementations exposed to the agent
-├── engine/                  # canonical public built-in engine API
-├── engine_lite/             # shared runtime, project, and modeling implementation
-├── skills_manager.py        # SKILL.md discovery, matching, and prompt injection helpers
-└── writer/                  # writer mode helpers
+??? __main__.py              # CLI entry point
+??? config.py                # config loading, migration, model source state
+??? modes.py                 # mode registry and aliases
+??? atlas.py                 # Atlas mode config and rules
+??? codex.py                 # Codex provider integration
+??? modelscope.py            # ModelScope provider integration
+??? agent/                   # agent prompts, tool execution, orchestration
+??? cli/                     # command handling, TUI, display helpers
+??? context_engine/          # indexing, retrieval, semantic analysis, graph data
+??? gamer/                   # Gamer production pipeline and runtime generation
+?   ??? runtime_adapters/    # built-in runtime targets such as Godot / Reverie Engine / O3DE
+?   ??? system_generators/   # combat, quest, progression, save/load, and world packets
+?   ??? verification/        # slice scoring and quality-gate helpers
+??? session/                 # sessions, checkpoints, rollback, archives, memory
+??? tools/                   # tool implementations exposed to the agent
+??? engine/                  # canonical public built-in engine API
+??? engine_lite/             # shared runtime, project, and modeling implementation
+??? skills_manager.py        # SKILL.md discovery, matching, and prompt injection helpers
+??? writer/                  # writer mode helpers
 ```
 
 ## Development
@@ -164,12 +164,12 @@ Windows executable packaging:
 
 GitHub Actions builds the Python PyInstaller executable as the primary `dist/reverie.exe`, runs the same release job on a daily schedule, and refreshes the rolling `latest` release assets used by Reverie UI's auto-download fallback.
 
-The packaged `dist/reverie.exe` now includes the built-in Reverie-Gamer runtime flows in one file, including `/engine video`, `/engine renpy`, `/modeling primitive`, and `/blender`. `build.bat` installs the official Blender, Godot, O3DE, and Game Models runtime plugins into `dist/.reverie/plugins/`: Blender can unpack its portable runtime when the build input zip is present and can prepare plugin-local MMD Tools for PMD/PMX/VMD/VPD import, Godot can discover/download official GitHub releases or clone source, O3DE can clone source plus write a plugin-local SDK manifest, and Game Models can prepare a plugin-local venv plus selectable HuggingFace model snapshots such as TRELLIS `low_vram` for local asset assistance. If `ffmpeg` is available during build, `build.bat` bundles it into the executable so `mp4` and `gif` export work without a separate system install. If not, frame-sequence export still works and encoded video falls back to an external `ffmpeg` at runtime.
+The packaged `dist/reverie.exe` now includes the built-in Reverie-Gamer runtime flows in one file, including `/engine video`, `/engine renpy`, `/modeling primitive`, and `/blender`. `build.bat` installs the Blender, Godot, O3DE, and Game Models runtime plugins into `dist/.reverie/plugins/`: Blender can unpack its portable runtime when the build input zip is present and can prepare plugin-local MMD Tools for PMD/PMX/VMD/VPD import, Godot can discover/download official GitHub releases or clone source, O3DE can clone source plus write a plugin-local SDK manifest, and Game Models can prepare a plugin-local venv plus selectable HuggingFace model snapshots such as TRELLIS `low_vram` for local asset assistance. If `ffmpeg` is available during build, `build.bat` bundles it into the executable so `mp4` and `gif` export work without a separate system install. If not, frame-sequence export still works and encoded video falls back to an external `ffmpeg` at runtime.
 
 ## Documentation
 
 - [Documentation Index](docs/README.md)
-- [Chinese README / 中文 README](docs/README.zh-CN.md)
+- [Chinese README / ?? README](docs/README.zh-CN.md)
 - [Harness Engineering Notes](docs/HARNESS_ENGINEERING.md)
 - [Configuration Guide](docs/CONFIGURATION.md)
 - [CLI Command Reference](docs/CLI_COMMANDS.md)

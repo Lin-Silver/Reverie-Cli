@@ -596,6 +596,8 @@ def test_github_action_schedules_latest_windows_exe_build() -> None:
     assert "Build Python exe" in workflow
     assert "reverie.exe: primary Windows CLI executable" in workflow
     assert "Reverie CLI for Windows (Python full build)" in workflow
+    assert "Blender runtime plugin" in workflow
+    assert "Official Blender runtime plugin" not in workflow
     assert "reverie-python.exe" not in workflow
     assert "reverie-rust-preview.exe" not in workflow
 

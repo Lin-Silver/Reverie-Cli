@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   build-windows-exe:
-    name: Build Python Windows exe and official plugins
+    name: Build Python Windows exe and plugins
     runs-on: windows-latest
     timeout-minutes: 150
 
@@ -127,7 +127,7 @@ jobs:
             exit 0
           }
           if ([string]::IsNullOrWhiteSpace($env:BLENDER_ARCHIVE_URL)) {
-            throw "BLENDER_ARCHIVE_URL is required to build the official Blender plugin."
+            throw "BLENDER_ARCHIVE_URL is required to build the Blender plugin."
           }
           New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
           Write-Host "Downloading Blender archive from $env:BLENDER_ARCHIVE_URL"
@@ -136,7 +136,7 @@ jobs:
             throw "Failed to download Blender archive to $target"
           }
 
-      - name: Build official plugin executables
+      - name: Build plugin executables
         shell: pwsh
         run: |
           $plugins = @(
@@ -288,10 +288,10 @@ jobs:
           Files:
           - reverie.exe: primary Windows CLI executable. This is the full Python PyInstaller build with bundled Python runtime, built-in skills, tool manifests, and the current Browser Controler skill.
           - plugins-manifest.json: release metadata consumed by Reverie UI/plugin download surfaces, including SHA-256 and file sizes.
-          - reverie-blender.exe: official Blender runtime plugin executable.
-          - reverie-godot.exe: official Godot runtime plugin executable.
-          - reverie-o3de.exe: official O3DE runtime plugin executable.
-          - reverie-game-models.exe: official Game Models runtime plugin executable.
+          - reverie-blender.exe: Blender runtime plugin executable.
+          - reverie-godot.exe: Godot runtime plugin executable.
+          - reverie-o3de.exe: O3DE runtime plugin executable.
+          - reverie-game-models.exe: Game Models runtime plugin executable.
 
           Commit: $env:GITHUB_SHA
           Event: $env:GITHUB_EVENT_NAME
@@ -308,10 +308,10 @@ jobs:
           $assets = @(
             @{ Path = "dist\reverie.exe"; Label = "Reverie CLI for Windows (Python full build)" },
             @{ Path = "dist\plugins-manifest.json"; Label = "Release manifest with hashes and plugin metadata" },
-            @{ Path = "plugins\blender\dist\reverie-blender.exe"; Label = "Official Blender runtime plugin" },
-            @{ Path = "plugins\godot\dist\reverie-godot.exe"; Label = "Official Godot runtime plugin" },
-            @{ Path = "plugins\o3de\dist\reverie-o3de.exe"; Label = "Official O3DE runtime plugin" },
-            @{ Path = "plugins\game_models\dist\reverie-game-models.exe"; Label = "Official Game Models runtime plugin" }
+            @{ Path = "plugins\blender\dist\reverie-blender.exe"; Label = "Blender runtime plugin" },
+            @{ Path = "plugins\godot\dist\reverie-godot.exe"; Label = "Godot runtime plugin" },
+            @{ Path = "plugins\o3de\dist\reverie-o3de.exe"; Label = "O3DE runtime plugin" },
+            @{ Path = "plugins\game_models\dist\reverie-game-models.exe"; Label = "Game Models runtime plugin" }
           )
           foreach ($asset in $assets) {
             $uploadSpec = "$($asset.Path)#$($asset.Label)"

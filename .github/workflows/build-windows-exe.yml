@@ -7,16 +7,23 @@ on:
   pull_request:
     branches:
       - main
+  schedule:
+    # Daily at 02:17 Asia/Shanghai. Scheduled workflows run on the default branch.
+    - cron: "17 18 * * *"
   workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: build-windows-exe-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build-windows-exe:
-    name: Build reverie.exe and official plugins
+    name: Build Windows executables and official plugins
     runs-on: windows-latest
-    timeout-minutes: 120
+    timeout-minutes: 150
 
     env:
       PYTHONUTF8: "1"
@@ -81,6 +88,35 @@ jobs:
           }
 
           "REVERIE_BUNDLE_RES_DIR=$bundleRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build Python exe
+        shell: pwsh
+        run: |
+          $pythonDist = Join-Path $env:GITHUB_WORKSPACE "dist-python"
+          $pythonWork = Join-Path $env:GITHUB_WORKSPACE "build\pyinstaller-python"
+          if (Test-Path $pythonDist) {
+            Remove-Item -LiteralPath $pythonDist -Recurse -Force
+          }
+          if (Test-Path $pythonWork) {
+            Remove-Item -LiteralPath $pythonWork -Recurse -Force
+          }
+
+          Push-Location $env:REVERIE_PY_ROOT
+          try {
+            $env:PYI_PYTHONWARNINGS = "ignore:Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.:UserWarning"
+            $env:PYTHONWARNINGS = $env:PYI_PYTHONWARNINGS
+            PyInstaller --noconfirm --clean --distpath $pythonDist --workpath $pythonWork reverie.spec
+          }
+          finally {
+            $env:PYTHONWARNINGS = ""
+            Pop-Location
+          }
+
+          $pythonExe = Join-Path $pythonDist "reverie.exe"
+          if (-not (Test-Path $pythonExe)) {
+            throw "Python build completed without producing dist-python\reverie.exe"
+          }
+          & $pythonExe --version
 
       - name: Prepare Blender plugin archive
         shell: pwsh
@@ -151,6 +187,12 @@ jobs:
 
           $releaseBase = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/latest"
           $cliPath = Join-Path $env:GITHUB_WORKSPACE "dist\reverie.exe"
+          $pythonCliSource = Join-Path $env:GITHUB_WORKSPACE "dist-python\reverie.exe"
+          $pythonCliPath = Join-Path $env:GITHUB_WORKSPACE "dist\reverie-python.exe"
+          if (-not (Test-Path $pythonCliSource)) {
+            throw "Missing Python CLI asset: $pythonCliSource"
+          }
+          Copy-Item -LiteralPath $pythonCliSource -Destination $pythonCliPath -Force
           $plugins = @(
             @{ Id = "blender"; Manifest = "plugins\blender\plugin.json"; Asset = "reverie-blender.exe"; Path = "plugins\blender\dist\reverie-blender.exe" },
             @{ Id = "godot"; Manifest = "plugins\godot\plugin.json"; Asset = "reverie-godot.exe"; Path = "plugins\godot\dist\reverie-godot.exe" },
@@ -162,11 +204,21 @@ jobs:
             schema = "reverie.plugins.release.v1"
             generated_at = (Get-Date).ToUniversalTime().ToString("o")
             commit = $env:GITHUB_SHA
+            event_name = $env:GITHUB_EVENT_NAME
+            run_id = $env:GITHUB_RUN_ID
+            run_url = "https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
             cli_asset = [ordered]@{
               name = "reverie.exe"
               download_url = "$releaseBase/reverie.exe"
               sha256 = Get-Sha256 $cliPath
               size = (Get-Item -LiteralPath $cliPath).Length
+            }
+            python_cli_asset = [ordered]@{
+              name = "reverie-python.exe"
+              download_url = "$releaseBase/reverie-python.exe"
+              sha256 = Get-Sha256 $pythonCliPath
+              size = (Get-Item -LiteralPath $pythonCliPath).Length
+              includes_builtin_skills = $true
             }
             plugins = @()
           }
@@ -199,6 +251,7 @@ jobs:
         shell: pwsh
         run: |
           .\dist\reverie.exe --version
+          .\dist\reverie-python.exe --version
           $bridgeOutput = '{"action":"shutdown"}' | .\dist\reverie.exe --sdk-bridge
           if ($LASTEXITCODE -ne 0) {
             throw "SDK bridge smoke test failed with exit code $LASTEXITCODE"
@@ -221,6 +274,21 @@ jobs:
             }
           }
 
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: reverie-windows-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            dist/reverie.exe
+            dist/reverie-python.exe
+            dist/plugins-manifest.json
+            plugins/blender/dist/reverie-blender.exe
+            plugins/godot/dist/reverie-godot.exe
+            plugins/o3de/dist/reverie-o3de.exe
+            plugins/game_models/dist/reverie-game-models.exe
+
       - name: Publish rolling latest release
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         shell: pwsh
@@ -232,7 +300,17 @@ jobs:
           git tag -f latest $env:GITHUB_SHA
           git push origin refs/tags/latest --force
 
-          $notes = "Automated Windows exe and official plugin build from main commit $env:GITHUB_SHA."
+          $notes = @"
+          Automated Windows executable and official plugin build.
+
+          Assets:
+          - reverie.exe: Rust SDK bridge / current UI default.
+          - reverie-python.exe: Python PyInstaller build with bundled Python tools and built-in skills.
+
+          Commit: $env:GITHUB_SHA
+          Event: $env:GITHUB_EVENT_NAME
+          Run: https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID
+          "@
           gh release view latest --repo $env:GITHUB_REPOSITORY *> $null
           if ($LASTEXITCODE -eq 0) {
             gh release edit latest --repo $env:GITHUB_REPOSITORY --title "Reverie CLI Latest" --notes $notes --latest
@@ -243,6 +321,7 @@ jobs:
 
           $assets = @(
             "dist\reverie.exe",
+            "dist\reverie-python.exe",
             "dist\plugins-manifest.json",
             "plugins\blender\dist\reverie-blender.exe",
             "plugins\godot\dist\reverie-godot.exe",

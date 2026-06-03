@@ -425,11 +425,24 @@ class BrowserControlerTool(BaseTool):
                     "open_page",
                     "open_debug_page",
                     "open_devtools",
+                    "browser_session_start",
+                    "browser_session_list",
+                    "browser_session_close",
+                    "browser_session_cleanup",
                     "devtools_targets",
                     "devtools_snapshot",
+                    "devtools_screenshot",
                     "devtools_eval",
                     "devtools_console",
                     "devtools_network",
+                    "devtools_click",
+                    "devtools_type",
+                    "devtools_upload",
+                    "devtools_wait_for",
+                    "devtools_accessibility_snapshot",
+                    "devtools_dom_outline",
+                    "devtools_find",
+                    "safety_policy",
                     "diagnose_page",
                     "check_endpoint",
                     "open_ai_service",
@@ -462,13 +475,28 @@ class BrowserControlerTool(BaseTool):
             "port": {"type": "integer", "description": "Chrome DevTools Protocol remote debugging port for open_debug_page/devtools_* actions."},
             "target_id": {"type": "string", "description": "Optional DevTools target id for devtools_* actions."},
             "url_contains": {"type": "string", "description": "Optional target URL/title substring for activate_browser or devtools_* target selection."},
+            "session_id": {"type": "string", "description": "Optional Browser Controler session id for browser_session_* actions."},
+            "selector": {"type": "string", "description": "CSS selector for background DevTools DOM actions."},
+            "role": {"type": "string", "description": "ARIA role filter for devtools_find."},
             "expression": {"type": "string", "description": "JavaScript expression to run through DevTools Runtime.evaluate."},
             "await_promise": {"type": "boolean", "description": "For devtools_eval, wait for returned promises."},
             "return_by_value": {"type": "boolean", "description": "For devtools_eval, return JSON-serializable values by value."},
             "include_bodies": {"type": "boolean", "description": "For devtools_network, include response body previews when available."},
+            "include_request_body": {"type": "boolean", "description": "For devtools_network, include captured request postData previews when available."},
+            "include_websockets": {"type": "boolean", "description": "For devtools_network, include WebSocket creation/frame events."},
+            "export_har": {"type": "boolean", "description": "For devtools_network, save a simplified HAR-style JSON artifact."},
+            "filter_url": {"type": "string", "description": "For devtools_network/devtools_find, filter by URL/text substring."},
+            "filter_method": {"type": "string", "description": "For devtools_network, filter by HTTP method."},
+            "filter_status": {"type": "string", "description": "For devtools_network, filter by status code or class such as 2xx/4xx."},
             "max_body_chars": {"type": "integer", "description": "For devtools_network, maximum characters per captured response body preview."},
             "max_events": {"type": "integer", "description": "For devtools_console/devtools_network, maximum events/items to render."},
             "reload": {"type": "boolean", "description": "For devtools_network, reload the selected page after enabling Network."},
+            "full_page": {"type": "boolean", "description": "For devtools_screenshot, request capture beyond the visible viewport when supported."},
+            "format": {"type": "string", "description": "For devtools_screenshot, png or jpeg."},
+            "quality": {"type": "integer", "description": "For jpeg devtools_screenshot, quality from 1 to 100."},
+            "clear": {"type": "boolean", "description": "For devtools_type, clear the existing value before typing."},
+            "poll_interval": {"type": "number", "description": "For devtools_wait_for, seconds between checks."},
+            "cleanup_profiles": {"type": "boolean", "description": "For browser_session_cleanup, also remove stale isolated debug profiles under Browser Controler data."},
             "user_data_dir": {"type": "string", "description": "Optional isolated browser profile directory for open_debug_page."},
             "include_all_windows": {"type": "boolean", "description": "For list_browser_windows, include non-browser top-level windows too."},
             "title_contains": {"type": "string", "description": "For activate_browser, choose a browser window whose title contains this text."},
@@ -508,6 +536,7 @@ class BrowserControlerTool(BaseTool):
         self.pages_dir = self.output_dir / "pages"
         self.observations_dir = self.output_dir / "observations"
         self.debug_profiles_dir = self.output_dir / "debug-profiles"
+        self.sessions_path = self.output_dir / "sessions.json"
         self.pages_dir.mkdir(parents=True, exist_ok=True)
         self.observations_dir.mkdir(parents=True, exist_ok=True)
         self.debug_profiles_dir.mkdir(parents=True, exist_ok=True)
@@ -522,11 +551,24 @@ class BrowserControlerTool(BaseTool):
             "open_page": "Opening browser page",
             "open_debug_page": "Opening browser page with DevTools Protocol enabled",
             "open_devtools": "Opening browser developer tools",
+            "browser_session_start": "Starting background browser session",
+            "browser_session_list": "Listing background browser sessions",
+            "browser_session_close": "Closing background browser session",
+            "browser_session_cleanup": "Cleaning up background browser sessions",
             "devtools_targets": "Listing DevTools Protocol page targets",
             "devtools_snapshot": "Reading live DOM text through DevTools Protocol",
+            "devtools_screenshot": "Capturing browser page screenshot through DevTools Protocol",
             "devtools_eval": "Running JavaScript in the browser through DevTools Protocol",
             "devtools_console": "Reading browser console and log events",
             "devtools_network": "Reading browser network events and responses",
+            "devtools_click": "Clicking a page element through DevTools Protocol",
+            "devtools_type": "Typing into a page element through DevTools Protocol",
+            "devtools_upload": "Uploading a file through DevTools Protocol",
+            "devtools_wait_for": "Waiting for page state through DevTools Protocol",
+            "devtools_accessibility_snapshot": "Reading accessibility tree through DevTools Protocol",
+            "devtools_dom_outline": "Reading semantic DOM outline through DevTools Protocol",
+            "devtools_find": "Finding semantic page elements through DevTools Protocol",
+            "safety_policy": "Showing Browser Controler safety policy",
             "diagnose_page": "Diagnosing web page structure and resources",
             "check_endpoint": "Checking web/server endpoint",
             "open_ai_service": "Opening web AI service",
@@ -564,6 +606,18 @@ class BrowserControlerTool(BaseTool):
                 return self._open_debug_page(**kwargs)
             if action_name == "open_devtools":
                 return self._open_devtools(**kwargs)
+            if action_name == "browser_session_start":
+                return self._browser_session_start(**kwargs)
+            if action_name == "browser_session_list":
+                return self._browser_session_list()
+            if action_name == "browser_session_close":
+                return self._browser_session_close(
+                    session_id=str(kwargs.get("session_id") or ""),
+                    port=kwargs.get("port"),
+                    timeout=float(kwargs.get("timeout", 5) or 5),
+                )
+            if action_name == "browser_session_cleanup":
+                return self._browser_session_cleanup(cleanup_profiles=bool(kwargs.get("cleanup_profiles", False)))
             if action_name == "devtools_targets":
                 return self._devtools_targets(
                     port=int(kwargs.get("port", DEFAULT_CDP_PORT) or DEFAULT_CDP_PORT),
@@ -576,6 +630,17 @@ class BrowserControlerTool(BaseTool):
                     target_id=str(kwargs.get("target_id") or ""),
                     url_contains=str(kwargs.get("url_contains") or ""),
                     max_chars=int(kwargs.get("max_chars", 30000) or 30000),
+                    timeout=float(kwargs.get("timeout", 5) or 5),
+                )
+            if action_name == "devtools_screenshot":
+                return self._devtools_screenshot(
+                    port=int(kwargs.get("port", DEFAULT_CDP_PORT) or DEFAULT_CDP_PORT),
+                    target_id=str(kwargs.get("target_id") or ""),
+                    url_contains=str(kwargs.get("url_contains") or ""),
+                    full_page=bool(kwargs.get("full_page", True)),
+                    image_format=str(kwargs.get("format") or "png"),
+                    quality=int(kwargs.get("quality", 90) or 90),
+                    observation_name=str(kwargs.get("observation_name") or "devtools-page"),
                     timeout=float(kwargs.get("timeout", 5) or 5),
                 )
             if action_name == "devtools_eval":
@@ -606,11 +671,86 @@ class BrowserControlerTool(BaseTool):
                     url_contains=str(kwargs.get("url_contains") or ""),
                     wait_seconds=float(kwargs.get("wait_seconds", 3.0) or 3.0),
                     include_bodies=bool(kwargs.get("include_bodies", False)),
+                    include_request_body=bool(kwargs.get("include_request_body", False)),
+                    include_websockets=bool(kwargs.get("include_websockets", False)),
+                    export_har=bool(kwargs.get("export_har", False)),
+                    filter_url=str(kwargs.get("filter_url") or ""),
+                    filter_method=str(kwargs.get("filter_method") or ""),
+                    filter_status=str(kwargs.get("filter_status") or ""),
                     max_body_chars=int(kwargs.get("max_body_chars", 2000) or 2000),
                     max_events=int(kwargs.get("max_events", 120) or 120),
                     reload=bool(kwargs.get("reload", False)),
                     timeout=float(kwargs.get("timeout", 5) or 5),
                 )
+            if action_name == "devtools_click":
+                return self._devtools_click(
+                    selector=str(kwargs.get("selector") or ""),
+                    port=int(kwargs.get("port", DEFAULT_CDP_PORT) or DEFAULT_CDP_PORT),
+                    target_id=str(kwargs.get("target_id") or ""),
+                    url_contains=str(kwargs.get("url_contains") or ""),
+                    timeout=float(kwargs.get("timeout", 5) or 5),
+                )
+            if action_name == "devtools_type":
+                return self._devtools_type(
+                    selector=str(kwargs.get("selector") or ""),
+                    text=str(kwargs.get("text") or ""),
+                    port=int(kwargs.get("port", DEFAULT_CDP_PORT) or DEFAULT_CDP_PORT),
+                    target_id=str(kwargs.get("target_id") or ""),
+                    url_contains=str(kwargs.get("url_contains") or ""),
+                    clear=bool(kwargs.get("clear", True)),
+                    press_enter=bool(kwargs.get("send", False)),
+                    timeout=float(kwargs.get("timeout", 5) or 5),
+                )
+            if action_name == "devtools_upload":
+                return self._devtools_upload(
+                    selector=str(kwargs.get("selector") or ""),
+                    file_path=kwargs.get("file_path"),
+                    port=int(kwargs.get("port", DEFAULT_CDP_PORT) or DEFAULT_CDP_PORT),
+                    target_id=str(kwargs.get("target_id") or ""),
+                    url_contains=str(kwargs.get("url_contains") or ""),
+                    timeout=float(kwargs.get("timeout", 5) or 5),
+                )
+            if action_name == "devtools_wait_for":
+                return self._devtools_wait_for(
+                    selector=str(kwargs.get("selector") or ""),
+                    text=str(kwargs.get("text") or ""),
+                    expression=str(kwargs.get("expression") or ""),
+                    port=int(kwargs.get("port", DEFAULT_CDP_PORT) or DEFAULT_CDP_PORT),
+                    target_id=str(kwargs.get("target_id") or ""),
+                    url_contains=str(kwargs.get("url_contains") or ""),
+                    wait_seconds=float(kwargs.get("wait_seconds", 10.0) or 10.0),
+                    poll_interval=float(kwargs.get("poll_interval", 0.25) or 0.25),
+                    timeout=float(kwargs.get("timeout", 5) or 5),
+                )
+            if action_name == "devtools_accessibility_snapshot":
+                return self._devtools_accessibility_snapshot(
+                    port=int(kwargs.get("port", DEFAULT_CDP_PORT) or DEFAULT_CDP_PORT),
+                    target_id=str(kwargs.get("target_id") or ""),
+                    url_contains=str(kwargs.get("url_contains") or ""),
+                    max_events=int(kwargs.get("max_events", 120) or 120),
+                    timeout=float(kwargs.get("timeout", 5) or 5),
+                )
+            if action_name == "devtools_dom_outline":
+                return self._devtools_dom_outline(
+                    port=int(kwargs.get("port", DEFAULT_CDP_PORT) or DEFAULT_CDP_PORT),
+                    target_id=str(kwargs.get("target_id") or ""),
+                    url_contains=str(kwargs.get("url_contains") or ""),
+                    max_events=int(kwargs.get("max_events", 120) or 120),
+                    timeout=float(kwargs.get("timeout", 5) or 5),
+                )
+            if action_name == "devtools_find":
+                return self._devtools_find(
+                    selector=str(kwargs.get("selector") or ""),
+                    text=str(kwargs.get("text") or kwargs.get("filter_url") or ""),
+                    role=str(kwargs.get("role") or ""),
+                    port=int(kwargs.get("port", DEFAULT_CDP_PORT) or DEFAULT_CDP_PORT),
+                    target_id=str(kwargs.get("target_id") or ""),
+                    url_contains=str(kwargs.get("url_contains") or ""),
+                    max_events=int(kwargs.get("max_events", 80) or 80),
+                    timeout=float(kwargs.get("timeout", 5) or 5),
+                )
+            if action_name == "safety_policy":
+                return self._safety_policy()
             if action_name == "diagnose_page":
                 return self._diagnose_page(
                     url=kwargs.get("url"),
@@ -953,6 +1093,137 @@ class BrowserControlerTool(BaseTool):
             },
         )
 
+    def _browser_session_start(self, **kwargs) -> ToolResult:
+        session_id = re.sub(r"[^A-Za-z0-9._-]+", "-", str(kwargs.get("session_id") or "").strip()).strip("-._")
+        if not session_id:
+            session_id = f"session-{int(time.time())}"
+        sessions = self._load_browser_sessions()
+        if session_id in sessions:
+            return ToolResult.fail(f"Browser session already exists: {session_id}")
+        port = kwargs.get("port")
+        if not port:
+            port = self._free_tcp_port()
+        open_kwargs = dict(kwargs)
+        open_kwargs["port"] = int(port)
+        open_kwargs.setdefault("url", "about:blank")
+        open_kwargs.setdefault("background", True)
+        open_kwargs.setdefault("minimized", True)
+        open_kwargs.setdefault("activate", False)
+        opened = self._open_debug_page(**open_kwargs)
+        if not opened.success:
+            return opened
+        sessions[session_id] = {
+            "session_id": session_id,
+            "port": int(port),
+            "url": str(open_kwargs.get("url") or "about:blank"),
+            "profile_dir": str(opened.data.get("profile_dir") or ""),
+            "browser": str(opened.data.get("browser") or ""),
+            "process_id": int(opened.data.get("process_id") or 0),
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "background": bool(opened.data.get("background", True)),
+            "minimized": bool(opened.data.get("minimized_requested", True)),
+        }
+        self._save_browser_sessions(sessions)
+        output = opened.output + f"\nSession: {session_id}"
+        return ToolResult.ok(output, data={**opened.data, "session_id": session_id, "session": sessions[session_id]})
+
+    def _browser_session_list(self) -> ToolResult:
+        sessions = self._load_browser_sessions()
+        if not sessions:
+            return ToolResult.ok("No Browser Controler sessions are recorded.", data={"sessions": {}})
+        lines = [f"Browser Controler sessions: {len(sessions)}", ""]
+        annotated: Dict[str, Any] = {}
+        for session_id, session in sessions.items():
+            port = int(session.get("port") or 0)
+            reachable = False
+            target_count = 0
+            try:
+                targets = self._cdp_list_targets(port, timeout=1.0)
+                reachable = True
+                target_count = len(targets)
+            except Exception:
+                target_count = 0
+            item = {**session, "reachable": reachable, "target_count": target_count}
+            annotated[session_id] = item
+            state = "reachable" if reachable else "stale"
+            lines.append(
+                f"- {session_id}: port={port} {state} targets={target_count} "
+                f"url={session.get('url') or '(empty)'}"
+            )
+        return ToolResult.ok("\n".join(lines).strip(), data={"sessions": annotated})
+
+    def _browser_session_close(self, *, session_id: str = "", port: Any = None, timeout: float = 5.0) -> ToolResult:
+        sessions = self._load_browser_sessions()
+        selected_id = str(session_id or "").strip()
+        selected = sessions.get(selected_id) if selected_id else None
+        selected_port = int(port or (selected or {}).get("port") or 0)
+        if not selected_port:
+            return ToolResult.fail("session_id or port is required for browser_session_close")
+        closed = False
+        error = ""
+        try:
+            version = self._cdp_version(selected_port, timeout=timeout)
+            websocket_url = str(version.get("webSocketDebuggerUrl") or "")
+            if not websocket_url:
+                raise RuntimeError("DevTools version endpoint did not expose a browser WebSocket URL")
+            with _CdpConnection(websocket_url, timeout=timeout) as cdp:
+                cdp.call("Browser.close", {}, timeout=timeout)
+            closed = True
+        except Exception as exc:
+            error = str(exc)
+        if selected_id and selected_id in sessions:
+            sessions.pop(selected_id, None)
+            self._save_browser_sessions(sessions)
+        if closed:
+            return ToolResult.ok(f"Closed Browser Controler session on port {selected_port}.", data={"session_id": selected_id, "port": selected_port})
+        return ToolResult.partial(
+            f"Removed Browser Controler session record for port {selected_port}." if selected_id else "",
+            f"Could not close browser through DevTools: {error}",
+            data={"session_id": selected_id, "port": selected_port},
+        )
+
+    def _browser_session_cleanup(self, *, cleanup_profiles: bool = False) -> ToolResult:
+        sessions = self._load_browser_sessions()
+        kept: Dict[str, Any] = {}
+        stale: Dict[str, Any] = {}
+        removed_profiles: List[str] = []
+        for session_id, session in sessions.items():
+            port = int(session.get("port") or 0)
+            reachable = False
+            if port:
+                try:
+                    self._cdp_version(port, timeout=1.0)
+                    reachable = True
+                except Exception:
+                    reachable = False
+            if reachable:
+                kept[session_id] = session
+            else:
+                stale[session_id] = session
+                if cleanup_profiles:
+                    profile_dir = Path(str(session.get("profile_dir") or ""))
+                    if self._is_safe_debug_profile_path(profile_dir) and profile_dir.exists():
+                        shutil.rmtree(profile_dir, ignore_errors=True)
+                        removed_profiles.append(str(profile_dir))
+        self._save_browser_sessions(kept)
+        lines = [
+            f"Session cleanup complete: kept={len(kept)}, removed_stale={len(stale)}",
+        ]
+        if removed_profiles:
+            lines.append(f"Removed profiles: {len(removed_profiles)}")
+        return ToolResult.ok("\n".join(lines), data={"kept": kept, "stale": stale, "removed_profiles": removed_profiles})
+
+    def _safety_policy(self) -> ToolResult:
+        lines = [
+            "Browser Controler Safety Policy:",
+            "- Prefer isolated debug profiles for automation; do not inspect a user's existing logged-in session unless requested.",
+            "- Use background CDP actions for observation and diagnostics; use visible UI actions only when foreground interaction is required.",
+            "- Do not enter credentials, submit payments, or mutate account/security settings unless the user explicitly asks in the current context.",
+            "- Upload only workspace files or user-provided files, and verify destination/intent before uploading to external services.",
+            "- Treat web AI services as optional helpers; verify their advice against local code and tests before applying it.",
+        ]
+        return ToolResult.ok("\n".join(lines), data={"policy": lines[1:]})
+
     def _devtools_targets(self, *, port: int, url_contains: str = "", timeout: float = 5.0) -> ToolResult:
         targets = self._cdp_list_targets(port, timeout=timeout)
         needle = str(url_contains or "").strip().lower()
@@ -1125,6 +1396,12 @@ class BrowserControlerTool(BaseTool):
         url_contains: str = "",
         wait_seconds: float = 3.0,
         include_bodies: bool = False,
+        include_request_body: bool = False,
+        include_websockets: bool = False,
+        export_har: bool = False,
+        filter_url: str = "",
+        filter_method: str = "",
+        filter_status: str = "",
         max_body_chars: int = 2000,
         max_events: int = 120,
         reload: bool = False,
@@ -1140,11 +1417,329 @@ class BrowserControlerTool(BaseTool):
             elif reload:
                 cdp.call("Page.reload", {"ignoreCache": True}, timeout=timeout)
             cdp.collect(max(0.1, min(float(wait_seconds or 0.0), 60.0)))
-            summary = self._summarize_cdp_network_events(cdp.events, max_events=max_events)
+            summary = self._summarize_cdp_network_events(
+                cdp.events,
+                max_events=max_events,
+                include_request_body=include_request_body,
+                include_websockets=include_websockets,
+                filter_url=filter_url,
+                filter_method=filter_method,
+                filter_status=filter_status,
+            )
             if include_bodies:
                 self._attach_cdp_response_bodies(cdp, summary["responses"], max_body_chars=max_body_chars, timeout=min(timeout, 3.0))
+            if export_har:
+                summary["har_path"] = str(self._persist_json("devtools-network-har", self._build_simple_har(summary)))
         output = self._render_cdp_network_summary(summary, target=target)
         return ToolResult.ok(output, data={"target": target, **summary})
+
+    def _devtools_screenshot(
+        self,
+        *,
+        port: int,
+        target_id: str = "",
+        url_contains: str = "",
+        full_page: bool = True,
+        image_format: str = "png",
+        quality: int = 90,
+        observation_name: str = "devtools-page",
+        timeout: float = 5.0,
+    ) -> ToolResult:
+        fmt = str(image_format or "png").strip().lower()
+        if fmt not in {"png", "jpeg"}:
+            return ToolResult.fail("format must be png or jpeg for devtools_screenshot")
+        target = self._cdp_select_target(port, target_id=target_id, url_contains=url_contains, timeout=timeout)
+        params: Dict[str, Any] = {"format": fmt, "fromSurface": True, "captureBeyondViewport": bool(full_page)}
+        if fmt == "jpeg":
+            params["quality"] = max(1, min(int(quality or 90), 100))
+        fallback_error = ""
+        with _CdpConnection(str(target["webSocketDebuggerUrl"]), timeout=timeout) as cdp:
+            self._safe_cdp_call(cdp, "Page.enable", timeout=timeout)
+            try:
+                result = cdp.call("Page.captureScreenshot", params, timeout=max(timeout, 10.0))
+            except Exception as exc:
+                if not full_page:
+                    raise
+                fallback_error = str(exc)
+                params["captureBeyondViewport"] = False
+                result = cdp.call("Page.captureScreenshot", params, timeout=max(timeout, 10.0))
+        encoded = str(result.get("data") or "")
+        if not encoded:
+            return ToolResult.fail("DevTools screenshot returned no image data.")
+        stem = re.sub(r"[^A-Za-z0-9._-]+", "-", str(observation_name or "devtools-page")).strip("-._") or "devtools-page"
+        suffix = "jpg" if fmt == "jpeg" else "png"
+        path = self.observations_dir / f"{stem}-{int(time.time() * 1000)}.{suffix}"
+        path.write_bytes(base64.b64decode(encoded))
+        return ToolResult.ok(
+            f"Saved DevTools screenshot: {path}" + (" (full-page capture fell back to viewport capture)." if fallback_error else ""),
+            data={"image_path": str(path), "format": fmt, "target": target, "full_page": full_page, "fallback_error": fallback_error},
+        )
+
+    def _devtools_click(self, *, selector: str, port: int, target_id: str = "", url_contains: str = "", timeout: float = 5.0) -> ToolResult:
+        if not selector.strip():
+            return ToolResult.fail("selector is required for devtools_click")
+        script = (
+            "(() => {"
+            f"const selector = {json.dumps(selector)};"
+            "const el = document.querySelector(selector);"
+            "if (!el) return {ok:false, error:'selector not found', selector};"
+            "el.scrollIntoView({block:'center', inline:'center'});"
+            "const rect = el.getBoundingClientRect();"
+            "el.click();"
+            "return {ok:true, selector, tag:el.tagName, id:el.id || '',"
+            "text:(el.innerText || el.value || el.getAttribute('aria-label') || '').slice(0,240),"
+            "rect:{x:rect.x, y:rect.y, width:rect.width, height:rect.height}};"
+            "})()"
+        )
+        return self._devtools_dom_action("Clicked element through DevTools", script, port=port, target_id=target_id, url_contains=url_contains, timeout=timeout)
+
+    def _devtools_type(
+        self,
+        *,
+        selector: str,
+        text: str,
+        port: int,
+        target_id: str = "",
+        url_contains: str = "",
+        clear: bool = True,
+        press_enter: bool = False,
+        timeout: float = 5.0,
+    ) -> ToolResult:
+        if not selector.strip():
+            return ToolResult.fail("selector is required for devtools_type")
+        script = (
+            "(async () => {"
+            f"const selector = {json.dumps(selector)};"
+            f"const value = {json.dumps(text)};"
+            f"const clear = {json.dumps(bool(clear))};"
+            f"const pressEnter = {json.dumps(bool(press_enter))};"
+            "const el = document.querySelector(selector);"
+            "if (!el) return {ok:false, error:'selector not found', selector};"
+            "el.scrollIntoView({block:'center', inline:'center'});"
+            "el.focus();"
+            "if ('value' in el) { if (clear) el.value = ''; el.value = clear ? value : (el.value + value); }"
+            "else if (el.isContentEditable) { if (clear) el.textContent = ''; el.textContent = clear ? value : (el.textContent + value); }"
+            "else return {ok:false, error:'element is not editable', selector, tag:el.tagName};"
+            "el.dispatchEvent(new InputEvent('input', {bubbles:true, inputType:'insertText', data:value}));"
+            "el.dispatchEvent(new Event('change', {bubbles:true}));"
+            "if (pressEnter) {"
+            "  el.dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', code:'Enter', bubbles:true}));"
+            "  el.dispatchEvent(new KeyboardEvent('keyup', {key:'Enter', code:'Enter', bubbles:true}));"
+            "}"
+            "return {ok:true, selector, tag:el.tagName, id:el.id || '', value:('value' in el ? el.value : el.textContent).slice(0,240)};"
+            "})()"
+        )
+        return self._devtools_dom_action("Typed into element through DevTools", script, port=port, target_id=target_id, url_contains=url_contains, timeout=timeout)
+
+    def _devtools_upload(
+        self,
+        *,
+        selector: str,
+        file_path: Any,
+        port: int,
+        target_id: str = "",
+        url_contains: str = "",
+        timeout: float = 5.0,
+    ) -> ToolResult:
+        if not selector.strip():
+            return ToolResult.fail("selector is required for devtools_upload")
+        if not file_path:
+            return ToolResult.fail("file_path is required for devtools_upload")
+        resolved = self.resolve_workspace_path(file_path, purpose="upload browser file")
+        if not resolved.exists() or not resolved.is_file():
+            return ToolResult.fail(f"Upload file not found: {file_path}")
+        target = self._cdp_select_target(port, target_id=target_id, url_contains=url_contains, timeout=timeout)
+        with _CdpConnection(str(target["webSocketDebuggerUrl"]), timeout=timeout) as cdp:
+            self._safe_cdp_call(cdp, "DOM.enable", timeout=timeout)
+            root = cdp.call("DOM.getDocument", {"depth": 1, "pierce": True}, timeout=timeout)
+            root_id = int(((root.get("root") or {}).get("nodeId")) or 0)
+            if not root_id:
+                return ToolResult.fail("DevTools DOM.getDocument returned no root node.")
+            result = cdp.call("DOM.querySelector", {"nodeId": root_id, "selector": selector}, timeout=timeout)
+            node_id = int(result.get("nodeId") or 0)
+            if not node_id:
+                return ToolResult.fail(f"No file input matched selector: {selector}")
+            cdp.call("DOM.setFileInputFiles", {"nodeId": node_id, "files": [str(resolved)]}, timeout=timeout)
+        return ToolResult.ok(
+            f"Uploaded file through DevTools selector {selector}: {resolved}",
+            data={"target": target, "selector": selector, "file_path": str(resolved)},
+        )
+
+    def _devtools_wait_for(
+        self,
+        *,
+        selector: str = "",
+        text: str = "",
+        expression: str = "",
+        port: int,
+        target_id: str = "",
+        url_contains: str = "",
+        wait_seconds: float = 10.0,
+        poll_interval: float = 0.25,
+        timeout: float = 5.0,
+    ) -> ToolResult:
+        if not selector.strip() and not text.strip() and not expression.strip():
+            return ToolResult.fail("selector, text, or expression is required for devtools_wait_for")
+        target = self._cdp_select_target(port, target_id=target_id, url_contains=url_contains, timeout=timeout)
+        if selector.strip():
+            condition = f"Boolean(document.querySelector({json.dumps(selector)}))"
+            label = f"selector {selector!r}"
+        elif text.strip():
+            condition = f"Boolean((document.body && document.body.innerText || '').includes({json.dumps(text)}))"
+            label = f"text {text!r}"
+        else:
+            condition = f"Boolean(({expression}))"
+            label = "expression"
+        deadline = time.time() + max(0.1, min(float(wait_seconds or 10.0), 120.0))
+        interval = max(0.05, min(float(poll_interval or 0.25), 5.0))
+        last_value = None
+        with _CdpConnection(str(target["webSocketDebuggerUrl"]), timeout=timeout) as cdp:
+            self._safe_cdp_call(cdp, "Runtime.enable", timeout=timeout)
+            while time.time() < deadline:
+                result = cdp.call(
+                    "Runtime.evaluate",
+                    {"expression": f"(() => {condition})()", "awaitPromise": True, "returnByValue": True},
+                    timeout=timeout,
+                )
+                last_value = (result.get("result") or {}).get("value")
+                if last_value:
+                    return ToolResult.ok(f"DevTools wait_for matched {label}.", data={"target": target, "matched": True, "value": last_value})
+                time.sleep(interval)
+        return ToolResult.fail(f"Timed out waiting for {label}. Last value: {last_value!r}")
+
+    def _devtools_accessibility_snapshot(
+        self,
+        *,
+        port: int,
+        target_id: str = "",
+        url_contains: str = "",
+        max_events: int = 120,
+        timeout: float = 5.0,
+    ) -> ToolResult:
+        target = self._cdp_select_target(port, target_id=target_id, url_contains=url_contains, timeout=timeout)
+        with _CdpConnection(str(target["webSocketDebuggerUrl"]), timeout=timeout) as cdp:
+            self._safe_cdp_call(cdp, "Accessibility.enable", timeout=timeout)
+            result = cdp.call("Accessibility.getFullAXTree", {}, timeout=max(timeout, 10.0))
+        nodes = list(result.get("nodes") or [])
+        rendered = self._render_ax_nodes(nodes, max_events=max_events)
+        lines = [
+            f"Accessibility snapshot for {target.get('title') or '(untitled)'}",
+            f"URL: {target.get('url') or '(empty)'}",
+            f"AX nodes: {len(nodes)}",
+            "",
+            *rendered,
+        ]
+        return ToolResult.ok("\n".join(lines).strip(), data={"target": target, "nodes": nodes[: max(1, int(max_events or 120))], "node_count": len(nodes)})
+
+    def _devtools_dom_outline(
+        self,
+        *,
+        port: int,
+        target_id: str = "",
+        url_contains: str = "",
+        max_events: int = 120,
+        timeout: float = 5.0,
+    ) -> ToolResult:
+        script = (
+            "(() => {"
+            "const clip = v => String(v || '').replace(/\\s+/g, ' ').trim().slice(0, 240);"
+            "const attrs = el => ({id:el.id || '', role:el.getAttribute('role') || '', name:el.getAttribute('name') || '',"
+            "aria:el.getAttribute('aria-label') || '', testid:el.getAttribute('data-testid') || '', selector:el.tagName.toLowerCase() + (el.id ? '#' + el.id : '')});"
+            "const collect = (sel, limit=80) => Array.from(document.querySelectorAll(sel)).slice(0, limit).map(el => ({tag:el.tagName, text:clip(el.innerText || el.value || el.alt || ''), href:el.href || '', type:el.type || '', ...attrs(el)}));"
+            "return {url:location.href, title:document.title, headings:collect('h1,h2,h3,h4,h5,h6'),"
+            "controls:collect('button,input,textarea,select,[role=button],[role=textbox],[contenteditable=true]'),"
+            "links:collect('a[href]'), forms:collect('form'), images:collect('img')};"
+            "})()"
+        )
+        result = self._devtools_eval_value(script, port=port, target_id=target_id, url_contains=url_contains, timeout=timeout)
+        if not result.get("ok"):
+            return ToolResult.fail(str(result.get("error") or "DevTools DOM outline failed"))
+        outline = result.get("value") or {}
+        lines = self._render_dom_outline(outline, max_events=max_events)
+        return ToolResult.ok("\n".join(lines).strip(), data={"outline": outline, "target": result.get("target")})
+
+    def _devtools_find(
+        self,
+        *,
+        selector: str = "",
+        text: str = "",
+        role: str = "",
+        port: int,
+        target_id: str = "",
+        url_contains: str = "",
+        max_events: int = 80,
+        timeout: float = 5.0,
+    ) -> ToolResult:
+        script = (
+            "(() => {"
+            f"const selector = {json.dumps(selector)};"
+            f"const textNeedle = {json.dumps(text.lower())};"
+            f"const roleNeedle = {json.dumps(role.lower())};"
+            "const clip = v => String(v || '').replace(/\\s+/g, ' ').trim().slice(0, 240);"
+            "let nodes = selector ? Array.from(document.querySelectorAll(selector)) : Array.from(document.querySelectorAll('a,button,input,textarea,select,[role],h1,h2,h3,h4,h5,h6,[data-testid]'));"
+            "const matches = [];"
+            "for (const el of nodes) {"
+            " const role = (el.getAttribute('role') || '').toLowerCase();"
+            " const label = clip(el.innerText || el.value || el.getAttribute('aria-label') || el.alt || el.name || el.id);"
+            " if (textNeedle && !label.toLowerCase().includes(textNeedle)) continue;"
+            " if (roleNeedle && role !== roleNeedle) continue;"
+            " const rect = el.getBoundingClientRect();"
+            " matches.push({tag:el.tagName, role, id:el.id || '', name:el.name || '', type:el.type || '', text:label, href:el.href || '',"
+            " selector:el.tagName.toLowerCase() + (el.id ? '#' + el.id : ''), rect:{x:rect.x, y:rect.y, width:rect.width, height:rect.height}});"
+            " if (matches.length >= 200) break;"
+            "}"
+            "return {url:location.href, title:document.title, count:matches.length, matches};"
+            "})()"
+        )
+        result = self._devtools_eval_value(script, port=port, target_id=target_id, url_contains=url_contains, timeout=timeout)
+        if not result.get("ok"):
+            return ToolResult.fail(str(result.get("error") or "DevTools find failed"))
+        value = result.get("value") or {}
+        matches = list(value.get("matches") or [])[: max(1, int(max_events or 80))]
+        lines = [f"DevTools find: {len(matches)} rendered of {value.get('count', 0)} match(es)", f"URL: {value.get('url') or ''}", ""]
+        for item in matches:
+            label = item.get("text") or item.get("id") or item.get("name") or "(no label)"
+            lines.append(f"- {item.get('tag')} role={item.get('role') or '-'} selector={item.get('selector') or '-'} text={label}")
+        return ToolResult.ok("\n".join(lines).strip(), data={"target": result.get("target"), **value, "matches": matches})
+
+    def _devtools_dom_action(
+        self,
+        title: str,
+        script: str,
+        *,
+        port: int,
+        target_id: str = "",
+        url_contains: str = "",
+        timeout: float = 5.0,
+    ) -> ToolResult:
+        result = self._devtools_eval_value(script, port=port, target_id=target_id, url_contains=url_contains, timeout=timeout)
+        if not result.get("ok"):
+            return ToolResult.fail(str(result.get("error") or f"{title} failed"))
+        value = result.get("value")
+        if isinstance(value, dict) and not value.get("ok", True):
+            return ToolResult.fail(str(value.get("error") or f"{title} failed"))
+        return ToolResult.ok(f"{title}: {json.dumps(value, ensure_ascii=False)}", data={"target": result.get("target"), "result": value})
+
+    def _devtools_eval_value(
+        self,
+        expression: str,
+        *,
+        port: int,
+        target_id: str = "",
+        url_contains: str = "",
+        timeout: float = 5.0,
+    ) -> Dict[str, Any]:
+        target = self._cdp_select_target(port, target_id=target_id, url_contains=url_contains, timeout=timeout)
+        with _CdpConnection(str(target["webSocketDebuggerUrl"]), timeout=timeout) as cdp:
+            self._safe_cdp_call(cdp, "Runtime.enable", timeout=timeout)
+            result = cdp.call(
+                "Runtime.evaluate",
+                {"expression": expression, "awaitPromise": True, "returnByValue": True, "userGesture": True},
+                timeout=timeout,
+            )
+        if result.get("exceptionDetails"):
+            return {"ok": False, "target": target, "error": self._format_cdp_exception(result.get("exceptionDetails") or {}), "result": result}
+        return {"ok": True, "target": target, "value": (result.get("result") or {}).get("value"), "result": result}
 
     def _ai_chat(self, **kwargs) -> ToolResult:
         service_url = self._resolve_service_url(kwargs.get("service"), kwargs.get("url"))
@@ -1820,26 +2415,39 @@ class BrowserControlerTool(BaseTool):
         return lines
 
     @classmethod
-    def _summarize_cdp_network_events(cls, events: Sequence[Dict[str, Any]], *, max_events: int = 120) -> Dict[str, Any]:
+    def _summarize_cdp_network_events(
+        cls,
+        events: Sequence[Dict[str, Any]],
+        *,
+        max_events: int = 120,
+        include_request_body: bool = False,
+        include_websockets: bool = False,
+        filter_url: str = "",
+        filter_method: str = "",
+        filter_status: str = "",
+    ) -> Dict[str, Any]:
         requests_by_id: Dict[str, Dict[str, Any]] = {}
         responses_by_id: Dict[str, Dict[str, Any]] = {}
         failures: List[Dict[str, Any]] = []
+        websockets_by_id: Dict[str, Dict[str, Any]] = {}
         finished: set[str] = set()
         for event in events:
             method = str(event.get("method") or "")
             params = event.get("params") or {}
             request_id = str(params.get("requestId") or "")
-            if not request_id:
-                continue
             if method == "Network.requestWillBeSent":
                 request = params.get("request") or {}
-                requests_by_id[request_id] = {
+                item = {
                     "request_id": request_id,
                     "url": request.get("url") or "",
                     "method": request.get("method") or "GET",
                     "resource_type": params.get("type") or "",
                     "document_url": params.get("documentURL") or "",
+                    "headers": request.get("headers") or {},
                 }
+                if include_request_body and request.get("postData") is not None:
+                    item["post_data_preview"] = str(request.get("postData") or "")[:4000]
+                requests_by_id[request_id] = item
             elif method == "Network.responseReceived":
                 response = params.get("response") or {}
                 request = requests_by_id.get(request_id) or {}
@@ -1852,6 +2460,7 @@ class BrowserControlerTool(BaseTool):
                     "mime_type": response.get("mimeType") or "",
                     "resource_type": params.get("type") or request.get("resource_type") or "",
                     "headers": response.get("headers") or {},
+                    "post_data_preview": request.get("post_data_preview") or "",
                 }
             elif method == "Network.loadingFailed":
                 request = requests_by_id.get(request_id) or {}
@@ -1866,19 +2475,81 @@ class BrowserControlerTool(BaseTool):
                 )
             elif method == "Network.loadingFinished":
                 finished.add(request_id)
+            elif include_websockets and method == "Network.webSocketCreated":
+                websockets_by_id[request_id] = {
+                    "request_id": request_id,
+                    "url": params.get("url") or "",
+                    "frames": [],
+                }
+            elif include_websockets and method in {"Network.webSocketFrameSent", "Network.webSocketFrameReceived"}:
+                frame = params.get("response") or {}
+                item = websockets_by_id.setdefault(request_id, {"request_id": request_id, "url": "", "frames": []})
+                item["frames"].append(
+                    {
+                        "direction": "sent" if method.endswith("Sent") else "received",
+                        "opcode": frame.get("opcode"),
+                        "mask": frame.get("mask"),
+                        "payload_preview": str(frame.get("payloadData") or "")[:2000],
+                    }
+                )
 
-        responses = list(responses_by_id.values())[: max(1, int(max_events or 120))]
+        responses = list(responses_by_id.values())
         for item in responses:
             item["finished"] = item.get("request_id") in finished
+        requests = list(requests_by_id.values())
+        responses = cls._filter_network_items(responses, filter_url=filter_url, filter_method=filter_method, filter_status=filter_status)
+        requests = cls._filter_network_items(requests, filter_url=filter_url, filter_method=filter_method, filter_status="")
+        failures = cls._filter_network_items(failures, filter_url=filter_url, filter_method=filter_method, filter_status="")
+        limit = max(1, int(max_events or 120))
         return {
             "request_count": len(requests_by_id),
             "response_count": len(responses_by_id),
             "failure_count": len(failures),
-            "requests": list(requests_by_id.values())[: max(1, int(max_events or 120))],
-            "responses": responses,
-            "failures": failures[: max(1, int(max_events or 120))],
-            "events": list(events)[: max(1, int(max_events or 120))],
+            "filtered_request_count": len(requests),
+            "filtered_response_count": len(responses),
+            "requests": requests[:limit],
+            "responses": responses[:limit],
+            "failures": failures[:limit],
+            "websockets": list(websockets_by_id.values())[:limit],
+            "events": list(events)[:limit],
+            "filters": {"url": filter_url, "method": filter_method, "status": filter_status},
         }
+
+    @classmethod
+    def _filter_network_items(
+        cls,
+        items: Sequence[Dict[str, Any]],
+        *,
+        filter_url: str = "",
+        filter_method: str = "",
+        filter_status: str = "",
+    ) -> List[Dict[str, Any]]:
+        url_needle = str(filter_url or "").strip().lower()
+        method_needle = str(filter_method or "").strip().upper()
+        status_needle = str(filter_status or "").strip().lower()
+        filtered: List[Dict[str, Any]] = []
+        for item in items:
+            if url_needle and url_needle not in str(item.get("url") or "").lower():
+                continue
+            if method_needle and method_needle != str(item.get("method") or "").upper():
+                continue
+            if status_needle and not cls._status_matches(item.get("status"), status_needle):
+                continue
+            filtered.append(dict(item))
+        return filtered
+
+    @staticmethod
+    def _status_matches(status: Any, filter_status: str) -> bool:
+        try:
+            status_int = int(status)
+        except Exception:
+            return False
+        text = str(filter_status or "").strip().lower()
+        if re.fullmatch(r"[1-5]xx", text):
+            return status_int // 100 == int(text[0])
+        if re.fullmatch(r"\d{3}", text):
+            return status_int == int(text)
+        return False
 
     @classmethod
     def _attach_cdp_response_bodies(
@@ -1928,6 +2599,8 @@ class BrowserControlerTool(BaseTool):
                 resource_type = item.get("resource_type") or ""
                 mime_type = item.get("mime_type") or ""
                 lines.append(f"- {status} {method} {item.get('url') or ''} [{resource_type} {mime_type}]".strip())
+                if item.get("post_data_preview"):
+                    lines.append("  Request Body Preview:\n" + str(item.get("post_data_preview")))
                 if item.get("body_preview"):
                     lines.append("  Body Preview:\n" + str(item.get("body_preview")))
                 elif item.get("body_error"):
@@ -1937,7 +2610,42 @@ class BrowserControlerTool(BaseTool):
             lines.append("\nFailures:")
             for item in failures[:40]:
                 lines.append(f"- {item.get('method') or ''} {item.get('url') or ''}: {item.get('error_text') or 'failed'}")
+        websockets = list(summary.get("websockets") or [])
+        if websockets:
+            lines.append("\nWebSockets:")
+            for item in websockets[:20]:
+                lines.append(f"- {item.get('url') or '(unknown websocket)'} frames={len(item.get('frames') or [])}")
+                for frame in (item.get("frames") or [])[:6]:
+                    lines.append(f"  {frame.get('direction')}: {frame.get('payload_preview')}")
+        if summary.get("har_path"):
+            lines.append(f"\nSaved HAR JSON: {summary.get('har_path')}")
         return "\n".join(lines).strip()
+
+    @staticmethod
+    def _build_simple_har(summary: Dict[str, Any]) -> Dict[str, Any]:
+        entries = []
+        requests_by_id = {item.get("request_id"): item for item in (summary.get("requests") or [])}
+        for response in summary.get("responses") or []:
+            request = requests_by_id.get(response.get("request_id")) or {}
+            entries.append(
+                {
+                    "request": {
+                        "method": response.get("method") or request.get("method") or "",
+                        "url": response.get("url") or request.get("url") or "",
+                        "headers": request.get("headers") or {},
+                        "postData": request.get("post_data_preview") or "",
+                    },
+                    "response": {
+                        "status": response.get("status") or 0,
+                        "statusText": response.get("status_text") or "",
+                        "headers": response.get("headers") or {},
+                        "mimeType": response.get("mime_type") or "",
+                        "bodyPreview": response.get("body_preview") or "",
+                    },
+                    "resourceType": response.get("resource_type") or "",
+                }
+            )
+        return {"log": {"version": "1.2", "creator": {"name": "Reverie Browser Controler"}, "entries": entries}}
 
     def _vk_for_key(self, key: Any) -> int:
         text = str(key or "").strip().lower()
@@ -2121,10 +2829,43 @@ class BrowserControlerTool(BaseTool):
             flags.append("--start-minimized")
         return flags
 
+    def _load_browser_sessions(self) -> Dict[str, Any]:
+        try:
+            if not self.sessions_path.exists():
+                return {}
+            data = json.loads(self.sessions_path.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    def _save_browser_sessions(self, sessions: Dict[str, Any]) -> None:
+        self.sessions_path.parent.mkdir(parents=True, exist_ok=True)
+        self.sessions_path.write_text(json.dumps(sessions, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    @staticmethod
+    def _free_tcp_port() -> int:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind((CDP_HOST, 0))
+            return int(sock.getsockname()[1])
+
+    def _is_safe_debug_profile_path(self, path: Path) -> bool:
+        try:
+            resolved = path.resolve()
+            root = self.debug_profiles_dir.resolve()
+            return str(resolved).lower().startswith(str(root).lower()) and resolved != root
+        except Exception:
+            return False
+
     def _persist_text(self, stem: str, text: str) -> Path:
         safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "-", str(stem or "page").strip()).strip("-._") or "page"
         path = self.pages_dir / f"{safe_stem}-{int(time.time() * 1000)}.txt"
         path.write_text(str(text or ""), encoding="utf-8")
+        return path
+
+    def _persist_json(self, stem: str, data: Any) -> Path:
+        safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "-", str(stem or "data").strip()).strip("-._") or "data"
+        path = self.pages_dir / f"{safe_stem}-{int(time.time() * 1000)}.json"
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         return path
 
     def _persist_page_artifacts(self, url: str, html: str, text: str) -> Dict[str, str]:
@@ -2381,3 +3122,49 @@ class BrowserControlerTool(BaseTool):
         if len(text) > len(clipped):
             lines.append("\n[page text truncated in tool output]")
         return "\n".join(lines).strip()
+
+    @classmethod
+    def _render_ax_nodes(cls, nodes: Sequence[Dict[str, Any]], *, max_events: int = 120) -> List[str]:
+        lines: List[str] = []
+        limit = max(1, int(max_events or 120))
+        for node in nodes:
+            role = cls._ax_value(node.get("role"))
+            name = cls._ax_value(node.get("name"))
+            value = cls._ax_value(node.get("value"))
+            if not role and not name and not value:
+                continue
+            label = name or value or "(unnamed)"
+            lines.append(f"- role={role or '-'} name={str(label)[:240]}")
+            if len(lines) >= limit:
+                lines.append(f"- [truncated at {limit} accessibility nodes]")
+                break
+        return lines
+
+    @staticmethod
+    def _ax_value(value: Any) -> str:
+        if isinstance(value, dict):
+            return str(value.get("value") or "").strip()
+        return str(value or "").strip()
+
+    @staticmethod
+    def _render_dom_outline(outline: Dict[str, Any], *, max_events: int = 120) -> List[str]:
+        lines = [
+            f"DOM outline for {outline.get('title') or '(untitled)'}",
+            f"URL: {outline.get('url') or '(empty)'}",
+        ]
+        remaining = max(1, int(max_events or 120))
+        for section in ("headings", "controls", "links", "forms", "images"):
+            items = list(outline.get(section) or [])
+            if not items:
+                continue
+            lines.append(f"\n{section.title()} ({len(items)}):")
+            for item in items[:remaining]:
+                label = item.get("text") or item.get("aria") or item.get("name") or item.get("id") or item.get("href") or "(no label)"
+                detail = item.get("selector") or item.get("tag") or ""
+                extra = item.get("href") or item.get("type") or item.get("role") or ""
+                lines.append(f"- {detail} {extra}: {label}".strip())
+                remaining -= 1
+                if remaining <= 0:
+                    lines.append("- [DOM outline truncated]")
+                    return lines
+        return lines

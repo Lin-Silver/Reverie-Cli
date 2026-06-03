@@ -348,14 +348,29 @@ def test_browser_controler_exposes_structured_devtools_actions() -> None:
     actions = parameters["action"]["enum"]
 
     assert "open_debug_page" in actions
+    assert "browser_session_start" in actions
+    assert "browser_session_cleanup" in actions
     assert "devtools_targets" in actions
     assert "devtools_snapshot" in actions
+    assert "devtools_screenshot" in actions
     assert "devtools_eval" in actions
     assert "devtools_console" in actions
     assert "devtools_network" in actions
+    assert "devtools_click" in actions
+    assert "devtools_type" in actions
+    assert "devtools_upload" in actions
+    assert "devtools_wait_for" in actions
+    assert "devtools_accessibility_snapshot" in actions
+    assert "devtools_dom_outline" in actions
+    assert "devtools_find" in actions
+    assert "safety_policy" in actions
     assert "port" in parameters
     assert "expression" in parameters
     assert "include_bodies" in parameters
+    assert "include_request_body" in parameters
+    assert "export_har" in parameters
+    assert "selector" in parameters
+    assert "session_id" in parameters
     assert "background" in parameters
     assert "minimized" in parameters
     assert "activate" in parameters
@@ -434,6 +449,81 @@ def test_browser_controler_renders_devtools_console_and_network_events() -> None
     assert "201 POST https://example.test/api" in rendered_network
 
 
+def test_browser_controler_filters_network_and_builds_har() -> None:
+    network_summary = BrowserControlerTool._summarize_cdp_network_events(
+        [
+            {
+                "method": "Network.requestWillBeSent",
+                "params": {
+                    "requestId": "1",
+                    "type": "XHR",
+                    "request": {
+                        "url": "https://example.test/api/save",
+                        "method": "POST",
+                        "postData": "{\"ok\":true}",
+                    },
+                },
+            },
+            {
+                "method": "Network.responseReceived",
+                "params": {
+                    "requestId": "1",
+                    "type": "XHR",
+                    "response": {"url": "https://example.test/api/save", "status": 500, "mimeType": "application/json"},
+                },
+            },
+            {
+                "method": "Network.requestWillBeSent",
+                "params": {
+                    "requestId": "2",
+                    "type": "Document",
+                    "request": {"url": "https://example.test/", "method": "GET"},
+                },
+            },
+            {
+                "method": "Network.responseReceived",
+                "params": {
+                    "requestId": "2",
+                    "type": "Document",
+                    "response": {"url": "https://example.test/", "status": 200, "mimeType": "text/html"},
+                },
+            },
+            {"method": "Network.webSocketCreated", "params": {"requestId": "ws", "url": "wss://example.test/socket"}},
+            {
+                "method": "Network.webSocketFrameReceived",
+                "params": {"requestId": "ws", "response": {"opcode": 1, "payloadData": "hello"}},
+            },
+        ],
+        include_request_body=True,
+        include_websockets=True,
+        filter_url="/api/",
+        filter_method="POST",
+        filter_status="5xx",
+    )
+    har = BrowserControlerTool._build_simple_har(network_summary)
+
+    assert network_summary["filtered_response_count"] == 1
+    assert network_summary["responses"][0]["post_data_preview"] == "{\"ok\":true}"
+    assert network_summary["websockets"][0]["frames"][0]["payload_preview"] == "hello"
+    assert har["log"]["entries"][0]["request"]["method"] == "POST"
+
+
+def test_browser_controler_renders_dom_outline() -> None:
+    lines = BrowserControlerTool._render_dom_outline(
+        {
+            "title": "App",
+            "url": "https://example.test",
+            "headings": [{"selector": "h1", "text": "Dashboard"}],
+            "controls": [{"selector": "button#save", "text": "Save", "role": "button"}],
+        },
+        max_events=5,
+    )
+
+    assert "DOM outline for App" in lines[0]
+    assert any("Dashboard" in line for line in lines)
+    assert any("Save" in line for line in lines)
+
+
 def test_skill_lookup_lists_and_inspects_discovered_skills(tmp_path: Path) -> None:
     app_root = tmp_path / "app"
     project_root = tmp_path / "project"
@@ -483,10 +573,29 @@ def test_skills_manager_discovers_builtin_browser_controler_skill(tmp_path: Path
     assert "devtools_eval" in record.body
     assert "devtools_console" in record.body
     assert "devtools_network" in record.body
+    assert "devtools_screenshot" in record.body
+    assert "devtools_dom_outline" in record.body
+    assert "devtools_click" in record.body
+    assert "browser_session_start" in record.body
+    assert "safety_policy" in record.body
     assert "background=true" in record.body
     assert "minimized=true" in record.body
     assert "diagnose_page" in record.body
     assert "check_endpoint" in record.body
+
+
+def test_github_action_schedules_latest_windows_exe_build() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    workflow = (repo_root / ".github" / "workflows" / "build-windows-exe.yml").read_text(encoding="utf-8")
+
+    assert "schedule:" in workflow
+    assert "17 18 * * *" in workflow
+    assert "actions/upload-artifact@v4" in workflow
+    assert "gh release upload latest" in workflow
+    assert "dist/reverie.exe" in workflow
+    assert "Build Python exe" in workflow
+    assert "dist/reverie-python.exe" in workflow
+    assert "python_cli_asset" in workflow
 
 
 def test_mcp_resource_tools_list_and_read(tmp_path: Path) -> None:

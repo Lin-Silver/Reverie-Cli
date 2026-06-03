@@ -11,7 +11,7 @@ Use `browser_controler` when the task needs evidence from a real browser session
 
 1. Establish the target: URL, local dev server, route, form, upload, login flow, or endpoint.
 2. Collect cheap evidence first: `active_window`/`list_browser_windows` for desktop state, `diagnose_page` for HTML/status/forms/assets, `check_endpoint` for API/server behavior, `extract_page` for static content, or `devtools_targets` when a DevTools-enabled browser is already open.
-3. Open the browser with `open_page` for normal visible interaction. Use `open_debug_page` when the task needs structured DevTools evidence such as live DOM content, Console output, JavaScript execution, or Network responses. For non-disruptive checks, prefer `open_debug_page(background=true, minimized=true, activate=false)` and then use `devtools_*` actions while the browser stays minimized. Use `private=true` only when isolation, logged-out state, or privacy mode matters.
+3. Open the browser with `open_page` for normal visible interaction. Use `browser_session_start` or `open_debug_page` when the task needs structured DevTools evidence such as live DOM content, screenshots, Console output, JavaScript execution, element interaction, uploads, or Network responses. For non-disruptive checks, prefer `browser_session_start(background=true, minimized=true, activate=false)` and then use `devtools_*` actions while the browser stays minimized. Use `private=true` only when isolation, logged-out state, or privacy mode matters.
 4. Use `activate_browser` before browser-specific shortcuts when the active window is not already a browser.
 5. Use `observe` with a grid before coordinate actions. Then apply one small action at a time: `click`, `scroll`, `paste_text`, `key_press`, `hotkey`, `upload_file`, `wait`.
 6. Re-observe, use `copy_page_text`, or use `devtools_snapshot` after each meaningful step. Report what was actually observed, not what you expected.
@@ -19,11 +19,15 @@ Use `browser_controler` when the task needs evidence from a real browser session
 ## DevTools And Diagnostics
 
 - Prefer `open_debug_page` plus DevTools Protocol actions for structured evidence. This supports Chromium-based browsers such as Chrome, Edge, and Brave with an isolated debug profile.
-- Use background mode for routine inspections: `open_debug_page(url=target_url, background=true, minimized=true, activate=false)`. This keeps the browser out of the foreground and lets the user keep working in other apps.
+- Use `browser_session_start` for reusable background automation sessions. Use `browser_session_list`, `browser_session_close`, and `browser_session_cleanup` to avoid stale debug browsers/profiles.
+- Use background mode for routine inspections: `browser_session_start(url=target_url, background=true, minimized=true, activate=false)`. This keeps the browser out of the foreground and lets the user keep working in other apps.
 - Use `devtools_snapshot` to read the live rendered DOM text/HTML, including client-rendered content that static fetches miss.
+- Use `devtools_screenshot(full_page=true)` for background screenshots; unlike `observe`, it works while the browser is minimized.
 - Use `devtools_eval(expression="...")` to run JavaScript in the selected page, equivalent to entering a command in the browser Console. Good examples: inspect `document.title`, query DOM nodes, check app globals, localStorage, route state, or run a small diagnostic expression.
 - Use `devtools_console` to read Console API events, browser log entries, and runtime exceptions. Pass `expression` when you need to deliberately emit or test a Console command.
-- Use `devtools_network(url=..., include_bodies=true)` to enable Network, navigate or reload, and capture request/response status, resource type, MIME type, failures, and optional response body previews.
+- Use `devtools_network(url=..., include_bodies=true, include_request_body=true, export_har=true)` to enable Network, navigate or reload, filter by URL/method/status, capture request/response status, payload previews, failures, optional response bodies, WebSocket frames, and a HAR-style artifact.
+- Use `devtools_dom_outline`, `devtools_find`, and `devtools_accessibility_snapshot` before interacting. Prefer selectors, roles, names, or visible text over coordinates.
+- Use `devtools_click(selector=...)`, `devtools_type(selector=..., text=...)`, `devtools_upload(selector=..., file_path=...)`, and `devtools_wait_for(...)` for background page interaction.
 - Background/minimized mode is for CDP actions. Do not use minimized windows for coordinate `click`, `scroll`, `observe`, file dialogs, or keyboard-driven UI automation; activate a visible browser window first when those are required.
 - Use `open_devtools` when the user specifically wants the visual DevTools panel opened. For logs/responses, still prefer `devtools_console` and `devtools_network` because they return structured evidence.
 - Use `diagnose_page(check_assets=true)` to find HTTP status, missing title/content, form structure, and broken scripts/styles/images.
@@ -32,9 +36,10 @@ Use `browser_controler` when the task needs evidence from a real browser session
 
 ## Practical Patterns
 
-- Background page smoke test: `open_debug_page(background=true, minimized=true, activate=false)`, then `devtools_snapshot`, `devtools_console`, and `devtools_network`.
+- Background page smoke test: `browser_session_start(background=true, minimized=true, activate=false)`, then `devtools_snapshot`, `devtools_screenshot`, `devtools_console`, and `devtools_network`.
 - Visible page smoke test: `diagnose_page`, `open_page`, `observe`, interact with the main path, `copy_page_text` or screenshot evidence.
 - UI bug investigation: reproduce in a background debug browser when CDP evidence is enough; use visible interaction only for layout, pointer, upload, or focus behavior that truly needs the foreground.
+- Form flow: `devtools_find` or `devtools_dom_outline`, then `devtools_type`, `devtools_click`, `devtools_wait_for`, and `devtools_network` to verify server behavior.
 - Server feature check: identify endpoint or form action, call `check_endpoint`, compare response with UI behavior, then test through the browser.
 - Upload flow: click the upload control, call `upload_file` for a workspace file, wait, observe the resulting UI state.
 - Dynamic app content: use `devtools_snapshot` or `copy_page_text` after rendering or interaction because static `extract_page` may miss client-rendered state.
@@ -46,6 +51,8 @@ Use `browser_controler` when the task needs evidence from a real browser session
 
 - Do not treat Browser Controler as a replacement for reading the codebase. Use it to verify runtime behavior.
 - Do not claim a UI state, console error, network result, or endpoint behavior unless `observe`, `copy_page_text`, `devtools_snapshot`, `devtools_eval`, `devtools_console`, `devtools_network`, `diagnose_page`, or `check_endpoint` produced evidence.
+- Call `safety_policy` when unsure about credentials, existing logged-in sessions, uploads, external web AI services, or potentially destructive page actions.
+- Prefer isolated debug profiles and new background sessions over controlling the user's existing logged-in browser.
 - Upload only files inside the workspace or files the user explicitly provided.
 - Avoid entering credentials unless the user explicitly asks and provides them in the current context.
 - Keep external web AI/OCR use as an optional fallback for tasks that specifically require it; browser control and diagnostics are the default purpose.

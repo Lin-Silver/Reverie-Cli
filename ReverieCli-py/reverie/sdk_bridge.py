@@ -670,7 +670,6 @@ class ReverieUiBridge:
             "generated_at": str(release.get("published_at") or ""),
             "commit": str(release.get("target_commitish") or ""),
             "cli_asset": next((asset for asset in assets if asset["name"].lower() == "reverie.exe"), None),
-            "rust_cli_asset": next((asset for asset in assets if asset["name"].lower() == "reverie-rust-preview.exe"), None),
             "plugins": plugins,
             "inferred": True,
         }

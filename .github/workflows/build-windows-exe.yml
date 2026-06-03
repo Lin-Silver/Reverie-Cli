@@ -166,22 +166,6 @@ jobs:
             }
           }
 
-      - name: Build Rust preview exe
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          $dist = Join-Path $env:GITHUB_WORKSPACE "dist"
-          if (Test-Path $dist) {
-            Remove-Item -LiteralPath $dist -Recurse -Force
-          }
-          & "$env:GITHUB_WORKSPACE\ReverieCli-Rs\build-windows.ps1" -Release -SkipTests
-          $rustExe = Join-Path $dist "reverie.exe"
-          if (-not (Test-Path $rustExe)) {
-            throw "Rust preview build completed without producing dist\reverie.exe"
-          }
-          Copy-Item -LiteralPath $rustExe -Destination (Join-Path $dist "reverie-rust-preview.exe") -Force
-          Remove-Item -LiteralPath $rustExe -Force
-
       - name: Generate plugin release manifest
         shell: pwsh
         run: |
@@ -198,17 +182,6 @@ jobs:
             throw "Missing Python CLI asset: $pythonCliSource"
           }
           Copy-Item -LiteralPath $pythonCliSource -Destination $cliPath -Force
-          $rustCliPath = Join-Path $env:GITHUB_WORKSPACE "dist\reverie-rust-preview.exe"
-          $rustCliAsset = $null
-          if (Test-Path $rustCliPath) {
-            $rustCliAsset = [ordered]@{
-              name = "reverie-rust-preview.exe"
-              download_url = "$releaseBase/reverie-rust-preview.exe"
-              sha256 = Get-Sha256 $rustCliPath
-              size = (Get-Item -LiteralPath $rustCliPath).Length
-              preview = $true
-            }
-          }
           $plugins = @(
             @{ Id = "blender"; Manifest = "plugins\blender\plugin.json"; Asset = "reverie-blender.exe"; Path = "plugins\blender\dist\reverie-blender.exe" },
             @{ Id = "godot"; Manifest = "plugins\godot\plugin.json"; Asset = "reverie-godot.exe"; Path = "plugins\godot\dist\reverie-godot.exe" },
@@ -231,7 +204,6 @@ jobs:
               includes_builtin_skills = $true
               runtime = "python"
             }
-            rust_cli_asset = $rustCliAsset
             plugins = @()
           }
 
@@ -320,7 +292,6 @@ jobs:
           - reverie-godot.exe: official Godot runtime plugin executable.
           - reverie-o3de.exe: official O3DE runtime plugin executable.
           - reverie-game-models.exe: official Game Models runtime plugin executable.
-          - reverie-rust-preview.exe: optional Rust SDK bridge preview, uploaded only when the non-blocking preview build succeeds. It is not the default release executable.
 
           Commit: $env:GITHUB_SHA
           Event: $env:GITHUB_EVENT_NAME
@@ -342,10 +313,6 @@ jobs:
             @{ Path = "plugins\o3de\dist\reverie-o3de.exe"; Label = "Official O3DE runtime plugin" },
             @{ Path = "plugins\game_models\dist\reverie-game-models.exe"; Label = "Official Game Models runtime plugin" }
           )
-          $rustPreview = "dist\reverie-rust-preview.exe"
-          if (Test-Path $rustPreview) {
-            $assets += @{ Path = $rustPreview; Label = "Rust SDK bridge preview (optional)" }
-          }
           foreach ($asset in $assets) {
             $uploadSpec = "$($asset.Path)#$($asset.Label)"
             gh release upload latest $uploadSpec --repo $env:GITHUB_REPOSITORY --clobber

@@ -157,7 +157,6 @@ def test_remote_plugin_manifest_can_be_inferred_from_release_assets() -> None:
     release = {"tag_name": "latest", "published_at": "2026-05-03T00:00:00Z", "target_commitish": "abc123"}
     assets = [
         {"name": "reverie.exe", "download_url": "https://example.test/reverie.exe", "size": 10},
-        {"name": "reverie-rust-preview.exe", "download_url": "https://example.test/reverie-rust-preview.exe", "size": 12},
         {"name": "reverie-blender.exe", "download_url": "https://example.test/reverie-blender.exe", "size": 20},
         {"name": "reverie-godot.exe", "download_url": "https://example.test/reverie-godot.exe", "size": 30},
         {"name": "reverie-o3de.exe", "download_url": "https://example.test/reverie-o3de.exe", "size": 40},
@@ -167,7 +166,6 @@ def test_remote_plugin_manifest_can_be_inferred_from_release_assets() -> None:
     manifest = bridge.infer_plugin_manifest_from_assets(release, assets)
     assert manifest["schema"] == bridge.RELEASE_SCHEMA
     assert manifest["cli_asset"]["name"] == "reverie.exe"
-    assert manifest["rust_cli_asset"]["name"] == "reverie-rust-preview.exe"
     assert {plugin["id"] for plugin in manifest["plugins"]} == {"blender", "godot", "o3de", "game_models"}
 
 

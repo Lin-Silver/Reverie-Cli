@@ -85,6 +85,7 @@ class CommandHandler:
             'clean': self.cmd_clean,
             'index': self.cmd_index,
             'tools': self.cmd_tools,
+            'browser': self.cmd_browser,
             'skills': self.cmd_skills,
             'plugins': self.cmd_plugins,
             'mcp': self.cmd_mcp,
@@ -2000,6 +2001,84 @@ class CommandHandler:
             ],
             title="Tool Browser Shortcuts",
             accent=self.theme.BORDER_SECONDARY,
+        )
+
+    def cmd_browser(self, args: str) -> bool:
+        """Manage Browser Controler profile backups and recovery from slash commands."""
+        from ..tools.browser_controler import BrowserControlerTool
+
+        try:
+            tokens = shlex.split(str(args or "").strip(), posix=False)
+        except ValueError as exc:
+            self.console.print(
+                Panel(
+                    escape(f"Could not parse /browser arguments: {exc}"),
+                    title="Browser Profile",
+                    border_style=self.theme.CORAL_SOFT,
+                )
+            )
+            return True
+
+        tokens = [str(token or "").strip().strip('"').strip("'") for token in tokens if str(token or "").strip()]
+        operation = str(tokens[0] if tokens else "status").lower()
+        browser = "edge"
+        backup_id = ""
+        include_cache = True
+        confirm = False
+
+        if operation in {"status", "backup", "backups", "list"}:
+            if len(tokens) >= 2:
+                browser = tokens[1]
+            include_cache = not any(str(token).lower() in {"--no-cache", "no-cache"} for token in tokens[2:])
+            action = "browser_profile_backups" if operation in {"backups", "list"} else f"browser_profile_{operation}"
+            payload: Dict[str, Any] = {"action": action, "browser": browser}
+            if action == "browser_profile_backup":
+                payload["include_cache"] = include_cache
+        elif operation == "restore":
+            if len(tokens) < 3:
+                self._print_browser_command_help()
+                return True
+            browser = tokens[1]
+            backup_id = tokens[2]
+            confirm = any(str(token).lower() in {"confirm", "--confirm", "true"} for token in tokens[3:])
+            payload = {
+                "action": "browser_profile_restore",
+                "browser": browser,
+                "backup_id": backup_id,
+                "confirm": confirm,
+            }
+        else:
+            self._print_browser_command_help()
+            return True
+
+        tool = BrowserControlerTool({"project_root": str(self._get_project_root())})
+        result = tool.execute(**payload)
+        is_partial = str(getattr(getattr(result, "status", ""), "value", "")).lower() == "partial"
+        if result.success:
+            body = result.output or ""
+            if result.error:
+                body = f"{body}\n\nWarning: {result.error}".strip()
+        else:
+            body = result.error or result.output or "Browser command failed."
+        title = "Browser Profile Warning" if (not result.success or is_partial) else "Browser Profile"
+        accent = self.theme.CORAL_SOFT if (not result.success or is_partial) else self.theme.MINT_SOFT
+        self.console.print(Panel(escape(str(body or "")), title=title, border_style=accent))
+        return True
+
+    def _print_browser_command_help(self) -> None:
+        self.console.print(
+            Panel(
+                "\n".join(
+                    [
+                        "/browser status [edge|chrome|brave]",
+                        "/browser backup [edge|chrome|brave] [--no-cache]",
+                        "/browser backups [edge|chrome|brave]",
+                        "/browser restore <edge|chrome|brave> <backup_id> confirm",
+                    ]
+                ),
+                title="Browser Commands",
+                border_style=self.theme.BORDER_SECONDARY,
+            )
         )
 
     _TOOL_LIST_LABELS: Dict[str, tuple[str, str]] = {

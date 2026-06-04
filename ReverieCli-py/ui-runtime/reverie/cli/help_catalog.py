@@ -250,6 +250,21 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
         ],
         "examples": ["/tools", "/tools all", "/tools details --mode reverie", "/tools search blueprint", "/tools recommend read MCP resources", "/tools inspect tool_catalog", "/tools groups", "/tools --mode writer"],
     },
+    "browser": {
+        "command": "/browser",
+        "section": "Tools & Context",
+        "summary": "Inspect, back up, list, and restore Browser Controler browser-profile backups.",
+        "detail": "Browser Controler uses isolated profiles for automation. `/browser` manages safety backups of real browser profiles before automation runs; restore is intentionally explicit and requires `confirm` after all browser processes are closed.",
+        "overview": "status, backup, backups, restore <browser> <backup_id> confirm",
+        "subcommands": [
+            {"usage": "/browser", "description": "Show Edge profile and backup status."},
+            {"usage": "/browser status [edge|chrome|brave]", "description": "Show the real profile location, size, and latest backup."},
+            {"usage": "/browser backup [edge|chrome|brave] [--no-cache]", "description": "Create a Browser Controler profile backup."},
+            {"usage": "/browser backups [edge|chrome|brave]", "description": "List recorded profile backups."},
+            {"usage": "/browser restore <edge|chrome|brave> <backup_id> confirm", "description": "Restore a backup after closing all matching browser processes."},
+        ],
+        "examples": ["/browser", "/browser backup edge", "/browser backups edge", "/browser restore edge 20260604-153000 confirm"],
+    },
     "skills": {
         "command": "/skills",
         "section": "Tools & Context",

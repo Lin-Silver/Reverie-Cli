@@ -11,14 +11,15 @@ Use `browser_controler` when the task needs evidence from a real browser session
 
 1. Establish the target: URL, local dev server, route, form, upload, login flow, or endpoint.
 2. Collect cheap evidence first: `active_window`/`list_browser_windows` for desktop state, `diagnose_page` for HTML/status/forms/assets, `check_endpoint` for API/server behavior, `extract_page` for static content, or `devtools_targets` when a DevTools-enabled browser is already open.
-3. Open the browser with `open_page` for normal visible interaction. Use `browser_session_start` or `open_debug_page` when the task needs structured DevTools evidence such as live DOM content, screenshots, Console output, JavaScript execution, element interaction, uploads, or Network responses. DevTools sessions default to Edge with an isolated Browser Controler profile. For non-disruptive checks, prefer `browser_session_start(background=true, minimized=true, activate=false)` and then use `devtools_*` actions while the browser stays minimized. Use `private=true` only when isolation, logged-out state, or privacy mode matters.
-4. Use `activate_browser` before browser-specific shortcuts when the active window is not already a browser.
+3. Open the browser with `open_page` for normal visible interaction. Use `browser_session_start` or `open_debug_page` when the task needs structured DevTools evidence such as live DOM content, screenshots, Console output, JavaScript execution, element interaction, uploads, or Network responses. Browser automation first backs up the real browser profile and then launches Edge by default with an isolated Browser Controler profile. For non-disruptive checks, prefer `browser_session_start(background=true, minimized=true, activate=false)` and then use `devtools_*` actions while the browser stays minimized. Use `private=true` only when logged-out state or privacy mode matters inside the isolated profile.
+4. Use `activate_browser` before browser-specific shortcuts when the active window is not already an isolated Browser Controler browser window.
 5. Use `observe` with a grid before coordinate actions. Then apply one small action at a time: `click`, `scroll`, `paste_text`, `key_press`, `hotkey`, `upload_file`, `wait`.
 6. Re-observe, use `copy_page_text`, or use `devtools_snapshot` after each meaningful step. Report what was actually observed, not what you expected.
 
 ## DevTools And Diagnostics
 
-- Prefer `open_debug_page` plus DevTools Protocol actions for structured evidence. This supports Chromium-based browsers such as Edge, Chrome, and Brave, but automation should use Edge unless the user explicitly asks for another browser. Debug profiles must stay under Browser Controler data; never point `user_data_dir` at a real browser profile.
+- Prefer `open_debug_page` plus DevTools Protocol actions for structured evidence. DevTools sessions default to Edge and support Chromium-based browsers such as Chrome and Brave when the user explicitly asks for them. Debug profiles must stay under Browser Controler data; never point `user_data_dir` at a real browser profile.
+- DevTools actions only attach to ports recorded by Browser Controler sessions with safe `debug-profiles` paths. Do not connect to arbitrary external DevTools ports.
 - Use `browser_session_start` for reusable background automation sessions. Use `browser_session_list`, `browser_session_close`, and `browser_session_cleanup` to avoid stale debug browsers/profiles.
 - Use background mode for routine inspections: `browser_session_start(url=target_url, background=true, minimized=true, activate=false)`. This keeps the browser out of the foreground and lets the user keep working in other apps.
 - Use `devtools_snapshot` to read the live rendered DOM text/HTML, including client-rendered content that static fetches miss.
@@ -47,12 +48,20 @@ Use `browser_controler` when the task needs evidence from a real browser session
 - Network response check: `open_debug_page(url="about:blank", background=true, minimized=true, activate=false)`, then `devtools_network(url=target_url, include_bodies=true)` and verify the relevant response status/body.
 - Web AI engineering help: when explicitly useful, operate a web AI service as a browser page to ask for code ideas, OCR, or debugging suggestions, then verify any advice against the local codebase and tests before applying it.
 
+## Profile Backup And Recovery
+
+- Browser automation backs up the selected real browser profile under Browser Controler `profile-backups` before launching an isolated automation profile.
+- Use `/browser status edge` to inspect the real Edge profile path, size, and latest backup.
+- Use `/browser backup edge` to create a manual backup before experiments. Use `/browser backups edge` to list saved backup ids.
+- Use `/browser restore edge <backup_id> confirm` only after closing all Edge processes. Restore writes to the real profile and is intentionally blocked while the browser is running.
+- Real browser profiles are recovery sources only. They are not automation targets; visible UI actions and `activate_browser` are limited to isolated Browser Controler windows.
+
 ## Guardrails
 
 - Do not treat Browser Controler as a replacement for reading the codebase. Use it to verify runtime behavior.
 - Do not claim a UI state, console error, network result, or endpoint behavior unless `observe`, `copy_page_text`, `devtools_snapshot`, `devtools_eval`, `devtools_console`, `devtools_network`, `diagnose_page`, or `check_endpoint` produced evidence.
 - Call `safety_policy` when unsure about credentials, existing logged-in sessions, uploads, external web AI services, or potentially destructive page actions.
-- Prefer isolated debug profiles and new background sessions over controlling the user's existing logged-in browser.
+- Do not control the user's existing logged-in browser. Use only Browser Controler windows launched with isolated profiles.
 - Do not use a user's real Chrome/Edge profile for DevTools sessions. If a custom `user_data_dir` is needed, use a relative isolated name so it is created under Browser Controler `debug-profiles`.
 - Upload only files inside the workspace or files the user explicitly provided.
 - Avoid entering credentials unless the user explicitly asks and provides them in the current context.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import base64
+import json
 from types import SimpleNamespace
 
 from rich.console import Console
@@ -364,6 +365,10 @@ def test_browser_controler_exposes_structured_devtools_actions() -> None:
     assert "devtools_dom_outline" in actions
     assert "devtools_find" in actions
     assert "safety_policy" in actions
+    assert "browser_profile_status" in actions
+    assert "browser_profile_backup" in actions
+    assert "browser_profile_backups" in actions
+    assert "browser_profile_restore" in actions
     assert "port" in parameters
     assert "expression" in parameters
     assert "include_bodies" in parameters
@@ -374,6 +379,9 @@ def test_browser_controler_exposes_structured_devtools_actions() -> None:
     assert "background" in parameters
     assert "minimized" in parameters
     assert "activate" in parameters
+    assert "include_cache" in parameters
+    assert "backup_id" in parameters
+    assert "confirm" in parameters
 
 
 def test_browser_controler_chromium_flags_support_minimized_background_launch() -> None:
@@ -406,6 +414,87 @@ def test_browser_controler_debug_profiles_stay_isolated(tmp_path: Path) -> None:
         assert "Refusing to use an existing browser profile" in str(exc)
     else:
         raise AssertionError("External browser profile path was not refused")
+
+
+def test_browser_controler_profile_backup_and_status(tmp_path: Path, monkeypatch) -> None:
+    local_app_data = tmp_path / "local"
+    edge_profile = local_app_data / "Microsoft" / "Edge" / "User Data"
+    (edge_profile / "Default").mkdir(parents=True)
+    (edge_profile / "Default" / "Cookies").write_text("cookie-data", encoding="utf-8")
+    (edge_profile / "Local State").write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("LOCALAPPDATA", str(local_app_data))
+    monkeypatch.setenv("APPDATA", str(tmp_path / "roaming"))
+
+    tool = BrowserControlerTool({"project_root": tmp_path / "workspace"})
+    backup = tool.execute(action="browser_profile_backup", browser="edge", include_cache=False)
+
+    assert backup.success is True
+    backup_dir = Path(backup.data["backup_dir"])
+    assert (backup_dir / "Default" / "Cookies").read_text(encoding="utf-8") == "cookie-data"
+    assert (backup_dir / "browser-profile-backup.json").exists()
+    assert backup.data["browser"] == "edge"
+
+    status = tool.execute(action="browser_profile_status", browser="edge")
+    backups = tool.execute(action="browser_profile_backups", browser="edge")
+
+    assert status.success is True
+    assert "Latest backup" in status.output
+    assert backups.success is True
+    assert backup.data["backup_id"] in backups.output
+
+
+def test_browser_command_manages_edge_profile_backups(tmp_path: Path, monkeypatch) -> None:
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    local_app_data = tmp_path / "local"
+    edge_profile = local_app_data / "Microsoft" / "Edge" / "User Data"
+    (edge_profile / "Default").mkdir(parents=True)
+    (edge_profile / "Default" / "Preferences").write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("LOCALAPPDATA", str(local_app_data))
+    monkeypatch.setenv("APPDATA", str(tmp_path / "roaming"))
+    monkeypatch.chdir(project_root)
+
+    console = Console(record=True, force_terminal=False, width=120)
+    handler = CommandHandler(console, {"project_root": project_root})
+
+    assert handler.handle("/browser backup edge") is True
+    assert handler.handle("/browser backups edge") is True
+    rendered = console.export_text()
+
+    assert "Backed up edge profile" in rendered
+    assert "Browser profile backups for edge" in rendered
+
+
+def test_browser_controler_authorizes_only_recorded_isolated_cdp_ports(tmp_path: Path) -> None:
+    tool = BrowserControlerTool({"project_root": tmp_path})
+    profile_dir = tool._resolve_debug_profile_dir("", browser="edge", port=45678)
+
+    assert tool._is_authorized_cdp_port(45678) is False
+    assert tool._user_data_dir_from_command_line(f'msedge.exe --user-data-dir="{profile_dir}"') == profile_dir
+
+    tool._record_browser_session(
+        session_id="safe",
+        port=45678,
+        url="about:blank",
+        profile_dir=profile_dir,
+        browser="msedge.exe",
+        process_id=123,
+        background=True,
+        minimized=True,
+    )
+
+    assert tool._is_authorized_cdp_port(45678) is True
+
+    tool._save_browser_sessions(
+        {
+            "unsafe": {
+                "session_id": "unsafe",
+                "port": 45679,
+                "profile_dir": str(tmp_path / "real-browser-profile"),
+            }
+        }
+    )
+    assert tool._is_authorized_cdp_port(45679) is False
 
 
 def test_browser_controler_prefers_real_page_devtools_targets() -> None:
@@ -600,10 +689,27 @@ def test_skills_manager_discovers_builtin_browser_controler_skill(tmp_path: Path
     assert "safety_policy" in record.body
     assert "DevTools sessions default to Edge" in record.body
     assert "never point `user_data_dir` at a real browser profile" in record.body
+    assert "/browser backup edge" in record.body
+    assert "profile-backups" in record.body
+    assert "Do not control the user's existing logged-in browser" in record.body
+    assert "external DevTools ports" in record.body
     assert "background=true" in record.body
     assert "minimized=true" in record.body
     assert "diagnose_page" in record.body
     assert "check_endpoint" in record.body
+
+
+def test_browser_controler_manifest_mentions_profile_backup_and_isolated_ports() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    manifest = json.loads((repo_root / "reverie" / "agent" / "tool_manifest.json").read_text(encoding="utf-8"))
+    browser_record = manifest["tools"]["browser_controler"]
+
+    assert "browser_profile_status/backup/backups/restore" in browser_record["parameters"]["action"]
+    assert "external unrecorded ports are refused" in browser_record["parameters"]["port"]
+    assert "include_cache" in browser_record["parameters"]
+    assert "backup_id" in browser_record["parameters"]
+    assert "confirm" in browser_record["parameters"]
+    assert any("browser_profile_backup" in example for example in browser_record["examples"])
 
 
 def test_github_action_schedules_latest_windows_exe_build() -> None:

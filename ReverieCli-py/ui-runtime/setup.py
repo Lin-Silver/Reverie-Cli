@@ -51,6 +51,7 @@ setup(
         # Web search
         "ddgs>=9.11.1",
         "beautifulsoup4>=4.12.0",
+        "playwright>=1.56.0",
 
         # Runtime support used by story/game/token tooling
         "PyYAML>=6.0.0",

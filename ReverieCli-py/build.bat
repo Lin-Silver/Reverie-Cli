@@ -131,10 +131,24 @@ if not exist "%SHARED_COMFY_DIR%\embedded_comfy.b64" (
 )
 
 if not exist "%BUNDLE_RES_DIR%\comfy" mkdir "%BUNDLE_RES_DIR%\comfy" >nul 2>&1
+if not exist "%BUNDLE_RES_DIR%\browser\ms-playwright" mkdir "%BUNDLE_RES_DIR%\browser\ms-playwright" >nul 2>&1
 copy /Y "%SHARED_COMFY_DIR%\generate_image.py" "%BUNDLE_RES_DIR%\comfy\generate_image.py" >nul
 copy /Y "%SHARED_COMFY_DIR%\embedded_comfy.b64" "%BUNDLE_RES_DIR%\comfy\embedded_comfy.b64" >nul
+set "PLAYWRIGHT_BROWSERS_PATH=%BUNDLE_RES_DIR%\browser\ms-playwright"
+python -m playwright install chromium --no-shell
+if %ERRORLEVEL% neq 0 (
+    echo [ERROR] Failed to install embedded Chromium for Browser Controler.
+    set "BUILD_EXIT_CODE=1"
+    goto finish
+)
+dir /s /b "%PLAYWRIGHT_BROWSERS_PATH%\chrome.exe" >nul 2>&1
+if %ERRORLEVEL% neq 0 (
+    echo [ERROR] Embedded Chromium install did not produce chrome.exe.
+    set "BUILD_EXIT_CODE=1"
+    goto finish
+)
 set "REVERIE_BUNDLE_RES_DIR=%BUNDLE_RES_DIR%"
-echo       Bundled resources: %REVERIE_BUNDLE_RES_DIR%\comfy
+echo       Bundled resources: %REVERIE_BUNDLE_RES_DIR%\comfy, %REVERIE_BUNDLE_RES_DIR%\browser
 if exist "%REPO_ROOT%\%BLENDER_ARCHIVE_NAME%" set "BLENDER_ARCHIVE_SOURCE=%REPO_ROOT%\%BLENDER_ARCHIVE_NAME%"
 if not defined BLENDER_ARCHIVE_SOURCE if exist "%ROOT_DIR%\%BLENDER_ARCHIVE_NAME%" set "BLENDER_ARCHIVE_SOURCE=%ROOT_DIR%\%BLENDER_ARCHIVE_NAME%"
 if not defined BLENDER_ARCHIVE_SOURCE if exist "%SHARED_PLUGINS_DIR%\blender\%BLENDER_ARCHIVE_NAME%" set "BLENDER_ARCHIVE_SOURCE=%SHARED_PLUGINS_DIR%\blender\%BLENDER_ARCHIVE_NAME%"

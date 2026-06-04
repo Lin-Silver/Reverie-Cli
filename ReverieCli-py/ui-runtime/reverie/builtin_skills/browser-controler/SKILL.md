@@ -1,26 +1,26 @@
 ---
 name: browser-controler
-description: Control and inspect real browser workflows with Browser Controler. Use when Reverie needs to open pages, operate a browser like a user, use private windows, open DevTools, inspect page state, diagnose frontend behavior, check server endpoints, test forms/uploads/login flows, capture dynamic page text, or verify a web app beyond static HTTP fetches.
+description: Control and inspect embedded browser workflows with Browser Controler. Use when Reverie needs to open pages in its bundled Chromium runtime, operate a browser like a user without touching real Edge/Chrome profiles, import user-provided cookies/storage state, open DevTools, inspect page state, diagnose frontend behavior, check server endpoints, test forms/uploads/login flows, capture dynamic page text, or verify a web app beyond static HTTP fetches.
 ---
 
 # Browser Controler
 
-Use `browser_controler` when the task needs evidence from a real browser session or a web/server diagnostic pass. The skill is about browser control and inspection first; any web AI page is just another site to operate when the task specifically calls for it.
+Use `browser_controler` when the task needs evidence from an embedded Chromium browser session or a web/server diagnostic pass. The skill is about browser control and inspection first; any web AI page is just another site to operate when the task specifically calls for it.
 
 ## Core Loop
 
 1. Establish the target: URL, local dev server, route, form, upload, login flow, or endpoint.
 2. Collect cheap evidence first: `active_window`/`list_browser_windows` for desktop state, `diagnose_page` for HTML/status/forms/assets, `check_endpoint` for API/server behavior, `extract_page` for static content, or `devtools_targets` when a DevTools-enabled browser is already open.
-3. Open the browser with `open_page` for normal visible interaction. Use `browser_session_start` or `open_debug_page` when the task needs structured DevTools evidence such as live DOM content, screenshots, Console output, JavaScript execution, element interaction, uploads, or Network responses. Browser automation first backs up the real browser profile and then launches Edge by default with an isolated Browser Controler profile. For non-disruptive checks, prefer `browser_session_start(background=true, minimized=true, activate=false)` and then use `devtools_*` actions while the browser stays minimized. Use `private=true` only when logged-out state or privacy mode matters inside the isolated profile.
-4. Use `activate_browser` before browser-specific shortcuts when the active window is not already an isolated Browser Controler browser window.
+3. Open the browser with `open_page` for normal visible interaction. Use `browser_session_start` or `open_debug_page` when the task needs structured DevTools evidence such as live DOM content, screenshots, Console output, JavaScript execution, element interaction, uploads, or Network responses. Browser Controler launches Reverie's bundled Chromium runtime and stores every profile, cookie, import, backup, download, page artifact, and session under the app root `.reverie/browser` directory. For non-disruptive checks, prefer `browser_session_start(background=true, minimized=true, activate=false)` and then use `devtools_*` actions while the browser stays minimized. Use `private=true` only when logged-out state or privacy mode matters inside the embedded profile.
+4. Use `activate_browser` before browser-specific shortcuts when the active window is not already an embedded Browser Controler browser window.
 5. Use `observe` with a grid before coordinate actions. Then apply one small action at a time: `click`, `scroll`, `paste_text`, `key_press`, `hotkey`, `upload_file`, `wait`.
 6. Re-observe, use `copy_page_text`, or use `devtools_snapshot` after each meaningful step. Report what was actually observed, not what you expected.
 
 ## DevTools And Diagnostics
 
-- Prefer `open_debug_page` plus DevTools Protocol actions for structured evidence. DevTools sessions default to Edge and support Chromium-based browsers such as Chrome and Brave when the user explicitly asks for them. Debug profiles must stay under Browser Controler data; never point `user_data_dir` at a real browser profile.
-- DevTools actions only attach to ports recorded by Browser Controler sessions with safe `debug-profiles` paths. Do not connect to arbitrary external DevTools ports.
-- Use `browser_session_start` for reusable background automation sessions. Use `browser_session_list`, `browser_session_close`, and `browser_session_cleanup` to avoid stale debug browsers/profiles.
+- Prefer `open_debug_page` plus DevTools Protocol actions for structured evidence. DevTools sessions use the embedded open-source Chromium runtime; do not use the real Edge, Chrome, Brave, or Firefox executables for automation.
+- DevTools actions only attach to ports recorded by Browser Controler sessions with safe `.reverie/browser/profiles` paths. Do not connect to arbitrary external DevTools ports.
+- Use `browser_session_start` for reusable background automation sessions. Use `browser_session_list`, `browser_session_close`, and `browser_session_cleanup` to avoid stale embedded browser sessions/profiles.
 - Use background mode for routine inspections: `browser_session_start(url=target_url, background=true, minimized=true, activate=false)`. This keeps the browser out of the foreground and lets the user keep working in other apps.
 - Use `devtools_snapshot` to read the live rendered DOM text/HTML, including client-rendered content that static fetches miss.
 - Use `devtools_screenshot(full_page=true)` for background screenshots; unlike `observe`, it works while the browser is minimized.
@@ -48,21 +48,21 @@ Use `browser_controler` when the task needs evidence from a real browser session
 - Network response check: `open_debug_page(url="about:blank", background=true, minimized=true, activate=false)`, then `devtools_network(url=target_url, include_bodies=true)` and verify the relevant response status/body.
 - Web AI engineering help: when explicitly useful, operate a web AI service as a browser page to ask for code ideas, OCR, or debugging suggestions, then verify any advice against the local codebase and tests before applying it.
 
-## Profile Backup And Recovery
+## Embedded Profile Data
 
-- Browser automation backs up the selected real browser profile under Browser Controler `profile-backups` before launching an isolated automation profile.
-- Use `/browser status edge` to inspect the real Edge profile path, size, and latest backup.
-- Use `/browser backup edge` to create a manual backup before experiments. Use `/browser backups edge` to list saved backup ids.
-- Use `/browser restore edge <backup_id> confirm` only after closing all Edge processes. Restore writes to the real profile and is intentionally blocked while the browser is running.
-- Real browser profiles are recovery sources only. They are not automation targets; visible UI actions and `activate_browser` are limited to isolated Browser Controler windows.
+- Use `/browser runtime` or `browser_runtime_status` to inspect the embedded Chromium runtime and the `.reverie/browser` roots.
+- Use `/browser status [profile]` to inspect an embedded profile. The default profile is `default`.
+- Use `/browser import <storage-state.json|cookies.txt> [profile]` or `browser_profile_import` to copy user-provided cookies/storage state into `.reverie/browser/imports/<profile>`. This supports Playwright-style storage state JSON, cookie JSON arrays, and Netscape `cookies.txt`.
+- Use `/browser backup [profile]`, `/browser backups [profile]`, and `/browser restore <profile> <backup_id> confirm` for embedded profile backups under `.reverie/browser/backups`.
+- Imported credentials/cookies are copies supplied by the user. Browser Controler must not read browser databases from `%LOCALAPPDATA%`, `%APPDATA%`, Edge, Chrome, Brave, Firefox, or any real browser profile.
 
 ## Guardrails
 
 - Do not treat Browser Controler as a replacement for reading the codebase. Use it to verify runtime behavior.
 - Do not claim a UI state, console error, network result, or endpoint behavior unless `observe`, `copy_page_text`, `devtools_snapshot`, `devtools_eval`, `devtools_console`, `devtools_network`, `diagnose_page`, or `check_endpoint` produced evidence.
-- Call `safety_policy` when unsure about credentials, existing logged-in sessions, uploads, external web AI services, or potentially destructive page actions.
-- Do not control the user's existing logged-in browser. Use only Browser Controler windows launched with isolated profiles.
-- Do not use a user's real Chrome/Edge profile for DevTools sessions. If a custom `user_data_dir` is needed, use a relative isolated name so it is created under Browser Controler `debug-profiles`.
+- Call `safety_policy` when unsure about credentials, imported cookies/storage state, uploads, external web AI services, or potentially destructive page actions.
+- Do not control the user's existing logged-in browser. Use only Browser Controler windows launched from the embedded Chromium runtime.
+- Do not use or back up a user's real Chrome/Edge/Firefox/Brave profile. If a custom profile is needed, use a relative embedded `profile` name so it is created under `.reverie/browser/profiles`.
 - Upload only files inside the workspace or files the user explicitly provided.
 - Avoid entering credentials unless the user explicitly asks and provides them in the current context.
 - Keep external web AI/OCR use as an optional fallback for tasks that specifically require it; browser control and diagnostics are the default purpose.

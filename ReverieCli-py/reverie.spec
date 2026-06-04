@@ -69,8 +69,10 @@ entry_script = legacy_entry if legacy_entry.exists() else package_entry
 resource_root = os.environ.get("REVERIE_BUNDLE_RES_DIR", "").strip()
 if resource_root:
     comfy_src = Path(resource_root) / "comfy"
+    browser_src = Path(resource_root) / "browser"
 else:
     comfy_src = repo_root / "Comfy"
+    browser_src = repo_root / "reverie_resources" / "browser"
 
 icon_path_env = os.environ.get("REVERIE_ICON_PATH", "").strip()
 resolved_icon = None
@@ -86,6 +88,7 @@ if resolved_icon is None:
 
 add_data_if_exists(comfy_src / "generate_image.py", "reverie_resources/comfy")
 add_data_if_exists(comfy_src / "embedded_comfy.b64", "reverie_resources/comfy")
+add_tree_if_exists(browser_src / "ms-playwright", "reverie_resources/browser/ms-playwright")
 add_data_if_exists(repo_root / "reverie" / "agent" / "tool_manifest.json", "reverie/agent")
 add_data_if_exists(repo_root / "reverie" / "engine_lite" / "vendor" / "live2d" / "live2dcubismcore.min.js", "reverie/engine_lite/vendor/live2d")
 add_tree_if_exists(repo_root / "reverie" / "builtin_skills", "reverie/builtin_skills")

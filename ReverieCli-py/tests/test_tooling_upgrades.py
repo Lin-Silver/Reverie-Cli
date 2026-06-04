@@ -17,6 +17,7 @@ from reverie.harness import (
     summarize_prompt_harness_history,
 )
 from reverie.skills_manager import SkillsManager
+from reverie.tools import browser_controler as browser_controler_module
 from reverie.tools.mcp_resource_tools import ListMcpResourcesTool, ReadMcpResourceTool
 from reverie.tools.mode_switch import ModeSwitchTool
 from reverie.tools.browser_controler import BrowserControlerTool
@@ -369,6 +370,9 @@ def test_browser_controler_exposes_structured_devtools_actions() -> None:
     assert "browser_profile_backup" in actions
     assert "browser_profile_backups" in actions
     assert "browser_profile_restore" in actions
+    assert "browser_profile_import" in actions
+    assert "browser_profile_export" in actions
+    assert "browser_runtime_status" in actions
     assert "port" in parameters
     assert "expression" in parameters
     assert "include_bodies" in parameters
@@ -379,9 +383,11 @@ def test_browser_controler_exposes_structured_devtools_actions() -> None:
     assert "background" in parameters
     assert "minimized" in parameters
     assert "activate" in parameters
+    assert "profile" in parameters
     assert "include_cache" in parameters
     assert "backup_id" in parameters
     assert "confirm" in parameters
+    assert "import_format" in parameters
 
 
 def test_browser_controler_chromium_flags_support_minimized_background_launch() -> None:
@@ -396,92 +402,235 @@ def test_browser_controler_chromium_flags_support_minimized_background_launch() 
     assert "--start-minimized" in flags
 
 
-def test_browser_controler_debug_profiles_stay_isolated(tmp_path: Path) -> None:
+def test_browser_controler_debug_profiles_stay_isolated(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("REVERIE_APP_ROOT", str(tmp_path / "app"))
     tool = BrowserControlerTool({"project_root": tmp_path})
 
-    default_profile = tool._resolve_debug_profile_dir("", browser="edge", port=45678)
-    relative_profile = tool._resolve_debug_profile_dir("edge-smoke", browser="edge", port=45679)
+    default_profile = tool._resolve_debug_profile_dir("", browser="chromium", port=45678)
+    relative_profile = tool._resolve_debug_profile_dir("weather-smoke", browser="chromium", port=45679)
 
-    assert default_profile == (tool.debug_profiles_dir / "edge" / "port-45678").resolve()
-    assert relative_profile == (tool.debug_profiles_dir / "edge-smoke").resolve()
+    assert default_profile == (tool.debug_profiles_dir / "chromium" / "port-45678").resolve()
+    assert relative_profile == (tool.debug_profiles_dir / "weather-smoke").resolve()
     assert tool._is_safe_debug_profile_path(default_profile)
     assert tool._is_safe_debug_profile_path(relative_profile)
     assert not tool._is_safe_debug_profile_path(tmp_path)
 
     try:
-        tool._resolve_debug_profile_dir(str(tmp_path / "real-browser-profile"), browser="chrome", port=45680)
+        tool._resolve_debug_profile_dir(str(tmp_path / "external-profile"), browser="chromium", port=45680)
     except ValueError as exc:
-        assert "Refusing to use an existing browser profile" in str(exc)
+        assert "absolute path" in str(exc)
     else:
         raise AssertionError("External browser profile path was not refused")
 
 
+def test_browser_controler_keeps_downloads_under_embedded_browser_root(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("REVERIE_APP_ROOT", str(tmp_path / "app"))
+    tool = BrowserControlerTool({"project_root": tmp_path})
+    profile_dir = tool._embedded_browser_profile_dir("download-test")
+    preferences_path = profile_dir / "Default" / "Preferences"
+    preferences_path.parent.mkdir(parents=True)
+    preferences_path.write_text(json.dumps({"theme": "dark"}), encoding="utf-8")
+
+    download_dir = tool._prepare_embedded_profile("download-test", profile_dir)
+    preferences = json.loads(preferences_path.read_text(encoding="utf-8"))
+
+    assert download_dir == (tool.downloads_dir / "download-test").resolve()
+    assert preferences["theme"] == "dark"
+    assert preferences["download"]["default_directory"] == str(download_dir)
+    assert preferences["download"]["prompt_for_download"] is False
+    assert preferences["savefile"]["default_directory"] == str(download_dir)
+    assert str(download_dir).startswith(str(tool.output_dir.resolve()))
+
+
+def test_browser_session_cleanup_preserves_persistent_and_credential_profiles(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("REVERIE_APP_ROOT", str(tmp_path / "app"))
+    tool = BrowserControlerTool({"project_root": tmp_path})
+    disposable = tool._embedded_browser_profile_dir("session-disposable")
+    credential_profile = tool._embedded_browser_profile_dir("session-credential")
+    persistent = tool._embedded_browser_profile_dir("default")
+    for profile_dir in (disposable, credential_profile, persistent):
+        profile_dir.mkdir(parents=True)
+        (profile_dir / "marker.txt").write_text("keep-or-remove", encoding="utf-8")
+    credential_import = tool.imports_dir / "session-credential"
+    credential_import.mkdir(parents=True)
+    (credential_import / "latest-storage-state.json").write_text("{}", encoding="utf-8")
+    tool._save_browser_sessions(
+        {
+            "disposable": {"port": 1, "profile_dir": str(disposable)},
+            "credential": {"port": 1, "profile_dir": str(credential_profile)},
+            "persistent": {"port": 1, "profile_dir": str(persistent)},
+        }
+    )
+
+    result = tool.execute(action="browser_session_cleanup", cleanup_profiles=True)
+
+    assert result.success is True
+    assert not disposable.exists()
+    assert credential_profile.exists()
+    assert persistent.exists()
+    assert str(disposable) in result.data["removed_profiles"]
+    assert str(credential_profile) in result.data["preserved_profiles"]
+    assert str(persistent) in result.data["preserved_profiles"]
+
+
+def test_browser_session_termination_only_stops_verified_embedded_process(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("REVERIE_APP_ROOT", str(tmp_path / "app"))
+    tool = BrowserControlerTool({"project_root": tmp_path})
+    embedded = tool.runtime_dir / "ms-playwright" / "chromium-1208" / "chrome-win64" / "chrome.exe"
+    embedded.parent.mkdir(parents=True)
+    embedded.write_bytes(b"embedded")
+    profile = tool._embedded_browser_profile_dir("session-test")
+    profile.mkdir(parents=True)
+    session = {"process_id": 123, "browser": str(embedded), "profile_dir": str(profile)}
+    taskkill_calls = []
+
+    monkeypatch.setattr(tool, "_process_path", lambda _pid: str(embedded))
+    monkeypatch.setattr(tool, "_process_command_line", lambda _pid: f'"{embedded}" --user-data-dir="{profile}"')
+
+    def fake_run(args, **_kwargs):
+        taskkill_calls.append(args)
+        return SimpleNamespace(returncode=0, stdout="stopped", stderr="")
+
+    monkeypatch.setattr(browser_controler_module.subprocess, "run", fake_run)
+    assert tool._is_browser_controler_process(123) is True
+    terminated = tool._terminate_embedded_browser_session_process(session)
+
+    assert terminated["terminated"] is True
+    assert taskkill_calls == [["taskkill", "/PID", "123", "/T", "/F"]]
+
+    external = tmp_path / "chrome.exe"
+    external.write_bytes(b"real-browser")
+    monkeypatch.setattr(tool, "_process_path", lambda _pid: str(external))
+    assert tool._is_browser_controler_process(123) is False
+    refused = tool._terminate_embedded_browser_session_process(session)
+
+    assert refused["terminated"] is False
+    assert "outside .reverie/browser/runtime" in refused["reason"]
+    assert len(taskkill_calls) == 1
+
+
+def test_browser_controler_resolves_only_embedded_chromium_runtime(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("REVERIE_APP_ROOT", str(tmp_path / "app"))
+    tool = BrowserControlerTool({"project_root": tmp_path})
+    embedded = tool.runtime_dir / "ms-playwright" / "chromium-1208" / "chrome-win64" / "chrome.exe"
+    embedded.parent.mkdir(parents=True)
+    embedded.write_bytes(b"embedded")
+    external = tmp_path / "system-browser.exe"
+    external.write_bytes(b"external")
+
+    assert tool._resolve_browser_executable(browser="edge", browser_path="") == embedded.resolve()
+    assert tool._resolve_browser_executable(browser="edge", browser_path=str(external)) is None
+    assert tool._resolve_browser_executable(browser="edge", browser_path=str(embedded)) == embedded.resolve()
+
+
 def test_browser_controler_profile_backup_and_status(tmp_path: Path, monkeypatch) -> None:
-    local_app_data = tmp_path / "local"
-    edge_profile = local_app_data / "Microsoft" / "Edge" / "User Data"
-    (edge_profile / "Default").mkdir(parents=True)
-    (edge_profile / "Default" / "Cookies").write_text("cookie-data", encoding="utf-8")
-    (edge_profile / "Local State").write_text("{}", encoding="utf-8")
-    monkeypatch.setenv("LOCALAPPDATA", str(local_app_data))
-    monkeypatch.setenv("APPDATA", str(tmp_path / "roaming"))
+    monkeypatch.setenv("REVERIE_APP_ROOT", str(tmp_path / "app"))
 
     tool = BrowserControlerTool({"project_root": tmp_path / "workspace"})
-    backup = tool.execute(action="browser_profile_backup", browser="edge", include_cache=False)
+    profile_dir = tool._embedded_browser_profile_dir("default")
+    (profile_dir / "Default").mkdir(parents=True)
+    (profile_dir / "Default" / "Cookies").write_text("cookie-data", encoding="utf-8")
+    (profile_dir / "Local State").write_text("{}", encoding="utf-8")
+    backup = tool.execute(action="browser_profile_backup", profile="default", include_cache=False)
 
     assert backup.success is True
     backup_dir = Path(backup.data["backup_dir"])
     assert (backup_dir / "Default" / "Cookies").read_text(encoding="utf-8") == "cookie-data"
     assert (backup_dir / "browser-profile-backup.json").exists()
-    assert backup.data["browser"] == "edge"
+    assert backup.data["profile"] == "default"
 
-    status = tool.execute(action="browser_profile_status", browser="edge")
-    backups = tool.execute(action="browser_profile_backups", browser="edge")
+    status = tool.execute(action="browser_profile_status", profile="default")
+    backups = tool.execute(action="browser_profile_backups", profile="default")
 
     assert status.success is True
+    assert str(tmp_path / "app" / ".reverie" / "browser") in status.output
     assert "Latest backup" in status.output
     assert backups.success is True
     assert backup.data["backup_id"] in backups.output
 
 
-def test_browser_command_manages_edge_profile_backups(tmp_path: Path, monkeypatch) -> None:
+def test_browser_profile_import_accepts_storage_state(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("REVERIE_APP_ROOT", str(tmp_path / "app"))
     project_root = tmp_path / "project"
     project_root.mkdir()
-    local_app_data = tmp_path / "local"
-    edge_profile = local_app_data / "Microsoft" / "Edge" / "User Data"
-    (edge_profile / "Default").mkdir(parents=True)
-    (edge_profile / "Default" / "Preferences").write_text("{}", encoding="utf-8")
-    monkeypatch.setenv("LOCALAPPDATA", str(local_app_data))
-    monkeypatch.setenv("APPDATA", str(tmp_path / "roaming"))
+    state_path = project_root / "auth-state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "cookies": [
+                    {
+                        "name": "sid",
+                        "value": "123",
+                        "domain": ".example.test",
+                        "path": "/",
+                        "expires": -1,
+                        "httpOnly": True,
+                        "secure": True,
+                        "sameSite": "Lax",
+                    }
+                ],
+                "origins": [{"origin": "https://example.test", "localStorage": [{"name": "token", "value": "abc"}]}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    tool = BrowserControlerTool({"project_root": project_root})
+    result = tool.execute(action="browser_profile_import", file_path="auth-state.json", profile="default")
+
+    assert result.success is True
+    latest = tool._latest_storage_state_path("default")
+    assert latest.exists()
+    imported = json.loads(latest.read_text(encoding="utf-8"))
+    assert imported["cookies"][0]["name"] == "sid"
+    assert imported["origins"][0]["localStorage"][0]["name"] == "token"
+
+
+def test_browser_command_manages_embedded_profile_backups(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("REVERIE_APP_ROOT", str(tmp_path / "app"))
+    project_root = tmp_path / "project"
+    project_root.mkdir()
     monkeypatch.chdir(project_root)
+    tool = BrowserControlerTool({"project_root": project_root})
+    profile_dir = tool._embedded_browser_profile_dir("default")
+    (profile_dir / "Default").mkdir(parents=True)
+    (profile_dir / "Default" / "Preferences").write_text("{}", encoding="utf-8")
 
     console = Console(record=True, force_terminal=False, width=120)
     handler = CommandHandler(console, {"project_root": project_root})
 
-    assert handler.handle("/browser backup edge") is True
-    assert handler.handle("/browser backups edge") is True
+    assert handler.handle("/browser backup default") is True
+    assert handler.handle("/browser backups default") is True
     rendered = console.export_text()
 
-    assert "Backed up edge profile" in rendered
-    assert "Browser profile backups for edge" in rendered
+    assert "Backed up embedded browser profile default" in rendered
+    assert "Embedded browser profile backups for default" in rendered
 
 
-def test_browser_controler_authorizes_only_recorded_isolated_cdp_ports(tmp_path: Path) -> None:
+def test_browser_controler_authorizes_only_recorded_isolated_cdp_ports(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("REVERIE_APP_ROOT", str(tmp_path / "app"))
     tool = BrowserControlerTool({"project_root": tmp_path})
-    profile_dir = tool._resolve_debug_profile_dir("", browser="edge", port=45678)
+    profile_dir = tool._resolve_debug_profile_dir("", browser="chromium", port=45678)
+    embedded = tool.runtime_dir / "ms-playwright" / "chromium-1208" / "chrome-win64" / "chrome.exe"
+    embedded.parent.mkdir(parents=True)
+    embedded.write_bytes(b"embedded")
 
     assert tool._is_authorized_cdp_port(45678) is False
-    assert tool._user_data_dir_from_command_line(f'msedge.exe --user-data-dir="{profile_dir}"') == profile_dir
+    assert tool._user_data_dir_from_command_line(f'chrome.exe --user-data-dir="{profile_dir}"') == profile_dir
 
     tool._record_browser_session(
         session_id="safe",
         port=45678,
         url="about:blank",
+        profile="default",
         profile_dir=profile_dir,
-        browser="msedge.exe",
+        browser=str(embedded),
         process_id=123,
         background=True,
         minimized=True,
     )
+    monkeypatch.setattr(tool, "_process_path", lambda _pid: str(embedded))
+    monkeypatch.setattr(tool, "_process_command_line", lambda _pid: f'"{embedded}" --user-data-dir="{profile_dir}"')
 
     assert tool._is_authorized_cdp_port(45678) is True
 
@@ -490,7 +639,8 @@ def test_browser_controler_authorizes_only_recorded_isolated_cdp_ports(tmp_path:
             "unsafe": {
                 "session_id": "unsafe",
                 "port": 45679,
-                "profile_dir": str(tmp_path / "real-browser-profile"),
+                "profile_dir": str(profile_dir),
+                "browser": str(tmp_path / "system-chrome.exe"),
             }
         }
     )
@@ -687,28 +837,37 @@ def test_skills_manager_discovers_builtin_browser_controler_skill(tmp_path: Path
     assert "devtools_click" in record.body
     assert "browser_session_start" in record.body
     assert "safety_policy" in record.body
-    assert "DevTools sessions default to Edge" in record.body
-    assert "never point `user_data_dir` at a real browser profile" in record.body
-    assert "/browser backup edge" in record.body
-    assert "profile-backups" in record.body
+    assert "embedded open-source Chromium runtime" in record.body
+    assert ".reverie/browser" in record.body
+    assert "/browser import" in record.body
+    assert "storage-state.json" in record.body
+    assert "must not read browser databases" in record.body
     assert "Do not control the user's existing logged-in browser" in record.body
     assert "external DevTools ports" in record.body
+    assert "real Chrome/Edge/Firefox/Brave profile" in record.body
     assert "background=true" in record.body
     assert "minimized=true" in record.body
     assert "diagnose_page" in record.body
     assert "check_endpoint" in record.body
 
 
-def test_browser_controler_manifest_mentions_profile_backup_and_isolated_ports() -> None:
+def test_browser_controler_manifest_mentions_embedded_browser_contract() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     manifest = json.loads((repo_root / "reverie" / "agent" / "tool_manifest.json").read_text(encoding="utf-8"))
     browser_record = manifest["tools"]["browser_controler"]
 
-    assert "browser_profile_status/backup/backups/restore" in browser_record["parameters"]["action"]
+    assert "browser_runtime_status" in browser_record["parameters"]["action"]
+    assert "browser_profile_status/backup/backups/restore/import/export" in browser_record["parameters"]["action"]
     assert "external unrecorded ports are refused" in browser_record["parameters"]["port"]
+    assert "embedded open-source Chromium runtime" in browser_record["purpose"]
+    assert ".reverie/browser" in browser_record["purpose"]
+    assert "profile" in browser_record["parameters"]
     assert "include_cache" in browser_record["parameters"]
     assert "backup_id" in browser_record["parameters"]
     assert "confirm" in browser_record["parameters"]
+    assert "import_format" in browser_record["parameters"]
+    assert any("browser_runtime_status" in example for example in browser_record["examples"])
+    assert any("browser_profile_import" in example for example in browser_record["examples"])
     assert any("browser_profile_backup" in example for example in browser_record["examples"])
 
 
@@ -722,12 +881,31 @@ def test_github_action_schedules_latest_windows_exe_build() -> None:
     assert "gh release upload latest" in workflow
     assert "dist/reverie.exe" in workflow
     assert "Build Python exe" in workflow
+    assert "python -m playwright install chromium" in workflow
+    assert "python -m playwright install chromium --no-shell" in workflow
+    assert "PLAYWRIGHT_BROWSERS_PATH" in workflow
+    assert "embedded Chromium Browser Controler runtime" in workflow
     assert "reverie.exe: primary Windows CLI executable" in workflow
     assert "Reverie CLI for Windows (Python full build)" in workflow
     assert "Blender runtime plugin" in workflow
     assert "Official Blender runtime plugin" not in workflow
     assert "reverie-python.exe" not in workflow
     assert "reverie-rust-preview.exe" not in workflow
+
+
+def test_local_build_scripts_bundle_embedded_chromium() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    build_bat = (repo_root / "build.bat").read_text(encoding="utf-8", errors="replace")
+    build_sh = (repo_root / "build.sh").read_text(encoding="utf-8")
+    spec = (repo_root / "reverie.spec").read_text(encoding="utf-8")
+    setup = (repo_root / "setup.py").read_text(encoding="utf-8")
+
+    for script in (build_bat, build_sh):
+        assert "playwright install chromium --no-shell" in script
+        assert "PLAYWRIGHT_BROWSERS_PATH" in script
+        assert "browser/ms-playwright" in script.replace("\\", "/")
+    assert 'add_tree_if_exists(browser_src / "ms-playwright", "reverie_resources/browser/ms-playwright")' in spec
+    assert '"playwright>=1.56.0"' in setup
 
 
 def test_mcp_resource_tools_list_and_read(tmp_path: Path) -> None:

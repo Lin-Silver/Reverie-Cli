@@ -17,6 +17,7 @@ import socket
 import ssl
 import subprocess
 import struct
+import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
@@ -26,14 +27,13 @@ import requests
 from bs4 import BeautifulSoup
 
 from .base import BaseTool, ToolResult
-from ..config import get_project_data_dir
+from ..config import get_app_root
 
 
 IS_WINDOWS = os.name == "nt"
 
 if IS_WINDOWS:
     import ctypes
-    import winreg
     from ctypes import wintypes
 
     ENUM_WINDOWS_PROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
@@ -107,7 +107,6 @@ if IS_WINDOWS:
     kernel32.GetCurrentThreadId.restype = wintypes.DWORD
 else:
     ctypes = None  # type: ignore[assignment]
-    winreg = None  # type: ignore[assignment]
     wintypes = None  # type: ignore[assignment]
     user32 = None  # type: ignore[assignment]
     kernel32 = None  # type: ignore[assignment]
@@ -397,7 +396,7 @@ class _CdpConnection:
 
 
 class BrowserControlerTool(BaseTool):
-    """Control the default browser and extract page information."""
+    """Control Reverie's embedded Chromium browser and extract page information."""
 
     name = "browser_controler"
     aliases = ("browser_controller", "browser_control", "Browser Controler")
@@ -406,11 +405,11 @@ class BrowserControlerTool(BaseTool):
     tool_tags = ("browser", "web", "desktop", "devtools", "diagnostics", "server", "upload")
     max_result_chars = 80_000
     description = (
-        "Browser Controler backs up real browser profiles, opens isolated system-browser profiles including "
-        "private windows when possible, controls only isolated visible browser pages with mouse/keyboard/scroll "
-        "actions, opens DevTools, talks to Chromium DevTools Protocol for console/network/DOM inspection, uploads "
-        "workspace files through file dialogs, copies or extracts page text, diagnoses page structure, and checks "
-        "web/server endpoints."
+        "Browser Controler uses Reverie's embedded open-source Chromium runtime, stores all browser runtime/profile/"
+        "cookie/session data under the app root .reverie/browser directory, controls only those embedded browser "
+        "windows with mouse/keyboard/scroll actions, opens DevTools, talks to Chromium DevTools Protocol for "
+        "console/network/DOM inspection, imports user-provided cookie/storage-state files, uploads workspace files "
+        "through file dialogs, copies or extracts page text, diagnoses page structure, and checks web/server endpoints."
     )
     parameters = {
         "type": "object",
@@ -429,10 +428,13 @@ class BrowserControlerTool(BaseTool):
                     "browser_session_list",
                     "browser_session_close",
                     "browser_session_cleanup",
+                    "browser_runtime_status",
                     "browser_profile_status",
                     "browser_profile_backup",
                     "browser_profile_backups",
                     "browser_profile_restore",
+                    "browser_profile_import",
+                    "browser_profile_export",
                     "devtools_targets",
                     "devtools_snapshot",
                     "devtools_screenshot",
@@ -469,8 +471,9 @@ class BrowserControlerTool(BaseTool):
             },
             "url": {"type": "string", "description": "URL to open or extract. If omitted for extract_page, the current browser URL is copied from the address bar."},
             "service": {"type": "string", "description": "Optional web service shortcut for open_ai_service/ai_chat."},
-            "browser": {"type": "string", "description": "Optional browser hint: default, edge, chrome, firefox, brave. Browser Controler launches default/system as Edge with an isolated profile."},
-            "browser_path": {"type": "string", "description": "Optional explicit browser executable path."},
+            "browser": {"type": "string", "description": "Compatibility hint only. Browser Controler always launches Reverie's embedded Chromium runtime, never the real system browser/profile."},
+            "browser_path": {"type": "string", "description": "Reserved for embedded runtime diagnostics; real system browser paths are refused."},
+            "profile": {"type": "string", "description": "Embedded browser profile name under .reverie/browser/profiles. Defaults to default."},
             "private": {"type": "boolean", "description": "Open a private/incognito window when possible."},
             "new_window": {"type": "boolean", "description": "Open in a new browser window."},
             "background": {"type": "boolean", "description": "For open_debug_page, keep the browser in the background and use CDP actions without stealing foreground focus."},
@@ -500,11 +503,12 @@ class BrowserControlerTool(BaseTool):
             "quality": {"type": "integer", "description": "For jpeg devtools_screenshot, quality from 1 to 100."},
             "clear": {"type": "boolean", "description": "For devtools_type, clear the existing value before typing."},
             "poll_interval": {"type": "number", "description": "For devtools_wait_for, seconds between checks."},
-            "cleanup_profiles": {"type": "boolean", "description": "For browser_session_cleanup, also remove stale isolated debug profiles under Browser Controler data."},
-            "include_cache": {"type": "boolean", "description": "For browser_profile_backup, include browser cache folders too. Defaults true for maximum recoverability."},
-            "backup_id": {"type": "string", "description": "Browser profile backup id for browser_profile_restore."},
-            "confirm": {"type": "boolean", "description": "Required true for browser_profile_restore because it modifies the real browser profile."},
-            "user_data_dir": {"type": "string", "description": "Optional isolated browser profile directory for open_page/open_debug_page. Relative paths are kept under Browser Controler data; existing browser profile paths are refused."},
+            "cleanup_profiles": {"type": "boolean", "description": "For browser_session_cleanup, also remove stale embedded profiles under .reverie/browser/profiles."},
+            "include_cache": {"type": "boolean", "description": "For browser_profile_backup, include embedded profile cache folders too. Defaults true."},
+            "backup_id": {"type": "string", "description": "Embedded browser profile backup id for browser_profile_restore."},
+            "confirm": {"type": "boolean", "description": "Required true for browser_profile_restore because it writes to an embedded .reverie/browser profile."},
+            "import_format": {"type": "string", "description": "For browser_profile_import, storage_state/json/netscape. Defaults auto."},
+            "user_data_dir": {"type": "string", "description": "Compatibility alias for profile. Relative names are kept under .reverie/browser/profiles; external paths are refused."},
             "include_all_windows": {"type": "boolean", "description": "For list_browser_windows, include non-browser top-level windows too."},
             "title_contains": {"type": "string", "description": "For activate_browser, choose a browser window whose title contains this text."},
             "window_index": {"type": "integer", "description": "For activate_browser, zero-based index among matching browser windows."},
@@ -539,14 +543,21 @@ class BrowserControlerTool(BaseTool):
     def __init__(self, context: Optional[Dict] = None):
         super().__init__(context)
         self.project_root = self.get_project_root()
-        self.output_dir = get_project_data_dir(self.project_root) / "browser_controler"
+        self.app_root = get_app_root()
+        self.output_dir = self.app_root / ".reverie" / "browser"
         self.pages_dir = self.output_dir / "pages"
         self.observations_dir = self.output_dir / "observations"
-        self.debug_profiles_dir = self.output_dir / "debug-profiles"
-        self.profile_backups_dir = self.output_dir / "profile-backups"
+        self.runtime_dir = self.output_dir / "runtime"
+        self.imports_dir = self.output_dir / "imports"
+        self.downloads_dir = self.output_dir / "downloads"
+        self.debug_profiles_dir = self.output_dir / "profiles"
+        self.profile_backups_dir = self.output_dir / "backups"
         self.sessions_path = self.output_dir / "sessions.json"
         self.pages_dir.mkdir(parents=True, exist_ok=True)
         self.observations_dir.mkdir(parents=True, exist_ok=True)
+        self.runtime_dir.mkdir(parents=True, exist_ok=True)
+        self.imports_dir.mkdir(parents=True, exist_ok=True)
+        self.downloads_dir.mkdir(parents=True, exist_ok=True)
         self.debug_profiles_dir.mkdir(parents=True, exist_ok=True)
         self.profile_backups_dir.mkdir(parents=True, exist_ok=True)
 
@@ -564,10 +575,13 @@ class BrowserControlerTool(BaseTool):
             "browser_session_list": "Listing background browser sessions",
             "browser_session_close": "Closing background browser session",
             "browser_session_cleanup": "Cleaning up background browser sessions",
+            "browser_runtime_status": "Inspecting embedded browser runtime",
             "browser_profile_status": "Inspecting browser profile backup status",
             "browser_profile_backup": "Backing up browser profile data",
             "browser_profile_backups": "Listing browser profile backups",
             "browser_profile_restore": "Restoring browser profile data",
+            "browser_profile_import": "Importing embedded browser cookies/storage state",
+            "browser_profile_export": "Exporting embedded browser cookies/storage state",
             "devtools_targets": "Listing DevTools Protocol page targets",
             "devtools_snapshot": "Reading live DOM text through DevTools Protocol",
             "devtools_screenshot": "Capturing browser page screenshot through DevTools Protocol",
@@ -648,20 +662,34 @@ class BrowserControlerTool(BaseTool):
                 )
             if action_name == "browser_session_cleanup":
                 return self._browser_session_cleanup(cleanup_profiles=bool(kwargs.get("cleanup_profiles", False)))
+            if action_name == "browser_runtime_status":
+                return self._browser_runtime_status()
             if action_name == "browser_profile_status":
-                return self._browser_profile_status(browser=str(kwargs.get("browser") or "edge"))
+                return self._browser_profile_status(profile=str(kwargs.get("profile") or kwargs.get("browser") or "default"))
             if action_name == "browser_profile_backup":
                 return self._browser_profile_backup(
-                    browser=str(kwargs.get("browser") or "edge"),
+                    profile=str(kwargs.get("profile") or kwargs.get("browser") or "default"),
                     include_cache=bool(kwargs.get("include_cache", True)),
                 )
             if action_name == "browser_profile_backups":
-                return self._browser_profile_backups(browser=str(kwargs.get("browser") or "edge"))
+                return self._browser_profile_backups(profile=str(kwargs.get("profile") or kwargs.get("browser") or "default"))
             if action_name == "browser_profile_restore":
                 return self._browser_profile_restore(
-                    browser=str(kwargs.get("browser") or "edge"),
+                    profile=str(kwargs.get("profile") or kwargs.get("browser") or "default"),
                     backup_id=str(kwargs.get("backup_id") or ""),
                     confirm=bool(kwargs.get("confirm", False)),
+                )
+            if action_name == "browser_profile_import":
+                return self._browser_profile_import(
+                    file_path=kwargs.get("file_path"),
+                    profile=str(kwargs.get("profile") or kwargs.get("browser") or "default"),
+                    import_format=str(kwargs.get("import_format") or kwargs.get("format") or "auto"),
+                )
+            if action_name == "browser_profile_export":
+                return self._browser_profile_export(
+                    profile=str(kwargs.get("profile") or kwargs.get("browser") or "default"),
+                    port=kwargs.get("port"),
+                    timeout=float(kwargs.get("timeout", 5) or 5),
                 )
             if action_name == "devtools_targets":
                 return self._devtools_targets(
@@ -923,29 +951,33 @@ class BrowserControlerTool(BaseTool):
         new_window = bool(kwargs.get("new_window", True))
         minimized = bool(kwargs.get("minimized", False))
         activate = bool(kwargs.get("activate")) if kwargs.get("activate") is not None else not minimized
-        browser = str(kwargs.get("browser") or "edge").strip() or "edge"
+        browser = str(kwargs.get("browser") or "chromium").strip() or "chromium"
         if browser.lower() in {"default", "system"}:
-            browser = "edge"
+            browser = "chromium"
         browser_path = str(kwargs.get("browser_path") or "").strip()
         wait_seconds = float(kwargs.get("wait_seconds", 0.75) or 0.75)
         executable = self._resolve_browser_executable(browser=browser, browser_path=browser_path)
         if not executable:
-            return ToolResult.fail("Could not resolve an Edge/Chromium browser executable for isolated browser control.")
-        if "firefox" in executable.name.lower():
-            return ToolResult.fail("Browser Controler isolated launches require a Chromium-based browser.")
+            return ToolResult.fail(self._embedded_browser_missing_message())
         browser = self._browser_key_for_executable(browser, executable)
-        backup = self._ensure_profile_backup_for_browser(browser)
-        if not backup.get("success"):
-            return ToolResult.fail(str(backup.get("error") or "Browser profile backup failed; refusing to launch browser control."))
+        profile_name = self._profile_name_from_kwargs(kwargs, default="default")
+        profile_dir = self._embedded_browser_profile_dir(profile_name).resolve()
+        if self._profile_processes_running(profile_dir):
+            return ToolResult.fail(f"Embedded browser profile is already in use: {profile_name}")
+        backup = self._ensure_profile_backup(profile_name)
         try:
             profile_dir = self._resolve_debug_profile_dir(
-                str(kwargs.get("user_data_dir") or "visible").strip(),
+                profile_name,
                 browser=browser,
                 port=0,
             )
         except ValueError as exc:
             return ToolResult.fail(str(exc))
         profile_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            download_dir = self._prepare_embedded_profile(profile_name, profile_dir)
+        except Exception as exc:
+            return ToolResult.fail(f"Could not prepare embedded browser profile {profile_name}: {exc}")
         before_browser_handles: set[int] = set()
         previous_foreground = 0
         if IS_WINDOWS:
@@ -966,6 +998,7 @@ class BrowserControlerTool(BaseTool):
             "--no-default-browser-check",
             "--disable-popup-blocking",
             "--disable-sync",
+            "--disable-features=Translate,OptimizationHints",
         ]
         args.extend(self._browser_window_flags(executable, private=private, new_window=new_window, minimized=minimized))
         args.append(url)
@@ -998,9 +1031,12 @@ class BrowserControlerTool(BaseTool):
         mode = "private " if private else ""
         details = [f"Opened {mode}browser page: {url}."]
         details.append(f"Profile: {profile_dir}.")
-        details.append(f"Real profile backup: {backup.get('backup_id')}.")
+        details.append(f"Downloads: {download_dir}.")
+        details.append(f"Embedded browser root: {self.output_dir}.")
+        if backup.get("backup_id"):
+            details.append(f"Embedded profile backup: {backup.get('backup_id')}.")
         if backup.get("partial"):
-            details.append(f"Real profile backup status is partial; close {browser} and run /browser backup {browser} for a complete cold backup.")
+            details.append(f"Embedded profile backup status is partial; close Browser Controler sessions and run /browser backup {profile_name}.")
         if activated:
             details.append("Activated a browser window.")
         if minimized_handles:
@@ -1012,7 +1048,9 @@ class BrowserControlerTool(BaseTool):
             data={
                 "url": url,
                 "private": private,
+                "profile": profile_name,
                 "profile_dir": str(profile_dir),
+                "download_dir": str(download_dir),
                 "browser": str(executable),
                 "process_id": process.pid,
                 "profile_backup": backup,
@@ -1042,23 +1080,13 @@ class BrowserControlerTool(BaseTool):
     def _open_debug_page(self, **kwargs) -> ToolResult:
         url = str(kwargs.get("url") or "about:blank").strip() or "about:blank"
         port = self._normalize_cdp_port(kwargs.get("port")) if kwargs.get("port") else self._free_tcp_port()
-        browser = str(kwargs.get("browser") or "edge").strip() or "edge"
+        browser = str(kwargs.get("browser") or "chromium").strip() or "chromium"
         if browser.lower() in {"default", "system"}:
-            browser = "edge"
+            browser = "chromium"
         browser_path = str(kwargs.get("browser_path") or "").strip()
         executable = self._resolve_browser_executable(browser=browser, browser_path=browser_path)
-        if not executable and not browser_path:
-            for fallback_browser in ("edge", "brave"):
-                if fallback_browser == browser.lower():
-                    continue
-                candidate = self._resolve_browser_executable(browser=fallback_browser, browser_path="")
-                if candidate and "firefox" not in candidate.name.lower():
-                    executable = candidate
-                    break
         if not executable:
-            return ToolResult.fail("Could not resolve Chrome/Edge/Brave for DevTools Protocol browser control.")
-        if "firefox" in executable.name.lower():
-            return ToolResult.fail("open_debug_page requires a Chromium-based browser for DevTools Protocol.")
+            return ToolResult.fail(self._embedded_browser_missing_message())
         browser = self._browser_key_for_executable(browser, executable)
         if self._tcp_port_open(port):
             if self._is_authorized_cdp_port(port):
@@ -1071,18 +1099,24 @@ class BrowserControlerTool(BaseTool):
                 "by Browser Controler. Choose a free port or start a new Browser Controler session."
             )
 
-        backup = self._ensure_profile_backup_for_browser(browser)
-        if not backup.get("success"):
-            return ToolResult.fail(str(backup.get("error") or "Browser profile backup failed; refusing to launch DevTools browser control."))
+        profile_name = self._profile_name_from_kwargs(kwargs, default=str(kwargs.get("session_id") or "default"))
+        profile_dir = self._embedded_browser_profile_dir(profile_name).resolve()
+        if self._profile_processes_running(profile_dir):
+            return ToolResult.fail(f"Embedded browser profile is already in use: {profile_name}")
+        backup = self._ensure_profile_backup(profile_name)
         try:
             profile_dir = self._resolve_debug_profile_dir(
-                str(kwargs.get("user_data_dir") or "").strip(),
+                profile_name,
                 browser=browser,
                 port=port,
             )
         except ValueError as exc:
             return ToolResult.fail(str(exc))
         profile_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            download_dir = self._prepare_embedded_profile(profile_name, profile_dir)
+        except Exception as exc:
+            return ToolResult.fail(f"Could not prepare embedded browser profile {profile_name}: {exc}")
         wait_seconds = max(1.0, min(float(kwargs.get("wait_seconds", 3.0) or 3.0), 20.0))
         background = bool(kwargs.get("background", False))
         minimized = bool(kwargs.get("minimized", background))
@@ -1109,6 +1143,7 @@ class BrowserControlerTool(BaseTool):
             "--no-default-browser-check",
             "--disable-popup-blocking",
             "--disable-sync",
+            "--disable-features=Translate,OptimizationHints",
         ]
         for flag in self._browser_window_flags(
             executable,
@@ -1138,6 +1173,23 @@ class BrowserControlerTool(BaseTool):
                 f"Opened browser process pid={process.pid}, but DevTools Protocol on port {port} did not respond. {last_error}"
             )
 
+        recorded_session_id = ""
+        if bool(kwargs.get("_record_session", True)):
+            recorded_session_id = self._record_browser_session(
+                session_id=str(kwargs.get("session_id") or f"debug-port-{port}"),
+                port=port,
+                url=url,
+                profile=profile_name,
+                profile_dir=profile_dir,
+                browser=str(executable),
+                process_id=int(process.pid or 0),
+                background=background,
+                minimized=minimized,
+                profile_backup=backup,
+            )
+        import_result = self._apply_profile_imports(port=port, profile=profile_name, timeout=min(wait_seconds, 5.0)) if recorded_session_id else ""
+        navigation_result = self._ensure_page_navigation(port=port, url=url, timeout=min(wait_seconds, 10.0)) if recorded_session_id else ""
+
         activated = False
         minimized_handles: List[int] = []
         restored_foreground = False
@@ -1165,11 +1217,18 @@ class BrowserControlerTool(BaseTool):
             f"Opened DevTools-enabled browser page: {url}",
             f"CDP: http://{CDP_HOST}:{port}",
             f"Profile: {profile_dir}",
-            f"Real profile backup: {backup.get('backup_id')}",
+            f"Downloads: {download_dir}",
+            f"Embedded browser root: {self.output_dir}",
             f"Browser: {version.get('Browser') or executable.name}",
         ]
+        if backup.get("backup_id"):
+            output.append(f"Embedded profile backup: {backup.get('backup_id')}")
         if backup.get("partial"):
-            output.append(f"Real profile backup status is partial; close {browser} and run /browser backup {browser} for a complete cold backup.")
+            output.append(f"Embedded profile backup status is partial; close Browser Controler sessions and run /browser backup {profile_name}.")
+        if import_result:
+            output.append(import_result)
+        if navigation_result:
+            output.append(navigation_result)
         if background:
             output.append("Background mode: CDP actions can control this page without foreground focus.")
         if minimized_handles:
@@ -1180,26 +1239,16 @@ class BrowserControlerTool(BaseTool):
             output.append("Did not activate the browser window.")
         if restored_foreground:
             output.append("Restored the previous foreground window.")
-        recorded_session_id = ""
-        if bool(kwargs.get("_record_session", True)):
-            recorded_session_id = self._record_browser_session(
-                session_id=str(kwargs.get("session_id") or f"debug-port-{port}"),
-                port=port,
-                url=url,
-                profile_dir=profile_dir,
-                browser=str(executable),
-                process_id=int(process.pid or 0),
-                background=background,
-                minimized=minimized,
-                profile_backup=backup,
-            )
+        if recorded_session_id:
             output.append(f"Session: {recorded_session_id}")
         return ToolResult.ok(
             "\n".join(output),
             data={
                 "url": url,
                 "port": port,
+                "profile": profile_name,
                 "profile_dir": str(profile_dir),
+                "download_dir": str(download_dir),
                 "browser": str(executable),
                 "process_id": process.pid,
                 "session_id": recorded_session_id,
@@ -1231,25 +1280,14 @@ class BrowserControlerTool(BaseTool):
         open_kwargs.setdefault("background", True)
         open_kwargs.setdefault("minimized", True)
         open_kwargs.setdefault("activate", False)
-        open_kwargs["_record_session"] = False
+        open_kwargs["session_id"] = session_id
+        open_kwargs["_record_session"] = True
         opened = self._open_debug_page(**open_kwargs)
         if not opened.success:
             return opened
-        sessions[session_id] = {
-            "session_id": session_id,
-            "port": int(port),
-            "url": str(open_kwargs.get("url") or "about:blank"),
-            "profile_dir": str(opened.data.get("profile_dir") or ""),
-            "browser": str(opened.data.get("browser") or ""),
-            "process_id": int(opened.data.get("process_id") or 0),
-            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "background": bool(opened.data.get("background", True)),
-            "minimized": bool(opened.data.get("minimized_requested", True)),
-            "profile_backup": opened.data.get("profile_backup") or {},
-        }
-        self._save_browser_sessions(sessions)
-        output = opened.output + f"\nSession: {session_id}"
-        return ToolResult.ok(output, data={**opened.data, "session_id": session_id, "session": sessions[session_id]})
+        sessions = self._load_browser_sessions()
+        session = sessions.get(session_id) or {}
+        return ToolResult.ok(opened.output, data={**opened.data, "session_id": session_id, "session": session})
 
     def _browser_session_list(self) -> ToolResult:
         sessions = self._load_browser_sessions()
@@ -1261,15 +1299,24 @@ class BrowserControlerTool(BaseTool):
             port = int(session.get("port") or 0)
             reachable = False
             target_count = 0
-            try:
-                targets = self._cdp_list_targets(port, timeout=1.0)
-                reachable = True
-                target_count = len(targets)
-            except Exception:
-                target_count = 0
-            item = {**session, "reachable": reachable, "target_count": target_count}
+            safe_record = self._is_safe_browser_session_record(session)
+            verified_process = bool(self._validate_embedded_browser_session_process(session).get("valid"))
+            if safe_record and verified_process:
+                try:
+                    targets = self._cdp_list_targets(port, timeout=1.0)
+                    reachable = True
+                    target_count = len(targets)
+                except Exception:
+                    target_count = 0
+            item = {
+                **session,
+                "safe_record": safe_record,
+                "verified_process": verified_process,
+                "reachable": reachable,
+                "target_count": target_count,
+            }
             annotated[session_id] = item
-            state = "reachable" if reachable else "stale"
+            state = "reachable" if reachable else ("stale" if safe_record and verified_process else "unsafe-record")
             lines.append(
                 f"- {session_id}: port={port} {state} targets={target_count} "
                 f"url={session.get('url') or '(empty)'}"
@@ -1283,13 +1330,31 @@ class BrowserControlerTool(BaseTool):
         selected_port = int(port or (selected or {}).get("port") or 0)
         if not selected_port:
             return ToolResult.fail("session_id or port is required for browser_session_close")
-        if selected and not self._is_safe_debug_profile_path(Path(str(selected.get("profile_dir") or ""))):
+        if not selected:
+            for candidate_id, candidate in sessions.items():
+                if int(candidate.get("port") or 0) == selected_port:
+                    selected_id = candidate_id
+                    selected = candidate
+                    break
+        if selected and not self._is_safe_browser_session_record(selected):
             return ToolResult.fail(
-                f"Refusing to close session {selected_id} because its profile_dir is not under Browser Controler debug-profiles."
+                f"Refusing to close session {selected_id} because its runtime/profile paths are not both under .reverie/browser."
             )
         if not selected and not self._is_authorized_cdp_port(selected_port):
             return ToolResult.fail(
                 f"Refusing to close DevTools port {selected_port} because it is not a recorded isolated Browser Controler session."
+            )
+        process_validation = self._validate_embedded_browser_session_process(selected or {})
+        if selected and process_validation.get("already_closed"):
+            sessions.pop(selected_id, None)
+            self._save_browser_sessions(sessions)
+            return ToolResult.ok(
+                f"Removed already-closed Browser Controler session on port {selected_port}.",
+                data={"session_id": selected_id, "port": selected_port, "termination": process_validation},
+            )
+        if selected and not process_validation.get("valid"):
+            return ToolResult.fail(
+                f"Refusing to close session {selected_id}: {process_validation.get('reason') or 'embedded process validation failed'}"
             )
         closed = False
         error = ""
@@ -1303,15 +1368,26 @@ class BrowserControlerTool(BaseTool):
             closed = True
         except Exception as exc:
             error = str(exc)
+        termination: Dict[str, Any] = {}
+        if selected:
+            time.sleep(min(max(float(timeout), 0.0), 1.0))
+            termination = self._terminate_embedded_browser_session_process(selected)
+            closed = closed or bool(termination.get("terminated") or termination.get("already_closed"))
         if selected_id and selected_id in sessions:
             sessions.pop(selected_id, None)
             self._save_browser_sessions(sessions)
         if closed:
-            return ToolResult.ok(f"Closed Browser Controler session on port {selected_port}.", data={"session_id": selected_id, "port": selected_port})
+            details = [f"Closed Browser Controler session on port {selected_port}."]
+            if termination.get("terminated"):
+                details.append("Stopped the verified embedded Chromium process tree.")
+            return ToolResult.ok(
+                " ".join(details),
+                data={"session_id": selected_id, "port": selected_port, "termination": termination},
+            )
         return ToolResult.partial(
             f"Removed Browser Controler session record for port {selected_port}." if selected_id else "",
-            f"Could not close browser through DevTools: {error}",
-            data={"session_id": selected_id, "port": selected_port},
+            f"Could not close browser through DevTools: {error}. Embedded process termination: {termination.get('reason') or 'not available'}",
+            data={"session_id": selected_id, "port": selected_port, "termination": termination},
         )
 
     def _browser_session_cleanup(self, *, cleanup_profiles: bool = False) -> ToolResult:
@@ -1319,10 +1395,11 @@ class BrowserControlerTool(BaseTool):
         kept: Dict[str, Any] = {}
         stale: Dict[str, Any] = {}
         removed_profiles: List[str] = []
+        preserved_profiles: List[str] = []
         for session_id, session in sessions.items():
             port = int(session.get("port") or 0)
             reachable = False
-            if port:
+            if port and self._validate_embedded_browser_session_process(session).get("valid"):
                 try:
                     self._cdp_version(port, timeout=1.0)
                     reachable = True
@@ -1334,68 +1411,110 @@ class BrowserControlerTool(BaseTool):
                 stale[session_id] = session
                 if cleanup_profiles:
                     profile_dir = Path(str(session.get("profile_dir") or ""))
-                    if self._is_safe_debug_profile_path(profile_dir) and profile_dir.exists():
+                    if self._is_disposable_debug_profile_path(profile_dir) and profile_dir.exists():
                         shutil.rmtree(profile_dir, ignore_errors=True)
                         removed_profiles.append(str(profile_dir))
+                    elif self._is_safe_debug_profile_path(profile_dir) and profile_dir.exists():
+                        preserved_profiles.append(str(profile_dir))
         self._save_browser_sessions(kept)
         lines = [
             f"Session cleanup complete: kept={len(kept)}, removed_stale={len(stale)}",
         ]
         if removed_profiles:
             lines.append(f"Removed profiles: {len(removed_profiles)}")
-        return ToolResult.ok("\n".join(lines), data={"kept": kept, "stale": stale, "removed_profiles": removed_profiles})
+        if preserved_profiles:
+            lines.append(f"Preserved non-temporary or credential-bearing profiles: {len(preserved_profiles)}")
+        return ToolResult.ok(
+            "\n".join(lines),
+            data={
+                "kept": kept,
+                "stale": stale,
+                "removed_profiles": removed_profiles,
+                "preserved_profiles": preserved_profiles,
+            },
+        )
 
-    def _browser_profile_status(self, *, browser: str = "edge") -> ToolResult:
-        browser_key = self._normalize_profile_browser(browser)
-        source = self._real_browser_profile_dir(browser_key)
-        backups = self._profile_backup_records(browser_key)
-        stats = self._directory_stats(source) if source and source.exists() else {"files": 0, "bytes": 0}
+    def _browser_runtime_status(self) -> ToolResult:
+        executable = self._resolve_browser_executable(browser="chromium", browser_path="")
         lines = [
-            f"Browser profile status: {browser_key}",
-            f"Real profile: {source if source else '(not found)'}",
-            f"Profile exists: {bool(source and source.exists())}",
+            "Embedded browser runtime:",
+            f"Root: {self.output_dir}",
+            f"Runtime: {self.runtime_dir}",
+            f"Profiles: {self.debug_profiles_dir}",
+            f"Backups: {self.profile_backups_dir}",
+            f"Imports: {self.imports_dir}",
+            f"Downloads: {self.downloads_dir}",
+            f"Chromium executable: {executable if executable else '(not found)'}",
+        ]
+        return ToolResult.ok(
+            "\n".join(lines),
+            data={
+                "browser_root": str(self.output_dir),
+                "runtime_dir": str(self.runtime_dir),
+                "profiles_dir": str(self.debug_profiles_dir),
+                "backups_dir": str(self.profile_backups_dir),
+                "imports_dir": str(self.imports_dir),
+                "downloads_dir": str(self.downloads_dir),
+                "chromium_executable": str(executable or ""),
+            },
+        )
+
+    def _browser_profile_status(self, *, profile: str = "default") -> ToolResult:
+        profile_name = self._normalize_profile_name(profile)
+        source = self._embedded_browser_profile_dir(profile_name)
+        backups = self._profile_backup_records(profile_name)
+        imports = self._profile_import_records(profile_name)
+        stats = self._directory_stats(source) if source.exists() else {"files": 0, "bytes": 0}
+        lines = [
+            f"Embedded browser profile status: {profile_name}",
+            f"Browser root: {self.output_dir}",
+            f"Profile: {source}",
+            f"Profile exists: {source.exists()}",
             f"Profile files: {stats['files']}",
             f"Profile size: {self._format_size(stats['bytes'])}",
             f"Backups: {len(backups)}",
+            f"Imported storage states: {len(imports)}",
         ]
         if backups:
             latest = backups[0]
             lines.append(f"Latest backup: {latest.get('backup_id')} ({latest.get('created_at')})")
+        if imports:
+            lines.append(f"Latest import: {imports[0].get('import_id')} ({imports[0].get('created_at')})")
         return ToolResult.ok(
             "\n".join(lines),
-            data={"browser": browser_key, "profile_dir": str(source or ""), "profile": stats, "backups": backups},
+            data={"profile": profile_name, "profile_dir": str(source), "stats": stats, "backups": backups, "imports": imports},
         )
 
-    def _browser_profile_backups(self, *, browser: str = "edge") -> ToolResult:
-        browser_key = self._normalize_profile_browser(browser)
-        backups = self._profile_backup_records(browser_key)
+    def _browser_profile_backups(self, *, profile: str = "default") -> ToolResult:
+        profile_name = self._normalize_profile_name(profile)
+        backups = self._profile_backup_records(profile_name)
         if not backups:
-            return ToolResult.ok(f"No browser profile backups recorded for {browser_key}.", data={"browser": browser_key, "backups": []})
-        lines = [f"Browser profile backups for {browser_key}: {len(backups)}", ""]
+            return ToolResult.ok(f"No embedded browser profile backups recorded for {profile_name}.", data={"profile": profile_name, "backups": []})
+        lines = [f"Embedded browser profile backups for {profile_name}: {len(backups)}", ""]
         for item in backups[:30]:
             lines.append(
                 f"- {item.get('backup_id')} | {item.get('created_at')} | "
                 f"{self._format_size(item.get('bytes', 0))} | files={item.get('files', 0)} | status={item.get('status')}"
             )
-        return ToolResult.ok("\n".join(lines), data={"browser": browser_key, "backups": backups})
+        return ToolResult.ok("\n".join(lines), data={"profile": profile_name, "backups": backups})
 
-    def _browser_profile_backup(self, *, browser: str = "edge", include_cache: bool = True) -> ToolResult:
-        browser_key = self._normalize_profile_browser(browser)
-        source = self._real_browser_profile_dir(browser_key)
-        if not source or not source.exists() or not source.is_dir():
-            return ToolResult.fail(f"Real {browser_key} profile directory was not found.")
+    def _browser_profile_backup(self, *, profile: str = "default", include_cache: bool = True) -> ToolResult:
+        profile_name = self._normalize_profile_name(profile)
+        source = self._embedded_browser_profile_dir(profile_name)
+        if not source.exists() or not source.is_dir():
+            return ToolResult.fail(f"Embedded browser profile was not found: {source}")
         backup_id = time.strftime("%Y%m%d-%H%M%S", time.localtime())
-        backup_dir = self.profile_backups_dir / browser_key / backup_id
+        backup_dir = self.profile_backups_dir / profile_name / backup_id
         if backup_dir.exists():
             backup_id = f"{backup_id}-{int(time.time() * 1000) % 1000:03d}-{secrets.token_hex(2)}"
-            backup_dir = self.profile_backups_dir / browser_key / backup_id
+            backup_dir = self.profile_backups_dir / profile_name / backup_id
         backup_dir.mkdir(parents=True, exist_ok=False)
         started = time.time()
         copy_result = self._copy_browser_profile(source, backup_dir, include_cache=include_cache)
         stats = self._directory_stats(backup_dir)
         manifest = {
             "backup_id": backup_id,
-            "browser": browser_key,
+            "profile": profile_name,
             "source_profile_dir": str(source),
             "backup_dir": str(backup_dir),
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -1408,7 +1527,7 @@ class BrowserControlerTool(BaseTool):
         }
         (backup_dir / "browser-profile-backup.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
         lines = [
-            f"Backed up {browser_key} profile.",
+            f"Backed up embedded browser profile {profile_name}.",
             f"Source: {source}",
             f"Backup: {backup_dir}",
             f"Files: {stats['files']}",
@@ -1419,31 +1538,29 @@ class BrowserControlerTool(BaseTool):
             lines.append(f"Warning: {copy_result['warning']}")
         if manifest["status"] != "success":
             lines.append(
-                f"Backup is partial. Close all {browser_key} processes and run /browser backup {browser_key} again for a complete cold backup."
+                f"Backup is partial. Close Browser Controler sessions using profile {profile_name} and run /browser backup {profile_name} again."
             )
-            return ToolResult.partial("\n".join(lines), f"{browser_key} profile backup is partial.", data=manifest)
+            return ToolResult.partial("\n".join(lines), f"Embedded profile {profile_name} backup is partial.", data=manifest)
         return ToolResult.ok("\n".join(lines), data=manifest)
 
-    def _browser_profile_restore(self, *, browser: str = "edge", backup_id: str = "", confirm: bool = False) -> ToolResult:
-        browser_key = self._normalize_profile_browser(browser)
+    def _browser_profile_restore(self, *, profile: str = "default", backup_id: str = "", confirm: bool = False) -> ToolResult:
+        profile_name = self._normalize_profile_name(profile)
         if not confirm:
-            return ToolResult.fail("browser_profile_restore requires confirm=true because it writes to the real browser profile.")
-        if self._browser_processes_running(browser_key):
-            return ToolResult.fail(f"Close all {browser_key} browser windows before restoring a profile backup.")
-        backups = self._profile_backup_records(browser_key)
+            return ToolResult.fail("browser_profile_restore requires confirm=true because it writes to an embedded .reverie/browser profile.")
+        backups = self._profile_backup_records(profile_name)
         selected = next((item for item in backups if str(item.get("backup_id") or "") == str(backup_id).strip()), None)
         if not selected:
-            return ToolResult.fail(f"Backup id not found for {browser_key}: {backup_id}")
+            return ToolResult.fail(f"Backup id not found for embedded profile {profile_name}: {backup_id}")
         source = Path(str(selected.get("backup_dir") or ""))
-        target = self._real_browser_profile_dir(browser_key)
-        if not target:
-            return ToolResult.fail(f"Could not resolve real {browser_key} profile directory.")
+        target = self._embedded_browser_profile_dir(profile_name)
+        if self._profile_processes_running(target):
+            return ToolResult.fail(f"Close Browser Controler sessions using profile {profile_name} before restoring a backup.")
         if not source.exists() or not source.is_dir():
             return ToolResult.fail(f"Backup directory is missing: {source}")
         restore_result = self._mirror_browser_profile(source, target)
         stats = self._directory_stats(target)
         lines = [
-            f"Restored {browser_key} profile backup {backup_id}.",
+            f"Restored embedded browser profile {profile_name} backup {backup_id}.",
             f"Backup: {source}",
             f"Target: {target}",
             f"Files now: {stats['files']}",
@@ -1452,18 +1569,84 @@ class BrowserControlerTool(BaseTool):
         ]
         if restore_result.get("warning"):
             lines.append(f"Warning: {restore_result['warning']}")
-        return ToolResult.ok("\n".join(lines), data={"browser": browser_key, "backup": selected, "restore": restore_result, "target": str(target)})
+        return ToolResult.ok("\n".join(lines), data={"profile": profile_name, "backup": selected, "restore": restore_result, "target": str(target)})
+
+    def _browser_profile_import(self, *, file_path: Any, profile: str = "default", import_format: str = "auto") -> ToolResult:
+        if not file_path:
+            return ToolResult.fail("file_path is required for browser_profile_import")
+        profile_name = self._normalize_profile_name(profile)
+        resolved = self.resolve_workspace_path(file_path, purpose="import browser cookies or storage state")
+        if not resolved.exists() or not resolved.is_file():
+            return ToolResult.fail(f"Import file not found: {file_path}")
+        try:
+            storage_state = self._load_import_storage_state(resolved, import_format=import_format)
+        except Exception as exc:
+            return ToolResult.fail(f"Could not read browser import file: {exc}")
+        import_id = time.strftime("%Y%m%d-%H%M%S", time.localtime())
+        import_dir = self.imports_dir / profile_name / import_id
+        import_dir.mkdir(parents=True, exist_ok=False)
+        storage_path = import_dir / "storage-state.json"
+        source_copy = import_dir / resolved.name
+        storage_path.write_text(json.dumps(storage_state, ensure_ascii=False, indent=2), encoding="utf-8")
+        try:
+            shutil.copy2(resolved, source_copy)
+        except Exception:
+            source_copy = resolved
+        manifest = {
+            "import_id": import_id,
+            "profile": profile_name,
+            "source": str(resolved),
+            "source_copy": str(source_copy),
+            "storage_state": str(storage_path),
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "cookies": len(storage_state.get("cookies") or []),
+            "origins": len(storage_state.get("origins") or []),
+        }
+        (import_dir / "browser-profile-import.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        latest_path = self.imports_dir / profile_name / "latest-storage-state.json"
+        latest_path.write_text(json.dumps(storage_state, ensure_ascii=False, indent=2), encoding="utf-8")
+        lines = [
+            f"Imported storage state for embedded browser profile {profile_name}.",
+            f"Import: {import_dir}",
+            f"Cookies: {manifest['cookies']}",
+            f"Origins: {manifest['origins']}",
+            "The file was copied under .reverie/browser/imports and will be applied to the embedded browser profile on the next launch.",
+        ]
+        return ToolResult.ok("\n".join(lines), data=manifest)
+
+    def _browser_profile_export(self, *, profile: str = "default", port: Any = None, timeout: float = 5.0) -> ToolResult:
+        profile_name = self._normalize_profile_name(profile)
+        selected_port = int(port or 0)
+        if not selected_port:
+            sessions = self._load_browser_sessions()
+            for session in sessions.values():
+                if str(session.get("profile") or "") == profile_name:
+                    selected_port = int(session.get("port") or 0)
+                    break
+        if not selected_port:
+            return ToolResult.fail("browser_profile_export requires a running embedded browser session port for now.")
+        if not self._is_authorized_cdp_port(selected_port):
+            return ToolResult.fail(f"Refusing to export from unrecorded DevTools port {selected_port}.")
+        storage_state = self._read_storage_state_from_cdp(selected_port, timeout=timeout)
+        export_dir = self.imports_dir / profile_name / "exports"
+        export_dir.mkdir(parents=True, exist_ok=True)
+        export_path = export_dir / f"storage-state-{int(time.time())}.json"
+        export_path.write_text(json.dumps(storage_state, ensure_ascii=False, indent=2), encoding="utf-8")
+        return ToolResult.ok(
+            f"Exported embedded browser storage state: {export_path}",
+            data={"profile": profile_name, "path": str(export_path), "cookies": len(storage_state.get("cookies") or []), "origins": len(storage_state.get("origins") or [])},
+        )
 
     def _safety_policy(self) -> ToolResult:
         lines = [
             "Browser Controler Safety Policy:",
-            "- Before launching browser automation, back up the selected real browser profile under Browser Controler profile-backups.",
-            "- Use real browser profiles only as backup/restore sources; do not use them as automation targets.",
-            "- DevTools sessions default to Edge and refuse existing Chrome/Edge user profile directories; use only Browser Controler isolated profiles.",
-            "- DevTools actions only attach to ports recorded by Browser Controler sessions with safe debug-profiles paths.",
-            "- Open/open_page/open_ai_service launch isolated Browser Controler profiles; they do not use the user's real browser profile.",
-            "- Visible UI actions refuse non-isolated browser windows, even when the active window is Chrome or Edge.",
-            "- Use /browser status, /browser backup, /browser backups, and /browser restore <browser> <backup_id> confirm for profile recovery.",
+            "- Browser Controler uses Reverie's embedded open-source Chromium runtime, not the real system Edge/Chrome executable.",
+            "- All runtime, profile, cookies, imports, backups, downloads, pages, screenshots, and sessions stay under the app root .reverie/browser directory.",
+            "- The tool must not read, back up, modify, or launch a user's real browser profile.",
+            "- Credentials/cookies can be imported only from user-provided storage-state, cookie JSON, or Netscape cookies.txt files.",
+            "- DevTools actions only attach to ports recorded by Browser Controler sessions with safe .reverie/browser/profiles paths.",
+            "- Visible UI actions refuse non-embedded browser windows, even when the active window is Chrome or Edge.",
+            "- Use /browser status, /browser import, /browser backup, /browser backups, and /browser restore <profile> <backup_id> confirm for embedded profile management.",
             "- Use background CDP actions for observation and diagnostics; use visible UI actions only when foreground interaction is required.",
             "- Do not enter credentials, submit payments, or mutate account/security settings unless the user explicitly asks in the current context.",
             "- Upload only workspace files or user-provided files, and verify destination/intent before uploading to external services.",
@@ -2324,9 +2507,9 @@ class BrowserControlerTool(BaseTool):
             if self._is_browser_controler_window(active):
                 return None
             return ToolResult.fail(
-                "Refusing to control the active real browser profile. "
+                "Refusing to control the active non-embedded browser window. "
                 f"{self._render_window_info(active, prefix='Active window')}. "
-                "Use open_page or browser_session_start so Browser Controler creates an isolated profile first."
+                "Use open_page or browser_session_start so Browser Controler launches its embedded Chromium runtime."
             )
         return ToolResult.fail(
             "Active window is not a recognized browser. "
@@ -2345,9 +2528,9 @@ class BrowserControlerTool(BaseTool):
             )
         if not self._is_browser_controler_window(active):
             return ToolResult.fail(
-                "Refusing to control a real browser profile. "
+                "Refusing to control a non-embedded browser window. "
                 f"{self._render_window_info(active, prefix='Active window')}. "
-                "Browser Controler UI actions only operate on windows launched with its isolated debug-profiles."
+                "Browser Controler UI actions only operate on its embedded runtime with .reverie/browser/profiles."
             )
         return None
 
@@ -2504,6 +2687,11 @@ class BrowserControlerTool(BaseTool):
     def _process_path(self, process_id: int) -> str:
         if not process_id:
             return ""
+        if not IS_WINDOWS:
+            try:
+                return str((Path("/proc") / str(int(process_id)) / "exe").resolve(strict=True))
+            except Exception:
+                return ""
         handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(process_id))
         if not handle:
             return ""
@@ -2517,8 +2705,14 @@ class BrowserControlerTool(BaseTool):
             kernel32.CloseHandle(handle)
 
     def _process_command_line(self, process_id: int) -> str:
-        if not process_id or not IS_WINDOWS:
+        if not process_id:
             return ""
+        if not IS_WINDOWS:
+            try:
+                raw = (Path("/proc") / str(int(process_id)) / "cmdline").read_bytes()
+                return raw.replace(b"\0", b" ").decode("utf-8", errors="replace").strip()
+            except Exception:
+                return ""
         script = (
             "$p = Get-CimInstance Win32_Process -Filter "
             f"'ProcessId = {int(process_id)}' -ErrorAction SilentlyContinue; "
@@ -2543,9 +2737,71 @@ class BrowserControlerTool(BaseTool):
         return self._is_browser_controler_process(int(info.get("process_id") or 0))
 
     def _is_browser_controler_process(self, process_id: int) -> bool:
+        process_path = self._process_path(process_id)
+        if not process_path or not self._is_safe_embedded_runtime_path(Path(process_path)):
+            return False
         command_line = self._process_command_line(process_id)
         profile_dir = self._user_data_dir_from_command_line(command_line)
         return bool(profile_dir and self._is_safe_debug_profile_path(profile_dir))
+
+    def _terminate_embedded_browser_session_process(self, session: Dict[str, Any]) -> Dict[str, Any]:
+        validation = self._validate_embedded_browser_session_process(session)
+        if not validation.get("valid"):
+            return {
+                "terminated": False,
+                "already_closed": bool(validation.get("already_closed")),
+                "reason": validation.get("reason") or "embedded process validation failed",
+            }
+        process_id = int(validation["process_id"])
+        if not IS_WINDOWS:
+            return {"terminated": False, "already_closed": False, "reason": "verified fallback termination is only implemented on Windows"}
+        try:
+            completed = subprocess.run(
+                ["taskkill", "/PID", str(process_id), "/T", "/F"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=10,
+            )
+        except Exception as exc:
+            return {"terminated": False, "already_closed": False, "reason": str(exc)}
+        return {
+            "terminated": completed.returncode == 0,
+            "already_closed": False,
+            "reason": str(completed.stderr or completed.stdout or "").strip(),
+            "process_id": process_id,
+        }
+
+    def _validate_embedded_browser_session_process(self, session: Dict[str, Any]) -> Dict[str, Any]:
+        process_id = int(session.get("process_id") or 0)
+        if not process_id:
+            return {"valid": False, "already_closed": False, "reason": "session has no process id"}
+        actual_path_text = self._process_path(process_id)
+        if not actual_path_text:
+            return {"valid": False, "already_closed": True, "reason": "process already exited"}
+        actual_path = Path(actual_path_text).resolve()
+        recorded_path_text = str(session.get("browser") or "").strip()
+        profile_path_text = str(session.get("profile_dir") or "").strip()
+        if not recorded_path_text or not profile_path_text:
+            return {"valid": False, "already_closed": False, "reason": "session is missing embedded runtime/profile paths"}
+        recorded_path = Path(recorded_path_text).resolve()
+        profile_path = Path(profile_path_text).resolve()
+        if not self._is_safe_embedded_runtime_path(actual_path) or not self._is_safe_embedded_runtime_path(recorded_path):
+            return {"valid": False, "already_closed": False, "reason": "process executable is outside .reverie/browser/runtime"}
+        if actual_path != recorded_path:
+            return {"valid": False, "already_closed": False, "reason": "running executable does not match the recorded embedded runtime"}
+        if not self._is_safe_debug_profile_path(profile_path):
+            return {"valid": False, "already_closed": False, "reason": "process profile is outside .reverie/browser/profiles"}
+        command_profile = self._user_data_dir_from_command_line(self._process_command_line(process_id))
+        if not command_profile or command_profile.resolve() != profile_path:
+            return {"valid": False, "already_closed": False, "reason": "running process does not use the recorded embedded profile"}
+        return {
+            "valid": True,
+            "already_closed": False,
+            "reason": "",
+            "process_id": process_id,
+        }
 
     @staticmethod
     def _user_data_dir_from_command_line(command_line: str) -> Optional[Path]:
@@ -3035,100 +3291,83 @@ class BrowserControlerTool(BaseTool):
 
     def _resolve_browser_executable(self, *, browser: str = "default", browser_path: str = "") -> Optional[Path]:
         explicit = Path(browser_path).expanduser() if browser_path else None
-        if explicit and explicit.exists() and explicit.is_file():
-            return explicit.resolve()
+        if explicit:
+            resolved = explicit.resolve()
+            if resolved.exists() and resolved.is_file() and self._is_safe_embedded_runtime_path(resolved):
+                return resolved
+            return None
 
-        browser_key = str(browser or "default").strip().lower()
-        if browser_key in {"", "default", "system"}:
-            browser_key = "edge"
+        copied = self._ensure_bundled_browser_runtime()
+        if copied:
+            return copied
 
-        aliases = {
-            "chrome": ["chrome", "chrome.exe"],
-            "google": ["chrome", "chrome.exe"],
-            "edge": ["msedge", "msedge.exe"],
-            "msedge": ["msedge", "msedge.exe"],
-            "firefox": ["firefox", "firefox.exe"],
-            "brave": ["brave", "brave.exe", "brave-browser"],
-        }
-        names = aliases.get(browser_key, aliases.get("edge", []))
-        for name in names:
-            found = shutil.which(name)
-            if found:
-                return Path(found).resolve()
-
-        if IS_WINDOWS:
-            for candidate in self._common_windows_browser_paths(browser_key):
-                if candidate.exists() and candidate.is_file():
-                    return candidate.resolve()
+        for candidate in self._embedded_chromium_candidates(self.runtime_dir):
+            if candidate.exists() and candidate.is_file():
+                return candidate.resolve()
         return None
 
-    def _default_windows_browser_path(self) -> Optional[Path]:
-        if not IS_WINDOWS or winreg is None:
+    def _embedded_browser_missing_message(self) -> str:
+        return (
+            "Embedded Chromium runtime was not found. Browser Controler no longer uses real Edge/Chrome profiles. "
+            f"Expected runtime under {self.runtime_dir}. For development, install it with "
+            f"`$env:PLAYWRIGHT_BROWSERS_PATH='{self.runtime_dir / 'ms-playwright'}'; python -m playwright install chromium --no-shell`. "
+            "The Windows exe build bundles this runtime into reverie_resources/browser and copies it into .reverie/browser/runtime on first use."
+        )
+
+    def _ensure_bundled_browser_runtime(self) -> Optional[Path]:
+        existing = next((path for path in self._embedded_chromium_candidates(self.runtime_dir) if path.exists() and path.is_file()), None)
+        if existing:
+            return existing.resolve()
+        source = self._bundled_browser_resource_dir()
+        if not source:
             return None
+        target = self.runtime_dir / "ms-playwright"
         try:
-            with winreg.OpenKey(
-                winreg.HKEY_CURRENT_USER,
-                r"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice",
-            ) as key:
-                prog_id = str(winreg.QueryValueEx(key, "ProgId")[0] or "").strip()
+            shutil.copytree(source, target, dirs_exist_ok=True)
         except Exception:
-            prog_id = ""
-        if not prog_id:
             return None
+        existing = next((path for path in self._embedded_chromium_candidates(self.runtime_dir) if path.exists() and path.is_file()), None)
+        return existing.resolve() if existing else None
 
-        for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
-            try:
-                with winreg.OpenKey(root, rf"Software\Classes\{prog_id}\shell\open\command") as key:
-                    command = str(winreg.QueryValueEx(key, "")[0] or "")
-            except Exception:
-                continue
-            path = self._browser_path_from_command(command)
-            if path:
-                return path
+    def _bundled_browser_resource_dir(self) -> Optional[Path]:
+        candidates: List[Path] = []
+        mei = Path(str(getattr(sys, "_MEIPASS", "") or ""))
+        if mei:
+            candidates.append(mei / "reverie_resources" / "browser" / "ms-playwright")
+        candidates.append(self.app_root / "reverie_resources" / "browser" / "ms-playwright")
+        candidates.append(Path(__file__).resolve().parents[2] / "reverie_resources" / "browser" / "ms-playwright")
+        for candidate in candidates:
+            if candidate.exists() and candidate.is_dir():
+                return candidate.resolve()
         return None
 
-    @staticmethod
-    def _browser_path_from_command(command: str) -> Optional[Path]:
-        text = str(command or "").strip()
-        if not text:
-            return None
-        match = re.search(r'"([^"]+?\.exe)"', text, flags=re.IGNORECASE)
-        if not match:
-            match = re.search(r"([A-Za-z]:\\[^\"]+?\.exe)", text, flags=re.IGNORECASE)
-        if not match:
-            return None
-        candidate = Path(match.group(1)).expanduser()
-        return candidate.resolve() if candidate.exists() and candidate.is_file() else None
-
-    @staticmethod
-    def _common_windows_browser_paths(browser_key: str) -> List[Path]:
-        program_files = [
-            os.environ.get("PROGRAMFILES", ""),
-            os.environ.get("PROGRAMFILES(X86)", ""),
-            os.environ.get("LOCALAPPDATA", ""),
+    def _embedded_chromium_candidates(self, root: Path) -> List[Path]:
+        patterns = [
+            "ms-playwright/chromium-*/chrome-win/chrome.exe",
+            "ms-playwright/chromium-*/chrome-win64/chrome.exe",
+            "ms-playwright/chromium-*/chrome-linux/chrome",
+            "ms-playwright/chromium-*/chrome-linux64/chrome",
+            "ms-playwright/chromium-*/chrome-mac/Chromium.app/Contents/MacOS/Chromium",
+            "chromium-*/chrome-win/chrome.exe",
+            "chromium-*/chrome-win64/chrome.exe",
+            "chromium-*/chrome-linux/chrome",
+            "chromium-*/chrome-linux64/chrome",
+            "chrome-win/chrome.exe",
+            "chrome-win64/chrome.exe",
+            "chrome-linux/chrome",
+            "chrome-linux64/chrome",
         ]
-        suffixes = {
-            "chrome": [r"Google\Chrome\Application\chrome.exe"],
-            "google": [r"Google\Chrome\Application\chrome.exe"],
-            "edge": [r"Microsoft\Edge\Application\msedge.exe"],
-            "msedge": [r"Microsoft\Edge\Application\msedge.exe"],
-            "firefox": [r"Mozilla Firefox\firefox.exe"],
-            "brave": [r"BraveSoftware\Brave-Browser\Application\brave.exe"],
-            "default": [
-                r"Microsoft\Edge\Application\msedge.exe",
-                r"Google\Chrome\Application\chrome.exe",
-                r"Mozilla Firefox\firefox.exe",
-                r"BraveSoftware\Brave-Browser\Application\brave.exe",
-            ],
-        }
-        selected_suffixes = suffixes.get(browser_key, suffixes["default"])
         candidates: List[Path] = []
-        for root in program_files:
-            if not root:
-                continue
-            for suffix in selected_suffixes:
-                candidates.append(Path(root) / suffix)
+        for pattern in patterns:
+            candidates.extend(sorted(root.glob(pattern)))
         return candidates
+
+    def _is_safe_embedded_runtime_path(self, path: Path) -> bool:
+        try:
+            path.resolve().relative_to(self.runtime_dir.resolve())
+            return True
+        except Exception:
+            return False
 
     @staticmethod
     def _browser_window_flags(executable: Path, *, private: bool, new_window: bool, minimized: bool = False) -> List[str]:
@@ -3166,6 +3405,7 @@ class BrowserControlerTool(BaseTool):
         session_id: str,
         port: int,
         url: str,
+        profile: str,
         profile_dir: Path,
         browser: str,
         process_id: int,
@@ -3181,6 +3421,7 @@ class BrowserControlerTool(BaseTool):
             "session_id": safe_id,
             "port": int(port),
             "url": str(url or "about:blank"),
+            "profile": self._normalize_profile_name(profile),
             "profile_dir": str(profile_dir),
             "browser": str(browser or ""),
             "process_id": int(process_id or 0),
@@ -3213,53 +3454,95 @@ class BrowserControlerTool(BaseTool):
             try:
                 if int(session.get("port") or 0) != selected_port:
                     continue
-                profile_dir = Path(str(session.get("profile_dir") or ""))
-                if self._is_safe_debug_profile_path(profile_dir):
+                if self._is_safe_browser_session_record(session) and self._validate_embedded_browser_session_process(session).get("valid"):
                     return True
             except Exception:
                 continue
         return False
 
+    def _is_safe_browser_session_record(self, session: Dict[str, Any]) -> bool:
+        try:
+            profile_dir = Path(str(session.get("profile_dir") or "")).resolve()
+            browser_path = Path(str(session.get("browser") or "")).resolve()
+            return self._is_safe_debug_profile_path(profile_dir) and self._is_safe_embedded_runtime_path(browser_path)
+        except Exception:
+            return False
+
     def _normalize_profile_browser(self, browser: str) -> str:
-        key = str(browser or "edge").strip().lower()
-        if key in {"", "default", "system", "msedge"}:
-            return "edge"
-        if key in {"google"}:
-            return "chrome"
-        if key in {"brave-browser"}:
-            return "brave"
+        key = str(browser or "chromium").strip().lower()
+        if key in {"", "default", "system", "msedge", "edge", "chrome", "google", "brave", "brave-browser"}:
+            return "chromium"
         return key
 
     def _browser_key_for_executable(self, browser: str, executable: Path) -> str:
         name = executable.name.lower()
-        if "msedge" in name:
-            return "edge"
-        if "chrome" in name:
-            return "chrome"
-        if "brave" in name:
-            return "brave"
-        if "vivaldi" in name:
-            return "vivaldi"
-        if "opera" in name:
-            return "opera"
+        if self._is_safe_embedded_runtime_path(executable):
+            return "chromium"
         return self._normalize_profile_browser(browser)
 
-    def _real_browser_profile_dir(self, browser: str) -> Optional[Path]:
-        browser_key = self._normalize_profile_browser(browser)
-        local_app_data = Path(os.environ.get("LOCALAPPDATA", "")).expanduser()
-        app_data = Path(os.environ.get("APPDATA", "")).expanduser()
-        candidates: Dict[str, Path] = {
-            "edge": local_app_data / "Microsoft" / "Edge" / "User Data",
-            "chrome": local_app_data / "Google" / "Chrome" / "User Data",
-            "brave": local_app_data / "BraveSoftware" / "Brave-Browser" / "User Data",
-            "vivaldi": local_app_data / "Vivaldi" / "User Data",
-            "opera": app_data / "Opera Software" / "Opera Stable",
-        }
-        return candidates.get(browser_key)
+    def _profile_name_from_kwargs(self, kwargs: Dict[str, Any], *, default: str = "default") -> str:
+        raw = str(kwargs.get("profile") or kwargs.get("user_data_dir") or default or "default").strip()
+        return self._normalize_profile_name(raw)
 
-    def _ensure_profile_backup_for_browser(self, browser: str) -> Dict[str, Any]:
-        browser_key = self._normalize_profile_browser(browser)
-        latest = self._latest_profile_backup(browser_key)
+    @staticmethod
+    def _normalize_profile_name(profile: str) -> str:
+        value = str(profile or "default").strip()
+        if not value:
+            value = "default"
+        if Path(value).is_absolute():
+            raise ValueError("Browser profile must be a relative .reverie/browser profile name, not an absolute path.")
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip().strip("/\\")).strip("-._")
+        if not safe or safe in {".", ".."}:
+            safe = "default"
+        return safe
+
+    def _embedded_browser_profile_dir(self, profile: str) -> Path:
+        return self.debug_profiles_dir / self._normalize_profile_name(profile)
+
+    def _prepare_embedded_profile(self, profile: str, profile_dir: Path) -> Path:
+        profile_name = self._normalize_profile_name(profile)
+        resolved_profile = profile_dir.resolve()
+        if not self._is_safe_debug_profile_path(resolved_profile):
+            raise ValueError("Embedded browser profile must stay under .reverie/browser/profiles.")
+        download_dir = (self.downloads_dir / profile_name).resolve()
+        try:
+            download_dir.relative_to(self.downloads_dir.resolve())
+        except ValueError as exc:
+            raise ValueError("Embedded browser downloads must stay under .reverie/browser/downloads.") from exc
+        download_dir.mkdir(parents=True, exist_ok=True)
+        preferences_path = resolved_profile / "Default" / "Preferences"
+        preferences: Dict[str, Any] = {}
+        if preferences_path.exists():
+            loaded = json.loads(preferences_path.read_text(encoding="utf-8"))
+            if not isinstance(loaded, dict):
+                raise ValueError(f"Embedded browser Preferences is not a JSON object: {preferences_path}")
+            preferences = loaded
+        preferences_path.parent.mkdir(parents=True, exist_ok=True)
+        download_preferences = preferences.setdefault("download", {})
+        if not isinstance(download_preferences, dict):
+            download_preferences = {}
+            preferences["download"] = download_preferences
+        download_preferences.update(
+            {
+                "default_directory": str(download_dir),
+                "directory_upgrade": True,
+                "prompt_for_download": False,
+            }
+        )
+        savefile_preferences = preferences.setdefault("savefile", {})
+        if not isinstance(savefile_preferences, dict):
+            savefile_preferences = {}
+            preferences["savefile"] = savefile_preferences
+        savefile_preferences["default_directory"] = str(download_dir)
+        preferences_path.write_text(json.dumps(preferences, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+        return download_dir
+
+    def _ensure_profile_backup(self, profile: str) -> Dict[str, Any]:
+        profile_name = self._normalize_profile_name(profile)
+        source = self._embedded_browser_profile_dir(profile_name)
+        if not source.exists():
+            return {"success": True, "backup_id": "", "backup_dir": "", "status": "not-needed", "partial": False, "reused": False}
+        latest = self._latest_profile_backup(profile_name)
         if latest:
             return {
                 "success": True,
@@ -3269,7 +3552,7 @@ class BrowserControlerTool(BaseTool):
                 "partial": str(latest.get("status") or "") != "success",
                 "reused": True,
             }
-        result = self._browser_profile_backup(browser=browser_key, include_cache=True)
+        result = self._browser_profile_backup(profile=profile_name, include_cache=True)
         if not result.success:
             return {"success": False, "error": result.error or result.output}
         return {
@@ -3286,8 +3569,8 @@ class BrowserControlerTool(BaseTool):
         return backups[0] if backups else None
 
     def _profile_backup_records(self, browser: str) -> List[Dict[str, Any]]:
-        browser_key = self._normalize_profile_browser(browser)
-        root = self.profile_backups_dir / browser_key
+        profile_name = self._normalize_profile_name(browser)
+        root = self.profile_backups_dir / profile_name
         if not root.exists():
             return []
         records: List[Dict[str, Any]] = []
@@ -3301,6 +3584,187 @@ class BrowserControlerTool(BaseTool):
                 continue
         records.sort(key=lambda item: str(item.get("created_at") or item.get("backup_id") or ""), reverse=True)
         return records
+
+    def _profile_import_records(self, profile: str) -> List[Dict[str, Any]]:
+        profile_name = self._normalize_profile_name(profile)
+        root = self.imports_dir / profile_name
+        if not root.exists():
+            return []
+        records: List[Dict[str, Any]] = []
+        for manifest_path in root.glob("*/browser-profile-import.json"):
+            try:
+                record = json.loads(manifest_path.read_text(encoding="utf-8"))
+                record.setdefault("import_id", manifest_path.parent.name)
+                record.setdefault("import_dir", str(manifest_path.parent))
+                records.append(record)
+            except Exception:
+                continue
+        records.sort(key=lambda item: str(item.get("created_at") or item.get("import_id") or ""), reverse=True)
+        return records
+
+    def _latest_storage_state_path(self, profile: str) -> Path:
+        return self.imports_dir / self._normalize_profile_name(profile) / "latest-storage-state.json"
+
+    def _load_import_storage_state(self, path: Path, *, import_format: str = "auto") -> Dict[str, Any]:
+        fmt = str(import_format or "auto").strip().lower()
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if fmt in {"auto", "json", "storage_state", "storage-state"}:
+            try:
+                data = json.loads(text)
+                if isinstance(data, dict):
+                    return self._normalize_storage_state(data)
+                if isinstance(data, list):
+                    return self._normalize_storage_state({"cookies": data, "origins": []})
+            except Exception:
+                if fmt not in {"auto"}:
+                    raise
+        if fmt in {"auto", "netscape", "cookies.txt", "cookie"}:
+            return {"cookies": self._parse_netscape_cookies(text), "origins": []}
+        raise ValueError(f"Unsupported import_format: {import_format}")
+
+    def _normalize_storage_state(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        cookies = []
+        for item in data.get("cookies") or []:
+            if not isinstance(item, dict):
+                continue
+            cookie = {
+                "name": str(item.get("name") or ""),
+                "value": str(item.get("value") or ""),
+                "domain": str(item.get("domain") or ""),
+                "path": str(item.get("path") or "/") or "/",
+                "expires": float(item.get("expires", -1) if item.get("expires") is not None else -1),
+                "httpOnly": bool(item.get("httpOnly", item.get("httponly", False))),
+                "secure": bool(item.get("secure", False)),
+                "sameSite": str(item.get("sameSite") or item.get("samesite") or "Lax").capitalize(),
+            }
+            if cookie["sameSite"] not in {"Strict", "Lax", "None"}:
+                cookie["sameSite"] = "Lax"
+            if cookie["name"] and cookie["domain"]:
+                cookies.append(cookie)
+        origins = []
+        for origin in data.get("origins") or []:
+            if not isinstance(origin, dict):
+                continue
+            origin_url = str(origin.get("origin") or "").strip()
+            local_storage = [
+                {"name": str(entry.get("name") or ""), "value": str(entry.get("value") or "")}
+                for entry in (origin.get("localStorage") or [])
+                if isinstance(entry, dict) and str(entry.get("name") or "")
+            ]
+            if origin_url and local_storage:
+                origins.append({"origin": origin_url, "localStorage": local_storage})
+        return {"cookies": cookies, "origins": origins}
+
+    def _parse_netscape_cookies(self, text: str) -> List[Dict[str, Any]]:
+        cookies: List[Dict[str, Any]] = []
+        for raw_line in str(text or "").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split("\t")
+            if len(parts) < 7:
+                continue
+            domain, _include_subdomains, path, secure, expires, name, value = parts[:7]
+            try:
+                expires_value = float(expires)
+            except Exception:
+                expires_value = -1
+            cookies.append(
+                {
+                    "name": name,
+                    "value": value,
+                    "domain": domain,
+                    "path": path or "/",
+                    "expires": expires_value,
+                    "httpOnly": False,
+                    "secure": str(secure).upper() == "TRUE",
+                    "sameSite": "Lax",
+                }
+            )
+        return cookies
+
+    def _apply_profile_imports(self, *, port: int, profile: str, timeout: float = 5.0) -> str:
+        state_path = self._latest_storage_state_path(profile)
+        if not state_path.exists():
+            return ""
+        try:
+            storage_state = self._normalize_storage_state(json.loads(state_path.read_text(encoding="utf-8")))
+            cookies = list(storage_state.get("cookies") or [])
+            origins = list(storage_state.get("origins") or [])
+            target = self._cdp_select_target(port, timeout=timeout)
+            with _CdpConnection(str(target["webSocketDebuggerUrl"]), timeout=timeout) as cdp:
+                self._safe_cdp_call(cdp, "Network.enable", timeout=timeout)
+                if cookies:
+                    cdp.call("Network.setCookies", {"cookies": cookies}, timeout=timeout)
+                for origin in origins[:20]:
+                    origin_url = str(origin.get("origin") or "")
+                    if not origin_url.startswith(("http://", "https://")):
+                        continue
+                    cdp.call("Page.navigate", {"url": origin_url}, timeout=timeout)
+                    time.sleep(0.2)
+                    assignments = ""
+                    for entry in origin.get("localStorage") or []:
+                        assignments += f"localStorage.setItem({json.dumps(entry.get('name') or '')}, {json.dumps(entry.get('value') or '')});"
+                    if assignments:
+                        cdp.call("Runtime.evaluate", {"expression": assignments, "awaitPromise": True}, timeout=timeout)
+            return f"Applied imported storage state: cookies={len(cookies)}, origins={len(origins)}."
+        except Exception as exc:
+            return f"Imported storage state is present but could not be applied yet: {exc}"
+
+    def _ensure_page_navigation(self, *, port: int, url: str, timeout: float = 5.0) -> str:
+        target_url = str(url or "about:blank").strip() or "about:blank"
+        if target_url == "about:blank":
+            return ""
+        try:
+            target = self._cdp_select_target(port, timeout=timeout)
+            with _CdpConnection(str(target["webSocketDebuggerUrl"]), timeout=timeout) as cdp:
+                self._safe_cdp_call(cdp, "Page.enable", timeout=timeout)
+                cdp.call("Page.navigate", {"url": target_url}, timeout=timeout)
+                deadline = time.time() + max(1.0, min(float(timeout or 5.0), 10.0))
+                ready_state = ""
+                current_url = ""
+                while time.time() < deadline:
+                    result = cdp.call(
+                        "Runtime.evaluate",
+                        {
+                            "expression": "({url:location.href, ready:document.readyState})",
+                            "awaitPromise": True,
+                            "returnByValue": True,
+                        },
+                        timeout=min(timeout, 3.0),
+                    )
+                    value = (result.get("result") or {}).get("value") or {}
+                    current_url = str(value.get("url") or "")
+                    ready_state = str(value.get("ready") or "")
+                    if current_url and current_url != "about:blank" and ready_state in {"interactive", "complete"}:
+                        break
+                    time.sleep(0.2)
+            return f"Confirmed embedded browser navigation: {current_url or target_url} ({ready_state or 'loading'})."
+        except Exception as exc:
+            return f"Embedded browser started, but navigation confirmation was partial: {exc}"
+
+    def _read_storage_state_from_cdp(self, port: int, *, timeout: float = 5.0) -> Dict[str, Any]:
+        target = self._cdp_select_target(port, timeout=timeout)
+        with _CdpConnection(str(target["webSocketDebuggerUrl"]), timeout=timeout) as cdp:
+            self._safe_cdp_call(cdp, "Network.enable", timeout=timeout)
+            cookies_result = cdp.call("Network.getAllCookies", {}, timeout=timeout)
+            local_result = cdp.call(
+                "Runtime.evaluate",
+                {
+                    "expression": "(() => Object.keys(localStorage).map(name => ({name, value: localStorage.getItem(name) || ''})))()",
+                    "awaitPromise": True,
+                    "returnByValue": True,
+                },
+                timeout=timeout,
+            )
+        origin = ""
+        target_url = str(target.get("url") or "")
+        if target_url.startswith(("http://", "https://")):
+            parsed = urlparse(target_url)
+            origin = f"{parsed.scheme}://{parsed.netloc}"
+        local_storage = ((local_result.get("result") or {}).get("value") or []) if isinstance(local_result, dict) else []
+        origins = [{"origin": origin, "localStorage": local_storage}] if origin and local_storage else []
+        return self._normalize_storage_state({"cookies": cookies_result.get("cookies") or [], "origins": origins})
 
     def _copy_browser_profile(self, source: Path, target: Path, *, include_cache: bool = True) -> Dict[str, Any]:
         if IS_WINDOWS:
@@ -3374,59 +3838,49 @@ class BrowserControlerTool(BaseTool):
                 return f"{value:.1f} {unit}" if unit != "B" else f"{int(value)} B"
             value /= 1024
 
-    def _browser_processes_running(self, browser: str) -> bool:
-        browser_key = self._normalize_profile_browser(browser)
-        names = {
-            "edge": {"msedge.exe"},
-            "chrome": {"chrome.exe"},
-            "brave": {"brave.exe", "brave-browser.exe"},
-            "vivaldi": {"vivaldi.exe"},
-            "opera": {"opera.exe", "opera_gx.exe"},
-        }.get(browser_key, set())
-        if not names or not IS_WINDOWS:
+    def _profile_processes_running(self, profile_dir: Path) -> bool:
+        if not IS_WINDOWS:
             return False
+        target = str(profile_dir.resolve()).lower()
         try:
             completed = subprocess.run(
-                ["tasklist", "/FO", "CSV", "/NH"],
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    "Get-CimInstance Win32_Process | "
+                    "Where-Object { $_.CommandLine -match '--user-data-dir=' } | "
+                    "ForEach-Object { $_.CommandLine }",
+                ],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
                 timeout=5,
             )
-            output = str(completed.stdout or "").lower()
-            for name in names:
-                if f'"{name.lower()}"' in output or name.lower() in output:
-                    return True
+            return target in str(completed.stdout or "").lower()
         except Exception:
-            try:
-                for item in self._top_level_windows():
-                    if str(item.get("process_name") or "").lower() in names:
-                        return True
-            except Exception:
-                return False
-        return False
+            return False
 
     def _resolve_debug_profile_dir(self, user_data_dir: str, *, browser: str, port: int) -> Path:
         root = self.debug_profiles_dir.resolve()
         if user_data_dir:
-            candidate = Path(user_data_dir).expanduser()
-            if not candidate.is_absolute():
-                safe_relative = str(candidate).strip().strip("/\\")
-                candidate = root / safe_relative
+            profile_name = self._normalize_profile_name(user_data_dir)
+            candidate = root / profile_name
         else:
-            safe_browser = re.sub(r"[^A-Za-z0-9._-]+", "-", str(browser or "edge").lower()).strip("-._") or "edge"
+            safe_browser = re.sub(r"[^A-Za-z0-9._-]+", "-", str(browser or "chromium").lower()).strip("-._") or "chromium"
             candidate = root / safe_browser / f"port-{int(port)}"
         resolved = candidate.resolve()
         try:
             resolved.relative_to(root)
         except ValueError as exc:
             raise ValueError(
-                "Refusing to use an existing browser profile outside Browser Controler debug-profiles. "
-                f"Requested user_data_dir={resolved}. Use a relative isolated profile name instead."
+                "Refusing to use a browser profile outside .reverie/browser/profiles. "
+                f"Requested user_data_dir={resolved}. Use a relative embedded profile name instead."
             ) from exc
         if resolved == root:
-            raise ValueError("Refusing to use the Browser Controler debug profile root directly.")
+            raise ValueError("Refusing to use the .reverie/browser/profiles root directly.")
         return resolved
 
     def _is_safe_debug_profile_path(self, path: Path) -> bool:
@@ -3437,6 +3891,28 @@ class BrowserControlerTool(BaseTool):
             return resolved != root
         except Exception:
             return False
+
+    def _is_disposable_debug_profile_path(self, path: Path) -> bool:
+        if not self._is_safe_debug_profile_path(path):
+            return False
+        resolved = path.resolve()
+        relative = resolved.relative_to(self.debug_profiles_dir.resolve())
+        profile_name = relative.parts[0] if relative.parts else ""
+        temporary = (
+            profile_name.startswith(("session-", "debug-port-", "temp-"))
+            or (
+                len(relative.parts) == 2
+                and relative.parts[0] == "chromium"
+                and relative.parts[1].startswith("port-")
+            )
+        )
+        if not temporary:
+            return False
+        if (self.imports_dir / profile_name).exists():
+            return False
+        if (self.profile_backups_dir / profile_name).exists():
+            return False
+        return True
 
     def _persist_text(self, stem: str, text: str) -> Path:
         safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "-", str(stem or "page").strip()).strip("-._") or "page"

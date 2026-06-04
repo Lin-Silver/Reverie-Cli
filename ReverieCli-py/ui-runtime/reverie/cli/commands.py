@@ -2021,29 +2021,39 @@ class CommandHandler:
 
         tokens = [str(token or "").strip().strip('"').strip("'") for token in tokens if str(token or "").strip()]
         operation = str(tokens[0] if tokens else "status").lower()
-        browser = "edge"
+        profile = "default"
         backup_id = ""
         include_cache = True
         confirm = False
 
-        if operation in {"status", "backup", "backups", "list"}:
+        if operation in {"runtime", "runtime-status"}:
+            payload: Dict[str, Any] = {"action": "browser_runtime_status"}
+        elif operation in {"status", "backup", "backups", "list"}:
             if len(tokens) >= 2:
-                browser = tokens[1]
+                profile = tokens[1]
             include_cache = not any(str(token).lower() in {"--no-cache", "no-cache"} for token in tokens[2:])
             action = "browser_profile_backups" if operation in {"backups", "list"} else f"browser_profile_{operation}"
-            payload: Dict[str, Any] = {"action": action, "browser": browser}
+            payload = {"action": action, "profile": profile}
             if action == "browser_profile_backup":
                 payload["include_cache"] = include_cache
+        elif operation == "import":
+            if len(tokens) < 2:
+                self._print_browser_command_help()
+                return True
+            file_path = tokens[1]
+            if len(tokens) >= 3:
+                profile = tokens[2]
+            payload = {"action": "browser_profile_import", "file_path": file_path, "profile": profile}
         elif operation == "restore":
             if len(tokens) < 3:
                 self._print_browser_command_help()
                 return True
-            browser = tokens[1]
+            profile = tokens[1]
             backup_id = tokens[2]
             confirm = any(str(token).lower() in {"confirm", "--confirm", "true"} for token in tokens[3:])
             payload = {
                 "action": "browser_profile_restore",
-                "browser": browser,
+                "profile": profile,
                 "backup_id": backup_id,
                 "confirm": confirm,
             }
@@ -2070,10 +2080,12 @@ class CommandHandler:
             Panel(
                 "\n".join(
                     [
-                        "/browser status [edge|chrome|brave]",
-                        "/browser backup [edge|chrome|brave] [--no-cache]",
-                        "/browser backups [edge|chrome|brave]",
-                        "/browser restore <edge|chrome|brave> <backup_id> confirm",
+                        "/browser runtime",
+                        "/browser status [profile]",
+                        "/browser import <storage-state.json|cookies.txt> [profile]",
+                        "/browser backup [profile] [--no-cache]",
+                        "/browser backups [profile]",
+                        "/browser restore <profile> <backup_id> confirm",
                     ]
                 ),
                 title="Browser Commands",

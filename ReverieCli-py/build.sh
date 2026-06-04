@@ -91,7 +91,7 @@ else
 fi
 
 echo "[4/6] Preparing bundled resources..."
-mkdir -p "$BUNDLE_RES_DIR/comfy"
+mkdir -p "$BUNDLE_RES_DIR/comfy" "$BUNDLE_RES_DIR/browser/ms-playwright"
 
 if [ ! -f "$SHARED_COMFY_DIR/generate_image.py" ]; then
     echo "[ERROR] Missing: $SHARED_COMFY_DIR/generate_image.py"
@@ -104,8 +104,15 @@ fi
 
 cp "$SHARED_COMFY_DIR/generate_image.py" "$BUNDLE_RES_DIR/comfy/generate_image.py"
 cp "$SHARED_COMFY_DIR/embedded_comfy.b64" "$BUNDLE_RES_DIR/comfy/embedded_comfy.b64"
+export PLAYWRIGHT_BROWSERS_PATH="$BUNDLE_RES_DIR/browser/ms-playwright"
+$PYTHON_CMD -m playwright install chromium --no-shell
+CHROMIUM_EXE=$(find "$PLAYWRIGHT_BROWSERS_PATH" -type f \( -name chrome -o -name chrome.exe \) -print -quit)
+if [ -z "$CHROMIUM_EXE" ]; then
+    echo "[ERROR] Embedded Chromium install did not produce a browser executable."
+    exit 1
+fi
 export REVERIE_BUNDLE_RES_DIR="$BUNDLE_RES_DIR"
-echo "      Bundled resources: $REVERIE_BUNDLE_RES_DIR/comfy"
+echo "      Bundled resources: $REVERIE_BUNDLE_RES_DIR/comfy, $REVERIE_BUNDLE_RES_DIR/browser"
 
 echo "[5/6] Resolving optional ffmpeg..."
 FFMPEG_PATH=""

@@ -6,12 +6,14 @@ import json
 import platform
 import stat
 import sys
+import threading
+import time
 import zipfile
 
 from rich.console import Console
 
 from reverie.cli.commands import CommandHandler
-from reverie.plugin.runtime_manager import DEFAULT_RUNTIME_PLUGIN_CATALOG, RuntimePluginManager
+from reverie.plugin.runtime_manager import DEFAULT_RUNTIME_PLUGIN_CATALOG, RuntimePluginManager, RuntimePluginRecord
 
 
 def _compiled_entry_name(plugin_id: str) -> str:
@@ -381,6 +383,93 @@ def test_runtime_plugin_manager_prefers_packaged_entry_when_available(tmp_path: 
     assert result["success"] is True
     assert result["data"]["entry"] == "packaged"
     assert result["data"]["echo"] == "packaged-call"
+
+
+def test_runtime_plugin_manager_reuses_persistent_protocol_cache(tmp_path: Path, monkeypatch) -> None:
+    app_root = tmp_path / "app"
+    _create_runtime_plugin(app_root, packaged=False)
+
+    first_manager = RuntimePluginManager(app_root)
+    first = first_manager.scan()
+
+    assert first.protocol_ready_count == 1
+    assert first_manager.protocol_cache_path.is_file()
+    assert first_manager.protocol_cache_path.is_relative_to(app_root / ".reverie")
+
+    second_manager = RuntimePluginManager(app_root)
+    monkeypatch.setattr(
+        second_manager,
+        "_probe_runtime_protocol",
+        lambda _record: (_ for _ in ()).throw(AssertionError("cached handshake should avoid plugin startup")),
+    )
+    second = second_manager.scan()
+
+    assert second.protocol_ready_count == 1
+    assert second.tool_count == first.tool_count
+
+
+def test_runtime_plugin_manager_invalidates_protocol_cache_when_entry_changes(tmp_path: Path, monkeypatch) -> None:
+    app_root = tmp_path / "app"
+    plugin_dir = _create_runtime_plugin(app_root, packaged=False)
+    RuntimePluginManager(app_root).scan()
+    entry_path = plugin_dir / "plugin.py"
+    entry_path.write_text(entry_path.read_text(encoding="utf-8") + "\n# changed\n", encoding="utf-8")
+
+    manager = RuntimePluginManager(app_root)
+    original_probe = manager._probe_runtime_protocol
+    probes: list[str] = []
+
+    def counted_probe(record):
+        probes.append(record.plugin_id)
+        return original_probe(record)
+
+    monkeypatch.setattr(manager, "_probe_runtime_protocol", counted_probe)
+    snapshot = manager.scan()
+
+    assert probes == ["sample-runtime"]
+    assert snapshot.protocol_ready_count == 1
+
+
+def test_runtime_plugin_manager_probes_cache_misses_in_parallel(tmp_path: Path, monkeypatch) -> None:
+    app_root = tmp_path / "app"
+    manager = RuntimePluginManager(app_root)
+    records = []
+    for plugin_id in ("first", "second"):
+        entry = app_root / ".reverie" / "plugins" / f"reverie-{plugin_id}.exe"
+        entry.parent.mkdir(parents=True, exist_ok=True)
+        entry.write_bytes(plugin_id.encode("utf-8"))
+        records.append(
+            RuntimePluginRecord(
+                plugin_id=plugin_id,
+                display_name=plugin_id.title(),
+                runtime_family="runtime",
+                status="ready",
+                install_dir=entry.parent / plugin_id,
+                source="root-entry",
+                entry_path=entry,
+                compiled_entry_path=entry,
+            )
+        )
+
+    lock = threading.Lock()
+    active = 0
+    max_active = 0
+
+    def slow_probe(_record):
+        nonlocal active, max_active
+        with lock:
+            active += 1
+            max_active = max(max_active, active)
+        time.sleep(0.05)
+        with lock:
+            active -= 1
+        return {"status": "unsupported", "error": "", "protocol": None}
+
+    monkeypatch.setattr(manager, "_probe_runtime_protocol", slow_probe)
+    attached = manager._attach_protocol_records(tuple(records))
+
+    assert len(attached) == 2
+    assert max_active == 2
 
 
 def test_runtime_plugin_manager_detects_standalone_root_entry_and_sets_plugin_root(tmp_path: Path) -> None:

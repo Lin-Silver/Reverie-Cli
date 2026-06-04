@@ -52,9 +52,10 @@ Use `browser_controler` when the task needs evidence from an embedded Chromium b
 
 - Use `/browser runtime` or `browser_runtime_status` to inspect the embedded Chromium runtime and the `.reverie/browser` roots.
 - Use `/browser status [profile]` to inspect an embedded profile. The default profile is `default`.
-- Use `/browser import <storage-state.json|cookies.txt> [profile]` or `browser_profile_import` to copy user-provided cookies/storage state into `.reverie/browser/imports/<profile>`. This supports Playwright-style storage state JSON, cookie JSON arrays, and Netscape `cookies.txt`.
+- Use `/browser import` or call `browser_profile_import` without `file_path` to open the transient arrow-key/Enter export-file picker. The user then chooses `Allow once`, `Always allow selected imports`, or `Cancel`; completed imports collapse to one log line.
+- Use `/browser import <storage-state.json|cookies.txt> [profile]` or `browser_profile_import(file_path=...)` only for explicit workspace export paths. All accepted files are copied and normalized into `.reverie/browser/imports/<profile>`. This supports Playwright-style storage state JSON, cookie JSON arrays, and Netscape `cookies.txt`.
 - Use `/browser backup [profile]`, `/browser backups [profile]`, and `/browser restore <profile> <backup_id> confirm` for embedded profile backups under `.reverie/browser/backups`.
-- Imported credentials/cookies are copies supplied by the user. Browser Controler must not read browser databases from `%LOCALAPPDATA%`, `%APPDATA%`, Edge, Chrome, Brave, Firefox, or any real browser profile.
+- Imported credentials/cookies are copies selected or supplied by the user. The picker may list export-like files in the workspace, Desktop, Documents, and Downloads, but Browser Controler must not read browser databases or scan profile data from `%LOCALAPPDATA%`, `%APPDATA%`, Edge, Chrome, Brave, Firefox, or any real browser profile.
 
 ## Guardrails
 

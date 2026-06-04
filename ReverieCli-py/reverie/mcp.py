@@ -18,6 +18,7 @@ from urllib.parse import urljoin
 import requests
 
 from .config import get_app_root
+from .modes import normalize_mode
 from .security_utils import write_json_secure
 from .version import __version__
 
@@ -27,6 +28,8 @@ logger = logging.getLogger(__name__)
 MCP_PROTOCOL_VERSION = "2025-06-18"
 MCP_DEFAULT_TIMEOUT_MS = 600_000
 MCP_DEFAULT_DISCOVERY_TIMEOUT_MS = 15_000
+MCP_STARTUP_DISCOVERY_TIMEOUT_MS = 200
+MCP_DISCOVERY_FAILURE_RETRY_SECONDS = 5.0
 MCP_DEFAULT_SSE_ENDPOINT_TIMEOUT_MS = 15_000
 MCP_CONFIG_DIRNAME = ".reverie"
 MCP_CONFIG_FILENAME = "mcp.json"
@@ -323,7 +326,18 @@ def serialize_mcp_config(raw_config: Any) -> Dict[str, Any]:
     return payload
 
 
-def get_effective_mcp_servers(mcp_config: Any) -> Dict[str, Dict[str, Any]]:
+def _mcp_server_visible_in_mode(server_cfg: Dict[str, Any], mode: str = "") -> bool:
+    normalized_mode = normalize_mode(mode) if str(mode or "").strip() else ""
+    if not normalized_mode:
+        return True
+    include_modes = {normalize_mode(item) for item in server_cfg.get("includeModes", []) if str(item or "").strip()}
+    exclude_modes = {normalize_mode(item) for item in server_cfg.get("excludeModes", []) if str(item or "").strip()}
+    if include_modes and normalized_mode not in include_modes:
+        return False
+    return normalized_mode not in exclude_modes
+
+
+def get_effective_mcp_servers(mcp_config: Any, *, mode: str = "") -> Dict[str, Dict[str, Any]]:
     """Return enabled/allowed server configs in priority order."""
     normalized = normalize_mcp_config(mcp_config)
     if not normalized["mcp"].get("enabled", True):
@@ -339,6 +353,8 @@ def get_effective_mcp_servers(mcp_config: Any) -> Dict[str, Dict[str, Any]]:
         if allowed and lowered not in allowed:
             continue
         if lowered in excluded:
+            continue
+        if not _mcp_server_visible_in_mode(server_cfg, mode):
             continue
         effective[server_name] = dict(server_cfg)
     return effective
@@ -622,6 +638,10 @@ class BaseMCPClient:
 
     @property
     def catalog_dirty(self) -> bool:
+        if not self._catalog_dirty and isinstance(self._discovery_cache, dict) and self._discovery_cache.get("error"):
+            fetched_at = float(self._discovery_cache.get("fetched_at", 0.0) or 0.0)
+            if time.time() - fetched_at >= MCP_DISCOVERY_FAILURE_RETRY_SECONDS:
+                return True
         return self._catalog_dirty
 
     @property
@@ -658,7 +678,7 @@ class BaseMCPClient:
     ) -> Dict[str, Any]:
         raise NotImplementedError
 
-    def initialize(self) -> None:
+    def initialize(self, timeout_ms: Optional[int] = None) -> None:
         with self._lock:
             if self._initialized:
                 return
@@ -669,21 +689,35 @@ class BaseMCPClient:
                     "capabilities": {},
                     "clientInfo": dict(MCP_CLIENT_INFO),
                 },
+                timeout_ms=timeout_ms,
                 expect_response=True,
             )
-            self.request("notifications/initialized", {}, expect_response=False)
+            self.request("notifications/initialized", {}, timeout_ms=timeout_ms, expect_response=False)
             self._initialized = True
 
     def discover(self, force: bool = False, timeout_ms: Optional[int] = None) -> Dict[str, Any]:
         with self._lock:
-            if self._discovery_cache is not None and not force and not self._catalog_dirty:
+            if self._discovery_cache is not None and not force and not self.catalog_dirty:
                 return dict(self._discovery_cache)
 
-            self.initialize()
             errors: List[str] = []
             tools: List[Dict[str, Any]] = []
             resources: List[Dict[str, Any]] = []
             prompts: List[Dict[str, Any]] = []
+
+            try:
+                self.initialize(timeout_ms=timeout_ms)
+            except Exception as exc:
+                self._last_error = str(exc)
+                self._catalog_dirty = False
+                self._discovery_cache = {
+                    "tools": [],
+                    "resources": [],
+                    "prompts": [],
+                    "error": self._last_error,
+                    "fetched_at": time.time(),
+                }
+                return dict(self._discovery_cache)
 
             try:
                 tools_result = self.request("tools/list", {}, timeout_ms=timeout_ms, expect_response=True)
@@ -991,7 +1025,7 @@ class HttpMCPClient(BaseMCPClient):
         return headers
 
     def _timeout_seconds(self, timeout_ms: Optional[int]) -> float:
-        return max(1.0, self._request_timeout_ms(timeout_ms) / 1000.0)
+        return max(0.05, self._request_timeout_ms(timeout_ms) / 1000.0)
 
     def _update_session_id(self, response: requests.Response) -> None:
         session_id = str(response.headers.get(MCP_SESSION_HEADER, "") or "").strip()
@@ -1412,7 +1446,9 @@ class MCPRuntime:
         self._tool_catalog: List[Dict[str, Any]] = []
         self._tool_lookup: Dict[str, Dict[str, Any]] = {}
         self._catalog_signature = ""
+        self._catalog_ready = False
         self._generation = 0
+        self._active_mode = "reverie"
         self._refresh_config_locked(force=True)
 
     def close(self) -> None:
@@ -1429,6 +1465,19 @@ class MCPRuntime:
             self.project_root = Path(project_root).resolve() if project_root is not None else None
             for client in self._clients.values():
                 client.set_project_root(self.project_root)
+
+    def set_active_mode(self, mode: str) -> None:
+        """Limit startup discovery to MCP servers visible in the active Reverie mode."""
+        normalized = normalize_mode(mode or "reverie")
+        with self._lock:
+            if normalized == self._active_mode:
+                return
+            self._active_mode = normalized
+            self._tool_catalog = []
+            self._tool_lookup = {}
+            self._catalog_signature = ""
+            self._catalog_ready = False
+            self._generation += 1
 
     def _refresh_config_locked(self, force: bool = False) -> bool:
         config = self.config_manager.load()
@@ -1448,6 +1497,7 @@ class MCPRuntime:
         self._tool_catalog = []
         self._tool_lookup = {}
         self._catalog_signature = ""
+        self._catalog_ready = False
         self._generation += 1
         return True
 
@@ -1461,7 +1511,7 @@ class MCPRuntime:
             return self._generation
 
     def _get_effective_servers_locked(self) -> Dict[str, Dict[str, Any]]:
-        return get_effective_mcp_servers(self._config)
+        return get_effective_mcp_servers(self._config, mode=self._active_mode)
 
     def _create_client_locked(self, server_name: str, server_cfg: Dict[str, Any]) -> BaseMCPClient:
         server_type = str(server_cfg.get("type", "stdio") or "stdio").strip().lower()
@@ -1490,13 +1540,18 @@ class MCPRuntime:
         self._clients[server_name] = client
         return client
 
-    def _rebuild_catalog_locked(self, force_refresh: bool = False) -> List[Dict[str, Any]]:
+    def _rebuild_catalog_locked(
+        self,
+        force_refresh: bool = False,
+        timeout_ms: Optional[int] = MCP_STARTUP_DISCOVERY_TIMEOUT_MS,
+    ) -> List[Dict[str, Any]]:
         self._refresh_config_locked(force=False)
         effective_servers = self._get_effective_servers_locked()
         used_names: set[str] = set()
         catalog: List[Dict[str, Any]] = []
         lookup: Dict[str, Dict[str, Any]] = {}
-        discovery_timeout_ms = int(self._config.get("mcp", {}).get("discovery_timeout_ms", MCP_DEFAULT_DISCOVERY_TIMEOUT_MS))
+        configured_timeout_ms = int(self._config.get("mcp", {}).get("discovery_timeout_ms", MCP_DEFAULT_DISCOVERY_TIMEOUT_MS))
+        discovery_timeout_ms = int(timeout_ms if timeout_ms is not None else configured_timeout_ms)
 
         for server_name, server_cfg in effective_servers.items():
             client = self._get_client_locked(server_name, server_cfg)
@@ -1537,11 +1592,16 @@ class MCPRuntime:
             self._catalog_signature = new_signature
         self._tool_catalog = catalog
         self._tool_lookup = lookup
+        self._catalog_ready = True
         return [dict(item) for item in catalog]
 
-    def get_tool_definitions(self, force_refresh: bool = False) -> List[Dict[str, Any]]:
+    def get_tool_definitions(
+        self,
+        force_refresh: bool = False,
+        timeout_ms: Optional[int] = MCP_STARTUP_DISCOVERY_TIMEOUT_MS,
+    ) -> List[Dict[str, Any]]:
         with self._lock:
-            if self._tool_catalog and not force_refresh:
+            if self._catalog_ready and not force_refresh:
                 effective_servers = self._get_effective_servers_locked()
                 any_dirty = False
                 for server_name, server_cfg in effective_servers.items():
@@ -1551,7 +1611,7 @@ class MCPRuntime:
                         break
                 if not any_dirty:
                     return [dict(item) for item in self._tool_catalog]
-            return self._rebuild_catalog_locked(force_refresh=force_refresh)
+            return self._rebuild_catalog_locked(force_refresh=force_refresh, timeout_ms=timeout_ms)
 
     def resolve_tool(self, synthetic_name: str) -> Optional[Dict[str, Any]]:
         wanted = str(synthetic_name or "").strip()
@@ -1559,7 +1619,7 @@ class MCPRuntime:
             return None
         with self._lock:
             if wanted not in self._tool_lookup:
-                self._rebuild_catalog_locked(force_refresh=False)
+                self._rebuild_catalog_locked(force_refresh=False, timeout_ms=MCP_STARTUP_DISCOVERY_TIMEOUT_MS)
             found = self._tool_lookup.get(wanted)
             return dict(found) if isinstance(found, dict) else None
 

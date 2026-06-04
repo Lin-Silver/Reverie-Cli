@@ -6,7 +6,6 @@ from rich.console import Console
 
 from reverie.agent.agent import ReverieAgent, decode_stream_event
 from reverie.codex import build_codex_request_payload
-from reverie.geminicli import build_geminicli_request_payload
 from reverie.cli.display import DisplayComponents
 from reverie.cli.help_catalog import HELP_TOPICS
 
@@ -317,6 +316,47 @@ def test_compaction_memory_is_persisted_to_memory_index(monkeypatch, tmp_path):
     assert memory_indexer.refreshed == "session-1"
 
 
+def test_automatic_context_compaction_emits_compact_token_log(monkeypatch, tmp_path):
+    seen = {}
+    _install_fake_openai(monkeypatch, seen)
+    agent = ReverieAgent(
+        base_url="https://example.test/v1",
+        api_key="x",
+        model="test-model",
+        project_root=tmp_path,
+        provider="request",
+        config=_standard_config(),
+    )
+    agent.messages = [
+        {"role": "user", "content": "old context " * 500},
+        {"role": "assistant", "content": "old response " * 500},
+        {"role": "user", "content": "current request"},
+    ]
+    events = []
+    agent.tool_executor.update_context("ui_event_handler", events.append)
+
+    from reverie.context_engine.compressor import ContextCompressor
+
+    monkeypatch.setattr(
+        ContextCompressor,
+        "compress",
+        lambda self, **_kwargs: [
+            {"role": "system", "content": "[MEMORY CONSOLIDATION - Context Engine Cache]\nsummary\n[END MEMORY]"},
+            {"role": "user", "content": "current request"},
+        ],
+    )
+
+    compressed_tokens = agent._handle_context_compaction(12_345, 20_000, session_id="session-1")
+
+    assert compressed_tokens < 12_345
+    assert any(
+        event.get("compact") is True
+        and event.get("message", "").startswith("Context compressed: 12,345 -> ")
+        and event.get("message", "").endswith(" tokens")
+        for event in events
+    )
+
+
 def test_nvidia_short_turn_keeps_full_tools_and_reasoning(monkeypatch, tmp_path):
     seen = {}
     _install_fake_openai(monkeypatch, seen)
@@ -391,7 +431,7 @@ def test_nvidia_request_provider_clamps_output_to_remaining_context(tmp_path):
     assert prepared["reasoning_effort"] == "high"
 
 
-def test_native_provider_payloads_preserve_inline_image_parts():
+def test_codex_native_provider_payload_preserves_inline_image_parts():
     messages = [
         {
             "role": "user",
@@ -404,14 +444,6 @@ def test_native_provider_payloads_preserve_inline_image_parts():
             ],
         }
     ]
-
-    gemini_payload = build_geminicli_request_payload(
-        model_name="gemini-test",
-        messages=messages,
-    )
-    gemini_parts = gemini_payload["request"]["contents"][0]["parts"]
-    assert {"text": "Describe this image"} in gemini_parts
-    assert {"inlineData": {"mimeType": "image/png", "data": "AAAA"}} in gemini_parts
 
     codex_payload = build_codex_request_payload(
         model_name="gpt-test",

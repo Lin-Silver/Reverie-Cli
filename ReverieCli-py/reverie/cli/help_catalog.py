@@ -25,10 +25,10 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
         "overview": "browser, <command>, all",
         "subcommands": [
             {"usage": "/help", "description": "Open the interactive help browser with live navigation, filtering, and detailed command pages."},
-            {"usage": "/help <command>", "description": "Show detailed help for a single command such as `/help codex` or `/help Geminicli model`.", "example": "/help Geminicli model"},
+            {"usage": "/help <command>", "description": "Show detailed help for a single command such as `/help codex` or `/help browser import`.", "example": "/help browser import"},
             {"usage": "/help all", "description": "Print the detailed help view for every command in sequence."},
         ],
-        "examples": ["/help", "/help codex", "/help Geminicli model", "/help all"],
+        "examples": ["/help", "/help codex", "/help browser import", "/help all"],
     },
     "status": {
         "command": "/status",
@@ -96,7 +96,7 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
         "command": "/model",
         "section": "Models & Modes",
         "summary": "Open the standard model selector or manage configured standard models.",
-        "detail": "This catalog is separate from provider-native catalogs like `/codex model` or `/Geminicli model`.",
+        "detail": "This catalog is separate from provider-native catalogs like `/codex model`.",
         "overview": "selector, add, delete/remove <n>",
         "subcommands": [
             {"usage": "/model", "description": "Open the selector for standard configured models."},
@@ -141,24 +141,6 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
             {"usage": "/mode computer-controller", "description": "Switch to the pinned NVIDIA desktop-autopilot mode."},
         ],
         "examples": ["/mode", "/mode reverie-atlas", "/mode computer-controller"],
-    },
-    "geminicli": {
-        "command": "/Geminicli",
-        "section": "Providers",
-        "summary": "Manage Gemini CLI OAuth relay status, models, and endpoint override.",
-        "detail": "Personal Google-account login works directly through Gemini CLI. A project override can still be stored for advanced setups, but it is optional.",
-        "overview": "status, login, model [id], endpoint [value]",
-        "aliases": ["/geminicli"],
-        "subcommands": [
-            {"usage": "/Geminicli", "description": "Show Gemini CLI credential, model, and optional project-override status."},
-            {"usage": "/Geminicli status", "description": "Explicit status view."},
-            {"usage": "/Geminicli login", "description": "Validate or refresh Gemini OAuth credentials from the local CLI cache."},
-            {"usage": "/Geminicli model", "description": "Open the Gemini CLI model selector."},
-            {"usage": "/Geminicli model <model-id>", "description": "Switch directly to a supported Gemini CLI model."},
-            {"usage": "/Geminicli endpoint", "description": "Show the current endpoint override prompt."},
-            {"usage": "/Geminicli endpoint <url|/path|clear>", "description": "Set or clear the reverse-proxy endpoint override."},
-        ],
-        "examples": ["/Geminicli", "/Geminicli model gemini-3.1-flash-lite-preview", "/Geminicli endpoint http://127.0.0.1:8000/v1internal:streamGenerateContent?alt=sse"],
     },
     "codex": {
         "command": "/codex",
@@ -255,11 +237,13 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
         "section": "Tools & Context",
         "summary": "Inspect, import, back up, list, and restore embedded Browser Controler profiles.",
         "detail": "Browser Controler uses Reverie's embedded Chromium runtime and stores all browser data under the app root `.reverie/browser`. `/browser` manages those embedded profiles only; it does not read, back up, or modify real Edge/Chrome profiles.",
-        "overview": "runtime, status [profile], import <file> [profile], backup, backups, restore <profile> <backup_id> confirm",
+        "overview": "runtime, status [profile], import [file] [profile], backup, backups, restore <profile> <backup_id> confirm",
         "subcommands": [
             {"usage": "/browser", "description": "Show the default embedded profile and backup/import status."},
             {"usage": "/browser runtime", "description": "Show the embedded Chromium runtime path and `.reverie/browser` data roots."},
             {"usage": "/browser status [profile]", "description": "Show one embedded profile location, size, imports, and latest backup."},
+            {"usage": "/browser import", "description": "Select and authorize an exported cookie/storage-state file with arrow keys and Enter."},
+            {"usage": "/browser import <file> [profile]", "description": "Import an explicit workspace export file into the embedded profile."},
             {"usage": "/browser import <storage-state.json|cookies.txt> [profile]", "description": "Copy user-provided cookies/storage state into `.reverie/browser/imports` for an embedded profile."},
             {"usage": "/browser backup [profile] [--no-cache]", "description": "Create an embedded profile backup under `.reverie/browser/backups`."},
             {"usage": "/browser backups [profile]", "description": "List recorded embedded profile backups."},
@@ -322,7 +306,7 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
             {"usage": "/mcp list", "description": "Alias of `/mcp status`; list configured MCP servers and discovered tool counts."},
             {"usage": "/mcp reload", "description": "Reload `.reverie/mcp.json` (or a legacy MCP file) and refresh the discovered MCP catalog."},
             {"usage": "/mcp path", "description": "Show the active MCP configuration file path."},
-            {"usage": "/mcp add <name> <command...>", "description": "Add a stdio MCP server, matching Gemini CLI's default add flow."},
+            {"usage": "/mcp add <name> <command...>", "description": "Add a stdio MCP server using the common command-first flow."},
             {"usage": "/mcp add stdio <name> <command...>", "description": "Explicit stdio variant of the add flow."},
             {"usage": "/mcp add http <name> <url>", "description": "Add a streamable HTTP MCP server."},
             {"usage": "/mcp add sse <name> <url>", "description": "Add a legacy SSE MCP server that exposes an endpoint event and message POST URL."},
@@ -703,9 +687,6 @@ def normalize_help_topic(value: str) -> str:
     primary = normalized.split()[0] if normalized.split() else ""
     compact = normalized.replace(" ", "")
     alias_map = {
-        "gemini": "geminicli",
-        "geminicli": "geminicli",
-        "gcli": "geminicli",
         "aihub": "aihubmix",
         "aihubmix": "aihubmix",
         "aihub_mix": "aihubmix",

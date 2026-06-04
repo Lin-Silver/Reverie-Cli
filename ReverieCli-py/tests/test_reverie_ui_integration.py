@@ -6,7 +6,8 @@ import sys
 from pathlib import Path
 
 from reverie.config import Config
-from reverie.codex import get_codex_model_catalog
+from reverie.codex import CODEX_CLIENT_VERSION, CODEX_DEFAULT_MAX_CONTEXT_TOKENS, get_codex_model_catalog
+from reverie.config import Config, EXTERNAL_MODEL_SOURCES
 from reverie.plugin.runtime_manager import RuntimePluginManager
 from reverie.sdk_bridge import ReverieUiBridge, normalize_jsonl_input
 from reverie.session.manager import SessionManager
@@ -133,13 +134,22 @@ def test_bundled_ui_runtime_bridge_exposes_model_source_actions() -> None:
 
 
 def test_codex_catalog_prefers_checked_out_source_models() -> None:
-    visible_ids = [
-        str(item.get("id") or "")
-        for item in get_codex_model_catalog()
-        if str(item.get("visibility") or "list").lower() == "list"
-    ]
+    catalog = get_codex_model_catalog()
+    visible_ids = [str(item.get("id") or "") for item in catalog if str(item.get("visibility") or "list").lower() == "list"]
 
     assert visible_ids[:5] == ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2"]
+    assert [item["id"] for item in catalog] == visible_ids + ["codex-auto-review"]
+    assert all(item["context_length"] == 272_000 for item in catalog)
+    assert CODEX_CLIENT_VERSION == "0.137.0"
+    assert CODEX_DEFAULT_MAX_CONTEXT_TOKENS == 272_000
+
+
+def test_gemini_cli_reverse_proxy_source_is_migrated_away() -> None:
+    config = Config.from_dict({"active_model_source": "geminicli", "geminicli": {"selected_model_id": "legacy"}})
+
+    assert "geminicli" not in EXTERNAL_MODEL_SOURCES
+    assert config.active_model_source == "standard"
+    assert "geminicli" not in config.to_dict()
 
 
 def test_sdk_bridge_accepts_bom_prefixed_jsonl_frames() -> None:

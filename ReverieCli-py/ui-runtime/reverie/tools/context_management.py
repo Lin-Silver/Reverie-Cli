@@ -283,6 +283,7 @@ class ContextManagementTool(BaseTool):
         from ..context_engine.compressor import ContextCompressor
         
         history = agent.get_history()
+        original_tokens = int(agent.get_token_estimate()) if hasattr(agent, "get_token_estimate") else 0
         if len(history) <= keep_last:
             return ToolResult.ok(f"History is already short ({len(history)} messages). No changes made.")
         
@@ -331,13 +332,9 @@ class ContextManagementTool(BaseTool):
             if session_manager and hasattr(session_manager, 'update_messages'):
                 session_manager.update_messages(compressed_history)
             
-            removed_count = len(history) - len(compressed_history)
+            compressed_tokens = int(agent.get_token_estimate()) if hasattr(agent, "get_token_estimate") else 0
             return ToolResult.ok(
-                f"Successfully compressed conversation history.\n"
-                f"Original: {len(history)} messages\n"
-                f"Compressed: {len(compressed_history)} messages\n"
-                f"Removed: {removed_count} messages\n"
-                f"Checkpoint saved before compression."
+                f"Context compressed: {original_tokens:,} -> {compressed_tokens:,} tokens"
             )
         except Exception as e:
             return ToolResult.fail(f"Compression failed: {str(e)}")

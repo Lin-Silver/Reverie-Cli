@@ -17,18 +17,6 @@ from ..sse import iter_sse_data_strings
 logger = logging.getLogger(__name__)
 
 
-def _collect_geminicli_summary_text(response: requests.Response) -> str:
-    """Collect assistant text from Gemini CLI SSE output."""
-    from ..geminicli import parse_geminicli_sse_event
-
-    parts = []
-    for data_str in _iter_sse_data_strings(response):
-        for event in parse_geminicli_sse_event(data_str):
-            if str(event.get("type", "")).strip().lower() == "content":
-                parts.append(str(event.get("text", "") or ""))
-    return "".join(parts).strip()
-
-
 def _collect_codex_summary_text(response: requests.Response) -> str:
     """Collect assistant text from Codex SSE output."""
     from ..codex import parse_codex_sse_event
@@ -597,7 +585,7 @@ class ContextCompressor:
             client: Client object (for openai-sdk and anthropic providers)
             model: Model name
             session_id: Session ID for checkpointing
-            provider: Provider type (openai-sdk, request, anthropic, gemini-cli, codex)
+            provider: Provider type (openai-sdk, request, anthropic, codex)
             base_url: Base URL for request provider
             api_key: API key for request provider
             custom_headers: Optional provider-specific extra headers
@@ -776,51 +764,6 @@ class ContextCompressor:
                 response = client.messages.create(**kwargs)
                 summary = response.content[0].text
                 usage_info = getattr(response, "usage", None)
-            elif provider == "gemini-cli":
-                from ..geminicli import (
-                    build_geminicli_request_payload,
-                    detect_geminicli_cli_credentials,
-                    get_geminicli_request_headers,
-                    resolve_geminicli_project_id,
-                    resolve_geminicli_request_url,
-                )
-
-                cred = detect_geminicli_cli_credentials(refresh_if_needed=True)
-                access_token = str(cred.get("api_key", "") or api_key or "").strip()
-                if not access_token:
-                    return compact_with_summary(fallback_summary, "Post-compression deterministic fallback")
-                project_id = resolve_geminicli_project_id(
-                    base_url=base_url,
-                    access_token=access_token,
-                    timeout=120,
-                )
-
-                payload = build_geminicli_request_payload(
-                    model_name=model,
-                    messages=prompt,
-                    tools=None,
-                    project_id=project_id,
-                    session_id=session_id,
-                )
-                headers = get_geminicli_request_headers(
-                    model_id=model,
-                    access_token=access_token,
-                    stream=True,
-                )
-                for key, value in (custom_headers or {}).items():
-                    normalized_key = str(key or "").strip()
-                    normalized_value = str(value or "").strip()
-                    if normalized_key and normalized_value:
-                        headers[normalized_key] = normalized_value
-                response = requests.post(
-                    resolve_geminicli_request_url(base_url, "", stream=True),
-                    headers=headers,
-                    json=payload,
-                    stream=True,
-                    timeout=120,
-                )
-                response.raise_for_status()
-                summary = _collect_geminicli_summary_text(response)
             elif provider == "codex":
                 from ..codex import (
                     build_codex_request_payload,

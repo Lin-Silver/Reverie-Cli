@@ -165,6 +165,41 @@ AI_SERVICE_URLS = {
     "perplexity": "https://www.perplexity.ai/",
 }
 
+BROWSER_IMPORT_SUFFIXES = {".json", ".txt", ".cookies"}
+BROWSER_IMPORT_NAME_HINTS = (
+    "cookie",
+    "cookies",
+    "storage-state",
+    "storage_state",
+    "browser-state",
+    "browser_state",
+    "playwright",
+    "auth-state",
+    "auth_state",
+    "session-state",
+    "session_state",
+)
+BROWSER_IMPORT_MAX_BYTES = 64 * 1024 * 1024
+BROWSER_IMPORT_SCAN_SKIP_DIRS = {
+    ".git",
+    ".hg",
+    ".svn",
+    ".venv",
+    "venv",
+    "node_modules",
+    "__pycache__",
+    "build",
+    "dist",
+}
+BROWSER_REAL_PROFILE_PATH_MARKERS = (
+    "/google/chrome/user data/",
+    "/microsoft/edge/user data/",
+    "/bravesoftware/brave-browser/user data/",
+    "/vivaldi/user data/",
+    "/mozilla/firefox/profiles/",
+    "/opera software/opera stable/",
+)
+
 BROWSER_PROCESS_NAMES = {
     "chrome.exe",
     "msedge.exe",
@@ -521,7 +556,13 @@ class BrowserControlerTool(BaseTool):
             "delta": {"type": "integer", "description": "Mouse wheel delta. Positive scrolls up, negative scrolls down. One notch is 120."},
             "key": {"type": "string", "description": "Single key for key_press."},
             "keys": {"type": "array", "items": {"type": "string"}, "description": "Key chord for hotkey, e.g. ['ctrl', 'l']."},
-            "file_path": {"type": "string", "description": "Workspace-relative file path to upload through the active file dialog."},
+            "file_path": {
+                "type": "string",
+                "description": (
+                    "Workspace-relative file path for uploads or browser data import. For browser_profile_import, omit "
+                    "this value to open Reverie's interactive export-file picker and user authorization screen."
+                ),
+            },
             "file_paths": {"type": "array", "items": {"type": "string"}, "description": "Workspace-relative files to upload sequentially."},
             "wait_seconds": {"type": "number", "description": "Delay for wait or after opening pages."},
             "max_chars": {"type": "integer", "description": "Maximum page text characters to include in the tool output."},
@@ -552,6 +593,7 @@ class BrowserControlerTool(BaseTool):
         self.downloads_dir = self.output_dir / "downloads"
         self.debug_profiles_dir = self.output_dir / "profiles"
         self.profile_backups_dir = self.output_dir / "backups"
+        self.import_consent_path = self.output_dir / "import-consent.json"
         self.sessions_path = self.output_dir / "sessions.json"
         self.pages_dir.mkdir(parents=True, exist_ok=True)
         self.observations_dir.mkdir(parents=True, exist_ok=True)
@@ -1117,7 +1159,7 @@ class BrowserControlerTool(BaseTool):
             download_dir = self._prepare_embedded_profile(profile_name, profile_dir)
         except Exception as exc:
             return ToolResult.fail(f"Could not prepare embedded browser profile {profile_name}: {exc}")
-        wait_seconds = max(1.0, min(float(kwargs.get("wait_seconds", 3.0) or 3.0), 20.0))
+        wait_seconds = max(1.0, min(float(kwargs.get("wait_seconds", 15.0) or 15.0), 45.0))
         background = bool(kwargs.get("background", False))
         minimized = bool(kwargs.get("minimized", background))
         activate = bool(kwargs.get("activate")) if kwargs.get("activate") is not None else not (background or minimized)
@@ -1169,8 +1211,14 @@ class BrowserControlerTool(BaseTool):
                 last_error = str(exc)
                 time.sleep(0.2)
         if not version:
+            cleanup = self._cleanup_failed_embedded_browser_launch(
+                process=process,
+                executable=executable,
+                profile_dir=profile_dir,
+            )
             return ToolResult.fail(
-                f"Opened browser process pid={process.pid}, but DevTools Protocol on port {port} did not respond. {last_error}"
+                f"Opened browser process pid={process.pid}, but DevTools Protocol on port {port} did not respond. "
+                f"{last_error} Cleanup: {cleanup}"
             )
 
         recorded_session_id = ""
@@ -1572,12 +1620,42 @@ class BrowserControlerTool(BaseTool):
         return ToolResult.ok("\n".join(lines), data={"profile": profile_name, "backup": selected, "restore": restore_result, "target": str(target)})
 
     def _browser_profile_import(self, *, file_path: Any, profile: str = "default", import_format: str = "auto") -> ToolResult:
-        if not file_path:
-            return ToolResult.fail("file_path is required for browser_profile_import")
         profile_name = self._normalize_profile_name(profile)
-        resolved = self.resolve_workspace_path(file_path, purpose="import browser cookies or storage state")
+        selected_by_user = False
+        if not file_path:
+            selection = self._select_browser_import_file(profile_name)
+            if selection.get("cancelled"):
+                return ToolResult.ok(
+                    "Browser data import cancelled by user.",
+                    data={"profile": profile_name, "cancelled": True},
+                )
+            selected_path = str(selection.get("path") or "").strip()
+            if not selected_path:
+                return ToolResult.fail(
+                    "No browser export files were found. Export cookies/storage state to the workspace, Desktop, "
+                    "Documents, or Downloads, then retry browser_profile_import."
+                )
+            resolved = Path(selected_path).expanduser().resolve()
+            selected_by_user = True
+        else:
+            resolved = self.resolve_workspace_path(file_path, purpose="import browser cookies or storage state")
+
         if not resolved.exists() or not resolved.is_file():
             return ToolResult.fail(f"Import file not found: {file_path}")
+        if self._is_real_browser_profile_path(resolved):
+            return ToolResult.fail(
+                "Refusing to read a real browser profile. Export cookies/storage state to a separate file and select "
+                "that exported copy instead."
+            )
+        try:
+            file_bytes = int(resolved.stat().st_size)
+        except OSError as exc:
+            return ToolResult.fail(f"Could not inspect browser import file: {exc}")
+        if file_bytes > BROWSER_IMPORT_MAX_BYTES:
+            return ToolResult.fail(
+                f"Browser import file is too large ({self._format_size(file_bytes)}); maximum is "
+                f"{self._format_size(BROWSER_IMPORT_MAX_BYTES)}."
+            )
         try:
             storage_state = self._load_import_storage_state(resolved, import_format=import_format)
         except Exception as exc:
@@ -1601,18 +1679,206 @@ class BrowserControlerTool(BaseTool):
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "cookies": len(storage_state.get("cookies") or []),
             "origins": len(storage_state.get("origins") or []),
+            "selected_by_user": selected_by_user,
         }
         (import_dir / "browser-profile-import.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
         latest_path = self.imports_dir / profile_name / "latest-storage-state.json"
         latest_path.write_text(json.dumps(storage_state, ensure_ascii=False, indent=2), encoding="utf-8")
-        lines = [
-            f"Imported storage state for embedded browser profile {profile_name}.",
-            f"Import: {import_dir}",
-            f"Cookies: {manifest['cookies']}",
-            f"Origins: {manifest['origins']}",
-            "The file was copied under .reverie/browser/imports and will be applied to the embedded browser profile on the next launch.",
-        ]
-        return ToolResult.ok("\n".join(lines), data=manifest)
+        return ToolResult.ok(
+            f"Browser data imported into embedded profile {profile_name}: {manifest['cookies']} cookies, "
+            f"{manifest['origins']} origins; copied to {import_dir}.",
+            data=manifest,
+        )
+
+    def _select_browser_import_file(self, profile: str) -> Dict[str, Any]:
+        """Let the user select and authorize one exported browser-data file."""
+        console = self.context.get("console") if self.context else None
+        if console is None or not bool(getattr(console, "is_terminal", False)):
+            return {"path": "", "cancelled": False}
+
+        candidates = self._browser_import_candidates()
+        if not candidates:
+            return {"path": "", "cancelled": False}
+
+        from ..cli.tui_selector import SelectorAction, SelectorItem, TUISelector
+
+        get_status_live = self.context.get("get_status_live") if self.context else None
+        status_live = get_status_live() if callable(get_status_live) else None
+        pause_stream_input = self.context.get("pause_stream_input_capture") if self.context else None
+        resume_stream_input = self.context.get("resume_stream_input_capture") if self.context else None
+        if status_live:
+            status_live.stop()
+        if callable(pause_stream_input):
+            pause_stream_input()
+
+        try:
+            file_items = []
+            for index, path in enumerate(candidates):
+                try:
+                    size = path.stat().st_size
+                except OSError:
+                    continue
+                file_items.append(
+                    SelectorItem(
+                        id=str(index),
+                        title=path.name,
+                        description=str(path.parent),
+                        metadata={
+                            "path": str(path),
+                            "size": self._format_size(size),
+                            "profile": profile,
+                        },
+                    )
+                )
+            if not file_items:
+                return {"path": "", "cancelled": False}
+            selected = TUISelector(
+                console,
+                "Import Browser Data Export",
+                file_items,
+                allow_search=True,
+                allow_cancel=True,
+                show_descriptions=True,
+                max_visible=10,
+            ).run()
+            if selected.action != SelectorAction.SELECT or selected.selected_item is None:
+                return {"path": "", "cancelled": True}
+
+            selected_path = Path(str((selected.selected_item.metadata or {}).get("path") or "")).resolve()
+            if self._browser_import_always_allowed():
+                return {"path": str(selected_path), "cancelled": False, "authorization": "always"}
+
+            authorization = TUISelector(
+                console,
+                "Authorize Browser Data Import",
+                [
+                    SelectorItem(
+                        id="once",
+                        title="Allow once",
+                        description="Read this selected export once and copy the normalized data into .reverie/browser.",
+                    ),
+                    SelectorItem(
+                        id="always",
+                        title="Always allow selected imports",
+                        description="Skip this authorization step later; file selection is still always required.",
+                    ),
+                    SelectorItem(
+                        id="cancel",
+                        title="Cancel",
+                        description="Do not read or import the selected file.",
+                    ),
+                ],
+                allow_search=False,
+                allow_cancel=True,
+                show_descriptions=True,
+                max_visible=3,
+            ).run()
+            if authorization.action != SelectorAction.SELECT or authorization.selected_item is None:
+                return {"path": "", "cancelled": True}
+            authorization_id = str(authorization.selected_item.id or "").strip().lower()
+            if authorization_id == "cancel":
+                return {"path": "", "cancelled": True}
+            if authorization_id == "always":
+                self._set_browser_import_always_allowed(True)
+            return {
+                "path": str(selected_path),
+                "cancelled": False,
+                "authorization": authorization_id,
+            }
+        finally:
+            if callable(resume_stream_input):
+                resume_stream_input()
+            if status_live:
+                status_live.start()
+
+    def _browser_import_candidates(self) -> List[Path]:
+        """Find likely user-exported cookie/storage-state files without reading real browser profiles."""
+        roots: List[Path] = [self.project_root]
+        home = Path.home()
+        for name in ("Desktop", "Documents", "Downloads"):
+            candidate = home / name
+            if candidate.exists():
+                roots.append(candidate)
+
+        candidates: List[Path] = []
+        seen: set[str] = set()
+        for root in roots:
+            try:
+                resolved_root = root.resolve()
+            except OSError:
+                continue
+            if self._is_real_browser_profile_path(resolved_root):
+                continue
+            for current_root, directory_names, file_names in os.walk(resolved_root):
+                current = Path(current_root)
+                try:
+                    relative_depth = len(current.relative_to(resolved_root).parts)
+                except ValueError:
+                    continue
+                directory_names[:] = [
+                    name
+                    for name in directory_names
+                    if name.lower() not in BROWSER_IMPORT_SCAN_SKIP_DIRS
+                    and not self._is_real_browser_profile_path(current / name)
+                    and relative_depth < 3
+                ]
+                for file_name in file_names:
+                    lower_name = file_name.lower()
+                    suffix = Path(file_name).suffix.lower()
+                    if suffix not in BROWSER_IMPORT_SUFFIXES:
+                        continue
+                    if lower_name != "cookies.txt" and not any(hint in lower_name for hint in BROWSER_IMPORT_NAME_HINTS):
+                        continue
+                    path = (current / file_name).resolve()
+                    if self._is_real_browser_profile_path(path):
+                        continue
+                    try:
+                        size = int(path.stat().st_size)
+                    except OSError:
+                        continue
+                    if size <= 0 or size > BROWSER_IMPORT_MAX_BYTES:
+                        continue
+                    key = str(path).lower()
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    candidates.append(path)
+                    if len(candidates) >= 200:
+                        break
+                if len(candidates) >= 200:
+                    break
+            if len(candidates) >= 200:
+                break
+        def sort_key(path: Path) -> tuple[int, str]:
+            try:
+                modified = int(path.stat().st_mtime_ns)
+            except OSError:
+                modified = 0
+            return (-modified, str(path).lower())
+
+        candidates.sort(key=sort_key)
+        return candidates
+
+    @staticmethod
+    def _is_real_browser_profile_path(path: Path) -> bool:
+        normalized = str(path.expanduser().resolve(strict=False)).replace("\\", "/").lower()
+        return any(marker in f"{normalized}/" for marker in BROWSER_REAL_PROFILE_PATH_MARKERS)
+
+    def _browser_import_always_allowed(self) -> bool:
+        try:
+            data = json.loads(self.import_consent_path.read_text(encoding="utf-8"))
+        except Exception:
+            return False
+        return bool(isinstance(data, dict) and data.get("always_allow_selected_imports"))
+
+    def _set_browser_import_always_allowed(self, allowed: bool) -> None:
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "always_allow_selected_imports": bool(allowed),
+            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "scope": "selected exported files only",
+        }
+        self.import_consent_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def _browser_profile_export(self, *, profile: str = "default", port: Any = None, timeout: float = 5.0) -> ToolResult:
         profile_name = self._normalize_profile_name(profile)
@@ -1643,7 +1909,8 @@ class BrowserControlerTool(BaseTool):
             "- Browser Controler uses Reverie's embedded open-source Chromium runtime, not the real system Edge/Chrome executable.",
             "- All runtime, profile, cookies, imports, backups, downloads, pages, screenshots, and sessions stay under the app root .reverie/browser directory.",
             "- The tool must not read, back up, modify, or launch a user's real browser profile.",
-            "- Credentials/cookies can be imported only from user-provided storage-state, cookie JSON, or Netscape cookies.txt files.",
+            "- Credentials/cookies can be imported only from user-selected exported storage-state, cookie JSON, or Netscape cookies.txt files.",
+            "- Interactive imports scan export-like files in the workspace, Desktop, Documents, and Downloads, then require explicit user selection and authorization.",
             "- DevTools actions only attach to ports recorded by Browser Controler sessions with safe .reverie/browser/profiles paths.",
             "- Visible UI actions refuse non-embedded browser windows, even when the active window is Chrome or Edge.",
             "- Use /browser status, /browser import, /browser backup, /browser backups, and /browser restore <profile> <backup_id> confirm for embedded profile management.",
@@ -2773,6 +3040,26 @@ class BrowserControlerTool(BaseTool):
             "process_id": process_id,
         }
 
+    def _cleanup_failed_embedded_browser_launch(
+        self,
+        *,
+        process: subprocess.Popen,
+        executable: Path,
+        profile_dir: Path,
+    ) -> str:
+        termination = self._terminate_embedded_browser_session_process(
+            {
+                "process_id": int(process.pid or 0),
+                "browser": str(executable),
+                "profile_dir": str(profile_dir),
+            }
+        )
+        if termination.get("terminated"):
+            return "stopped the verified isolated Chromium process tree"
+        if termination.get("already_closed"):
+            return "isolated Chromium process already exited"
+        return f"refused process cleanup because verification failed: {termination.get('reason') or 'unknown reason'}"
+
     def _validate_embedded_browser_session_process(self, session: Dict[str, Any]) -> Dict[str, Any]:
         process_id = int(session.get("process_id") or 0)
         if not process_id:
@@ -3316,16 +3603,20 @@ class BrowserControlerTool(BaseTool):
 
     def _ensure_bundled_browser_runtime(self) -> Optional[Path]:
         existing = next((path for path in self._embedded_chromium_candidates(self.runtime_dir) if path.exists() and path.is_file()), None)
-        if existing:
-            return existing.resolve()
         source = self._bundled_browser_resource_dir()
         if not source:
-            return None
+            return existing.resolve() if existing else None
+        bundled = next((path for path in self._embedded_chromium_candidates(source) if path.exists() and path.is_file()), None)
+        if existing and (
+            not bundled
+            or self._embedded_chromium_revision(existing) >= self._embedded_chromium_revision(bundled)
+        ):
+            return existing.resolve()
         target = self.runtime_dir / "ms-playwright"
         try:
             shutil.copytree(source, target, dirs_exist_ok=True)
         except Exception:
-            return None
+            return existing.resolve() if existing else None
         existing = next((path for path in self._embedded_chromium_candidates(self.runtime_dir) if path.exists() and path.is_file()), None)
         return existing.resolve() if existing else None
 
@@ -3359,8 +3650,17 @@ class BrowserControlerTool(BaseTool):
         ]
         candidates: List[Path] = []
         for pattern in patterns:
-            candidates.extend(sorted(root.glob(pattern)))
-        return candidates
+            candidates.extend(root.glob(pattern))
+        return sorted(
+            set(candidates),
+            key=lambda path: (self._embedded_chromium_revision(path), str(path).lower()),
+            reverse=True,
+        )
+
+    @staticmethod
+    def _embedded_chromium_revision(path: Path) -> int:
+        match = re.search(r"(?:^|[\\/])chromium-(\d+)(?:[\\/]|$)", str(path), flags=re.IGNORECASE)
+        return int(match.group(1)) if match else -1
 
     def _is_safe_embedded_runtime_path(self, path: Path) -> bool:
         try:

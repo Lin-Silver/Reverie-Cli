@@ -1,4 +1,4 @@
-﻿"""
+"""
 Command Handler - Process CLI commands with Dreamscape Theme
 
 Handles all commands starting with / with dreamy pink-purple-blue aesthetics
@@ -67,7 +67,6 @@ class CommandHandler:
             'model': self.cmd_model,
             'subagent': self.cmd_subagent,
             'subagents': self.cmd_subagent,
-            'geminicli': self.cmd_geminicli,
             'codex': self.cmd_codex,
             'aihubmix': self.cmd_aihubmix,
             'aihub': self.cmd_aihubmix,
@@ -2037,10 +2036,7 @@ class CommandHandler:
             if action == "browser_profile_backup":
                 payload["include_cache"] = include_cache
         elif operation == "import":
-            if len(tokens) < 2:
-                self._print_browser_command_help()
-                return True
-            file_path = tokens[1]
+            file_path = tokens[1] if len(tokens) >= 2 else ""
             if len(tokens) >= 3:
                 profile = tokens[2]
             payload = {"action": "browser_profile_import", "file_path": file_path, "profile": profile}
@@ -2061,7 +2057,9 @@ class CommandHandler:
             self._print_browser_command_help()
             return True
 
-        tool = BrowserControlerTool({"project_root": str(self._get_project_root())})
+        tool_context = dict(self.app)
+        tool_context.update({"project_root": str(self._get_project_root()), "console": self.console})
+        tool = BrowserControlerTool(tool_context)
         result = tool.execute(**payload)
         is_partial = str(getattr(getattr(result, "status", ""), "value", "")).lower() == "partial"
         if result.success:
@@ -2070,6 +2068,10 @@ class CommandHandler:
                 body = f"{body}\n\nWarning: {result.error}".strip()
         else:
             body = result.error or result.output or "Browser command failed."
+        if operation == "import":
+            color = self.theme.CORAL_SOFT if (not result.success or is_partial) else self.theme.MINT_SOFT
+            self.console.print(f"[{color}]{escape(str(body or ''))}[/{color}]")
+            return True
         title = "Browser Profile Warning" if (not result.success or is_partial) else "Browser Profile"
         accent = self.theme.CORAL_SOFT if (not result.success or is_partial) else self.theme.MINT_SOFT
         self.console.print(Panel(escape(str(body or "")), title=title, border_style=accent))
@@ -2082,7 +2084,7 @@ class CommandHandler:
                     [
                         "/browser runtime",
                         "/browser status [profile]",
-                        "/browser import <storage-state.json|cookies.txt> [profile]",
+                        "/browser import [storage-state.json|cookies.txt] [profile]",
                         "/browser backup [profile] [--no-cache]",
                         "/browser backups [profile]",
                         "/browser restore <profile> <backup_id> confirm",
@@ -5723,7 +5725,6 @@ class CommandHandler:
         """Return a readable model source label."""
         mapping = {
             "standard": "Custom Providers",
-            "geminicli": "Gemini CLI",
             "codex": "Codex",
             "aihubmix": "AIhubMix",
             "nvidia": "NVIDIA",
@@ -6076,298 +6077,6 @@ class CommandHandler:
         if normalized_mode == "computer-controller":
             return self._prepare_computer_controller_nvidia_configuration(config)
         return True
-
-    def cmd_geminicli(self, args: str) -> bool:
-        """Gemini CLI integration command."""
-        raw = args.strip()
-        if not raw:
-            return self._cmd_geminicli_status()
-
-        lowered = raw.lower()
-        if lowered in ("status", "check"):
-            return self._cmd_geminicli_status()
-        if lowered == "login":
-            return self._cmd_geminicli_login()
-        if lowered == "model":
-            return self._cmd_geminicli_model("")
-        if lowered.startswith("model "):
-            return self._cmd_geminicli_model(raw[6:].strip())
-        if lowered == "endpoint":
-            return self._cmd_geminicli_endpoint("")
-        if lowered.startswith("endpoint "):
-            return self._cmd_geminicli_endpoint(raw[9:].strip())
-        if lowered == "project":
-            return self._cmd_geminicli_project("")
-        if lowered.startswith("project "):
-            return self._cmd_geminicli_project(raw[8:].strip())
-
-        self.console.print(
-            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /Geminicli [status|login|model|endpoint][/{self.theme.AMBER_GLOW}]"
-        )
-        return True
-
-    def _cmd_geminicli_status(self) -> bool:
-        """Detect local Gemini CLI credentials and show current Gemini selection."""
-        from ..geminicli import (
-            detect_geminicli_cli_credentials,
-            infer_geminicli_project_id,
-            normalize_geminicli_config,
-            resolve_geminicli_selected_model,
-        )
-
-        config_manager = self.app.get('config_manager')
-        config = config_manager.load() if config_manager else None
-
-        cred = detect_geminicli_cli_credentials(refresh_if_needed=True)
-        self.console.print()
-
-        if cred.get("found"):
-            self.console.print(
-                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Gemini CLI credentials detected.[/{self.theme.MINT_VIBRANT}]"
-            )
-            self.console.print(
-                f"[{self.theme.MINT_SOFT}]Gemini CLI is installed and logged in. Use /Geminicli model to select a model.[/{self.theme.MINT_SOFT}]"
-            )
-            if cred.get("refreshed"):
-                self.console.print(
-                    f"[{self.theme.MINT_SOFT}]Access token was auto-refreshed from local OAuth cache.[/{self.theme.MINT_SOFT}]"
-                )
-            source_file = cred.get("source_file", "")
-            if source_file:
-                self.console.print(
-                    f"[{self.theme.TEXT_DIM}]Credential source: {source_file}[/{self.theme.TEXT_DIM}]"
-                )
-            email = str(cred.get("email", "")).strip()
-            if email:
-                self.console.print(
-                    f"[{self.theme.TEXT_DIM}]Active account: {email}[/{self.theme.TEXT_DIM}]"
-                )
-            expires_at = cred.get("expires_at")
-            if isinstance(expires_at, int) and expires_at > 0:
-                expires_at_text = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(expires_at / 1000))
-                self.console.print(
-                    f"[{self.theme.TEXT_DIM}]Token expiry: {expires_at_text}[/{self.theme.TEXT_DIM}]"
-                )
-        else:
-            self.console.print(
-                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Gemini CLI credentials were not found under ~/.gemini.[/{self.theme.CORAL_SOFT}]"
-            )
-            self.console.print(
-                f"[{self.theme.AMBER_GLOW}]Use /Geminicli login to authenticate, or install Gemini CLI first.[/{self.theme.AMBER_GLOW}]"
-            )
-            if cred.get("errors"):
-                self.console.print(
-                    f"[{self.theme.TEXT_DIM}]Details: {' | '.join(str(x) for x in cred.get('errors', []))}[/{self.theme.TEXT_DIM}]"
-                )
-
-        if config_manager and config:
-            geminicli_cfg = normalize_geminicli_config(getattr(config, "geminicli", {}))
-            selected = resolve_geminicli_selected_model(geminicli_cfg)
-            agent = self.app.get('agent')
-            project_root = self.app.get('project_root') or getattr(agent, 'project_root', None) or Path.cwd()
-            if selected:
-                self.console.print(
-                    f"[{self.theme.BLUE_SOFT}]Current Gemini model:[/{self.theme.BLUE_SOFT}] {selected['display_name']} ({selected['id']})"
-                )
-                context_length = selected.get('context_length', 0)
-                if context_length:
-                    self.console.print(
-                        f"[{self.theme.TEXT_DIM}]Context length: {context_length:,} tokens[/{self.theme.TEXT_DIM}]"
-                    )
-            else:
-                self.console.print(
-                    f"[{self.theme.TEXT_DIM}]Current Gemini model: (none)[/{self.theme.TEXT_DIM}]"
-                )
-
-            model_source = str(getattr(config, "active_model_source", "standard")).lower()
-            self.console.print(
-                f"[{self.theme.BLUE_SOFT}]Active model source:[/{self.theme.BLUE_SOFT}] {self._format_model_source_label(model_source)}"
-            )
-
-            configured_project = str(geminicli_cfg.get("project_id", "")).strip()
-            inferred_project = infer_geminicli_project_id(project_root)
-            if configured_project:
-                self.console.print(
-                    f"[{self.theme.TEXT_DIM}]Gemini project override: {configured_project} (optional)[/{self.theme.TEXT_DIM}]"
-                )
-            elif inferred_project:
-                self.console.print(
-                    f"[{self.theme.TEXT_DIM}]Gemini project override (inferred): {inferred_project} (optional)[/{self.theme.TEXT_DIM}]"
-                )
-            else:
-                self.console.print(
-                    f"[{self.theme.TEXT_DIM}]Gemini project override: (none, personal Google login works without it)[/{self.theme.TEXT_DIM}]"
-                )
-
-            api_url = str(geminicli_cfg.get("api_url", "")).strip()
-            if api_url:
-                self.console.print(
-                    f"[{self.theme.TEXT_DIM}]Gemini API endpoint: {api_url}[/{self.theme.TEXT_DIM}]"
-                )
-            endpoint = str(geminicli_cfg.get("endpoint", "")).strip()
-            if endpoint:
-                self.console.print(
-                    f"[{self.theme.TEXT_DIM}]Endpoint override: {endpoint}[/{self.theme.TEXT_DIM}]"
-                )
-
-        self.console.print()
-        return True
-
-    def _cmd_geminicli_login(self) -> bool:
-        """Validate or refresh local Gemini OAuth credentials."""
-        from ..geminicli import geminicli_oauth_login
-
-        self.console.print()
-        self.console.print(
-            f"[{self.theme.PURPLE_SOFT}]{self.deco.SPARKLE} Validating Gemini OAuth credentials...[/{self.theme.PURPLE_SOFT}]"
-        )
-        self.console.print()
-
-        with self.console.status(f"[{self.theme.PURPLE_SOFT}]Checking local CLI cache...[/{self.theme.PURPLE_SOFT}]"):
-            login_result = geminicli_oauth_login(force_refresh=False)
-
-        if not login_result.get("success"):
-            error_msg = login_result.get("error", "Unknown error")
-            self.console.print(
-                f"[{self.theme.CORAL_VIBRANT}]{self.deco.CROSS} Login failed: {error_msg}[/{self.theme.CORAL_VIBRANT}]"
-            )
-            self.console.print(
-                f"[{self.theme.AMBER_GLOW}]Please run `gemini`, complete OAuth login, then run /Geminicli login again.[/{self.theme.AMBER_GLOW}]"
-            )
-            self.console.print()
-            return True
-
-        if login_result.get("refreshed"):
-            self.console.print(
-                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Gemini OAuth token refreshed successfully.[/{self.theme.MINT_VIBRANT}]"
-            )
-        else:
-            self.console.print(
-                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Gemini OAuth credentials are valid.[/{self.theme.MINT_VIBRANT}]"
-            )
-
-        source_file = str(login_result.get("source_file", "")).strip()
-        if source_file:
-            self.console.print(
-                f"[{self.theme.TEXT_DIM}]Credential source: {source_file}[/{self.theme.TEXT_DIM}]"
-            )
-        email = str(login_result.get("email", "")).strip()
-        if email:
-            self.console.print(
-                f"[{self.theme.TEXT_DIM}]Active account: {email}[/{self.theme.TEXT_DIM}]"
-            )
-        expires_at = login_result.get("expires_at")
-        if isinstance(expires_at, int) and expires_at > 0:
-            expires_at_text = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(expires_at / 1000))
-            self.console.print(
-                f"[{self.theme.TEXT_DIM}]Token expiry: {expires_at_text}[/{self.theme.TEXT_DIM}]"
-            )
-        if login_result.get("errors"):
-            self.console.print(
-                f"[{self.theme.TEXT_DIM}]Notes: {' | '.join(str(x) for x in login_result.get('errors', []))}[/{self.theme.TEXT_DIM}]"
-            )
-        self.console.print(
-            f"[{self.theme.TEXT_DIM}]Use /Geminicli model to select a model. Project override is optional.[/{self.theme.TEXT_DIM}]"
-        )
-        self.console.print()
-        return True
-
-    def _cmd_geminicli_endpoint(self, endpoint_value: str) -> bool:
-        """Configure custom endpoint override for Gemini CLI requests."""
-        from ..geminicli import normalize_geminicli_config
-
-        return self._configure_provider_endpoint(
-            config_attr="geminicli",
-            normalize_config=normalize_geminicli_config,
-            provider_label="Gemini CLI",
-            endpoint_value=endpoint_value,
-        )
-
-    def _cmd_geminicli_project(self, project_value: str) -> bool:
-        """Configure Gemini CLI project id."""
-        from ..geminicli import infer_geminicli_project_id, normalize_geminicli_config
-
-        config_manager = self.app.get('config_manager')
-        if not config_manager:
-            self.console.print(
-                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
-            )
-            return True
-
-        config = config_manager.load()
-        geminicli_cfg = normalize_geminicli_config(getattr(config, "geminicli", {}))
-        agent = self.app.get('agent')
-        project_root = self.app.get('project_root') or getattr(agent, 'project_root', None) or Path.cwd()
-        inferred_project = infer_geminicli_project_id(project_root)
-
-        candidate = str(project_value or "").strip()
-        if not candidate:
-            current_project = str(geminicli_cfg.get("project_id", "")).strip()
-            placeholder = current_project or inferred_project or "(none)"
-            self.console.print(
-                f"[{self.theme.TEXT_DIM}]Current Gemini project id: {placeholder}[/{self.theme.TEXT_DIM}]"
-            )
-            self.console.print(
-                f"[{self.theme.TEXT_DIM}]Use 'clear' to remove stored project id.[/{self.theme.TEXT_DIM}]"
-            )
-            candidate = Prompt.ask(
-                "Gemini project id",
-                default=current_project or inferred_project
-            ).strip()
-
-        if candidate.lower() in ("clear", "none", "off", "default"):
-            candidate = ""
-
-        geminicli_cfg["project_id"] = candidate
-        config.geminicli = geminicli_cfg
-        config_manager.save(config)
-
-        self.console.print()
-        if candidate:
-            self.console.print(
-                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Gemini project id set to: {candidate}[/{self.theme.MINT_VIBRANT}]"
-            )
-        else:
-            self.console.print(
-                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Gemini project id cleared.[/{self.theme.MINT_VIBRANT}]"
-            )
-
-        if self.app.get('reinit_agent'):
-            self.app['reinit_agent']()
-
-        self.console.print()
-        return True
-
-    def _cmd_geminicli_model(self, model_query: str) -> bool:
-        """Select Gemini CLI model from dedicated catalog."""
-        from ..geminicli import (
-            detect_geminicli_cli_credentials,
-            get_geminicli_model_catalog,
-            normalize_geminicli_config,
-        )
-
-        cred = detect_geminicli_cli_credentials(refresh_if_needed=True)
-        if not cred.get("found"):
-            self.console.print(
-                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Gemini CLI credentials are unavailable.[/{self.theme.CORAL_SOFT}]"
-            )
-            self.console.print(
-                f"[{self.theme.AMBER_GLOW}]Run /Geminicli first after logging into Gemini CLI.[/{self.theme.AMBER_GLOW}]"
-            )
-            if cred.get("errors"):
-                self.console.print(
-                    f"[{self.theme.TEXT_DIM}]Details: {' | '.join(str(x) for x in cred.get('errors', []))}[/{self.theme.TEXT_DIM}]"
-                )
-            return True
-
-        return self._select_external_provider_model(
-            config_attr="geminicli",
-            normalize_config=normalize_geminicli_config,
-            catalog=get_geminicli_model_catalog(),
-            provider_label="Gemini CLI",
-            active_source="geminicli",
-            model_query=model_query,
-        )
 
     def cmd_codex(self, args: str) -> bool:
         """Codex CLI integration command."""
@@ -12081,12 +11790,7 @@ class CommandHandler:
                     except Exception:
                         pass
 
-                    self._show_activity_event(
-                        "Context Engine",
-                        str(result.output or "Context compression completed."),
-                        status="success",
-                        detail=detail,
-                    )
+                    self.console.print(f"[{self.theme.MINT_SOFT}]{escape(str(result.output or 'Context compression completed.'))}[/{self.theme.MINT_SOFT}]")
                 else:
                     self._show_activity_event(
                         "Context Engine",

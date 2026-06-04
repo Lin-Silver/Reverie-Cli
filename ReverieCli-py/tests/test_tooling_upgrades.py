@@ -16,6 +16,7 @@ from reverie.harness import (
     build_harness_prompt_guidance,
     summarize_prompt_harness_history,
 )
+from reverie.mcp import BaseMCPClient, MCP_STARTUP_DISCOVERY_TIMEOUT_MS, get_effective_mcp_servers
 from reverie.skills_manager import SkillsManager
 from reverie.tools import browser_controler as browser_controler_module
 from reverie.tools.mcp_resource_tools import ListMcpResourcesTool, ReadMcpResourceTool
@@ -118,6 +119,16 @@ class DummyToolExecutor:
                 }
             )
         return records
+
+
+class FailingDiscoveryMcpClient(BaseMCPClient):
+    def __init__(self) -> None:
+        super().__init__("slow", {"type": "http", "httpUrl": "http://127.0.0.1:9/mcp"})
+        self.timeouts: list[int | None] = []
+
+    def request(self, method, params=None, *, timeout_ms=None, expect_response=True):
+        self.timeouts.append(timeout_ms)
+        raise RuntimeError("unavailable")
 
 
 class DummyAgent:
@@ -345,6 +356,40 @@ def test_browser_controler_exposes_window_state_actions() -> None:
     assert not BrowserControlerTool._is_browser_process("vmware.exe")
 
 
+def test_mcp_startup_discovery_skips_servers_outside_active_mode() -> None:
+    config = {
+        "mcpServers": {
+            "ashfox": {
+                "enabled": True,
+                "type": "http",
+                "httpUrl": "http://127.0.0.1:8787/mcp",
+                "includeModes": ["reverie-gamer"],
+            },
+            "shared": {
+                "enabled": True,
+                "type": "http",
+                "httpUrl": "http://127.0.0.1:8788/mcp",
+            },
+        }
+    }
+
+    assert list(get_effective_mcp_servers(config, mode="reverie")) == ["shared"]
+    assert list(get_effective_mcp_servers(config, mode="gamer")) == ["ashfox", "shared"]
+
+
+def test_mcp_failed_startup_discovery_uses_200ms_limit_and_failure_cache() -> None:
+    client = FailingDiscoveryMcpClient()
+
+    first = client.discover(timeout_ms=MCP_STARTUP_DISCOVERY_TIMEOUT_MS)
+    second = client.discover(timeout_ms=MCP_STARTUP_DISCOVERY_TIMEOUT_MS)
+
+    assert MCP_STARTUP_DISCOVERY_TIMEOUT_MS == 200
+    assert first["tools"] == []
+    assert "unavailable" in first["error"]
+    assert second == first
+    assert client.timeouts == [200]
+
+
 def test_browser_controler_exposes_structured_devtools_actions() -> None:
     parameters = BrowserControlerTool.parameters["properties"]
     actions = parameters["action"]["enum"]
@@ -509,6 +554,29 @@ def test_browser_session_termination_only_stops_verified_embedded_process(tmp_pa
     assert len(taskkill_calls) == 1
 
 
+def test_failed_browser_launch_cleanup_only_stops_verified_embedded_process(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("REVERIE_APP_ROOT", str(tmp_path / "app"))
+    tool = BrowserControlerTool({"project_root": tmp_path})
+    embedded = tool.runtime_dir / "ms-playwright" / "chromium-1208" / "chrome-win64" / "chrome.exe"
+    profile = tool._embedded_browser_profile_dir("failed-start")
+    process = SimpleNamespace(pid=321)
+    calls = []
+
+    def fake_terminate(session):
+        calls.append(session)
+        return {"terminated": True, "already_closed": False, "reason": "", "process_id": 321}
+
+    monkeypatch.setattr(tool, "_terminate_embedded_browser_session_process", fake_terminate)
+    result = tool._cleanup_failed_embedded_browser_launch(
+        process=process,
+        executable=embedded,
+        profile_dir=profile,
+    )
+
+    assert result == "stopped the verified isolated Chromium process tree"
+    assert calls == [{"process_id": 321, "browser": str(embedded), "profile_dir": str(profile)}]
+
+
 def test_browser_controler_resolves_only_embedded_chromium_runtime(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("REVERIE_APP_ROOT", str(tmp_path / "app"))
     tool = BrowserControlerTool({"project_root": tmp_path})
@@ -521,6 +589,24 @@ def test_browser_controler_resolves_only_embedded_chromium_runtime(tmp_path: Pat
     assert tool._resolve_browser_executable(browser="edge", browser_path="") == embedded.resolve()
     assert tool._resolve_browser_executable(browser="edge", browser_path=str(external)) is None
     assert tool._resolve_browser_executable(browser="edge", browser_path=str(embedded)) == embedded.resolve()
+
+
+def test_browser_controler_updates_embedded_runtime_from_newer_bundle(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("REVERIE_APP_ROOT", str(tmp_path / "app"))
+    tool = BrowserControlerTool({"project_root": tmp_path})
+    old_runtime = tool.runtime_dir / "ms-playwright" / "chromium-1208" / "chrome-win64" / "chrome.exe"
+    old_runtime.parent.mkdir(parents=True)
+    old_runtime.write_bytes(b"old")
+    bundle = tmp_path / "bundle" / "ms-playwright"
+    bundled_runtime = bundle / "chromium-1223" / "chrome-win64" / "chrome.exe"
+    bundled_runtime.parent.mkdir(parents=True)
+    bundled_runtime.write_bytes(b"new")
+    monkeypatch.setattr(tool, "_bundled_browser_resource_dir", lambda: bundle)
+
+    resolved = tool._resolve_browser_executable(browser="chromium", browser_path="")
+
+    assert resolved == (tool.runtime_dir / "ms-playwright" / "chromium-1223" / "chrome-win64" / "chrome.exe").resolve()
+    assert resolved.read_bytes() == b"new"
 
 
 def test_browser_controler_profile_backup_and_status(tmp_path: Path, monkeypatch) -> None:
@@ -584,6 +670,80 @@ def test_browser_profile_import_accepts_storage_state(tmp_path: Path, monkeypatc
     imported = json.loads(latest.read_text(encoding="utf-8"))
     assert imported["cookies"][0]["name"] == "sid"
     assert imported["origins"][0]["localStorage"][0]["name"] == "token"
+
+
+def test_browser_profile_import_picker_accepts_only_user_selected_export_copy(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("REVERIE_APP_ROOT", str(tmp_path / "app"))
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    exported_state = tmp_path / "Downloads" / "browser-storage-state.json"
+    exported_state.parent.mkdir()
+    exported_state.write_text(
+        json.dumps(
+            {
+                "cookies": [
+                    {
+                        "name": "sid",
+                        "value": "selected",
+                        "domain": ".example.test",
+                        "path": "/",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    tool = BrowserControlerTool({"project_root": project_root})
+    monkeypatch.setattr(
+        tool,
+        "_select_browser_import_file",
+        lambda _profile: {"path": str(exported_state), "cancelled": False, "authorization": "once"},
+    )
+
+    result = tool.execute(action="browser_profile_import", profile="selected")
+
+    assert result.success is True
+    assert result.data["selected_by_user"] is True
+    assert Path(result.data["source_copy"]).is_relative_to(tool.output_dir)
+    assert Path(result.data["storage_state"]).is_relative_to(tool.output_dir)
+    assert "\n" not in result.output
+
+
+def test_browser_profile_import_refuses_real_browser_profile_paths(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("REVERIE_APP_ROOT", str(tmp_path / "app"))
+    project_root = tmp_path / "project"
+    profile_export = project_root / "Microsoft" / "Edge" / "User Data" / "Default" / "cookies.json"
+    profile_export.parent.mkdir(parents=True)
+    profile_export.write_text("[]", encoding="utf-8")
+
+    tool = BrowserControlerTool({"project_root": project_root})
+    result = tool.execute(action="browser_profile_import", file_path=str(profile_export), profile="default")
+
+    assert result.success is False
+    assert "real browser profile" in str(result.error)
+
+
+def test_browser_import_picker_never_scans_a_real_browser_profile_workspace(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("REVERIE_APP_ROOT", str(tmp_path / "app"))
+    profile_root = tmp_path / "Microsoft" / "Edge" / "User Data"
+    profile_root.mkdir(parents=True)
+    (profile_root / "cookies.json").write_text("[]", encoding="utf-8")
+    tool = BrowserControlerTool({"project_root": profile_root})
+
+    assert tool._browser_import_candidates() == []
+
+
+def test_browser_import_always_allow_consent_stays_under_browser_root(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("REVERIE_APP_ROOT", str(tmp_path / "app"))
+    tool = BrowserControlerTool({"project_root": tmp_path / "project"})
+
+    tool._set_browser_import_always_allowed(True)
+
+    assert tool._browser_import_always_allowed() is True
+    assert tool.import_consent_path.is_relative_to(tool.output_dir)
+    consent = json.loads(tool.import_consent_path.read_text(encoding="utf-8"))
+    assert consent["scope"] == "selected exported files only"
 
 
 def test_browser_command_manages_embedded_profile_backups(tmp_path: Path, monkeypatch) -> None:

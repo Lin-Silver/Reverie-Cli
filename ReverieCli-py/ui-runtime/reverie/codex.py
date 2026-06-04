@@ -27,10 +27,10 @@ CODEX_DEFAULT_RESPONSE_ENDPOINT = "/responses"
 CODEX_DEFAULT_MODELS_ENDPOINT = "/models"
 CODEX_TOKEN_URL = "https://auth.openai.com/oauth/token"
 CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
-CODEX_CLIENT_VERSION = "0.115.0"
+CODEX_CLIENT_VERSION = "0.137.0"
 CODEX_USER_AGENT = f"codex_cli_rs/{CODEX_CLIENT_VERSION} (Windows NT 10.0; Win64; x64) Reverie/{__version__}"
 CODEX_DEFAULT_REASONING_EFFORT = "medium"
-CODEX_DEFAULT_MAX_CONTEXT_TOKENS = 258_400
+CODEX_DEFAULT_MAX_CONTEXT_TOKENS = 272_000
 _CODEX_CHATGPT_HOSTS = {"chatgpt.com", "chat.openai.com"}
 _CODEX_LOCAL_SOURCE_MODELS_RELATIVE_PATHS = (
     ("references", "codex", "codex-rs", "models-manager", "models.json"),
@@ -81,121 +81,48 @@ _CODEX_ALLOWED_MODELS = [
         "id": "gpt-5.5",
         "display_name": "GPT-5.5",
         "description": "Frontier model for complex coding, research, and real-world work.",
-        "context_length": 258_400,
-        "reasoning_levels": ["low", "medium", "high", "xhigh"],
-        "visibility": "list",
-    },
-    {
-        "id": "gpt-5.3-codex",
-        "display_name": "GPT-5.3-Codex",
-        "description": "Latest frontier agentic coding model.",
-        "context_length": 258_400,
+        "context_length": 272_000,
         "reasoning_levels": ["low", "medium", "high", "xhigh"],
         "visibility": "list",
     },
     {
         "id": "gpt-5.4",
         "display_name": "GPT-5.4",
-        "description": "Latest frontier agentic coding model.",
-        "context_length": 258_400,
+        "description": "Strong model for everyday coding.",
+        "context_length": 272_000,
         "reasoning_levels": ["low", "medium", "high", "xhigh"],
         "visibility": "list",
     },
     {
         "id": "gpt-5.4-mini",
         "display_name": "GPT-5.4-Mini",
-        "description": "Smaller frontier agentic coding model.",
-        "context_length": 258_400,
+        "description": "Small, fast, and cost-efficient model for simpler coding tasks.",
+        "context_length": 272_000,
         "reasoning_levels": ["low", "medium", "high", "xhigh"],
         "visibility": "list",
-        "insert_after_id": "gpt-5.4",
     },
     {
-        "id": "gpt-5.2-codex",
-        "display_name": "GPT-5.2-Codex",
-        "description": "Frontier agentic coding model.",
-        "context_length": 258_400,
+        "id": "gpt-5.3-codex",
+        "display_name": "GPT-5.3-Codex",
+        "description": "Coding-optimized model.",
+        "context_length": 272_000,
         "reasoning_levels": ["low", "medium", "high", "xhigh"],
-        "visibility": "hide",
-    },
-    {
-        "id": "gpt-5.1-codex-max",
-        "display_name": "GPT-5.1-Codex-Max",
-        "description": "Codex-optimized model for deep and fast reasoning.",
-        "context_length": 258_400,
-        "reasoning_levels": ["low", "medium", "high", "xhigh"],
-        "visibility": "hide",
+        "visibility": "list",
     },
     {
         "id": "gpt-5.2",
         "display_name": "GPT-5.2",
         "description": "Optimized for professional work and long-running agents.",
-        "context_length": 258_400,
+        "context_length": 272_000,
         "reasoning_levels": ["low", "medium", "high", "xhigh"],
         "visibility": "list",
     },
     {
-        "id": "gpt-5.1-codex",
-        "display_name": "GPT-5.1-Codex",
-        "description": "Frontier agentic coding model.",
-        "context_length": 258_400,
-        "reasoning_levels": ["low", "medium", "high"],
-        "visibility": "hide",
-    },
-    {
-        "id": "gpt-5.1",
-        "display_name": "GPT-5.1",
-        "description": "General-purpose GPT-5.1 model.",
-        "context_length": 258_400,
-        "reasoning_levels": ["low", "medium", "high"],
-        "visibility": "hide",
-    },
-    {
-        "id": "gpt-5-codex",
-        "display_name": "GPT-5-Codex",
-        "description": "GPT-5 Codex compatibility model.",
-        "context_length": 258_400,
-        "reasoning_levels": ["low", "medium", "high"],
-        "visibility": "hide",
-    },
-    {
-        "id": "gpt-5",
-        "display_name": "GPT-5",
-        "description": "GPT-5 compatibility model.",
-        "context_length": 258_400,
-        "reasoning_levels": ["minimal", "low", "medium", "high"],
-        "visibility": "hide",
-    },
-    {
-        "id": "gpt-oss-120b",
-        "display_name": "GPT-OSS-120B",
-        "description": "Open-weight GPT-OSS 120B model.",
-        "context_length": 128_000,
-        "reasoning_levels": ["low", "medium", "high"],
-        "visibility": "hide",
-    },
-    {
-        "id": "gpt-oss-20b",
-        "display_name": "GPT-OSS-20B",
-        "description": "Open-weight GPT-OSS 20B model.",
-        "context_length": 128_000,
-        "reasoning_levels": ["low", "medium", "high"],
-        "visibility": "hide",
-    },
-    {
-        "id": "gpt-5.1-codex-mini",
-        "display_name": "GPT-5.1-Codex-Mini",
-        "description": "Optimized for codex. Cheaper, faster, but less capable.",
-        "context_length": 258_400,
-        "reasoning_levels": ["medium", "high"],
-        "visibility": "hide",
-    },
-    {
-        "id": "gpt-5-codex-mini",
-        "display_name": "GPT-5-Codex-Mini",
-        "description": "GPT-5 Codex mini compatibility model.",
-        "context_length": 258_400,
-        "reasoning_levels": ["medium", "high"],
+        "id": "codex-auto-review",
+        "display_name": "Codex Auto Review",
+        "description": "Automatic approval review model for Codex.",
+        "context_length": 272_000,
+        "reasoning_levels": ["low", "medium", "high", "xhigh"],
         "visibility": "hide",
     },
 ]
@@ -650,10 +577,10 @@ def get_codex_model_catalog() -> List[Dict[str, Any]]:
         catalog.append(
             {
                 "id": item["id"],
-                "display_name": _safe_string(cached_item.get("display_name", item["display_name"])) or item["display_name"],
-                "description": _safe_string(cached_item.get("description", item.get("description", ""))) or item.get("description", ""),
-                "context_length": cached_context_length or metadata_context_length,
-                "visibility": _safe_string(cached_item.get("visibility", item.get("visibility", ""))),
+                "display_name": _safe_string(item.get("display_name", cached_item.get("display_name", ""))) or item["id"],
+                "description": _safe_string(item.get("description", cached_item.get("description", ""))),
+                "context_length": metadata_context_length or cached_context_length,
+                "visibility": _safe_string(item.get("visibility", cached_item.get("visibility", ""))),
                 "reasoning_levels": merged_levels or metadata_levels,
             }
         )

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, Iterable, Optional
 import json
@@ -359,18 +360,18 @@ DEFAULT_RUNTIME_PLUGIN_CATALOG: tuple[RuntimePluginSpec, ...] = (
         plugin_id="blender",
         display_name="Blender",
         runtime_family="dcc",
-        description="Authoring/runtime-adjacent DCC for mesh processing, baking, export automation, and plugin-local MMD import workflows.",
+        description="Authoring/runtime-adjacent DCC for mesh processing, baking, export automation, plugin-local MMD import workflows, and optional plugin-managed Blender MCP.",
         source_repo_hint="https://projects.blender.org/blender/blender",
         delivery="sdk-runtime",
-        capabilities=("mesh", "rigging", "bake", "export", "mmd", "pmx", "pmd", "vmd", "vpd"),
+        capabilities=("mesh", "rigging", "bake", "export", "mmd", "pmx", "pmd", "vmd", "vpd", "mcp", "blender-mcp"),
         entry_candidates={
             "windows": ("runtime/blender.exe", "runtime/blender/blender.exe", "runtime/**/blender.exe", "blender.exe", "Blender.exe", "bin/blender.exe"),
             "linux": ("runtime/blender", "runtime/blender/blender", "runtime/**/blender", "blender", "bin/blender"),
             "darwin": ("runtime/Blender.app", "runtime/**/Blender.app", "Blender.app", "Blender*.app"),
         },
         sdk_download_page="https://www.blender.org/download/",
-        sdk_archive_hint="Unpack Blender Portable/ZIP into `.reverie/plugins/blender/runtime/`; the official plugin can also clone MMD Tools into `.reverie/plugins/blender/addons/`.",
-        sdk_install_hint="Expected entry: `.reverie/plugins/blender/runtime/blender.exe`; optional MMD add-on checkout: `.reverie/plugins/blender/addons/blender_mmd_tools/`.",
+        sdk_archive_hint="Unpack Blender Portable/ZIP into `.reverie/plugins/blender/runtime/`; the official plugin can also clone MMD Tools and deploy Blender MCP into plugin-local folders.",
+        sdk_install_hint="Expected entry: `.reverie/plugins/blender/runtime/blender.exe`; optional MMD add-on checkout: `.reverie/plugins/blender/addons/blender_mmd_tools/`; Blender MCP source lives under `.reverie/plugins/blender/mcp/blender-mcp/`.",
         bundled_archive_candidates={
             "windows": ("blender-5.1.1-windows-x64.zip", "blender-*-windows-x64.zip", "plugins/blender/*.zip"),
         },
@@ -410,6 +411,8 @@ class RuntimePluginManager:
     PROTOCOL_TIMEOUT_SECONDS = 30.0
     TOOL_TIMEOUT_SECONDS = 1200.0
     BUILD_TIMEOUT_SECONDS = 1800.0
+    PROTOCOL_CACHE_VERSION = 1
+    PROTOCOL_PROBE_WORKERS = 8
 
     def __init__(self, app_root: Path, *, catalog: Iterable[RuntimePluginSpec] | None = None, source_root: Path | None = None) -> None:
         self.app_root = Path(app_root).resolve()
@@ -426,6 +429,8 @@ class RuntimePluginManager:
         self._tool_signature = ""
         self._generation = 0
         self._template_catalog: tuple[RuntimePluginTemplateRecord, ...] = tuple()
+        self.protocol_cache_path = self.app_root / ".reverie" / "runtime-plugin-protocol-cache.json"
+        self._protocol_cache = self._load_protocol_cache()
 
     def _resolve_source_root(self) -> Path:
         """Return the editable source-plugin tree for the current runtime."""
@@ -455,7 +460,7 @@ class RuntimePluginManager:
     def get_snapshot(self, *, force_refresh: bool = False) -> RuntimePluginSnapshot:
         """Return the cached scan result, rescanning when requested."""
         if force_refresh or self._snapshot is None:
-            return self.scan()
+            return self.scan(force_protocol_refresh=force_refresh)
         return self._snapshot
 
     def get_generation(self) -> int:
@@ -465,7 +470,7 @@ class RuntimePluginManager:
     def get_tool_definitions(self, *, force_refresh: bool = False) -> list[dict[str, Any]]:
         """Return dynamic tool metadata synthesized from `-RC` plugin handshakes."""
         if force_refresh or self._snapshot is None:
-            self.scan()
+            self.scan(force_protocol_refresh=force_refresh)
         if not self.AI_TOOL_EXPOSURE_ENABLED:
             return []
         return [dict(item) for item in self._tool_catalog]
@@ -489,7 +494,7 @@ class RuntimePluginManager:
                 return record
         return None
 
-    def scan(self) -> RuntimePluginSnapshot:
+    def scan(self, *, force_protocol_refresh: bool = False) -> RuntimePluginSnapshot:
         """Rescan the install root and rebuild the runtime plugin snapshot."""
         records_by_id: dict[str, RuntimePluginRecord] = {}
         if self.install_root.exists():
@@ -527,7 +532,7 @@ class RuntimePluginManager:
             records_by_id[record.plugin_id] = record
 
         base_records = tuple(sorted(records_by_id.values(), key=self._sort_key))
-        records = tuple(self._attach_protocol(record) for record in base_records)
+        records = self._attach_protocol_records(base_records, force_refresh=force_protocol_refresh)
         snapshot = RuntimePluginSnapshot(
             install_root=self.install_root,
             catalog_root=self.catalog_root,
@@ -538,6 +543,134 @@ class RuntimePluginManager:
         self._snapshot = snapshot
         self._rebuild_tool_catalog(records)
         return snapshot
+
+    def _load_protocol_cache(self) -> dict[str, Any]:
+        try:
+            payload = json.loads(self.protocol_cache_path.read_text(encoding="utf-8"))
+            if isinstance(payload, dict) and int(payload.get("version", 0) or 0) == self.PROTOCOL_CACHE_VERSION:
+                entries = payload.get("entries")
+                if isinstance(entries, dict):
+                    return {"version": self.PROTOCOL_CACHE_VERSION, "entries": dict(entries)}
+        except Exception:
+            pass
+        return {"version": self.PROTOCOL_CACHE_VERSION, "entries": {}}
+
+    def _save_protocol_cache(self) -> None:
+        try:
+            self.protocol_cache_path.parent.mkdir(parents=True, exist_ok=True)
+            temp_path = self.protocol_cache_path.with_suffix(self.protocol_cache_path.suffix + ".tmp")
+            temp_path.write_text(json.dumps(self._protocol_cache, ensure_ascii=False, indent=2), encoding="utf-8")
+            temp_path.replace(self.protocol_cache_path)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _protocol_path_fingerprint(path: Optional[Path]) -> dict[str, Any]:
+        if path is None:
+            return {}
+        try:
+            resolved = path.resolve(strict=False)
+            stat = resolved.stat()
+            return {
+                "path": str(resolved),
+                "size": int(stat.st_size),
+                "mtime_ns": int(stat.st_mtime_ns),
+            }
+        except Exception:
+            return {"path": str(path.resolve(strict=False))}
+
+    def _protocol_record_fingerprint(self, record: RuntimePluginRecord) -> dict[str, Any]:
+        return {
+            "entry": self._protocol_path_fingerprint(record.entry_path),
+            "compiled_entry": self._protocol_path_fingerprint(record.compiled_entry_path),
+            "source_entry": self._protocol_path_fingerprint(record.source_entry_path),
+            "manifest": self._protocol_path_fingerprint(record.manifest_path),
+        }
+
+    def _cached_protocol_probe(self, record: RuntimePluginRecord) -> Optional[dict[str, Any]]:
+        entries = self._protocol_cache.get("entries")
+        cached = entries.get(record.plugin_id) if isinstance(entries, dict) else None
+        if not isinstance(cached, dict) or cached.get("fingerprint") != self._protocol_record_fingerprint(record):
+            return None
+        probe = cached.get("probe")
+        if not isinstance(probe, dict):
+            return None
+        protocol_payload = probe.get("protocol")
+        protocol = None
+        if isinstance(protocol_payload, dict):
+            protocol = normalize_runtime_handshake(
+                protocol_payload,
+                fallback_plugin_id=record.plugin_id,
+                fallback_display_name=record.display_name,
+                fallback_runtime_family=record.runtime_family,
+            )
+            if protocol is None:
+                return None
+        return {
+            "status": str(probe.get("status", "unsupported") or "unsupported"),
+            "error": str(probe.get("error", "") or ""),
+            "protocol": protocol,
+        }
+
+    def _cache_protocol_probe(self, record: RuntimePluginRecord, probe: dict[str, Any]) -> None:
+        entries = self._protocol_cache.setdefault("entries", {})
+        if not isinstance(entries, dict):
+            entries = {}
+            self._protocol_cache["entries"] = entries
+        protocol = probe.get("protocol")
+        entries[record.plugin_id] = {
+            "fingerprint": self._protocol_record_fingerprint(record),
+            "probe": {
+                "status": str(probe.get("status", "unsupported") or "unsupported"),
+                "error": str(probe.get("error", "") or ""),
+                "protocol": asdict(protocol) if isinstance(protocol, RuntimePluginHandshake) else None,
+            },
+        }
+
+    def _attach_protocol_records(
+        self,
+        records: tuple[RuntimePluginRecord, ...],
+        *,
+        force_refresh: bool = False,
+    ) -> tuple[RuntimePluginRecord, ...]:
+        attached: list[Optional[RuntimePluginRecord]] = [None] * len(records)
+        pending: list[tuple[int, RuntimePluginRecord]] = []
+        for index, record in enumerate(records):
+            if not record.is_ready or record.entry_path is None or (
+                record.delivery_label == "sdk-runtime" and record.manifest_path is None
+            ):
+                attached[index] = self._attach_protocol(record)
+                continue
+            cached_probe = None if force_refresh else self._cached_protocol_probe(record)
+            if cached_probe is not None:
+                attached[index] = self._attach_protocol_probe(record, cached_probe)
+            else:
+                pending.append((index, record))
+
+        if pending:
+            workers = max(1, min(self.PROTOCOL_PROBE_WORKERS, len(pending)))
+            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="reverie-plugin-probe") as executor:
+                futures = {
+                    executor.submit(self._probe_runtime_protocol, record): (index, record)
+                    for index, record in pending
+                }
+                for future in as_completed(futures):
+                    index, record = futures[future]
+                    try:
+                        probe = future.result()
+                    except Exception as exc:
+                        probe = {"status": "error", "error": str(exc), "protocol": None}
+                    attached[index] = self._attach_protocol_probe(record, probe)
+                    self._cache_protocol_probe(record, probe)
+            current_ids = {record.plugin_id for record in records}
+            entries = self._protocol_cache.get("entries")
+            if isinstance(entries, dict):
+                self._protocol_cache["entries"] = {
+                    plugin_id: payload for plugin_id, payload in entries.items() if plugin_id in current_ids
+                }
+            self._save_protocol_cache()
+
+        return tuple(record for record in attached if isinstance(record, RuntimePluginRecord))
 
     def get_status_summary(self, *, force_refresh: bool = False) -> dict[str, Any]:
         """Build a small summary payload for UI surfaces."""
@@ -1182,7 +1315,7 @@ class RuntimePluginManager:
             "- Plugins provide portable, plugin-local SDK/runtime environments under the app data `.reverie/plugins` directory.",
             "- Protocol-ready plugins expose `rc_<plugin>_<command>` tools directly to the model when their command metadata allows the active mode.",
             "- Use plugin tools for environment deployment, executable discovery, software launch, and runtime execution; use built-in authoring tools for planning and content generation.",
-            "- The official Blender plugin embeds Blender Portable in its plugin executable; call `rc_blender_ensure_runtime` before `rc_blender_run_script` when direct Blender execution is needed, and use `rc_blender_ensure_mmd_tools` / `rc_blender_import_mmd_model` for PMD/PMX/VMD/VPD MMD assets.",
+            "- The official Blender plugin embeds Blender Portable in its plugin executable; call `rc_blender_ensure_runtime` before `rc_blender_run_script` when direct Blender execution is needed, use `rc_blender_ensure_mmd_tools` / `rc_blender_import_mmd_model` for PMD/PMX/VMD/VPD MMD assets, and use `rc_blender_mcp_install` / `rc_blender_mcp_start` / `rc_blender_mcp_info` for optional plugin-managed Blender MCP. Only treat Blender MCP as prompt-available after its MCP tools/list discovery succeeds.",
         ]
         if not snapshot.records:
             lines.append("- No plugin directories are currently detected under `.reverie/plugins`.")
@@ -1441,7 +1574,9 @@ class RuntimePluginManager:
         if record.delivery_label == "sdk-runtime" and record.manifest_path is None:
             return replace(record, protocol_status="sdk-only", protocol_error="", protocol=None)
 
-        probe = self._probe_runtime_protocol(record)
+        return self._attach_protocol_probe(record, self._probe_runtime_protocol(record))
+
+    def _attach_protocol_probe(self, record: RuntimePluginRecord, probe: dict[str, Any]) -> RuntimePluginRecord:
         protocol = probe.get("protocol")
         display_name = record.display_name
         runtime_family = record.runtime_family

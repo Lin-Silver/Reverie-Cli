@@ -1221,7 +1221,6 @@ class ReverieInterface:
             "openai-sdk": "OpenAI",
             "request": "Relay",
             "anthropic": "Anthropic",
-            "gemini-cli": "Gemini",
             "codex": "Codex",
             "aihubmix": "AIhubMix",
             "nvidia": "NVIDIA",
@@ -1229,7 +1228,6 @@ class ReverieInterface:
         }
         source_labels = {
             "standard": "config.json",
-            "geminicli": "Gemini CLI",
             "codex": "Codex",
             "aihubmix": "AIhubMix",
             "nvidia": "NVIDIA",
@@ -1984,6 +1982,22 @@ class ReverieInterface:
             if self._append_active_tool_progress(event):
                 self._refresh_streaming_footer()
             return
+        if bool(event.get("compact")):
+            self._captured_activity_events.append(
+                {
+                    "category": str(event.get("category", "") or "Activity"),
+                    "message": str(event.get("message", "") or "").strip(),
+                    "status": str(event.get("status", "") or "info"),
+                    "detail": "",
+                    "meta": "",
+                }
+            )
+            if not self.headless:
+                self.display.show_status(
+                    str(event.get("message", "") or "").strip(),
+                    status=str(event.get("status", "") or "info"),
+                )
+            return
         self._show_activity_event(
             str(event.get("category", "") or "Activity"),
             str(event.get("message", "") or "").strip(),
@@ -2002,7 +2016,7 @@ class ReverieInterface:
             or "the current model"
         ).strip()
 
-        if active_source in {"geminicli", "codex"}:
+        if active_source == "codex":
             return True, ""
 
         if active_source in {"standard", "aihubmix"}:
@@ -3266,6 +3280,7 @@ class ReverieInterface:
     ) -> None:
         config = self._clone_config(config_override) if config_override is not None else self._load_active_runtime_config()
         self.mcp_runtime.set_project_root(self.project_root)
+        self.mcp_runtime.set_active_mode(config.mode)
         scope_changed = self._ensure_runtime_services_for_config(config)
         if normalize_mode(config.mode) == "computer-controller":
             runtime_nvidia = build_nvidia_computer_controller_runtime_model_data(getattr(config, "nvidia", {}))

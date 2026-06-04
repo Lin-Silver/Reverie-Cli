@@ -20,11 +20,6 @@ import shutil
 import logging
 
 from .security_utils import write_json_secure
-from .geminicli import (
-    build_geminicli_runtime_model_data,
-    default_geminicli_config,
-    normalize_geminicli_config,
-)
 from .codex import (
     build_codex_runtime_model_data,
     default_codex_config,
@@ -55,7 +50,7 @@ from .modelscope import (
 from .modes import normalize_mode
 from .version import CONFIG_VERSION, __version__
 
-EXTERNAL_MODEL_SOURCES = ("geminicli", "codex", "aihubmix", "nvidia", "modelscope")
+EXTERNAL_MODEL_SOURCES = ("codex", "aihubmix", "nvidia", "modelscope")
 SUPPORTED_ACTIVE_MODEL_SOURCES = ("standard",) + EXTERNAL_MODEL_SOURCES
 SUPPORTED_TOOL_OUTPUT_STYLES = ("compact", "condensed", "full")
 SUPPORTED_THINKING_OUTPUT_STYLES = ("hidden", "compact", "full")
@@ -600,13 +595,13 @@ def get_app_root() -> Path:
     try:
         source_root = Path(__file__).resolve().parent.parent
         repo_root = source_root
-        if source_root.name.lower() == "ui-runtime" and source_root.parent.name.lower() == "reveriecli-py":
-            repo_root = source_root.parent.parent
+        if source_root.name.lower() == "reveriecli-py" and (source_root.parent / ".git").exists():
+            repo_root = source_root.parent
         is_source_checkout = (
             (source_root / "reverie").exists()
             and (
                 (source_root / ".git").exists()
-                or (repo_root / ".git").exists()
+                or (source_root.parent / ".git").exists()
                 or (source_root / "setup.py").exists()
                 or (source_root / "pyproject.toml").exists()
             )
@@ -835,7 +830,7 @@ class Config:
     """Main configuration"""
     models: List[ModelConfig] = field(default_factory=list)
     active_model_index: int = 0
-    active_model_source: str = "standard"  # standard | geminicli | codex | aihubmix | nvidia | modelscope
+    active_model_source: str = "standard"  # standard | codex | aihubmix | nvidia | modelscope
     mode: str = "reverie"
     theme: str = "default"
     max_context_tokens: int = 128000
@@ -857,7 +852,6 @@ class Config:
     
     # Text-to-image settings
     text_to_image: Dict[str, Any] = field(default_factory=default_text_to_image_config)
-    geminicli: Dict[str, Any] = field(default_factory=dict)
     codex: Dict[str, Any] = field(default_factory=dict)
     aihubmix: Dict[str, Any] = field(default_factory=default_aihubmix_config)
     nvidia: Dict[str, Any] = field(default_factory=default_nvidia_config)
@@ -897,11 +891,6 @@ class Config:
             if runtime_nvidia_model:
                 return ModelConfig.from_dict(runtime_nvidia_model)
             return None
-
-        if source == "geminicli":
-            runtime_geminicli_model = build_geminicli_runtime_model_data(self.geminicli)
-            if runtime_geminicli_model:
-                return ModelConfig.from_dict(runtime_geminicli_model)
 
         if source == "codex":
             runtime_codex_model = build_codex_runtime_model_data(self.codex)
@@ -954,7 +943,6 @@ class Config:
         text_to_image.pop('model_paths', None)
         text_to_image.pop('default_model_index', None)
         tti_models = text_to_image['models']
-        geminicli = normalize_geminicli_config(self.geminicli)
         codex = normalize_codex_config(self.codex)
         aihubmix = normalize_aihubmix_config(self.aihubmix)
         nvidia = normalize_nvidia_config(self.nvidia)
@@ -986,7 +974,6 @@ class Config:
             'api_timeout': self.api_timeout,
             'api_enable_debug_logging': self.api_enable_debug_logging,
             'text_to_image': text_to_image,
-            'geminicli': geminicli,
             'codex': codex,
             'aihubmix': aihubmix,
             'nvidia': nvidia,
@@ -1024,8 +1011,6 @@ class Config:
         text_to_image['default_model_display_name'] = resolve_tti_default_display_name(text_to_image)
         text_to_image.pop('model_paths', None)
         text_to_image.pop('default_model_index', None)
-        raw_geminicli = data.get('geminicli', {})
-        geminicli = normalize_geminicli_config(raw_geminicli)
         raw_codex = data.get('codex', {})
         codex = normalize_codex_config(raw_codex)
         raw_aihubmix = data.get('aihubmix', {})
@@ -1063,7 +1048,6 @@ class Config:
             api_timeout=data.get('api_timeout', 60),
             api_enable_debug_logging=data.get('api_enable_debug_logging', False),
             text_to_image=text_to_image,
-            geminicli=geminicli,
             codex=codex,
             aihubmix=aihubmix,
             nvidia=nvidia,
@@ -1662,16 +1646,9 @@ class ConfigManager:
         if active_model_source not in SUPPORTED_ACTIVE_MODEL_SOURCES:
             needs_update = True
 
-        # Check if geminicli section is missing
-        if 'geminicli' not in data:
+        # Gemini CLI reverse-proxy settings are legacy and are removed on the next save.
+        if 'geminicli' in data:
             needs_update = True
-        elif not isinstance(data.get('geminicli'), dict):
-            needs_update = True
-        else:
-            for field_name in default_geminicli_config().keys():
-                if field_name not in data.get('geminicli', {}):
-                    needs_update = True
-                    break
 
         # Check if codex section is missing
         if 'codex' not in data:
@@ -1847,8 +1824,6 @@ class ConfigManager:
         if len(config.models) > 0:
             return True
 
-        if normalize_geminicli_config(getattr(config, "geminicli", {})).get("selected_model_id"):
-            return True
         if normalize_codex_config(getattr(config, "codex", {})).get("selected_model_id"):
             return True
         if build_aihubmix_runtime_model_data(getattr(config, "aihubmix", {})):
@@ -1879,9 +1854,7 @@ class ConfigManager:
                 config.active_model_index = max(0, len(config.models) - 1)
             # If standard models are empty but another external source is selected, keep that source active.
             if not config.models and config.active_model_source == "standard":
-                if normalize_geminicli_config(getattr(config, "geminicli", {})).get("selected_model_id"):
-                    config.active_model_source = "geminicli"
-                elif normalize_codex_config(getattr(config, "codex", {})).get("selected_model_id"):
+                if normalize_codex_config(getattr(config, "codex", {})).get("selected_model_id"):
                     config.active_model_source = "codex"
                 elif build_aihubmix_runtime_model_data(getattr(config, "aihubmix", {})):
                     config.active_model_source = "aihubmix"

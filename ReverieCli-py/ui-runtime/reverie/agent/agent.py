@@ -1843,12 +1843,12 @@ class ReverieAgent:
             # For request provider, we don't need a client object
             # We'll use requests library directly
             self._client = None
-        elif self.provider in ("gemini-cli", "codex"):
+        elif self.provider == "codex":
             self._client = None
         else:
             raise ValueError(
                 f"Unknown provider: {self.provider}. "
-                f"Supported providers: openai-sdk, request, anthropic, gemini-cli, codex"
+                f"Supported providers: openai-sdk, request, anthropic, codex"
             )
         self._client_config_key = self._provider_client_key()
 
@@ -1979,15 +1979,6 @@ class ReverieAgent:
 
         config = getattr(self, "config", None)
         if not config:
-            return timeout_value
-
-        if self.provider == "gemini-cli":
-            try:
-                cfg = getattr(config, "geminicli", {})
-                if isinstance(cfg, dict):
-                    return max(timeout_value, int(cfg.get("timeout", timeout_value)))
-            except Exception:
-                return timeout_value
             return timeout_value
 
         if self.provider == "codex":
@@ -2436,6 +2427,7 @@ class ReverieAgent:
         status: str = "info",
         detail: str = "",
         meta: str = "",
+        compact: bool = False,
     ) -> None:
         """Send a structured UI event to the CLI surface when available."""
         handler = None
@@ -2450,6 +2442,7 @@ class ReverieAgent:
             "status": str(status or "info").strip().lower(),
             "detail": str(detail or "").strip(),
             "meta": str(meta or "").strip(),
+            "compact": bool(compact),
         }
 
         if callable(handler):
@@ -2760,7 +2753,7 @@ class ReverieAgent:
             try:
                 last_question = self.operation_history.get_last_user_question()
                 parent_id = last_question.id if last_question else None
-                self.operation_history.add_tool_call(
+                tool_operation = self.operation_history.add_tool_call(
                     tool_name=tool_name,
                     arguments=args,
                     result=result.output if result.success else None,
@@ -2768,6 +2761,28 @@ class ReverieAgent:
                     error=result.error,
                     parent_id=parent_id,
                 )
+                if result.success:
+                    edit_operation = None
+                    if tool_name == "str_replace_editor":
+                        command = str(args.get("command") or "").strip()
+                        if command in {"str_replace", "insert"}:
+                            edit_operation = "modify"
+                        elif command == "create":
+                            edit_operation = "create"
+                    elif tool_name == "create_file":
+                        edit_operation = "create"
+                    elif tool_name == "delete_file":
+                        edit_operation = "delete"
+
+                    raw_path = args.get("path") if isinstance(args, dict) else None
+                    if edit_operation and raw_path:
+                        self.operation_history.add_file_operation(
+                            file_path=str(raw_path),
+                            operation=edit_operation,
+                            old_content=None,
+                            new_content=None,
+                            parent_id=tool_operation.id,
+                        )
             except Exception:
                 logger.debug("Operation history tool logging failed", exc_info=True)
 
@@ -2794,7 +2809,7 @@ class ReverieAgent:
         messages.append(tool_result_message)
 
     def _process_streaming_native_provider(self, provider_name: str, session_id: str = "default") -> Generator[str, None, None]:
-        """Process streaming responses for native Gemini CLI / Codex providers."""
+        """Process streaming responses for the native Codex provider."""
         import requests
 
         tools = self.get_visible_tool_schemas()
@@ -2808,81 +2823,36 @@ class ReverieAgent:
             request_messages = list(messages)
             parser_state: Dict[str, Any] = {}
 
-            if provider_name == "gemini-cli":
-                from ..geminicli import (
-                    build_geminicli_request_payload,
-                    detect_geminicli_cli_credentials,
-                    get_geminicli_request_headers,
-                    normalize_geminicli_config,
-                    parse_geminicli_sse_event,
-                    resolve_geminicli_project_id,
-                    resolve_geminicli_request_url,
-                )
+            from ..codex import (
+                build_codex_request_payload,
+                detect_codex_cli_credentials,
+                get_codex_request_headers,
+                normalize_codex_config,
+                parse_codex_sse_event,
+                resolve_codex_request_url,
+            )
 
-                cfg = normalize_geminicli_config(getattr(self.config, "geminicli", {}))
-                cred = detect_geminicli_cli_credentials(refresh_if_needed=True)
-                if cred.get("found"):
-                    self.api_key = str(cred.get("api_key", "")).strip()
-                if not self.api_key:
-                    detail = " | ".join(str(item) for item in cred.get("errors", []) if str(item).strip())
-                    if detail:
-                        raise ValueError(f"Gemini CLI credentials are unavailable: {detail}")
-                    raise ValueError("Gemini CLI credentials were not found. Please run /Geminicli login first.")
-                project_id = resolve_geminicli_project_id(
-                    base_url=self.base_url,
-                    access_token=self.api_key,
-                    configured_project_id=str(cfg.get("project_id", "")).strip(),
-                    extra_headers=self.custom_headers,
-                    timeout=int(cfg.get("timeout", 1200) or 1200),
-                )
-                request_url = resolve_geminicli_request_url(self.base_url, self.endpoint, stream=True)
-                payload = build_geminicli_request_payload(
-                    model_name=self.model,
-                    messages=messages,
-                    tools=tools if tools else None,
-                    project_id=project_id,
-                    session_id=session_id,
-                    user_prompt_id=f"reverie-{session_id}-{uuid.uuid4().hex[:12]}",
-                )
-                headers = get_geminicli_request_headers(
-                    model_id=self.model,
-                    access_token=self.api_key,
-                    stream=True,
-                    extra_headers=self.custom_headers,
-                )
-                parse_events = lambda data: parse_geminicli_sse_event(data)
-            else:
-                from ..codex import (
-                    build_codex_request_payload,
-                    detect_codex_cli_credentials,
-                    get_codex_request_headers,
-                    normalize_codex_config,
-                    parse_codex_sse_event,
-                    resolve_codex_request_url,
-                )
-
-                cfg = normalize_codex_config(getattr(self.config, "codex", {}))
-                cred = detect_codex_cli_credentials()
-                if cred.get("found"):
-                    self.api_key = str(cred.get("api_key", "")).strip()
-                if not self.api_key:
-                    raise ValueError("Codex CLI credentials were not found. Please run /codex login first.")
-                request_url = resolve_codex_request_url(self.base_url, self.endpoint or cfg.get("endpoint", ""))
-                payload = build_codex_request_payload(
-                    model_name=self.model,
-                    messages=messages,
-                    tools=tools if tools else None,
-                    reasoning_effort=self.thinking_mode or cfg.get("reasoning_effort", "medium"),
-                    stream=True,
-                )
-                headers = get_codex_request_headers(
-                    api_key=self.api_key,
-                    account_id=str(cred.get("account_id", "")).strip(),
-                    auth_mode=str(cred.get("auth_mode", "")).strip(),
-                    extra_headers=self.custom_headers,
-                    stream=True,
-                )
-                parse_events = lambda data: parse_codex_sse_event(data, parser_state)[0]
+            cfg = normalize_codex_config(getattr(self.config, "codex", {}))
+            cred = detect_codex_cli_credentials()
+            if cred.get("found"):
+                self.api_key = str(cred.get("api_key", "")).strip()
+            if not self.api_key:
+                raise ValueError("Codex CLI credentials were not found. Please run /codex login first.")
+            request_url = resolve_codex_request_url(self.base_url, self.endpoint or cfg.get("endpoint", ""))
+            payload = build_codex_request_payload(
+                model_name=self.model,
+                messages=messages,
+                tools=tools if tools else None,
+                reasoning_effort=self.thinking_mode or cfg.get("reasoning_effort", "medium"),
+                stream=True,
+            )
+            headers = get_codex_request_headers(
+                api_key=self.api_key,
+                account_id=str(cred.get("account_id", "")).strip(),
+                auth_mode=str(cred.get("auth_mode", "")).strip(),
+                extra_headers=self.custom_headers,
+                stream=True,
+            )
 
             effective_timeout = self._resolve_provider_timeout()
             try:
@@ -2902,12 +2872,7 @@ class ReverieAgent:
             state = _StreamingTurnState()
             try:
                 for data_str in self._iter_sse_data_strings(response):
-                    if provider_name == "codex":
-                        from ..codex import parse_codex_sse_event
-
-                        events, parser_state = parse_codex_sse_event(data_str, parser_state)
-                    else:
-                        events = parse_events(data_str)
+                    events, parser_state = parse_codex_sse_event(data_str, parser_state)
 
                     for event in events:
                         yield from self._apply_stream_event(state, event)
@@ -3123,8 +3088,6 @@ class ReverieAgent:
             yield from self._process_streaming_request(session_id=session_id)
         elif self.provider == "anthropic":
             yield from self._process_streaming_anthropic(session_id=session_id)
-        elif self.provider == "gemini-cli":
-            yield from self._process_streaming_native_provider("gemini-cli", session_id=session_id)
         elif self.provider == "codex":
             yield from self._process_streaming_native_provider("codex", session_id=session_id)
         else:
@@ -3463,8 +3426,6 @@ class ReverieAgent:
             return self._process_non_streaming_request(session_id=session_id)
         elif self.provider == "anthropic":
             return self._process_non_streaming_anthropic(session_id=session_id)
-        elif self.provider == "gemini-cli":
-            return self._process_non_streaming_native_provider("gemini-cli", session_id=session_id)
         elif self.provider == "codex":
             return self._process_non_streaming_native_provider("codex", session_id=session_id)
         else:
@@ -4316,6 +4277,14 @@ class ReverieAgent:
                 self._persist_history_to_session()
                 self._record_compaction_memory(compressed_messages, session_id)
                 self._auto_context_compaction_retry_after = 0.0
+                compressed_tokens = self.get_token_estimate()
+                self._emit_ui_event(
+                    category="Context",
+                    message=f"Context compressed: {current_tokens:,} -> {compressed_tokens:,} tokens",
+                    status="success",
+                    compact=True,
+                )
+                return compressed_tokens
             else:
                 self._auto_context_compaction_retry_after = time.time() + 30.0
 

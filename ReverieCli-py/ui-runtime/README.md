@@ -6,7 +6,7 @@ Reverie CLI is a context-engine-powered AI coding assistant for large repositori
 
 - **Context Engine** - shared by every mode for symbol lookup, dependency tracking, semantic retrieval, commit-history learning, and workspace memory
 - **Multiple Workflow Modes** - `Reverie`, `Reverie-Atlas`, `Reverie-Gamer`, `Reverie-Ant`, `Spec-Driven`, `Spec-Vibe`, `Writer`, `Computer Controller`
-- **Multi-Provider** - standard OpenAI-compatible models plus `Gemini CLI`, `Codex`, `NVIDIA`, and `ModelScope`
+- **Multi-Provider** - standard OpenAI-compatible models plus `Codex`, `NVIDIA`, and `ModelScope`
 - **Rich TUI** - selectors, streaming output, help browser, status panels, session browsing, checkpoint rollback, command discovery
 - **Workspace Safety** - file-access sandboxing, audited command execution, archive extraction hardening
 - **Game Tooling** - built-in `Reverie Engine` runtime, prompt-to-vertical-slice Reverie-Gamer workflow, direct Blender authoring, Godot/O3DE open-runtime plugins, and a built-in Ashfox MCP bridge for optional Blockbench sessions
@@ -81,9 +81,9 @@ For the packaged Windows build, the same one-shot flow works with `dist\reverie.
 On first run, configure at least one model source. Reverie supports:
 
 - Standard OpenAI-compatible endpoints (stored in `models`)
-- `Gemini CLI`, `Codex`, `NVIDIA`, `ModelScope`
+- `Codex`, `NVIDIA`, `ModelScope`
 
-Use `/model` to add presets or `/Geminicli`, `/codex`, `/nvidia`, `/modelscope` for provider-specific setup.
+Use `/model` to add presets or `/codex`, `/nvidia`, `/modelscope` for provider-specific setup.
 
 ## Common Commands
 

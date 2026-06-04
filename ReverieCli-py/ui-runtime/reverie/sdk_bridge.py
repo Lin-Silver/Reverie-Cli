@@ -226,12 +226,6 @@ class ReverieUiBridge:
             normalize_codex_config,
             resolve_codex_selected_model,
         )
-        from reverie.geminicli import (
-            detect_geminicli_cli_credentials,
-            get_geminicli_model_catalog,
-            normalize_geminicli_config,
-            resolve_geminicli_selected_model,
-        )
         from reverie.aihubmix import (
             get_aihubmix_model_catalog,
             normalize_aihubmix_config,
@@ -255,27 +249,6 @@ class ReverieUiBridge:
 
         active_source = str(getattr(config, "active_model_source", "standard") or "standard").strip().lower()
         sources: list[Dict[str, Any]] = []
-
-        geminicli_cfg = normalize_geminicli_config(getattr(config, "geminicli", {}))
-        geminicli_cred = detect_geminicli_cli_credentials(refresh_if_needed=False)
-        geminicli_selected = resolve_geminicli_selected_model(geminicli_cfg)
-        sources.append(
-            {
-                "source": "geminicli",
-                "label": "Gemini CLI",
-                "active": active_source == "geminicli",
-                "credential": "found" if geminicli_cred.get("found") else "missing",
-                "has_api_key": bool(geminicli_cred.get("found")),
-                "selected_model_id": str(geminicli_cfg.get("selected_model_id", "") or ""),
-                "selected_model_display_name": str(
-                    (geminicli_selected or {}).get("display_name") or geminicli_cfg.get("selected_model_display_name") or ""
-                ),
-                "api_url": str(geminicli_cfg.get("api_url", "") or ""),
-                "endpoint": str(geminicli_cfg.get("endpoint", "") or ""),
-                "project_id": str(geminicli_cfg.get("project_id", "") or ""),
-                "models": get_geminicli_model_catalog(),
-            }
-        )
 
         codex_cfg = normalize_codex_config(getattr(config, "codex", {}))
         codex_catalog = get_codex_model_catalog()
@@ -911,7 +884,6 @@ class ReverieUiBridge:
         from reverie.aihubmix import normalize_aihubmix_config
         from reverie.codex import normalize_codex_config
         from reverie.config import EXTERNAL_MODEL_SOURCES
-        from reverie.geminicli import normalize_geminicli_config
         from reverie.modelscope import normalize_modelscope_config
         from reverie.nvidia import apply_nvidia_thinking_choice, normalize_nvidia_config
 
@@ -926,17 +898,7 @@ class ReverieUiBridge:
         api_url = str(payload.get("api_url") or "").strip()
         endpoint = str(payload.get("endpoint") or "").strip()
 
-        if source == "geminicli":
-            cfg = normalize_geminicli_config(getattr(config, "geminicli", {}))
-            if selected_model_id:
-                cfg["selected_model_id"] = selected_model_id
-            if api_url:
-                cfg["api_url"] = api_url
-            cfg["endpoint"] = endpoint
-            if "project_id" in payload:
-                cfg["project_id"] = str(payload.get("project_id") or "").strip()
-            config.geminicli = normalize_geminicli_config(cfg)
-        elif source == "codex":
+        if source == "codex":
             cfg = normalize_codex_config(getattr(config, "codex", {}))
             if selected_model_id:
                 cfg["selected_model_id"] = selected_model_id

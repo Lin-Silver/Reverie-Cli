@@ -12,7 +12,6 @@ import requests
 from .compressor import (
     _apply_nvidia_request_payload_defaults,
     _collect_codex_summary_text,
-    _collect_geminicli_summary_text,
     _get_message_text,
     _message_text_from_value,
     _openai_extra_body_for_model,
@@ -546,66 +545,6 @@ def _request_handoff_summary_text(
             session_id=session_id,
         )
         return response_text
-
-    if provider == "gemini-cli":
-        from ..geminicli import (
-            build_geminicli_request_payload,
-            detect_geminicli_cli_credentials,
-            get_geminicli_request_headers,
-            resolve_geminicli_project_id,
-            resolve_geminicli_request_url,
-        )
-
-        cred = detect_geminicli_cli_credentials(refresh_if_needed=True)
-        access_token = str(cred.get("api_key", "") or api_key or "").strip()
-        if not access_token:
-            return ""
-
-        project_id = resolve_geminicli_project_id(
-            base_url=base_url,
-            access_token=access_token,
-            timeout=120,
-        )
-        payload = build_geminicli_request_payload(
-            model_name=model,
-            messages=prompt_messages,
-            tools=None,
-            project_id=project_id,
-            session_id=session_id,
-        )
-        headers = get_geminicli_request_headers(
-            model_id=model,
-            access_token=access_token,
-            stream=True,
-        )
-        for key, value in (custom_headers or {}).items():
-            normalized_key = str(key or "").strip()
-            normalized_value = str(value or "").strip()
-            if normalized_key and normalized_value:
-                headers[normalized_key] = normalized_value
-        response = requests.post(
-            resolve_geminicli_request_url(base_url, "", stream=True),
-            headers=headers,
-            json=payload,
-            stream=True,
-            timeout=120,
-        )
-        response.raise_for_status()
-        try:
-            response_text = _collect_geminicli_summary_text(response)
-            _record_handoff_usage(
-                workspace_stats_manager,
-                provider=provider,
-                model=model,
-                model_display_name=model_display_name,
-                prompt_messages=prompt_messages,
-                response_text=response_text,
-                usage=None,
-                session_id=session_id,
-            )
-            return response_text
-        finally:
-            response.close()
 
     if provider == "codex":
         from ..codex import (

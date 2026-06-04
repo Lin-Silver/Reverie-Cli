@@ -25,16 +25,6 @@ from .aihubmix import (
     normalize_aihubmix_config,
 )
 from .config import Config, get_app_root
-from .geminicli import (
-    build_geminicli_request_payload,
-    build_geminicli_runtime_model_data,
-    detect_geminicli_cli_credentials,
-    get_geminicli_request_headers,
-    normalize_geminicli_config,
-    parse_geminicli_sse_event,
-    resolve_geminicli_project_id,
-    resolve_geminicli_request_url,
-)
 from .modelscope import (
     build_modelscope_anthropic_options,
     build_modelscope_runtime_model_data,
@@ -49,7 +39,7 @@ from .nvidia import (
 )
 
 
-BUILTIN_PROVIDER_NAMES = ("aihubmix", "modelscope", "nvidia", "geminicli", "codex")
+BUILTIN_PROVIDER_NAMES = ("aihubmix", "modelscope", "nvidia", "codex")
 
 
 @dataclass
@@ -315,51 +305,6 @@ def smoke_nvidia(config: Config, timeout_seconds: int = 45, model_id: str = "") 
             response.close()
 
 
-def smoke_geminicli(config: Config, timeout_seconds: int = 60, model_id: str = "") -> ProviderSmokeResult:
-    provider = "geminicli"
-    cfg = normalize_geminicli_config(config.geminicli)
-    if model_id:
-        cfg["selected_model_id"] = str(model_id or "").strip()
-        cfg = normalize_geminicli_config(cfg)
-    runtime = build_geminicli_runtime_model_data(cfg)
-    model = str((runtime or {}).get("model") or cfg.get("selected_model_id") or "")
-    cred = detect_geminicli_cli_credentials(refresh_if_needed=True)
-    if not runtime or not cred.get("found"):
-        return _skipped(provider, model, "missing_credentials")
-
-    start = time.perf_counter()
-    response = None
-    try:
-        access_token = str(cred.get("api_key", "") or "").strip()
-        project_id = resolve_geminicli_project_id(
-            base_url=runtime["base_url"],
-            access_token=access_token,
-            configured_project_id=str(cfg.get("project_id", "") or "").strip(),
-            timeout=min(45, max(5, timeout_seconds)),
-        )
-        payload = build_geminicli_request_payload(
-            model_name=model,
-            messages=[{"role": "user", "content": "Reply with OK."}],
-            project_id=project_id,
-            session_id="provider-smoke",
-        )
-        response = _requests_post_stream(
-            resolve_geminicli_request_url(runtime["base_url"], runtime.get("endpoint", ""), stream=True),
-            get_geminicli_request_headers(model_id=model, access_token=access_token, stream=True),
-            payload,
-            timeout_seconds=timeout_seconds,
-        )
-        for data_str in _iter_sse_data_strings(response):
-            if parse_geminicli_sse_event(data_str):
-                break
-        return ProviderSmokeResult(provider=provider, model=model, status="ok", latency_ms=int((time.perf_counter() - start) * 1000))
-    except Exception as exc:
-        return _result_from_error(provider, model, start, exc)
-    finally:
-        if response is not None:
-            response.close()
-
-
 def smoke_codex(config: Config, timeout_seconds: int = 60, model_id: str = "") -> ProviderSmokeResult:
     provider = "codex"
     cfg = normalize_codex_config(config.codex)
@@ -409,7 +354,6 @@ SMOKE_RUNNERS: Dict[str, Callable[[Config, int, str], ProviderSmokeResult]] = {
     "aihubmix": smoke_aihubmix,
     "modelscope": smoke_modelscope,
     "nvidia": smoke_nvidia,
-    "geminicli": smoke_geminicli,
     "codex": smoke_codex,
 }
 

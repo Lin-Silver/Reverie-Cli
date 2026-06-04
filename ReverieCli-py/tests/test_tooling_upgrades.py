@@ -388,6 +388,26 @@ def test_browser_controler_chromium_flags_support_minimized_background_launch() 
     assert "--start-minimized" in flags
 
 
+def test_browser_controler_debug_profiles_stay_isolated(tmp_path: Path) -> None:
+    tool = BrowserControlerTool({"project_root": tmp_path})
+
+    default_profile = tool._resolve_debug_profile_dir("", browser="edge", port=45678)
+    relative_profile = tool._resolve_debug_profile_dir("edge-smoke", browser="edge", port=45679)
+
+    assert default_profile == (tool.debug_profiles_dir / "edge" / "port-45678").resolve()
+    assert relative_profile == (tool.debug_profiles_dir / "edge-smoke").resolve()
+    assert tool._is_safe_debug_profile_path(default_profile)
+    assert tool._is_safe_debug_profile_path(relative_profile)
+    assert not tool._is_safe_debug_profile_path(tmp_path)
+
+    try:
+        tool._resolve_debug_profile_dir(str(tmp_path / "real-browser-profile"), browser="chrome", port=45680)
+    except ValueError as exc:
+        assert "Refusing to use an existing browser profile" in str(exc)
+    else:
+        raise AssertionError("External browser profile path was not refused")
+
+
 def test_browser_controler_prefers_real_page_devtools_targets() -> None:
     about_blank = {"type": "page", "url": "about:blank", "title": "", "webSocketDebuggerUrl": "ws://example/blank"}
     real_page = {"type": "page", "url": "http://127.0.0.1:3000/", "title": "App", "webSocketDebuggerUrl": "ws://example/app"}
@@ -578,6 +598,8 @@ def test_skills_manager_discovers_builtin_browser_controler_skill(tmp_path: Path
     assert "devtools_click" in record.body
     assert "browser_session_start" in record.body
     assert "safety_policy" in record.body
+    assert "DevTools sessions default to Edge" in record.body
+    assert "never point `user_data_dir` at a real browser profile" in record.body
     assert "background=true" in record.body
     assert "minimized=true" in record.body
     assert "diagnose_page" in record.body

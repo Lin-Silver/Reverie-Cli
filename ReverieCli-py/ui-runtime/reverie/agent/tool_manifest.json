@@ -378,12 +378,13 @@
       ]
     },
     "browser_controler": {
-      "purpose": "Open and control the system browser, run reusable minimized/background DevTools sessions, inspect and interact with dynamic pages through Chrome DevTools Protocol, diagnose page resources, upload files, capture screenshots, and check web/server endpoints.",
+      "purpose": "Open and control the system browser, run reusable minimized/background DevTools sessions with Edge isolated profiles by default, inspect and interact with dynamic pages through Chromium DevTools Protocol, diagnose page resources, upload files, capture screenshots, and check web/server endpoints.",
       "use_when": "A task needs real browser automation, non-disruptive background frontend runtime inspection, selector-based page interaction, DevTools Console/Network/DOM/accessibility evidence, form/upload/login flow testing, dynamic page text, or server/API endpoint verification beyond static fetches.",
       "parameters": {
         "action": "active_window, list_browser_windows, activate_browser, open_browser, open_page, open_debug_page, open_devtools, browser_session_start/list/close/cleanup, devtools_targets, devtools_snapshot, devtools_screenshot, devtools_eval, devtools_console, devtools_network, devtools_click, devtools_type, devtools_upload, devtools_wait_for, devtools_accessibility_snapshot, devtools_dom_outline, devtools_find, safety_policy, diagnose_page, check_endpoint, current_url, extract_page, copy_page_text, observe, click, scroll, paste_text, key_press, hotkey, upload_file, close_page, wait, or optional open_ai_service/ai_chat.",
         "url": "Optional URL to open or extract.",
         "port": "Remote debugging port for open_debug_page/devtools_* actions.",
+        "browser": "Optional browser hint; DevTools sessions default to Edge.",
         "session_id": "Optional reusable Browser Controler session id.",
         "background": "For open_debug_page, keep the browser out of foreground and use CDP actions.",
         "minimized": "Open or move the browser minimized when possible.",
@@ -394,6 +395,7 @@
         "url_contains": "Optional DevTools target URL/title filter.",
         "include_bodies": "Include Network response body previews for devtools_network.",
         "include_request_body/export_har/include_websockets": "Optional Network diagnostics for payloads, HAR JSON, and WebSocket frames.",
+        "user_data_dir": "Optional isolated debug profile name/path under Browser Controler data; existing browser profile paths are refused.",
         "private": "Open private/incognito mode when true.",
         "title_contains": "Optional browser window title filter for activate_browser.",
         "include_all_windows": "Include non-browser top-level windows when listing windows.",

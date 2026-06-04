@@ -465,7 +465,7 @@ class BrowserControlerTool(BaseTool):
             },
             "url": {"type": "string", "description": "URL to open or extract. If omitted for extract_page, the current browser URL is copied from the address bar."},
             "service": {"type": "string", "description": "Optional web service shortcut for open_ai_service/ai_chat."},
-            "browser": {"type": "string", "description": "Optional browser hint: default, chrome, edge, firefox, brave."},
+            "browser": {"type": "string", "description": "Optional browser hint: default, edge, chrome, firefox, brave. DevTools sessions default to Edge."},
             "browser_path": {"type": "string", "description": "Optional explicit browser executable path."},
             "private": {"type": "boolean", "description": "Open a private/incognito window when possible."},
             "new_window": {"type": "boolean", "description": "Open in a new browser window."},
@@ -497,7 +497,7 @@ class BrowserControlerTool(BaseTool):
             "clear": {"type": "boolean", "description": "For devtools_type, clear the existing value before typing."},
             "poll_interval": {"type": "number", "description": "For devtools_wait_for, seconds between checks."},
             "cleanup_profiles": {"type": "boolean", "description": "For browser_session_cleanup, also remove stale isolated debug profiles under Browser Controler data."},
-            "user_data_dir": {"type": "string", "description": "Optional isolated browser profile directory for open_debug_page."},
+            "user_data_dir": {"type": "string", "description": "Optional isolated browser profile directory for open_debug_page. Relative paths are kept under Browser Controler data; existing browser profile paths are refused."},
             "include_all_windows": {"type": "boolean", "description": "For list_browser_windows, include non-browser top-level windows too."},
             "title_contains": {"type": "string", "description": "For activate_browser, choose a browser window whose title contains this text."},
             "window_index": {"type": "integer", "description": "For activate_browser, zero-based index among matching browser windows."},
@@ -960,13 +960,13 @@ class BrowserControlerTool(BaseTool):
     def _open_debug_page(self, **kwargs) -> ToolResult:
         url = str(kwargs.get("url") or "about:blank").strip() or "about:blank"
         port = self._normalize_cdp_port(kwargs.get("port", DEFAULT_CDP_PORT))
-        browser = str(kwargs.get("browser") or "chrome").strip() or "chrome"
+        browser = str(kwargs.get("browser") or "edge").strip() or "edge"
         if browser.lower() in {"default", "system"}:
-            browser = "chrome"
+            browser = "edge"
         browser_path = str(kwargs.get("browser_path") or "").strip()
         executable = self._resolve_browser_executable(browser=browser, browser_path=browser_path)
         if not executable and not browser_path:
-            for fallback_browser in ("edge", "brave", "default"):
+            for fallback_browser in ("edge", "brave"):
                 if fallback_browser == browser.lower():
                     continue
                 candidate = self._resolve_browser_executable(browser=fallback_browser, browser_path="")
@@ -978,8 +978,14 @@ class BrowserControlerTool(BaseTool):
         if "firefox" in executable.name.lower():
             return ToolResult.fail("open_debug_page requires a Chromium-based browser for DevTools Protocol.")
 
-        user_data_dir = str(kwargs.get("user_data_dir") or "").strip()
-        profile_dir = Path(user_data_dir).expanduser() if user_data_dir else self.debug_profiles_dir / f"port-{port}"
+        try:
+            profile_dir = self._resolve_debug_profile_dir(
+                str(kwargs.get("user_data_dir") or "").strip(),
+                browser=browser,
+                port=port,
+            )
+        except ValueError as exc:
+            return ToolResult.fail(str(exc))
         profile_dir.mkdir(parents=True, exist_ok=True)
         wait_seconds = max(1.0, min(float(kwargs.get("wait_seconds", 3.0) or 3.0), 20.0))
         background = bool(kwargs.get("background", False))
@@ -1217,6 +1223,7 @@ class BrowserControlerTool(BaseTool):
         lines = [
             "Browser Controler Safety Policy:",
             "- Prefer isolated debug profiles for automation; do not inspect a user's existing logged-in session unless requested.",
+            "- DevTools sessions default to Edge and refuse existing Chrome/Edge user profile directories; use only Browser Controler isolated profiles.",
             "- Use background CDP actions for observation and diagnostics; use visible UI actions only when foreground interaction is required.",
             "- Do not enter credentials, submit payments, or mutate account/security settings unless the user explicitly asks in the current context.",
             "- Upload only workspace files or user-provided files, and verify destination/intent before uploading to external services.",
@@ -2848,11 +2855,34 @@ class BrowserControlerTool(BaseTool):
             sock.bind((CDP_HOST, 0))
             return int(sock.getsockname()[1])
 
+    def _resolve_debug_profile_dir(self, user_data_dir: str, *, browser: str, port: int) -> Path:
+        root = self.debug_profiles_dir.resolve()
+        if user_data_dir:
+            candidate = Path(user_data_dir).expanduser()
+            if not candidate.is_absolute():
+                safe_relative = str(candidate).strip().strip("/\\")
+                candidate = root / safe_relative
+        else:
+            safe_browser = re.sub(r"[^A-Za-z0-9._-]+", "-", str(browser or "edge").lower()).strip("-._") or "edge"
+            candidate = root / safe_browser / f"port-{int(port)}"
+        resolved = candidate.resolve()
+        try:
+            resolved.relative_to(root)
+        except ValueError as exc:
+            raise ValueError(
+                "Refusing to use an existing browser profile outside Browser Controler debug-profiles. "
+                f"Requested user_data_dir={resolved}. Use a relative isolated profile name instead."
+            ) from exc
+        if resolved == root:
+            raise ValueError("Refusing to use the Browser Controler debug profile root directly.")
+        return resolved
+
     def _is_safe_debug_profile_path(self, path: Path) -> bool:
         try:
             resolved = path.resolve()
             root = self.debug_profiles_dir.resolve()
-            return str(resolved).lower().startswith(str(root).lower()) and resolved != root
+            resolved.relative_to(root)
+            return resolved != root
         except Exception:
             return False
 

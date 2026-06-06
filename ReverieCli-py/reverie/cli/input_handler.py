@@ -357,7 +357,7 @@ class InputHandler:
             msvcrt = None
 
         seeded_text = str(initial_text or "")
-        if msvcrt is not None:
+        if seeded_text:
             return self._get_seeded_single_line_input(prompt_text, seeded_text)
         
         lines = []
@@ -368,49 +368,32 @@ class InputHandler:
             try:
                 if in_multiline:
                     self._render_prompt(prompt_text, is_continuation=True)
-                elif self.attachment_selector is not None and msvcrt is not None:
-                    line = self._get_seeded_single_line_input(
-                        prompt_text,
-                        "",
-                        record_history=False,
-                    )
-                    if line is None:
-                        return None
-                    # Skip the standard input() path; this line was captured by
-                    # the interactive reader so `@` can open the attachment picker.
-                    pass
                 else:
                     self._render_prompt(prompt_text, is_continuation=False)
 
-                if not (not in_multiline and self.attachment_selector is not None and msvcrt is not None):
-                    line = input("")
+                line = input("")
                 
                 # Paste detection: Check if more input is immediately available in buffer.
                 # Preserve pasted newlines so long specs, logs, and code blocks remain intact.
-                # Only trigger if there's significant buffered content (more than just the enter key)
                 if not in_multiline and msvcrt is not None and msvcrt.kbhit():
                     # Small delay to let the buffer fill if it's a real paste
                     import time
                     time.sleep(0.05)
                     
-                    # Only treat as paste if there's still content after the delay
-                    if msvcrt.kbhit():
-                        pasted_lines = [line]
-                        while msvcrt.kbhit():
-                            try:
-                                # Read subsequent lines without prompting
-                                pasted_lines.append(input(""))
-                            except (EOFError, KeyboardInterrupt):
-                                break
-                        
-                        combined_input = "\n".join(pasted_lines)
-                        
-                        # If we detected a paste, we usually return immediately unless it ended with continuation char
-                        if combined_input.strip():
-                            self.history.append(combined_input)
-                            self.history_index = len(self.history)
-                            return combined_input
+                    # Collect all buffered lines as a single multi-line paste
+                    pasted_lines = [line]
+                    while msvcrt.kbhit():
+                        try:
+                            pasted_lines.append(input(""))
+                        except (EOFError, KeyboardInterrupt):
+                            break
+                    
+                    combined_input = "\n".join(pasted_lines)
+                    if combined_input.strip():
+                        self.history.append(combined_input)
+                        self.history_index = len(self.history)
                         return combined_input
+                    return combined_input
                 
                 if '"""' in line or "'''" in line:
                     quote = '"""' if '"""' in line else "'''"

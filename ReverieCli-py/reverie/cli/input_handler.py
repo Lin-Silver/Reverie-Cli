@@ -157,6 +157,31 @@ class InputHandler:
             "cursor_col": max(cursor_col, 0),
         }
 
+    def _plain_prompt_text(self, prompt_text: str, is_continuation: bool = False) -> str:
+        if is_continuation:
+            return f"  {self.deco.LINE_VERTICAL} continue {self.deco.CHEVRON_RIGHT} "
+        return (
+            f"{self.deco.DIAMOND_FILLED} "
+            f"{prompt_text.rstrip('> ')} "
+            f"{self.deco.DOT_MEDIUM} ready "
+            f"{self.deco.CHEVRON_RIGHT} "
+        )
+
+    def _render_input_line(self, prompt_text: str, line: str, is_continuation: bool) -> str:
+        if is_continuation:
+            prefix = f"  {self.deco.LINE_VERTICAL}{self.deco.CHEVRON_RIGHT} "
+            return f"{prefix}{line}"
+        prefix = f"{self.deco.DIAMOND_FILLED} {prompt_text.rstrip('> ')} {self.deco.DOT_MEDIUM} {self.deco.CHEVRON_RIGHT} "
+        return f"{prefix}{line}"
+
+    def _update_cursor_position(self, render_state: dict, metrics: dict) -> None:
+        rows_below_cursor = metrics["total_rows"] - metrics["cursor_row"] - 1
+        if rows_below_cursor > 0:
+            self._write_terminal(f"\033[{rows_below_cursor}A")
+        self._write_terminal("\r")
+        if metrics["cursor_col"] > 0:
+            self._write_terminal(f"\033[{metrics['cursor_col']}C")
+
     def _redraw_windows_input(
         self,
         prompt_text: str,
@@ -174,17 +199,12 @@ class InputHandler:
         for index, line in enumerate(lines):
             if index:
                 self._write_terminal("\n")
-            self._render_prompt(prompt_text, is_continuation=index > 0)
-            if line:
-                self._write_terminal(line)
+            is_continuation = index > 0
+            rendered_line = self._render_input_line(prompt_text, line, is_continuation=is_continuation)
+            self._write_terminal(rendered_line)
 
         metrics = self._input_visual_metrics(prompt_text, buffer, cursor)
-        rows_below_cursor = metrics["total_rows"] - metrics["cursor_row"] - 1
-        if rows_below_cursor > 0:
-            self._write_terminal(f"\033[{rows_below_cursor}A")
-        self._write_terminal("\r")
-        if metrics["cursor_col"] > 0:
-            self._write_terminal(f"\033[{metrics['cursor_col']}C")
+        self._update_cursor_position(render_state, metrics)
 
         render_state.update(metrics)
         render_state["rendered"] = True
@@ -252,6 +272,22 @@ class InputHandler:
         # VK_SHIFT = 0x10, VK_CONTROL = 0x11.
         return self._windows_virtual_key_pressed(0x10, 0x11)
 
+    def _any_buffered_input(self, msvcrt_module: Any) -> bool:
+        try:
+            return bool(msvcrt_module.kbhit())
+        except OSError:
+            return False
+
+    def _read_buffered_input(self) -> str:
+        rest = []
+        while True:
+            try:
+                fragment = input("")
+            except (EOFError, KeyboardInterrupt):
+                break
+            rest.append(fragment)
+        return "\n".join(rest)
+
     def _get_seeded_single_line_input(
         self,
         prompt_text: str,
@@ -267,10 +303,12 @@ class InputHandler:
             line = Prompt.ask("", default=initial_text, show_default=False)
             return line
 
+        if "\n" in initial_text:
+            initial_text = initial_text.splitlines()[0]
+
         buffer = str(initial_text or "")
         cursor = len(buffer)
         render_state = {"rendered": False, "cursor_row": 0, "total_rows": 1}
-        skip_next_lf = False
         self._redraw_windows_input(prompt_text, buffer, cursor, render_state)
 
         while True:
@@ -278,24 +316,22 @@ class InputHandler:
                 key = msvcrt.getwch()
             except OSError:
                 continue
-            if skip_next_lf and key != "\n":
-                skip_next_lf = False
 
             if key in ("\x00", "\xe0"):
                 try:
                     key_code = msvcrt.getwch()
                 except OSError:
                     continue
-                if key_code == "K":  # Left
+                if key_code == "K":
                     cursor = self._move_cursor_left(buffer, cursor)
-                elif key_code == "M":  # Right
+                elif key_code == "M":
                     cursor = self._move_cursor_right(buffer, cursor)
-                elif key_code == "G":  # Home
+                elif key_code == "G":
                     cursor = buffer.rfind("\n", 0, cursor) + 1
-                elif key_code == "O":  # End
+                elif key_code == "O":
                     next_newline = buffer.find("\n", cursor)
                     cursor = len(buffer) if next_newline < 0 else next_newline
-                elif key_code == "S":  # Delete
+                elif key_code == "S":
                     buffer, cursor = self._delete_forward(buffer, cursor)
                 self._redraw_windows_input(prompt_text, buffer, cursor, render_state)
                 continue
@@ -306,7 +342,6 @@ class InputHandler:
                     continue
                 if self._has_buffered_keyboard_input(msvcrt):
                     buffer, cursor = self._insert_text(buffer, cursor, "\n")
-                    skip_next_lf = True
                     self._redraw_windows_input(prompt_text, buffer, cursor, render_state)
                     continue
                 self._write_terminal("\n")
@@ -315,12 +350,15 @@ class InputHandler:
                     self.history_index = len(self.history)
                 return buffer
             if key == "\n":
-                if skip_next_lf:
-                    skip_next_lf = False
+                if self._has_buffered_keyboard_input(msvcrt):
+                    buffer, cursor = self._insert_text(buffer, cursor, "\n")
+                    self._redraw_windows_input(prompt_text, buffer, cursor, render_state)
                     continue
-                buffer, cursor = self._insert_text(buffer, cursor, "\n")
-                self._redraw_windows_input(prompt_text, buffer, cursor, render_state)
-                continue
+                self._write_terminal("\n")
+                if record_history and buffer.strip():
+                    self.history.append(buffer)
+                    self.history_index = len(self.history)
+                return buffer
             if key == "\x03":
                 self._write_terminal("\n")
                 return None
@@ -420,9 +458,8 @@ class InputHandler:
                     continue
                 
                 lines.append(line)
-                
-                if not in_multiline:
-                    break
+                in_multiline = False
+                break
                     
             except KeyboardInterrupt:
                 if in_multiline:

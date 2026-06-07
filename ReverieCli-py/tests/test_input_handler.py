@@ -57,10 +57,43 @@ def test_prompt_editor_tracks_cursor_on_multiline_input() -> None:
 
     assert metrics["total_rows"] == 2
     assert metrics["cursor_row"] == 1
-    assert metrics["cursor_col"] == (
-        handler._display_width(handler._plain_prompt_text("Reverie> ", is_continuation=True))
-        + handler._display_width(ZH_SECOND_LINE)
+    assert metrics["cursor_col"] == handler._display_width(ZH_SECOND_LINE)
+
+
+def test_prompt_editor_renders_newline_without_continuation_prefix() -> None:
+    handler = _handler(width=120)
+    render_state = {"rendered": False, "cursor_row": 0, "total_rows": 1}
+
+    handler._redraw_windows_input("Reverie> ", f"{ZH_FIRST_LINE}\n{ZH_SECOND_LINE}", 0, render_state)
+
+    rendered = handler._output_stream().getvalue()
+    assert "continue" not in rendered
+    assert f"\n{ZH_SECOND_LINE}" in rendered
+
+
+def test_prompt_editor_prompt_width_matches_visible_prompt() -> None:
+    handler = _handler(width=120)
+    render_state = {"rendered": False, "cursor_row": 0, "total_rows": 1}
+
+    handler._redraw_windows_input("Reverie> ", "", 0, render_state)
+
+    rendered = handler._output_stream().getvalue()
+    assert "\x1b[" in rendered
+    assert "ready" not in rendered
+    assert render_state["cursor_col"] == handler._display_width(
+        handler._plain_prompt_text("Reverie> ")
     )
+
+
+def test_windows_get_input_uses_key_editor_for_empty_input(monkeypatch) -> None:
+    import msvcrt
+
+    handler = _handler()
+    keys = iter([*list(ZH_FIRST), "\n", *list(ZH_SECOND), "\r"])
+    monkeypatch.setattr(msvcrt, "getwch", lambda: next(keys))
+    monkeypatch.setattr(msvcrt, "kbhit", lambda: False)
+
+    assert handler.get_input("Reverie> ") == f"{ZH_FIRST}\n{ZH_SECOND}"
 
 
 def test_windows_prompt_editor_handles_arrow_insertion(monkeypatch) -> None:

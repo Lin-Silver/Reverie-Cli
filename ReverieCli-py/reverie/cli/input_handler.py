@@ -65,11 +65,11 @@ class InputHandler:
 
     def _plain_prompt_text(self, prompt_text: str, is_continuation: bool = False) -> str:
         if is_continuation:
-            return f"  {self.deco.LINE_VERTICAL} continue {self.deco.CHEVRON_RIGHT} "
+            return ""
         return (
             f"{self.deco.DIAMOND_FILLED} "
             f"{prompt_text.rstrip('> ')} "
-            f"{self.deco.DOT_MEDIUM} ready "
+            f"{self.deco.DOT_MEDIUM} "
             f"{self.deco.CHEVRON_RIGHT} "
         )
 
@@ -159,18 +159,17 @@ class InputHandler:
 
     def _plain_prompt_text(self, prompt_text: str, is_continuation: bool = False) -> str:
         if is_continuation:
-            return f"  {self.deco.LINE_VERTICAL} continue {self.deco.CHEVRON_RIGHT} "
+            return ""
         return (
             f"{self.deco.DIAMOND_FILLED} "
             f"{prompt_text.rstrip('> ')} "
-            f"{self.deco.DOT_MEDIUM} ready "
+            f"{self.deco.DOT_MEDIUM} "
             f"{self.deco.CHEVRON_RIGHT} "
         )
 
     def _render_input_line(self, prompt_text: str, line: str, is_continuation: bool) -> str:
         if is_continuation:
-            prefix = f"  {self.deco.LINE_VERTICAL}{self.deco.CHEVRON_RIGHT} "
-            return f"{prefix}{line}"
+            return line
         prefix = f"{self.deco.DIAMOND_FILLED} {prompt_text.rstrip('> ')} {self.deco.DOT_MEDIUM} {self.deco.CHEVRON_RIGHT} "
         return f"{prefix}{line}"
 
@@ -199,9 +198,12 @@ class InputHandler:
         for index, line in enumerate(lines):
             if index:
                 self._write_terminal("\n")
-            is_continuation = index > 0
-            rendered_line = self._render_input_line(prompt_text, line, is_continuation=is_continuation)
-            self._write_terminal(rendered_line)
+            if index > 0:
+                self._write_terminal(line)
+            else:
+                self._render_prompt(prompt_text, is_continuation=False)
+                if line:
+                    self._write_terminal(line)
 
         metrics = self._input_visual_metrics(prompt_text, buffer, cursor)
         self._update_cursor_position(render_state, metrics)
@@ -212,20 +214,13 @@ class InputHandler:
     def _render_prompt(self, prompt_text: str, is_continuation: bool = False) -> None:
         """Render the dreamy themed prompt"""
         if is_continuation:
-            continuation = Text()
-            continuation.append("  ", style=self.theme.TEXT_DIM)
-            continuation.append(self.deco.LINE_VERTICAL, style=self.theme.PURPLE_MEDIUM)
-            continuation.append(" continue ", style=self.theme.TEXT_DIM)
-            continuation.append(self.deco.CHEVRON_RIGHT, style=self.theme.BLUE_SOFT)
-            continuation.append(" ", style=self.theme.TEXT_DIM)
-            self.console.print(continuation, end="")
+            return
         else:
             prompt_parts = Text()
             prompt_parts.append(f"{self.deco.DIAMOND_FILLED} ", style=self.theme.BLUE_SOFT)
             prompt_parts.append(prompt_text.rstrip("> "), style=f"bold {self.theme.PURPLE_SOFT}")
             prompt_parts.append(f" {self.deco.DOT_MEDIUM} ", style=self.theme.TEXT_DIM)
-            prompt_parts.append("ready", style=self.theme.TEXT_DIM)
-            prompt_parts.append(f" {self.deco.CHEVRON_RIGHT} ", style=self.theme.BLUE_SOFT)
+            prompt_parts.append(f"{self.deco.CHEVRON_RIGHT} ", style=self.theme.BLUE_SOFT)
             self.console.print(prompt_parts, end="")
 
     def _should_open_attachment_selector(self, text_before_cursor: str) -> bool:
@@ -354,11 +349,9 @@ class InputHandler:
                     buffer, cursor = self._insert_text(buffer, cursor, "\n")
                     self._redraw_windows_input(prompt_text, buffer, cursor, render_state)
                     continue
-                self._write_terminal("\n")
-                if record_history and buffer.strip():
-                    self.history.append(buffer)
-                    self.history_index = len(self.history)
-                return buffer
+                buffer, cursor = self._insert_text(buffer, cursor, "\n")
+                self._redraw_windows_input(prompt_text, buffer, cursor, render_state)
+                continue
             if key == "\x03":
                 self._write_terminal("\n")
                 return None
@@ -393,6 +386,9 @@ class InputHandler:
             import msvcrt
         except ImportError:
             msvcrt = None
+
+        if msvcrt is not None:
+            return self._get_seeded_single_line_input(prompt_text, str(initial_text or ""))
 
         seeded_text = str(initial_text or "")
         if seeded_text:

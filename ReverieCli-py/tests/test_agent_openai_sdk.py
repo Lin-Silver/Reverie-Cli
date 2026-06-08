@@ -480,3 +480,13 @@ def test_nvidia_help_matches_supported_commands():
     assert "/nvidia fast on" not in subcommand_usages
     assert "/nvidia fast off" not in subcommand_usages
     assert "thinking" in nvidia_help["overview"]
+
+
+def test_webgemini_help_matches_supported_commands():
+    webgemini_help = HELP_TOPICS["webgemini"]
+    subcommand_usages = [item["usage"] for item in webgemini_help["subcommands"]]
+
+    assert "/webgemini activate" in subcommand_usages
+    assert "/webgemini model <model-id>" in subcommand_usages
+    assert "/webgemini proxy <url|clear>" in subcommand_usages
+    assert "/wgemini" in subcommand_usages

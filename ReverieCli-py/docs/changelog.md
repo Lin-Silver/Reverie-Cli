@@ -2,6 +2,7 @@
 
 ### Provider and Stability
 
+* Added the WebGemini built-in source, using Gemini Web's anonymous StreamGenerate protocol for Gemini Flash, Thinking, Pro preference, Auto, and Lite model modes with optional cookie/proxy settings.
 * Promoted Gemini CLI, Codex, NVIDIA, and ModelScope to first-class built-in sources with dedicated GUI state, source switching, credential discovery, and safe API smoke testing.
 * Added a redacted `reverie.provider_smoke` helper for live streaming checks across ModelScope Anthropic streams, NVIDIA hosted models, Gemini CLI, and Codex.
 * Added NVIDIA GLM-4.7 (`z-ai/glm4.7`) to the built-in catalog and let provider smoke tests temporarily override model ids without mutating persisted config.

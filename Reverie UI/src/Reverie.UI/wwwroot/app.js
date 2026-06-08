@@ -231,6 +231,7 @@ function modelSourceLabel(source) {
     standard: "Custom Providers",
     geminicli: "Gemini CLI",
     codex: "Codex",
+    webgemini: "WebGemini",
     aihubmix: "AIhubMix",
     nvidia: "NVIDIA",
     modelscope: "ModelScope"
@@ -698,7 +699,7 @@ function fillBuiltinSourceForm(sourceId = "") {
   el.builtinSourceApiKey.disabled = !["aihubmix", "nvidia", "modelscope"].includes(source.source);
   el.builtinSourceApiUrl.value = source.api_url || "";
   el.builtinSourceEndpoint.value = source.endpoint || "";
-  el.builtinSourceEndpoint.disabled = source.source === "modelscope";
+  el.builtinSourceEndpoint.disabled = ["modelscope", "webgemini"].includes(source.source);
   el.builtinSourceProject.value = source.project_id || "";
   el.builtinSourceProject.disabled = source.source !== "geminicli";
   populateBuiltinThinkingOptions(source);

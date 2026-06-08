@@ -68,6 +68,8 @@ class CommandHandler:
             'subagent': self.cmd_subagent,
             'subagents': self.cmd_subagent,
             'codex': self.cmd_codex,
+            'webgemini': self.cmd_webgemini,
+            'wgemini': self.cmd_webgemini,
             'aihubmix': self.cmd_aihubmix,
             'aihub': self.cmd_aihubmix,
             'nvidia': self.cmd_nvidia,
@@ -5729,6 +5731,7 @@ class CommandHandler:
             "aihubmix": "AIhubMix",
             "nvidia": "NVIDIA",
             "modelscope": "ModelScope",
+            "webgemini": "WebGemini",
         }
         return mapping.get(str(source or "").strip().lower(), "Custom Providers")
 
@@ -6504,6 +6507,152 @@ class CommandHandler:
             )
             return self._cmd_codex_thinking("")
 
+        return True
+
+    def cmd_webgemini(self, args: str) -> bool:
+        """Manage WebGemini anonymous Gemini Web source settings."""
+        raw = args.strip()
+        if not raw:
+            return self._cmd_webgemini_status()
+
+        lowered = raw.lower()
+        if lowered in ("status", "check"):
+            return self._cmd_webgemini_status()
+        if lowered in ("activate", "use"):
+            return self._cmd_webgemini_activate()
+        if lowered == "model":
+            return self._cmd_webgemini_model("")
+        if lowered.startswith("model "):
+            return self._cmd_webgemini_model(raw[6:].strip())
+        if lowered in ("proxy",):
+            return self._cmd_webgemini_proxy("")
+        if lowered.startswith("proxy "):
+            return self._cmd_webgemini_proxy(raw[6:].strip())
+
+        self.console.print(
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /webgemini [status|activate|model|proxy][/{self.theme.AMBER_GLOW}]"
+        )
+        return True
+
+    def _cmd_webgemini_status(self) -> bool:
+        from ..webgemini import (
+            WEBGEMINI_ORIGIN,
+            mask_webgemini_cookie,
+            normalize_webgemini_config,
+            resolve_webgemini_selected_model,
+        )
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        webgemini_cfg = normalize_webgemini_config(getattr(config, "webgemini", {}))
+        selected = resolve_webgemini_selected_model(webgemini_cfg)
+        model_source = str(getattr(config, "active_model_source", "standard") or "standard").strip().lower()
+        cookie_state = mask_webgemini_cookie(webgemini_cfg.get("cookie", "")) if webgemini_cfg.get("cookie") else "(anonymous)"
+        if webgemini_cfg.get("cookie_file"):
+            cookie_state = f"file: {escape(str(webgemini_cfg.get('cookie_file')))}"
+
+        lines = [
+            f"[{self.theme.BLUE_SOFT}]Active model source:[/{self.theme.BLUE_SOFT}] {self._format_model_source_label(model_source)}",
+            f"[{self.theme.BLUE_SOFT}]Transport:[/{self.theme.BLUE_SOFT}] Gemini Web StreamGenerate",
+            f"[{self.theme.BLUE_SOFT}]Gemini origin:[/{self.theme.BLUE_SOFT}] {WEBGEMINI_ORIGIN}",
+            f"[{self.theme.BLUE_SOFT}]Cookie:[/{self.theme.BLUE_SOFT}] {cookie_state}",
+            f"[{self.theme.BLUE_SOFT}]Proxy:[/{self.theme.BLUE_SOFT}] {escape(str(webgemini_cfg.get('proxy') or '(auto/env)'))}",
+            f"[{self.theme.BLUE_SOFT}]Timeout:[/{self.theme.BLUE_SOFT}] {webgemini_cfg.get('timeout')}s",
+        ]
+        if selected:
+            lines.insert(1, f"[{self.theme.BLUE_SOFT}]Selected model:[/{self.theme.BLUE_SOFT}] {escape(selected['display_name'])} ({escape(selected['id'])})")
+            lines.insert(3, f"[{self.theme.BLUE_SOFT}]Anonymous mode:[/{self.theme.BLUE_SOFT}] YES")
+            if selected.get("requires_cookie_for_real_routing"):
+                lines.append(
+                    f"[{self.theme.AMBER_GLOW}]Pro routing requires a paid Gemini Advanced cookie; anonymous upstream may fall back to Flash.[/{self.theme.AMBER_GLOW}]"
+                )
+
+        self.console.print()
+        self.console.print(
+            Panel(
+                Text.from_markup("\n".join(lines)),
+                title=f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} WebGemini Source {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]",
+                border_style=self.theme.BORDER_PRIMARY,
+                box=box.ROUNDED,
+                padding=(1, 2),
+            )
+        )
+        self.console.print()
+        return True
+
+    def _cmd_webgemini_activate(self) -> bool:
+        from ..webgemini import normalize_webgemini_config
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        config.webgemini = normalize_webgemini_config(getattr(config, "webgemini", {}))
+        config.active_model_source = "webgemini"
+        config_manager.save(config)
+        if self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} WebGemini source activated.[/{self.theme.MINT_VIBRANT}]"
+        )
+        return True
+
+    def _cmd_webgemini_model(self, model_query: str) -> bool:
+        from ..webgemini import get_webgemini_model_catalog, normalize_webgemini_config
+
+        return self._select_external_provider_model(
+            config_attr="webgemini",
+            normalize_config=normalize_webgemini_config,
+            catalog=get_webgemini_model_catalog(),
+            provider_label="WebGemini",
+            active_source="webgemini",
+            model_query=model_query,
+        )
+
+    def _cmd_webgemini_proxy(self, proxy_value: str) -> bool:
+        from ..webgemini import normalize_webgemini_config
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        webgemini_cfg = normalize_webgemini_config(getattr(config, "webgemini", {}))
+        candidate = str(proxy_value or "").strip()
+        if not candidate:
+            current_proxy = str(webgemini_cfg.get("proxy", "") or "").strip()
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Current WebGemini proxy: {current_proxy or '(auto/env)'}[/{self.theme.TEXT_DIM}]"
+            )
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Use 'clear' to let WebGemini use HTTPS_PROXY/HTTP_PROXY automatically.[/{self.theme.TEXT_DIM}]"
+            )
+            candidate = Prompt.ask("WebGemini proxy", default=current_proxy).strip()
+
+        if candidate.lower() in ("clear", "default", "none", "off"):
+            candidate = ""
+        webgemini_cfg["proxy"] = candidate
+        config.webgemini = normalize_webgemini_config(webgemini_cfg)
+        config_manager.save(config)
+        if self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} WebGemini proxy {'set to: ' + escape(candidate) if candidate else 'cleared.'}[/{self.theme.MINT_VIBRANT}]"
+        )
         return True
 
     def cmd_aihubmix(self, args: str) -> bool:

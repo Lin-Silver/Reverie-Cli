@@ -37,6 +37,11 @@ from ..nvidia import (
 )
 from ..aihubmix import build_aihubmix_openai_options
 from ..modelscope import build_modelscope_anthropic_options
+from ..webgemini import (
+    generate_webgemini_message,
+    iter_webgemini_text_deltas,
+    normalize_webgemini_config,
+)
 
 # Special marker for thinking content (used in streaming)
 # This allows the interface to identify and style thinking content differently
@@ -1843,12 +1848,12 @@ class ReverieAgent:
             # For request provider, we don't need a client object
             # We'll use requests library directly
             self._client = None
-        elif self.provider == "codex":
+        elif self.provider in ("codex", "webgemini"):
             self._client = None
         else:
             raise ValueError(
                 f"Unknown provider: {self.provider}. "
-                f"Supported providers: openai-sdk, request, anthropic, codex"
+                f"Supported providers: openai-sdk, request, anthropic, codex, webgemini"
             )
         self._client_config_key = self._provider_client_key()
 
@@ -1984,6 +1989,14 @@ class ReverieAgent:
         if self.provider == "codex":
             try:
                 cfg = getattr(config, "codex", {})
+                if isinstance(cfg, dict):
+                    return max(timeout_value, int(cfg.get("timeout", timeout_value)))
+            except Exception:
+                return timeout_value
+
+        if self.provider == "webgemini" or self._is_active_model_source("webgemini"):
+            try:
+                cfg = getattr(config, "webgemini", {})
                 if isinstance(cfg, dict):
                     return max(timeout_value, int(cfg.get("timeout", timeout_value)))
             except Exception:
@@ -2926,6 +2939,99 @@ class ReverieAgent:
             chunks.append(chunk)
         return "".join(chunks)
 
+    def _process_streaming_webgemini(self, session_id: str = "default") -> Generator[str, None, None]:
+        """Process streaming responses through Gemini Web's anonymous StreamGenerate endpoint."""
+        tools = self.get_visible_tool_schemas()
+        cfg = normalize_webgemini_config(getattr(self.config, "webgemini", {}))
+        max_continuations = self._completion_continuation_limit()
+        continuation_count = 0
+
+        while True:
+            self._check_and_compress_context(session_id=session_id)
+            request_messages = self._build_messages()
+            messages = _sanitize_messages_for_relay(self._build_messages(resolve_local_images=True))
+            effective_timeout = self._resolve_provider_timeout()
+            yield self._model_request_stream_event(
+                provider_label="WebGemini",
+                model=self.model,
+                stream=True,
+                timeout=effective_timeout,
+            )
+
+            state = _StreamingTurnState()
+            try:
+                if tools:
+                    text, tool_calls = generate_webgemini_message(
+                        messages=messages,
+                        model=self.model,
+                        webgemini_config={**cfg, "timeout": effective_timeout},
+                        tools=tools,
+                    )
+                    if text:
+                        yield from self._apply_stream_event(state, {"type": "content", "text": text})
+                    for tool_call in tool_calls:
+                        fn = tool_call.get("function", {}) if isinstance(tool_call, dict) else {}
+                        state.update_tool_call(
+                            len(state.tool_calls),
+                            tool_call_id=str(tool_call.get("id", "") or ""),
+                            name=str(fn.get("name", "") or ""),
+                            arguments=str(fn.get("arguments", "") or "{}"),
+                        )
+                    state.set_finish_reason("tool_calls" if tool_calls else "stop")
+                else:
+                    for delta in iter_webgemini_text_deltas(
+                        messages=messages,
+                        model=self.model,
+                        webgemini_config={**cfg, "timeout": effective_timeout},
+                    ):
+                        yield from self._apply_stream_event(state, {"type": "content", "text": delta})
+                    state.set_finish_reason("stop")
+            except Exception as exc:
+                if _should_recover_partial_stream_error(state, exc):
+                    logger.warning("Recovered partial streaming output after WebGemini interruption: %s", exc)
+                    state.set_finish_reason("interrupted")
+                else:
+                    raise
+            finally:
+                for chunk in state.flush():
+                    yield chunk
+
+            outcome, _ = self._commit_stream_state(
+                state=state,
+                request_messages=request_messages,
+                messages=messages,
+                session_id=session_id,
+            )
+
+            if outcome == "tool_calls":
+                yield from self._execute_streamed_tool_calls(
+                    state.tool_calls,
+                    messages,
+                    session_id=session_id,
+                )
+                continuation_count = 0
+                continue
+
+            if outcome == "content":
+                if self._should_end_generation(state.collected_content, state.finish_reason):
+                    break
+
+                continuation_count += 1
+                if continuation_count >= max_continuations:
+                    break
+                continue
+
+            break
+
+    def _process_non_streaming_webgemini(self, session_id: str = "default") -> str:
+        """Fallback non-streaming WebGemini path via streaming aggregation."""
+        chunks: List[str] = []
+        for chunk in self._process_streaming_webgemini(session_id=session_id):
+            if chunk in (THINKING_START_MARKER, THINKING_END_MARKER):
+                continue
+            chunks.append(chunk)
+        return "".join(chunks)
+
     def _openai_extra_body_for_thinking(self) -> Optional[Dict[str, Any]]:
         """Build `extra_body` (OpenAI SDK) to enable/disable thinking for compatible models.
 
@@ -3090,6 +3196,8 @@ class ReverieAgent:
             yield from self._process_streaming_anthropic(session_id=session_id)
         elif self.provider == "codex":
             yield from self._process_streaming_native_provider("codex", session_id=session_id)
+        elif self.provider == "webgemini":
+            yield from self._process_streaming_webgemini(session_id=session_id)
         else:
             raise ValueError(f"Unknown provider: {self.provider}")
     
@@ -3428,6 +3536,8 @@ class ReverieAgent:
             return self._process_non_streaming_anthropic(session_id=session_id)
         elif self.provider == "codex":
             return self._process_non_streaming_native_provider("codex", session_id=session_id)
+        elif self.provider == "webgemini":
+            return self._process_non_streaming_webgemini(session_id=session_id)
         else:
             raise ValueError(f"Unknown provider: {self.provider}")
     

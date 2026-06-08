@@ -47,10 +47,15 @@ from .modelscope import (
     default_modelscope_config,
     normalize_modelscope_config,
 )
+from .webgemini import (
+    build_webgemini_runtime_model_data,
+    default_webgemini_config,
+    normalize_webgemini_config,
+)
 from .modes import normalize_mode
 from .version import CONFIG_VERSION, __version__
 
-EXTERNAL_MODEL_SOURCES = ("codex", "aihubmix", "nvidia", "modelscope")
+EXTERNAL_MODEL_SOURCES = ("codex", "aihubmix", "nvidia", "modelscope", "webgemini")
 SUPPORTED_ACTIVE_MODEL_SOURCES = ("standard",) + EXTERNAL_MODEL_SOURCES
 SUPPORTED_TOOL_OUTPUT_STYLES = ("compact", "condensed", "full")
 SUPPORTED_THINKING_OUTPUT_STYLES = ("hidden", "compact", "full")
@@ -830,7 +835,7 @@ class Config:
     """Main configuration"""
     models: List[ModelConfig] = field(default_factory=list)
     active_model_index: int = 0
-    active_model_source: str = "standard"  # standard | codex | aihubmix | nvidia | modelscope
+    active_model_source: str = "standard"  # standard | codex | aihubmix | nvidia | modelscope | webgemini
     mode: str = "reverie"
     theme: str = "default"
     max_context_tokens: int = 128000
@@ -856,6 +861,7 @@ class Config:
     aihubmix: Dict[str, Any] = field(default_factory=default_aihubmix_config)
     nvidia: Dict[str, Any] = field(default_factory=default_nvidia_config)
     modelscope: Dict[str, Any] = field(default_factory=default_modelscope_config)
+    webgemini: Dict[str, Any] = field(default_factory=default_webgemini_config)
     atlas_mode: Dict[str, Any] = field(default_factory=default_atlas_mode_config)
     subagents: Dict[str, Any] = field(default_factory=default_subagent_config)
     
@@ -912,6 +918,11 @@ class Config:
             if runtime_modelscope_model:
                 return ModelConfig.from_dict(runtime_modelscope_model)
 
+        if source == "webgemini":
+            runtime_webgemini_model = build_webgemini_runtime_model_data(self.webgemini)
+            if runtime_webgemini_model:
+                return ModelConfig.from_dict(runtime_webgemini_model)
+
         if 0 <= self.active_model_index < len(self.models):
             return self.models[self.active_model_index]
         return None
@@ -947,6 +958,7 @@ class Config:
         aihubmix = normalize_aihubmix_config(self.aihubmix)
         nvidia = normalize_nvidia_config(self.nvidia)
         modelscope = normalize_modelscope_config(self.modelscope)
+        webgemini = normalize_webgemini_config(self.webgemini)
         atlas_mode = normalize_atlas_mode_config(self.atlas_mode)
         subagents = normalize_subagent_config(self.subagents)
         active_model_source = self.active_model_source.lower()
@@ -978,6 +990,7 @@ class Config:
             'aihubmix': aihubmix,
             'nvidia': nvidia,
             'modelscope': modelscope,
+            'webgemini': webgemini,
             'atlas_mode': atlas_mode,
             'subagents': subagents,
         }
@@ -1019,6 +1032,8 @@ class Config:
         nvidia = normalize_nvidia_config(raw_nvidia)
         raw_modelscope = data.get('modelscope', {})
         modelscope = normalize_modelscope_config(raw_modelscope)
+        raw_webgemini = data.get('webgemini', {})
+        webgemini = normalize_webgemini_config(raw_webgemini)
         raw_atlas_mode = data.get('atlas_mode', {})
         atlas_mode = normalize_atlas_mode_config(raw_atlas_mode)
         raw_subagents = data.get('subagents', {})
@@ -1052,6 +1067,7 @@ class Config:
             aihubmix=aihubmix,
             nvidia=nvidia,
             modelscope=modelscope,
+            webgemini=webgemini,
             atlas_mode=atlas_mode,
             subagents=subagents,
         )

@@ -246,6 +246,11 @@ class ReverieUiBridge:
             resolve_nvidia_thinking_choice,
             get_nvidia_thinking_options,
         )
+        from reverie.webgemini import (
+            get_webgemini_model_catalog,
+            normalize_webgemini_config,
+            resolve_webgemini_selected_model,
+        )
 
         active_source = str(getattr(config, "active_model_source", "standard") or "standard").strip().lower()
         sources: list[Dict[str, Any]] = []
@@ -336,6 +341,24 @@ class ReverieUiBridge:
                 "api_url": str(modelscope_cfg.get("api_url", "") or ""),
                 "endpoint": "",
                 "models": get_modelscope_model_catalog(),
+            }
+        )
+        webgemini_cfg = normalize_webgemini_config(getattr(config, "webgemini", {}))
+        webgemini_selected = resolve_webgemini_selected_model(webgemini_cfg)
+        sources.append(
+            {
+                "source": "webgemini",
+                "label": "WebGemini",
+                "active": active_source == "webgemini",
+                "credential": "anonymous",
+                "has_api_key": True,
+                "selected_model_id": str(webgemini_cfg.get("selected_model_id", "") or ""),
+                "selected_model_display_name": str(
+                    (webgemini_selected or {}).get("display_name") or webgemini_cfg.get("selected_model_display_name") or ""
+                ),
+                "api_url": "https://gemini.google.com",
+                "endpoint": "StreamGenerate",
+                "models": get_webgemini_model_catalog(),
             }
         )
         return json_safe(sources)
@@ -886,6 +909,7 @@ class ReverieUiBridge:
         from reverie.config import EXTERNAL_MODEL_SOURCES
         from reverie.modelscope import normalize_modelscope_config
         from reverie.nvidia import apply_nvidia_thinking_choice, normalize_nvidia_config
+        from reverie.webgemini import normalize_webgemini_config
 
         interface = self.ensure_interface()
         source = str(payload.get("source") or "").strip().lower()
@@ -939,6 +963,23 @@ class ReverieUiBridge:
             if api_url:
                 cfg["api_url"] = api_url
             config.modelscope = normalize_modelscope_config(cfg)
+        elif source == "webgemini":
+            cfg = normalize_webgemini_config(getattr(config, "webgemini", {}))
+            if selected_model_id:
+                cfg["selected_model_id"] = selected_model_id
+            if payload.get("gemini_bl"):
+                cfg["gemini_bl"] = str(payload.get("gemini_bl") or "").strip()
+            if payload.get("auth_user") is not None:
+                cfg["auth_user"] = str(payload.get("auth_user") or "").strip()
+            if payload.get("xsrf_token") is not None:
+                cfg["xsrf_token"] = str(payload.get("xsrf_token") or "").strip()
+            if payload.get("cookie") is not None:
+                cfg["cookie"] = str(payload.get("cookie") or "").strip()
+            if payload.get("cookie_file") is not None:
+                cfg["cookie_file"] = str(payload.get("cookie_file") or "").strip()
+            if payload.get("proxy") is not None:
+                cfg["proxy"] = str(payload.get("proxy") or "").strip()
+            config.webgemini = normalize_webgemini_config(cfg)
 
         if bool(payload.get("activate", True)):
             config.active_model_source = source

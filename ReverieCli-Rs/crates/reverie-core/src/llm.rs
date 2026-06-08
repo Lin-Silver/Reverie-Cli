@@ -1026,6 +1026,7 @@ pub async fn send_openai_compatible(
             Ok(ChatResponse {
                 output_text,
                 raw: response,
+                usage: None,
             })
         }
     })
@@ -1095,6 +1096,7 @@ pub async fn send_anthropic_compatible(
             Ok(ChatResponse {
                 output_text,
                 raw: response,
+                usage: None,
             })
         }
     })
@@ -1872,6 +1874,7 @@ fn stream_response(
                 "finish_reason": finish_reason
             }]
         }),
+        usage: None,
     }
 }
 
@@ -1940,6 +1943,7 @@ pub async fn send_nvidia_compatible(
             Ok(ChatResponse {
                 output_text,
                 raw: response,
+                usage: None,
             })
         }
     })
@@ -2003,6 +2007,7 @@ pub async fn send_modelscope_compatible(
             Ok(ChatResponse {
                 output_text,
                 raw: response,
+                usage: None,
             })
         }
     })
@@ -2069,6 +2074,7 @@ pub async fn send_codex_compatible(
             Ok(ChatResponse {
                 output_text,
                 raw: response,
+                usage: None,
             })
         }
     })
@@ -2130,6 +2136,7 @@ pub async fn send_gemini_compatible(
             Ok(ChatResponse {
                 output_text,
                 raw: response,
+                usage: None,
             })
         }
     })
@@ -2206,6 +2213,7 @@ pub async fn send_ollama_compatible(
             Ok(ChatResponse {
                 output_text,
                 raw: response,
+                usage: None,
             })
         }
     })

@@ -30,6 +30,11 @@ from .aihubmix import (
     default_aihubmix_config,
     normalize_aihubmix_config,
 )
+from .agnes import (
+    build_agnes_runtime_model_data,
+    default_agnes_config,
+    normalize_agnes_config,
+)
 from .atlas import (
     default_atlas_mode_config,
     normalize_atlas_mode_config,
@@ -55,11 +60,12 @@ from .webgemini import (
 from .modes import normalize_mode
 from .version import CONFIG_VERSION, __version__
 
-EXTERNAL_MODEL_SOURCES = ("codex", "aihubmix", "nvidia", "modelscope", "webgemini")
+EXTERNAL_MODEL_SOURCES = ("codex", "aihubmix", "agnes", "nvidia", "modelscope", "webgemini")
 SUPPORTED_ACTIVE_MODEL_SOURCES = ("standard",) + EXTERNAL_MODEL_SOURCES
 SUPPORTED_TOOL_OUTPUT_STYLES = ("compact", "condensed", "full")
 SUPPORTED_THINKING_OUTPUT_STYLES = ("hidden", "compact", "full")
-SUPPORTED_TTI_SOURCES = ("local", "aihubmix", "pollinations")
+SUPPORTED_TTI_SOURCES = ("local", "aihubmix", "pollinations", "agnes")
+SUPPORTED_TTV_SOURCES = ("agnes",)
 PROJECTS_DATA_DIRNAME = "projects"
 LEGACY_PROJECT_CACHES_DIRNAME = "project_caches"
 
@@ -200,6 +206,36 @@ def default_text_to_image_config() -> Dict[str, Any]:
             "default_quality": "medium",
             "response_format": "b64_json",
             "safe": "",
+        },
+        "agnes": {
+            "enabled": True,
+            "base_url": "https://apihub.agnes-ai.com/v1",
+            "default_model": "agnes-image-2.1-flash",
+            "timeout": 300,
+            "default_size": "1024x1024",
+            "default_quality": "auto",
+            "response_format": "b64_json",
+        },
+    }
+
+
+def default_text_to_video_config() -> Dict[str, Any]:
+    """Default configuration for text-to-video generation."""
+    return {
+        "enabled": True,
+        "output_dir": ".",
+        "active_source": "agnes",
+        "agnes": {
+            "enabled": True,
+            "base_url": "https://apihub.agnes-ai.com/v1",
+            "default_model": "agnes-video-v2.0",
+            "timeout": 300,
+            "default_width": 1152,
+            "default_height": 768,
+            "default_num_frames": 121,
+            "default_frame_rate": 24,
+            "default_poll_interval": 5,
+            "default_max_poll_seconds": 600,
         },
     }
 
@@ -581,6 +617,14 @@ def normalize_tti_source(value: Any, default: str = "local") -> str:
     return default
 
 
+def normalize_ttv_source(value: Any, default: str = "agnes") -> str:
+    """Normalize the persisted text-to-video source selector."""
+    candidate = str(value or "").strip().lower()
+    if candidate in SUPPORTED_TTV_SOURCES:
+        return candidate
+    return default
+
+
 def get_app_root() -> Path:
     """
     Get the application root directory.
@@ -835,7 +879,7 @@ class Config:
     """Main configuration"""
     models: List[ModelConfig] = field(default_factory=list)
     active_model_index: int = 0
-    active_model_source: str = "standard"  # standard | codex | aihubmix | nvidia | modelscope | webgemini
+    active_model_source: str = "standard"  # standard | codex | aihubmix | agnes | nvidia | modelscope | webgemini
     mode: str = "reverie"
     theme: str = "default"
     max_context_tokens: int = 128000
@@ -857,8 +901,10 @@ class Config:
     
     # Text-to-image settings
     text_to_image: Dict[str, Any] = field(default_factory=default_text_to_image_config)
+    text_to_video: Dict[str, Any] = field(default_factory=default_text_to_video_config)
     codex: Dict[str, Any] = field(default_factory=dict)
     aihubmix: Dict[str, Any] = field(default_factory=default_aihubmix_config)
+    agnes: Dict[str, Any] = field(default_factory=default_agnes_config)
     nvidia: Dict[str, Any] = field(default_factory=default_nvidia_config)
     modelscope: Dict[str, Any] = field(default_factory=default_modelscope_config)
     webgemini: Dict[str, Any] = field(default_factory=default_webgemini_config)
@@ -908,6 +954,11 @@ class Config:
             if runtime_aihubmix_model:
                 return ModelConfig.from_dict(runtime_aihubmix_model)
 
+        if source == "agnes":
+            runtime_agnes_model = build_agnes_runtime_model_data(self.agnes)
+            if runtime_agnes_model:
+                return ModelConfig.from_dict(runtime_agnes_model)
+
         if source == "nvidia":
             runtime_nvidia_model = build_nvidia_runtime_model_data(runtime_nvidia_config)
             if runtime_nvidia_model:
@@ -945,6 +996,12 @@ class Config:
             text_to_image["pollinations"] = nested_pollinations
         else:
             text_to_image["pollinations"] = dict(text_to_image_defaults["pollinations"])
+        if isinstance(text_to_image.get("agnes"), dict):
+            nested_agnes_tti = dict(text_to_image_defaults["agnes"])
+            nested_agnes_tti.update(text_to_image.get("agnes", {}))
+            text_to_image["agnes"] = nested_agnes_tti
+        else:
+            text_to_image["agnes"] = dict(text_to_image_defaults["agnes"])
         text_to_image['active_source'] = normalize_tti_source(text_to_image.get('active_source', 'local'))
         text_to_image['models'] = normalize_tti_models(
             text_to_image.get('models', []),
@@ -954,8 +1011,21 @@ class Config:
         text_to_image.pop('model_paths', None)
         text_to_image.pop('default_model_index', None)
         tti_models = text_to_image['models']
+        text_to_video_defaults = default_text_to_video_config()
+        text_to_video = dict(self.text_to_video) if isinstance(self.text_to_video, dict) else dict(text_to_video_defaults)
+        for key, value in text_to_video_defaults.items():
+            if key not in text_to_video:
+                text_to_video[key] = value
+        if isinstance(text_to_video.get("agnes"), dict):
+            nested_agnes_ttv = dict(text_to_video_defaults["agnes"])
+            nested_agnes_ttv.update(text_to_video.get("agnes", {}))
+            text_to_video["agnes"] = nested_agnes_ttv
+        else:
+            text_to_video["agnes"] = dict(text_to_video_defaults["agnes"])
+        text_to_video["active_source"] = normalize_ttv_source(text_to_video.get("active_source", "agnes"))
         codex = normalize_codex_config(self.codex)
         aihubmix = normalize_aihubmix_config(self.aihubmix)
+        agnes = normalize_agnes_config(self.agnes)
         nvidia = normalize_nvidia_config(self.nvidia)
         modelscope = normalize_modelscope_config(self.modelscope)
         webgemini = normalize_webgemini_config(self.webgemini)
@@ -986,8 +1056,10 @@ class Config:
             'api_timeout': self.api_timeout,
             'api_enable_debug_logging': self.api_enable_debug_logging,
             'text_to_image': text_to_image,
+            'text_to_video': text_to_video,
             'codex': codex,
             'aihubmix': aihubmix,
+            'agnes': agnes,
             'nvidia': nvidia,
             'modelscope': modelscope,
             'webgemini': webgemini,
@@ -1013,6 +1085,10 @@ class Config:
                 nested_pollinations = dict(default_text_to_image_config()["pollinations"])
                 nested_pollinations.update(loaded_t2i.get("pollinations", {}))
                 text_to_image["pollinations"] = nested_pollinations
+            if isinstance(loaded_t2i.get("agnes"), dict):
+                nested_agnes_tti = dict(default_text_to_image_config()["agnes"])
+                nested_agnes_tti.update(loaded_t2i.get("agnes", {}))
+                text_to_image["agnes"] = nested_agnes_tti
         top_level_tti_models = data.get('tti-models', None)
         if top_level_tti_models is not None:
             text_to_image['models'] = top_level_tti_models
@@ -1024,10 +1100,21 @@ class Config:
         text_to_image['default_model_display_name'] = resolve_tti_default_display_name(text_to_image)
         text_to_image.pop('model_paths', None)
         text_to_image.pop('default_model_index', None)
+        text_to_video = default_text_to_video_config()
+        loaded_ttv = data.get('text_to_video', data.get('ttv', {}))
+        if isinstance(loaded_ttv, dict):
+            text_to_video.update(loaded_ttv)
+            if isinstance(loaded_ttv.get("agnes"), dict):
+                nested_agnes_ttv = dict(default_text_to_video_config()["agnes"])
+                nested_agnes_ttv.update(loaded_ttv.get("agnes", {}))
+                text_to_video["agnes"] = nested_agnes_ttv
+        text_to_video["active_source"] = normalize_ttv_source(text_to_video.get("active_source", "agnes"))
         raw_codex = data.get('codex', {})
         codex = normalize_codex_config(raw_codex)
         raw_aihubmix = data.get('aihubmix', {})
         aihubmix = normalize_aihubmix_config(raw_aihubmix)
+        raw_agnes = data.get('agnes', {})
+        agnes = normalize_agnes_config(raw_agnes)
         raw_nvidia = data.get('nvidia', {})
         nvidia = normalize_nvidia_config(raw_nvidia)
         raw_modelscope = data.get('modelscope', {})
@@ -1063,8 +1150,10 @@ class Config:
             api_timeout=data.get('api_timeout', 60),
             api_enable_debug_logging=data.get('api_enable_debug_logging', False),
             text_to_image=text_to_image,
+            text_to_video=text_to_video,
             codex=codex,
             aihubmix=aihubmix,
+            agnes=agnes,
             nvidia=nvidia,
             modelscope=modelscope,
             webgemini=webgemini,
@@ -1688,6 +1777,17 @@ class ConfigManager:
                     needs_update = True
                     break
 
+        # Check if agnes section is missing
+        if 'agnes' not in data:
+            needs_update = True
+        elif not isinstance(data.get('agnes'), dict):
+            needs_update = True
+        else:
+            for field_name in default_agnes_config().keys():
+                if field_name not in data.get('agnes', {}):
+                    needs_update = True
+                    break
+
         # Check if nvidia section is missing
         if 'nvidia' not in data:
             needs_update = True
@@ -1777,6 +1877,15 @@ class ConfigManager:
                         if field_name not in tti_pollinations:
                             needs_update = True
                             break
+                tti_agnes_defaults = default_text_to_image_config().get("agnes", {})
+                tti_agnes = text_to_image.get("agnes", {})
+                if not isinstance(tti_agnes, dict):
+                    needs_update = True
+                else:
+                    for field_name in tti_agnes_defaults.keys():
+                        if field_name not in tti_agnes:
+                            needs_update = True
+                            break
                 models = text_to_image.get('models', [])
                 if not isinstance(models, list):
                     needs_update = True
@@ -1792,8 +1901,32 @@ class ConfigManager:
                 if 'model_paths' in text_to_image or 'default_model_index' in text_to_image:
                     needs_update = True
 
+        # Check if text_to_video section is missing or incomplete
+        if 'text_to_video' not in data:
+            needs_update = True
+        else:
+            text_to_video = data.get('text_to_video')
+            if not isinstance(text_to_video, dict):
+                needs_update = True
+            else:
+                for field_name in default_text_to_video_config().keys():
+                    if field_name not in text_to_video:
+                        needs_update = True
+                        break
+                ttv_agnes_defaults = default_text_to_video_config().get("agnes", {})
+                ttv_agnes = text_to_video.get("agnes", {})
+                if not isinstance(ttv_agnes, dict):
+                    needs_update = True
+                else:
+                    for field_name in ttv_agnes_defaults.keys():
+                        if field_name not in ttv_agnes:
+                            needs_update = True
+                            break
+
         # Canonical config now stores TTI models only under text_to_image.models.
         if 'tti-models' in data:
+            needs_update = True
+        if 'ttv' in data:
             needs_update = True
 
         return needs_update
@@ -1844,6 +1977,8 @@ class ConfigManager:
             return True
         if build_aihubmix_runtime_model_data(getattr(config, "aihubmix", {})):
             return True
+        if build_agnes_runtime_model_data(getattr(config, "agnes", {})):
+            return True
         if build_modelscope_runtime_model_data(getattr(config, "modelscope", {})):
             return True
         nvidia = normalize_nvidia_config(getattr(config, "nvidia", {}))
@@ -1874,6 +2009,8 @@ class ConfigManager:
                     config.active_model_source = "codex"
                 elif build_aihubmix_runtime_model_data(getattr(config, "aihubmix", {})):
                     config.active_model_source = "aihubmix"
+                elif build_agnes_runtime_model_data(getattr(config, "agnes", {})):
+                    config.active_model_source = "agnes"
                 elif build_nvidia_runtime_model_data(getattr(config, "nvidia", {})):
                     config.active_model_source = "nvidia"
                 elif build_modelscope_runtime_model_data(getattr(config, "modelscope", {})):

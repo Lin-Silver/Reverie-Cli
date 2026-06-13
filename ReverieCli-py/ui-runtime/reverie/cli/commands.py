@@ -72,6 +72,8 @@ class CommandHandler:
             'wgemini': self.cmd_webgemini,
             'aihubmix': self.cmd_aihubmix,
             'aihub': self.cmd_aihubmix,
+            'agnes': self.cmd_agnes,
+            'ag': self.cmd_agnes,
             'nvidia': self.cmd_nvidia,
             'modelscope': self.cmd_modelscope,
             'mode': self.cmd_mode,
@@ -2113,6 +2115,7 @@ class CommandHandler:
         "switch_mode": ("Switch Mode", "switch_mode"),
         "task_manager": ("WriteTodos", "task_manager"),
         "text_to_image": ("Generate Image", "text_to_image"),
+        "text_to_video": ("Generate Video", "text_to_video"),
         "tool_catalog": ("List Tools", "tool_catalog"),
         "userInput": ("Ask User", "ask_user"),
         "web_fetch": ("WebFetch", "web_fetch"),
@@ -3590,14 +3593,14 @@ class CommandHandler:
         Supported:
         - /tti models      -> list TTI models and pick default model
         - /tti add         -> add a TTI model to config
-        - /tti source      -> select local, AIhubMix, or Pollinations TTI source
+        - /tti source      -> select local, AIhubMix, Pollinations, or Agnes TTI source
         - /tti <prompt>    -> generate one image with default model/default params
         """
         raw = args.strip()
         if not raw:
             self.console.print(
                 f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} "
-                f"Usage: /tti models OR /tti source [local|aihubmix|pollinations] OR /tti add OR /tti <your prompt>"
+                f"Usage: /tti models OR /tti source [local|aihubmix|pollinations|agnes] OR /tti add OR /tti <your prompt>"
                 f"[/{self.theme.AMBER_GLOW}]"
             )
             return True
@@ -3761,12 +3764,12 @@ class CommandHandler:
         candidate = normalize_tti_source(raw_value, default="") if raw_value else ""
         if raw_value and not candidate:
             self.console.print(
-                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid TTI source: {escape(raw_value)}. Use local, aihubmix, or pollinations.[/{self.theme.CORAL_SOFT}]"
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid TTI source: {escape(raw_value)}. Use local, aihubmix, pollinations, or agnes.[/{self.theme.CORAL_SOFT}]"
             )
             return True
         if not candidate:
             current = normalize_tti_source(tti_cfg.get("active_source", "local"))
-            candidate = Prompt.ask("TTI source", default=current, choices=["local", "aihubmix", "pollinations"]).strip().lower()
+            candidate = Prompt.ask("TTI source", default=current, choices=["local", "aihubmix", "pollinations", "agnes"]).strip().lower()
             candidate = normalize_tti_source(candidate)
 
         if candidate == "pollinations":
@@ -3789,6 +3792,27 @@ class CommandHandler:
                     return True
                 tti_pollinations["api_key"] = configured_key
                 tti_cfg["pollinations"] = tti_pollinations
+
+        if candidate == "agnes":
+            from ..agnes import AGNES_API_KEY_HINT_URL, normalize_agnes_config, resolve_agnes_api_key
+
+            agnes_cfg = normalize_agnes_config(getattr(config, "agnes", {}))
+            if not resolve_agnes_api_key(agnes_cfg):
+                self.console.print()
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Agnes image generation uses the shared top-level Agnes API key. Get one from {AGNES_API_KEY_HINT_URL} and paste it here to continue.[/{self.theme.TEXT_DIM}]"
+                )
+                api_key = Prompt.ask(
+                    f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Agnes API Key",
+                    password=True,
+                ).strip()
+                if not api_key:
+                    self.console.print(
+                        f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Agnes API key is required to activate this TTI source.[/{self.theme.CORAL_SOFT}]"
+                    )
+                    return True
+                agnes_cfg["api_key"] = api_key
+                config.agnes = normalize_agnes_config(agnes_cfg)
 
         tti_cfg["active_source"] = candidate
         config.text_to_image = tti_cfg
@@ -3899,6 +3923,53 @@ class CommandHandler:
             config_manager.save(config)
             self.console.print(
                 f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Default Pollinations TTI model set to: {selected_model['display_name']}[/{self.theme.MINT_VIBRANT}]"
+            )
+            if self.app.get('reinit_agent'):
+                self.app['reinit_agent']()
+            return True
+
+        if normalize_tti_source(tti_cfg.get("active_source", "local")) == "agnes":
+            from ..agnes_tti_profiles.registry import get_agnes_tti_model_catalog
+            from .tui_selector import ModelSelector, SelectorAction
+
+            tti_agnes = tti_cfg.get("agnes", {}) if isinstance(tti_cfg.get("agnes"), dict) else {}
+            default_model = str(tti_agnes.get("default_model", "agnes-image-2.1-flash") or "agnes-image-2.1-flash").strip()
+            catalog = get_agnes_tti_model_catalog()
+            models_data = []
+            current_model_id = None
+            for i, model in enumerate(catalog):
+                model_id = str(model.get("id", ""))
+                input_modalities = ",".join(model.get("input_modalities", []))
+                models_data.append(
+                    {
+                        "id": str(i),
+                        "name": str(model.get("display_name", model_id)),
+                        "description": f"{model_id} | inputs: {input_modalities} | {model.get('description', '')}",
+                        "model": model,
+                    }
+                )
+                if model_id.lower() == default_model.lower():
+                    current_model_id = str(i)
+
+            selector = ModelSelector(console=self.console, models=models_data, current_model=current_model_id)
+            result = selector.run()
+            if result.action != SelectorAction.SELECT or not result.selected_item:
+                return True
+            try:
+                selected_idx = int(result.selected_item.id)
+            except (TypeError, ValueError):
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid model selection.[/{self.theme.CORAL_SOFT}]")
+                return True
+            if selected_idx < 0 or selected_idx >= len(catalog):
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid model index.[/{self.theme.CORAL_SOFT}]")
+                return True
+            selected_model = catalog[selected_idx]
+            tti_agnes["default_model"] = selected_model["id"]
+            tti_cfg["agnes"] = tti_agnes
+            config.text_to_image = tti_cfg
+            config_manager.save(config)
+            self.console.print(
+                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Default Agnes TTI model set to: {selected_model['display_name']}[/{self.theme.MINT_VIBRANT}]"
             )
             if self.app.get('reinit_agent'):
                 self.app['reinit_agent']()
@@ -5729,6 +5800,7 @@ class CommandHandler:
             "standard": "Custom Providers",
             "codex": "Codex",
             "aihubmix": "AIhubMix",
+            "agnes": "Agnes",
             "nvidia": "NVIDIA",
             "modelscope": "ModelScope",
             "webgemini": "WebGemini",
@@ -6879,6 +6951,242 @@ class CommandHandler:
             catalog=get_aihubmix_model_catalog(),
             provider_label="AIhubMix",
             active_source="aihubmix",
+            model_query=model_query,
+        )
+
+    def cmd_agnes(self, args: str) -> bool:
+        """Manage Agnes source settings."""
+        raw = args.strip()
+        if not raw:
+            return self._cmd_agnes_status()
+
+        lowered = raw.lower()
+        if lowered in ("status", "check"):
+            return self._cmd_agnes_status()
+        if lowered in ("key", "apikey", "api-key", "login"):
+            return self._cmd_agnes_key()
+        if lowered in ("activate", "use"):
+            return self._cmd_agnes_activate()
+        if lowered == "model":
+            return self._cmd_agnes_model("")
+        if lowered.startswith("model "):
+            return self._cmd_agnes_model(raw[6:].strip())
+        if lowered in ("endpoint", "url", "base-url", "baseurl"):
+            return self._cmd_agnes_endpoint("")
+        if lowered.startswith("endpoint "):
+            return self._cmd_agnes_endpoint(raw[9:].strip())
+        if lowered.startswith("url "):
+            return self._cmd_agnes_endpoint(raw[4:].strip())
+        if lowered.startswith("base-url "):
+            return self._cmd_agnes_endpoint(raw[9:].strip())
+        if lowered.startswith("baseurl "):
+            return self._cmd_agnes_endpoint(raw[8:].strip())
+
+        self.console.print(
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /agnes [status|key|activate|model|endpoint][/{self.theme.AMBER_GLOW}]"
+        )
+        return True
+
+    def _ensure_agnes_configuration(self, config) -> bool:
+        """Prompt for Agnes API key when needed and bind the source."""
+        from ..agnes import (
+            AGNES_API_KEY_HINT_URL,
+            normalize_agnes_config,
+            resolve_agnes_api_key,
+        )
+
+        agnes_cfg = normalize_agnes_config(getattr(config, "agnes", {}))
+        api_key = resolve_agnes_api_key(agnes_cfg)
+        if not api_key:
+            self.console.print()
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Get your Agnes API key here: {AGNES_API_KEY_HINT_URL}[/{self.theme.TEXT_DIM}]"
+            )
+            api_key = Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Agnes API Key",
+                password=True,
+            ).strip()
+            if not api_key:
+                self.console.print(
+                    f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Agnes API key is required to activate this source.[/{self.theme.CORAL_SOFT}]"
+                )
+                return False
+        agnes_cfg["api_key"] = api_key
+        config.agnes = normalize_agnes_config(agnes_cfg)
+        config.active_model_source = "agnes"
+        return True
+
+    def _cmd_agnes_status(self) -> bool:
+        from ..agnes import (
+            AGNES_API_KEY_HINT_URL,
+            mask_secret,
+            normalize_agnes_config,
+            resolve_agnes_api_key,
+            resolve_agnes_selected_model,
+        )
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        agnes_cfg = normalize_agnes_config(getattr(config, "agnes", {}))
+        selected = resolve_agnes_selected_model(agnes_cfg)
+        effective_api_key = resolve_agnes_api_key(agnes_cfg)
+        key_origin = " (from environment)" if effective_api_key and not str(agnes_cfg.get("api_key", "") or "").strip() else ""
+        model_source = str(getattr(config, "active_model_source", "standard") or "standard").strip().lower()
+
+        lines = [
+            f"[{self.theme.BLUE_SOFT}]Active model source:[/{self.theme.BLUE_SOFT}] {self._format_model_source_label(model_source)}",
+            f"[{self.theme.BLUE_SOFT}]Configured key:[/{self.theme.BLUE_SOFT}] {mask_secret(effective_api_key) if effective_api_key else '(not set)'}{key_origin}",
+            f"[{self.theme.BLUE_SOFT}]OpenAI base URL:[/{self.theme.BLUE_SOFT}] {escape(str(agnes_cfg.get('api_url', '')))}",
+            f"[{self.theme.BLUE_SOFT}]Endpoint:[/{self.theme.BLUE_SOFT}] {escape(str(agnes_cfg.get('endpoint', '')))}",
+            f"[{self.theme.BLUE_SOFT}]Temperature:[/{self.theme.BLUE_SOFT}] {agnes_cfg.get('temperature', 0.7)}",
+            f"[{self.theme.BLUE_SOFT}]Default max tokens:[/{self.theme.BLUE_SOFT}] {agnes_cfg.get('max_tokens', 16384)}",
+            f"[{self.theme.BLUE_SOFT}]Live model list:[/{self.theme.BLUE_SOFT}] {'on' if agnes_cfg.get('live_model_list', True) else 'off'}",
+            f"[{self.theme.BLUE_SOFT}]API key help:[/{self.theme.BLUE_SOFT}] {escape(AGNES_API_KEY_HINT_URL)}",
+        ]
+        if selected:
+            lines.insert(1, f"[{self.theme.BLUE_SOFT}]Selected model:[/{self.theme.BLUE_SOFT}] {escape(selected['display_name'])} ({escape(selected['id'])})")
+            lines.insert(2, f"[{self.theme.BLUE_SOFT}]Transport:[/{self.theme.BLUE_SOFT}] OpenAI SDK")
+            lines.insert(3, f"[{self.theme.BLUE_SOFT}]Context:[/{self.theme.BLUE_SOFT}] {int(selected.get('context_length') or 0):,} tokens")
+
+        self.console.print()
+        self.console.print(
+            Panel(
+                Text.from_markup("\n".join(lines)),
+                title=f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Agnes Source {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]",
+                border_style=self.theme.BORDER_PRIMARY,
+                box=box.ROUNDED,
+                padding=(1, 2),
+            )
+        )
+        self.console.print()
+        return True
+
+    def _cmd_agnes_key(self) -> bool:
+        from ..agnes import AGNES_API_KEY_HINT_URL, normalize_agnes_config
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        agnes_cfg = normalize_agnes_config(getattr(config, "agnes", {}))
+        self.console.print(
+            f"[{self.theme.TEXT_DIM}]Get your Agnes API key here: {AGNES_API_KEY_HINT_URL}[/{self.theme.TEXT_DIM}]"
+        )
+        api_key = Prompt.ask(
+            f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Agnes API Key",
+            password=True,
+        ).strip()
+        if not api_key:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Agnes API key cannot be empty.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        agnes_cfg["api_key"] = api_key
+        config.agnes = normalize_agnes_config(agnes_cfg)
+        config_manager.save(config)
+
+        if self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Agnes API key saved.[/{self.theme.MINT_VIBRANT}]"
+        )
+        return True
+
+    def _cmd_agnes_activate(self) -> bool:
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        if not self._ensure_agnes_configuration(config):
+            return True
+        config.active_model_source = "agnes"
+        config_manager.save(config)
+        if self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Agnes source activated.[/{self.theme.MINT_VIBRANT}]"
+        )
+        return True
+
+    def _cmd_agnes_endpoint(self, endpoint_value: str) -> bool:
+        from ..agnes import AGNES_DEFAULT_API_URL, normalize_agnes_config
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        agnes_cfg = normalize_agnes_config(getattr(config, "agnes", {}))
+        candidate = str(endpoint_value or "").strip()
+        if not candidate:
+            current_url = str(agnes_cfg.get("api_url", AGNES_DEFAULT_API_URL)).strip()
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Current OpenAI-compatible base URL: {current_url}[/{self.theme.TEXT_DIM}]"
+            )
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Use 'clear' to restore the default. You may paste /v1/chat/completions; Reverie normalizes it to /v1.[/{self.theme.TEXT_DIM}]"
+            )
+            candidate = Prompt.ask(
+                "Agnes OpenAI base URL",
+                default=current_url
+            ).strip()
+
+        if candidate.lower() in ("clear", "default", "none", "off"):
+            candidate = AGNES_DEFAULT_API_URL
+
+        if candidate and not candidate.startswith(("http://", "https://")):
+            candidate = f"https://{candidate}"
+
+        agnes_cfg["api_url"] = candidate or AGNES_DEFAULT_API_URL
+        config.agnes = normalize_agnes_config(agnes_cfg)
+        config_manager.save(config)
+
+        if self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+
+        self.console.print()
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Agnes OpenAI base URL set to: {escape(config.agnes.get('api_url', AGNES_DEFAULT_API_URL))}[/{self.theme.MINT_VIBRANT}]"
+        )
+        self.console.print()
+        return True
+
+    def _cmd_agnes_model(self, model_query: str) -> bool:
+        from ..agnes import get_agnes_model_catalog, normalize_agnes_config
+
+        config_manager = self.app.get('config_manager')
+        current_cfg = {}
+        if config_manager:
+            try:
+                current_cfg = normalize_agnes_config(getattr(config_manager.load(), "agnes", {}))
+            except Exception:
+                current_cfg = {}
+
+        return self._select_external_provider_model(
+            config_attr="agnes",
+            normalize_config=normalize_agnes_config,
+            catalog=get_agnes_model_catalog(current_cfg),
+            provider_label="Agnes",
+            active_source="agnes",
             model_query=model_query,
         )
 

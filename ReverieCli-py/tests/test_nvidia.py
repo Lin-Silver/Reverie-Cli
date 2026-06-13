@@ -15,6 +15,7 @@ from reverie.nvidia import (
     get_nvidia_reasoning_effort_label,
     get_nvidia_model_catalog,
     get_nvidia_model_metadata,
+    get_nvidia_model_vision_modalities,
     get_nvidia_thinking_options,
     normalize_nvidia_reasoning_effort,
     resolve_nvidia_model_profile_name,
@@ -29,6 +30,28 @@ def test_nvidia_catalog_contains_minimax_m27():
     assert metadata["id"] == "minimaxai/minimax-m2.7"
     assert metadata["display_name"] == "MiniMax M2.7"
     assert metadata["transport"] == "openai-sdk"
+
+
+def test_nvidia_catalog_contains_minimax_m3_multimodal_request_model():
+    metadata = get_nvidia_model_metadata("minimaxai/minimax-m3")
+
+    assert metadata is not None
+    assert metadata["id"] == "minimaxai/minimax-m3"
+    assert metadata["display_name"] == "MiniMax M3"
+    assert metadata["transport"] == "request"
+    assert metadata["vision"] is True
+    assert metadata["vision_modalities"] == ["image", "video"]
+    assert get_nvidia_model_vision_modalities("minimaxai/minimax-m3") == ["image", "video"]
+
+    defaults = build_nvidia_request_defaults(
+        {"selected_model_id": "minimaxai/minimax-m3", "max_tokens": 16384},
+        "minimaxai/minimax-m3",
+    )
+    assert defaults == {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "max_tokens": 8192,
+    }
 
 
 def test_nvidia_default_timeout_matches_global_api_timeout_default():
@@ -93,6 +116,7 @@ def test_nvidia_catalog_context_lengths_match_model_cards():
         "qwen/qwen3.5-122b-a10b": 262144,
         "nvidia/nemotron-3-super-120b-a12b": 1000000,
         "minimaxai/minimax-m2.7": 204800,
+        "minimaxai/minimax-m3": 1000000,
         "qwen/qwen3.5-397b-a17b": 262144,
         "z-ai/glm-5.1": 131072,
         "z-ai/glm4.7": 131072,

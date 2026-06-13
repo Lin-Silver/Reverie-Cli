@@ -36,6 +36,7 @@ from ..nvidia import (
     nvidia_model_requires_system_message_first,
 )
 from ..aihubmix import build_aihubmix_openai_options
+from ..agnes import build_agnes_openai_options
 from ..modelscope import build_modelscope_anthropic_options
 from ..webgemini import (
     generate_webgemini_message,
@@ -171,6 +172,18 @@ def _normalize_message_content_for_relay(content: Any) -> Any:
                 url = str(image_payload).strip()
             if url:
                 normalized_parts.append({"type": "image_url", "image_url": {"url": url}})
+                has_media = True
+            continue
+
+        if part_type == "video_url":
+            video_payload = part.get("video_url")
+            url = ""
+            if isinstance(video_payload, dict):
+                url = str(video_payload.get("url", "") or "").strip()
+            elif video_payload is not None:
+                url = str(video_payload).strip()
+            if url:
+                normalized_parts.append({"type": "video_url", "video_url": {"url": url}})
                 has_media = True
             continue
 
@@ -1654,7 +1667,8 @@ class ReverieAgent:
             model_name=self.model_display_name,
             additional_rules=additional_rules,
             mode=self.mode,
-            ant_phase=self.ant_phase
+            ant_phase=self.ant_phase,
+            config=self.config,
         )
 
     def set_ant_phase(self, phase: str) -> None:
@@ -1673,7 +1687,8 @@ class ReverieAgent:
                 model_name=self.model_display_name,
                 additional_rules=self.additional_rules,
                 mode=self.mode,
-                ant_phase=prompt_phase
+                ant_phase=prompt_phase,
+                config=self.config,
             )
 
     def _check_tool_side_effects(self, tool_name: str, args: Dict[str, Any]) -> None:
@@ -1692,7 +1707,8 @@ class ReverieAgent:
             model_name=self.model_display_name,
             additional_rules=self.additional_rules,
             mode=self.mode,
-            ant_phase=self.ant_phase
+            ant_phase=self.ant_phase,
+            config=self.config,
         )
 
     def reconfigure_runtime(
@@ -1760,7 +1776,8 @@ class ReverieAgent:
             model_name=self.model_display_name,
             additional_rules=self.additional_rules,
             mode=self.mode,
-            ant_phase=self.ant_phase
+            ant_phase=self.ant_phase,
+            config=self.config,
         )
     
     @staticmethod
@@ -2031,6 +2048,14 @@ class ReverieAgent:
             except Exception:
                 return timeout_value
 
+        if self._is_active_model_source("agnes") and self.provider == "openai-sdk":
+            try:
+                cfg = getattr(config, "agnes", {})
+                if isinstance(cfg, dict):
+                    return max(timeout_value, int(cfg.get("timeout", timeout_value)))
+            except Exception:
+                return timeout_value
+
         return timeout_value
 
     def _build_request_headers(self, stream: bool) -> Dict[str, str]:
@@ -2261,6 +2286,8 @@ class ReverieAgent:
                 extra_body = nvidia_options.get("extra_body")
         elif self._is_active_model_source("aihubmix"):
             nvidia_options = build_aihubmix_openai_options(getattr(self.config, "aihubmix", {}), model_for_sdk)
+        elif self._is_active_model_source("agnes"):
+            nvidia_options = build_agnes_openai_options(getattr(self.config, "agnes", {}), model_for_sdk)
         else:
             extra_body = self._openai_extra_body_for_thinking()
             if extra_body is not None and isinstance(model_for_sdk, str) and "(" in model_for_sdk and ")" in model_for_sdk:
@@ -2372,6 +2399,8 @@ class ReverieAgent:
             return "NVIDIA API"
         if self._is_active_model_source("aihubmix"):
             return "AIhubMix API"
+        if self._is_active_model_source("agnes"):
+            return "Agnes API"
         return "OpenAI-compatible API"
 
     def _model_request_stream_event(
@@ -3232,6 +3261,12 @@ class ReverieAgent:
                     model_for_sdk,
                 )
                 extra_body = None
+            elif self._is_active_model_source("agnes"):
+                nvidia_options = build_agnes_openai_options(
+                    getattr(self.config, "agnes", {}),
+                    model_for_sdk,
+                )
+                extra_body = None
             else:
                 extra_body = self._openai_extra_body_for_thinking()
             if extra_body is not None and isinstance(model_for_sdk, str) and "(" in model_for_sdk and ")" in model_for_sdk:
@@ -3568,6 +3603,12 @@ class ReverieAgent:
             elif self._is_active_model_source("aihubmix"):
                 nvidia_options = build_aihubmix_openai_options(
                     getattr(self.config, "aihubmix", {}),
+                    model_for_sdk,
+                )
+                extra_body = None
+            elif self._is_active_model_source("agnes"):
+                nvidia_options = build_agnes_openai_options(
+                    getattr(self.config, "agnes", {}),
                     model_for_sdk,
                 )
                 extra_body = None

@@ -36,6 +36,8 @@ NVIDIA_GPT_OSS_120B_CONTEXT_TOKENS = 128_000
 NVIDIA_KIMI_K2_6_CONTEXT_TOKENS = 262_144
 NVIDIA_DEEPSEEK_V4_CONTEXT_TOKENS = 1_000_000
 NVIDIA_DEEPSEEK_V4_MAX_OUTPUT_TOKENS = 262_144
+NVIDIA_MINIMAX_M3_CONTEXT_TOKENS = 1_000_000
+NVIDIA_MINIMAX_M3_MAX_OUTPUT_TOKENS = 8_192
 NVIDIA_DEFAULT_REASONING_EFFORT = "high"
 NVIDIA_DEFAULT_REASONING_BUDGET = 16_384
 NVIDIA_REASONING_EFFORTS = ("max", "high", "medium", "low", "none")
@@ -169,6 +171,7 @@ def _request_model(
     thinking_control: str = "none",
     thinking_options: Optional[List[Dict[str, str]]] = None,
     default_thinking_choice: str = "",
+    vision_modalities: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     profile_context_length = get_nvidia_profile_context_tokens(
         model_id,
@@ -183,6 +186,7 @@ def _request_model(
         "description": description,
         "transport": "request",
         "vision": bool(vision),
+        "vision_modalities": list(vision_modalities or (["image"] if vision else [])),
         "thinking": bool(thinking),
         "context_length": profile_context_length,
         "max_output_tokens": int(max_output_tokens) if max_output_tokens else None,
@@ -214,6 +218,7 @@ def _openai_model(
     thinking_control: str = "none",
     thinking_options: Optional[List[Dict[str, str]]] = None,
     default_thinking_choice: str = "",
+    vision_modalities: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     profile_context_length = get_nvidia_profile_context_tokens(
         model_id,
@@ -226,6 +231,7 @@ def _openai_model(
         "description": description,
         "transport": "openai-sdk",
         "vision": bool(vision),
+        "vision_modalities": list(vision_modalities or (["image"] if vision else [])),
         "thinking": bool(thinking),
         "context_length": profile_context_length,
         "max_output_tokens": int(max_output_tokens) if max_output_tokens else None,
@@ -292,6 +298,16 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         "MiniMax M2.7",
         "OpenAI SDK transport.",
         context_length=NVIDIA_MINIMAX_CONTEXT_TOKENS,
+    ),
+    _request_model(
+        "minimaxai/minimax-m3",
+        "MiniMax M3",
+        "Request transport with multimodal text, image, and video input.",
+        vision=True,
+        vision_modalities=["image", "video"],
+        context_length=NVIDIA_MINIMAX_M3_CONTEXT_TOKENS,
+        max_output_tokens=NVIDIA_MINIMAX_M3_MAX_OUTPUT_TOKENS,
+        tool_calling=True,
     ),
     _request_model(
         "qwen/qwen3.5-397b-a17b",
@@ -784,6 +800,21 @@ def is_nvidia_model_vision_capable(model_id: Any) -> bool:
     return bool(metadata and metadata.get("vision"))
 
 
+def get_nvidia_model_vision_modalities(model_id: Any) -> List[str]:
+    """Return supported inline visual media modalities for a NVIDIA model."""
+    metadata = get_nvidia_model_metadata(model_id) or {}
+    raw_modalities = metadata.get("vision_modalities")
+    if isinstance(raw_modalities, (list, tuple, set)):
+        modalities = [
+            str(item or "").strip().lower()
+            for item in raw_modalities
+            if str(item or "").strip().lower() in {"image", "video"}
+        ]
+        if modalities:
+            return modalities
+    return ["image"] if bool(metadata.get("vision")) else []
+
+
 def build_nvidia_runtime_model_data(nvidia_config: Any, model_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Build runtime model config dict for agent initialization."""
     cfg = normalize_nvidia_config(nvidia_config)
@@ -827,6 +858,7 @@ def build_nvidia_runtime_model_data(nvidia_config: Any, model_id: Optional[str] 
         "custom_headers": {},
         "supports_vision": bool(selected.get("vision", False)),
         "vision": bool(selected.get("vision", False)),
+        "vision_modalities": list(selected.get("vision_modalities") or (["image"] if selected.get("vision") else [])),
         "profile": resolve_nvidia_model_profile_name(selected["id"]),
     }
 
@@ -915,7 +947,14 @@ def build_nvidia_inline_image_notice(attachments: List[Dict[str, Any]]) -> str:
     """Return a compact attachment summary appended to user text blocks."""
     if not attachments:
         return ""
-    lines = ["Attached local image files:"]
+    has_video = any(str(item.get("type", "") or "").strip().lower() == "local_video" for item in attachments)
+    has_image = any(str(item.get("type", "") or "").strip().lower() == "local_image" for item in attachments)
+    if has_image and has_video:
+        lines = ["Attached local visual files:"]
+    elif has_video:
+        lines = ["Attached local video files:"]
+    else:
+        lines = ["Attached local image files:"]
     for item in attachments:
         path_text = str(item.get("file_path", "") or "").strip()
         file_name = str(item.get("file_name", "") or "").strip() or path_text

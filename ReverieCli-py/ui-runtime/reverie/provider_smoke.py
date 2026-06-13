@@ -24,6 +24,11 @@ from .aihubmix import (
     build_aihubmix_runtime_model_data,
     normalize_aihubmix_config,
 )
+from .agnes import (
+    build_agnes_openai_options,
+    build_agnes_runtime_model_data,
+    normalize_agnes_config,
+)
 from .config import Config, get_app_root
 from .modelscope import (
     build_modelscope_anthropic_options,
@@ -44,7 +49,7 @@ from .webgemini import (
 )
 
 
-BUILTIN_PROVIDER_NAMES = ("aihubmix", "modelscope", "nvidia", "codex", "webgemini")
+BUILTIN_PROVIDER_NAMES = ("aihubmix", "agnes", "modelscope", "nvidia", "codex", "webgemini")
 
 
 @dataclass
@@ -239,6 +244,49 @@ def smoke_aihubmix(config: Config, timeout_seconds: int = 45, model_id: str = ""
             stream.close()
 
 
+def smoke_agnes(config: Config, timeout_seconds: int = 45, model_id: str = "") -> ProviderSmokeResult:
+    provider = "agnes"
+    cfg = normalize_agnes_config(config.agnes)
+    if model_id:
+        cfg["selected_model_id"] = str(model_id or "").strip()
+        cfg = normalize_agnes_config(cfg)
+    runtime = build_agnes_runtime_model_data(cfg)
+    model = str((runtime or {}).get("model") or cfg.get("selected_model_id") or "")
+    if not runtime or not runtime.get("api_key"):
+        return _skipped(provider, model, "missing_credentials")
+
+    smoke_cfg = {**cfg, "max_tokens": 16}
+    start = time.perf_counter()
+    stream = None
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(
+            base_url=runtime["base_url"],
+            api_key=runtime["api_key"],
+            timeout=timeout_seconds,
+            max_retries=0,
+        )
+        options = build_agnes_openai_options(smoke_cfg, model)
+        options["max_tokens"] = min(16, int(options.get("max_tokens") or 16))
+        stream = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": "Reply with OK."}],
+            stream=True,
+            **{key: value for key, value in options.items() if value is not None},
+        )
+        for chunk in stream:
+            delta = getattr(getattr(chunk, "choices", [None])[0], "delta", None) if getattr(chunk, "choices", None) else None
+            if getattr(delta, "content", None):
+                break
+        return ProviderSmokeResult(provider=provider, model=model, status="ok", latency_ms=int((time.perf_counter() - start) * 1000))
+    except Exception as exc:
+        return _result_from_error(provider, model, start, exc)
+    finally:
+        if stream is not None and hasattr(stream, "close"):
+            stream.close()
+
+
 def smoke_nvidia(config: Config, timeout_seconds: int = 45, model_id: str = "") -> ProviderSmokeResult:
     provider = "nvidia"
     cfg = normalize_nvidia_config(config.nvidia)
@@ -382,6 +430,7 @@ def smoke_webgemini(config: Config, timeout_seconds: int = 60, model_id: str = "
 
 SMOKE_RUNNERS: Dict[str, Callable[[Config, int, str], ProviderSmokeResult]] = {
     "aihubmix": smoke_aihubmix,
+    "agnes": smoke_agnes,
     "modelscope": smoke_modelscope,
     "nvidia": smoke_nvidia,
     "codex": smoke_codex,

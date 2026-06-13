@@ -233,6 +233,7 @@ function modelSourceLabel(source) {
     codex: "Codex",
     webgemini: "WebGemini",
     aihubmix: "AIhubMix",
+    agnes: "Agnes",
     nvidia: "NVIDIA",
     modelscope: "ModelScope"
   };
@@ -696,7 +697,7 @@ function fillBuiltinSourceForm(sourceId = "") {
     el.builtinSourceModel.append(option);
   }
   el.builtinSourceApiKey.value = "";
-  el.builtinSourceApiKey.disabled = !["aihubmix", "nvidia", "modelscope"].includes(source.source);
+  el.builtinSourceApiKey.disabled = !["aihubmix", "agnes", "nvidia", "modelscope"].includes(source.source);
   el.builtinSourceApiUrl.value = source.api_url || "";
   el.builtinSourceEndpoint.value = source.endpoint || "";
   el.builtinSourceEndpoint.disabled = ["modelscope", "webgemini"].includes(source.source);

@@ -1,7 +1,7 @@
 """
 Text-to-Image Tool
 
-Generate images from text prompts using local Comfy models, AIhubMix, or Pollinations.
+Generate images from text prompts using local Comfy models, AIhubMix, Pollinations, or Agnes.
 """
 
 from __future__ import annotations
@@ -24,6 +24,12 @@ from ..aihubmix import (
     resolve_aihubmix_api_key,
     resolve_aihubmix_sdk_base_url,
 )
+from ..agnes import (
+    AGNES_DEFAULT_API_URL,
+    normalize_agnes_config,
+    resolve_agnes_api_key,
+    resolve_agnes_sdk_base_url,
+)
 from ..aihubmix_tti_profiles.registry import (
     get_aihubmix_tti_model_catalog,
     get_aihubmix_tti_profile,
@@ -38,6 +44,11 @@ from ..pollinations_tti_profiles.registry import (
     get_pollinations_tti_profile,
     resolve_pollinations_tti_model,
 )
+from ..agnes_tti_profiles.registry import (
+    get_agnes_tti_model_catalog,
+    get_agnes_tti_profile,
+    resolve_agnes_tti_model,
+)
 from ..config import (
     default_text_to_image_config,
     get_app_root,
@@ -50,7 +61,7 @@ from ..security_utils import is_path_within_workspace
 
 
 class TextToImageTool(BaseTool):
-    """Generate images via local Comfy models, AIhubMix, or Pollinations."""
+    """Generate images via local Comfy models, AIhubMix, Pollinations, or Agnes."""
 
     name = "text_to_image"
     aliases = ("generate_image", "tti")
@@ -58,23 +69,26 @@ class TextToImageTool(BaseTool):
     tool_category = "image-generation"
     tool_tags = ("image", "generate", "art", "asset", "comfy", "prompt")
 
-    description = """Generate images from text prompts using configured local, AIhubMix, or Pollinations models.
+    description = """Generate images from text prompts using configured local, AIhubMix, Pollinations, or Agnes models.
 
 Supports:
 - List configured text-to-image models from config.json
 - List AIhubMix image-generation models
 - List Pollinations free image-generation models
+- List Agnes image-generation models
 - Generate images by selecting configured model display name
 - Local Comfy parameter tuning
 - AIhubMix image API parameters: n, size, quality, aspect_ratio
 - Pollinations image API parameters: n, size, quality, response_format, safe
+- Agnes image API parameters: n, size, quality, response_format, seed
 
 Examples:
 - List models: {"action": "list_models"}
 - Generate with default model: {"action": "generate", "prompt": "a cyberpunk city at dusk"}
 - Generate with model display name: {"action": "generate", "prompt": "anime portrait", "model": "anime-xl"}
 - Generate with AIhubMix: {"action": "generate", "source": "aihubmix", "model": "gpt-image-2-free", "prompt": "a vase of flowers"}
-- Generate with Pollinations: {"action": "generate", "source": "pollinations", "model": "flux", "prompt": "a vase of flowers"}"""
+- Generate with Pollinations: {"action": "generate", "source": "pollinations", "model": "flux", "prompt": "a vase of flowers"}
+- Generate with Agnes: {"action": "generate", "source": "agnes", "model": "agnes-image-2.1-flash", "prompt": "a vase of flowers"}"""
 
     parameters = {
         "type": "object",
@@ -107,13 +121,13 @@ Examples:
             },
             "source": {
                 "type": "string",
-                "description": "Optional source override: local, aihubmix, or pollinations.",
+                "description": "Optional source override: local, aihubmix, pollinations, or agnes.",
             },
             "prompt": {"type": "string", "description": "Positive prompt for image generation"},
             "negative_prompt": {"type": "string", "description": "Negative prompt override"},
             "model": {
                 "type": "string",
-                "description": "Local display name, AIhubMix image model id/display name, or Pollinations model id/display name.",
+                "description": "Local display name, AIhubMix image model id/display name, Pollinations model id/display name, or Agnes image model id/display name.",
             },
             "display_name": {
                 "type": "string",
@@ -135,7 +149,7 @@ Examples:
             "sampler": {"type": "string", "description": "Sampler name"},
             "scheduler": {"type": "string", "description": "Scheduler name"},
             "batch_size": {"type": "integer", "description": "Batch size"},
-            "n": {"type": "integer", "description": "Remote image count. AIhubMix supports 1-10; Pollinations currently supports 1."},
+            "n": {"type": "integer", "description": "Remote image count. AIhubMix and Agnes support 1-10; Pollinations currently supports 1."},
             "size": {
                 "type": "string",
                 "description": "Remote image size: 1024x1024, 1024x1536, 1536x1024, or auto.",
@@ -150,7 +164,7 @@ Examples:
             },
             "response_format": {
                 "type": "string",
-                "description": "Pollinations response format: b64_json or url.",
+                "description": "Remote response format for Pollinations/Agnes: b64_json or url.",
             },
             "safe": {
                 "type": "boolean",
@@ -308,6 +322,8 @@ Examples:
             return self._generate_aihubmix(config=config, prompt=prompt, kwargs=kwargs)
         if source == "pollinations":
             return self._generate_pollinations(config=config, prompt=prompt, kwargs=kwargs)
+        if source == "agnes":
+            return self._generate_agnes(config=config, prompt=prompt, kwargs=kwargs)
 
         script_path = self._resolve_script_path(config=config, script_override=None)
         if not script_path.exists():
@@ -762,6 +778,125 @@ Examples:
             payload,
         )
 
+    def _get_agnes_tti_runtime_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        defaults = default_text_to_image_config().get("agnes", {})
+        tti_cfg = dict(defaults)
+        if isinstance(config.get("agnes"), dict):
+            tti_cfg.update(config.get("agnes", {}))
+
+        provider_cfg: Dict[str, Any] = {}
+        manager = self.context.get("config_manager")
+        if manager is not None:
+            try:
+                loaded = manager.load()
+                provider_cfg = normalize_agnes_config(getattr(loaded, "agnes", {}))
+            except Exception:
+                provider_cfg = {}
+        else:
+            provider_cfg = normalize_agnes_config({})
+
+        api_key = resolve_agnes_api_key(provider_cfg)
+
+        base_url = str(
+            tti_cfg.get("base_url")
+            or tti_cfg.get("api_url")
+            or provider_cfg.get("api_url")
+            or AGNES_DEFAULT_API_URL
+        ).strip()
+
+        try:
+            timeout = int(tti_cfg.get("timeout", 300) or 300)
+        except (TypeError, ValueError):
+            timeout = 300
+
+        return {
+            "enabled": bool(tti_cfg.get("enabled", True)),
+            "api_key": api_key,
+            "base_url": resolve_agnes_sdk_base_url(base_url),
+            "default_model": str(tti_cfg.get("default_model", "agnes-image-2.1-flash") or "agnes-image-2.1-flash").strip(),
+            "timeout": max(1, timeout),
+            "default_size": str(tti_cfg.get("default_size", "1024x1024") or "1024x1024").strip(),
+            "default_quality": str(tti_cfg.get("default_quality", "auto") or "auto").strip(),
+            "response_format": str(tti_cfg.get("response_format", "b64_json") or "b64_json").strip(),
+        }
+
+    def _generate_agnes(self, *, config: Dict[str, Any], prompt: str, kwargs: Dict[str, Any]) -> ToolResult:
+        runtime_cfg = self._get_agnes_tti_runtime_config(config)
+        if not runtime_cfg.get("enabled", True):
+            return ToolResult.fail("text_to_image.agnes.enabled=false")
+        if not runtime_cfg.get("api_key"):
+            return ToolResult.fail(
+                "Agnes API key is required. Set agnes.api_key in config.json, "
+                "or set AGNES_API_KEY/AGNES_TOKEN."
+            )
+
+        model_request = kwargs.get("display_name") or kwargs.get("model") or runtime_cfg.get("default_model")
+        selected = resolve_agnes_tti_model(model_request)
+        if not selected:
+            available = ", ".join(item["id"] for item in get_agnes_tti_model_catalog())
+            return ToolResult.fail(f"Unknown Agnes TTI model '{model_request}'. Available models: {available}")
+
+        profile = get_agnes_tti_profile(selected["id"])
+        if profile is None:
+            return ToolResult.fail(f"Agnes TTI profile not found for model: {selected['id']}")
+
+        try:
+            output_path = self._resolve_output_path(
+                output_override=kwargs.get("output_path"),
+                configured_output=str(config.get("output_dir", ".")),
+            )
+        except ValueError as exc:
+            return ToolResult.fail(str(exc))
+
+        n_value = kwargs.get("n", kwargs.get("batch_size", 1))
+        try:
+            result = profile.generate_image(
+                prompt=prompt,
+                output_path=output_path,
+                base_url=runtime_cfg["base_url"],
+                api_key=runtime_cfg.get("api_key", ""),
+                timeout=runtime_cfg["timeout"],
+                n=n_value,
+                size=kwargs.get("size", runtime_cfg.get("default_size", "1024x1024")),
+                quality=kwargs.get("quality", runtime_cfg.get("default_quality", "auto")),
+                response_format=kwargs.get("response_format", runtime_cfg.get("response_format", "b64_json")),
+                seed=kwargs.get("seed"),
+            )
+        except Exception as exc:
+            return ToolResult.fail(f"Agnes TTI generation failed for {selected['id']}: {exc}")
+
+        saved_images = [str(path) for path in result.get("saved_images", []) if str(path).strip()]
+        text_parts = [str(text) for text in result.get("text_parts", []) if str(text).strip()]
+        output_lines = [
+            "Agnes text-to-image generation finished",
+            f"Model: {result.get('display_name', selected['display_name'])} ({selected['id']})",
+            f"Base URL: {runtime_cfg['base_url']}",
+            f"Output target: {output_path}",
+        ]
+        if saved_images:
+            output_lines.append("Generated images:")
+            output_lines.extend(f"- {path}" for path in saved_images)
+        if text_parts:
+            output_lines.append("\n--- TEXT ---")
+            output_lines.extend(text_parts)
+
+        payload = {
+            "source": "agnes",
+            "model": selected["id"],
+            "model_display_name": selected["display_name"],
+            "saved_images": saved_images,
+            "text_parts": text_parts,
+            "output_path": str(output_path),
+            "request": result.get("request", {}),
+        }
+        if saved_images:
+            return ToolResult.ok("\n".join(output_lines), payload)
+        return ToolResult.partial(
+            "\n".join(output_lines),
+            "Agnes response did not include image data.",
+            payload,
+        )
+
     def _get_t2i_config(self) -> Dict[str, Any]:
         cfg = default_text_to_image_config()
         manager = self.context.get("config_manager")
@@ -770,6 +905,7 @@ Examples:
             cfg["default_model_display_name"] = resolve_tti_default_display_name(cfg)
             cfg["aihubmix"] = dict(default_text_to_image_config().get("aihubmix", {}))
             cfg["pollinations"] = dict(default_text_to_image_config().get("pollinations", {}))
+            cfg["agnes"] = dict(default_text_to_image_config().get("agnes", {}))
             return cfg
         try:
             loaded = manager.load()
@@ -784,12 +920,18 @@ Examples:
                     nested = dict(default_text_to_image_config().get("pollinations", {}))
                     nested.update(loaded_cfg.get("pollinations", {}))
                     cfg["pollinations"] = nested
+                if isinstance(loaded_cfg.get("agnes"), dict):
+                    nested = dict(default_text_to_image_config().get("agnes", {}))
+                    nested.update(loaded_cfg.get("agnes", {}))
+                    cfg["agnes"] = nested
         except Exception:
             pass
         if not isinstance(cfg.get("aihubmix"), dict):
             cfg["aihubmix"] = dict(default_text_to_image_config().get("aihubmix", {}))
         if not isinstance(cfg.get("pollinations"), dict):
             cfg["pollinations"] = dict(default_text_to_image_config().get("pollinations", {}))
+        if not isinstance(cfg.get("agnes"), dict):
+            cfg["agnes"] = dict(default_text_to_image_config().get("agnes", {}))
         cfg["models"] = normalize_tti_models(
             cfg.get("models", []),
             legacy_model_paths=cfg.get("model_paths", []),
@@ -843,6 +985,23 @@ Examples:
             return ToolResult.ok(
                 "Pollinations free text-to-image models:\n" + "\n".join(rows),
                 data={"models": data_rows, "source": "pollinations", "default_model": runtime_cfg.get("default_model", "")},
+            )
+        if source == "agnes":
+            runtime_cfg = self._get_agnes_tti_runtime_config(config)
+            models = get_agnes_tti_model_catalog()
+            default_model = str(runtime_cfg.get("default_model", "")).strip().lower()
+            rows = []
+            data_rows = []
+            for idx, item in enumerate(models):
+                marker = "*" if str(item.get("id", "")).lower() == default_model else " "
+                input_modalities = ",".join(item.get("input_modalities", []))
+                rows.append(
+                    f"{marker}[{idx}] {item['display_name']} | {item['id']} | inputs: {input_modalities}"
+                )
+                data_rows.append({**item, "index": idx, "is_default": str(item.get("id", "")).lower() == default_model})
+            return ToolResult.ok(
+                "Agnes text-to-image models:\n" + "\n".join(rows),
+                data={"models": data_rows, "source": "agnes", "default_model": runtime_cfg.get("default_model", "")},
             )
         models = config.get("models", [])
         default_display_name = str(config.get("default_model_display_name", "")).strip()
@@ -1143,6 +1302,32 @@ Examples:
                 ToolResult.ok(output, payload)
                 if ready
                 else ToolResult.partial(output, "Pollinations TTI is not ready; configure the missing API key, endpoint, or model.", payload)
+            )
+        if source == "agnes":
+            runtime_cfg = self._get_agnes_tti_runtime_config(config)
+            models = get_agnes_tti_model_catalog()
+            default_model = resolve_agnes_tti_model(runtime_cfg.get("default_model"))
+            checks = [
+                {"id": "enabled", "ok": bool(config.get("enabled", True)), "detail": "text_to_image.enabled"},
+                {"id": "source", "ok": source == "agnes", "detail": f"active source: {source}"},
+                {"id": "agnes_enabled", "ok": bool(runtime_cfg.get("enabled", True)), "detail": "text_to_image.agnes.enabled"},
+                {"id": "api_key", "ok": bool(runtime_cfg.get("api_key")), "detail": "agnes.api_key, AGNES_API_KEY, or AGNES_TOKEN"},
+                {"id": "base_url", "ok": bool(runtime_cfg.get("base_url")), "detail": runtime_cfg.get("base_url", "")},
+                {"id": "models", "ok": bool(models), "detail": f"{len(models)} Agnes TTI profiles available"},
+                {"id": "default_model", "ok": bool(default_model), "detail": runtime_cfg.get("default_model", "")},
+            ]
+            ready = all(item["ok"] for item in checks)
+            output = "Text-to-image Agnes diagnosis\n"
+            output += f"Ready: {'yes' if ready else 'no'}\n"
+            for check in checks:
+                output += f"- {check['id']}: {'ok' if check['ok'] else 'missing'} | {check['detail']}\n"
+            for item in models:
+                output += f"Model {item['display_name']}: {item['id']} | {item.get('api', '')}\n"
+            payload = {"ready": ready, "checks": checks, "models": models, "source": "agnes"}
+            return (
+                ToolResult.ok(output, payload)
+                if ready
+                else ToolResult.partial(output, "Agnes TTI is not ready; configure the missing Agnes API key or model.", payload)
             )
         script_path = self._resolve_script_path(config=config, script_override=None)
         python_exe = self._select_python_executable(config=config, script_path=script_path)

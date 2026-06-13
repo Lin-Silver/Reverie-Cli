@@ -16,6 +16,7 @@ Tools available to the AI Agent:
 - subagent: Delegate bounded Reverie-mode work to configured Subagents
 - skill_lookup: Inspect discovered SKILL.md instructions
 - list_mcp_resources/read_mcp_resource: Inspect MCP resources exposed by connected servers
+- media_generation_capabilities: Inspect runtime image/video generation capability profiles
 - count_tokens: Count tokens in text or current conversation
 """
 
@@ -36,7 +37,9 @@ from .create_file import CreateFileTool
 from .user_input import UserInputTool
 from .skill_lookup import SkillLookupTool
 from .clarification import ClarificationTool
+from .media_generation_capabilities import MediaGenerationCapabilitiesTool
 from .text_to_image import TextToImageTool
+from .text_to_video import TextToVideoTool
 from .ant_tools import TaskBoundaryTool, NotifyUserTool
 from .novel_context_manager import NovelContextManagerTool
 from .consistency_checker_tool import ConsistencyCheckerTool
@@ -85,7 +88,9 @@ __all__ = [
     "UserInputTool",
     "SkillLookupTool",
     "ClarificationTool",
+    "MediaGenerationCapabilitiesTool",
     "TextToImageTool",
+    "TextToVideoTool",
     "TaskBoundaryTool",
     "NotifyUserTool",
     "NovelContextManagerTool",

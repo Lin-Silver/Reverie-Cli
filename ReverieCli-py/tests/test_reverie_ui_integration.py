@@ -113,10 +113,12 @@ def test_reverie_ui_exposes_reverie_light_dark_theme_and_shortcuts() -> None:
     assert '<select id="builtinSourceThinking"' in html
     assert '<option value="webgemini">WebGemini</option>' in html
     assert '<option value="aihubmix">AIhubMix</option>' in html
+    assert '<option value="agnes">Agnes</option>' in html
     assert 'id="modelSupportsVision"' in html
     assert "function populateBuiltinThinkingOptions" in js
     assert "function getVisibleBuiltinModels" in js
     assert 'aihubmix: "AIhubMix"' in js
+    assert 'agnes: "Agnes"' in js
     assert 'webgemini: "WebGemini"' in js
     assert "supports_vision" in js
 
@@ -130,6 +132,7 @@ def test_bundled_ui_runtime_bridge_exposes_model_source_actions() -> None:
     assert '"builtin_sources": self.summarize_builtin_sources(config)' in bridge
     assert "get_codex_reasoning_catalog" in bridge
     assert "get_aihubmix_model_catalog" in bridge
+    assert "get_agnes_model_catalog" in bridge
     assert "get_webgemini_model_catalog" in bridge
     assert '"reasoning_choices": get_codex_reasoning_catalog' in bridge
     assert "get_nvidia_thinking_options" in bridge

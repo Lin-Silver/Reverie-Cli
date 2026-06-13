@@ -232,6 +232,12 @@ class ReverieUiBridge:
             resolve_aihubmix_api_key,
             resolve_aihubmix_selected_model,
         )
+        from reverie.agnes import (
+            get_agnes_model_catalog,
+            normalize_agnes_config,
+            resolve_agnes_api_key,
+            resolve_agnes_selected_model,
+        )
         from reverie.modelscope import (
             get_modelscope_model_catalog,
             normalize_modelscope_config,
@@ -298,6 +304,26 @@ class ReverieUiBridge:
                 "api_url": str(aihubmix_cfg.get("api_url", "") or ""),
                 "endpoint": str(aihubmix_cfg.get("endpoint", "") or ""),
                 "models": get_aihubmix_model_catalog(),
+            }
+        )
+
+        agnes_cfg = normalize_agnes_config(getattr(config, "agnes", {}))
+        agnes_key = resolve_agnes_api_key(agnes_cfg)
+        agnes_selected = resolve_agnes_selected_model(agnes_cfg)
+        sources.append(
+            {
+                "source": "agnes",
+                "label": "Agnes",
+                "active": active_source == "agnes",
+                "credential": "found" if agnes_key else "missing",
+                "has_api_key": bool(agnes_key),
+                "selected_model_id": str(agnes_cfg.get("selected_model_id", "") or ""),
+                "selected_model_display_name": str(
+                    (agnes_selected or {}).get("display_name") or agnes_cfg.get("selected_model_display_name") or ""
+                ),
+                "api_url": str(agnes_cfg.get("api_url", "") or ""),
+                "endpoint": str(agnes_cfg.get("endpoint", "") or ""),
+                "models": get_agnes_model_catalog(agnes_cfg),
             }
         )
 
@@ -905,6 +931,7 @@ class ReverieUiBridge:
 
     def handle_save_builtin_source(self, request_id: Any, payload: Dict[str, Any]) -> None:
         from reverie.aihubmix import normalize_aihubmix_config
+        from reverie.agnes import normalize_agnes_config
         from reverie.codex import normalize_codex_config
         from reverie.config import EXTERNAL_MODEL_SOURCES
         from reverie.modelscope import normalize_modelscope_config
@@ -942,6 +969,16 @@ class ReverieUiBridge:
                 cfg["api_url"] = api_url
             cfg["endpoint"] = endpoint
             config.aihubmix = normalize_aihubmix_config(cfg)
+        elif source == "agnes":
+            cfg = normalize_agnes_config(getattr(config, "agnes", {}))
+            if api_key:
+                cfg["api_key"] = api_key
+            if selected_model_id:
+                cfg["selected_model_id"] = selected_model_id
+            if api_url:
+                cfg["api_url"] = api_url
+            cfg["endpoint"] = endpoint
+            config.agnes = normalize_agnes_config(cfg)
         elif source == "nvidia":
             cfg = normalize_nvidia_config(getattr(config, "nvidia", {}))
             if api_key:

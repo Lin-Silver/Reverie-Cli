@@ -36,6 +36,7 @@ _OPENAI_PROFILES: Dict[str, ProfileBuilder] = {
 }
 
 _REQUEST_PROFILES: Dict[str, ProfileBuilder] = {
+    "minimaxai/minimax-m3": minimax.build_m3_request_defaults,
     "mistralai/mistral-small-4-119b-2603": mistral_small_4.build_request_defaults,
     "mistralai/mistral-medium-3.5-128b": mistral_medium_35.build_request_defaults,
     "qwen/qwen3.5-122b-a10b": qwen_35.build_122b_request_defaults,
@@ -43,6 +44,10 @@ _REQUEST_PROFILES: Dict[str, ProfileBuilder] = {
     "stepfun-ai/step-3.7-flash": step_37_flash.build_request_defaults,
     "mistralai/mistral-large-3-675b-instruct-2512": mistral_large_3.build_request_defaults,
     "moonshotai/kimi-k2.6": kimi_k2_6.build_request_defaults,
+}
+
+_CONTEXT_OVERRIDES: Dict[str, int] = {
+    "minimaxai/minimax-m3": minimax.M3_CONTEXT_TOKENS,
 }
 
 
@@ -67,6 +72,9 @@ def _profile_builder(model_id: Any, *, transport: str) -> Optional[ProfileBuilde
 
 def get_context_tokens(model_id: Any, *, transport: str, fallback: Optional[int] = None) -> Optional[int]:
     """Return the profile-owned context window for one NVIDIA-hosted model."""
+    key = _model_key(model_id)
+    if key in _CONTEXT_OVERRIDES:
+        return _CONTEXT_OVERRIDES[key]
     builder = _profile_builder(model_id, transport=transport)
     if builder is None:
         return fallback

@@ -173,7 +173,11 @@ def test_config_manager_creates_default_config_file_for_manual_editing(tmp_path:
     assert config.text_to_image["active_source"] == "local"
     assert config.text_to_image["aihubmix"]["default_model"] == "gpt-image-2-free"
     assert config.text_to_image["pollinations"]["default_model"] == "flux"
+    assert config.text_to_image["agnes"]["default_model"] == "agnes-image-2.1-flash"
+    assert config.text_to_video["active_source"] == "agnes"
+    assert config.text_to_video["agnes"]["default_model"] == "agnes-video-v2.0"
     assert config.aihubmix["selected_model_id"] == "gpt-5.5-free"
+    assert config.agnes["selected_model_id"] == "agnes-2.0-flash"
     assert config.modelscope["selected_model_id"] == "ZhipuAI/GLM-5.1"
     saved_payload = json.loads(config_path.read_text(encoding="utf-8"))
     assert saved_payload["tool_output_style"] == "compact"
@@ -181,7 +185,11 @@ def test_config_manager_creates_default_config_file_for_manual_editing(tmp_path:
     assert saved_payload["text_to_image"]["active_source"] == "local"
     assert saved_payload["text_to_image"]["aihubmix"]["default_model"] == "gpt-image-2-free"
     assert saved_payload["text_to_image"]["pollinations"]["default_model"] == "flux"
+    assert saved_payload["text_to_image"]["agnes"]["default_model"] == "agnes-image-2.1-flash"
+    assert saved_payload["text_to_video"]["active_source"] == "agnes"
+    assert saved_payload["text_to_video"]["agnes"]["default_model"] == "agnes-video-v2.0"
     assert saved_payload["aihubmix"]["selected_model_id"] == "gpt-5.5-free"
+    assert saved_payload["agnes"]["selected_model_id"] == "agnes-2.0-flash"
     assert saved_payload["modelscope"]["selected_model_id"] == "ZhipuAI/GLM-5.1"
     assert notice is not None
     assert notice["title"] == "Created default config"
@@ -217,7 +225,11 @@ def test_config_manager_auto_adds_tool_output_style_on_load(tmp_path: Path, monk
     assert repaired_payload["text_to_image"]["active_source"] == "local"
     assert repaired_payload["text_to_image"]["aihubmix"]["default_model"] == "gpt-image-2-free"
     assert repaired_payload["text_to_image"]["pollinations"]["default_model"] == "flux"
+    assert repaired_payload["text_to_image"]["agnes"]["default_model"] == "agnes-image-2.1-flash"
+    assert repaired_payload["text_to_video"]["active_source"] == "agnes"
+    assert repaired_payload["text_to_video"]["agnes"]["default_model"] == "agnes-video-v2.0"
     assert repaired_payload["aihubmix"]["selected_model_id"] == "gpt-5.5-free"
+    assert repaired_payload["agnes"]["selected_model_id"] == "agnes-2.0-flash"
     assert repaired_payload["modelscope"]["selected_model_id"] == "ZhipuAI/GLM-5.1"
 
 

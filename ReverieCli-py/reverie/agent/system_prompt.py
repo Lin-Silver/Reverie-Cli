@@ -8,6 +8,7 @@ on how to use the Context Engine effectively to reduce hallucinations.
 from datetime import datetime
 from typing import Optional
 from .tool_descriptions import get_tool_descriptions_for_mode
+from ..media_capabilities import build_media_capabilities, render_runtime_media_capabilities_digest
 from ..modes import normalize_mode
 from ..tools.registry import get_tool_classes_for_mode
 
@@ -58,7 +59,8 @@ def build_system_prompt(
     model_name: str = "Reverie",
     additional_rules: str = "",
     mode: str = "reverie",
-    ant_phase: str = "PLANNING"
+    ant_phase: str = "PLANNING",
+    config: object = None,
 ) -> str:
     """
     Build the complete system prompt for Reverie.
@@ -73,7 +75,7 @@ def build_system_prompt(
     current_date = datetime.now().strftime("%Y-%m-%d")
 
     normalized_mode = normalize_mode(mode)
-    additional_rules = _append_shared_prompt_guidance(additional_rules, normalized_mode)
+    additional_rules = _append_shared_prompt_guidance(additional_rules, normalized_mode, config=config)
 
     if normalized_mode == "spec-driven":
         return build_spec_driven_prompt(model_name, additional_rules, current_date)
@@ -95,7 +97,7 @@ def build_system_prompt(
     return build_reverie_prompt(model_name, additional_rules, current_date)
 
 
-def _append_shared_prompt_guidance(additional_rules: str, normalized_mode: str) -> str:
+def _append_shared_prompt_guidance(additional_rules: str, normalized_mode: str, config: object = None) -> str:
     """Inject shared system-level guidance for every Reverie mode."""
     shared_sections = [PROJECT_CODING_GUARDRAILS]
 
@@ -127,6 +129,12 @@ def _append_shared_prompt_guidance(additional_rules: str, normalized_mode: str) 
 - Use MCP tools when the task clearly depends on capabilities provided by configured external servers.
 - Inspect the tool description and required arguments before calling any MCP tool.
 """.strip())
+
+    shared_sections.append(
+        render_runtime_media_capabilities_digest(
+            build_media_capabilities(config=config)
+        )
+    )
 
     shared_guidance = "\n\n".join(section for section in shared_sections if section.strip())
     if additional_rules.strip():
@@ -299,37 +307,6 @@ When task management would be helpful:
 ## Long-Running Work
 Use `task_manager` for task state and the Context Engine for retrieved context. Avoid extra workflow layers when a checklist plus repository evidence is enough.
 
-
-## Text-to-Image Tool (All Modes)
-You can generate images from text prompts using the `text_to_image` tool.
-This tool reads model configuration from `config.json` (`text_to_image` section), and model switching is done by configured display name.
-
-### Key Actions
-- `list_models`: Inspect configured text-to-image model list and availability
-- `diagnose`: Inspect bundled runtime, Python modules, configured models, and GGUF auxiliary files
-- `prepare_models`: Report or download app-local auxiliary packages for supported GGUF workflows; use `include_optional=true` only for optional large extras
-- `generate`: Generate images from prompt with configurable generation parameters
-
-### Common Parameters for `generate`
-- `prompt`, `negative_prompt`
-- `model` (configured display name), optional `model_index` for compatibility
-- `width`, `height`, `steps`, `cfg`, `seed`
-- `sampler`, `scheduler`, `batch_size`
-- `use_cpu`, `output_path`, `timeout_seconds`
-- GGUF models are selected by configured display name; entries may point to a single model file or a folder package that auto-detects the main model, text encoder, and VAE
-
-### Output Path Rule
-- If `output_path` is provided, it must be a **relative path** (relative to Reverie CLI project root).
-- If `output_path` is omitted, images are saved to the Reverie CLI project root by default.
-
-### Example Calls
-```
-text_to_image(action="list_models")
-text_to_image(action="diagnose")
-text_to_image(action="prepare_models", package="ernie-image-turbo-gguf", download=false)
-text_to_image(action="generate", prompt="cinematic city skyline at sunset", model="cinematic-xl", width=1024, height=576, steps=30, cfg=7.0, sampler="euler", scheduler="normal")
-text_to_image(action="generate", prompt="anime character concept art", model="anime-concept", negative_prompt="blurry, low quality", seed=42)
-```
 
 # Advanced Tools for Context and Vision
 
@@ -2125,34 +2102,11 @@ All tools use precise parameter schemas. Review their docstrings before use and 
 5. Testing (QA, bugfixes, optimization)
 6. Release (build, documentation, deployment)
 
-## 10) Text-to-Image Tool (Concept Art & Visual Prototyping)
-**Tool**: `text_to_image`  
-**Key Actions**:
-- `list_models`: Check configured model list and availability
-- `diagnose`: Check bundled Comfy runtime, Python modules, GGUF auxiliary files, and model readiness
-- `prepare_models`: Report or download app-local auxiliary model packages such as ERNIE-Image-Turbo GGUF support files
-- `generate`: Create concept images from prompt
-
-**Common Parameters**:
-- Prompting: `prompt`, `negative_prompt`
-- Model selection: `model` (configured display name), optional `model_index` for compatibility
-- Core generation: `width`, `height`, `steps`, `cfg`, `seed`
-- Sampling: `sampler`, `scheduler`, `batch_size`
-- Runtime/output: `use_cpu`, `output_path`, `timeout_seconds`
-- GGUF support: configured model entries can point to one model file or a folder package; folder packages auto-detect common ERNIE diffusion, text encoder, and VAE files, while explicit `clip_model` and `vae_model` still override detection
-
-**Output Path Rule**:
-- `output_path` must be a relative path (relative to Reverie CLI project root).
-- If `output_path` is omitted, default output location is the Reverie CLI project root.
-
-**Usage Examples**:
-```
-text_to_image(action="list_models")
-text_to_image(action="diagnose")
-text_to_image(action="prepare_models", package="ernie-image-turbo-gguf", download=false)
-text_to_image(action="generate", prompt="top-down RPG town concept, pixel art", model="pixel-rpg-xl", width=1024, height=1024, steps=28, cfg=7.5)
-text_to_image(action="generate", prompt="boss arena concept art", model="vision-concept", negative_prompt="blurry", sampler="euler", scheduler="normal")
-```
+## 10) Media Generation Tools
+- Use `media_generation_capabilities` to inspect current image/video sources, default models, readiness, provider profiles, parameter constraints, and output capabilities.
+- Use `text_to_image` for concept art and visual prototyping.
+- Use `text_to_video` for motion prototyping and generated video assets.
+- Keep media output paths workspace-relative.
 
 # Integrated Workflow Example
 

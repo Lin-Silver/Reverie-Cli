@@ -39,9 +39,11 @@ from .markdown_formatter import MarkdownFormatter, format_markdown
 from .theme import THEME, DECO, DREAM
 from ..inline_images import (
     SUPPORTED_INLINE_IMAGE_EXTENSIONS,
+    SUPPORTED_INLINE_VIDEO_EXTENSIONS,
     build_user_message_content,
     flatten_multimodal_content_for_display,
-    parse_inline_image_mentions,
+    parse_inline_media_mentions,
+    supported_inline_media_extensions,
 )
 from ..config import (
     ConfigManager,
@@ -50,9 +52,6 @@ from ..config import (
     get_computer_controller_data_dir,
     normalize_thinking_output_style,
     normalize_tool_output_style,
-    normalize_tti_models,
-    normalize_tti_source,
-    resolve_tti_default_display_name,
 )
 from ..harness import build_harness_prompt_guidance, build_prompt_harness_report, persist_prompt_harness_run
 from ..atlas import build_atlas_additional_rules, normalize_atlas_mode_config
@@ -76,6 +75,7 @@ from ..context_engine import LSPManager
 from ..modes import get_mode_display_name, normalize_mode
 from ..nvidia import (
     build_nvidia_computer_controller_runtime_model_data,
+    get_nvidia_model_vision_modalities,
     normalize_nvidia_config,
     resolve_nvidia_selected_model,
 )
@@ -2007,7 +2007,7 @@ class ReverieInterface:
         )
 
     def _can_attach_inline_images(self, config: Config) -> tuple[bool, str]:
-        """Whether the current model/source can accept inline `@image` attachments."""
+        """Whether the current model/source can accept inline visual `@file` attachments."""
         active_source = str(getattr(config, "active_model_source", "standard") or "standard").strip().lower()
         active_model = getattr(config, "active_model", None)
         model_name = str(
@@ -2019,7 +2019,7 @@ class ReverieInterface:
         if active_source == "codex":
             return True, ""
 
-        if active_source in {"standard", "aihubmix"}:
+        if active_source in {"standard", "aihubmix", "agnes"}:
             if bool(getattr(active_model, "supports_vision", False)):
                 return True, ""
             return False, f"{model_name} is not configured with supports_vision=true."
@@ -2038,6 +2038,23 @@ class ReverieInterface:
             return False, f"{model_name} is not marked as vision-capable."
         return True, ""
 
+    def _current_inline_media_modalities(self, config: Config) -> List[str]:
+        """Return visual media modalities supported by the active model."""
+        active_source = str(getattr(config, "active_model_source", "standard") or "standard").strip().lower()
+        if active_source == "nvidia":
+            selected = resolve_nvidia_selected_model(normalize_nvidia_config(getattr(config, "nvidia", {})))
+            if selected:
+                return get_nvidia_model_vision_modalities(selected.get("id"))
+            return []
+        if active_source in {"codex", "standard", "aihubmix", "agnes"}:
+            active_model = getattr(config, "active_model", None)
+            if active_source == "codex" or bool(getattr(active_model, "supports_vision", False)):
+                return ["image"]
+        return []
+
+    def _current_inline_media_extensions(self, config: Config) -> set[str]:
+        return supported_inline_media_extensions(self._current_inline_media_modalities(config))
+
     def _is_attachment_picker_request(self, user_input: str) -> bool:
         """Return true for bare `@` attachment-picker prompts."""
         text = str(user_input or "").strip()
@@ -2046,17 +2063,25 @@ class ReverieInterface:
         if any(char.isspace() for char in text):
             return False
         path_text = text[1:].strip().strip('"\'')
+        config = self.config_manager.load()
+        allowed_extensions = self._current_inline_media_extensions(config)
         if not path_text:
             return True
-        return Path(path_text).suffix.lower() not in SUPPORTED_INLINE_IMAGE_EXTENSIONS
+        return Path(path_text).suffix.lower() not in allowed_extensions
 
     def _attachment_query_from_input(self, user_input: str) -> str:
         text = str(user_input or "").strip()
         return text[1:].strip() if text.startswith("@") else ""
 
-    def _collect_inline_image_candidates(self, query: str = "", limit: int = 80) -> List[Dict[str, Any]]:
-        """Collect workspace image candidates, lightly boosted by Context Engine task relevance."""
+    def _collect_inline_image_candidates(
+        self,
+        query: str = "",
+        limit: int = 80,
+        modalities: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Collect workspace visual candidates, lightly boosted by Context Engine task relevance."""
         query_text = str(query or "").strip().lower()
+        allowed_extensions = supported_inline_media_extensions(modalities)
         relevant_dirs: Dict[str, float] = {}
         if query_text:
             try:
@@ -2099,7 +2124,7 @@ class ReverieInterface:
             current_path = Path(current_root)
             for name in files:
                 suffix = Path(name).suffix.lower()
-                if suffix not in SUPPORTED_INLINE_IMAGE_EXTENSIONS:
+                if suffix not in allowed_extensions:
                     continue
                 path = current_path / name
                 try:
@@ -2127,6 +2152,7 @@ class ReverieInterface:
                         "name": name,
                         "size": stat.st_size,
                         "mtime": stat.st_mtime,
+                        "kind": "video" if suffix in SUPPORTED_INLINE_VIDEO_EXTENSIONS else "image",
                         "score": score,
                     }
                 )
@@ -2213,7 +2239,7 @@ class ReverieInterface:
         name = str(item.get("name") or item.get("path") or "").strip()
         if kind == "dir":
             count = int(item.get("count", 0) or 0)
-            suffix = "image" if count == 1 else "images"
+            suffix = "file" if count == 1 else "files"
             return f"[dir] {name}/  ({count} {suffix})"
         return self._format_attachment_candidate(item)
 
@@ -2241,7 +2267,7 @@ class ReverieInterface:
 
         def render() -> None:
             self.console.print()
-            title = "Select Image Attachment"
+            title = "Select Visual Attachment"
             if query:
                 title += f" - {query}"
             if current_dir:
@@ -2278,7 +2304,7 @@ class ReverieInterface:
                     selected = max(0, selected - 1)
                     render()
                 elif code == "P":
-                    selected = min(len(candidates) - 1, selected + 1)
+                    selected = min(len(entries) - 1, selected + 1)
                     render()
                 continue
             if key in ("\r", "\n"):
@@ -2312,13 +2338,14 @@ class ReverieInterface:
                 detail=detail,
             )
             return None
-        candidates = self._collect_inline_image_candidates(query=query, limit=500)
+        modalities = self._current_inline_media_modalities(config)
+        candidates = self._collect_inline_image_candidates(query=query, limit=500, modalities=modalities)
         if not candidates:
             self._show_activity_event(
                 "Attachment",
-                "No supported image files found in this workspace.",
+                "No supported visual files found in this workspace.",
                 status="warning",
-                detail=", ".join(sorted(SUPPORTED_INLINE_IMAGE_EXTENSIONS)),
+                detail=", ".join(sorted(supported_inline_media_extensions(modalities))),
             )
             return None
         selected = self._select_inline_image_candidate(candidates, query=query)
@@ -2328,7 +2355,7 @@ class ReverieInterface:
         mention = self._format_inline_image_mention(str(selected.get("path", "") or ""))
         self._show_activity_event(
             "Attachment",
-            "Image selected",
+            "Visual file selected",
             status="success",
             detail=f"Queued {mention} in the prompt.",
         )
@@ -2346,13 +2373,14 @@ class ReverieInterface:
             )
             return True
         query = self._attachment_query_from_input(user_input)
-        candidates = self._collect_inline_image_candidates(query=query, limit=500)
+        modalities = self._current_inline_media_modalities(config)
+        candidates = self._collect_inline_image_candidates(query=query, limit=500, modalities=modalities)
         if not candidates:
             self._show_activity_event(
                 "Attachment",
-                "No supported image files found in this workspace.",
+                "No supported visual files found in this workspace.",
                 status="warning",
-                detail=", ".join(sorted(SUPPORTED_INLINE_IMAGE_EXTENSIONS)),
+                detail=", ".join(sorted(supported_inline_media_extensions(modalities))),
             )
             return True
         selected = self._select_inline_image_candidate(candidates, query=query)
@@ -2362,7 +2390,7 @@ class ReverieInterface:
         self._store_pending_input_draft(f"{self._format_inline_image_mention(str(selected['path']))} ")
         self._show_activity_event(
             "Attachment",
-            "Image selected",
+            "Visual file selected",
             status="success",
             detail=f"Queued @{selected['path']} for the next prompt.",
         )
@@ -2454,7 +2482,11 @@ class ReverieInterface:
         response_provider_label = self._resolve_provider_label(config)
         response_mode = config.mode or "reverie"
         response_mode_label = get_mode_display_name(response_mode).upper()
-        parsed_inline = parse_inline_image_mentions(message, self.project_root)
+        parsed_inline = parse_inline_media_mentions(
+            message,
+            self.project_root,
+            modalities=self._current_inline_media_modalities(config),
+        )
         inline_attachments = parsed_inline.get("attachments", []) if isinstance(parsed_inline, dict) else []
         inline_warnings = parsed_inline.get("warnings", []) if isinstance(parsed_inline, dict) else []
         clean_message = str(parsed_inline.get("clean_text", message) if isinstance(parsed_inline, dict) else message).strip()
@@ -2512,20 +2544,20 @@ class ReverieInterface:
             if not allowed:
                 self._show_activity_event(
                     "Attachment",
-                    "The current model doesn't support vision input.",
+                    "The current model doesn't support visual input.",
                     status="warning",
                     detail=detail,
                 )
                 return True
 
             outbound_message = build_user_message_content(clean_message, inline_attachments)
-            transcript_message = clean_message or "Attached image input."
+            transcript_message = clean_message or "Attached visual input."
             agent_display_text = flatten_multimodal_content_for_display(outbound_message)
             self._show_activity_event(
                 "Attachment",
-                "Inline image attached",
+                "Inline visual file attached",
                 status="success",
-                detail=f"{len(inline_attachments)} image file(s) added to the LLM context.",
+                detail=f"{len(inline_attachments)} visual file(s) added to the LLM context.",
             )
         else:
             outbound_message = clean_message or transcript_message
@@ -3095,6 +3127,7 @@ class ReverieInterface:
             additional_rules=self.agent.additional_rules,
             mode=self.agent.mode,
             ant_phase=prompt_phase,
+            config=config,
         )
 
     def _bind_agent_runtime_context(self, config: Config) -> None:
@@ -3445,6 +3478,7 @@ class ReverieInterface:
                 additional_rules=self.agent.additional_rules,
                 mode=self.agent.mode,
                 ant_phase=prompt_phase,
+                config=getattr(self.agent, "config", None),
             )
 
             def _capture_ui_event(event: Dict[str, Any]) -> None:
@@ -3640,56 +3674,6 @@ class ReverieInterface:
         base_rules = (self.rules_manager.get_rules_text() or "").strip()
         normalized_mode = normalize_mode(getattr(config, "mode", "reverie"))
 
-        tti_cfg = config.text_to_image if isinstance(config.text_to_image, dict) else {}
-        tti_models = normalize_tti_models(
-            tti_cfg.get("models", []),
-            legacy_model_paths=tti_cfg.get("model_paths", []),
-        )
-        from ..aihubmix_tti_profiles.registry import get_aihubmix_tti_model_catalog
-        from ..pollinations_tti_profiles.registry import get_pollinations_tti_model_catalog
-
-        aihubmix_tti_cfg = tti_cfg.get("aihubmix", {}) if isinstance(tti_cfg.get("aihubmix"), dict) else {}
-        aihubmix_tti_default = str(aihubmix_tti_cfg.get("default_model", "gpt-image-2-free") or "gpt-image-2-free").strip()
-        aihubmix_tti_models = get_aihubmix_tti_model_catalog()
-        pollinations_tti_cfg = tti_cfg.get("pollinations", {}) if isinstance(tti_cfg.get("pollinations"), dict) else {}
-        pollinations_tti_default = str(pollinations_tti_cfg.get("default_model", "flux") or "flux").strip()
-        pollinations_tti_models = get_pollinations_tti_model_catalog()
-        default_display_name = resolve_tti_default_display_name(tti_cfg)
-        active_tti_source = normalize_tti_source(tti_cfg.get("active_source", "local"))
-
-        lines = [
-            "## TTI Models (from config.json)",
-            f"- Tool: `text_to_image`",
-            f"- Source selection: use `source=local`, `source=aihubmix`, or `source=pollinations` when overriding the default TTI runtime.",
-            f"- Active source: {active_tti_source}",
-            f"- Local selection rule: use configured local `display_name` values (not raw paths).",
-            f"- Default local model: {default_display_name if default_display_name else '(none)'}",
-            f"- Default AIhubMix model: {aihubmix_tti_default}",
-            f"- Default Pollinations model: {pollinations_tti_default}",
-            f"- Pollinations authentication: generation requires `text_to_image.pollinations.api_key`, `POLLINATIONS_API_KEY`, or `POLLINATIONS_TOKEN`.",
-        ]
-
-        if not tti_models:
-            lines.append("- Configured local models: (none)")
-        else:
-            lines.append("- Configured local models:")
-            for idx, item in enumerate(tti_models):
-                intro = item.get("introduction", "")
-                intro_text = intro if intro else "(empty)"
-                lines.append(
-                    f"  [{idx}] display_name={item['display_name']}; path={item['path']}; introduction={intro_text}"
-                )
-        lines.append("- AIhubMix models:")
-        for idx, item in enumerate(aihubmix_tti_models):
-            lines.append(
-                f"  [{idx}] id={item['id']}; display_name={item['display_name']}; api={item.get('api', '')}"
-            )
-        lines.append("- Pollinations models:")
-        for idx, item in enumerate(pollinations_tti_models):
-            lines.append(
-                f"  [{idx}] id={item['id']}; display_name={item['display_name']}; api={item.get('api', '')}"
-            )
-
         memory_title = "Computer Controller History" if normalized_mode == "computer-controller" else "Workspace Global Memory"
         memory_label = "computer-control history archive" if normalized_mode == "computer-controller" else "workspace global memory"
 
@@ -3725,7 +3709,6 @@ class ReverieInterface:
         merged_blocks = [
             tti_block
             for tti_block in [
-                "\n".join(lines),
                 "\n".join(lsp_lines),
                 build_harness_prompt_guidance(
                     self.project_root,

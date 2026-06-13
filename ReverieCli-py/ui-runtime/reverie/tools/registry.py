@@ -22,7 +22,9 @@ from .create_file import CreateFileTool
 from .user_input import UserInputTool
 from .skill_lookup import SkillLookupTool
 from .clarification import ClarificationTool
+from .media_generation_capabilities import MediaGenerationCapabilitiesTool
 from .text_to_image import TextToImageTool
+from .text_to_video import TextToVideoTool
 from .ant_tools import TaskBoundaryTool, NotifyUserTool
 from .novel_context_manager import NovelContextManagerTool
 from .consistency_checker_tool import ConsistencyCheckerTool
@@ -198,7 +200,9 @@ def _register_builtin_tools() -> None:
     register_tool_class(UserInputTool)
     register_tool_class(SkillLookupTool)
     register_tool_class(ClarificationTool, include_modes=("writer",))
+    register_tool_class(MediaGenerationCapabilitiesTool)
     register_tool_class(TextToImageTool)
+    register_tool_class(TextToVideoTool)
     register_tool_class(ListMcpResourcesTool)
     register_tool_class(ReadMcpResourceTool)
     register_tool_class(TaskBoundaryTool, include_modes=("reverie-ant",))

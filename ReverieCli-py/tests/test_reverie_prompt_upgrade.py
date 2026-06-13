@@ -76,6 +76,7 @@ def test_reverie_tool_workflow_comes_from_json_manifest() -> None:
     assert "`web_search`" in workflow
     assert "`web_fetch`" in workflow
     assert "`command_exec`" in workflow
+    assert "`media_generation_capabilities`" in workflow
     assert "`task_manager`" in workflow
     assert "`blender_modeling_workbench`" in workflow
     assert "`game_modeling_workbench`" in workflow
@@ -83,6 +84,16 @@ def test_reverie_tool_workflow_comes_from_json_manifest() -> None:
     assert "`game_design_orchestrator`" not in workflow
     assert "`reverie_engine`" not in workflow
     assert "core Blender/modeling tools directly in Reverie" in workflow
+
+
+def test_reverie_prompt_injects_short_runtime_media_digest_without_provider_hardcoding() -> None:
+    prompt = build_system_prompt(model_name="Test Model", mode="reverie")
+
+    assert "## Runtime Media Capabilities" in prompt
+    assert "media_generation_capabilities" in prompt
+    assert "Current source: Agnes" not in prompt
+    assert "num_frames must be 8n+1" not in prompt
+    assert "TTI Models (from config.json)" not in prompt
 
 
 def test_reverie_default_tool_surface_keeps_core_modeling_without_runtime_tools(tmp_path) -> None:

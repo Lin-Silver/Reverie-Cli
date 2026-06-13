@@ -5,6 +5,7 @@ from pathlib import Path
 import json
 from types import SimpleNamespace
 
+from reverie.agnes_tti_profiles import agnes_image_21_flash
 from reverie.aihubmix_tti_profiles import gemini_31_flash_image_preview_free, gpt_image_2_free
 from reverie.pollinations_tti_profiles import flux
 from reverie.tools.game_asset_manager import GameAssetManagerTool
@@ -123,10 +124,32 @@ def test_text_to_image_lists_free_pollinations_models(tmp_path: Path) -> None:
     assert "nanobanana" not in ids
 
 
+def test_text_to_image_lists_agnes_models(tmp_path: Path) -> None:
+    tool = TextToImageTool({"project_root": tmp_path})
+
+    result = tool.execute(action="list_models", source="agnes")
+
+    assert result.success is True
+    ids = {item["id"] for item in result.data["models"]}
+    assert {"agnes-image-2.0-flash", "agnes-image-2.1-flash"} <= ids
+
+
 def test_text_to_image_pollinations_diagnose_requires_api_key(tmp_path: Path) -> None:
     tool = TextToImageTool({"project_root": tmp_path})
 
     result = tool.execute(action="diagnose", source="pollinations")
+
+    assert result.status.value == "partial"
+    assert result.data["ready"] is False
+    assert any(check["id"] == "api_key" and check["ok"] is False for check in result.data["checks"])
+
+
+def test_text_to_image_agnes_diagnose_requires_shared_api_key(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("AGNES_API_KEY", raising=False)
+    monkeypatch.delenv("AGNES_TOKEN", raising=False)
+    tool = TextToImageTool({"project_root": tmp_path})
+
+    result = tool.execute(action="diagnose", source="agnes")
 
     assert result.status.value == "partial"
     assert result.data["ready"] is False
@@ -154,6 +177,43 @@ def test_aihubmix_gpt_image_profile_saves_base64_response(tmp_path: Path) -> Non
     saved = Path(result["saved_images"][0])
     assert saved.exists()
     assert saved.read_bytes() == image_bytes
+
+
+def test_agnes_image_profile_saves_base64_response(tmp_path: Path, monkeypatch) -> None:
+    image_bytes = b"fake-agnes-png"
+    encoded = base64.b64encode(image_bytes).decode("ascii")
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"data": [{"b64_json": encoded}]}
+
+    def fake_post(url, headers, json, timeout):
+        assert url == "https://apihub.agnes-ai.com/v1/images/generations"
+        assert headers["Authorization"] == "Bearer agnes-test"
+        assert json["model"] == "agnes-image-2.1-flash"
+        assert json["extra_body"]["response_format"] == "b64_json"
+        return FakeResponse()
+
+    monkeypatch.setattr("reverie.agnes_tti_profiles.common.requests.post", fake_post)
+
+    result = agnes_image_21_flash.generate_image(
+        prompt="flowers",
+        output_path=tmp_path / "out",
+        base_url="https://apihub.agnes-ai.com/v1",
+        api_key="agnes-test",
+        n=1,
+        size="1024x1024",
+        quality="auto",
+        response_format="b64_json",
+    )
+
+    saved = Path(result["saved_images"][0])
+    assert saved.exists()
+    assert saved.read_bytes() == image_bytes
+    assert result["request"]["response_format"] == "b64_json"
 
 
 def test_aihubmix_gemini_image_profile_saves_inline_data(tmp_path: Path) -> None:

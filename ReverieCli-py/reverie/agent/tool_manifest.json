@@ -39,7 +39,9 @@
         "skill_lookup",
         "list_mcp_resources",
         "read_mcp_resource",
+        "media_generation_capabilities",
         "text_to_image",
+        "text_to_video",
         "count_tokens",
         "task_manager",
         "subagent",
@@ -71,7 +73,9 @@
         "skill_lookup",
         "list_mcp_resources",
         "read_mcp_resource",
+        "media_generation_capabilities",
         "text_to_image",
+        "text_to_video",
         "count_tokens",
         "task_manager",
         "userInput",
@@ -115,7 +119,9 @@
         "skill_lookup",
         "list_mcp_resources",
         "read_mcp_resource",
+        "media_generation_capabilities",
         "text_to_image",
+        "text_to_video",
         "count_tokens",
         "userInput",
         "switch_mode",
@@ -142,7 +148,9 @@
         "skill_lookup",
         "list_mcp_resources",
         "read_mcp_resource",
+        "media_generation_capabilities",
         "text_to_image",
+        "text_to_video",
         "count_tokens",
         "userInput",
         "switch_mode"
@@ -168,7 +176,9 @@
         "skill_lookup",
         "list_mcp_resources",
         "read_mcp_resource",
+        "media_generation_capabilities",
         "text_to_image",
+        "text_to_video",
         "count_tokens",
         "userInput",
         "switch_mode"
@@ -195,7 +205,9 @@
         "skill_lookup",
         "list_mcp_resources",
         "read_mcp_resource",
+        "media_generation_capabilities",
         "text_to_image",
+        "text_to_video",
         "count_tokens",
         "userInput",
         "switch_mode",
@@ -225,7 +237,9 @@
         "skill_lookup",
         "list_mcp_resources",
         "read_mcp_resource",
+        "media_generation_capabilities",
         "text_to_image",
+        "text_to_video",
         "count_tokens",
         "userInput",
         "switch_mode",
@@ -253,7 +267,9 @@
         "skill_lookup",
         "list_mcp_resources",
         "read_mcp_resource",
+        "media_generation_capabilities",
         "text_to_image",
+        "text_to_video",
         "count_tokens",
         "userInput",
         "computer_control"
@@ -468,10 +484,11 @@
       ]
     },
     "text_to_image": {
-      "purpose": "Generate or prepare raster images through the configured local image runtime.",
-      "use_when": "The user explicitly needs generated bitmap assets.",
+      "purpose": "Generate or prepare raster images through the configured local or remote image runtime.",
+      "use_when": "The user explicitly needs generated bitmap assets. Call media_generation_capabilities first when model or provider-specific parameters matter.",
       "parameters": {
         "action": "list_models, diagnose, prepare_models, or generate.",
+        "source": "Optional source override such as local, aihubmix, pollinations, or agnes.",
         "prompt": "Generation prompt for generate.",
         "model": "Optional model id/path.",
         "display_name": "Optional configured display name.",
@@ -481,6 +498,39 @@
       },
       "examples": [
         "text_to_image(action=\"diagnose\")"
+      ]
+    },
+    "text_to_video": {
+      "purpose": "Generate videos through the configured text-to-video runtime.",
+      "use_when": "The user explicitly needs generated video or motion assets.",
+      "parameters": {
+        "action": "generate, status, list_models, or diagnose.",
+        "source": "Optional source override; inspect media_generation_capabilities for available sources.",
+        "prompt": "Generation prompt for generate.",
+        "model": "Optional video model id/display name from the active provider profile.",
+        "video_id": "Provider video_id for status retrieval.",
+        "task_id": "Provider task id for status retrieval.",
+        "width": "Optional video width.",
+        "height": "Optional video height.",
+        "num_frames": "Optional frame count; inspect media_generation_capabilities or list_models for provider constraints.",
+        "frame_rate": "Optional frame rate, 1-60.",
+        "output_path": "Optional workspace-safe output path."
+      },
+      "examples": [
+        "text_to_video(action=\"diagnose\")",
+        "text_to_video(action=\"generate\", prompt=\"cinematic sunrise over a quiet city\")"
+      ]
+    },
+    "media_generation_capabilities": {
+      "purpose": "Inspect current image/video generation sources, default models, readiness, model profiles, parameter constraints, and output capabilities.",
+      "use_when": "Before selecting non-default media models or provider-specific generation parameters; also useful when media generation fails due to missing config.",
+      "parameters": {
+        "detail": "summary or full.",
+        "modality": "all, image, or video."
+      },
+      "examples": [
+        "media_generation_capabilities(detail=\"full\")",
+        "media_generation_capabilities(detail=\"summary\", modality=\"video\")"
       ]
     },
     "count_tokens": {

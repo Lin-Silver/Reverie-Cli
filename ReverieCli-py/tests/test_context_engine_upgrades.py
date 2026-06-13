@@ -7,6 +7,7 @@ from reverie.context_engine.fragments import make_context_fragment, render_conte
 from reverie.context_engine.indexer import FileInfo
 from reverie.context_engine.retriever import ContextRetriever
 from reverie.context_engine.symbol_table import Symbol, SymbolKind, SymbolTable
+from reverie.context_engine.workspace import detect_workspace_profile
 from reverie.session.memory_indexer import MemoryIndexer
 
 
@@ -71,6 +72,69 @@ def test_task_context_prioritizes_file_and_symbol_anchors(tmp_path: Path) -> Non
     assert result.relevant_files[0].file_path == str(target)
     assert result.relevant_symbols[0].qualified_name == symbol.qualified_name
     assert "anchor-file:retriever.py" in result.relevant_files[0].reasons
+
+
+def test_task_context_includes_workspace_instructions_and_evidence(tmp_path: Path) -> None:
+    (tmp_path / "AGENTS.md").write_text("Always inspect Context Engine evidence first.\n", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='demo'\n", encoding="utf-8")
+    target = tmp_path / "src" / "engine.py"
+    target.parent.mkdir()
+    target.write_text(
+        "class EvidenceAssembler:\n"
+        "    def build_workset(self):\n"
+        "        return 'context engine workset evidence'\n",
+        encoding="utf-8",
+    )
+
+    table = SymbolTable()
+    symbol = Symbol(
+        name="EvidenceAssembler",
+        qualified_name="src.engine.EvidenceAssembler",
+        kind=SymbolKind.CLASS,
+        file_path=str(target),
+        start_line=1,
+        end_line=3,
+        source_code=target.read_text(encoding="utf-8"),
+        language="python",
+    )
+    table.add_symbol(symbol)
+    file_info = {
+        str(target): FileInfo(
+            path=str(target),
+            mtime=1,
+            size=target.stat().st_size,
+            content_hash="a",
+            language="python",
+            symbol_names=["EvidenceAssembler", "build_workset"],
+            top_level_symbols=[symbol.qualified_name],
+            keywords=["context", "engine", "workset", "evidence"],
+            tags=["engine"],
+            summary="Context Engine evidence workset assembly",
+        )
+    }
+
+    retriever = ContextRetriever(table, DependencyGraph(), tmp_path, file_info=file_info)
+    result = retriever.retrieve_for_task("Build Context Engine evidence workset", max_files=2, max_symbols=4)
+
+    assert result.workspace_profile is not None
+    assert result.workspace_profile.languages == ["python"]
+    assert result.workspace_profile.instruction_layers
+    assert "PROJECT INSTRUCTIONS" in result.context_string
+    assert "Always inspect Context Engine evidence first" in result.context_string
+    assert result.relevant_files[0].evidence
+    assert "index" in result.metadata["evidence_sources"]
+
+
+def test_workspace_profile_detects_nested_project_boundaries(tmp_path: Path) -> None:
+    (tmp_path / "package.json").write_text("{}", encoding="utf-8")
+    nested = tmp_path / "packages" / "api"
+    nested.mkdir(parents=True)
+    (nested / "go.mod").write_text("module demo/api\n", encoding="utf-8")
+
+    profile = detect_workspace_profile(tmp_path, focus_files=[str(nested / "main.go")])
+    kinds = {boundary.kind for boundary in profile.project_boundaries}
+
+    assert {"node", "go"} <= kinds
 
 
 def test_compressor_uses_deterministic_fallback_when_provider_fails(tmp_path: Path) -> None:

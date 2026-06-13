@@ -1,4 +1,4 @@
-"""Delegate bounded work to configured Reverie subagents."""
+"""Delegate bounded Context Engine work to configured Reverie subagents."""
 
 from __future__ import annotations
 
@@ -8,18 +8,21 @@ from .base import BaseTool, ToolResult
 
 
 class SubagentTool(BaseTool):
-    """Tool for the main Reverie agent to delegate work to configured subagents."""
+    """Tool for the main Reverie agent to delegate bounded context work."""
 
     name = "subagent"
     aliases = ("delegate_to_subagent", "subagents")
-    search_hint = "delegate independent development tasks to configured Reverie subagents"
+    search_hint = "delegate read-only context engine investigation or validation work to scoped subagents"
     tool_category = "orchestration"
-    tool_tags = ("delegate", "subagent", "parallel", "development")
+    tool_tags = ("delegate", "subagent", "parallel", "context", "validation")
     concurrency_safe = False
-    description = """Delegate bounded development work to a configured Reverie Subagent.
+    description = """Delegate bounded Context Engine investigation or validation work to a configured Reverie Subagent.
 Subagents are available only in base Reverie mode. Each configured Subagent uses
 the same Reverie prompt/tool/plugin/skill surface as the main agent, but runs
 with the model selected by the user and the task assigned by the main agent.
+Subagents are read-only by default. They should locate files, inspect symbols,
+validate assumptions, and return evidence for the main agent. Provide write_scope
+only for rare bounded edits; otherwise subagent write tools are blocked.
 Use action=list first when you need available subagent IDs, then action=delegate
 with a clear, self-contained task.
 """
@@ -51,7 +54,13 @@ with a clear, self-contained task.
             "write_scope": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "Optional files or areas the subagent may modify.",
+                "description": "Optional files or areas the subagent may modify. Omit for read-only context/validation workers.",
+            },
+            "worker_role": {
+                "type": "string",
+                "enum": ["context_expert", "validator"],
+                "description": "Whether this subagent should retrieve context or verify a bounded claim.",
+                "default": "context_expert",
             },
             "run_id": {
                 "type": "string",
@@ -90,6 +99,11 @@ with a clear, self-contained task.
 
         try:
             if not manager.is_available():
+                config = manager._load_config() if hasattr(manager, "_load_config") else None
+                if str(getattr(config, "active_model_source", "standard") or "standard").strip().lower() == "nvidia":
+                    return ToolResult.fail(
+                        "Subagents are disabled for the NVIDIA source. Use Context Engine retrieval instead."
+                    )
                 return ToolResult.fail("Subagents are only available in base Reverie mode.")
         except Exception as exc:
             return ToolResult.fail(str(exc))
@@ -140,6 +154,7 @@ with a clear, self-contained task.
                 expected_output=str(kwargs.get("expected_output") or "").strip(),
                 read_scope=self._coerce_string_list(kwargs.get("read_scope")),
                 write_scope=self._coerce_string_list(kwargs.get("write_scope")),
+                worker_role=str(kwargs.get("worker_role") or "context_expert").strip(),
                 stream=False,
             )
         except Exception as exc:

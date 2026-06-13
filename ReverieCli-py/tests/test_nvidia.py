@@ -40,6 +40,9 @@ def test_nvidia_catalog_contains_minimax_m3_multimodal_request_model():
     assert metadata["display_name"] == "MiniMax M3"
     assert metadata["transport"] == "request"
     assert metadata["vision"] is True
+    assert metadata["thinking"] is True
+    assert metadata["thinking_control"] == "effort"
+    assert [item["id"] for item in metadata["thinking_options"]] == ["high", "none"]
     assert metadata["vision_modalities"] == ["image", "video"]
     assert get_nvidia_model_vision_modalities("minimaxai/minimax-m3") == ["image", "video"]
 
@@ -51,7 +54,25 @@ def test_nvidia_catalog_contains_minimax_m3_multimodal_request_model():
         "temperature": 1.0,
         "top_p": 0.95,
         "max_tokens": 8192,
+        "chat_template_kwargs": {"thinking_mode": "enabled"},
     }
+
+
+def test_nvidia_minimax_m3_thinking_defaults_to_high_and_can_select_none():
+    runtime = build_nvidia_runtime_model_data(
+        {"api_key": "nv-test", "selected_model_id": "minimaxai/minimax-m3"}
+    )
+    off = apply_nvidia_thinking_choice(
+        {"selected_model_id": "minimaxai/minimax-m3"},
+        "minimaxai/minimax-m3",
+        "none",
+    )
+    off_defaults = build_nvidia_request_defaults(off, "minimaxai/minimax-m3")
+
+    assert runtime["thinking_mode"] == "high"
+    assert off["reasoning_effort"] == "none"
+    assert off["enable_thinking"] is False
+    assert off_defaults["chat_template_kwargs"] == {"thinking_mode": "disabled"}
 
 
 def test_nvidia_default_timeout_matches_global_api_timeout_default():

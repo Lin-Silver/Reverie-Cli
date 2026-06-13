@@ -14,6 +14,7 @@ Tools available to the AI Agent:
 - tool_catalog: CLI-only helper for /tools diagnostics
 - task_manager: Organize complex work
 - subagent: Delegate bounded Reverie-mode work to configured Subagents
+- memory_retrieval/memory_manager/evolution_feedback: Query, curate, and validate Memory OS learning
 - skill_lookup: Inspect discovered SKILL.md instructions
 - list_mcp_resources/read_mcp_resource: Inspect MCP resources exposed by connected servers
 - media_generation_capabilities: Inspect runtime image/video generation capability profiles
@@ -33,6 +34,9 @@ from .tool_catalog import ToolCatalogTool
 from .task_manager import TaskManagerTool
 from .subagent import SubagentTool
 from .context_management import ContextManagementTool
+from .memory_retrieval import MemoryRetrievalTool
+from .memory_manager import MemoryManagerTool
+from .evolution_feedback import EvolutionFeedbackTool
 from .create_file import CreateFileTool
 from .user_input import UserInputTool
 from .skill_lookup import SkillLookupTool
@@ -84,6 +88,9 @@ __all__ = [
     'TaskManagerTool',
     "SubagentTool",
     "ContextManagementTool",
+    "MemoryRetrievalTool",
+    "MemoryManagerTool",
+    "EvolutionFeedbackTool",
     "CreateFileTool",
     "UserInputTool",
     "SkillLookupTool",

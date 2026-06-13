@@ -585,6 +585,12 @@ Examples:
                 'files': [item.file_path for item in result.relevant_files],
                 'symbols': [item.qualified_name for item in result.relevant_symbols],
                 'token_estimate': result.token_estimate,
+                'workspace': result.metadata.get('workspace', {}),
+                'evidence_sources': result.metadata.get('evidence_sources', []),
+                'file_evidence': {
+                    item.file_path: list(item.evidence)
+                    for item in result.relevant_files
+                },
             }
         )
 

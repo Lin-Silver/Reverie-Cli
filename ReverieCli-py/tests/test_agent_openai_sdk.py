@@ -431,6 +431,48 @@ def test_nvidia_request_provider_clamps_output_to_remaining_context(tmp_path):
     assert prepared["reasoning_effort"] == "high"
 
 
+def test_nvidia_minimax_m3_request_payload_uses_thinking_mode_and_stream_reasoning(tmp_path):
+    config = _nvidia_config()
+    config.nvidia = {
+        "selected_model_id": "minimaxai/minimax-m3",
+        "selected_model_display_name": "MiniMax M3",
+        "reasoning_effort": "high",
+    }
+    agent = ReverieAgent(
+        base_url="https://integrate.api.nvidia.com/v1/chat/completions",
+        api_key="x",
+        model="minimaxai/minimax-m3",
+        project_root=tmp_path,
+        provider="request",
+        config=config,
+    )
+    payload = agent._prepare_request_payload(
+        {
+            "model": "minimaxai/minimax-m3",
+            "messages": [{"role": "user", "content": "hello"}],
+            "stream": True,
+        }
+    )
+
+    assert payload["chat_template_kwargs"] == {"thinking_mode": "enabled"}
+    assert "reasoning_effort" not in payload
+
+    class FakeResponse:
+        def iter_lines(self, decode_unicode=False, chunk_size=None):
+            yield 'data: {"choices":[{"delta":{"reasoning_content":"thinking"},"finish_reason":null}]}'
+            yield ""
+            yield 'data: {"choices":[{"delta":{"content":"answer"},"finish_reason":null}]}'
+            yield ""
+            yield "data: [DONE]"
+
+    events = list(agent._iter_request_stream_events(FakeResponse(), "NVIDIA"))
+
+    assert events[:2] == [
+        {"type": "reasoning", "text": "thinking"},
+        {"type": "content", "text": "answer"},
+    ]
+
+
 def test_codex_native_provider_payload_preserves_inline_image_parts():
     messages = [
         {

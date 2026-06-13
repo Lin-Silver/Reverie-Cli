@@ -16,10 +16,13 @@ import os
 import sys
 import hashlib
 import re
-import shutil
 import logging
 
 from .security_utils import write_json_secure
+from .storage import (
+    ProjectStorageResolver,
+    sanitize_project_name,
+)
 from .codex import (
     build_codex_runtime_model_data,
     default_codex_config,
@@ -66,10 +69,6 @@ SUPPORTED_TOOL_OUTPUT_STYLES = ("compact", "condensed", "full")
 SUPPORTED_THINKING_OUTPUT_STYLES = ("hidden", "compact", "full")
 SUPPORTED_TTI_SOURCES = ("local", "aihubmix", "pollinations", "agnes")
 SUPPORTED_TTV_SOURCES = ("agnes",)
-PROJECTS_DATA_DIRNAME = "projects"
-LEGACY_PROJECT_CACHES_DIRNAME = "project_caches"
-
-
 def normalize_tool_output_style(value: Any, default: str = "compact") -> str:
     """Normalize persisted tool-result display preference."""
     candidate = str(value or "").strip().lower()
@@ -669,39 +668,13 @@ def get_computer_controller_data_dir(app_root: Optional[Path] = None) -> Path:
     return root / ".reverie" / "computer-controller"
 
 
-def get_legacy_project_data_name(project_path: Path) -> str:
-    """
-    Generate the path-derived project data folder name.
-
-    This format is human-readable but not collision-safe because path separators
-    and literal underscores can normalize to the same value.
-    """
-    full_path = str(project_path.resolve())
-    safe_name = re.sub(r'[<>:"/\\|?*]', '_', full_path)
-    safe_name = re.sub(r'_+', '_', safe_name).strip('_')
-    return safe_name or "root"
-
-
 def get_project_data_name(project_path: Path) -> str:
     """
-    Generate the canonical project data folder name from the full project path.
+    Generate the canonical portable project data folder name from the full path.
 
-    Reverie intentionally does not append a hash here: project folders should
-    stay readable and predictable, for example
-    `G:\\Reverie\\Reverie-Cli` -> `G_Reverie_Reverie-Cli`.
+    Example: `G:\\Vtuber` -> `G_Vtuber`.
     """
-    return get_legacy_project_data_name(project_path)
-
-
-def _get_hashed_project_data_name(project_path: Path) -> str:
-    """Return the pre-projects legacy cache folder name with the path hash."""
-    full_path = str(project_path.resolve())
-    safe_name = get_legacy_project_data_name(project_path)
-    path_hash = hashlib.sha1(full_path.encode('utf-8')).hexdigest()[:12]
-
-    if safe_name:
-        return f"{safe_name}_{path_hash}"
-    return path_hash
+    return sanitize_project_name(project_path)
 
 
 def get_project_data_dir(project_path: Path, app_root: Optional[Path] = None) -> Path:
@@ -710,112 +683,7 @@ def get_project_data_dir(project_path: Path, app_root: Optional[Path] = None) ->
 
     Project data lives under the app's `.reverie/projects/` directory.
     """
-    root = Path(app_root).resolve() if app_root is not None else get_app_root()
-    projects_dir = root / '.reverie' / PROJECTS_DATA_DIRNAME
-    project_name = get_project_data_name(project_path)
-    return projects_dir / project_name
-
-
-def get_legacy_project_cache_dir(project_path: Path, app_root: Optional[Path] = None) -> Path:
-    """Return the legacy hashed project cache directory used by older builds."""
-    root = Path(app_root).resolve() if app_root is not None else get_app_root()
-    return root / '.reverie' / LEGACY_PROJECT_CACHES_DIRNAME / _get_hashed_project_data_name(project_path)
-
-
-def _project_data_metadata(project_path: Path, source: Optional[Path] = None) -> Dict[str, Any]:
-    payload: Dict[str, Any] = {
-        "schema": "reverie.project_data.v2",
-        "project_path": str(Path(project_path).resolve()),
-        "project_data_name": get_project_data_name(project_path),
-        "hash_suffix_used": False,
-        "updated_at": datetime.now().isoformat(timespec="seconds"),
-    }
-    if source is not None:
-        payload["migrated_from"] = str(source.resolve(strict=False))
-    return payload
-
-
-def migrate_legacy_project_cache(
-    project_path: Path,
-    *,
-    app_root: Optional[Path] = None,
-    destination: Optional[Path] = None,
-) -> Dict[str, Any]:
-    """Copy an old `.reverie/project_caches/*` workspace cache into `.reverie/projects/*`.
-
-    The migration is deliberately non-destructive: old cache folders are left in
-    place so users can roll back or inspect them manually.
-    """
-    root = Path(app_root).resolve() if app_root is not None else get_app_root()
-    target = Path(destination).resolve() if destination is not None else get_project_data_dir(project_path, root)
-    legacy_root = root / '.reverie' / LEGACY_PROJECT_CACHES_DIRNAME
-    candidates = [
-        legacy_root / _get_hashed_project_data_name(project_path),
-        legacy_root / get_project_data_name(project_path),
-    ]
-    seen: set[str] = set()
-    sources: List[Path] = []
-    for candidate in candidates:
-        key = str(candidate.resolve(strict=False)).lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        if candidate.exists() and candidate.is_dir():
-            sources.append(candidate)
-
-    if not sources:
-        return {"migrated": False, "reason": "no_legacy_cache", "target": str(target)}
-
-    target_has_data = target.exists() and any(target.iterdir())
-    if target_has_data:
-        conflict_path = target / "migration_conflict.json"
-        try:
-            target.mkdir(parents=True, exist_ok=True)
-            write_json_secure(
-                conflict_path,
-                {
-                    "schema": "reverie.project_data_migration_conflict.v1",
-                    "project_path": str(Path(project_path).resolve()),
-                    "target": str(target),
-                    "legacy_sources": [str(source.resolve(strict=False)) for source in sources],
-                    "reason": "target_already_contains_data",
-                    "updated_at": datetime.now().isoformat(timespec="seconds"),
-                },
-            )
-        except Exception:
-            logging.getLogger(__name__).debug("Failed to write project cache migration conflict", exc_info=True)
-        return {
-            "migrated": False,
-            "reason": "target_already_contains_data",
-            "target": str(target),
-            "sources": [str(source) for source in sources],
-        }
-
-    target.parent.mkdir(parents=True, exist_ok=True)
-    primary_source = sources[0]
-    try:
-        shutil.copytree(primary_source, target, dirs_exist_ok=True)
-        write_json_secure(target / "project_metadata.json", _project_data_metadata(project_path, primary_source))
-        return {
-            "migrated": True,
-            "target": str(target),
-            "source": str(primary_source),
-            "sources": [str(source) for source in sources],
-        }
-    except Exception as exc:
-        logging.getLogger(__name__).warning(
-            "Failed to migrate legacy project cache from %s to %s: %s",
-            primary_source,
-            target,
-            exc,
-        )
-        return {
-            "migrated": False,
-            "reason": "copy_failed",
-            "error": str(exc),
-            "target": str(target),
-            "source": str(primary_source),
-        }
+    return ProjectStorageResolver.for_project(project_path, launcher_root=app_root).project_dir
 
 
 @dataclass
@@ -1183,13 +1051,9 @@ class ConfigManager:
 
         # Use app root for runtime data (next to exe file or script directory).
         self.app_root = get_app_root()
-        self.data_root = self.app_root / '.reverie' / PROJECTS_DATA_DIRNAME
-        self.project_data_dir = get_project_data_dir(project_root, self.app_root)
-        self.project_cache_migration = migrate_legacy_project_cache(
-            project_root,
-            app_root=self.app_root,
-            destination=self.project_data_dir,
-        )
+        self.storage_resolver = ProjectStorageResolver.for_project(project_root, launcher_root=self.app_root)
+        self.data_root = self.storage_resolver.projects_root
+        self.project_data_dir = self.storage_resolver.project_dir
         self.global_config_path = self.app_root / '.reverie' / 'config.json'
         self.workspace_config_path = self.project_data_dir / 'config.json'
 
@@ -1604,18 +1468,7 @@ class ConfigManager:
     
     def ensure_dirs(self) -> None:
         """Create necessary directories"""
-        # Runtime data directories live under the executable's
-        # `.reverie/projects` root.
-        self.data_root.mkdir(parents=True, exist_ok=True)
-
-        # Project-specific data directories (for context cache, etc.)
-        self.project_data_dir.mkdir(parents=True, exist_ok=True)
-        (self.project_data_dir / 'context_cache').mkdir(exist_ok=True)
-        (self.project_data_dir / 'specs').mkdir(exist_ok=True)
-        (self.project_data_dir / 'steering').mkdir(exist_ok=True)
-        (self.project_data_dir / 'sessions').mkdir(exist_ok=True)
-        (self.project_data_dir / 'archives').mkdir(exist_ok=True)
-        (self.project_data_dir / 'checkpoints').mkdir(exist_ok=True)
+        self.storage_resolver.ensure_project_dir()
     
     def load(self) -> Config:
         """Load configuration from file, reloading if file changed"""

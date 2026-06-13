@@ -18,6 +18,9 @@ from .browser_controler import BrowserControlerTool
 from .tool_catalog import ToolCatalogTool
 from .task_manager import TaskManagerTool
 from .context_management import ContextManagementTool
+from .memory_retrieval import MemoryRetrievalTool
+from .memory_manager import MemoryManagerTool
+from .evolution_feedback import EvolutionFeedbackTool
 from .create_file import CreateFileTool
 from .user_input import UserInputTool
 from .skill_lookup import SkillLookupTool
@@ -196,6 +199,9 @@ def _register_builtin_tools() -> None:
     register_tool_class(TaskManagerTool, include_modes=("reverie", "reverie-gamer"))
     register_tool_class(SubagentTool, include_modes=("reverie",))
     register_tool_class(ContextManagementTool, expose_schema=False)
+    register_tool_class(MemoryRetrievalTool)
+    register_tool_class(MemoryManagerTool)
+    register_tool_class(EvolutionFeedbackTool)
     register_tool_class(CreateFileTool)
     register_tool_class(UserInputTool)
     register_tool_class(SkillLookupTool)

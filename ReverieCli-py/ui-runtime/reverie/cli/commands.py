@@ -7795,7 +7795,25 @@ class CommandHandler:
         return True
 
     def _require_subagent_mode(self) -> bool:
-        if self._current_mode_name() == "reverie":
+        config_manager = self.app.get('config_manager')
+        config = config_manager.load() if config_manager else None
+        active_source = str(getattr(config, "active_model_source", "standard") or "standard").strip().lower()
+        if active_source == "nvidia":
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Subagents are disabled for the NVIDIA source. Use Context Engine retrieval instead.[/{self.theme.AMBER_GLOW}]"
+            )
+            return False
+        current_mode = self._current_mode_name()
+        non_reverie_modes = {
+            "reverie-gamer",
+            "reverie-atlas",
+            "reverie-ant",
+            "spec-driven",
+            "spec-vibe",
+            "writer",
+            "computer-controller",
+        }
+        if current_mode == "reverie" or current_mode not in non_reverie_modes:
             return True
         self.console.print(
             f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Subagents are only available in base Reverie mode. Switch with `/mode reverie`.[/{self.theme.AMBER_GLOW}]"

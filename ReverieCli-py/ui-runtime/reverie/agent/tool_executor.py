@@ -120,14 +120,157 @@ class ToolExecutor:
     def _invalidate_schema_cache(self) -> None:
         self._schema_cache = {}
 
+    def _get_memory_os(self):
+        """Return the shared Memory OS facade when available."""
+        existing = self.context.get("memory_os")
+        if existing is not None:
+            return existing
+        try:
+            from ..memory import MemoryOS
+
+            project_data_dir = self.context.get("project_data_dir") or get_project_data_dir(Path(self.project_root))
+            memory_os = MemoryOS(Path(project_data_dir), project_root=Path(self.project_root))
+            self.context["memory_os"] = memory_os
+            return memory_os
+        except Exception:
+            logger.debug("Failed to initialize Memory OS from ToolExecutor", exc_info=True)
+            return None
+
+    def _record_memory_event(
+        self,
+        event_type: str,
+        payload: Dict[str, Any],
+        *,
+        actor: str = "tool",
+        tags: Optional[List[str]] = None,
+        consolidate: bool = True,
+    ) -> None:
+        memory_os = self._get_memory_os()
+        if not memory_os:
+            return
+        session_id = "default"
+        agent = self.context.get("agent")
+        if agent is not None and hasattr(agent, "_current_session_details"):
+            try:
+                session_id = agent._current_session_details("default")[0]
+            except Exception:
+                session_id = "default"
+        try:
+            memory_os.record_event(
+                event_type,
+                payload,
+                actor=actor,
+                session_id=session_id,
+                tags=tags,
+                consolidate=consolidate,
+            )
+        except Exception:
+            logger.debug("Failed to record Memory OS tool event", exc_info=True)
+
+    def _candidate_file_paths(self, tool_name: str, arguments: Dict[str, Any]) -> List[Path]:
+        if tool_name not in {"str_replace_editor", "create_file", "delete_file", "file_ops"}:
+            return []
+        raw_paths: List[Any] = []
+        for key in ("path", "file_path", "target_path", "target_file"):
+            if key in arguments:
+                raw_paths.append(arguments.get(key))
+        paths: List[Path] = []
+        root = Path(self.project_root).resolve()
+        for raw_path in raw_paths:
+            text = str(raw_path or "").strip()
+            if not text:
+                continue
+            try:
+                path = Path(text)
+                if not path.is_absolute():
+                    path = root / path
+                resolved = path.resolve()
+                try:
+                    resolved.relative_to(root)
+                except ValueError:
+                    continue
+                if resolved not in paths:
+                    paths.append(resolved)
+            except Exception:
+                continue
+        return paths
+
+    @staticmethod
+    def _read_text_snapshot(path: Path) -> Optional[str]:
+        try:
+            if not path.exists() or not path.is_file():
+                return ""
+            return path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            return None
+        except Exception:
+            return None
+
+    def _snapshot_file_paths(self, paths: List[Path]) -> Dict[str, Optional[str]]:
+        return {str(path): self._read_text_snapshot(path) for path in paths}
+
+    def _record_file_diffs(
+        self,
+        *,
+        before: Dict[str, Optional[str]],
+        tool_name: str,
+        arguments: Dict[str, Any],
+        result: ToolResult,
+    ) -> None:
+        if not before:
+            return
+        for path_text, before_text in before.items():
+            path = Path(path_text)
+            after_text = self._read_text_snapshot(path)
+            if before_text is None or after_text is None or before_text == after_text:
+                continue
+            diff = "\n".join(
+                difflib.unified_diff(
+                    (before_text or "").splitlines(),
+                    (after_text or "").splitlines(),
+                    fromfile=f"{path_text}:before",
+                    tofile=f"{path_text}:after",
+                    lineterm="",
+                )
+            )
+            self._record_memory_event(
+                "file_diff",
+                {
+                    "tool_name": tool_name,
+                    "path": path_text,
+                    "arguments": arguments,
+                    "success": bool(result.success),
+                    "diff": diff,
+                },
+                actor="tool",
+                tags=["file_diff", tool_name],
+            )
+
     def _tool_is_visible(self, name: str, tool: BaseTool, mode: object) -> bool:
         """Return whether a tool should be exposed in the supplied mode."""
         normalized_mode = normalize_mode(mode)
+        if name == "subagent" and self._active_model_source() == "nvidia":
+            return False
         if isinstance(tool, MCPDynamicTool) and not tool.visible_in_mode(normalized_mode):
             return False
         if isinstance(tool, RuntimePluginDynamicTool) and not tool.visible_in_mode(normalized_mode):
             return False
         return is_tool_visible_in_mode(name, normalized_mode)
+
+    def _active_model_source(self) -> str:
+        """Resolve active model source from tool context without forcing a config dependency."""
+        config = self.context.get("config")
+        if config is None:
+            agent = self.context.get("agent")
+            config = getattr(agent, "config", None) if agent is not None else None
+        if config is None:
+            config_manager = self.context.get("config_manager")
+            if config_manager is not None and hasattr(config_manager, "load"):
+                try:
+                    config = config_manager.load()
+                except Exception:
+                    config = None
+        return str(getattr(config, "active_model_source", "standard") or "standard").strip().lower()
 
     def resolve_tool_name(self, name: str) -> str:
         """Resolve a tool name or alias to the registered primary tool name."""
@@ -360,6 +503,97 @@ class ToolExecutor:
         lines.append("Use one of the tool schemas included in the current request.")
         return ToolResult.fail(" ".join(lines))
 
+    def _path_like_argument_values(self, arguments: Dict[str, Any]) -> List[str]:
+        """Extract likely filesystem path arguments for subagent scope checks."""
+        path_keys = {
+            "path",
+            "file",
+            "file_path",
+            "filepath",
+            "source_path",
+            "target_path",
+            "dest_path",
+            "destination",
+            "output_path",
+            "output_dir",
+            "asset_dir",
+            "manifest_path",
+            "bbmodel_path",
+            "relative_path",
+        }
+        values: List[str] = []
+        for key, value in (arguments or {}).items():
+            lowered = str(key or "").strip().lower()
+            if lowered not in path_keys and not lowered.endswith("_path") and not lowered.endswith("_dir"):
+                continue
+            if isinstance(value, list):
+                values.extend(str(item) for item in value if str(item or "").strip())
+            elif isinstance(value, str) and value.strip():
+                values.append(value.strip())
+        return values
+
+    def _resolve_scope_paths(self, raw_scope: Any) -> List[Path]:
+        roots: List[Path] = []
+        if not isinstance(raw_scope, list):
+            return roots
+        for item in raw_scope:
+            text = str(item or "").strip()
+            if not text:
+                continue
+            try:
+                candidate = Path(text)
+                if not candidate.is_absolute():
+                    candidate = self.project_root / candidate
+                roots.append(candidate.resolve(strict=False))
+            except Exception:
+                continue
+        return roots
+
+    def _argument_paths_in_scope(self, arguments: Dict[str, Any], scope_paths: List[Path]) -> bool:
+        if not scope_paths:
+            return False
+        values = self._path_like_argument_values(arguments)
+        if not values:
+            return False
+        for value in values:
+            try:
+                candidate = Path(value)
+                if not candidate.is_absolute():
+                    candidate = self.project_root / candidate
+                resolved = candidate.resolve(strict=False)
+            except Exception:
+                return False
+            if not any(resolved == scope or scope in resolved.parents for scope in scope_paths):
+                return False
+        return True
+
+    def _subagent_scope_denial(self, tool: BaseTool, arguments: Dict[str, Any]) -> Optional[str]:
+        """Enforce default read-only and optional scope bounds for subagents."""
+        if not self.context.get("is_subagent"):
+            return None
+
+        write_scope = self._resolve_scope_paths(self.context.get("subagent_write_scope"))
+        read_scope = self._resolve_scope_paths(self.context.get("subagent_read_scope"))
+
+        if not bool(getattr(tool, "read_only", False)):
+            if not write_scope:
+                return (
+                    f"Subagent policy denied {tool.name}: subagents are read-only by default. "
+                    "The main agent must provide write_scope for bounded edits."
+                )
+            if not self._argument_paths_in_scope(arguments, write_scope):
+                return (
+                    f"Subagent policy denied {tool.name}: write paths must be inside the assigned write_scope."
+                )
+            return None
+
+        if read_scope and self._path_like_argument_values(arguments):
+            if not self._argument_paths_in_scope(arguments, read_scope):
+                return (
+                    f"Subagent policy denied {tool.name}: read paths must be inside the assigned read_scope."
+                )
+        return None
+
     def _tool_result_dir(self) -> Path:
         """Return the workspace-local directory used for persisted tool outputs."""
         project_data_dir = self.context.get("project_data_dir")
@@ -543,16 +777,89 @@ class ToolExecutor:
         """
         self._sync_dynamic_tools()
         tool = self.get_tool(tool_name)
-        
+
         if not tool:
-            return self._unknown_tool_result(tool_name)
+            self._record_memory_event(
+                "tool_call",
+                {"tool_name": tool_name, "arguments": arguments or {}, "tool_call_id": str(tool_call_id or "")},
+                actor="assistant",
+                tags=["tool", str(tool_name or "")],
+                consolidate=False,
+            )
+            result = self._unknown_tool_result(tool_name)
+            self._record_memory_event(
+                "tool_result",
+                {
+                    "tool_name": tool_name,
+                    "arguments": arguments or {},
+                    "tool_call_id": str(tool_call_id or ""),
+                    "success": False,
+                    "output": "",
+                    "error": result.error,
+                    "status": str(getattr(result.status, "value", "error")),
+                },
+                actor="tool",
+                tags=["tool", "error", str(tool_name or "")],
+            )
+            return result
         
         normalized_arguments = self._normalize_arguments(tool, arguments)
+        self._record_memory_event(
+            "tool_call",
+            {
+                "tool_name": tool.name,
+                "arguments": normalized_arguments,
+                "tool_call_id": str(tool_call_id or ""),
+            },
+            actor="assistant",
+            tags=["tool", tool.name],
+            consolidate=False,
+        )
 
         # Validate parameters
         validation_error = tool.validate_params(normalized_arguments)
         if validation_error:
-            return ToolResult.fail(f"Parameter validation failed: {validation_error}")
+            result = ToolResult.fail(f"Parameter validation failed: {validation_error}")
+            self._record_memory_event(
+                "tool_result",
+                {
+                    "tool_name": tool.name,
+                    "arguments": normalized_arguments,
+                    "tool_call_id": str(tool_call_id or ""),
+                    "success": False,
+                    "output": "",
+                    "error": result.error,
+                    "status": str(getattr(result.status, "value", "error")),
+                },
+                actor="tool",
+                tags=["tool", "error", tool.name],
+            )
+            self._record_file_diffs(
+                before=before_snapshots,
+                tool_name=tool.name,
+                arguments=normalized_arguments,
+                result=result,
+            )
+            return result
+
+        subagent_denial = self._subagent_scope_denial(tool, normalized_arguments)
+        if subagent_denial:
+            result = ToolResult.fail(subagent_denial)
+            self._record_memory_event(
+                "tool_result",
+                {
+                    "tool_name": tool.name,
+                    "arguments": normalized_arguments,
+                    "tool_call_id": str(tool_call_id or ""),
+                    "success": False,
+                    "output": "",
+                    "error": result.error,
+                    "status": str(getattr(result.status, "value", "error")),
+                },
+                actor="tool",
+                tags=["tool", "error", tool.name],
+            )
+            return result
         
         previous_tool_name = self.context.get("active_tool_name")
         previous_tool_args = self.context.get("active_tool_arguments")
@@ -572,9 +879,25 @@ class ToolExecutor:
                 self.context["active_tool_name"] = previous_tool_name
                 self.context["active_tool_arguments"] = previous_tool_args
                 self.context["active_tool_call_id"] = previous_tool_call_id
-                return ToolResult.fail(f"Lifecycle hook denied {tool.name}: {getattr(decision, 'reason', '')}")
+                result = ToolResult.fail(f"Lifecycle hook denied {tool.name}: {getattr(decision, 'reason', '')}")
+                self._record_memory_event(
+                    "tool_result",
+                    {
+                        "tool_name": tool.name,
+                        "arguments": normalized_arguments,
+                        "tool_call_id": str(tool_call_id or ""),
+                        "success": False,
+                        "output": "",
+                        "error": result.error,
+                        "status": str(getattr(result.status, "value", "error")),
+                    },
+                    actor="tool",
+                    tags=["tool", "error", tool.name],
+                )
+                return result
 
         started = time.perf_counter()
+        before_snapshots = self._snapshot_file_paths(self._candidate_file_paths(tool.name, normalized_arguments))
         try:
             result = tool.execute(**normalized_arguments)
             result = self._apply_result_budget(tool, result)
@@ -589,6 +912,40 @@ class ToolExecutor:
                     )
                 except Exception as exc:
                     logger.debug("Lifecycle post-tool hook failed: %s", exc, exc_info=True)
+            self._record_memory_event(
+                "tool_result",
+                {
+                    "tool_name": tool.name,
+                    "arguments": normalized_arguments,
+                    "tool_call_id": str(tool_call_id or ""),
+                    "success": bool(result.success),
+                    "output": result.output,
+                    "error": result.error,
+                    "status": str(getattr(result.status, "value", "success")),
+                    "elapsed_ms": int((time.perf_counter() - started) * 1000),
+                },
+                actor="tool",
+                tags=["tool", "success" if result.success else "error", tool.name],
+            )
+            if tool.name == "command_exec":
+                self._record_memory_event(
+                    "command_result",
+                    {
+                        "arguments": normalized_arguments,
+                        "success": bool(result.success),
+                        "output": result.output,
+                        "error": result.error,
+                        "status": str(getattr(result.status, "value", "success")),
+                    },
+                    actor="tool",
+                    tags=["command", "success" if result.success else "error"],
+                )
+            self._record_file_diffs(
+                before=before_snapshots,
+                tool_name=tool.name,
+                arguments=normalized_arguments,
+                result=result,
+            )
             return result
         except Exception as e:
             result = ToolResult.fail(f"Tool execution error: {str(e)}")
@@ -603,6 +960,21 @@ class ToolExecutor:
                     )
                 except Exception as exc:
                     logger.debug("Lifecycle error hook failed: %s", exc, exc_info=True)
+            self._record_memory_event(
+                "tool_result",
+                {
+                    "tool_name": tool.name,
+                    "arguments": normalized_arguments,
+                    "tool_call_id": str(tool_call_id or ""),
+                    "success": False,
+                    "output": "",
+                    "error": result.error,
+                    "status": str(getattr(result.status, "value", "error")),
+                    "elapsed_ms": int((time.perf_counter() - started) * 1000),
+                },
+                actor="tool",
+                tags=["tool", "error", tool.name],
+            )
             return result
         finally:
             self.context["active_tool_name"] = previous_tool_name

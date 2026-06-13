@@ -9,6 +9,7 @@ import json
 from reverie.agent.subagents import SubagentManager
 from reverie.agent.tool_executor import ToolExecutor
 from reverie.config import Config, ModelConfig, normalize_subagent_config
+from reverie.nvidia import default_nvidia_config
 
 
 class _FakeConfigManager:
@@ -75,46 +76,17 @@ class _SubagentFakeHandler(BaseHTTPRequestHandler):
         content_length = int(self.headers.get("Content-Length", "0") or "0")
         _ = self.rfile.read(content_length)
         type(self).call_count += 1
-        if type(self).call_count == 1:
-            payload = {
-                "choices": [
-                    {
-                        "message": {
-                            "role": "assistant",
-                            "content": "",
-                            "tool_calls": [
-                                {
-                                    "id": "call_create_file",
-                                    "type": "function",
-                                    "function": {
-                                        "name": "create_file",
-                                        "arguments": json.dumps(
-                                            {
-                                                "path": "artifacts/subagent_real_task.txt",
-                                                "content": "Subagent real task completed.\n",
-                                                "overwrite": True,
-                                            }
-                                        ),
-                                    },
-                                }
-                            ],
-                        }
+        payload = {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "Evidence summary: inspected requested scope and found the relevant boundary. //END//",
                     }
-                ],
-                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-            }
-        else:
-            payload = {
-                "choices": [
-                    {
-                        "message": {
-                            "role": "assistant",
-                            "content": "Created the requested file. //END//",
-                        }
-                    }
-                ],
-                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-            }
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
 
         body = json.dumps(payload).encode("utf-8")
         self.send_response(200)
@@ -170,51 +142,128 @@ def test_subagent_tool_is_only_visible_in_base_reverie(tmp_path: Path) -> None:
     assert "subagent" not in gamer_names
 
 
-def test_subagent_real_delegation_invokes_tool_and_creates_file(tmp_path: Path) -> None:
-    server, thread, base_url = _start_fake_server()
+def test_subagent_is_disabled_with_nvidia_source(tmp_path: Path) -> None:
+    nvidia_cfg = default_nvidia_config()
+    nvidia_cfg["api_key"] = "nv-test-key"
+    config = Config(
+        models=[],
+        mode="reverie",
+        active_model_source="nvidia",
+        nvidia=nvidia_cfg,
+    )
+    manager = SubagentManager(_FakeInterface(tmp_path, config))
+
+    assert not manager.is_available()
     try:
-        config = Config(
-            models=[
-                ModelConfig(
-                    model="fake-subagent-model",
-                    model_display_name="Fake Subagent Model",
-                    base_url=base_url,
-                    api_key="test-key",
-                    max_context_tokens=128000,
-                    provider="request",
-                )
-            ],
-            active_model_index=0,
-            mode="reverie",
-        )
-        interface = _FakeInterface(tmp_path, config)
-        manager = SubagentManager(interface)
+        manager.ensure_available()
+    except RuntimeError as exc:
+        assert "NVIDIA source" in str(exc)
+    else:
+        raise AssertionError("NVIDIA source should disable Subagents")
 
-        spec = manager.create_subagent(
-            {
-                "source": "standard",
-                "index": 0,
-                "model": "fake-subagent-model",
-                "display_name": "Fake Subagent Model",
-            }
-        )
-        run = manager.run_task(
-            spec.id,
-            "Create artifacts/subagent_real_task.txt with the test completion line.",
-        )
 
-        created = tmp_path / "artifacts" / "subagent_real_task.txt"
-        assert run.status == "completed"
-        assert "Created the requested file." in run.summary
-        assert created.read_text(encoding="utf-8") == "Subagent real task completed.\n"
-        assert Path(run.log_path).exists()
-        assert any(
-            event.get("kind") == "stream_event"
-            and event.get("event") == "tool_start"
-            and event.get("agent_id") == spec.id
-            for event in interface.ui_events
-        )
-        assert _SubagentFakeHandler.call_count >= 2
-    finally:
-        server.shutdown()
-        thread.join(timeout=2)
+def test_context_engine_remains_visible_when_source_string_pollutes_mode(tmp_path: Path) -> None:
+    executor = ToolExecutor(tmp_path)
+    names = {
+        schema["function"]["name"]
+        for schema in executor.get_tool_schemas(mode="nvidia")
+    }
+
+    assert "codebase-retrieval" in names
+
+
+def test_nvidia_source_hides_subagent_schema_but_keeps_context_engine(tmp_path: Path) -> None:
+    nvidia_cfg = default_nvidia_config()
+    nvidia_cfg["api_key"] = "nv-test-key"
+    config = Config(
+        mode="reverie",
+        active_model_source="nvidia",
+        nvidia=nvidia_cfg,
+    )
+    executor = ToolExecutor(tmp_path)
+    executor.update_context("config", config)
+
+    names = {
+        schema["function"]["name"]
+        for schema in executor.get_tool_schemas(mode="reverie")
+    }
+
+    assert "subagent" not in names
+    assert "codebase-retrieval" in names
+
+
+def test_subagent_tool_executor_is_read_only_by_default(tmp_path: Path) -> None:
+    executor = ToolExecutor(tmp_path)
+    executor.update_context("is_subagent", True)
+    result = executor.execute(
+        "create_file",
+        {
+            "path": "artifacts/blocked.txt",
+            "content": "should not be written\n",
+            "overwrite": True,
+        },
+    )
+
+    assert not result.success
+    assert "read-only by default" in (result.error or "")
+    assert not (tmp_path / "artifacts" / "blocked.txt").exists()
+
+
+def test_subagent_write_scope_allows_bounded_paths(tmp_path: Path) -> None:
+    executor = ToolExecutor(tmp_path)
+    executor.update_context("is_subagent", True)
+    executor.update_context("subagent_write_scope", ["artifacts"])
+
+    allowed = executor.execute(
+        "create_file",
+        {"path": "artifacts/allowed.txt", "content": "ok\n", "overwrite": True},
+    )
+    denied = executor.execute(
+        "create_file",
+        {"path": "outside.txt", "content": "no\n", "overwrite": True},
+    )
+
+    assert allowed.success
+    assert (tmp_path / "artifacts" / "allowed.txt").read_text(encoding="utf-8") == "ok\n"
+    assert not denied.success
+    assert "write_scope" in (denied.error or "")
+    assert not (tmp_path / "outside.txt").exists()
+
+
+def test_subagent_assignment_prompt_positions_worker_as_scoped_validator(tmp_path: Path) -> None:
+    config = Config(
+        models=[
+            ModelConfig(
+                model="fake-subagent-model",
+                model_display_name="Fake Subagent Model",
+                base_url="http://127.0.0.1",
+                api_key="test-key",
+                max_context_tokens=128000,
+                provider="request",
+            )
+        ],
+        active_model_index=0,
+        mode="reverie",
+    )
+    interface = _FakeInterface(tmp_path, config)
+    manager = SubagentManager(interface)
+    spec = manager.create_subagent(
+        {
+            "source": "standard",
+            "index": 0,
+            "model": "fake-subagent-model",
+            "display_name": "Fake Subagent Model",
+        }
+    )
+
+    prompt = manager._build_assignment_prompt(
+        spec=spec,
+        assignment="Validate the selected Context Engine workset.",
+        read_scope=["reverie/context_engine"],
+        worker_role="validator",
+    )
+
+    assert "validator worker" in prompt
+    assert "Default policy: read-only" in prompt
+    assert "No write_scope was assigned" in prompt
+    assert "- reverie/context_engine" in prompt

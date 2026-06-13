@@ -72,6 +72,7 @@ from ..agent import (
 from ..agent.subagents import SubagentManager
 from ..context_engine import CodebaseIndexer, ContextRetriever, GitIntegration
 from ..context_engine import LSPManager
+from ..memory import MemoryOS
 from ..modes import get_mode_display_name, normalize_mode
 from ..nvidia import (
     build_nvidia_computer_controller_runtime_model_data,
@@ -1003,6 +1004,10 @@ class ReverieInterface:
 
         from ..session import MemoryIndexer, WorkspaceStatsManager
         self.memory_indexer = MemoryIndexer(self.project_data_dir)
+        self.memory_os = MemoryOS(
+            self.project_data_dir,
+            project_root=None if runtime_scope == "computer-controller" else self.project_root,
+        )
         try:
             self.memory_indexer.auto_learn_from_sessions(max_items=36, max_sessions=40)
         except Exception:
@@ -2995,6 +3000,7 @@ class ReverieInterface:
                 file_info=self.indexer._file_info,
                 git_integration=self.git_integration,
                 memory_indexer=self.memory_indexer,
+                lsp_manager=getattr(self, "lsp_manager", None),
             )
             self._context_engine_ready = True
             self._refresh_command_context()
@@ -3112,6 +3118,7 @@ class ReverieInterface:
         self.agent.set_context_engine(self.retriever, self.indexer, self.git_integration)
         self.agent.tool_executor.update_context('lsp_manager', self.lsp_manager)
         self.agent.tool_executor.update_context('memory_indexer', self.memory_indexer)
+        self.agent.tool_executor.update_context('memory_os', self.memory_os)
         self._refresh_agent_prompt_guidance()
 
     def _refresh_agent_prompt_guidance(self) -> None:
@@ -3143,6 +3150,7 @@ class ReverieInterface:
         self.agent.tool_executor.update_context('session_manager', self.session_manager)
         self.agent.tool_executor.update_context('project_data_dir', self.project_data_dir)
         self.agent.tool_executor.update_context('memory_indexer', self.memory_indexer)
+        self.agent.tool_executor.update_context('memory_os', self.memory_os)
         self.agent.tool_executor.update_context('workspace_stats_manager', self.workspace_stats_manager)
         self.agent.tool_executor.update_context('lifecycle_manager', self.lifecycle_manager)
         self.agent.tool_executor.update_context('ensure_context_engine', self.ensure_context_engine)

@@ -15,11 +15,15 @@ from pathlib import Path
 from typing import List, Dict, Optional, Set, Tuple, Any
 from dataclasses import dataclass, field
 import re
+import shutil
+import sqlite3
+import subprocess
 import time
 from collections import defaultdict
 
 from .symbol_table import Symbol, SymbolTable, SymbolKind
 from .dependency_graph import DependencyGraph, DependencyType
+from .workspace import WorkspaceProfile, detect_workspace_profile
 
 
 @dataclass
@@ -81,6 +85,7 @@ class TaskContextFile:
     top_symbols: List[str] = field(default_factory=list)
     tags: List[str] = field(default_factory=list)
     excerpt: str = ""
+    evidence: List[Dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -94,6 +99,7 @@ class TaskContextResult:
     context_string: str
     token_estimate: int
     metadata: Dict = field(default_factory=dict)
+    workspace_profile: Optional[WorkspaceProfile] = None
 
 
 class ContextRetriever:
@@ -169,6 +175,7 @@ class ContextRetriever:
         file_info: Optional[Dict[str, Any]] = None,
         git_integration: Any = None,
         memory_indexer: Any = None,
+        lsp_manager: Any = None,
     ):
         self.symbol_table = symbol_table
         self.dependency_graph = dependency_graph
@@ -176,6 +183,7 @@ class ContextRetriever:
         self.file_info = file_info if file_info is not None else {}
         self.git_integration = git_integration
         self.memory_indexer = memory_indexer
+        self.lsp_manager = lsp_manager
         self._activity_files: Dict[str, Dict[str, float]] = {}
         self._activity_symbols: Dict[str, Dict[str, float]] = {}
         self._task_cache: Dict[tuple[Any, ...], tuple[float, TaskContextResult]] = {}
@@ -336,6 +344,165 @@ class ContextRetriever:
             if len(reasons) >= 4:
                 break
         return score, reasons
+
+    def _workspace_relative_path(self, file_path: str) -> str:
+        try:
+            return str(Path(file_path).resolve().relative_to(self.project_root))
+        except Exception:
+            return str(file_path)
+
+    def _merge_file_evidence(
+        self,
+        evidence_by_file: Dict[str, List[Dict[str, Any]]],
+        file_path: str,
+        *,
+        source: str,
+        reason: str,
+        score: float = 0.0,
+        line: Optional[int] = None,
+        detail: str = "",
+    ) -> None:
+        normalized = self._normalize_file_path(file_path)
+        item = {
+            "source": source,
+            "reason": reason,
+            "score": round(float(score), 3),
+        }
+        if line is not None:
+            item["line"] = int(line)
+        if detail:
+            item["detail"] = str(detail)[:300]
+        bucket = evidence_by_file.setdefault(normalized, [])
+        key = (item.get("source"), item.get("reason"), item.get("line"), item.get("detail"))
+        if any((old.get("source"), old.get("reason"), old.get("line"), old.get("detail")) == key for old in bucket):
+            return
+        bucket.append(item)
+
+    def _run_ripgrep_for_task(self, query: str, term_weights: Dict[str, float], limit: int = 40) -> List[Dict[str, Any]]:
+        """Use ripgrep as a fast lexical signal when it is installed."""
+        rg = shutil.which("rg")
+        if not rg or not term_weights:
+            return []
+        terms = [
+            re.escape(term)
+            for term, _ in sorted(term_weights.items(), key=lambda item: item[1], reverse=True)
+            if len(str(term or "")) >= 3
+        ][:8]
+        if not terms:
+            return []
+        pattern = "|".join(terms)
+        try:
+            completed = subprocess.run(
+                [rg, "--json", "--ignore-case", "--line-number", "--max-count", "4", pattern, str(self.project_root)],
+                cwd=str(self.project_root),
+                text=True,
+                capture_output=True,
+                timeout=5,
+            )
+        except Exception:
+            return []
+        hits: List[Dict[str, Any]] = []
+        for raw_line in completed.stdout.splitlines():
+            if len(hits) >= limit:
+                break
+            try:
+                payload = __import__("json").loads(raw_line)
+            except Exception:
+                continue
+            if payload.get("type") != "match":
+                continue
+            data = payload.get("data", {}) if isinstance(payload.get("data"), dict) else {}
+            path_info = data.get("path", {}) if isinstance(data.get("path"), dict) else {}
+            lines_info = data.get("lines", {}) if isinstance(data.get("lines"), dict) else {}
+            path_text = str(path_info.get("text") or "").strip()
+            if not path_text:
+                continue
+            line_text = str(lines_info.get("text") or "").strip()
+            line_number = int(data.get("line_number") or 0)
+            score = 0.6
+            lower_line = line_text.lower()
+            for term, weight in term_weights.items():
+                if term.lower() in lower_line:
+                    score += 0.35 * weight
+            hits.append(
+                {
+                    "file_path": self._normalize_file_path(path_text),
+                    "line": line_number,
+                    "text": line_text,
+                    "score": score,
+                }
+            )
+        return hits
+
+    def _run_fts_for_task(self, term_weights: Dict[str, float], limit: int = 40) -> List[Dict[str, Any]]:
+        """Build a small in-memory FTS index from cached summaries and keywords."""
+        if not term_weights or not isinstance(self.file_info, dict) or not self.file_info:
+            return []
+        terms = [term for term, _ in sorted(term_weights.items(), key=lambda item: item[1], reverse=True) if len(term) >= 3][:10]
+        if not terms:
+            return []
+        try:
+            conn = sqlite3.connect(":memory:")
+            conn.execute("CREATE VIRTUAL TABLE docs USING fts5(path UNINDEXED, body)")
+            rows = []
+            for raw_path, info in self.file_info.items():
+                body_parts = [
+                    str(raw_path),
+                    str(self._get_file_meta(info, "summary", "") or ""),
+                    " ".join(str(value) for value in self._get_file_meta(info, "keywords", []) or []),
+                    " ".join(str(value) for value in self._get_file_meta(info, "symbol_names", []) or []),
+                    " ".join(str(value) for value in self._get_file_meta(info, "tags", []) or []),
+                ]
+                rows.append((self._normalize_file_path(raw_path), " ".join(body_parts)))
+            conn.executemany("INSERT INTO docs(path, body) VALUES (?, ?)", rows)
+            match_query = " OR ".join(terms)
+            cursor = conn.execute(
+                "SELECT path, bm25(docs) AS rank FROM docs WHERE docs MATCH ? ORDER BY rank LIMIT ?",
+                (match_query, int(limit)),
+            )
+            results = [
+                {"file_path": self._normalize_file_path(path), "score": max(0.2, 2.0 - float(rank))}
+                for path, rank in cursor.fetchall()
+            ]
+            conn.close()
+            return results
+        except Exception:
+            return []
+
+    def _collect_lsp_task_evidence(self, query: str, term_weights: Dict[str, float], limit: int = 20) -> List[Dict[str, Any]]:
+        """Collect optional LSP workspace-symbol evidence without requiring LSP availability."""
+        manager = getattr(self, "lsp_manager", None)
+        if manager is None:
+            manager = getattr(self, "lsp", None)
+        if manager is None:
+            return []
+        hits: List[Dict[str, Any]] = []
+        terms = [term for term, _ in sorted(term_weights.items(), key=lambda item: item[1], reverse=True) if len(term) >= 3][:5]
+        for term in terms or [query]:
+            try:
+                symbols = manager.workspace_symbols(term, limit=max(4, limit // 2))
+            except Exception:
+                continue
+            for item in symbols:
+                if not isinstance(item, dict):
+                    continue
+                location = item.get("location", {}) if isinstance(item.get("location"), dict) else {}
+                uri = str(location.get("uri", "") or "")
+                if uri.startswith("file:///"):
+                    try:
+                        path = Path(uri.replace("file:///", "", 1))
+                    except Exception:
+                        continue
+                    hits.append(
+                        {
+                            "file_path": self._normalize_file_path(str(path)),
+                            "symbol": str(item.get("name") or ""),
+                            "score": 2.0,
+                        }
+                    )
+                    if len(hits) >= limit:
+                        return hits
+        return hits
 
     def _get_file_meta(self, info: Any, key: str, default: Any = None) -> Any:
         if isinstance(info, dict):
@@ -765,6 +932,12 @@ class ContextRetriever:
                 for path in dirty.get(group, []) or []:
                     normalized_changed_files.add(self._normalize_file_path(path))
 
+        evidence_by_file: Dict[str, List[Dict[str, Any]]] = {}
+        for path in normalized_active_files:
+            self._merge_file_evidence(evidence_by_file, path, source="activity", reason="active_file", score=2.2)
+        for path in normalized_changed_files:
+            self._merge_file_evidence(evidence_by_file, path, source="git", reason="uncommitted_change", score=1.9)
+
         file_candidates: List[TaskContextFile] = []
         seen_file_candidates: Set[str] = set()
         for raw_path, info in list((self.file_info or {}).items()):
@@ -779,6 +952,8 @@ class ContextRetriever:
                 anchor_file_terms=anchor_file_terms,
             )
             if candidate and file_path not in seen_file_candidates:
+                for reason in candidate.reasons:
+                    self._merge_file_evidence(evidence_by_file, file_path, source="index", reason=reason, score=candidate.score)
                 file_candidates.append(candidate)
                 seen_file_candidates.add(file_path)
 
@@ -802,8 +977,88 @@ class ContextRetriever:
                     anchor_file_terms=anchor_file_terms,
                 )
                 if candidate:
+                    self._merge_file_evidence(evidence_by_file, file_path, source="anchor", reason=f"anchor-file:{anchor}", score=candidate.score)
                     file_candidates.append(candidate)
                     seen_file_candidates.add(file_path)
+
+        for hit in self._run_fts_for_task(term_weights, limit=max_files * 8):
+            file_path = self._normalize_file_path(hit.get("file_path", ""))
+            if not file_path:
+                continue
+            self._merge_file_evidence(evidence_by_file, file_path, source="fts", reason="summary_keyword_match", score=float(hit.get("score", 0.0)))
+            if file_path in seen_file_candidates:
+                continue
+            info = self._get_file_info_record(file_path)
+            candidate = self._score_file_for_task(
+                file_path=file_path,
+                info=info,
+                term_weights=term_weights,
+                active_files=normalized_active_files,
+                changed_files=normalized_changed_files,
+                base_score=float(hit.get("score", 0.0)),
+                reason_override="fts:summary_keyword_match",
+                query_text=query_text,
+                anchor_file_terms=anchor_file_terms,
+            )
+            if candidate:
+                file_candidates.append(candidate)
+                seen_file_candidates.add(file_path)
+
+        for hit in self._run_ripgrep_for_task(query_text, term_weights, limit=max_files * 10):
+            file_path = self._normalize_file_path(hit.get("file_path", ""))
+            if not file_path:
+                continue
+            self._merge_file_evidence(
+                evidence_by_file,
+                file_path,
+                source="ripgrep",
+                reason="line_match",
+                score=float(hit.get("score", 0.0)),
+                line=hit.get("line"),
+                detail=str(hit.get("text", "")),
+            )
+            if file_path in seen_file_candidates:
+                continue
+            info = self._get_file_info_record(file_path)
+            candidate = self._score_file_for_task(
+                file_path=file_path,
+                info=info,
+                term_weights=term_weights,
+                active_files=normalized_active_files,
+                changed_files=normalized_changed_files,
+                base_score=float(hit.get("score", 0.0)),
+                reason_override="rg:line_match",
+                query_text=query_text,
+                anchor_file_terms=anchor_file_terms,
+            )
+            if candidate:
+                file_candidates.append(candidate)
+                seen_file_candidates.add(file_path)
+
+        for hit in self._collect_lsp_task_evidence(query_text, term_weights, limit=max_files * 4):
+            file_path = self._normalize_file_path(hit.get("file_path", ""))
+            if not file_path:
+                continue
+            symbol_name = str(hit.get("symbol", "") or "").strip()
+            reason = f"lsp:{symbol_name}" if symbol_name else "lsp:workspace_symbol"
+            self._merge_file_evidence(evidence_by_file, file_path, source="lsp", reason=reason, score=float(hit.get("score", 0.0)))
+            if file_path in seen_file_candidates:
+                continue
+            info = self._get_file_info_record(file_path)
+            candidate = self._score_file_for_task(
+                file_path=file_path,
+                info=info,
+                term_weights=term_weights,
+                active_files=normalized_active_files,
+                changed_files=normalized_changed_files,
+                base_score=float(hit.get("score", 0.0)),
+                reason_override=reason,
+                query_text=query_text,
+                anchor_file_terms=anchor_file_terms,
+            )
+            if candidate:
+                file_candidates.append(candidate)
+                seen_file_candidates.add(file_path)
 
         file_candidates.sort(key=lambda item: item.score, reverse=True)
         selected_files: Dict[str, TaskContextFile] = {
@@ -878,7 +1133,16 @@ class ContextRetriever:
                 break
 
         selected_file_list = sorted(selected_files.values(), key=lambda item: item.score, reverse=True)[:max_files]
+        workspace_profile = detect_workspace_profile(
+            self.project_root,
+            focus_files=[item.file_path for item in selected_file_list],
+        )
         for item in selected_file_list:
+            item.evidence = sorted(
+                evidence_by_file.get(item.file_path, []),
+                key=lambda evidence: float(evidence.get("score", 0.0)),
+                reverse=True,
+            )[:8]
             file_symbols = [symbol for symbol in selected_symbols if symbol.file_path == item.file_path][:3]
             item.excerpt = self._build_file_excerpt(item.file_path, file_symbols, term_weights=term_weights)
 
@@ -922,6 +1186,7 @@ class ContextRetriever:
                     "date": getattr(getattr(commit, "date", None), "isoformat", lambda: "")(),
                     "message": str(getattr(commit, "message", "")),
                     "files_changed": list(getattr(commit, "files_changed", [])[:6]),
+                    "source": "git_history",
                 })
                 if len(commit_context) >= 5:
                     break
@@ -932,6 +1197,7 @@ class ContextRetriever:
             selected_symbols,
             memory_fragments,
             commit_context,
+            workspace_profile=workspace_profile,
             max_tokens=max_tokens,
         )
 
@@ -948,12 +1214,22 @@ class ContextRetriever:
             commit_context=commit_context,
             context_string=context_string,
             token_estimate=token_estimate,
+            workspace_profile=workspace_profile,
             metadata={
                 "term_weights": term_weights,
                 "active_files": sorted(normalized_active_files),
                 "changed_files": sorted(normalized_changed_files),
                 "selected_file_count": len(selected_file_list),
                 "selected_symbol_count": len(selected_symbols),
+                "workspace": workspace_profile.to_dict(),
+                "evidence_sources": sorted(
+                    {
+                        str(evidence.get("source"))
+                        for item in selected_file_list
+                        for evidence in item.evidence
+                        if evidence.get("source")
+                    }
+                ),
             },
         )
         self._task_cache[cache_key] = (now, result)
@@ -1145,6 +1421,7 @@ class ContextRetriever:
         memory_fragments: List[Dict[str, str]],
         commit_context: List[Dict[str, Any]],
         *,
+        workspace_profile: Optional[WorkspaceProfile] = None,
         max_tokens: int,
     ) -> Tuple[str, int]:
         """Render the final task context string while respecting a token budget."""
@@ -1156,13 +1433,42 @@ class ContextRetriever:
             f"Symbols selected: {len(relevant_symbols)}",
             "=" * 60,
             "",
-            "--- FILE PRIORITIES ---",
         ]
+        if workspace_profile:
+            parts.extend(
+                [
+                    "--- WORKSPACE ---",
+                    f"Root: {workspace_profile.root}",
+                    f"VCS root: {workspace_profile.vcs_root or '(none detected)'}",
+                    f"Languages: {', '.join(workspace_profile.languages) if workspace_profile.languages else 'unknown'}",
+                ]
+            )
+            if workspace_profile.project_boundaries:
+                parts.append("Project boundaries:")
+                for boundary in workspace_profile.project_boundaries[:8]:
+                    markers = ", ".join(boundary.markers[:4])
+                    parts.append(f"- {boundary.kind}: {boundary.root} ({markers})")
+            if workspace_profile.instruction_layers:
+                parts.append("")
+                parts.append("--- PROJECT INSTRUCTIONS ---")
+                for layer in workspace_profile.instruction_layers[:6]:
+                    compact = " ".join(layer.excerpt.split())
+                    compact = compact[:420] + ("..." if len(compact) > 420 else "")
+                    parts.append(f"- {layer.path} [scope={layer.scope or '.'}] {compact}")
+        parts.append("")
+        parts.append("--- FILE PRIORITIES ---")
         for item in relevant_files:
             reason_text = ", ".join(item.reasons) if item.reasons else "relevance"
             parts.append(
                 f"- {item.file_path} [score={item.score:.2f}] ({item.language}) :: {item.summary} :: reasons={reason_text}"
             )
+            for evidence in item.evidence[:4]:
+                line = f"  evidence: {evidence.get('source')}:{evidence.get('reason')}"
+                if evidence.get("line"):
+                    line += f":{evidence.get('line')}"
+                if evidence.get("detail"):
+                    line += f" :: {evidence.get('detail')}"
+                parts.append(line)
 
         if relevant_symbols:
             parts.append("")

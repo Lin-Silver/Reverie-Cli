@@ -302,8 +302,12 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
     _request_model(
         "minimaxai/minimax-m3",
         "MiniMax M3",
-        "Request transport with multimodal text, image, and video input.",
+        "Request transport with multimodal text, image, video input, and selectable chat-template thinking.",
         vision=True,
+        thinking=True,
+        thinking_control="effort",
+        thinking_options=list(NVIDIA_REASONING_NONE_HIGH_OPTIONS),
+        default_thinking_choice="high",
         vision_modalities=["image", "video"],
         context_length=NVIDIA_MINIMAX_M3_CONTEXT_TOKENS,
         max_output_tokens=NVIDIA_MINIMAX_M3_MAX_OUTPUT_TOKENS,

@@ -12,6 +12,7 @@ from reverie.config import (
     get_project_data_name,
     normalize_tti_models,
 )
+from reverie.storage import ProjectStorageError, ProjectStorageResolver, sanitize_project_name
 from reverie.tools.mcp_resource_tools import ReadMcpResourceTool
 
 
@@ -113,44 +114,79 @@ def test_get_app_root_uses_dist_depot_for_source_checkout(tmp_path: Path, monkey
     assert not (source_root / ".reverie").exists()
 
 
-def test_project_data_dir_uses_projects_safe_full_path_without_hash(tmp_path: Path, monkeypatch) -> None:
+def test_project_data_dir_uses_portable_safe_full_path_name_without_hash(tmp_path: Path, monkeypatch) -> None:
     app_root = tmp_path / "app"
     app_root.mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setattr("reverie.config.get_app_root", lambda: app_root)
 
     project_root = Path(r"G:\Reverie\Reverie-Cli")
+    expected_name = "G_Reverie_Reverie-Cli"
 
-    assert get_project_data_name(project_root) == "G_Reverie_Reverie-Cli"
-    assert get_project_data_dir(project_root) == app_root / ".reverie" / "projects" / "G_Reverie_Reverie-Cli"
+    assert get_project_data_name(project_root) == expected_name
+    assert get_project_data_dir(project_root) == app_root / ".reverie" / "projects" / expected_name
 
 
-def test_config_manager_migrates_legacy_project_cache_to_projects(tmp_path: Path, monkeypatch) -> None:
+def test_config_manager_creates_clean_project_storage_layout_without_legacy_metadata(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
     app_root = tmp_path / "app"
-    project_root = tmp_path / "workspace" / "Reverie-Cli"
+    project_root = tmp_path / "workspace" / "Vtuber"
     project_root.mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setattr("reverie.config.get_app_root", lambda: app_root)
     monkeypatch.setattr("reverie.config.get_launcher_root", lambda: app_root)
-
-    legacy_name = config_module._get_hashed_project_data_name(project_root)
-    legacy_dir = app_root / ".reverie" / "project_caches" / legacy_name
-    legacy_sessions_dir = legacy_dir / "sessions"
-    legacy_sessions_dir.mkdir(parents=True, exist_ok=True)
-    (legacy_sessions_dir / "session.json").write_text('{"id":"legacy"}\n', encoding="utf-8")
 
     manager = ConfigManager(project_root)
     manager.ensure_dirs()
 
     expected_dir = app_root / ".reverie" / "projects" / get_project_data_name(project_root)
     assert manager.project_data_dir == expected_dir
-    assert manager.project_cache_migration["migrated"] is True
-    assert (expected_dir / "sessions" / "session.json").exists()
-    assert (legacy_sessions_dir / "session.json").exists()
+    assert get_project_data_name(project_root) == sanitize_project_name(project_root)
+    assert "__" not in get_project_data_name(project_root)
+    assert (expected_dir / "sessions").is_dir()
+    assert (expected_dir / "archives").is_dir()
+    assert (expected_dir / "checkpoints").is_dir()
+    assert (expected_dir / "full_transcripts").is_dir()
+    assert (expected_dir / "session_handoffs").is_dir()
+    assert (expected_dir / "context" / "compression").is_dir()
+    assert (expected_dir / "memory" / "events").is_dir()
+    assert (expected_dir / "feedback" / "evolution_proposals").is_dir()
 
     metadata = json.loads((expected_dir / "project_metadata.json").read_text(encoding="utf-8"))
     assert metadata["project_data_name"] == get_project_data_name(project_root)
-    assert metadata["hash_suffix_used"] is False
+    assert metadata["schema"] == "reverie.project_storage.v4"
+    assert "workspace_hash" not in metadata
+    assert "migrated_from" not in metadata
+
+
+def test_project_storage_exposes_no_legacy_migration_api() -> None:
+    assert not hasattr(config_module, "migrate_legacy_project_cache")
+    assert not hasattr(config_module, "get_legacy_project_cache_dir")
+    assert not hasattr(ProjectStorageResolver, "migrate_legacy_data")
+
+
+def test_project_storage_resolver_refuses_unwritable_launcher_root(tmp_path: Path, monkeypatch) -> None:
+    resolver = ProjectStorageResolver.for_project(tmp_path / "workspace", launcher_root=tmp_path / "app")
+    original_write_text = Path.write_text
+
+    def fail_write_text(self: Path, *args, **kwargs):
+        if self.name == ".write-test":
+            raise PermissionError("read only")
+        return original_write_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", fail_write_text)
+
+    try:
+        resolver.ensure_writable()
+    except ProjectStorageError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("Expected ProjectStorageError")
+
+    assert "portable storage is not writable" in message
+    assert "will not silently fall back" in message
 
 
 def test_config_manager_creates_default_config_file_for_manual_editing(tmp_path: Path, monkeypatch) -> None:

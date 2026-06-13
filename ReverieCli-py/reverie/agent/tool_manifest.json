@@ -607,6 +607,52 @@
         "context_management(action=\"checkpoint\")"
       ]
     },
+    "memory_retrieval": {
+      "purpose": "Query structured long-term memory with scope/type/evidence/confidence metadata.",
+      "use_when": "User preferences, project decisions, failures, successful workflows, or prior feedback matter.",
+      "parameters": {
+        "query": "Current request or memory search query.",
+        "scope": "Optional session, project, workflow, or procedural filter.",
+        "memory_type": "Optional memory type filter.",
+        "limit": "Optional maximum result count.",
+        "explain": "Whether to include ranking reasons and evidence ids."
+      },
+      "examples": [
+        "memory_retrieval(query=\"NVIDIA MiniMax thinking preference\", scope=\"project\")"
+      ]
+    },
+    "memory_manager": {
+      "purpose": "List, inspect, correct, delete, or consolidate structured MemoryItems.",
+      "use_when": "A memory needs explanation, correction, deletion, or manual consolidation from the event store.",
+      "parameters": {
+        "action": "list, get, correct, delete, or consolidate.",
+        "memory_id": "Target MemoryItem id.",
+        "query": "Optional list/search query.",
+        "content": "Replacement content for correct.",
+        "hard": "Optional hard-delete flag."
+      },
+      "examples": [
+        "memory_manager(action=\"list\", query=\"failed command\")",
+        "memory_manager(action=\"correct\", memory_id=\"mem_...\", content=\"...\")"
+      ]
+    },
+    "evolution_feedback": {
+      "purpose": "Record feedback and manage validated LearningProposal records.",
+      "use_when": "User correction or run feedback should improve future workflow memory, retrieval ranking, tool guidance, or prompt digest.",
+      "parameters": {
+        "action": "observe, propose, evaluate, apply, or list.",
+        "feedback": "Feedback text for observe/propose.",
+        "proposal_id": "LearningProposal id for evaluate/apply.",
+        "target": "workflow_memory, tool_manifest_guidance, retrieval_ranking, or prompt_digest.",
+        "approved": "Whether evaluation validated the proposal.",
+        "score": "Replay/eval score from 0 to 1."
+      },
+      "examples": [
+        "evolution_feedback(action=\"observe\", feedback=\"Prefer pytest -q for this repo\", target=\"workflow_memory\")",
+        "evolution_feedback(action=\"evaluate\", proposal_id=\"learn_...\", approved=true)",
+        "evolution_feedback(action=\"apply\", proposal_id=\"learn_...\")"
+      ]
+    },
     "game_design_orchestrator": {
       "purpose": "Compile game prompts into durable request/program/design artifacts and vertical-slice plans.",
       "use_when": "Game design, production planning, scope reduction, or slice generation is needed.",

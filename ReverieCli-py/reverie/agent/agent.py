@@ -23,6 +23,7 @@ from .system_prompt import build_system_prompt
 from .tool_executor import ToolExecutor
 from ..context_engine.handoff import build_session_handoff_packet
 from ..inline_images import resolve_inline_image_content_for_request
+from ..memory import MEMORY_CONTEXT_PROMPT_HEADER, MemoryOS
 from ..modes import normalize_mode
 from ..sse import iter_sse_data_strings as iter_provider_sse_data_strings
 from ..tools.base import ToolResult
@@ -1657,6 +1658,8 @@ class ReverieAgent:
         self._auto_context_rotation_active = False
         self._auto_context_rotation_retry_after = 0.0
         self._last_context_safety_signature: Optional[tuple[Any, ...]] = None
+        self._memory_os: Optional[MemoryOS] = None
+        self._prompt_history_limit = 28
         
         # Operation history and rollback support
         self.operation_history = operation_history
@@ -2288,6 +2291,7 @@ class ReverieAgent:
             nvidia_options = build_aihubmix_openai_options(getattr(self.config, "aihubmix", {}), model_for_sdk)
         elif self._is_active_model_source("agnes"):
             nvidia_options = build_agnes_openai_options(getattr(self.config, "agnes", {}), model_for_sdk)
+            extra_body = nvidia_options.get("extra_body")
         else:
             extra_body = self._openai_extra_body_for_thinking()
             if extra_body is not None and isinstance(model_for_sdk, str) and "(" in model_for_sdk and ")" in model_for_sdk:
@@ -3123,6 +3127,111 @@ class ReverieAgent:
                 continue
             self.tool_executor.update_context(key, value)
         self.tool_executor.update_context("agent", self)
+
+    def _get_memory_os(self) -> Optional[MemoryOS]:
+        """Return the Memory OS facade for this workspace, creating it lazily."""
+        context = getattr(self.tool_executor, "context", {}) if self.tool_executor else {}
+        existing = context.get("memory_os") if isinstance(context, dict) else None
+        if isinstance(existing, MemoryOS):
+            self._memory_os = existing
+            return existing
+        if isinstance(self._memory_os, MemoryOS):
+            if isinstance(context, dict):
+                context["memory_os"] = self._memory_os
+            return self._memory_os
+
+        try:
+            from ..config import get_project_data_dir
+
+            project_root = Path(context.get("project_root") or self.project_root) if isinstance(context, dict) else self.project_root
+            project_data_dir = context.get("project_data_dir") if isinstance(context, dict) else None
+            base_dir = Path(project_data_dir) if project_data_dir else get_project_data_dir(Path(project_root))
+            self._memory_os = MemoryOS(base_dir, project_root=Path(project_root))
+            if isinstance(context, dict):
+                context["memory_os"] = self._memory_os
+            return self._memory_os
+        except Exception:
+            logger.debug("Failed to initialize Memory OS", exc_info=True)
+            return None
+
+    def _record_memory_event(
+        self,
+        event_type: str,
+        payload: Dict[str, Any],
+        *,
+        actor: str = "",
+        session_id: str = "default",
+        tags: Optional[List[str]] = None,
+        consolidate: bool = True,
+    ) -> None:
+        """Best-effort event-store write for traceable memory evidence."""
+        memory_os = self._get_memory_os()
+        if not memory_os:
+            return
+        try:
+            resolved_session_id, _ = self._current_session_details(session_id)
+            memory_os.record_event(
+                event_type,
+                payload,
+                actor=actor,
+                session_id=resolved_session_id,
+                tags=tags,
+                consolidate=consolidate,
+            )
+        except Exception:
+            logger.debug("Failed to record Memory OS event", exc_info=True)
+
+    def _select_prompt_history(self) -> List[Dict[str, Any]]:
+        """Return bounded history for model prompts while preserving tool-call safety."""
+        messages = [dict(message) for message in self.messages if isinstance(message, dict)]
+        if len(messages) <= self._prompt_history_limit:
+            return messages
+
+        working_memory = [
+            message
+            for message in messages
+            if str(message.get("role", "") or "").strip().lower() == "system"
+            and "[WORKING MEMORY" in _coerce_text_fragments(message.get("content"))
+        ][-2:]
+
+        tail = messages[-self._prompt_history_limit :]
+        while tail and str(tail[0].get("role", "") or "").strip().lower() == "tool":
+            tail = tail[1:]
+
+        selected: List[Dict[str, Any]] = []
+        seen: set[int] = set()
+        for message in working_memory + tail:
+            marker = id(message)
+            if marker in seen:
+                continue
+            selected.append(message)
+            seen.add(marker)
+        return selected
+
+    def _memory_context_package_message(self) -> Optional[Dict[str, Any]]:
+        """Build one bounded retrieved context package for the active request."""
+        memory_os = self._get_memory_os()
+        if not memory_os:
+            return None
+        query = self._latest_user_message_text()
+        if not query:
+            return None
+        try:
+            resolved_session_id, _ = self._current_session_details("default")
+            package = memory_os.assemble_context(
+                query,
+                code_retriever=self.tool_executor.context.get("retriever"),
+                session_id=resolved_session_id,
+                recent_messages=self.messages,
+                max_tokens=6000,
+            )
+        except Exception:
+            logger.debug("Failed to assemble Memory OS context package", exc_info=True)
+            return None
+        content = str(getattr(package, "content", "") or "").strip()
+        if not content:
+            return None
+        return {"role": "system", "content": content}
     
     def _build_messages(
         self,
@@ -3131,7 +3240,10 @@ class ReverieAgent:
     ) -> List[Dict]:
         """Build message list for API calls, optionally resolving local multimodal parts."""
         messages = [{"role": "system", "content": self.system_prompt}]
-        for message in self.messages:
+        memory_context = self._memory_context_package_message()
+        if memory_context:
+            messages.append(memory_context)
+        for message in self._select_prompt_history():
             if not isinstance(message, dict):
                 continue
             normalized = dict(message)
@@ -3167,6 +3279,20 @@ class ReverieAgent:
         if not display_text and isinstance(user_message, list):
             display_text = "[image attachment]"
 
+        self._record_memory_event(
+            "user_message",
+            {
+                "content": user_message,
+                "display_text": display_text,
+                "mode": self.mode,
+                "model": self.model,
+                "provider": self.provider,
+            },
+            actor="user",
+            session_id=session_id,
+            tags=["user", "message"],
+        )
+
         # Create checkpoint before processing user question
         if self.rollback_manager:
             self.current_checkpoint_id = self.rollback_manager.create_pre_question_checkpoint(
@@ -3201,6 +3327,19 @@ class ReverieAgent:
                 yield response
         except Exception as e:
             error_msg = f"Error processing message: {str(e)}"
+            self._record_memory_event(
+                "error",
+                {
+                    "message": error_msg,
+                    "error": str(e),
+                    "mode": self.mode,
+                    "model": self.model,
+                    "provider": self.provider,
+                },
+                actor="agent",
+                session_id=session_id,
+                tags=["error", "turn"],
+            )
             yield error_msg
         finally:
             self._cleanup_completed_task_artifacts()
@@ -3266,7 +3405,7 @@ class ReverieAgent:
                     getattr(self.config, "agnes", {}),
                     model_for_sdk,
                 )
-                extra_body = None
+                extra_body = nvidia_options.get("extra_body")
             else:
                 extra_body = self._openai_extra_body_for_thinking()
             if extra_body is not None and isinstance(model_for_sdk, str) and "(" in model_for_sdk and ")" in model_for_sdk:
@@ -3611,7 +3750,7 @@ class ReverieAgent:
                     getattr(self.config, "agnes", {}),
                     model_for_sdk,
                 )
-                extra_body = None
+                extra_body = nvidia_options.get("extra_body")
             else:
                 extra_body = self._openai_extra_body_for_thinking()
             if extra_body is not None and isinstance(model_for_sdk, str) and "(" in model_for_sdk and ")" in model_for_sdk:
@@ -4200,6 +4339,14 @@ class ReverieAgent:
                 and _coerce_text_fragments(first.get("content")) == self.system_prompt
             ):
                 history = history[1:]
+        history = [
+            message
+            for message in history
+            if not (
+                str(message.get("role", "") or "").strip().lower() == "system"
+                and _coerce_text_fragments(message.get("content")).startswith(MEMORY_CONTEXT_PROMPT_HEADER)
+            )
+        ]
         return history
 
     def _persist_history_to_session(self) -> None:
@@ -4278,27 +4425,42 @@ class ReverieAgent:
     ) -> None:
         """Record workspace-level token usage for one model call."""
         workspace_stats_manager = self.tool_executor.context.get("workspace_stats_manager")
-        if not workspace_stats_manager:
-            return
-
         resolved_session_id, session_name = self._current_session_details(session_id)
-        try:
-            workspace_stats_manager.record_model_usage(
-                provider=self.provider,
-                source=source,
-                model=self.model,
-                model_display_name=self.model_display_name,
-                request_messages=request_messages,
-                assistant_text=assistant_text,
-                reasoning_text=reasoning_text,
-                tool_calls=tool_calls,
-                usage=usage,
-                session_id=resolved_session_id,
-                session_name=session_name,
-                interaction_type=interaction_type,
-            )
-        except Exception:
-            logger.debug("Failed to record workspace model usage", exc_info=True)
+        if workspace_stats_manager:
+            try:
+                workspace_stats_manager.record_model_usage(
+                    provider=self.provider,
+                    source=source,
+                    model=self.model,
+                    model_display_name=self.model_display_name,
+                    request_messages=request_messages,
+                    assistant_text=assistant_text,
+                    reasoning_text=reasoning_text,
+                    tool_calls=tool_calls,
+                    usage=usage,
+                    session_id=resolved_session_id,
+                    session_name=session_name,
+                    interaction_type=interaction_type,
+                )
+            except Exception:
+                logger.debug("Failed to record workspace model usage", exc_info=True)
+
+        self._record_memory_event(
+            "model_result",
+            {
+                "assistant_text": assistant_text,
+                "reasoning_text": reasoning_text,
+                "tool_calls": tool_calls or [],
+                "provider": self.provider,
+                "model": self.model,
+                "model_display_name": self.model_display_name,
+                "interaction_type": interaction_type,
+            },
+            actor="assistant",
+            session_id=session_id,
+            tags=["model", "result"],
+            consolidate=False,
+        )
 
     def _resolve_max_context_tokens(self) -> int:
         """Resolve the active model context window from runtime configuration."""
@@ -4427,6 +4589,17 @@ class ReverieAgent:
                 self.messages = new_history
                 self._persist_history_to_session()
                 self._record_compaction_memory(compressed_messages, session_id)
+                self._record_memory_event(
+                    "context_compaction",
+                    {
+                        "current_tokens": current_tokens,
+                        "compressed_tokens": self.get_token_estimate(),
+                        "session_id": session_id,
+                    },
+                    actor="memory_os",
+                    session_id=session_id,
+                    tags=["context", "compaction"],
+                )
                 self._auto_context_compaction_retry_after = 0.0
                 compressed_tokens = self.get_token_estimate()
                 self._emit_ui_event(
@@ -4556,6 +4729,19 @@ class ReverieAgent:
                 working_memory=handoff.carryover_text,
                 reason=rotation_reason,
                 handoff_packet=handoff.to_dict(),
+            )
+            self._record_memory_event(
+                "session_rotation",
+                {
+                    "reason": rotation_reason,
+                    "from_session_id": session_id,
+                    "new_session_id": getattr(new_session, "id", ""),
+                    "working_memory": handoff.carryover_text,
+                    "handoff": handoff.to_dict(),
+                },
+                actor="memory_os",
+                session_id=session_id,
+                tags=["session", "rotation", "handoff"],
             )
 
             self.messages = list(new_session.messages)

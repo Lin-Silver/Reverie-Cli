@@ -18,6 +18,12 @@ AGNES_DEFAULT_MAX_TOKENS = 65_536
 AGNES_PRO_MAX_TOKENS = 256_000
 AGNES_DEFAULT_TEMPERATURE = 0.7
 AGNES_DEFAULT_TOP_P = 1.0
+AGNES_DEFAULT_THINKING_MODE = "medium"
+AGNES_THINKING_BUDGETS = {
+    "low": 1024,
+    "medium": 4096,
+    "high": 8192,
+}
 
 _MODEL_CACHE_TTL_SECONDS = 300
 _MODEL_CACHE: Dict[str, Any] = {"key": "", "expires_at": 0.0, "models": []}
@@ -31,6 +37,7 @@ def _agnes_model(
     context_length: int = AGNES_DEFAULT_CONTEXT_TOKENS,
     max_output_tokens: int = AGNES_DEFAULT_MAX_TOKENS,
     vision: bool = False,
+    thinking: bool = False,
     deprecated: bool = False,
     owned_by: str = "agnes-ai",
 ) -> Dict[str, Any]:
@@ -42,7 +49,7 @@ def _agnes_model(
         "context_length": int(context_length),
         "max_output_tokens": int(max_output_tokens),
         "vision": bool(vision),
-        "thinking": False,
+        "thinking": bool(thinking),
         "tool_calling": True,
         "deprecated": bool(deprecated),
         "owned_by": owned_by,
@@ -57,6 +64,7 @@ _AGNES_STATIC_MODEL_CATALOG: List[Dict[str, Any]] = [
         context_length=256_000,
         max_output_tokens=65_536,
         vision=True,
+        thinking=True,
     ),
     _agnes_model(
         "agnes-1.5-flash",
@@ -95,7 +103,40 @@ def default_agnes_config() -> Dict[str, Any]:
         "max_tokens": AGNES_DEFAULT_MAX_TOKENS,
         "temperature": AGNES_DEFAULT_TEMPERATURE,
         "top_p": AGNES_DEFAULT_TOP_P,
+        "thinking_mode": AGNES_DEFAULT_THINKING_MODE,
         "live_model_list": True,
+    }
+
+
+def normalize_agnes_thinking_mode(value: Any, *, supports_thinking: bool = True) -> str:
+    candidate = str(value or "").strip().lower()
+    aliases = {
+        "off": "none",
+        "false": "none",
+        "disabled": "none",
+        "disable": "none",
+        "no": "none",
+        "on": AGNES_DEFAULT_THINKING_MODE,
+        "true": AGNES_DEFAULT_THINKING_MODE,
+        "enabled": AGNES_DEFAULT_THINKING_MODE,
+        "enable": AGNES_DEFAULT_THINKING_MODE,
+        "default": AGNES_DEFAULT_THINKING_MODE,
+    }
+    candidate = aliases.get(candidate, candidate)
+    if candidate not in {"none", *AGNES_THINKING_BUDGETS.keys()}:
+        candidate = AGNES_DEFAULT_THINKING_MODE
+    if not supports_thinking:
+        return "none"
+    return candidate
+
+
+def build_agnes_thinking_payload(mode: Any) -> Optional[Dict[str, Any]]:
+    normalized = normalize_agnes_thinking_mode(mode)
+    if normalized == "none":
+        return None
+    return {
+        "type": "enabled",
+        "budget_tokens": AGNES_THINKING_BUDGETS[normalized],
     }
 
 
@@ -324,11 +365,17 @@ def normalize_agnes_config(raw_agnes: Any) -> Dict[str, Any]:
     if matched:
         cfg["selected_model_id"] = str(matched["id"])
         cfg["selected_model_display_name"] = str(matched["display_name"])
+        cfg["thinking_mode"] = normalize_agnes_thinking_mode(
+            cfg.get("thinking_mode", AGNES_DEFAULT_THINKING_MODE),
+            supports_thinking=bool(matched.get("thinking", False)),
+        )
         context_length = matched.get("context_length")
         if context_length:
             cfg["max_context_tokens"] = int(context_length)
         output_limit = int(matched.get("max_output_tokens") or AGNES_DEFAULT_MAX_TOKENS)
         cfg["max_tokens"] = min(int(cfg.get("max_tokens") or output_limit), output_limit)
+    else:
+        cfg["thinking_mode"] = normalize_agnes_thinking_mode(cfg.get("thinking_mode", AGNES_DEFAULT_THINKING_MODE))
 
     return cfg
 
@@ -355,7 +402,10 @@ def build_agnes_runtime_model_data(agnes_config: Any, model_id: Optional[str] = 
         "max_context_tokens": int(selected.get("context_length") or cfg.get("max_context_tokens", AGNES_DEFAULT_CONTEXT_TOKENS)),
         "provider": "openai-sdk",
         "supports_vision": bool(selected.get("vision", False)),
-        "thinking_mode": None,
+        "thinking_mode": normalize_agnes_thinking_mode(
+            cfg.get("thinking_mode", AGNES_DEFAULT_THINKING_MODE),
+            supports_thinking=bool(selected.get("thinking", False)),
+        ),
         "endpoint": str(cfg.get("endpoint", "") or ""),
         "custom_headers": {},
         "vision": bool(selected.get("vision", False)),
@@ -373,11 +423,20 @@ def build_agnes_openai_options(agnes_config: Any, model_id: Optional[str] = None
         max_tokens = AGNES_DEFAULT_MAX_TOKENS
     if max_tokens <= 0:
         max_tokens = AGNES_DEFAULT_MAX_TOKENS
-    return {
+    options = {
         "temperature": float(cfg.get("temperature", AGNES_DEFAULT_TEMPERATURE)),
         "top_p": float(cfg.get("top_p", AGNES_DEFAULT_TOP_P)),
         "max_tokens": min(max_tokens, output_limit),
     }
+    thinking = build_agnes_thinking_payload(
+        normalize_agnes_thinking_mode(
+            cfg.get("thinking_mode", AGNES_DEFAULT_THINKING_MODE),
+            supports_thinking=bool((selected or {}).get("thinking", False)),
+        )
+    )
+    if thinking:
+        options["extra_body"] = {"thinking": thinking}
+    return options
 
 
 def mask_secret(secret: str) -> str:

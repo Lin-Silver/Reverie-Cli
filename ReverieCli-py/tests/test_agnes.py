@@ -27,8 +27,10 @@ def test_agnes_catalog_context_lengths_match_model_docs(monkeypatch) -> None:
 
     assert catalog["agnes-2.0-flash"]["context_length"] == 256_000
     assert catalog["agnes-2.0-flash"]["max_output_tokens"] == 65_536
+    assert catalog["agnes-2.0-flash"]["thinking"] is True
     assert catalog["agnes-1.5-flash"]["context_length"] == 256_000
     assert catalog["agnes-1.5-flash"]["max_output_tokens"] == 65_536
+    assert catalog["agnes-1.5-flash"]["thinking"] is False
     assert catalog["agnes-1.5-pro"]["context_length"] == 256_000
     assert catalog["agnes-1.5-pro"]["max_output_tokens"] == 256_000
 
@@ -55,6 +57,7 @@ def test_agnes_runtime_model_data_uses_env_key(monkeypatch) -> None:
     assert runtime["provider"] == "openai-sdk"
     assert runtime["base_url"] == AGNES_DEFAULT_API_URL
     assert runtime["api_key"] == "agnes-test"
+    assert runtime["thinking_mode"] == "none"
 
 
 def test_config_active_model_resolves_agnes(monkeypatch) -> None:
@@ -82,7 +85,35 @@ def test_agnes_openai_options_match_provider_defaults() -> None:
         "temperature": 0.7,
         "top_p": 1.0,
         "max_tokens": 65536,
+        "extra_body": {"thinking": {"type": "enabled", "budget_tokens": 4096}},
     }
+
+
+def test_agnes_openai_options_allow_disabling_thinking() -> None:
+    options = build_agnes_openai_options(
+        {"selected_model_id": "agnes-2.0-flash", "thinking_mode": "none", "live_model_list": False}
+    )
+
+    assert options == {
+        "temperature": 0.7,
+        "top_p": 1.0,
+        "max_tokens": 65536,
+    }
+
+
+def test_agnes_runtime_model_data_exposes_selected_thinking_level(monkeypatch) -> None:
+    monkeypatch.setenv("AGNES_API_KEY", "agnes-test")
+
+    runtime = build_agnes_runtime_model_data(
+        {
+            "selected_model_id": "agnes-2.0-flash",
+            "thinking_mode": "high",
+            "live_model_list": False,
+        }
+    )
+
+    assert runtime is not None
+    assert runtime["thinking_mode"] == "high"
 
 
 def test_text_to_video_lists_agnes_model(tmp_path) -> None:

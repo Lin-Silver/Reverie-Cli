@@ -360,7 +360,8 @@ def normalize_mode(value: object, default: str = "reverie") -> str:
     raw = str(value or "").strip().lower()
     if not raw:
         return default
-    return MODE_ALIASES.get(raw, raw)
+    normalized = MODE_ALIASES.get(raw, raw)
+    return normalized if normalized in MODE_METADATA else default
 
 
 def get_mode_metadata(mode: object) -> Dict[str, object]:

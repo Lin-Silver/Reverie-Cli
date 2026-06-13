@@ -21,6 +21,23 @@ from ..modes import normalize_mode
 from .agent import ReverieAgent
 
 
+_NON_REVERIE_WORKFLOW_MODES = {
+    "reverie-gamer",
+    "reverie-atlas",
+    "reverie-ant",
+    "spec-driven",
+    "spec-vibe",
+    "writer",
+    "computer-controller",
+}
+
+
+def _is_base_reverie_mode(mode: Any) -> bool:
+    """Treat unknown model-source strings as base Reverie workflow mode."""
+    normalized = normalize_mode(mode)
+    return normalized == "reverie" or normalized not in _NON_REVERIE_WORKFLOW_MODES
+
+
 def _utc_timestamp() -> str:
     return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
@@ -119,10 +136,15 @@ class SubagentManager:
 
     def is_available(self, config: Optional[Config] = None) -> bool:
         active_config = config or self._load_config()
-        return normalize_mode(getattr(active_config, "mode", "reverie")) == "reverie"
+        if str(getattr(active_config, "active_model_source", "standard") or "standard").strip().lower() == "nvidia":
+            return False
+        return _is_base_reverie_mode(getattr(active_config, "mode", "reverie"))
 
     def ensure_available(self, config: Optional[Config] = None) -> None:
         if not self.is_available(config):
+            active_config = config or self._load_config()
+            if str(getattr(active_config, "active_model_source", "standard") or "standard").strip().lower() == "nvidia":
+                raise RuntimeError("Subagents are disabled for the NVIDIA source. Use Context Engine retrieval instead.")
             raise RuntimeError("Subagents are only available in base Reverie mode.")
 
     def list_specs(self, config: Optional[Config] = None) -> List[SubagentSpec]:
@@ -297,7 +319,12 @@ class SubagentManager:
     def _runs_dir(self, subagent_id: str) -> Path:
         project_data_dir = getattr(self.interface, "project_data_dir", None)
         if project_data_dir is None:
-            project_data_dir = Path.cwd() / ".reverie"
+            config_manager = getattr(self.interface, "config_manager", None)
+            project_data_dir = getattr(config_manager, "project_data_dir", None)
+        if project_data_dir is None:
+            from ..config import get_project_data_dir
+
+            project_data_dir = get_project_data_dir(getattr(self.interface, "project_root", Path.cwd()))
         return Path(project_data_dir) / "subagents" / _safe_subagent_id(subagent_id) / "runs"
 
     def _build_assignment_prompt(
@@ -308,13 +335,16 @@ class SubagentManager:
         expected_output: str = "",
         read_scope: Optional[List[str]] = None,
         write_scope: Optional[List[str]] = None,
+        worker_role: str = "context_expert",
     ) -> str:
+        role_text = "validator worker" if worker_role == "validator" else "Context Engine expert worker"
         lines = [
-            "You are a Reverie Subagent created by the main agent.",
+            f"You are a Reverie Subagent acting as a {role_text} for the main agent.",
             f"Subagent ID: {spec.id}",
-            "You share the current Reverie system prompt, tools, plugins, skills, MCP surface, and workspace context.",
-            "Your goal is only the task assigned by the main agent. Do not ask the user for confirmation unless the assignment is blocked.",
-            "When you use tools, operate only inside the active workspace and return a concise result for the main agent.",
+            "Your job is to retrieve, cross-check, and cite repository evidence through the Context Engine.",
+            "Default policy: read-only. Do not implement independent development work unless the assignment includes a write_scope.",
+            "Respect read_scope and write_scope exactly. If evidence points outside scope, report that boundary instead of expanding it yourself.",
+            "Return concise findings with file paths, symbols, line references when available, confidence, and remaining uncertainty.",
             "",
             "## Assignment",
             str(assignment or "").strip(),
@@ -325,7 +355,9 @@ class SubagentManager:
             lines.extend(["", "## Read Scope", "\n".join(f"- {item}" for item in read_scope)])
         if write_scope:
             lines.extend(["", "## Write Scope", "\n".join(f"- {item}" for item in write_scope)])
-        lines.extend(["", "Finish with a short summary and include any files changed."])
+        if not write_scope:
+            lines.extend(["", "## Write Policy", "No write_scope was assigned. Do not modify files."])
+        lines.extend(["", "Finish with a short evidence summary for the main agent."])
         return "\n".join(lines).strip()
 
     def _shared_context_from_interface(self) -> Dict[str, Any]:
@@ -350,7 +382,15 @@ class SubagentManager:
         }
         return {key: value for key, value in context.items() if value is not None}
 
-    def _build_child_agent(self, spec: SubagentSpec, model: ModelConfig, config: Config) -> ReverieAgent:
+    def _build_child_agent(
+        self,
+        spec: SubagentSpec,
+        model: ModelConfig,
+        config: Config,
+        *,
+        read_scope: Optional[List[str]] = None,
+        write_scope: Optional[List[str]] = None,
+    ) -> ReverieAgent:
         rules_builder = getattr(self.interface, "_build_additional_rules_with_tti", None)
         additional_rules = rules_builder(config) if callable(rules_builder) else ""
         child = ReverieAgent(
@@ -386,6 +426,8 @@ class SubagentManager:
         child.tool_executor.update_context("subagent_id", spec.id)
         child.tool_executor.update_context("subagent_color", spec.color)
         child.tool_executor.update_context("subagent_manager", self)
+        child.tool_executor.update_context("subagent_read_scope", list(read_scope or []))
+        child.tool_executor.update_context("subagent_write_scope", list(write_scope or []))
         return child
 
     def run_task(
@@ -396,6 +438,7 @@ class SubagentManager:
         expected_output: str = "",
         read_scope: Optional[List[str]] = None,
         write_scope: Optional[List[str]] = None,
+        worker_role: str = "context_expert",
         stream: bool = False,
     ) -> SubagentRun:
         config = self._load_config()
@@ -429,13 +472,20 @@ class SubagentManager:
 
         child_config = Config.from_dict(config.to_dict())
         child_config.mode = "reverie"
-        child_agent = self._build_child_agent(spec, model, child_config)
+        child_agent = self._build_child_agent(
+            spec,
+            model,
+            child_config,
+            read_scope=read_scope,
+            write_scope=write_scope,
+        )
         prompt = self._build_assignment_prompt(
             spec=spec,
             assignment=assignment,
             expected_output=expected_output,
             read_scope=read_scope,
             write_scope=write_scope,
+            worker_role=worker_role,
         )
 
         try:

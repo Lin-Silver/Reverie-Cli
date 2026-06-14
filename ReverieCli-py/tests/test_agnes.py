@@ -2,6 +2,8 @@ from reverie.agnes import (
     AGNES_DEFAULT_API_URL,
     build_agnes_openai_options,
     build_agnes_runtime_model_data,
+    get_agnes_thinking_catalog,
+    get_agnes_thinking_label,
     get_agnes_model_catalog,
     normalize_agnes_config,
     resolve_agnes_sdk_base_url,
@@ -87,6 +89,26 @@ def test_agnes_openai_options_match_provider_defaults() -> None:
         "max_tokens": 65536,
         "extra_body": {"thinking": {"type": "enabled", "budget_tokens": 4096}},
     }
+
+
+def test_agnes_thinking_catalog_exposes_depth_choices() -> None:
+    assert [item["id"] for item in get_agnes_thinking_catalog()] == ["none", "low", "medium", "high"]
+    assert get_agnes_thinking_label("high") == "High"
+    assert get_agnes_thinking_catalog(supports_thinking=False) == [
+        {
+            "id": "none",
+            "label": "Off",
+            "description": "Disable Agnes thinking for lower latency.",
+        }
+    ]
+
+
+def test_agnes_openai_options_map_high_thinking_budget() -> None:
+    options = build_agnes_openai_options(
+        {"selected_model_id": "agnes-2.0-flash", "thinking_mode": "high", "live_model_list": False}
+    )
+
+    assert options["extra_body"] == {"thinking": {"type": "enabled", "budget_tokens": 8192}}
 
 
 def test_agnes_openai_options_allow_disabling_thinking() -> None:

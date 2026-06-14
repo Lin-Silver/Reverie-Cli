@@ -6971,6 +6971,14 @@ class CommandHandler:
             return self._cmd_agnes_model("")
         if lowered.startswith("model "):
             return self._cmd_agnes_model(raw[6:].strip())
+        if lowered in ("thinking", "reasoning"):
+            return self._cmd_agnes_thinking("")
+        if lowered.startswith("thinking "):
+            return self._cmd_agnes_thinking(raw[9:].strip())
+        if lowered.startswith("reasoning "):
+            return self._cmd_agnes_thinking(raw[10:].strip())
+        if lowered in ("none", "off", "low", "medium", "high"):
+            return self._cmd_agnes_thinking(raw)
         if lowered in ("endpoint", "url", "base-url", "baseurl"):
             return self._cmd_agnes_endpoint("")
         if lowered.startswith("endpoint "):
@@ -6983,7 +6991,7 @@ class CommandHandler:
             return self._cmd_agnes_endpoint(raw[8:].strip())
 
         self.console.print(
-            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /agnes [status|key|activate|model|endpoint][/{self.theme.AMBER_GLOW}]"
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /agnes [status|key|activate|model|thinking|endpoint][/{self.theme.AMBER_GLOW}]"
         )
         return True
 
@@ -7020,6 +7028,7 @@ class CommandHandler:
         from ..agnes import (
             AGNES_API_KEY_HINT_URL,
             mask_secret,
+            get_agnes_thinking_label,
             normalize_agnes_config,
             resolve_agnes_api_key,
             resolve_agnes_selected_model,
@@ -7053,6 +7062,10 @@ class CommandHandler:
             lines.insert(1, f"[{self.theme.BLUE_SOFT}]Selected model:[/{self.theme.BLUE_SOFT}] {escape(selected['display_name'])} ({escape(selected['id'])})")
             lines.insert(2, f"[{self.theme.BLUE_SOFT}]Transport:[/{self.theme.BLUE_SOFT}] OpenAI SDK")
             lines.insert(3, f"[{self.theme.BLUE_SOFT}]Context:[/{self.theme.BLUE_SOFT}] {int(selected.get('context_length') or 0):,} tokens")
+            thinking_label = get_agnes_thinking_label(agnes_cfg.get("thinking_mode", "none"))
+            if not bool(selected.get("thinking", False)):
+                thinking_label = "Not supported"
+            lines.insert(4, f"[{self.theme.BLUE_SOFT}]Thinking depth:[/{self.theme.BLUE_SOFT}] {thinking_label}")
 
         self.console.print()
         self.console.print(
@@ -7170,8 +7183,114 @@ class CommandHandler:
         self.console.print()
         return True
 
+    def _cmd_agnes_thinking(self, value: str) -> bool:
+        from ..agnes import (
+            get_agnes_thinking_catalog,
+            get_agnes_thinking_label,
+            normalize_agnes_config,
+            normalize_agnes_thinking_mode,
+            resolve_agnes_selected_model,
+        )
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        agnes_cfg = normalize_agnes_config(getattr(config, "agnes", {}))
+        selected = resolve_agnes_selected_model(agnes_cfg)
+        supports_thinking = bool((selected or {}).get("thinking", False))
+        if not supports_thinking:
+            if selected:
+                self.console.print(
+                    f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} {selected['display_name']} does not support Agnes thinking controls.[/{self.theme.AMBER_GLOW}]"
+                )
+            agnes_cfg["thinking_mode"] = "none"
+            config.agnes = normalize_agnes_config(agnes_cfg)
+            config_manager.save(config)
+            return True
+
+        chosen_mode = ""
+        raw_value = str(value or "").strip().lower()
+        if raw_value:
+            chosen_mode = normalize_agnes_thinking_mode(raw_value, supports_thinking=True)
+            if chosen_mode != raw_value and raw_value not in ("on", "true", "enabled", "enable", "default", "off", "false", "disabled", "disable", "no"):
+                self.console.print(
+                    f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Unsupported Agnes thinking depth: {value}[/{self.theme.CORAL_SOFT}]"
+                )
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Available: none, low, medium, high[/{self.theme.TEXT_DIM}]"
+                )
+                return True
+        else:
+            chosen_mode = self._prompt_agnes_thinking_mode(agnes_cfg, selected)
+            if not chosen_mode:
+                return True
+
+        agnes_cfg["thinking_mode"] = chosen_mode
+        config.agnes = normalize_agnes_config(agnes_cfg)
+        config_manager.save(config)
+
+        self.console.print()
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Agnes thinking depth set to {get_agnes_thinking_label(chosen_mode)} for {selected['display_name']}.[/{self.theme.MINT_VIBRANT}]"
+        )
+        if str(getattr(config, "active_model_source", "standard")).lower() == "agnes" and self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+        return True
+
+    def _prompt_agnes_thinking_mode(self, agnes_cfg: Dict[str, Any], selected_model: Dict[str, Any]) -> str:
+        from ..agnes import get_agnes_thinking_catalog
+        from .tui_selector import ModelSelector, SelectorAction
+
+        supports_thinking = bool(selected_model.get("thinking", False))
+        if not supports_thinking:
+            return "none"
+
+        modes = get_agnes_thinking_catalog(supports_thinking=supports_thinking)
+        current_mode = str(agnes_cfg.get("thinking_mode", "") or "").strip().lower()
+        models_data = []
+        current_selector_id = None
+        for index, item in enumerate(modes):
+            models_data.append(
+                {
+                    "id": str(index),
+                    "name": item["label"],
+                    "description": item["description"],
+                    "model": {"id": item["id"]},
+                }
+            )
+            if item["id"] == current_mode:
+                current_selector_id = str(index)
+
+        selector = ModelSelector(
+            console=self.console,
+            models=models_data,
+            current_model=current_selector_id,
+        )
+        result = selector.run()
+        if result.action != SelectorAction.SELECT or not result.selected_item:
+            return ""
+
+        try:
+            selected_index = int(result.selected_item.id)
+        except (TypeError, ValueError):
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid Agnes thinking selection.[/{self.theme.CORAL_SOFT}]"
+            )
+            return ""
+        if selected_index < 0 or selected_index >= len(modes):
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid Agnes thinking index.[/{self.theme.CORAL_SOFT}]"
+            )
+            return ""
+        return modes[selected_index]["id"]
+
     def _cmd_agnes_model(self, model_query: str) -> bool:
-        from ..agnes import get_agnes_model_catalog, normalize_agnes_config
+        from ..agnes import get_agnes_model_catalog, get_agnes_thinking_label, normalize_agnes_config
 
         config_manager = self.app.get('config_manager')
         current_cfg = {}
@@ -7181,14 +7300,35 @@ class CommandHandler:
             except Exception:
                 current_cfg = {}
 
-        return self._select_external_provider_model(
+        def post_select_config(provider_cfg: Dict[str, Any], selected_model: Dict[str, Any]) -> Dict[str, Any]:
+            if bool(selected_model.get("thinking", False)) and not str(model_query or "").strip():
+                chosen_mode = self._prompt_agnes_thinking_mode(provider_cfg, selected_model)
+                if chosen_mode:
+                    provider_cfg["thinking_mode"] = chosen_mode
+            elif not bool(selected_model.get("thinking", False)):
+                provider_cfg["thinking_mode"] = "none"
+            return normalize_agnes_config(provider_cfg)
+
+        result = self._select_external_provider_model(
             config_attr="agnes",
             normalize_config=normalize_agnes_config,
             catalog=get_agnes_model_catalog(current_cfg),
             provider_label="Agnes",
             active_source="agnes",
             model_query=model_query,
+            post_select_config=post_select_config,
         )
+        if result:
+            try:
+                saved_cfg = normalize_agnes_config(getattr(config_manager.load(), "agnes", {})) if config_manager else {}
+                selected_supports = bool(saved_cfg.get("thinking_mode", "none") != "none")
+                if selected_supports:
+                    self.console.print(
+                        f"[{self.theme.TEXT_DIM}]Thinking depth: {get_agnes_thinking_label(saved_cfg.get('thinking_mode'))}[/{self.theme.TEXT_DIM}]"
+                    )
+            except Exception:
+                pass
+        return result
 
     def cmd_modelscope(self, args: str) -> bool:
         """Manage ModelScope source settings."""

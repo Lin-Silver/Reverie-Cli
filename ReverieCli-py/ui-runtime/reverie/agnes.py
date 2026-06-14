@@ -24,6 +24,18 @@ AGNES_THINKING_BUDGETS = {
     "medium": 4096,
     "high": 8192,
 }
+AGNES_THINKING_LABELS = {
+    "none": "Off",
+    "low": "Low",
+    "medium": "Medium",
+    "high": "High",
+}
+AGNES_THINKING_DESCRIPTIONS = {
+    "none": "Disable Agnes thinking for lower latency.",
+    "low": "Use a small thinking budget for straightforward prompts.",
+    "medium": "Use the provider-recommended thinking budget for coding and reasoning.",
+    "high": "Use a larger thinking budget for complex coding, debugging, and agent tasks.",
+}
 
 _MODEL_CACHE_TTL_SECONDS = 300
 _MODEL_CACHE: Dict[str, Any] = {"key": "", "expires_at": 0.0, "models": []}
@@ -128,6 +140,23 @@ def normalize_agnes_thinking_mode(value: Any, *, supports_thinking: bool = True)
     if not supports_thinking:
         return "none"
     return candidate
+
+
+def get_agnes_thinking_label(mode: Any) -> str:
+    normalized = normalize_agnes_thinking_mode(mode)
+    return AGNES_THINKING_LABELS.get(normalized, AGNES_THINKING_LABELS[AGNES_DEFAULT_THINKING_MODE])
+
+
+def get_agnes_thinking_catalog(*, supports_thinking: bool = True) -> List[Dict[str, str]]:
+    modes = ("none", "low", "medium", "high") if supports_thinking else ("none",)
+    return [
+        {
+            "id": mode,
+            "label": AGNES_THINKING_LABELS[mode],
+            "description": AGNES_THINKING_DESCRIPTIONS[mode],
+        }
+        for mode in modes
+    ]
 
 
 def build_agnes_thinking_payload(mode: Any) -> Optional[Dict[str, Any]]:

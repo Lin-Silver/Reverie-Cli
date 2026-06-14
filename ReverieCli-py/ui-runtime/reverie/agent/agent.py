@@ -2358,27 +2358,10 @@ class ReverieAgent:
                     and isinstance(call_kwargs.get("tools"), list)
                     and call_kwargs.get("tools")
                 ):
-                    compatibility_kwargs = _strip_tooling_from_payload(call_kwargs)
-                    if compatibility_kwargs != call_kwargs:
-                        logger.warning(
-                            "OpenAI-compatible SDK call failed with provider error; retrying once without tool-calling fields"
-                        )
-                        try:
-                            return self._call_openai_chat_completion_once(compatibility_kwargs)
-                        except Exception as fallback_exc:
-                            last_error = fallback_exc
-                            logger.warning(
-                                "OpenAI-compatible tool-free SDK fallback failed: %s",
-                                fallback_exc,
-                            )
-                            fallback_status = getattr(fallback_exc, "status_code", None)
-                            if _should_retry_without_tooling(fallback_status):
-                                compact_kwargs = _compact_payload_for_plain_chat(call_kwargs)
-                                if compact_kwargs != compatibility_kwargs:
-                                    logger.warning(
-                                        "OpenAI-compatible SDK retrying once with compact plain-chat payload"
-                                    )
-                                    return self._call_openai_chat_completion_once(compact_kwargs)
+                    logger.warning(
+                        "OpenAI-compatible SDK call failed with provider error; retrying once with tool-calling fields preserved"
+                    )
+                    return self._call_openai_chat_completion_once(call_kwargs)
                 if isinstance(status_code, int) and 400 <= status_code < 500 and status_code != 429:
                     raise
                 if attempt >= attempts - 1 or not _is_recoverable_stream_exception(exc):
@@ -3463,7 +3446,6 @@ class ReverieAgent:
                         if value is not None
                     },
                 )
-            
             state = _StreamingTurnState()
             try:
                 for event in self._iter_openai_sdk_stream_events(response):
@@ -3809,7 +3791,6 @@ class ReverieAgent:
                         if value is not None
                     },
                 )
-            
             choice = response.choices[0]
             message = choice.message
             message_content = _coerce_text_fragments(getattr(message, "content", None))

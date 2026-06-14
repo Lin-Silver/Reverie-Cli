@@ -104,9 +104,11 @@ def _append_shared_prompt_guidance(additional_rules: str, normalized_mode: str, 
     shared_sections.append("""
 ## Context Engine
 - Context Engine is available in every mode.
-- When a task depends on repository state, start with `codebase-retrieval` before proposing edits or architecture claims.
-- For multi-file features, bugs, refactors, or ambiguous requests, the default first retrieval is `codebase-retrieval(query_type="task", query="<the active request>")`.
+- Treat `codebase-retrieval` as the primary repository-intelligence entrypoint, not as an optional search tool.
+- When a task depends on repository state, start with `codebase-retrieval` before `ReadFile`, `ReadFolder`, direct file tools, edits, plans, or architecture claims.
+- For large repositories, unfamiliar areas, multi-file features, bugs, refactors, migrations, API/config changes, or ambiguous requests, the default first tool call is exactly `codebase-retrieval(query_type="task", query="<the active request>")`.
 - After the task-level retrieval, drill down with `symbol`, `file`, `dependencies`, `memory`, or `lsp` as needed before editing.
+- Use direct file reads only after Context Engine has produced a workset, or when the user named an exact file and the task is trivial.
 - Do not rely on conversational memory alone when the repository can be inspected directly.
 - After resume, rotation, or `continue`-style follow-ups, re-anchor with retrieval before making new claims about the codebase.
 """.strip())

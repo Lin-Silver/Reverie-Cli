@@ -86,6 +86,18 @@ def test_reverie_tool_workflow_comes_from_json_manifest() -> None:
     assert "core Blender/modeling tools directly in Reverie" in workflow
 
 
+def test_context_engine_is_primary_large_project_entrypoint() -> None:
+    prompt = build_system_prompt(model_name="Test Model", mode="reverie")
+    workflow = get_tool_descriptions_for_mode("reverie")
+
+    assert "Treat `codebase-retrieval` as the primary repository-intelligence entrypoint" in prompt
+    assert "before `ReadFile`, `ReadFolder`, direct file tools" in prompt
+    assert 'codebase-retrieval(query_type="task", query="<the active request>")' in prompt
+    assert "Primary Context Engine entrypoint" in workflow
+    assert "First tool for large repositories" in workflow
+    assert "Use `task` as the default first call" in workflow
+
+
 def test_reverie_prompt_injects_short_runtime_media_digest_without_provider_hardcoding() -> None:
     prompt = build_system_prompt(model_name="Test Model", mode="reverie")
 

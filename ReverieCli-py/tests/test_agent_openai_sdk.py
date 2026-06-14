@@ -71,7 +71,7 @@ def test_openai_sdk_client_receives_resolved_provider_timeout_when_needed(monkey
     assert seen["init_kwargs"]["timeout"] == 23
 
 
-def test_openai_sdk_provider_error_retries_once_without_tool_fields(tmp_path):
+def test_openai_sdk_provider_error_retries_once_with_tool_fields_preserved(tmp_path):
     class FakeProviderError(Exception):
         status_code = 502
 
@@ -122,17 +122,12 @@ def test_openai_sdk_provider_error_retries_once_without_tool_fields(tmp_path):
     assert response == "ok"
     assert len(calls) == 2
     assert "tools" in calls[0]
-    assert "tools" not in calls[1]
-    assert calls[1]["messages"] == [
-        {
-            "role": "system",
-            "content": "primary system\n\n[Merged System Note]\nworkspace memory",
-        },
-        {"role": "user", "content": "hello"},
-    ]
+    assert "tools" in calls[1]
+    assert calls[1]["tools"] == calls[0]["tools"]
+    assert calls[1]["messages"] == calls[0]["messages"]
 
 
-def test_openai_sdk_provider_error_compacts_after_tool_free_failure(tmp_path):
+def test_openai_sdk_provider_error_preserves_tool_fields_on_retry_failure(tmp_path):
     class FakeProviderError(Exception):
         status_code = 502
 
@@ -141,7 +136,7 @@ def test_openai_sdk_provider_error_compacts_after_tool_free_failure(tmp_path):
     class FakeCompletions:
         def create(self, **kwargs):
             calls.append(dict(kwargs))
-            if len(calls) < 3:
+            if len(calls) < 2:
                 raise FakeProviderError("local server rejected payload")
             return "ok"
 
@@ -168,11 +163,11 @@ def test_openai_sdk_provider_error_compacts_after_tool_free_failure(tmp_path):
     )
 
     assert response == "ok"
-    assert len(calls) == 3
-    assert "tools" not in calls[2]
-    assert calls[2]["messages"][0]["role"] == "system"
-    assert "concise coding assistant" in calls[2]["messages"][0]["content"]
-    assert calls[2]["messages"][1] == {"role": "user", "content": "hello"}
+    assert len(calls) == 2
+    assert "tools" in calls[0]
+    assert "tools" in calls[1]
+    assert calls[1]["tools"] == calls[0]["tools"]
+    assert calls[1]["messages"] == calls[0]["messages"]
 
 
 def test_legacy_nvidia_default_timeout_does_not_override_global_timeout_when_needed(monkeypatch, tmp_path):

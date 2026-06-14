@@ -278,10 +278,10 @@
   },
   "tools": {
     "codebase-retrieval": {
-      "purpose": "Inspect repository files, symbols, usages, dependencies, workspace memory, and LSP state.",
-      "use_when": "Before non-trivial edits, design claims, refactors, bug fixes, or code explanations.",
+      "purpose": "Primary Context Engine entrypoint for repository files, symbols, usages, dependencies, workspace memory, and LSP state.",
+      "use_when": "First tool for large repositories, unfamiliar areas, multi-file features, bugs, refactors, migrations, API/config changes, or architecture/code explanations. Prefer `task` before direct file reads unless the user named an exact file and the task is trivial.",
       "parameters": {
-        "query_type": "One of symbol, file, search, dependencies, outline, task, memory, lsp.",
+        "query_type": "One of symbol, file, search, dependencies, outline, task, memory, lsp. Use `task` as the default first call for broad or uncertain work.",
         "query": "Symbol, file path, search text, task description, or LSP target.",
         "direction": "Optional dependency direction for dependency queries.",
         "lsp_action": "Optional LSP action such as diagnostics, definitions, document_symbols, workspace_symbols, or status."

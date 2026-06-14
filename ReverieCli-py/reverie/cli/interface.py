@@ -1144,18 +1144,32 @@ class ReverieInterface:
             detail=notice.get("detail", ""),
         )
 
+    def _model_configuration_help_detail(self, config: Config) -> str:
+        """Return provider-aware setup guidance for missing active models."""
+        config_path = self.config_manager.get_active_config_path()
+        source = str(getattr(config, "active_model_source", "standard") or "standard").strip().lower()
+        source_commands = {
+            "codex": "/codex",
+            "aihubmix": "/aihubmix key or /aihubmix activate",
+            "agnes": "/agnes key or /agnes activate",
+            "nvidia": "/nvidia key or /nvidia activate",
+            "modelscope": "/modelscope key or /modelscope activate",
+            "webgemini": "/webgemini activate",
+        }
+        command_hint = source_commands.get(source, "/model")
+        return f"Use {command_hint} or edit {config_path}, then continue in the same TUI session."
+
     def _show_unconfigured_model_notice(self, config: Config) -> None:
         """Explain how to configure Reverie without forcing the setup wizard."""
         if config.active_model is not None or self.config_manager.is_configured():
             return
-        config_path = self.config_manager.get_active_config_path()
         self._show_activity_event(
             "Model",
             "No active model is configured yet",
             status="warning",
             detail=(
-                f"Edit {config_path} manually or use /model inside Reverie. "
-                "The TUI stays available even before a model is configured."
+                self._model_configuration_help_detail(config)
+                + " The TUI stays available even before a model is configured."
             ),
         )
 
@@ -2462,12 +2476,12 @@ class ReverieInterface:
         if not self.agent:
             self._init_agent()
         if not self.agent:
-            config_path = self.config_manager.get_active_config_path()
+            config = self.config_manager.load()
             self._show_activity_event(
                 "Model",
                 "Cannot send chat messages without a configured model",
                 status="warning",
-                detail=f"Use /model or edit {config_path}, then continue in the same TUI session.",
+                detail=self._model_configuration_help_detail(config),
             )
             return True
 

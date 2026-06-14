@@ -7295,10 +7295,10 @@ class CommandHandler:
         config_manager = self.app.get('config_manager')
         current_cfg = {}
         if config_manager:
-            try:
-                current_cfg = normalize_agnes_config(getattr(config_manager.load(), "agnes", {}))
-            except Exception:
-                current_cfg = {}
+            config = config_manager.load()
+            if not self._ensure_agnes_configuration(config):
+                return True
+            current_cfg = normalize_agnes_config(getattr(config, "agnes", {}))
 
         def post_select_config(provider_cfg: Dict[str, Any], selected_model: Dict[str, Any]) -> Dict[str, Any]:
             if bool(selected_model.get("thinking", False)) and not str(model_query or "").strip():

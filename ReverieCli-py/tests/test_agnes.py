@@ -8,11 +8,13 @@ from reverie.agnes import (
     normalize_agnes_config,
     resolve_agnes_sdk_base_url,
 )
-from reverie.config import Config, EXTERNAL_MODEL_SOURCES
+from reverie.cli.commands import CommandHandler
+from reverie.config import Config, ConfigManager, EXTERNAL_MODEL_SOURCES
 from reverie.media_capabilities import build_media_capabilities
 from reverie.provider_smoke import BUILTIN_PROVIDER_NAMES
 from reverie.tools.media_generation_capabilities import MediaGenerationCapabilitiesTool
 from reverie.tools.text_to_video import TextToVideoTool
+from rich.console import Console
 
 
 def test_agnes_catalog_contains_documented_text_models(monkeypatch) -> None:
@@ -78,6 +80,35 @@ def test_config_active_model_resolves_agnes(monkeypatch) -> None:
     assert active.model_display_name == "Agnes 2.0 Flash"
     assert active.provider == "openai-sdk"
     assert active.supports_vision is True
+
+
+def test_agnes_model_command_prompts_key_before_switching(tmp_path, monkeypatch) -> None:
+    app_root = tmp_path / "app"
+    project_root = tmp_path / "project"
+    project_root.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.delenv("AGNES_API_KEY", raising=False)
+    monkeypatch.delenv("AGNES_TOKEN", raising=False)
+    monkeypatch.setattr("reverie.config.get_app_root", lambda: app_root)
+    monkeypatch.setattr("reverie.config.get_launcher_root", lambda: app_root)
+    monkeypatch.setattr("reverie.cli.commands.Prompt.ask", lambda *args, **kwargs: "agnes-test")
+
+    config_manager = ConfigManager(project_root)
+    handler = CommandHandler(
+        Console(record=True, force_terminal=False, width=120),
+        {"config_manager": config_manager, "project_root": project_root},
+    )
+
+    assert handler._cmd_agnes_model("agnes-2.0-flash") is True
+
+    reloaded = config_manager.load()
+    active = reloaded.active_model
+    assert reloaded.models == []
+    assert reloaded.active_model_source == "agnes"
+    assert reloaded.agnes["api_key"] == "agnes-test"
+    assert reloaded.agnes["selected_model_id"] == "agnes-2.0-flash"
+    assert active is not None
+    assert active.model == "agnes-2.0-flash"
 
 
 def test_agnes_openai_options_match_provider_defaults() -> None:

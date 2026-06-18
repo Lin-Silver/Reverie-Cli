@@ -222,4 +222,34 @@ def test_cursor_position_at_exact_line_boundary() -> None:
     # cursor should be on the second visual line (row 1) at column 0
     assert metrics["cursor_row"] == 1
     assert metrics["cursor_col"] == 0
-    assert metrics["total_rows"] == 1  # the text itself occupies 1 rendered row
+    assert metrics["text_rows"] == 1
+    assert metrics["total_rows"] == 2
+    assert metrics["needs_trailing_cursor_row"] is True
+
+
+def test_prompt_editor_materializes_exact_boundary_cursor_row() -> None:
+    handler = _handler(width=80)
+    prompt_width = handler._display_width(handler._plain_prompt_text("Reverie> "))
+    buffer = "x" * (80 - prompt_width)
+    render_state = {"rendered": False, "cursor_row": 0, "total_rows": 1}
+
+    handler._redraw_windows_input("Reverie> ", buffer, len(buffer), render_state)
+
+    assert render_state["text_rows"] == 1
+    assert render_state["rendered_rows"] == 2
+    assert handler._output_stream().getvalue().endswith("\n\r")
+
+
+def test_cursor_boundary_inside_wrapped_text_uses_existing_row() -> None:
+    handler = _handler(width=80)
+    prompt_width = handler._display_width(handler._plain_prompt_text("Reverie> "))
+    boundary_prefix = "x" * (80 - prompt_width)
+    buffer = f"{boundary_prefix}next"
+
+    metrics = handler._input_visual_metrics("Reverie> ", buffer, len(boundary_prefix))
+
+    assert metrics["text_rows"] == 2
+    assert metrics["total_rows"] == 2
+    assert metrics["cursor_row"] == 1
+    assert metrics["cursor_col"] == 0
+    assert metrics["needs_trailing_cursor_row"] is False

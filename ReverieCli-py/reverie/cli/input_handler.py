@@ -135,7 +135,7 @@ class InputHandler:
         cursor_line_start = prefix.rfind("\n") + 1
         cursor_line_prefix = prefix[cursor_line_start:]
 
-        total_rows = 0
+        text_rows = 0
         cursor_row = 0
         cursor_col = 0
         for index, line in enumerate(lines):
@@ -143,18 +143,22 @@ class InputHandler:
                 self._plain_prompt_text(prompt_text, is_continuation=index > 0)
             )
             if index < cursor_line:
-                total_rows += self._line_visual_rows(prompt_width, line)
+                text_rows += self._line_visual_rows(prompt_width, line)
                 continue
             if index == cursor_line:
                 cursor_cells = prompt_width + self._display_width(cursor_line_prefix)
-                cursor_row = total_rows + (cursor_cells // terminal_width)
+                cursor_row = text_rows + (cursor_cells // terminal_width)
                 cursor_col = cursor_cells % terminal_width
-            total_rows += self._line_visual_rows(prompt_width, line)
+            text_rows += self._line_visual_rows(prompt_width, line)
 
+        text_rows = max(text_rows, 1)
+        needs_trailing_cursor_row = cursor_row >= text_rows
         return {
-            "total_rows": max(total_rows, 1),
+            "text_rows": text_rows,
+            "total_rows": max(text_rows, cursor_row + 1),
             "cursor_row": max(cursor_row, 0),
             "cursor_col": max(cursor_col, 0),
+            "needs_trailing_cursor_row": needs_trailing_cursor_row,
         }
 
     def _update_cursor_position(self, render_state: dict, metrics: dict) -> None:
@@ -189,6 +193,8 @@ class InputHandler:
                     self._write_terminal(line)
 
         metrics = self._input_visual_metrics(prompt_text, buffer, cursor)
+        if metrics.get("needs_trailing_cursor_row"):
+            self._write_terminal("\n")
         self._update_cursor_position(render_state, metrics)
 
         render_state.update(metrics)

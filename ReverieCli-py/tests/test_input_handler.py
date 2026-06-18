@@ -1,3 +1,4 @@
+from collections import deque
 from io import StringIO
 
 from rich.console import Console
@@ -85,6 +86,20 @@ def test_prompt_editor_prompt_width_matches_visible_prompt() -> None:
     )
 
 
+def test_prompt_editor_clears_previous_wrapped_rows_before_redraw() -> None:
+    handler = _handler(width=30)
+    render_state = {"rendered": False, "cursor_row": 0, "total_rows": 1}
+
+    handler._redraw_windows_input("Reverie> ", "x" * 90, 90, render_state)
+    assert render_state["rendered_rows"] > 1
+
+    handler._redraw_windows_input("Reverie> ", "ok", 2, render_state)
+
+    rendered = handler._output_stream().getvalue()
+    assert "\x1b[2K" in rendered
+    assert render_state["rendered_rows"] == 1
+
+
 def test_windows_get_input_uses_key_editor_for_empty_input(monkeypatch) -> None:
     import msvcrt
 
@@ -116,6 +131,18 @@ def test_windows_prompt_editor_handles_middle_backspace(monkeypatch) -> None:
     assert _handler()._get_seeded_single_line_input("Reverie> ", "") == ZH_BACKSPACED_PROMPT
 
 
+def test_windows_prompt_editor_clears_rendered_input_on_ctrl_c(monkeypatch) -> None:
+    import msvcrt
+
+    handler = _handler(width=30)
+    keys = iter([*"x" * 90, "\x03"])
+    monkeypatch.setattr(msvcrt, "getwch", lambda: next(keys))
+    monkeypatch.setattr(msvcrt, "kbhit", lambda: False)
+
+    assert handler._get_seeded_single_line_input("Reverie> ", "") is None
+    assert "\x1b[2K" in handler._output_stream().getvalue()
+
+
 def test_windows_prompt_editor_allows_modified_enter_newline(monkeypatch) -> None:
     import msvcrt
 
@@ -127,3 +154,72 @@ def test_windows_prompt_editor_allows_modified_enter_newline(monkeypatch) -> Non
     monkeypatch.setattr(handler, "_enter_should_insert_newline", lambda: next(enter_modes))
 
     assert handler._get_seeded_single_line_input("Reverie> ", "") == f"{ZH_FIRST}\n{ZH_SECOND}"
+
+
+def test_windows_prompt_editor_paste_preserves_single_newline(monkeypatch) -> None:
+    import msvcrt
+
+    handler = _handler()
+    # Simulate pasting "第一行\r\n第二行" (no trailing newline) then user presses Enter
+    keys = deque([*list(ZH_FIRST_LINE), "\r", "\n", *list(ZH_SECOND_LINE), "\r"])
+    monkeypatch.setattr(msvcrt, "getwch", lambda: keys.popleft())
+    monkeypatch.setattr(msvcrt, "kbhit", lambda: bool(keys))
+
+    result = handler._get_seeded_single_line_input("Reverie> ", "")
+    assert result == f"{ZH_FIRST_LINE}\n{ZH_SECOND_LINE}"
+
+
+def test_windows_prompt_editor_right_at_end_does_not_redraw(monkeypatch) -> None:
+    import msvcrt
+
+    handler = _handler(width=80)
+    prompt_width = handler._display_width(handler._plain_prompt_text("Reverie> "))
+    initial = "x" * (80 - prompt_width)
+    keys = iter(["\xe0", "M", "\r"])
+    monkeypatch.setattr(msvcrt, "getwch", lambda: next(keys))
+    monkeypatch.setattr(msvcrt, "kbhit", lambda: False)
+
+    assert handler._get_seeded_single_line_input("Reverie> ", initial) == initial
+    assert "\x1b[2K" not in handler._output_stream().getvalue()
+
+
+def test_windows_prompt_editor_batches_printable_paste_redraw(monkeypatch) -> None:
+    import msvcrt
+
+    handler = _handler()
+    keys = deque([*"pasted text", "\r"])
+    monkeypatch.setattr(msvcrt, "getwch", lambda: keys.popleft())
+    monkeypatch.setattr(msvcrt, "kbhit", lambda: bool(keys))
+
+    assert handler._get_seeded_single_line_input("Reverie> ", "") == "pasted text"
+    assert handler._output_stream().getvalue().count("\x1b[2K") == 1
+
+
+def test_line_visual_rows_exact_width() -> None:
+    handler = _handler(width=80)
+    prompt_width = handler._display_width(handler._plain_prompt_text("Reverie> "))
+    # Fill exactly one terminal line
+    filler = "x" * (80 - prompt_width)
+    assert handler._line_visual_rows(prompt_width, filler) == 1
+    # One extra character should wrap to second line
+    assert handler._line_visual_rows(prompt_width, filler + "x") == 2
+
+
+def test_line_visual_rows_empty_line() -> None:
+    handler = _handler(width=80)
+    assert handler._line_visual_rows(0, "") == 1
+    assert handler._line_visual_rows(10, "") == 1
+
+
+def test_cursor_position_at_exact_line_boundary() -> None:
+    handler = _handler(width=80)
+    prompt_width = handler._display_width(handler._plain_prompt_text("Reverie> "))
+    # Fill exactly one terminal line so cursor lands at the start of the next visual line
+    filler = "x" * (80 - prompt_width)
+    buffer = filler
+    cursor = len(buffer)
+    metrics = handler._input_visual_metrics("Reverie> ", buffer, cursor)
+    # cursor should be on the second visual line (row 1) at column 0
+    assert metrics["cursor_row"] == 1
+    assert metrics["cursor_col"] == 0
+    assert metrics["total_rows"] == 1  # the text itself occupies 1 rendered row

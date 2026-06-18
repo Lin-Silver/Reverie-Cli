@@ -934,6 +934,19 @@ impl ReverieUiBridge {
                     "type": "stream.recovered",
                     "message": message
                 }),
+                ModelStreamEvent::RetryScheduled {
+                    message,
+                    attempt,
+                    max_attempts,
+                    retry_after_seconds,
+                } => json!({
+                    "id": request_id,
+                    "type": "stream.retry",
+                    "message": message,
+                    "attempt": attempt,
+                    "max_attempts": max_attempts,
+                    "retry_after_seconds": retry_after_seconds
+                }),
                 ModelStreamEvent::ToolExecStart { id, name } => json!({
                     "id": request_id,
                     "type": "tool_call.start",
@@ -954,7 +967,11 @@ impl ReverieUiBridge {
                     "error": error
                 }),
             };
-            let _ = writeln!(writer, "{}", serde_json::to_string(&frame).unwrap_or_default());
+            let _ = writeln!(
+                writer,
+                "{}",
+                serde_json::to_string(&frame).unwrap_or_default()
+            );
             let _ = writer.flush();
         };
 
@@ -1324,10 +1341,7 @@ pub async fn run_sdk_bridge() -> ReverieResult<i32> {
                 stdout.flush()?;
             }
             "chat" => {
-                let payload = frame
-                    .get("payload")
-                    .cloned()
-                    .unwrap_or_else(|| json!({}));
+                let payload = frame.get("payload").cloned().unwrap_or_else(|| json!({}));
                 if payload
                     .get("stream")
                     .and_then(Value::as_bool)
@@ -1338,8 +1352,12 @@ pub async fn run_sdk_bridge() -> ReverieResult<i32> {
                         .handle_chat_streaming(payload, &request_id, &mut stdout)
                         .await;
                     let response = match result {
-                        Ok(value) => json!({"id": request_id, "ok": true, "result": value, "type": "chat.complete"}),
-                        Err(err) => json!({"id": request_id, "ok": false, "error": err.to_string()}),
+                        Ok(value) => {
+                            json!({"id": request_id, "ok": true, "result": value, "type": "chat.complete"})
+                        }
+                        Err(err) => {
+                            json!({"id": request_id, "ok": false, "error": err.to_string()})
+                        }
                     };
                     writeln!(stdout, "{}", serde_json::to_string(&response)?)?;
                     stdout.flush()?;
@@ -1994,6 +2012,7 @@ mod tests {
             "stream.tool_call",
             "stream.end",
             "stream.recovered",
+            "stream.retry",
             "tool_call.start",
             "tool_call.complete",
             "chat.complete",

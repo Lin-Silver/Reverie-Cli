@@ -1,10 +1,10 @@
 use crate::cli_commands::{render_help, render_mode_list, render_tool_list};
 use crate::config::{project_data_dir, Config, ConfigManager, ModelConfig};
 use crate::llm::{
-    build_openai_tool_definitions, build_request_extra_body,
-    extract_anthropic_tool_calls, extract_openai_tool_calls,
-    sanitize_prompt_output_text, send_model_compatible, send_model_streaming_compatible,
-    user_content_with_inline_images, ChatMessage, ChatRequest, ModelStreamEvent,
+    build_openai_tool_definitions, build_request_extra_body, extract_anthropic_tool_calls,
+    extract_openai_tool_calls, sanitize_prompt_output_text, send_model_compatible,
+    send_model_streaming_compatible, user_content_with_inline_images, ChatMessage, ChatRequest,
+    ModelStreamEvent,
 };
 use crate::modes::{normalize_mode, Mode};
 use crate::providers::{
@@ -221,7 +221,8 @@ impl ReverieAgent {
                         .description
                         .clone()
                         .unwrap_or_else(|| format!("MCP tool from {}", server_name));
-                    let schema = serde_json::to_value(&tool.input_schema).unwrap_or(json!({"type":"object","properties":{}}));
+                    let schema = serde_json::to_value(&tool.input_schema)
+                        .unwrap_or(json!({"type":"object","properties":{}}));
                     tool_definitions.push(json!({
                         "type": "function",
                         "function": {
@@ -238,10 +239,7 @@ impl ReverieAgent {
         let mut messages = self.context_messages(session_id)?;
         // Inject mode-specific system prompt as the first message
         let mode_prompt = self.options.mode.system_prompt();
-        messages.insert(
-            0,
-            ChatMessage::new("system", json!(mode_prompt)),
-        );
+        messages.insert(0, ChatMessage::new("system", json!(mode_prompt)));
         let rules_text = RulesManager::new(&self.project_root).get_rules_text()?;
         if !rules_text.trim().is_empty() {
             messages.insert(
@@ -406,51 +404,51 @@ impl ReverieAgent {
         arguments: Value,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = reverie_tools::ToolResult> + 'a>> {
         Box::pin(async move {
-        // Route MCP tool calls to the appropriate server
-        if let Some(rest) = name.strip_prefix("mcp_") {
-            return self.execute_mcp_tool(rest, &arguments).await;
-        }
-
-        // Subagent tool — use the real SubagentManager
-        if name == "subagent" {
-            return self.execute_subagent_tool(&arguments).await;
-        }
-
-        // Skill execution — if the tool is skill_lookup with execute action
-        if name == "skill_lookup" {
-            if let Some("execute") = arguments.get("operation").and_then(Value::as_str) {
-                return self.execute_skill_tool(&arguments).await;
+            // Route MCP tool calls to the appropriate server
+            if let Some(rest) = name.strip_prefix("mcp_") {
+                return self.execute_mcp_tool(rest, &arguments).await;
             }
-        }
 
-        // Sandbox enforcement for file/command operations
-        if self.options.sandbox_enabled {
-            if let Some(violation) = self.check_sandbox(name, &arguments) {
-                return reverie_tools::ToolResult {
+            // Subagent tool — use the real SubagentManager
+            if name == "subagent" {
+                return self.execute_subagent_tool(&arguments).await;
+            }
+
+            // Skill execution — if the tool is skill_lookup with execute action
+            if name == "skill_lookup" {
+                if let Some("execute") = arguments.get("operation").and_then(Value::as_str) {
+                    return self.execute_skill_tool(&arguments).await;
+                }
+            }
+
+            // Sandbox enforcement for file/command operations
+            if self.options.sandbox_enabled {
+                if let Some(violation) = self.check_sandbox(name, &arguments) {
+                    return reverie_tools::ToolResult {
+                        success: false,
+                        output: Value::Null,
+                        error: Some(violation),
+                    };
+                }
+            }
+
+            // Default: execute as builtin tool
+            match execute_builtin_tool(
+                &self.project_root,
+                ToolInvocation {
+                    name: name.to_string(),
+                    arguments,
+                },
+            )
+            .await
+            {
+                Ok(result) => result,
+                Err(err) => reverie_tools::ToolResult {
                     success: false,
                     output: Value::Null,
-                    error: Some(violation),
-                };
+                    error: Some(err.to_string()),
+                },
             }
-        }
-
-        // Default: execute as builtin tool
-        match execute_builtin_tool(
-            &self.project_root,
-            ToolInvocation {
-                name: name.to_string(),
-                arguments,
-            },
-        )
-        .await
-        {
-            Ok(result) => result,
-            Err(err) => reverie_tools::ToolResult {
-                success: false,
-                output: Value::Null,
-                error: Some(err.to_string()),
-            },
-        }
         })
     }
 
@@ -487,11 +485,7 @@ impl ReverieAgent {
                 reverie_tools::ToolResult {
                     success: !result.is_error,
                     output: json!({"text": text, "content": result.content}),
-                    error: if result.is_error {
-                        Some(text)
-                    } else {
-                        None
-                    },
+                    error: if result.is_error { Some(text) } else { None },
                 }
             }
             Err(err) => reverie_tools::ToolResult {

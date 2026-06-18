@@ -3,7 +3,7 @@ Web Search / Web Fetch tools for external research.
 
 Enhancement highlights:
 - provider fallback (DDG -> Brave)
-- retry/backoff for transient HTTP failures
+- fixed retry delays for transient HTTP failures
 - bounded concurrent fetch pipeline
 - result normalization, dedupe, and domain filters
 """
@@ -50,7 +50,7 @@ class WebSearchTool(BaseTool):
             "exclude_domains": {"type": "array", "items": {"type": "string"}},
             "recency": {"type": "string", "description": "DDG recency hint: d/w/m/y."},
             "request_timeout": {"type": "integer", "default": 15},
-            "max_retries": {"type": "integer", "default": 2},
+            "max_retries": {"type": "integer", "default": 5},
             "fetch_workers": {"type": "integer", "default": 4},
             "max_content_chars": {"type": "integer", "default": 7000},
             "output_format": {"type": "string", "enum": ["text", "markdown"], "default": "text"},
@@ -61,7 +61,8 @@ class WebSearchTool(BaseTool):
     DEFAULT_MAX_RESULTS = 10
     MAX_ALLOWED_RESULTS = 30
     DEFAULT_TIMEOUT = 15
-    DEFAULT_MAX_RETRIES = 2
+    DEFAULT_MAX_RETRIES = 5
+    RETRY_DELAYS_SECONDS = (1, 3, 5, 7, 15)
     DEFAULT_FETCH_WORKERS = 4
     MAX_FETCH_WORKERS = 8
     DEFAULT_MAX_CONTENT_CHARS = 7000
@@ -249,17 +250,8 @@ class WebSearchTool(BaseTool):
                 self._search_cache.popitem(last=False)
 
     @staticmethod
-    def _compute_backoff(attempt: int, retry_after: Optional[str] = None) -> float:
-        retry_after_value = None
-        if retry_after:
-            try:
-                retry_after_value = float(retry_after)
-            except (TypeError, ValueError):
-                retry_after_value = None
-        base = 0.75 * (2 ** attempt) + random.uniform(0.0, 0.35)
-        if retry_after_value and retry_after_value > 0:
-            base = max(base, retry_after_value)
-        return min(base, 10.0)
+    def _compute_backoff(attempt: int) -> float:
+        return float(WebSearchTool.RETRY_DELAYS_SECONDS[attempt])
 
     def _build_request_headers(self, url: str) -> Dict[str, str]:
         host = (urlparse(str(url or "")).hostname or "").lower()
@@ -276,7 +268,8 @@ class WebSearchTool(BaseTool):
     def _request_with_retry(self, url: str, *, params: Optional[Dict[str, Any]], timeout: int, max_retries: int):
         import requests
         last_response = None
-        for attempt in range(max_retries + 1):
+        retries = len(self.RETRY_DELAYS_SECONDS)
+        for attempt in range(retries + 1):
             try:
                 session = self._get_http_session()
                 response = session.get(
@@ -287,12 +280,12 @@ class WebSearchTool(BaseTool):
                     headers=self._build_request_headers(url),
                 )
                 last_response = response
-                if response.status_code in self.RETRY_HTTP_CODES and attempt < max_retries:
-                    time.sleep(self._compute_backoff(attempt, response.headers.get("Retry-After")))
+                if response.status_code in self.RETRY_HTTP_CODES and attempt < retries:
+                    time.sleep(self._compute_backoff(attempt))
                     continue
                 return response
             except requests.RequestException:
-                if attempt < max_retries:
+                if attempt < retries:
                     time.sleep(self._compute_backoff(attempt))
                     continue
                 raise
@@ -714,7 +707,7 @@ class WebSearchTool(BaseTool):
         if recency not in self.ALLOWED_RECENCY:
             recency = ""
         request_timeout = self._coerce_int(kwargs.get("request_timeout", self.DEFAULT_TIMEOUT), self.DEFAULT_TIMEOUT, 5, 90)
-        max_retries = self._coerce_int(kwargs.get("max_retries", self.DEFAULT_MAX_RETRIES), self.DEFAULT_MAX_RETRIES, 0, 6)
+        max_retries = self.DEFAULT_MAX_RETRIES
         fetch_workers = self._coerce_int(kwargs.get("fetch_workers", self.DEFAULT_FETCH_WORKERS), self.DEFAULT_FETCH_WORKERS, 1, self.MAX_FETCH_WORKERS)
         max_content_chars = self._coerce_int(kwargs.get("max_content_chars", self.DEFAULT_MAX_CONTENT_CHARS), self.DEFAULT_MAX_CONTENT_CHARS, 1000, self.MAX_CONTENT_CHARS_LIMIT)
         output_format = str(kwargs.get("output_format") or "text").strip().lower()
@@ -857,7 +850,7 @@ class WebFetchTool(WebSearchTool):
             "url": {"type": "string", "description": "Single URL to fetch."},
             "urls": {"type": "array", "items": {"type": "string"}, "description": "URLs to fetch, up to 8."},
             "request_timeout": {"type": "integer", "default": 15},
-            "max_retries": {"type": "integer", "default": 2},
+            "max_retries": {"type": "integer", "default": 5},
             "max_content_chars": {"type": "integer", "default": 12000},
             "output_format": {"type": "string", "enum": ["text", "markdown"], "default": "markdown"},
         },
@@ -905,7 +898,7 @@ class WebFetchTool(WebSearchTool):
             return ToolResult.fail("url or urls is required")
 
         request_timeout = self._coerce_int(kwargs.get("request_timeout", self.DEFAULT_TIMEOUT), self.DEFAULT_TIMEOUT, 5, 90)
-        max_retries = self._coerce_int(kwargs.get("max_retries", self.DEFAULT_MAX_RETRIES), self.DEFAULT_MAX_RETRIES, 0, 6)
+        max_retries = self.DEFAULT_MAX_RETRIES
         max_content_chars = self._coerce_int(kwargs.get("max_content_chars", self.DEFAULT_MAX_CONTENT_CHARS), self.DEFAULT_MAX_CONTENT_CHARS, 1000, self.MAX_CONTENT_CHARS_LIMIT)
         output_format = str(kwargs.get("output_format") or "markdown").strip().lower()
         if output_format not in {"text", "markdown"}:

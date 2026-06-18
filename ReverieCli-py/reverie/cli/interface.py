@@ -1861,6 +1861,27 @@ class ReverieInterface:
         if self._stream_input_state:
             self._stream_input_state.resume()
 
+    def _collect_buffered_stream_input(
+        self,
+        msvcrt_module: Any,
+        first_key: str,
+        pending_keys: List[str],
+    ) -> str:
+        text = [first_key]
+        while True:
+            try:
+                if not msvcrt_module.kbhit():
+                    break
+                key = msvcrt_module.getwch()
+            except OSError:
+                break
+            if key.isprintable():
+                text.append(key)
+                continue
+            pending_keys.append(key)
+            break
+        return "".join(text)
+
     def _stream_input_capture_loop(self, state: StreamInputState) -> None:
         """Background key-capture loop for streaming-time interjections."""
         try:
@@ -1868,6 +1889,7 @@ class ReverieInterface:
         except ImportError:
             return
 
+        pending_keys: List[str] = []
         while True:
             snapshot = state.snapshot()
             if not snapshot.get("active"):
@@ -1875,12 +1897,12 @@ class ReverieInterface:
             if snapshot.get("paused"):
                 time.sleep(0.025)
                 continue
-            if not msvcrt.kbhit():
+            if not pending_keys and not msvcrt.kbhit():
                 time.sleep(0.025)
                 continue
 
             try:
-                key = msvcrt.getwch()
+                key = pending_keys.pop(0) if pending_keys else msvcrt.getwch()
             except OSError:
                 time.sleep(0.025)
                 continue
@@ -1915,7 +1937,7 @@ class ReverieInterface:
                 _thread.interrupt_main()
                 return
             if key.isprintable():
-                state.append(key)
+                state.append(self._collect_buffered_stream_input(msvcrt, key, pending_keys))
                 self._refresh_streaming_footer(force=True)
 
     def _start_stream_input_capture(self) -> None:

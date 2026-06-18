@@ -9,13 +9,14 @@ This is the main agent class that:
 """
 
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional, Generator, AsyncGenerator
+from typing import List, Dict, Any, Optional, Generator, AsyncGenerator, Callable
 from pathlib import Path
 import json
 import time
 import re
 import logging
 import uuid
+import threading
 
 from rich.markup import escape as rich_escape
 
@@ -56,6 +57,23 @@ THINKING_CLOSE_TAG_LITERAL = "</think>"
 
 # Configure logging for debugging
 logger = logging.getLogger(__name__)
+
+API_RETRY_DELAYS_SECONDS = (1, 3, 5, 7, 15)
+API_RETRY_ATTEMPTS = len(API_RETRY_DELAYS_SECONDS)
+NVIDIA_MIN_REQUEST_INTERVAL_SECONDS = 1.5
+_NVIDIA_RATE_LIMIT_LOCK = threading.Lock()
+_NVIDIA_LAST_REQUEST_AT = 0.0
+
+
+def _wait_for_nvidia_rate_limit() -> None:
+    global _NVIDIA_LAST_REQUEST_AT
+    with _NVIDIA_RATE_LIMIT_LOCK:
+        now = time.monotonic()
+        elapsed = now - _NVIDIA_LAST_REQUEST_AT
+        if elapsed < NVIDIA_MIN_REQUEST_INTERVAL_SECONDS:
+            time.sleep(NVIDIA_MIN_REQUEST_INTERVAL_SECONDS - elapsed)
+            now = time.monotonic()
+        _NVIDIA_LAST_REQUEST_AT = now
 
 
 def encode_stream_event(event_type: str, **payload: Any) -> str:
@@ -1400,19 +1418,21 @@ def make_api_request_with_retry(
     max_retries: int = 3,
     initial_backoff: float = 1.0,
     stream: bool = False,
-    timeout: int = 60
+    timeout: int = 60,
+    on_retry: Optional[Callable[[float, int, int, BaseException], None]] = None,
 ) -> Any:
     """
-    Make an API request with retry logic and exponential backoff.
+    Make an API request with fixed retry delays.
     
     Args:
         url: The API endpoint URL
         headers: Request headers
         payload: Request payload (will be validated and sanitized)
-        max_retries: Maximum number of retry attempts
-        initial_backoff: Initial backoff time in seconds
+        max_retries: Ignored; Reverie uses five fixed retry attempts.
+        initial_backoff: Ignored; Reverie uses 1, 3, 5, 7, and 15 second delays.
         stream: Whether to stream the response
         timeout: Request timeout in seconds
+        on_retry: Optional callback invoked before each retry sleep.
         
     Returns:
         The response object
@@ -1435,9 +1455,16 @@ def make_api_request_with_retry(
     except (TypeError, ValueError):
         timeout_value = 60
     request_timeout = (min(15, timeout_value), timeout_value)
-    for attempt in range(max_retries):
+    is_nvidia_request = (
+        is_nvidia_api_url(url)
+        or is_nvidia_model(str(sanitized_payload.get("model", "") or ""))
+    )
+    attempts = API_RETRY_ATTEMPTS
+    for attempt in range(attempts + 1):
         try:
-            logger.debug(f"API request attempt {attempt + 1}/{max_retries}")
+            if is_nvidia_request:
+                _wait_for_nvidia_rate_limit()
+            logger.debug(f"API request attempt {attempt + 1}/{attempts + 1}")
 
             request_headers = dict(headers or {})
             if stream:
@@ -1541,21 +1568,18 @@ def make_api_request_with_retry(
             last_error = e
             logger.warning(f"Request exception on attempt {attempt + 1}: {e}")
         
-        if attempt < max_retries - 1:
-            retry_after = None
-            response = getattr(last_error, "response", None)
-            if response is not None:
+        if attempt < attempts:
+            backoff = API_RETRY_DELAYS_SECONDS[attempt]
+            if callable(on_retry) and last_error is not None:
                 try:
-                    retry_after = float(response.headers.get("Retry-After", ""))
+                    on_retry(float(backoff), attempt + 1, attempts, last_error)
                 except Exception:
-                    retry_after = None
-            backoff = retry_after if retry_after is not None else initial_backoff * (2 ** attempt)
-            backoff = min(30.0, max(0.1, float(backoff)))
+                    logger.debug("Retry callback failed", exc_info=True)
             logger.debug(f"Waiting {backoff}s before retry...")
             time.sleep(backoff)
     
     # All retries failed
-    logger.error(f"All {max_retries} retry attempts failed")
+    logger.error(f"All {attempts} retry attempts failed")
     raise last_error or requests.RequestException("All retry attempts failed")
 
 
@@ -1617,14 +1641,14 @@ class ReverieAgent:
         self._openai_request_fallback_active = False
         
         # API configuration for stability
-        self.api_max_retries = 3
-        self.api_initial_backoff = 1.0
+        self.api_max_retries = API_RETRY_ATTEMPTS
+        self.api_initial_backoff = API_RETRY_DELAYS_SECONDS[0]
         self.api_timeout = 60
         self.api_enable_debug_logging = False
 
         if config:
-            self.api_max_retries = getattr(config, 'api_max_retries', 3)
-            self.api_initial_backoff = getattr(config, 'api_initial_backoff', 1.0)
+            self.api_max_retries = API_RETRY_ATTEMPTS
+            self.api_initial_backoff = API_RETRY_DELAYS_SECONDS[0]
             self.api_timeout = getattr(config, 'api_timeout', 60)
             self.api_enable_debug_logging = getattr(config, 'api_enable_debug_logging', False)
         
@@ -1750,13 +1774,13 @@ class ReverieAgent:
                     self.custom_headers[k] = v
 
         self._openai_request_fallback_active = False
-        self.api_max_retries = 3
-        self.api_initial_backoff = 1.0
+        self.api_max_retries = API_RETRY_ATTEMPTS
+        self.api_initial_backoff = API_RETRY_DELAYS_SECONDS[0]
         self.api_timeout = 60
         self.api_enable_debug_logging = False
         if config:
-            self.api_max_retries = getattr(config, 'api_max_retries', 3)
-            self.api_initial_backoff = getattr(config, 'api_initial_backoff', 1.0)
+            self.api_max_retries = API_RETRY_ATTEMPTS
+            self.api_initial_backoff = API_RETRY_DELAYS_SECONDS[0]
             self.api_timeout = getattr(config, 'api_timeout', 60)
             self.api_enable_debug_logging = getattr(config, 'api_enable_debug_logging', False)
 
@@ -2343,12 +2367,14 @@ class ReverieAgent:
 
     def _create_openai_chat_completion(self, **kwargs: Any) -> Any:
         """Call OpenAI-compatible chat completions with SDK compatibility and transient retries."""
-        attempts = max(1, int(getattr(self, "api_max_retries", 1) or 1))
+        retries = API_RETRY_ATTEMPTS
         last_error: Optional[Exception] = None
         call_kwargs = dict(kwargs)
 
-        for attempt in range(attempts):
+        for attempt in range(retries + 1):
             try:
+                if self._is_active_model_source("nvidia"):
+                    _wait_for_nvidia_rate_limit()
                 return self._call_openai_chat_completion_once(call_kwargs)
             except Exception as exc:
                 last_error = exc
@@ -2364,14 +2390,23 @@ class ReverieAgent:
                     return self._call_openai_chat_completion_once(call_kwargs)
                 if isinstance(status_code, int) and 400 <= status_code < 500 and status_code != 429:
                     raise
-                if attempt >= attempts - 1 or not _is_recoverable_stream_exception(exc):
+                if attempt >= retries or not _is_recoverable_stream_exception(exc):
                     raise
-                backoff = min(8.0, float(getattr(self, "api_initial_backoff", 1.0) or 1.0) * (2 ** attempt))
+                backoff = API_RETRY_DELAYS_SECONDS[attempt]
+                self._emit_api_retry_event(
+                    provider_label=self._openai_sdk_provider_label(),
+                    model=call_kwargs.get("model", self.model),
+                    stream=bool(call_kwargs.get("stream")),
+                    delay_seconds=backoff,
+                    attempt=attempt + 1,
+                    max_attempts=retries,
+                    error=exc,
+                )
                 logger.warning(
                     "OpenAI-compatible SDK call failed transiently; retrying in %.1fs (%s/%s): %s",
                     backoff,
                     attempt + 1,
-                    attempts,
+                    retries,
                     exc,
                 )
                 time.sleep(backoff)
@@ -2408,6 +2443,30 @@ class ReverieAgent:
             status="working",
             detail=f"{model_text} | {transport}",
             meta=f"timeout {int(timeout or 60)}s",
+        )
+
+    def _emit_api_retry_event(
+        self,
+        *,
+        provider_label: str,
+        model: Any,
+        stream: bool,
+        delay_seconds: float,
+        attempt: int,
+        max_attempts: int,
+        error: BaseException,
+    ) -> None:
+        model_text = str(model or self.model or "model").strip() or "model"
+        transport = "stream" if stream else "non-stream"
+        error_text = str(error or "").strip()
+        if len(error_text) > 180:
+            error_text = f"{error_text[:177]}..."
+        self._emit_ui_event(
+            category="Model",
+            message=f"{provider_label} error; retrying in {int(delay_seconds)}s",
+            status="warning",
+            detail=error_text,
+            meta=f"{model_text} | {transport} | retry {attempt}/{max_attempts}",
         )
 
     def _request_provider_label(self) -> str:
@@ -2893,6 +2952,15 @@ class ReverieAgent:
                     initial_backoff=self.api_initial_backoff,
                     stream=True,
                     timeout=effective_timeout,
+                    on_retry=lambda delay, attempt, max_attempts, error: self._emit_api_retry_event(
+                        provider_label=provider_name,
+                        model=payload.get("model", self.model),
+                        stream=True,
+                        delay_seconds=delay,
+                        attempt=attempt,
+                        max_attempts=max_attempts,
+                        error=error,
+                    ),
                 )
             except requests.RequestException as e:
                 logger.error(f"Streaming API request failed for {provider_name}: {e}")
@@ -3535,6 +3603,15 @@ class ReverieAgent:
                     initial_backoff=self.api_initial_backoff,
                     stream=True,
                     timeout=effective_timeout,
+                    on_retry=lambda delay, attempt, max_attempts, error: self._emit_api_retry_event(
+                        provider_label=self._request_provider_label(),
+                        model=payload.get("model", self.model),
+                        stream=True,
+                        delay_seconds=delay,
+                        attempt=attempt,
+                        max_attempts=max_attempts,
+                        error=error,
+                    ),
                 )
             except requests.RequestException as e:
                 logger.error(f"Streaming API request failed: {e}")
@@ -3976,6 +4053,15 @@ class ReverieAgent:
                     initial_backoff=self.api_initial_backoff,
                     stream=False,
                     timeout=effective_timeout,
+                    on_retry=lambda delay, attempt, max_attempts, error: self._emit_api_retry_event(
+                        provider_label=self._request_provider_label(),
+                        model=payload.get("model", self.model),
+                        stream=False,
+                        delay_seconds=delay,
+                        attempt=attempt,
+                        max_attempts=max_attempts,
+                        error=error,
+                    ),
                 )
             except requests.RequestException as e:
                 logger.error(f"API request failed: {e}")

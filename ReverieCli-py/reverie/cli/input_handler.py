@@ -118,7 +118,7 @@ class InputHandler:
     def _line_visual_rows(self, prompt_width: int, line: str) -> int:
         terminal_width = max(self._console_width(), 1)
         cells = prompt_width + self._display_width(line)
-        return max(1, cells // terminal_width + 1)
+        return max(1, (cells + terminal_width - 1) // terminal_width)
 
     def _input_visual_metrics(
         self,
@@ -157,26 +157,13 @@ class InputHandler:
             "cursor_col": max(cursor_col, 0),
         }
 
-    def _plain_prompt_text(self, prompt_text: str, is_continuation: bool = False) -> str:
-        if is_continuation:
-            return ""
-        return (
-            f"{self.deco.DIAMOND_FILLED} "
-            f"{prompt_text.rstrip('> ')} "
-            f"{self.deco.DOT_MEDIUM} "
-            f"{self.deco.CHEVRON_RIGHT} "
-        )
-
-    def _render_input_line(self, prompt_text: str, line: str, is_continuation: bool) -> str:
-        if is_continuation:
-            return line
-        prefix = f"{self.deco.DIAMOND_FILLED} {prompt_text.rstrip('> ')} {self.deco.DOT_MEDIUM} {self.deco.CHEVRON_RIGHT} "
-        return f"{prefix}{line}"
-
     def _update_cursor_position(self, render_state: dict, metrics: dict) -> None:
-        rows_below_cursor = metrics["total_rows"] - metrics["cursor_row"] - 1
-        if rows_below_cursor > 0:
-            self._write_terminal(f"\033[{rows_below_cursor}A")
+        last_row = metrics["total_rows"] - 1
+        row_delta = last_row - metrics["cursor_row"]
+        if row_delta > 0:
+            self._write_terminal(f"\033[{row_delta}A")
+        elif row_delta < 0:
+            self._write_terminal(f"\033[{-row_delta}B")
         self._write_terminal("\r")
         if metrics["cursor_col"] > 0:
             self._write_terminal(f"\033[{metrics['cursor_col']}C")
@@ -188,11 +175,7 @@ class InputHandler:
         cursor: int,
         render_state: dict,
     ) -> None:
-        if render_state.get("rendered"):
-            previous_cursor_row = int(render_state.get("cursor_row", 0) or 0)
-            if previous_cursor_row > 0:
-                self._write_terminal(f"\033[{previous_cursor_row}A")
-            self._write_terminal("\r\033[J")
+        self._clear_rendered_windows_input(render_state)
 
         lines = str(buffer or "").split("\n")
         for index, line in enumerate(lines):
@@ -209,7 +192,31 @@ class InputHandler:
         self._update_cursor_position(render_state, metrics)
 
         render_state.update(metrics)
+        render_state["rendered_rows"] = metrics["total_rows"]
         render_state["rendered"] = True
+
+    def _clear_rendered_windows_input(self, render_state: dict) -> None:
+        if not render_state.get("rendered"):
+            return
+
+        previous_cursor_row = int(render_state.get("cursor_row", 0) or 0)
+        if previous_cursor_row > 0:
+            self._write_terminal(f"\033[{previous_cursor_row}A")
+
+        previous_rows = max(
+            1,
+            int(render_state.get("rendered_rows", 0) or 0),
+            int(render_state.get("total_rows", 0) or 0),
+            previous_cursor_row + 1,
+        )
+        for row in range(previous_rows):
+            self._write_terminal("\r\033[2K")
+            if row < previous_rows - 1:
+                self._write_terminal("\033[1B")
+        if previous_rows > 1:
+            self._write_terminal(f"\033[{previous_rows - 1}A")
+        self._write_terminal("\r")
+        render_state["rendered"] = False
     
     def _render_prompt(self, prompt_text: str, is_continuation: bool = False) -> None:
         """Render the dreamy themed prompt"""
@@ -273,6 +280,25 @@ class InputHandler:
         except OSError:
             return False
 
+    def _collect_buffered_printable_input(
+        self,
+        msvcrt_module: Any,
+        first_key: str,
+        pending_keys: List[str],
+    ) -> str:
+        text = [first_key]
+        while self._any_buffered_input(msvcrt_module):
+            try:
+                key = msvcrt_module.getwch()
+            except OSError:
+                break
+            if key.isprintable():
+                text.append(key)
+                continue
+            pending_keys.append(key)
+            break
+        return "".join(text)
+
     def _read_buffered_input(self) -> str:
         rest = []
         while True:
@@ -298,23 +324,25 @@ class InputHandler:
             line = Prompt.ask("", default=initial_text, show_default=False)
             return line
 
-        if "\n" in initial_text:
-            initial_text = initial_text.splitlines()[0]
-
         buffer = str(initial_text or "")
         cursor = len(buffer)
         render_state = {"rendered": False, "cursor_row": 0, "total_rows": 1}
+        skip_next_lf = False
+        pending_keys: List[str] = []
         self._redraw_windows_input(prompt_text, buffer, cursor, render_state)
 
         while True:
             try:
-                key = msvcrt.getwch()
+                key = pending_keys.pop(0) if pending_keys else msvcrt.getwch()
             except OSError:
                 continue
+            if skip_next_lf and key != "\n":
+                skip_next_lf = False
 
             if key in ("\x00", "\xe0"):
+                before = (buffer, cursor)
                 try:
-                    key_code = msvcrt.getwch()
+                    key_code = pending_keys.pop(0) if pending_keys else msvcrt.getwch()
                 except OSError:
                     continue
                 if key_code == "K":
@@ -328,7 +356,8 @@ class InputHandler:
                     cursor = len(buffer) if next_newline < 0 else next_newline
                 elif key_code == "S":
                     buffer, cursor = self._delete_forward(buffer, cursor)
-                self._redraw_windows_input(prompt_text, buffer, cursor, render_state)
+                if (buffer, cursor) != before:
+                    self._redraw_windows_input(prompt_text, buffer, cursor, render_state)
                 continue
             if key == "\r":
                 if self._enter_should_insert_newline():
@@ -337,6 +366,7 @@ class InputHandler:
                     continue
                 if self._has_buffered_keyboard_input(msvcrt):
                     buffer, cursor = self._insert_text(buffer, cursor, "\n")
+                    skip_next_lf = True
                     self._redraw_windows_input(prompt_text, buffer, cursor, render_state)
                     continue
                 self._write_terminal("\n")
@@ -345,19 +375,21 @@ class InputHandler:
                     self.history_index = len(self.history)
                 return buffer
             if key == "\n":
-                if self._has_buffered_keyboard_input(msvcrt):
-                    buffer, cursor = self._insert_text(buffer, cursor, "\n")
-                    self._redraw_windows_input(prompt_text, buffer, cursor, render_state)
+                if skip_next_lf:
+                    skip_next_lf = False
                     continue
                 buffer, cursor = self._insert_text(buffer, cursor, "\n")
                 self._redraw_windows_input(prompt_text, buffer, cursor, render_state)
                 continue
             if key == "\x03":
+                self._clear_rendered_windows_input(render_state)
                 self._write_terminal("\n")
                 return None
             if key == "\x08":
+                before = (buffer, cursor)
                 buffer, cursor = self._delete_backward(buffer, cursor)
-                self._redraw_windows_input(prompt_text, buffer, cursor, render_state)
+                if (buffer, cursor) != before:
+                    self._redraw_windows_input(prompt_text, buffer, cursor, render_state)
                 continue
             if key == "@" and self._should_open_attachment_selector(buffer[:cursor]):
                 self._write_terminal("\n")
@@ -367,7 +399,8 @@ class InputHandler:
                 self._redraw_windows_input(prompt_text, buffer, cursor, render_state)
                 continue
             if key.isprintable():
-                buffer, cursor = self._insert_text(buffer, cursor, key)
+                text = self._collect_buffered_printable_input(msvcrt, key, pending_keys)
+                buffer, cursor = self._insert_text(buffer, cursor, text)
                 self._redraw_windows_input(prompt_text, buffer, cursor, render_state)
 
     def get_input(self, prompt_text: str = "Reverie> ", initial_text: str = "") -> Optional[str]:
@@ -454,8 +487,9 @@ class InputHandler:
                     continue
                 
                 lines.append(line)
-                in_multiline = False
-                break
+
+                if not in_multiline:
+                    break
                     
             except KeyboardInterrupt:
                 if in_multiline:

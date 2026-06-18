@@ -383,13 +383,8 @@ impl AppState {
     pub fn delete_forward(&mut self) {
         if self.input_cursor < self.input.len() {
             // 找到下一个字符的起始位置
-            let mut pos = self.input_cursor;
-            while pos < self.input.len() && !self.input.is_char_boundary(pos + 1) {
-                pos += 1;
-            }
-            if pos < self.input.len() {
-                self.input.drain(self.input_cursor..pos + 1);
-            }
+            let next = next_char_boundary(&self.input, self.input_cursor);
+            self.input.drain(self.input_cursor..next);
         }
     }
 
@@ -399,21 +394,13 @@ impl AppState {
             Direction::Left => {
                 if self.input_cursor > 0 {
                     // 找到前一个字符的起始位置
-                    let mut pos = self.input_cursor;
-                    while pos > 0 && !self.input.is_char_boundary(pos - 1) {
-                        pos -= 1;
-                    }
-                    self.input_cursor = pos.saturating_sub(1);
+                    self.input_cursor = prev_char_boundary(&self.input, self.input_cursor);
                 }
             }
             Direction::Right => {
                 if self.input_cursor < self.input.len() {
                     // 找到下一个字符的起始位置
-                    let mut pos = self.input_cursor;
-                    while pos < self.input.len() && !self.input.is_char_boundary(pos + 1) {
-                        pos += 1;
-                    }
-                    self.input_cursor = pos + 1;
+                    self.input_cursor = next_char_boundary(&self.input, self.input_cursor);
                 }
             }
             Direction::Home => {
@@ -433,4 +420,23 @@ pub enum Direction {
     Right,
     Home,
     End,
+}
+
+fn prev_char_boundary(input: &str, cursor: usize) -> usize {
+    input[..cursor.min(input.len())]
+        .char_indices()
+        .last()
+        .map(|(index, _)| index)
+        .unwrap_or(0)
+}
+
+fn next_char_boundary(input: &str, cursor: usize) -> usize {
+    if cursor >= input.len() {
+        return input.len();
+    }
+    input[cursor..]
+        .char_indices()
+        .nth(1)
+        .map(|(offset, _)| cursor + offset)
+        .unwrap_or(input.len())
 }

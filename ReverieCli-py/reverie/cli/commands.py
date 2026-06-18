@@ -10735,7 +10735,13 @@ class CommandHandler:
         if action in ("timeout", "api-timeout"):
             return self._cmd_setting_int("api_timeout", "API Timeout", value, min_value=10, max_value=3600)
         if action in ("retries", "api-retries"):
-            return self._cmd_setting_int("api_max_retries", "API Retries", value, min_value=0, max_value=12)
+            config_manager = self.app.get('config_manager')
+            if not config_manager:
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]")
+                return True
+            config = config_manager.load()
+            config.api_max_retries = 5
+            return self._setting_save_and_reinit(config, "API Retries fixed to 5 with delays 1, 3, 5, 7, 15 seconds.", reinit=False)
         if action in ("debug", "debug-logging"):
             return self._cmd_setting_bool("api_enable_debug_logging", "Debug Logging", value)
         if action == "workspace":

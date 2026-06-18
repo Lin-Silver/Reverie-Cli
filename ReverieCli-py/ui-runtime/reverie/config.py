@@ -762,7 +762,7 @@ class Config:
     use_workspace_config: bool = False  # If True, config is stored in workspace directory
     
     # API call settings for improved stability
-    api_max_retries: int = 3
+    api_max_retries: int = 5
     api_initial_backoff: float = 1.0
     api_timeout: int = 60
     api_enable_debug_logging: bool = False
@@ -1013,7 +1013,7 @@ class Config:
             gamer_mode=normalize_gamer_mode_config(data.get('gamer_mode', {})),
             config_version=data.get('config_version', CONFIG_VERSION),
             use_workspace_config=data.get('use_workspace_config', False),
-            api_max_retries=data.get('api_max_retries', 3),
+            api_max_retries=data.get('api_max_retries', 5),
             api_initial_backoff=data.get('api_initial_backoff', 1.0),
             api_timeout=data.get('api_timeout', 60),
             api_enable_debug_logging=data.get('api_enable_debug_logging', False),

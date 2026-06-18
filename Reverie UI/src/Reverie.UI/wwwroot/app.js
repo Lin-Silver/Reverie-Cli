@@ -13,8 +13,11 @@ const state = {
   plugins: null,
   settings: null,
   currentAssistant: null,
+  activeAssistantRequestId: "",
   currentAssistantText: "",
   pendingAssistantChunk: "",
+  lastAssistantChunk: null,
+  lastChatRefreshId: "",
   streamFrame: 0,
   busy: false,
   logs: [],
@@ -323,6 +326,78 @@ function queueAssistantChunk(chunk) {
     state.streamFrame = 0;
     flushAssistantChunk();
   });
+}
+
+function beginAssistantTurn(message) {
+  const requestId = String(message.id || "");
+  if (state.currentAssistant && requestId && state.activeAssistantRequestId === requestId) return;
+  flushAssistantChunk();
+  activateView("chat");
+  state.activeAssistantRequestId = requestId;
+  state.currentAssistantText = "";
+  state.pendingAssistantChunk = "";
+  state.lastAssistantChunk = null;
+  state.currentAssistant = addMessage("assistant", "");
+  setBusy(true, "Streaming");
+}
+
+function queueAssistantChunkFromMessage(message) {
+  const text = String(message.chunk ?? message.content ?? "");
+  if (!text) return;
+  const protocol = String(message.type || "").split(".")[0];
+  const requestId = String(message.id || state.activeAssistantRequestId || "");
+  const last = state.lastAssistantChunk;
+  if (last && last.id === requestId && last.text === text && last.protocol !== protocol) {
+    return;
+  }
+  state.lastAssistantChunk = { id: requestId, protocol, text };
+  if (!state.currentAssistant) {
+    state.activeAssistantRequestId = requestId;
+    state.currentAssistantText = "";
+    state.pendingAssistantChunk = "";
+    state.currentAssistant = addMessage("assistant", "");
+  }
+  queueAssistantChunk(text);
+}
+
+function finalAssistantText(message) {
+  const result = message.result || {};
+  for (const value of [
+    message.message,
+    message.content,
+    message.output_text,
+    result.message,
+    result.content,
+    result.output_text,
+    result.output
+  ]) {
+    if (typeof value === "string" && value) return value;
+  }
+  return "";
+}
+
+function finishAssistantTurn(message) {
+  flushAssistantChunk();
+  const finalText = finalAssistantText(message);
+  if (finalText && !state.currentAssistantText) {
+    if (!state.currentAssistant) state.currentAssistant = addMessage("assistant", "");
+    state.currentAssistantText = finalText;
+    setMessageContent(state.currentAssistant, state.currentAssistantText);
+    el.messageList.scrollTop = el.messageList.scrollHeight;
+  }
+  state.currentAssistant = null;
+  state.pendingAssistantChunk = "";
+  state.lastAssistantChunk = null;
+  setBusy(false, "Ready");
+
+  const requestId = String(message.id || state.activeAssistantRequestId || "");
+  if (requestId && state.lastChatRefreshId !== requestId) {
+    state.lastChatRefreshId = requestId;
+    send("gitStatus", { projectRoot: el.workspaceInput.value });
+  } else if (!requestId) {
+    send("gitStatus", { projectRoot: el.workspaceInput.value });
+  }
+  state.activeAssistantRequestId = "";
 }
 
 function activateView(name) {
@@ -1297,18 +1372,28 @@ function handleBridgeMessage(message) {
       log(`${message.type}: ${message.plugin_id || ""} ${message.command || ""}`);
       break;
     case "chat.started":
-      activateView("chat");
-      state.currentAssistantText = "";
-      state.pendingAssistantChunk = "";
-      state.currentAssistant = addMessage("assistant", "");
-      setBusy(true, "Streaming");
+    case "stream.start":
+      beginAssistantTurn(message);
       break;
     case "chat.context":
       log(`Context engine initialized: ${message.context_engine_initialized}`);
       break;
     case "chat.chunk":
-      if (!state.currentAssistant) state.currentAssistant = addMessage("assistant", "");
-      queueAssistantChunk(message.chunk || "");
+    case "stream.content":
+      queueAssistantChunkFromMessage(message);
+      break;
+    case "stream.retry": {
+      const seconds = Number(message.retry_after_seconds || 0);
+      const attempt = Number(message.attempt || 0);
+      const maxAttempts = Number(message.max_attempts || 0);
+      const suffix = attempt && maxAttempts ? ` (${attempt}/${maxAttempts})` : "";
+      setBusy(true, `Error, retrying in ${seconds}s${suffix}`);
+      log(`retry in ${seconds}s${suffix}: ${message.message || "provider error"}`);
+      break;
+    }
+    case "stream.recovered":
+      setBusy(true, "Recovered stream");
+      log(`recovered: ${message.message || ""}`);
       break;
     case "chat.thinking":
       log(`thinking: ${message.chunk || ""}`);
@@ -1317,10 +1402,8 @@ function handleBridgeMessage(message) {
       log(`tool ${message.event?.event || ""}: ${message.event?.tool || message.event?.name || ""}`);
       break;
     case "chat.complete":
-      flushAssistantChunk();
-      state.currentAssistant = null;
-      setBusy(false, "Ready");
-      send("gitStatus", { projectRoot: el.workspaceInput.value });
+    case "stream.end":
+      finishAssistantTurn(message);
       break;
     case "index.started":
       el.indexSummary.textContent = "Indexing started.";
@@ -1491,9 +1574,14 @@ el.composer.addEventListener("submit", event => {
   if (!message || state.busy) return;
   addMessage("user", message);
   el.messageInput.value = "";
+  state.activeAssistantRequestId = "";
+  state.currentAssistantText = "";
+  state.pendingAssistantChunk = "";
+  state.lastAssistantChunk = null;
   setBusy(true, "Starting");
-  send("chat", {
+  state.activeAssistantRequestId = send("chat", {
     message,
+    stream: true,
     projectRoot: el.workspaceInput.value,
     mode: el.modeSelect.value,
     sessionId: state.sessions?.current_session_id || ""

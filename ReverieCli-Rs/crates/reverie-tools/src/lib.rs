@@ -880,10 +880,7 @@ async fn web_search(args: Value) -> Result<ToolResult> {
             error: None,
         });
     }
-    let max_results = args
-        .get("max_results")
-        .and_then(Value::as_u64)
-        .unwrap_or(5) as usize;
+    let max_results = args.get("max_results").and_then(Value::as_u64).unwrap_or(5) as usize;
 
     // Try real DuckDuckGo HTML lite search first
     match ddg_html_search(query, max_results).await {
@@ -945,12 +942,9 @@ pub fn parse_ddg_html_results(html: &str, max_results: usize) -> Result<Vec<Valu
     // We parse these with regexes since we don't have an HTML DOM parser.
 
     // Match result blocks — each starts with class="result "
-    let result_re =
-        Regex::new(r#"(?is)class="result\s[^"]*"[^>]*>(.*?)</div>\s*</div>"#)?;
-    let link_re =
-        Regex::new(r#"(?is)class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>"#)?;
-    let snippet_re =
-        Regex::new(r#"(?is)class="result__snippet"[^>]*>(.*?)</a>"#)?;
+    let result_re = Regex::new(r#"(?is)class="result\s[^"]*"[^>]*>(.*?)</div>\s*</div>"#)?;
+    let link_re = Regex::new(r#"(?is)class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>"#)?;
+    let snippet_re = Regex::new(r#"(?is)class="result__snippet"[^>]*>(.*?)</a>"#)?;
     let tag_re = Regex::new(r"<[^>]+>")?;
 
     // Fallback: if the structured extraction finds nothing, try a simpler link+text approach
@@ -993,9 +987,7 @@ pub fn parse_ddg_html_results(html: &str, max_results: usize) -> Result<Vec<Valu
 
     // Simpler fallback if no structured results found
     if results.is_empty() {
-        let simple_re = Regex::new(
-            r#"(?is)class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>"#,
-        )?;
+        let simple_re = Regex::new(r#"(?is)class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>"#)?;
         for cap in simple_re.captures_iter(html) {
             if results.len() >= max_results {
                 break;
@@ -1059,9 +1051,7 @@ mod urlencoding {
         let mut i = 0;
         while i < bytes.len() {
             if bytes[i] == b'%' && i + 2 < bytes.len() {
-                if let Ok(val) =
-                    u8::from_str_radix(&input[i + 1..i + 3], 16)
-                {
+                if let Ok(val) = u8::from_str_radix(&input[i + 1..i + 3], 16) {
                     out.push(val);
                     i += 3;
                     continue;
@@ -1752,10 +1742,7 @@ async fn game_design_orchestrator(project_root: &Path, args: Value) -> Result<To
             state["systems"][system_id] = system_def;
         }
         "advance_stage" => {
-            let stage_id = args
-                .get("stage_id")
-                .and_then(Value::as_str)
-                .unwrap_or("");
+            let stage_id = args.get("stage_id").and_then(Value::as_str).unwrap_or("");
             let new_status = args
                 .get("status")
                 .and_then(Value::as_str)
@@ -1845,10 +1832,7 @@ async fn game_design_orchestrator(project_root: &Path, args: Value) -> Result<To
                 .count()
         })
         .unwrap_or(0);
-    let system_count = state["systems"]
-        .as_object()
-        .map(|o| o.len())
-        .unwrap_or(0);
+    let system_count = state["systems"].as_object().map(|o| o.len()).unwrap_or(0);
 
     Ok(ToolResult {
         success: true,
@@ -1953,10 +1937,7 @@ async fn game_playtest_lab(project_root: &Path, args: Value) -> Result<ToolResul
             }
         }
         "run_check" => {
-            let check_id = args
-                .get("check_id")
-                .and_then(Value::as_str)
-                .unwrap_or("");
+            let check_id = args.get("check_id").and_then(Value::as_str).unwrap_or("");
             let passed = args.get("passed").and_then(Value::as_bool).unwrap_or(false);
             if let Some(checks) = state["checks"].as_array_mut() {
                 if let Some(check) = checks
@@ -2067,10 +2048,7 @@ async fn game_gdd_manager(project_root: &Path, args: Value) -> Result<ToolResult
                 .get("section")
                 .and_then(Value::as_str)
                 .unwrap_or("overview");
-            let content = args
-                .get("content")
-                .and_then(Value::as_str)
-                .unwrap_or("");
+            let content = args.get("content").and_then(Value::as_str).unwrap_or("");
             gdd["sections"][section] = json!(content);
             // Track revision
             let revision = json!({
@@ -2117,7 +2095,11 @@ async fn game_gdd_manager(project_root: &Path, args: Value) -> Result<ToolResult
 
     let section_count = gdd["sections"]
         .as_object()
-        .map(|o| o.values().filter(|v| !v.as_str().unwrap_or("").is_empty()).count())
+        .map(|o| {
+            o.values()
+                .filter(|v| !v.as_str().unwrap_or("").is_empty())
+                .count()
+        })
         .unwrap_or(0);
     let system_count = gdd["systems"].as_array().map(|a| a.len()).unwrap_or(0);
 
@@ -2177,7 +2159,8 @@ async fn game_asset_manager(project_root: &Path, args: Value) -> Result<ToolResu
                 .and_then(Value::as_u64)
                 .unwrap_or(0);
             state["stats"]["by_type"][&asset_type] = json!(count + 1);
-            state["stats"]["total"] = json!(state["assets"].as_array().map(|a| a.len()).unwrap_or(0));
+            state["stats"]["total"] =
+                json!(state["assets"].as_array().map(|a| a.len()).unwrap_or(0));
         }
         "update" => {
             let asset_id = args.get("id").and_then(Value::as_str).unwrap_or("");
@@ -2311,10 +2294,7 @@ async fn game_analysis_tool(
         .get("action")
         .and_then(Value::as_str)
         .unwrap_or("analyze");
-    let state_path = writable_join(
-        project_root,
-        &format!("artifacts/{tool_name}.json"),
-    )?;
+    let state_path = writable_join(project_root, &format!("artifacts/{tool_name}.json"))?;
     let mut state = if state_path.is_file() {
         serde_json::from_str::<Value>(&std::fs::read_to_string(&state_path)?)?
     } else {
@@ -2505,7 +2485,8 @@ async fn atlas_delivery_orchestrator(project_root: &Path, args: Value) -> Result
                 {
                     blocker["status"] = json!("resolved");
                     blocker["resolved_at"] = json!(chrono::Utc::now().to_rfc3339());
-                    blocker["resolution"] = json!(args.get("resolution").and_then(Value::as_str).unwrap_or(""));
+                    blocker["resolution"] =
+                        json!(args.get("resolution").and_then(Value::as_str).unwrap_or(""));
                 }
             }
         }
@@ -2641,7 +2622,10 @@ async fn writer_tool(project_root: &Path, tool_name: &str, args: Value) -> Resul
 
             match action {
                 "add_character" => {
-                    let name = args.get("name").and_then(Value::as_str).unwrap_or("Unknown");
+                    let name = args
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("Unknown");
                     let character = json!({
                         "description": args.get("description").and_then(Value::as_str).unwrap_or(""),
                         "traits": args.get("traits").cloned().unwrap_or(json!([])),
@@ -2652,7 +2636,10 @@ async fn writer_tool(project_root: &Path, tool_name: &str, args: Value) -> Resul
                     memory["characters"][name] = character;
                 }
                 "add_location" => {
-                    let name = args.get("name").and_then(Value::as_str).unwrap_or("Unknown");
+                    let name = args
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("Unknown");
                     let location = json!({
                         "description": args.get("description").and_then(Value::as_str).unwrap_or(""),
                         "features": args.get("features").cloned().unwrap_or(json!([])),
@@ -2747,7 +2734,8 @@ async fn writer_tool(project_root: &Path, tool_name: &str, args: Value) -> Resul
             // Check for characters mentioned in plot threads but not defined
             if let Some(threads) = memory["plot_threads"].as_array() {
                 for thread in threads {
-                    if let Some(chars) = thread.get("related_characters").and_then(Value::as_array) {
+                    if let Some(chars) = thread.get("related_characters").and_then(Value::as_array)
+                    {
                         for c in chars {
                             if let Some(name) = c.as_str() {
                                 if memory["characters"].get(name).is_none() {
@@ -2838,10 +2826,7 @@ async fn writer_tool(project_root: &Path, tool_name: &str, args: Value) -> Resul
                         .count()
                 })
                 .unwrap_or(0);
-            let timeline_events = memory["timeline"]
-                .as_array()
-                .map(|a| a.len())
-                .unwrap_or(0);
+            let timeline_events = memory["timeline"].as_array().map(|a| a.len()).unwrap_or(0);
             let character_count = memory["characters"]
                 .as_object()
                 .map(|o| o.len())
@@ -2905,13 +2890,19 @@ fn writer_plot_recommendations(open: usize, resolved: usize, characters: usize) 
         recs.push("Consider resolving some plot threads before introducing new ones.".to_string());
     }
     if open > 0 && resolved == 0 {
-        recs.push("No threads resolved yet. Plan resolution points for narrative satisfaction.".to_string());
+        recs.push(
+            "No threads resolved yet. Plan resolution points for narrative satisfaction."
+                .to_string(),
+        );
     }
     if characters > 15 {
         recs.push("Large cast size. Ensure each character has a distinct role.".to_string());
     }
     if characters < 3 && open > 3 {
-        recs.push("Few characters managing many threads. Consider whether complexity matches cast.".to_string());
+        recs.push(
+            "Few characters managing many threads. Consider whether complexity matches cast."
+                .to_string(),
+        );
     }
     if recs.is_empty() {
         recs.push("Story structure looks balanced.".to_string());
@@ -3198,7 +3189,10 @@ mod tests {
 
     #[test]
     fn ddg_url_decode_passthrough_direct_urls() {
-        assert_eq!(decode_ddg_url("https://rust-lang.org"), "https://rust-lang.org");
+        assert_eq!(
+            decode_ddg_url("https://rust-lang.org"),
+            "https://rust-lang.org"
+        );
     }
 
     #[test]

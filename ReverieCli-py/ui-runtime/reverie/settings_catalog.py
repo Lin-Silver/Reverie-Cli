@@ -116,7 +116,7 @@ def get_setting_items(config: Any, config_manager: Any, rules_manager: Any = Non
             "min": 0,
             "max": 12,
             "step": 1,
-            "description": "Retry count for recoverable API failures.",
+            "description": "Fixed retry policy for recoverable API failures: 5 retries after 1, 3, 5, 7, and 15 seconds.",
             "command": "/setting retries <count>",
         },
         {

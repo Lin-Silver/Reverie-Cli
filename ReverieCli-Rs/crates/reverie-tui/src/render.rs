@@ -4,6 +4,7 @@
 
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
+    prelude::Position,
     style::{Color, Modifier, Style},
     text::Line,
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
@@ -150,6 +151,18 @@ impl TuiRenderer {
         );
 
         frame.render_widget(input_box, area);
+        let cursor_x = area
+            .left()
+            .saturating_add(1)
+            .saturating_add(InputBox::cursor_column(
+                &app_state.input,
+                app_state.input_cursor,
+                &app_state.settings.prompt_prefix,
+            ));
+        let cursor_y = area.top().saturating_add(1);
+        if cursor_x < area.right().saturating_sub(1) && cursor_y < area.bottom().saturating_sub(1) {
+            frame.set_cursor_position(Position::new(cursor_x, cursor_y));
+        }
 
         // 如果正在生成，显示状态
         if app_state.is_generating {

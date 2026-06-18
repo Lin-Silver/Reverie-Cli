@@ -2,6 +2,7 @@
 
 #[cfg(test)]
 mod tests {
+    use reverie_tui::components::InputBox;
     use reverie_tui::state::{AppState, Direction, Message, MessageRole};
 
     #[test]
@@ -78,6 +79,30 @@ mod tests {
 
         state.move_cursor(Direction::End);
         assert_eq!(state.input_cursor, 11);
+    }
+
+    #[test]
+    fn test_unicode_cursor_movement_uses_char_boundaries() {
+        let mut state = AppState::new("reverie".to_string());
+        state.update_input("测试abc".to_string());
+
+        state.move_cursor(Direction::Left);
+        assert_eq!(state.input_cursor, "测试ab".len());
+
+        state.move_cursor(Direction::Home);
+        state.move_cursor(Direction::Right);
+        assert_eq!(state.input_cursor, "测".len());
+
+        state.move_cursor(Direction::Home);
+        state.delete_forward();
+        assert_eq!(state.input, "试abc");
+        assert_eq!(state.input_cursor, 0);
+    }
+
+    #[test]
+    fn test_unicode_cursor_display_column_uses_terminal_width() {
+        assert_eq!(InputBox::cursor_column("测试abc", "测试abc".len(), "▶ "), 9);
+        assert_eq!(InputBox::cursor_column("测试abc", "测".len(), "▶ "), 4);
     }
 
     #[test]

@@ -208,7 +208,10 @@ fn compact_with_summary(
     let mut kept = Vec::with_capacity(keep_start + 1 + keep_end);
     kept.extend_from_slice(&messages[..cut_start]);
     if !summary_text.is_empty() {
-        kept.push(SessionMessage::new("system", serde_json::json!(summary_text)));
+        kept.push(SessionMessage::new(
+            "system",
+            serde_json::json!(summary_text),
+        ));
     }
     let adjusted = repair_tool_pair_boundary(messages, cut_end);
     kept.extend_from_slice(&messages[adjusted..]);
@@ -351,7 +354,10 @@ fn estimate_session_tokens(messages: &[SessionMessage]) -> usize {
         .sum()
 }
 
-fn apply_token_limit(messages: Vec<SessionMessage>, config: &CompactionConfig) -> Vec<SessionMessage> {
+fn apply_token_limit(
+    messages: Vec<SessionMessage>,
+    config: &CompactionConfig,
+) -> Vec<SessionMessage> {
     let Some(max_tok) = config.max_tokens else {
         return messages;
     };
@@ -956,10 +962,7 @@ mod tests {
     #[test]
     fn config_from_extras_custom() {
         let mut extras = std::collections::BTreeMap::new();
-        extras.insert(
-            "compaction_strategy".to_string(),
-            json!("importance"),
-        );
+        extras.insert("compaction_strategy".to_string(), json!("importance"));
         extras.insert("compaction_max_messages".to_string(), json!(50));
         extras.insert("compaction_keep_start".to_string(), json!(3));
         extras.insert("compaction_keep_end".to_string(), json!(8));

@@ -16,6 +16,9 @@ from ..sse import iter_sse_data_strings
 
 logger = logging.getLogger(__name__)
 
+REQUEST_RETRY_DELAYS_SECONDS = (1, 3, 5, 7, 15)
+REQUEST_RETRY_ATTEMPTS = len(REQUEST_RETRY_DELAYS_SECONDS)
+
 
 def _collect_codex_summary_text(response: requests.Response) -> str:
     """Collect assistant text from Codex SSE output."""
@@ -480,13 +483,13 @@ def make_compression_request_with_retry(
     max_retries: int = 2
 ) -> requests.Response:
     """
-    Make a compression API request with retry logic.
+    Make a compression API request with fixed retry delays.
     
     Args:
         url: The API endpoint URL
         headers: Request headers
         payload: Request payload
-        max_retries: Maximum number of retry attempts
+        max_retries: Ignored; Reverie uses five fixed retry attempts.
         
     Returns:
         The response object
@@ -498,9 +501,10 @@ def make_compression_request_with_retry(
     payload = validate_payload_for_compression(payload)
     
     last_error = None
-    for attempt in range(max_retries):
+    attempts = REQUEST_RETRY_ATTEMPTS
+    for attempt in range(attempts + 1):
         try:
-            logger.debug(f"Compression request attempt {attempt + 1}/{max_retries}")
+            logger.debug(f"Compression request attempt {attempt + 1}/{attempts + 1}")
             
             response = requests.post(
                 url,
@@ -517,13 +521,13 @@ def make_compression_request_with_retry(
             logger.debug(
                 "Compression request attempt %s/%s failed",
                 attempt + 1,
-                max_retries,
+                attempts + 1,
                 exc_info=True,
             )
             
-            if attempt < max_retries - 1:
+            if attempt < attempts:
                 import time
-                time.sleep(2 ** attempt)  # Exponential backoff
+                time.sleep(REQUEST_RETRY_DELAYS_SECONDS[attempt])
     
     raise last_error or requests.RequestException("All compression retry attempts failed")
 

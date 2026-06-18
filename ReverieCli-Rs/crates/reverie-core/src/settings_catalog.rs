@@ -89,7 +89,7 @@ pub const SETTINGS: &[SettingItem] = &[
         id: "api_max_retries",
         label: "API Retries",
         kind: "int",
-        description: "Maximum API retry count.",
+        description: "Fixed API retry count. Reverie retries requests up to 5 times with 1, 3, 5, 7, and 15 second delays.",
         options: &[],
     },
     SettingItem {
@@ -188,22 +188,22 @@ pub fn apply_setting(config: &mut Config, id: &str, value: Value) -> ReverieResu
                 .clamp(10, 3600);
         }
         "api_max_retries" => {
-            config.api_max_retries = value
+            let _ = value
                 .as_u64()
                 .or_else(|| value.as_str()?.parse::<u64>().ok())
                 .ok_or_else(|| {
                     ReverieError::InvalidInput("api_max_retries must be an integer".to_string())
-                })?
-                .min(12) as u8;
+                })?;
+            config.api_max_retries = 5;
         }
         "retries" => {
-            config.api_max_retries = value
+            let _ = value
                 .as_u64()
                 .or_else(|| value.as_str()?.parse::<u64>().ok())
                 .ok_or_else(|| {
                     ReverieError::InvalidInput("api_max_retries must be an integer".to_string())
-                })?
-                .min(12) as u8;
+                })?;
+            config.api_max_retries = 5;
         }
         "workspace" | "use_workspace_config" => config.use_workspace_config = parse_bool(&value)?,
         "rules" => {

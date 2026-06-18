@@ -9,7 +9,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 use tracing::info;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -106,6 +107,12 @@ pub enum ModelStreamEvent {
     },
     Recovered {
         message: String,
+    },
+    RetryScheduled {
+        message: String,
+        attempt: u8,
+        max_attempts: u8,
+        retry_after_seconds: u64,
     },
     ToolExecStart {
         id: String,
@@ -909,36 +916,57 @@ pub fn sanitize_prompt_output_text(value: &str) -> String {
     text.trim().to_string()
 }
 
-/// Retry an async request with exponential backoff.
-async fn with_retry<F, Fut>(max_retries: u8, mut f: F) -> ReverieResult<ChatResponse>
+const RETRY_DELAYS_SECONDS: [u64; 5] = [1, 3, 5, 7, 15];
+const REQUEST_RETRY_ATTEMPTS: u8 = RETRY_DELAYS_SECONDS.len() as u8;
+const NVIDIA_MIN_REQUEST_INTERVAL: Duration = Duration::from_millis(1500);
+
+static NVIDIA_LAST_REQUEST_AT: OnceLock<tokio::sync::Mutex<Option<Instant>>> = OnceLock::new();
+
+fn is_retryable_error(err: &ReverieError) -> bool {
+    match err {
+        ReverieError::Http(e) => e
+            .status()
+            .map(|s| matches!(s.as_u16(), 429 | 500 | 502 | 503 | 504))
+            .unwrap_or(true),
+        _ => false,
+    }
+}
+
+async fn wait_for_nvidia_rate_limit() {
+    let limiter = NVIDIA_LAST_REQUEST_AT.get_or_init(|| tokio::sync::Mutex::new(None));
+    let mut last_request_at = limiter.lock().await;
+    if let Some(last) = *last_request_at {
+        let elapsed = last.elapsed();
+        if elapsed < NVIDIA_MIN_REQUEST_INTERVAL {
+            tokio::time::sleep(NVIDIA_MIN_REQUEST_INTERVAL - elapsed).await;
+        }
+    }
+    *last_request_at = Some(Instant::now());
+}
+
+/// Retry an async request with fixed backoff capped at five retries.
+async fn with_retry<F, Fut>(_max_retries: u8, mut f: F) -> ReverieResult<ChatResponse>
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = ReverieResult<ChatResponse>>,
 {
     let mut last_err = None;
+    let max_retries = REQUEST_RETRY_ATTEMPTS;
     for attempt in 0..=max_retries {
         match f().await {
             Ok(resp) => return Ok(resp),
             Err(err) => {
-                let is_retryable = match &err {
-                    ReverieError::Http(e) => {
-                        e.status()
-                            .map(|s| matches!(s.as_u16(), 429 | 500 | 502 | 503 | 504))
-                            .unwrap_or(true) // network errors are retryable
-                    }
-                    _ => false,
-                };
-                if !is_retryable || attempt == max_retries {
+                if !is_retryable_error(&err) || attempt == max_retries {
                     return Err(err);
                 }
-                let delay_ms = 500u64 * 2u64.pow(attempt as u32);
+                let delay_seconds = RETRY_DELAYS_SECONDS[attempt as usize];
                 tracing::warn!(
-                    "Request attempt {} failed (retrying in {}ms): {}",
+                    "Request attempt {} failed (retrying in {}s): {}",
                     attempt + 1,
-                    delay_ms,
+                    delay_seconds,
                     err
                 );
-                tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                tokio::time::sleep(Duration::from_secs(delay_seconds)).await;
                 last_err = Some(err);
             }
         }
@@ -950,14 +978,13 @@ pub async fn send_openai_compatible(
     config: &Config,
     request: ChatRequest,
 ) -> ReverieResult<ChatResponse> {
-    let max_retries = config.api_max_retries;
     let config = config.clone();
     let request_model = request.model.clone();
     let request_messages = request.messages.clone();
     let request_tools = request.tools.clone();
     let request_extra = request.extra_body.clone();
 
-    with_retry(max_retries, || {
+    with_retry(REQUEST_RETRY_ATTEMPTS, || {
         let config = config.clone();
         let model = request_model.clone();
         let messages = request_messages.clone();
@@ -1037,14 +1064,13 @@ pub async fn send_anthropic_compatible(
     config: &Config,
     request: ChatRequest,
 ) -> ReverieResult<ChatResponse> {
-    let max_retries = config.api_max_retries;
     let config = config.clone();
     let request_model = request.model.clone();
     let request_messages = request.messages.clone();
     let request_tools = request.tools.clone();
     let request_extra = request.extra_body.clone();
 
-    with_retry(max_retries, || {
+    with_retry(REQUEST_RETRY_ATTEMPTS, || {
         let config = config.clone();
         let model = request_model.clone();
         let messages = request_messages.clone();
@@ -1181,21 +1207,14 @@ where
         model: selected.model.clone(),
     });
 
-    let result = match effective_transport {
-        t if t.contains("anthropic") || t == "modelscope" => {
-            stream_anthropic_compatible(config, request, &mut on_event).await
-        }
-        "gemini" | "google" => {
-            // Gemini streaming via SSE
-            stream_gemini_compatible(config, request, &mut on_event).await
-        }
-        "ollama" | "local" => {
-            // Ollama supports OpenAI-compatible streaming
-            stream_openai_compatible(config, request, &mut on_event).await
-        }
-        // OpenAI, NVIDIA, Codex all use OpenAI-compatible streaming
-        _ => stream_openai_compatible(config, request, &mut on_event).await,
-    };
+    let result = stream_with_retry(
+        config,
+        request,
+        provider,
+        effective_transport,
+        &mut on_event,
+    )
+    .await;
 
     match result {
         Ok(response) => Ok(response),
@@ -1206,6 +1225,73 @@ where
             Err(err)
         }
         Err(err) => Err(err),
+    }
+}
+
+async fn stream_with_retry<F>(
+    config: &Config,
+    request: ChatRequest,
+    provider: &str,
+    effective_transport: &str,
+    on_event: &mut F,
+) -> ReverieResult<ChatResponse>
+where
+    F: FnMut(ModelStreamEvent) + Send,
+{
+    let max_retries = REQUEST_RETRY_ATTEMPTS;
+    let mut last_err = None;
+    for attempt in 0..=max_retries {
+        match stream_once_compatible(
+            config,
+            request.clone(),
+            provider,
+            effective_transport,
+            on_event,
+        )
+        .await
+        {
+            Ok(response) => return Ok(response),
+            Err(err) => {
+                if !is_retryable_error(&err) || attempt == max_retries {
+                    return Err(err);
+                }
+                let delay_seconds = RETRY_DELAYS_SECONDS[attempt as usize];
+                on_event(ModelStreamEvent::RetryScheduled {
+                    message: err.to_string(),
+                    attempt: attempt + 1,
+                    max_attempts: max_retries,
+                    retry_after_seconds: delay_seconds,
+                });
+                tokio::time::sleep(Duration::from_secs(delay_seconds)).await;
+                last_err = Some(err);
+            }
+        }
+    }
+    Err(last_err.unwrap_or_else(|| ReverieError::InvalidInput("retry exhausted".to_string())))
+}
+
+async fn stream_once_compatible<F>(
+    config: &Config,
+    request: ChatRequest,
+    provider: &str,
+    effective_transport: &str,
+    on_event: &mut F,
+) -> ReverieResult<ChatResponse>
+where
+    F: FnMut(ModelStreamEvent) + Send,
+{
+    if provider.eq_ignore_ascii_case("nvidia") {
+        wait_for_nvidia_rate_limit().await;
+        return stream_openai_compatible(config, request, on_event).await;
+    }
+
+    match effective_transport {
+        t if t.contains("anthropic") || t == "modelscope" => {
+            stream_anthropic_compatible(config, request, on_event).await
+        }
+        "gemini" | "google" => stream_gemini_compatible(config, request, on_event).await,
+        "ollama" | "local" => stream_openai_compatible(config, request, on_event).await,
+        _ => stream_openai_compatible(config, request, on_event).await,
     }
 }
 
@@ -1574,14 +1660,9 @@ where
                         });
                     }
                     if let Some(fc) = part.get("functionCall") {
-                        let name = fc
-                            .get("name")
-                            .and_then(Value::as_str)
+                        let name = fc.get("name").and_then(Value::as_str).unwrap_or_default();
+                        let args = serde_json::to_string(&fc.get("args").unwrap_or(&json!({})))
                             .unwrap_or_default();
-                        let args = serde_json::to_string(
-                            &fc.get("args").unwrap_or(&json!({})),
-                        )
-                        .unwrap_or_default();
                         let id = format!("gemini_call_{name}");
                         let current = tool_calls.entry(tool_index).or_default();
                         current.id = Some(id.clone());
@@ -1629,7 +1710,9 @@ where
 /// Process a sequence of OpenAI-format SSE lines and produce a ChatResponse + events.
 /// Used for testing the streaming logic without a real HTTP connection.
 #[cfg(test)]
-fn process_openai_sse_lines(lines: &[&str]) -> ReverieResult<(ChatResponse, Vec<ModelStreamEvent>)> {
+fn process_openai_sse_lines(
+    lines: &[&str],
+) -> ReverieResult<(ChatResponse, Vec<ModelStreamEvent>)> {
     let mut content = String::new();
     let mut finish_reason = None;
     let mut tool_calls: BTreeMap<usize, StreamingToolCall> = BTreeMap::new();
@@ -1802,8 +1885,8 @@ fn process_gemini_sse_lines(
                 }
                 if let Some(fc) = part.get("functionCall") {
                     let name = fc.get("name").and_then(Value::as_str).unwrap_or_default();
-                    let args =
-                        serde_json::to_string(&fc.get("args").unwrap_or(&json!({}))).unwrap_or_default();
+                    let args = serde_json::to_string(&fc.get("args").unwrap_or(&json!({})))
+                        .unwrap_or_default();
                     let id = format!("gemini_call_{name}");
                     let current = tool_calls.entry(tool_index).or_default();
                     current.id = Some(id.clone());
@@ -1884,20 +1967,20 @@ pub async fn send_nvidia_compatible(
     request: ChatRequest,
 ) -> ReverieResult<ChatResponse> {
     info!("Sending request to NVIDIA API");
-    let max_retries = config.api_max_retries;
     let config = config.clone();
     let request_model = request.model.clone();
     let request_messages = request.messages.clone();
     let request_tools = request.tools.clone();
     let request_extra = request.extra_body.clone();
 
-    with_retry(max_retries, || {
+    with_retry(REQUEST_RETRY_ATTEMPTS, || {
         let config = config.clone();
         let model = request_model.clone();
         let messages = request_messages.clone();
         let tools = request_tools.clone();
         let extra_body = request_extra.clone();
         async move {
+            wait_for_nvidia_rate_limit().await;
             let selected = config
                 .models
                 .iter()
@@ -1956,14 +2039,13 @@ pub async fn send_modelscope_compatible(
     request: ChatRequest,
 ) -> ReverieResult<ChatResponse> {
     info!("Sending request to ModelScope API");
-    let max_retries = config.api_max_retries;
     let config = config.clone();
     let request_model = request.model.clone();
     let request_messages = request.messages.clone();
     let request_tools = request.tools.clone();
     let request_extra = request.extra_body.clone();
 
-    with_retry(max_retries, || {
+    with_retry(REQUEST_RETRY_ATTEMPTS, || {
         let config = config.clone();
         let model = request_model.clone();
         let messages = request_messages.clone();
@@ -2020,14 +2102,13 @@ pub async fn send_codex_compatible(
     request: ChatRequest,
 ) -> ReverieResult<ChatResponse> {
     info!("Sending request to Codex API");
-    let max_retries = config.api_max_retries;
     let config = config.clone();
     let request_model = request.model.clone();
     let request_messages = request.messages.clone();
     let request_tools = request.tools.clone();
     let request_extra = request.extra_body.clone();
 
-    with_retry(max_retries, || {
+    with_retry(REQUEST_RETRY_ATTEMPTS, || {
         let config = config.clone();
         let model = request_model.clone();
         let messages = request_messages.clone();
@@ -2087,14 +2168,13 @@ pub async fn send_gemini_compatible(
     request: ChatRequest,
 ) -> ReverieResult<ChatResponse> {
     info!("Sending request to Google Gemini API");
-    let max_retries = config.api_max_retries;
     let config = config.clone();
     let request_model = request.model.clone();
     let request_messages = request.messages.clone();
     let request_tools = request.tools.clone();
     let request_extra = request.extra_body.clone();
 
-    with_retry(max_retries, || {
+    with_retry(REQUEST_RETRY_ATTEMPTS, || {
         let config = config.clone();
         let model = request_model.clone();
         let messages = request_messages.clone();
@@ -2149,14 +2229,13 @@ pub async fn send_ollama_compatible(
     request: ChatRequest,
 ) -> ReverieResult<ChatResponse> {
     info!("Sending request to Ollama API");
-    let max_retries = config.api_max_retries;
     let config = config.clone();
     let request_model = request.model.clone();
     let request_messages = request.messages.clone();
     let request_tools = request.tools.clone();
     let request_extra = request.extra_body.clone();
 
-    with_retry(max_retries, || {
+    with_retry(REQUEST_RETRY_ATTEMPTS, || {
         let config = config.clone();
         let model = request_model.clone();
         let messages = request_messages.clone();
@@ -2237,10 +2316,7 @@ fn build_gemini_payload(
                 _ => "user",
             };
             if m.role == "tool" {
-                let fn_name = m
-                    .tool_call_id
-                    .as_deref()
-                    .unwrap_or("unknown");
+                let fn_name = m.tool_call_id.as_deref().unwrap_or("unknown");
                 json!({
                     "role": role,
                     "parts": [{
@@ -2256,7 +2332,10 @@ fn build_gemini_payload(
                     .iter()
                     .filter_map(|tc| {
                         let name = tc.pointer("/function/name").and_then(Value::as_str)?;
-                        let args_str = tc.pointer("/function/arguments").and_then(Value::as_str).unwrap_or("{}");
+                        let args_str = tc
+                            .pointer("/function/arguments")
+                            .and_then(Value::as_str)
+                            .unwrap_or("{}");
                         let args = serde_json::from_str::<Value>(args_str).unwrap_or(json!({}));
                         Some(json!({"functionCall": {"name": name, "args": args}}))
                     })
@@ -2359,10 +2438,7 @@ pub fn extract_gemini_tool_calls(response: &Value) -> Vec<ToolCallRequest> {
 pub fn extract_token_usage(raw: &Value) -> Option<TokenUsage> {
     // OpenAI / Codex / NVIDIA / Ollama format
     if let Some(u) = raw.get("usage") {
-        let prompt = u
-            .get("prompt_tokens")
-            .and_then(Value::as_u64)
-            .unwrap_or(0) as u32;
+        let prompt = u.get("prompt_tokens").and_then(Value::as_u64).unwrap_or(0) as u32;
         let completion = u
             .get("completion_tokens")
             .and_then(Value::as_u64)
@@ -2381,14 +2457,8 @@ pub fn extract_token_usage(raw: &Value) -> Option<TokenUsage> {
     }
     // Anthropic format
     if let Some(u) = raw.get("usage") {
-        let input = u
-            .get("input_tokens")
-            .and_then(Value::as_u64)
-            .unwrap_or(0) as u32;
-        let output = u
-            .get("output_tokens")
-            .and_then(Value::as_u64)
-            .unwrap_or(0) as u32;
+        let input = u.get("input_tokens").and_then(Value::as_u64).unwrap_or(0) as u32;
+        let output = u.get("output_tokens").and_then(Value::as_u64).unwrap_or(0) as u32;
         if input > 0 || output > 0 {
             return Some(TokenUsage {
                 prompt_tokens: input,
@@ -2493,17 +2563,18 @@ pub fn build_request_extra_body(config: &Config, model_name: &str) -> Value {
         .extra
         .get("max_tokens")
         .and_then(Value::as_u64)
-        .or_else(|| config.extra.get("max_output_tokens").and_then(Value::as_u64))
+        .or_else(|| {
+            config
+                .extra
+                .get("max_output_tokens")
+                .and_then(Value::as_u64)
+        })
         .or_else(|| catalog_model.as_ref().map(|m| m.output_limit as u64))
         .unwrap_or(4096);
     extra.insert("max_tokens".to_string(), json!(max_tokens));
 
     // --- temperature ---
-    if let Some(temp) = config
-        .extra
-        .get("temperature")
-        .and_then(Value::as_f64)
-    {
+    if let Some(temp) = config.extra.get("temperature").and_then(Value::as_f64) {
         extra.insert("temperature".to_string(), json!(temp));
     }
 
@@ -2518,11 +2589,7 @@ pub fn build_request_extra_body(config: &Config, model_name: &str) -> Value {
     }
 
     // --- reasoning_effort (OpenAI/Codex) ---
-    if let Some(effort) = config
-        .extra
-        .get("reasoning_effort")
-        .and_then(Value::as_str)
-    {
+    if let Some(effort) = config.extra.get("reasoning_effort").and_then(Value::as_str) {
         extra.insert(
             "reasoning_effort".to_string(),
             json!(crate::providers::normalize_reasoning_effort(effort)),
@@ -2936,9 +3003,16 @@ mod tests {
         ];
         let (response, events) = process_openai_sse_lines(&lines).unwrap();
         assert_eq!(response.output_text, "Hello world");
-        assert!(matches!(events[0], ModelStreamEvent::Content { ref content } if content == "Hello"));
-        assert!(matches!(events[1], ModelStreamEvent::Content { ref content } if content == " world"));
-        assert!(matches!(events.last().unwrap(), ModelStreamEvent::End { .. }));
+        assert!(
+            matches!(events[0], ModelStreamEvent::Content { ref content } if content == "Hello")
+        );
+        assert!(
+            matches!(events[1], ModelStreamEvent::Content { ref content } if content == " world")
+        );
+        assert!(matches!(
+            events.last().unwrap(),
+            ModelStreamEvent::End { .. }
+        ));
     }
 
     #[test]
@@ -2979,7 +3053,10 @@ mod tests {
         assert_eq!(response.output_text, "Hi there");
         assert!(matches!(&events[0], ModelStreamEvent::Content { content } if content == "Hi "));
         assert!(matches!(&events[1], ModelStreamEvent::Content { content } if content == "there"));
-        assert!(matches!(events.last().unwrap(), ModelStreamEvent::End { .. }));
+        assert!(matches!(
+            events.last().unwrap(),
+            ModelStreamEvent::End { .. }
+        ));
     }
 
     #[test]
@@ -3022,9 +3099,16 @@ mod tests {
         assert_eq!(raw_tool_calls.len(), 1);
         assert_eq!(raw_tool_calls[0]["function"]["name"], "web_fetch");
         // Verify events
-        assert!(matches!(&events[0], ModelStreamEvent::Content { content } if content == "Let me check."));
-        assert!(matches!(&events[1], ModelStreamEvent::ToolCallDelta { name, .. } if name.as_deref() == Some("web_fetch")));
-        assert!(matches!(events.last().unwrap(), ModelStreamEvent::End { .. }));
+        assert!(
+            matches!(&events[0], ModelStreamEvent::Content { content } if content == "Let me check.")
+        );
+        assert!(
+            matches!(&events[1], ModelStreamEvent::ToolCallDelta { name, .. } if name.as_deref() == Some("web_fetch"))
+        );
+        assert!(matches!(
+            events.last().unwrap(),
+            ModelStreamEvent::End { .. }
+        ));
     }
 
     #[test]

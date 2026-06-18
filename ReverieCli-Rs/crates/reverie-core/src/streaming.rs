@@ -35,6 +35,13 @@ pub enum StreamingEvent {
     },
     /// Error during streaming
     Error { message: String },
+    /// A retryable request error occurred and Reverie is waiting before retrying.
+    RetryScheduled {
+        message: String,
+        attempt: u8,
+        max_attempts: u8,
+        retry_after_seconds: u64,
+    },
 }
 
 /// Usage information from the model
@@ -79,6 +86,13 @@ pub struct StreamingResult {
     pub error: Option<String>,
 }
 
+const REQUEST_RETRY_DELAYS_SECONDS: [u64; 5] = [1, 3, 5, 7, 15];
+const REQUEST_RETRY_ATTEMPTS: u8 = REQUEST_RETRY_DELAYS_SECONDS.len() as u8;
+
+fn retryable_status(status: reqwest::StatusCode) -> bool {
+    matches!(status.as_u16(), 429 | 500 | 502 | 503 | 504)
+}
+
 /// Handle streaming response from an LLM
 pub async fn handle_streaming(
     url: &str,
@@ -98,34 +112,88 @@ pub async fn handle_streaming(
         .build()?;
 
     tokio::spawn(async move {
-        let mut request = client.post(url);
+        let mut last_error = None;
+        for attempt in 0..=REQUEST_RETRY_ATTEMPTS {
+            let mut request = client.post(&url);
 
-        // Add headers
-        for (key, value) in headers {
-            request = request.header(key, value);
-        }
+            for (key, value) in &headers {
+                request = request.header(key, value);
+            }
 
-        // Add JSON body
-        request = request.json(&body);
+            request = request.json(&body);
 
-        match request.send().await {
-            Ok(response) => {
-                debug!("Received streaming response");
+            match request.send().await {
+                Ok(response) => {
+                    let status = response.status();
+                    if !status.is_success() {
+                        let message = format!("streaming request failed with HTTP {status}");
+                        if retryable_status(status) && attempt < REQUEST_RETRY_ATTEMPTS {
+                            let delay = REQUEST_RETRY_DELAYS_SECONDS[attempt as usize];
+                            let _ = tx
+                                .send(StreamingEvent::RetryScheduled {
+                                    message: message.clone(),
+                                    attempt: attempt + 1,
+                                    max_attempts: REQUEST_RETRY_ATTEMPTS,
+                                    retry_after_seconds: delay,
+                                })
+                                .await;
+                            tokio::time::sleep(Duration::from_secs(delay)).await;
+                            last_error = Some(message);
+                            continue;
+                        }
+                        let _ = tx.send(StreamingEvent::Error { message }).await;
+                        return;
+                    }
 
-                // Process SSE stream
-                if let Err(e) = process_sse_stream(response, tx).await {
-                    error!("Error processing SSE stream: {}", e);
+                    debug!("Received streaming response");
+                    if let Err(e) = process_sse_stream(response, tx.clone()).await {
+                        let message = e.to_string();
+                        if attempt < REQUEST_RETRY_ATTEMPTS {
+                            let delay = REQUEST_RETRY_DELAYS_SECONDS[attempt as usize];
+                            let _ = tx
+                                .send(StreamingEvent::RetryScheduled {
+                                    message: message.clone(),
+                                    attempt: attempt + 1,
+                                    max_attempts: REQUEST_RETRY_ATTEMPTS,
+                                    retry_after_seconds: delay,
+                                })
+                                .await;
+                            tokio::time::sleep(Duration::from_secs(delay)).await;
+                            last_error = Some(message);
+                            continue;
+                        }
+                        error!("Error processing SSE stream: {}", e);
+                        let _ = tx.send(StreamingEvent::Error { message }).await;
+                    }
+                    return;
+                }
+                Err(e) => {
+                    let message = e.to_string();
+                    if attempt < REQUEST_RETRY_ATTEMPTS {
+                        let delay = REQUEST_RETRY_DELAYS_SECONDS[attempt as usize];
+                        let _ = tx
+                            .send(StreamingEvent::RetryScheduled {
+                                message: message.clone(),
+                                attempt: attempt + 1,
+                                max_attempts: REQUEST_RETRY_ATTEMPTS,
+                                retry_after_seconds: delay,
+                            })
+                            .await;
+                        tokio::time::sleep(Duration::from_secs(delay)).await;
+                        last_error = Some(message);
+                        continue;
+                    }
+                    error!("Failed to send streaming request: {}", e);
+                    let _ = tx.send(StreamingEvent::Error { message }).await;
+                    return;
                 }
             }
-            Err(e) => {
-                error!("Failed to send streaming request: {}", e);
-                let _ = tx
-                    .send(StreamingEvent::Error {
-                        message: e.to_string(),
-                    })
-                    .await;
-            }
         }
+        let _ = tx
+            .send(StreamingEvent::Error {
+                message: last_error.unwrap_or_else(|| "streaming retry exhausted".to_string()),
+            })
+            .await;
     });
 
     Ok(StreamingResult {
@@ -281,6 +349,7 @@ pub fn aggregate_streaming_content(rx: &mut mpsc::Receiver<StreamingEvent>) -> R
             StreamingEvent::Error { message } => {
                 return Err(anyhow!("Streaming error: {}", message));
             }
+            StreamingEvent::RetryScheduled { .. } => {}
             _ => {}
         }
     }

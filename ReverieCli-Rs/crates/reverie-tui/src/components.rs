@@ -9,6 +9,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph, Widget},
 };
+use unicode_width::UnicodeWidthStr;
 
 use crate::state::{Message, MessageRole, Settings, Theme};
 
@@ -105,6 +106,21 @@ impl<'a> InputBox<'a> {
             prompt,
         }
     }
+
+    pub fn cursor_column(input: &str, cursor: usize, prompt: &str) -> u16 {
+        let cursor = cursor.min(input.len());
+        let cursor = if input.is_char_boundary(cursor) {
+            cursor
+        } else {
+            input
+                .char_indices()
+                .map(|(index, _)| index)
+                .take_while(|index| *index < cursor)
+                .last()
+                .unwrap_or(0)
+        };
+        (UnicodeWidthStr::width(prompt) + UnicodeWidthStr::width(&input[..cursor])) as u16
+    }
 }
 
 impl<'a> Widget for InputBox<'a> {
@@ -122,15 +138,14 @@ impl<'a> Widget for InputBox<'a> {
         // 渲染输入内容
         let input_style = Style::default().fg(Color::White);
         buf.set_string(
-            area.left() + 1 + self.prompt.len() as u16,
+            area.left() + 1 + UnicodeWidthStr::width(self.prompt) as u16,
             area.top() + 1,
             self.input,
             input_style,
         );
 
         // 渲染光标
-        let cursor_x = area.left() + 1 + self.prompt.len() as u16 + self.cursor as u16;
-        let _ = cursor_x;
+        let _ = self.cursor;
     }
 }
 

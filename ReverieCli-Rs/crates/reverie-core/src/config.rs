@@ -54,7 +54,7 @@ impl Default for Config {
             stream_responses: true,
             show_status_line: true,
             api_timeout: 300,
-            api_max_retries: 2,
+            api_max_retries: 5,
             tool_output_style: "compact".to_string(),
             thinking_output_style: "full".to_string(),
             use_workspace_config: false,

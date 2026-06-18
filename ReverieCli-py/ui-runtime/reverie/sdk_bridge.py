@@ -201,7 +201,7 @@ class ReverieUiBridge:
             "thinking_output_style": getattr(config, "thinking_output_style", "full"),
             "theme": getattr(config, "theme", "default"),
             "api_timeout": int(getattr(config, "api_timeout", 60) or 60),
-            "api_max_retries": int(getattr(config, "api_max_retries", 3) or 3),
+            "api_max_retries": int(getattr(config, "api_max_retries", 5) or 5),
             "active_model_source": getattr(config, "active_model_source", "standard"),
             "active_model_index": int(getattr(config, "active_model_index", 0) or 0),
             "active_model": object_to_dict(

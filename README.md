@@ -2,7 +2,6 @@
 
 **Reverie** is an open-source, terminal-based agentic coding assistant that wraps large language models to enable natural language interaction with your local codebase. It combines multi-provider LLM access, a powerful Context Engine for codebase intelligence, session management, inline media support, 3D/Game modeling workflows, browser automation, and more — all in a unified terminal interface.
 
-- **Open-source** under the MIT license
 - **Multi-provider LLM** support: NVIDIA, ModelScope, Codex (ChatGPT), SenseNova, unlimited.surf, AIHubMix, Agnes, WebGemini
 - **Multiple modes**: General coding, spec-driven development, game production, creative writing, computer control, and more
 - **Context Engine**: Augment-style codebase retrieval, LSP integration, git history analysis
@@ -32,6 +31,7 @@
 13. [Troubleshooting](#troubleshooting)
 14. [Contributing](#contributing)
 15. [License](#license)
+16. [Links](#links)
 
 ---
 
@@ -52,8 +52,6 @@ Reverie supports a wide range of LLM providers out of the box. Each provider has
 | **Agnes** | Agnes AI OpenAI-compatible API (text, image, video) | Agnes 2.0 Flash (vision + thinking), Agnes 1.5 Flash (vision), image/video generation |
 | **WebGemini** | Anonymous Gemini Web access via `gemini.google.com` | Gemini 3.5 Flash, Gemini 3.5 Flash Thinking, Gemini 3.5 Flash Thinking Lite, Gemini 3.1 Pro, Gemini Auto, Gemini Flash Lite |
 
-> **Note:** There is no built-in Ollama or Gemini API source in Reverie. The `standard` source uses user-defined OpenAI-compatible model presets stored in the `models` section of `config.json`. WebGemini is the only Gemini-related source — it accesses Gemini models through the anonymous web interface.
-
 All providers support streaming responses where applicable. Reasoning/thinking toggles, temperature, top_p, max_tokens, and other parameters are configurable per provider.
 
 ### Operating Modes
@@ -64,7 +62,7 @@ Reverie ships with specialized modes that change tooling, system prompt rules, a
 |------|-------------|-------------|
 | `reverie` | Reverie | Default general coding and automation mode. Context Engine retrieval, core workspace tools, Blender/3D modeling. |
 | `reverie-atlas` | Reverie-Atlas | Document-driven spec development. Deep research paired with Context Engine and Atlas delivery artifacts. |
-| `reverie-gamer` | Reverie-Gamer | Full game production: blueprints, system packets, vertical slices, playtest loops, modeling pipelines. |
+| `reverie-gamer` | Reverie-Gamer | ⚠️ **Work in Progress** — Full game production pipeline (blueprints, system packets, vertical slices, playtest loops, modeling pipelines). Not yet complete. |
 | `reverie-ant` | Reverie-Ant | Structured long-running execution: planning, checkpoints, verification. |
 | `spec-driven` | Spec-Driven | Spec authoring: requirements, design, implementation task breakdown. |
 | `spec-vibe` | Spec-Vibe | Implementation mode for executing approved specs with a lighter workflow. |
@@ -148,63 +146,46 @@ Custom rule files can define:
 ```
 Reverie-Cli/
 ├── README.md                  ← You are here
-├── CHANGELOG.md               ← Version history
-├── Cargo.toml                 ← Rust workspace manifest
-├── dist/
-│   ├── reverie.exe            ← Windows executable
+├── comfy/                     ← ComfyUI image generation (embedded)
+│   ├── generate_image.py
+│   ├── pack_embedded.py
 │   └── ...
+├── plugins/                   ← Runtime plugins (Blender, Godot, O3DE, game_models)
+│   ├── blender/
+│   ├── godot/
+│   ├── o3de/
+│   └── game_models/
 ├── ReverieCli-py/             ← Python source (primary runtime)
-│   └── reverie/
-│       ├── __main__.py        ← Entry point
-│       ├── config.py          ← Configuration management
-│       ├── harness.py         ← Prompt audit & verification
-│       ├── modes.py           ← Mode registry
-│       ├── session/
-│       │   └── manager.py     ← Session persistence
-│       ├── agent/
-│       │   ├── agent.py       ← Core agent loop
-│       │   ├── subagents.py   ← Subagent delegation
-│       │   ├── system_prompt.py← System prompt building
-│       │   └── tool_executor.py← Tool execution
-│       ├── cli/
-│       │   └── interface.py   ← Terminal UI (Rich-based)
-│       ├── llm/               ← LLM client implementations
-│       ├── nvidia.py          ← NVIDIA provider integration (18 models)
-│       ├── codex.py           ← Codex/ChatGPT provider integration
-│       ├── modelscope.py      ← ModelScope Anthropic-compatible provider
-│       ├── sensenova.py       ← SenseNova OpenAI-compatible provider
-│       ├── unlimitedsurf.py   ← unlimited.surf gateway provider
-│       ├── aihubmix.py        ← AIHubMix OpenAI-compatible provider
-│       ├── agnes.py           ← Agnes AI provider (text/image/video)
-│       ├── webgemini.py       ← WebGemini anonymous Gemini Web provider
-│       ├── config.py          ← Configuration management & source registry
-│       └── builtin_skills/    ← Bundled skills
-├── ReverieCli-Rs/             ← Rust crates
-│   └── crates/
-│       ├── reverie-core/      ← Core types, providers, modes
-│       ├── reverie-cli/       ← CLI binary
-│       ├── reverie-tui/       ← Terminal UI (Rust)
-│       ├── reverie-context/   ← Context engine (Rust)
-│       ├── reverie-tools/     ← Tool definitions
-│       ├── reverie-mcp/       ← MCP client
-│       ├── reverie-skills/    ← Skills runtime
-│       ├── reverie-sandbox/   ← Sandboxed execution
-│       └── ...
-└── API.md                     ← Provider API documentation
+│   ├── reverie/
+│   │   ├── __main__.py        ← Entry point
+│   │   ├── config.py          ← Configuration management & source registry
+│   │   ├── harness.py         ← Prompt audit & verification
+│   │   ├── modes.py           ← Mode registry
+│   │   ├── session/
+│   │   │   └── manager.py     ← Session persistence
+│   │   ├── agent/
+│   │   │   ├── agent.py       ← Core agent loop
+│   │   │   ├── subagents.py   ← Subagent delegation
+│   │   │   ├── system_prompt.py← System prompt building
+│   │   │   └── tool_executor.py← Tool execution
+│   │   ├── cli/
+│   │   │   └── interface.py   ← Terminal UI (Rich-based)
+│   │   ├── nvidia.py          ← NVIDIA provider integration (16 models)
+│   │   ├── codex.py           ← Codex/ChatGPT provider integration
+│   │   ├── modelscope.py      ← ModelScope Anthropic-compatible provider
+│   │   ├── sensenova.py       ← SenseNova OpenAI-compatible provider
+│   │   ├── unlimitedsurf.py   ← unlimited.surf gateway provider
+│   │   ├── aihubmix.py        ← AIHubMix OpenAI-compatible provider
+│   │   ├── agnes.py           ← Agnes AI provider (text/image/video)
+│   │   ├── webgemini.py       ← WebGemini anonymous Gemini Web provider
+│   │   ├── builtin_skills/    ← Bundled skills
+│   │   └── ...
+│   ├── requirements.txt
+│   ├── setup.py
+│   └── ...
+└── dist/
+    └── reverie.exe            ← Windows executable (packaged)
 ```
-
-### Technology Stack
-
-| Component | Technology |
-|-----------|-----------|
-| Primary Runtime | Python 3.x with `asyncio` / `tokio` |
-| Terminal UI | Rich (Python) / Crossterm (Rust) |
-| LLM Transport | HTTP/SSE via `reqwest` / `requests` / OpenAI SDK |
-| Configuration | JSON with atomic writes, secure file permissions |
-| Git Integration | `git2` (Rust) / subprocess (Python) |
-| 3D/Modeling | Blender Python API (`bpy`), Blockbench `.bbmodel` |
-| Browser | Embedded Chromium via Playwright/DevTools Protocol |
-| Serialization | `serde` / `serde_json` / `toml` / `yaml-rust` |
 
 ---
 
@@ -212,8 +193,7 @@ Reverie-Cli/
 
 ### Prerequisites
 
-- **Python 3.10+** (for Python runtime)
-- **Rust 1.70+** (for building Rust components, optional)
+- **Python 3.10+**
 - **Git** (for session history and Context Engine)
 - **Windows 10/11** (primary target; Linux/macOS supported with minor adjustments)
 - **PowerShell** (Windows) or Bash (Unix)
@@ -222,7 +202,7 @@ Reverie-Cli/
 
 ```powershell
 # Clone the repository
-git clone https://github.com/your-org/Reverie-Cli.git
+git clone https://github.com/Lin-Silver/Reverie-Cli.git
 cd Reverie-Cli
 
 # Create and activate a virtual environment
@@ -235,14 +215,6 @@ py -m pip install -r ReverieCli-py\requirements.txt
 
 # Run Reverie
 py -m reverie
-```
-
-### Install from Source (Rust)
-
-```powershell
-cd ReverieCli-Rs
-cargo build --release
-.\target\release\reverie.exe
 ```
 
 ### Pre-built Executable
@@ -326,11 +298,6 @@ Reverie uses `config.json` stored in the project's `.reverie/` directory or the 
     "reasoning_effort": "medium",
     "timeout": 1200
   },
-  "gemini": {
-    "api_key": "",
-    "model": "gemini-2.5-pro",
-    "timeout": 120
-  },
   "modelscope": {
     "enabled": true,
     "api_key": "",
@@ -411,7 +378,7 @@ Reverie uses `config.json` stored in the project's `.reverie/` directory or the 
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `active_model_source` | string | `"standard"` | Active provider: `standard`, `nvidia`, `codex`, `gemini`, `modelscope`, `sensenova`, `unlimitedsurf`, `aihubmix`, `agnes`, `webgemini` |
+| `active_model_source` | string | `"standard"` | Active provider: `standard`, `nvidia`, `codex`, `modelscope`, `sensenova`, `unlimitedsurf`, `aihubmix`, `agnes`, `webgemini` |
 | `tool_output_style` | string | `"compact"` | Tool result display: `compact`, `condensed`, `full` |
 | `thinking_output_style` | string | `"full"` | Reasoning display: `hidden`, `compact`, `full` |
 | `nvidia.enable_thinking` | bool | `true` | Enable provider-side thinking for NVIDIA models |
@@ -433,6 +400,8 @@ General-purpose coding and automation. Full Context Engine, all workspace tools,
 Document-driven development for complex systems. Produces structured specs, architecture documents, and delivery artifacts. Focus tools: `codebase-retrieval`, `create_file`, `command_exec`.
 
 ### Reverie-Gamer
+
+> ⚠️ **Work in Progress** — This mode is not yet complete.
 
 Full game production pipeline:
 - **Game Design Orchestrator**: Plan games from concept to vertical slice
@@ -480,7 +449,7 @@ Desktop automation via NVIDIA's computer_control capability. Pinned to NVIDIA pr
 
 ### NVIDIA (Recommended for High-Throughput)
 
-NVIDIA's hosted API at `integrate.api.nvidia.com` provides access to 18+ models. Key configurations:
+NVIDIA's hosted API at `integrate.api.nvidia.com` provides access to 16 models. Key configurations:
 
 **Model catalog (hardcoded in `reverie/nvidia.py`):**
 
@@ -1011,12 +980,12 @@ py -m reverie --provider nvidia --verify
 
 ## Contributing
 
-Reverie is open-source. Contributions are welcome:
+Contributions are welcome:
 
 1. Fork the repository
 2. Create a feature branch: `git checkout -b feature/my-feature`
 3. Make your changes with tests
-4. Run verification: `cargo test` (Rust) or `pytest` (Python)
+4. Run verification: `pytest` (Python)
 5. Submit a pull request
 
 ### Development Setup
@@ -1028,30 +997,26 @@ py -m venv venv
 py -m pip install -r ReverieCli-py\requirements.txt
 py -m pip install -r ReverieCli-py\requirements-dev.txt
 
-# Rust development
-cd ReverieCli-Rs
-cargo build
-cargo test
+# Run tests
+py -m pytest
 ```
 
 ---
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details.
+This project is shared as open-source software. See the repository for details.
 
 ---
 
 ## Links
 
-- **Repository**: https://github.com/your-org/Reverie-Cli
-- **Issues**: https://github.com/your-org/Reverie-Cli/issues
+- **Repository**: https://github.com/Lin-Silver/Reverie-Cli
+- **Issues**: https://github.com/Lin-Silver/Reverie-Cli/issues
 - **NVIDIA API Docs**: https://build.nvidia.com
 - **Claude API Docs**: https://docs.anthropic.com
 - **Gemini API Docs**: https://ai.google.dev
 
 ---
 
-*Reverie CLI — Open-source agentic coding assistant. Built with Python, Rust, and modern LLM APIs.*
-
-//END//
+*Reverie CLI — Open-source agentic coding assistant. Built with Python and modern LLM APIs.*

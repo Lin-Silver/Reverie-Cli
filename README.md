@@ -3,7 +3,7 @@
 **Reverie** is an open-source, terminal-based agentic coding assistant that wraps large language models to enable natural language interaction with your local codebase. It combines multi-provider LLM access, a powerful Context Engine for codebase intelligence, session management, inline media support, 3D/Game modeling workflows, browser automation, and more — all in a unified terminal interface.
 
 - **Open-source** under the MIT license
-- **Multi-provider LLM** support: NVIDIA, ModelScope, Codex (ChatGPT), Gemini, Ollama, AIHubMix, Agnes, WebGemini
+- **Multi-provider LLM** support: NVIDIA, ModelScope, Codex (ChatGPT), SenseNova, unlimited.surf, AIHubMix, Agnes, WebGemini
 - **Multiple modes**: General coding, spec-driven development, game production, creative writing, computer control, and more
 - **Context Engine**: Augment-style codebase retrieval, LSP integration, git history analysis
 - **Session management**: Conversation persistence, rotation, working memory injection, handoff packets
@@ -43,14 +43,16 @@ Reverie supports a wide range of LLM providers out of the box. Each provider has
 
 | Provider | Description | Key Models |
 |----------|-------------|------------|
-| **NVIDIA** | NVIDIA-hosted catalog via `integrate.api.nvidia.com` | Qwen3.5 397B, DeepSeek V4 Pro, Kimi K2.6, GLM-5.1, MiniMax M2.7/M3, Mistral Small 4, Mistral Medium 3.5, Step-3.7-Flash, GPT-OSS-120B, Nemotron 3 Super |
-| **ModelScope** | Zhipu-hosted models via ModelScope | GLM-5.1, DeepSeek V4 Pro, Kimi K2.6, Qwen3.5 397B A17B |
-| **Codex** | ChatGPT backend (OpenAI-compatible Responses API) | GPT-5.5, GPT-5.4, GPT-5.4-Mini, GPT-5.3-Codex, GPT-5.2 |
-| **Gemini** | Google Gemini via API | Gemini 2.5 Pro, Gemini 2.5 Flash, Gemini 2.0 Flash |
-| **Ollama** | Local models via Ollama | Llama 3.3 70B, Qwen3, DeepSeek R1, Codestral |
-| **AIHubMix** | Third-party API gateway | Various models via AIHubMix |
-| **Agnes** | Agnes image/video generation backend | Image generation models, video generation |
-| **WebGemini** | Web-based Gemini access | Gemini models via web interface |
+| **NVIDIA** | NVIDIA-hosted catalog via `integrate.api.nvidia.com` | Qwen3.5 397B, DeepSeek V4 Pro/V4 Flash, Kimi K2.6, GLM-5.1/4.7, MiniMax M2.7/M3, Mistral Small 4, Mistral Medium 3.5, Mistral Large 3, Step-3.5/3.7-Flash, GPT-OSS-120B, Nemotron 3 Super, Qwen3.5 122B |
+| **ModelScope** | Anthropic-compatible API on `api-inference.modelscope.cn` — all models supporting the Anthropic SDK can be used | GLM-5.1, GLM-5, DeepSeek V4 Pro, DeepSeek V4 Flash, MiniMax M2.7, Qwen3.5 397B A17B (catalog is statically defined in code) |
+| **Codex** | ChatGPT backend (OpenAI-compatible Responses API) | GPT-5.5 and other ChatGPT/Codex models (auto-detected from local Codex source or CLI cache) |
+| **SenseNova** | ByteDance SenseNova OpenAI-compatible API | DeepSeek V4 Flash (1M context), SenseNova 6.7 Flash Lite (vision) |
+| **unlimited.surf** | Gateway service with request transport | GPT-5 (via `unlimited.surf`), with selectable effort (low/medium/high) |
+| **AIHubMix** | Third-party API gateway (OpenAI-compatible) | GPT-5.5 Free (with/without reasoning), GPT-4o Free, GPT-4.1 Free |
+| **Agnes** | Agnes AI OpenAI-compatible API (text, image, video) | Agnes 2.0 Flash (vision + thinking), Agnes 1.5 Flash (vision), image/video generation |
+| **WebGemini** | Anonymous Gemini Web access via `gemini.google.com` | Gemini 3.5 Flash, Gemini 3.5 Flash Thinking, Gemini 3.5 Flash Thinking Lite, Gemini 3.1 Pro, Gemini Auto, Gemini Flash Lite |
+
+> **Note:** There is no built-in Ollama or Gemini API source in Reverie. The `standard` source uses user-defined OpenAI-compatible model presets stored in the `models` section of `config.json`. WebGemini is the only Gemini-related source — it accesses Gemini models through the anonymous web interface.
 
 All providers support streaming responses where applicable. Reasoning/thinking toggles, temperature, top_p, max_tokens, and other parameters are configurable per provider.
 
@@ -167,20 +169,15 @@ Reverie-Cli/
 │       ├── cli/
 │       │   └── interface.py   ← Terminal UI (Rich-based)
 │       ├── llm/               ← LLM client implementations
-│       ├── context_engine/    ← Codebase retrieval, LSP, memory
-│       ├── memory/            ← Memory OS
-│       ├── tools/             ← Tool definitions & registry
-│       ├── engine_lite/       ← Modeling pipeline helpers
-│       ├── nvidia.py          ← NVIDIA provider integration
-│       ├── codex.py           ← Codex provider integration
-│       ├── modelscope.py      ← ModelScope provider integration
-│       ├── webgemini.py       ← WebGemini provider integration
-│       ├── agnes.py           ← Agnes media provider
-│       ├── aihubmix.py        ← AIHubMix provider
-│       ├── mcp.py             ← MCP runtime
-│       ├── inline_images.py   ← Inline media support
-│       ├── skills_manager.py  ← Skills system
-│       └── ...
+│       ├── nvidia.py          ← NVIDIA provider integration (18 models)
+│       ├── codex.py           ← Codex/ChatGPT provider integration
+│       ├── modelscope.py      ← ModelScope Anthropic-compatible provider
+│       ├── sensenova.py       ← SenseNova OpenAI-compatible provider
+│       ├── unlimitedsurf.py   ← unlimited.surf gateway provider
+│       ├── aihubmix.py        ← AIHubMix OpenAI-compatible provider
+│       ├── agnes.py           ← Agnes AI provider (text/image/video)
+│       ├── webgemini.py       ← WebGemini anonymous Gemini Web provider
+│       ├── config.py          ← Configuration management & source registry
 │       └── builtin_skills/    ← Bundled skills
 ├── ReverieCli-Rs/             ← Rust crates
 │   └── crates/
@@ -256,7 +253,7 @@ Download the latest `reverie.exe` from the `dist/` directory and run it directly
 
 On first launch, Reverie guides you through a setup wizard:
 
-1. **Select an LLM provider** — choose from NVIDIA, Codex, Gemini, Ollama, etc.
+1. **Select an LLM provider** — choose from NVIDIA, ModelScope, Codex, SenseNova, unlimited.surf, AIHubMix, Agnes, WebGemini, or Standard
 2. **Configure API keys** — enter your provider API key (stored securely in `config.json`)
 3. **Select a default model** — pick from the provider's catalog
 4. **Choose a workspace** — set your project root directory
@@ -303,10 +300,10 @@ Reverie uses `config.json` stored in the project's `.reverie/` directory or the 
   "version": "0.1.0",
   "active_model_source": "nvidia",
   "standard": {
-    "base_url": "http://localhost:11434/v1",
+    "base_url": "https://api.openai.com/v1",
     "api_key": "",
-    "model": "llama3.3",
-    "provider": "ollama"
+    "model": "gpt-4o",
+    "provider": "openai"
   },
   "nvidia": {
     "enabled": true,
@@ -329,15 +326,79 @@ Reverie uses `config.json` stored in the project's `.reverie/` directory or the 
     "reasoning_effort": "medium",
     "timeout": 1200
   },
-  "ollama": {
-    "base_url": "http://localhost:11434",
-    "model": "llama3.3",
-    "timeout": 120
-  },
   "gemini": {
     "api_key": "",
     "model": "gemini-2.5-pro",
     "timeout": 120
+  },
+  "modelscope": {
+    "enabled": true,
+    "api_key": "",
+    "selected_model_id": "ZhipuAI/GLM-5.1",
+    "selected_model_display_name": "GLM-5.1",
+    "api_url": "https://api-inference.modelscope.cn",
+    "max_context_tokens": 202752,
+    "timeout": 300,
+    "max_tokens": 16384
+  },
+  "sensenova": {
+    "enabled": true,
+    "api_key": "",
+    "selected_model_id": "deepseek-v4-flash",
+    "selected_model_display_name": "DeepSeek V4 Flash",
+    "api_url": "https://token.sensenova.cn/v1",
+    "max_context_tokens": 1000000,
+    "timeout": 60,
+    "max_tokens": 65536,
+    "temperature": 0.6,
+    "top_p": 0.95,
+    "reasoning_effort": "medium"
+  },
+  "unlimitedsurf": {
+    "enabled": true,
+    "api_key": "",
+    "selected_model_id": "gateway-gpt-5",
+    "selected_model_display_name": "GPT-5",
+    "api_url": "https://unlimited.surf",
+    "endpoint": "/api/chat",
+    "max_context_tokens": 128000,
+    "timeout": 60,
+    "max_tokens": 16384,
+    "effort": "medium"
+  },
+  "aihubmix": {
+    "enabled": true,
+    "api_key": "",
+    "selected_model_id": "gpt-5.5-free",
+    "selected_model_display_name": "GPT-5.5 Free",
+    "api_url": "https://aihubmix.com/v1",
+    "max_context_tokens": 128000,
+    "timeout": 60,
+    "max_tokens": 16384,
+    "temperature": 0.7,
+    "top_p": 1.0
+  },
+  "agnes": {
+    "enabled": true,
+    "api_key": "",
+    "selected_model_id": "agnes-2.0-flash",
+    "selected_model_display_name": "Agnes 2.0 Flash",
+    "api_url": "https://apihub.agnes-ai.com/v1",
+    "max_context_tokens": 256000,
+    "timeout": 60,
+    "max_tokens": 65536,
+    "temperature": 0.7,
+    "top_p": 1.0,
+    "thinking_mode": "low"
+  },
+  "webgemini": {
+    "enabled": true,
+    "selected_model_id": "gemini-3.5-flash-thinking",
+    "selected_model_display_name": "Gemini 3.5 Flash Thinking",
+    "timeout": 180,
+    "retry_attempts": 2,
+    "retry_delay": 1,
+    "max_context_tokens": 128000
   },
   "tool_output_style": "compact",
   "thinking_output_style": "full",
@@ -350,13 +411,12 @@ Reverie uses `config.json` stored in the project's `.reverie/` directory or the 
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `active_model_source` | string | `"standard"` | Active provider: `standard`, `nvidia`, `codex`, `gemini`, `ollama`, `aihubmix`, `agnes`, `modelscope`, `webgemini` |
+| `active_model_source` | string | `"standard"` | Active provider: `standard`, `nvidia`, `codex`, `gemini`, `modelscope`, `sensenova`, `unlimitedsurf`, `aihubmix`, `agnes`, `webgemini` |
 | `tool_output_style` | string | `"compact"` | Tool result display: `compact`, `condensed`, `full` |
 | `thinking_output_style` | string | `"full"` | Reasoning display: `hidden`, `compact`, `full` |
 | `nvidia.enable_thinking` | bool | `true` | Enable provider-side thinking for NVIDIA models |
 | `nvidia.reasoning_effort` | string | `"high"` | Reasoning depth: `max`, `high`, `medium`, `low`, `none` |
 | `codex.reasoning_effort` | string | `"medium"` | Codex effort: `minimal`, `low`, `medium`, `high`, `xhigh` |
-| `ollama.base_url` | string | `"http://localhost:11434"` | Ollama server URL |
 
 ---
 
@@ -420,18 +480,56 @@ Desktop automation via NVIDIA's computer_control capability. Pinned to NVIDIA pr
 
 ### NVIDIA (Recommended for High-Throughput)
 
-NVIDIA's hosted API at `integrate.api.nvidia.com` provides access to dozens of models. Key configurations:
+NVIDIA's hosted API at `integrate.api.nvidia.com` provides access to 18+ models. Key configurations:
+
+**Model catalog (hardcoded in `reverie/nvidia.py`):**
+
+| Model ID | Display Name | Transport | Vision | Thinking | Context |
+|----------|-------------|-----------|--------|----------|---------|
+| `qwen/qwen3.5-397b-a17b` | Qwen3.5 397B A17B | request | ✅ | toggle | 262K |
+| `qwen/qwen3.5-122b-a10b` | Qwen3.5 122B A10B | request | ✅ | toggle | 262K |
+| `z-ai/glm-5.1` | GLM-5.1 | openai-sdk | ❌ | toggle | 131K |
+| `z-ai/glm4.7` | GLM-4.7 | openai-sdk | ❌ | toggle | 131K |
+| `deepseek-ai/deepseek-v4-pro` | DeepSeek V4 Pro | openai-sdk | ❌ | effort (none/high/max) | 1M |
+| `deepseek-ai/deepseek-v4-flash` | DeepSeek V4 Flash | openai-sdk | ❌ | effort (none/low/med/high) | 1M |
+| `minimaxai/minimax-m2.7` | MiniMax M2.7 | openai-sdk | ❌ | ❌ | 204K |
+| `minimaxai/minimax-m3` | MiniMax M3 | request | ✅ (img+vid) | effort (none/high) | 1M |
+| `mistralai/mistral-small-4-119b-2603` | Mistral Small 4 119B | request | ✅ | effort (none/high) | 262K |
+| `mistralai/mistral-medium-3.5-128b` | Mistral Medium 3.5 128B | request | ✅ | effort (none/high) | 262K |
+| `mistralai/mistral-large-3-675b-instruct-2512` | Mistral Large 3 675B | request | ✅ | ❌ | 262K |
+| `stepfun-ai/step-3.5-flash` | Step-3.5-Flash | openai-sdk | ❌ | fixed (always-on) | 256K |
+| `stepfun-ai/step-3.7-flash` | Step-3.7-Flash | request | ✅ (img) | ❌ | 256K |
+| `moonshotai/kimi-k2.6` | Kimi K2.6 | request | ✅ | toggle | 262K |
+| `openai/gpt-oss-120b` | GPT-OSS-120B | openai-sdk | ❌ | effort (low/med/high) | 128K |
+| `nvidia/nemotron-3-super-120b-a12b` | Nemotron 3 Super 120B | openai-sdk | ❌ | effort (none/low/high) | 1M |
 
 **Transport types:**
-- `request` — Direct HTTP POST with chat-template kwargs (for models like Kimi K2.6, MiniMax M3, Qwen3.5)
-- `openai-sdk` — OpenAI-compatible SDK transport (for models like DeepSeek V4 Pro, GLM-5.1)
+- `request` — Direct HTTP POST with chat-template kwargs (for models like Kimi K2.6, MiniMax M3, Qwen3.5, Mistral)
+- `openai-sdk` — OpenAI-compatible SDK transport (for models like DeepSeek V4 Pro, GLM-5.1, GPT-OSS-120B)
 
 **Thinking control:**
-- `toggle` — Binary on/off (Qwen3.5, GLM-5.1, Kimi K2.6)
-- `effort` — Selectable levels: `none`/`low`/`medium`/`high`/`max` (DeepSeek V4 Pro, Mistral models, GPT-OSS-120B)
-- `fixed` — Always-on thinking (Step models)
+- `toggle` — Binary on/off (Qwen3.5, GLM-5.1/4.7, Kimi K2.6)
+- `effort` — Selectable levels: `none`/`low`/`medium`/`high`/`max` (DeepSeek V4 Pro, Nemotron, Mistral models, GPT-OSS-120B, MiniMax M3)
+- `fixed` — Always-on thinking (Step-3.5-Flash)
 
-**Vision models:** MiniMax M3, Mistral Small 4, Mistral Medium 3.5, Qwen3.5 122B, Kimi K2.6 support image and video input.
+**Vision models:** MiniMax M3, Mistral Small 4, Mistral Medium 3.5, Mistral Large 3, Qwen3.5 122B/397B, Kimi K2.6, Step-3.7-Flash support image and/or video input.
+
+### ModelScope
+
+ModelScope provides an **Anthropic-compatible** inference API at `https://api-inference.modelscope.cn`. Any model on ModelScope that supports the Anthropic SDK can be used — it is not limited to Zhipu models. The built-in catalog in `reverie/modelscope.py` includes:
+
+| Model ID | Display Name | Context | Thinking | Vision |
+|----------|-------------|---------|----------|--------|
+| `ZhipuAI/GLM-5.1` | GLM-5.1 | 202,752 | ✅ | ❌ |
+| `ZhipuAI/GLM-5` | GLM-5 | 202,752 | ✅ | ❌ |
+| `deepseek-ai/DeepSeek-V4-Pro` | DeepSeek V4 Pro | 1,048,576 | ✅ | ❌ |
+| `deepseek-ai/DeepSeek-V4-Flash` | DeepSeek V4 Flash | 1,048,576 | ✅ | ❌ |
+| `MiniMax/MiniMax-M2.7` | MiniMax M2.7 | 204,800 | ✅ | ❌ |
+| `Qwen/Qwen3.5-397B-A17B` | Qwen3.5 397B A17B | 262,144 | ✅ | ✅ |
+
+**API key:** Get a token from `https://www.modelscope.cn/my/access/token`. Environment variables `MODELSCOPE_API_KEY`, `MODELSCOPE_TOKEN`, or `MODELSCOPE_ACCESS_TOKEN` are also read.
+
+**Important:** The API URL should be the provider root (e.g., `https://api-inference.modelscope.cn`). Reverie normalizes pasted `/v1`, `/v1/messages`, or `/v1/chat/completions` URLs back to the root because the Anthropic SDK appends the Messages path automatically.
 
 ### Codex (ChatGPT Backend)
 
@@ -441,20 +539,71 @@ Connects to ChatGPT's backend API. Supports:
 - Vision input support
 - Model catalog loaded from local Codex source or CLI cache
 
-### Gemini
+### SenseNova
 
-Google Gemini models with thinking and tool use:
-- `gemini-2.5-pro` — 1M context, thinking, vision
-- `gemini-2.5-flash` — 1M context, fast reasoning
-- `gemini-2.0-flash` — 1M context, 8K output limit
+ByteDance's SenseNova platform with OpenAI-compatible API at `https://token.sensenova.cn/v1`:
 
-### Ollama
+| Model ID | Display Name | Context | Thinking | Vision |
+|----------|-------------|---------|----------|--------|
+| `deepseek-v4-flash` | DeepSeek V4 Flash | 1,000,000 | ✅ (effort) | ❌ |
+| `sensenova-6.7-flash-lite` | SenseNova 6.7 Flash Lite | 262,144 | ❌ | ✅ |
 
-Local model serving:
-- `llama3.3` (70B)
-- `qwen3` (with thinking)
-- `deepseek-r1` (reasoning)
-- `codestral` (code-optimized)
+Reasoning effort is selectable: `none`, `low`, `medium`, `high`.
+
+### unlimited.surf
+
+A gateway service at `https://unlimited.surf` with request transport:
+
+| Model ID | Display Name | Provider | Tier |
+|----------|-------------|----------|------|
+| `gateway-gpt-5` | GPT-5 | openai | flagship |
+
+Effort is selectable: `low`, `medium`, `high`. Note: tool calling is not supported.
+
+### AIHubMix
+
+Third-party API gateway (OpenAI-compatible) at `https://aihubmix.com/v1`:
+
+| Model ID | Display Name | Reasoning Variant |
+|----------|-------------|-------------------|
+| `gpt-5.5-free` | GPT-5.5 Free | none |
+| `gpt-5.5-free-high` | GPT-5.5 Free High | high |
+| `gpt-5.5-free-low` | GPT-5.5 Free Low | low |
+| `gpt-4o-free` | GPT-4o Free | — |
+| `gpt-4.1-free` | GPT-4.1 Free | — |
+
+### Agnes
+
+Agnes AI OpenAI-compatible API at `https://apihub.agnes-ai.com/v1`:
+
+| Model ID | Display Name | Context | Vision | Thinking |
+|----------|-------------|---------|--------|----------|
+| `agnes-2.0-flash` | Agnes 2.0 Flash | 256,000 | ✅ | ✅ (low/med/high) |
+| `agnes-1.5-flash` | Agnes 1.5 Flash | 256,000 | ✅ | ❌ |
+| `agnes-1.5-pro` | Agnes 1.5 Pro (Deprecated) | 256,000 | ❌ | ❌ |
+
+Thinking budgets: `low` (1024), `medium` (4096), `high` (8192).
+
+Agnes also supports **text-to-image** and **text-to-video** generation through the `text_to_image` and `text_to_video` subsystems.
+
+### WebGemini
+
+Anonymous Gemini Web access via `gemini.google.com`. Models are selected by mode and thinking parameters:
+
+| Model ID | Display Name | Mode | Think | Max Output |
+|----------|-------------|------|-------|-----------|
+| `gemini-3.5-flash` | Gemini 3.5 Flash | 1 | 4 | 12,000 |
+| `gemini-3.5-flash-thinking` | Gemini 3.5 Flash Thinking | 2 | 0 | 20,000 |
+| `gemini-3.5-flash-thinking-lite` | Gemini 3.5 Flash Thinking Lite | 5 | 0 | 15,000 |
+| `gemini-3.1-pro` | Gemini 3.1 Pro | 3 | 4 | 12,000 |
+| `gemini-auto` | Gemini Auto | 4 | 4 | 12,000 |
+| `gemini-flash-lite` | Gemini Flash Lite | 6 | 4 | 10,000 |
+
+> **Note:** `gemini-3.1-pro` requires cookies for proper routing. Default model: `gemini-3.5-flash-thinking`.
+
+### Standard (OpenAI-Compatible Presets)
+
+The `standard` source uses user-defined model presets stored in the `models` array of `config.json`. Each entry specifies a `base_url`, `api_key`, `model`, and optional `provider` label. This is for third-party OpenAI-compatible services (any provider exposing an OpenAI-compatible chat completions endpoint).
 
 ---
 
@@ -467,7 +616,7 @@ reverie [OPTIONS]
 
 Options:
   --mode <MODE>            Start in a specific mode (reverie, atlas, gamer, etc.)
-  --provider <PROVIDER>    Override active provider (nvidia, codex, gemini, ollama...)
+  --provider <PROVIDER>    Override active provider (nvidia, codex, modelscope, sensenova, unlimitedsurf, aihubmix, agnes, webgemini...)
   --model <MODEL>          Override selected model
   --resume                 Resume last active session
   --session <ID>           Load a specific session by ID
@@ -705,64 +854,96 @@ task_manager(action="list")
 
 ## API Reference
 
-### Provider Model Data Structures
+### Provider Model Catalog (Python API)
+
+Each built-in source exposes a model catalog and config normalization functions:
 
 ```python
-from reverie.providers import ProviderModel, resolve_model, all_provider_names
-
-# Model catalog entry
-model = ProviderModel(
-    id="qwen/qwen3.5-397b-a17b",
-    display_name="Qwen3.5 397B A17B",
-    description="Qwen3.5 397B-A17B model on NVIDIA.",
-    transport="request",
-    context_length=262144,
-    output_limit=65536,
-    supports_vision=True,
-    supports_thinking=True,
-    provider="nvidia",
+# NVIDIA
+from reverie.nvidia import (
+    get_nvidia_model_catalog,
+    get_nvidia_model_metadata,
+    build_nvidia_runtime_model_data,
+    default_nvidia_config,
+    normalize_nvidia_config,
+    resolve_nvidia_api_key,
+    get_nvidia_thinking_options,
 )
 
-# Resolve a model by provider + id
-resolved = resolve_model(provider="nvidia", model_id="qwen/qwen3.5-397b-a17b")
+catalog = get_nvidia_model_catalog()  # List of model dicts
+metadata = get_nvidia_model_metadata("qwen/qwen3.5-397b-a17b")
 
-# List all provider names
-providers = all_provider_names()  # ["nvidia", "modelscope", "codex", "gemini", "ollama"]
+# ModelScope
+from reverie.modelscope import (
+    get_modelscope_model_catalog,
+    get_modelscope_model_metadata,
+    build_modelscope_runtime_model_data,
+    default_modelscope_config,
+    normalize_modelscope_config,
+    resolve_modelscope_anthropic_base_url,
+    resolve_modelscope_api_key,
+)
+
+# Codex
+from reverie.codex import (
+    build_codex_runtime_model_data,
+    detect_codex_cli_credentials,
+    default_codex_config,
+    normalize_codex_config,
+)
+
+# AIHubMix
+from reverie.aihubmix import (
+    build_aihubmix_runtime_model_data,
+    default_aihubmix_config,
+    normalize_aihubmix_config,
+    get_aihubmix_model_catalog,
+)
+
+# Agnes
+from reverie.agnes import (
+    build_agnes_runtime_model_data,
+    default_agnes_config,
+    normalize_agnes_config,
+    get_agnes_model_catalog,
+)
+
+# SenseNova
+from reverie.sensenova import (
+    build_sensenova_runtime_model_data,
+    default_sensenova_config,
+    normalize_sensenova_config,
+    get_sensenova_model_catalog,
+)
+
+# unlimited.surf
+from reverie.unlimitedsurf import (
+    build_unlimitedsurf_runtime_model_data,
+    default_unlimitedsurf_config,
+    normalize_unlimitedsurf_config,
+)
+
+# WebGemini
+from reverie.webgemini import (
+    build_webgemini_runtime_model_data,
+    default_webgemini_config,
+    normalize_webgemini_config,
+    get_webgemini_model_catalog,
+)
 ```
 
-### NVIDIA Runtime Model Data
+### External Model Sources Registry
 
 ```python
-from reverie.nvidia import build_nvidia_runtime_model_data, normalize_nvidia_config
+from reverie.config import EXTERNAL_MODEL_SOURCES, SUPPORTED_ACTIVE_MODEL_SOURCES
 
-config = normalize_nvidia_config({
-    "api_key": "nvapi-...",
-    "selected_model_id": "qwen/qwen3.5-397b-a17b",
-})
-runtime_data = build_nvidia_runtime_model_data(config)
-# Returns: {
-#   "model": "qwen/qwen3.5-397b-a17b",
-#   "base_url": "https://integrate.api.nvidia.com/v1",
-#   "api_key": "nvapi-...",
-#   "provider": "request",
-#   "thinking_mode": "true",
-#   "supports_vision": True,
-#   ...
-# }
-```
+# All external (non-standard) model sources
+print(EXTERNAL_MODEL_SOURCES)
+# ("codex", "aihubmix", "agnes", "sensenova", "unlimitedsurf", "nvidia", "modelscope", "webgemini")
 
-### Codex Runtime Model Data
-
-```python
-from reverie.codex import build_codex_runtime_model_data, detect_codex_cli_credentials
-
-cred = detect_codex_cli_credentials()
-# Auto-detects from ~/.codex/auth.json
-
-runtime_data = build_codex_runtime_model_data({
-    "selected_model_id": "gpt-5.5",
-    "api_url": "https://chatgpt.com/backend-api/codex",
-})
+# All supported active model source values (includes "standard")
+print(SUPPORTED_ACTIVE_MODEL_SOURCES)
+# ("standard", "codex", "aihubmix", "agnes", "sensenova", "unlimitedsurf", "nvidia", "modelscope", "webgemini")
 ```
 
 ### Mode Normalization
@@ -789,8 +970,9 @@ profile = get_mode_tool_discovery_profile("reverie-gamer")
 **LLM connection errors**
 - Verify your API key is set in `config.json`
 - Check network connectivity to the provider endpoint
-- For Ollama: ensure `ollama serve` is running
 - For NVIDIA: verify key at `https://build.nvidia.com/settings/api-keys`
+- For ModelScope: verify token at `https://www.modelscope.cn/my/access/token`
+- For WebGemini: ensure proxy/cookie settings are correct if needed
 
 **Context Engine not returning results**
 - Ensure the project has been indexed (`codebase-retrieval` triggers indexing on first use)

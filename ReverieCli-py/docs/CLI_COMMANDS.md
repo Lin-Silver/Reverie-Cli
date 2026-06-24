@@ -76,7 +76,6 @@ Subagents are enabled only in base `reverie` mode. They inherit the active Rever
 Request-based NVIDIA vision models can also consume inline chat attachments like `@image.png`.
 Reverie also reads `NVIDIA_API_KEY` automatically when it is present, and Computer Controller mode pins the runtime to `qwen/qwen3.5-397b-a17b`.
 ModelScope is called through the Anthropic SDK and reads `MODELSCOPE_API_KEY`, `MODELSCOPE_TOKEN`, or `MODELSCOPE_ACCESS_TOKEN` automatically when present. Its default model is `ZhipuAI/GLM-5.1`.
-
 ## Tools and Context
 
 | Command | Description |
@@ -102,6 +101,16 @@ ModelScope is called through the Anthropic SDK and reads `MODELSCOPE_API_KEY`, `
 | `/tti <prompt>` | Generate an image using the default TTI model |
 
 `/CE` is case-sensitive.
+
+Most slash commands can also be called directly from the executable without
+entering the TUI. Drop the leading slash and pass the same arguments:
+
+```bash
+reverie setting status
+reverie setting mode reverie
+reverie tools search context
+reverie --path C:\work\project setting workspace on
+```
 
 ## Project and Rules
 

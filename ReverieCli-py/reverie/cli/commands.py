@@ -74,6 +74,11 @@ class CommandHandler:
             'aihub': self.cmd_aihubmix,
             'agnes': self.cmd_agnes,
             'ag': self.cmd_agnes,
+            'sensenova': self.cmd_sensenova,
+            'sense': self.cmd_sensenova,
+            'us': self.cmd_unlimitedsurf,
+            'unlimitedsurf': self.cmd_unlimitedsurf,
+            'unlimited.surf': self.cmd_unlimitedsurf,
             'nvidia': self.cmd_nvidia,
             'modelscope': self.cmd_modelscope,
             'mode': self.cmd_mode,
@@ -5801,6 +5806,8 @@ class CommandHandler:
             "codex": "Codex",
             "aihubmix": "AIhubMix",
             "agnes": "Agnes",
+            "sensenova": "SenseNova",
+            "unlimitedsurf": "unlimited.surf",
             "nvidia": "NVIDIA",
             "modelscope": "ModelScope",
             "webgemini": "WebGemini",
@@ -5882,6 +5889,7 @@ class CommandHandler:
         current_selected_id: str,
         model_query: str,
         provider_label: str,
+        provider_command: str = "",
         normalize_query: Optional[Callable[[str], str]] = None,
     ):
         """Resolve selected model by query or TUI selector."""
@@ -5922,7 +5930,7 @@ class CommandHandler:
                     f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} {provider_label} model not found: {model_query}[/{self.theme.CORAL_SOFT}]"
                 )
                 self.console.print(
-                    f"[{self.theme.TEXT_DIM}]Use /{provider_label.lower().replace(' ', '')} model to open the full selector.[/{self.theme.TEXT_DIM}]"
+                    f"[{self.theme.TEXT_DIM}]Use /{provider_command or provider_label.lower().replace(' ', '')} model to open the full selector.[/{self.theme.TEXT_DIM}]"
                 )
                 return None
             return selected_model
@@ -5993,6 +6001,7 @@ class CommandHandler:
         provider_label: str,
         active_source: str,
         model_query: str,
+        provider_command: str = "",
         normalize_query: Optional[Callable[[str], str]] = None,
         post_select_config: Optional[Callable[[Dict[str, Any], Dict[str, Any]], Dict[str, Any]]] = None,
     ) -> bool:
@@ -6017,6 +6026,7 @@ class CommandHandler:
             current_selected_id=str(provider_cfg.get("selected_model_id", "")),
             model_query=model_query,
             provider_label=provider_label,
+            provider_command=provider_command,
             normalize_query=normalize_query,
         )
         if not selected_model:
@@ -6613,6 +6623,7 @@ class CommandHandler:
             normalize_webgemini_config,
             resolve_webgemini_selected_model,
         )
+        from ..proxy import proxy_display
 
         config_manager = self.app.get('config_manager')
         if not config_manager:
@@ -6634,7 +6645,7 @@ class CommandHandler:
             f"[{self.theme.BLUE_SOFT}]Transport:[/{self.theme.BLUE_SOFT}] Gemini Web StreamGenerate",
             f"[{self.theme.BLUE_SOFT}]Gemini origin:[/{self.theme.BLUE_SOFT}] {WEBGEMINI_ORIGIN}",
             f"[{self.theme.BLUE_SOFT}]Cookie:[/{self.theme.BLUE_SOFT}] {cookie_state}",
-            f"[{self.theme.BLUE_SOFT}]Proxy:[/{self.theme.BLUE_SOFT}] {escape(str(webgemini_cfg.get('proxy') or '(auto/env)'))}",
+            f"[{self.theme.BLUE_SOFT}]Proxy:[/{self.theme.BLUE_SOFT}] {escape(proxy_display(webgemini_cfg.get('proxy', ''), prefer_system=True))}",
             f"[{self.theme.BLUE_SOFT}]Timeout:[/{self.theme.BLUE_SOFT}] {webgemini_cfg.get('timeout')}s",
         ]
         if selected:
@@ -6707,10 +6718,10 @@ class CommandHandler:
         if not candidate:
             current_proxy = str(webgemini_cfg.get("proxy", "") or "").strip()
             self.console.print(
-                f"[{self.theme.TEXT_DIM}]Current WebGemini proxy: {current_proxy or '(auto/env)'}[/{self.theme.TEXT_DIM}]"
+                f"[{self.theme.TEXT_DIM}]Current WebGemini proxy override: {current_proxy or '(auto/system/env)'}[/{self.theme.TEXT_DIM}]"
             )
             self.console.print(
-                f"[{self.theme.TEXT_DIM}]Use 'clear' to let WebGemini use HTTPS_PROXY/HTTP_PROXY automatically.[/{self.theme.TEXT_DIM}]"
+                f"[{self.theme.TEXT_DIM}]Use 'clear' to force Windows system proxy first, then HTTPS_PROXY/HTTP_PROXY.[/{self.theme.TEXT_DIM}]"
             )
             candidate = Prompt.ask("WebGemini proxy", default=current_proxy).strip()
 
@@ -7329,6 +7340,495 @@ class CommandHandler:
             except Exception:
                 pass
         return result
+
+    def cmd_unlimitedsurf(self, args: str) -> bool:
+        """Manage unlimited.surf source settings."""
+        raw = args.strip()
+        lowered = raw.lower()
+        if not raw or lowered in ("status", "check"):
+            return self._cmd_unlimitedsurf_status()
+        if lowered in ("key", "apikey", "api-key", "login"):
+            return self._cmd_unlimitedsurf_key("")
+        if lowered.startswith(("key ", "apikey ", "api-key ", "login ")):
+            return self._cmd_unlimitedsurf_key(raw.split(None, 1)[1].strip())
+        if lowered in ("activate", "use"):
+            return self._cmd_unlimitedsurf_activate()
+        if lowered == "model":
+            return self._cmd_unlimitedsurf_model("")
+        if lowered.startswith("model "):
+            return self._cmd_unlimitedsurf_model(raw[6:].strip())
+        if lowered in ("effort", "thinking", "reasoning"):
+            return self._cmd_unlimitedsurf_effort("")
+        if lowered.startswith(("effort ", "thinking ", "reasoning ")):
+            return self._cmd_unlimitedsurf_effort(raw.split(None, 1)[1].strip())
+        if lowered in ("endpoint", "url", "base-url", "baseurl"):
+            return self._cmd_unlimitedsurf_endpoint("")
+        if lowered.startswith("endpoint "):
+            return self._cmd_unlimitedsurf_endpoint(raw[9:].strip())
+        if lowered.startswith("url "):
+            return self._cmd_unlimitedsurf_endpoint(raw[4:].strip())
+        if lowered.startswith("base-url "):
+            return self._cmd_unlimitedsurf_endpoint(raw[9:].strip())
+        if lowered.startswith("baseurl "):
+            return self._cmd_unlimitedsurf_endpoint(raw[8:].strip())
+
+        self.console.print(
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /us [status|key|activate|model|effort|endpoint][/{self.theme.AMBER_GLOW}]"
+        )
+        return True
+
+    def _ensure_unlimitedsurf_configuration(self, config) -> bool:
+        from ..unlimitedsurf import (
+            UNLIMITEDSURF_API_KEY_HINT_URL,
+            normalize_unlimitedsurf_config,
+            resolve_unlimitedsurf_api_key,
+        )
+
+        us_cfg = normalize_unlimitedsurf_config(getattr(config, "unlimitedsurf", {}))
+        api_key = resolve_unlimitedsurf_api_key(us_cfg)
+        if not api_key:
+            self.console.print()
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Get or copy your unlimited.surf API key from {UNLIMITEDSURF_API_KEY_HINT_URL}, then paste it here.[/{self.theme.TEXT_DIM}]"
+            )
+            api_key = Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] unlimited.surf API Key",
+                password=True,
+            ).strip()
+            if not api_key:
+                self.console.print(
+                    f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} unlimited.surf API key is required to activate this source.[/{self.theme.CORAL_SOFT}]"
+                )
+                return False
+        us_cfg["api_key"] = api_key
+        config.unlimitedsurf = normalize_unlimitedsurf_config(us_cfg)
+        config.active_model_source = "unlimitedsurf"
+        return True
+
+    def _cmd_unlimitedsurf_status(self) -> bool:
+        from ..unlimitedsurf import (
+            UNLIMITEDSURF_API_KEY_HINT_URL,
+            get_unlimitedsurf_model_catalog,
+            mask_secret,
+            normalize_unlimitedsurf_config,
+            resolve_unlimitedsurf_api_key,
+            resolve_unlimitedsurf_chat_url,
+            resolve_unlimitedsurf_models_url,
+            resolve_unlimitedsurf_selected_model,
+        )
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        us_cfg = normalize_unlimitedsurf_config(getattr(config, "unlimitedsurf", {}))
+        catalog = get_unlimitedsurf_model_catalog(us_cfg.get("api_url"), fetch_live=True, timeout=8)
+        selected = resolve_unlimitedsurf_selected_model(us_cfg, catalog=catalog)
+        effective_api_key = resolve_unlimitedsurf_api_key(us_cfg)
+        key_origin = " (from environment)" if effective_api_key and not str(us_cfg.get("api_key", "") or "").strip() else ""
+        model_source = str(getattr(config, "active_model_source", "standard") or "standard").strip().lower()
+
+        lines = [
+            f"[{self.theme.BLUE_SOFT}]Active model source:[/{self.theme.BLUE_SOFT}] {self._format_model_source_label(model_source)}",
+            f"[{self.theme.BLUE_SOFT}]Configured key:[/{self.theme.BLUE_SOFT}] {mask_secret(effective_api_key)}{key_origin}",
+            f"[{self.theme.BLUE_SOFT}]Chat endpoint:[/{self.theme.BLUE_SOFT}] {escape(resolve_unlimitedsurf_chat_url(us_cfg.get('api_url'), us_cfg.get('endpoint')))}",
+            f"[{self.theme.BLUE_SOFT}]Models endpoint:[/{self.theme.BLUE_SOFT}] {escape(resolve_unlimitedsurf_models_url(us_cfg.get('api_url')))}",
+            f"[{self.theme.BLUE_SOFT}]Public models loaded:[/{self.theme.BLUE_SOFT}] {len(catalog)}",
+            f"[{self.theme.BLUE_SOFT}]Effort:[/{self.theme.BLUE_SOFT}] {escape(str(us_cfg.get('effort', 'medium')))}",
+            f"[{self.theme.BLUE_SOFT}]Default max tokens:[/{self.theme.BLUE_SOFT}] {us_cfg.get('max_tokens', 16384)}",
+            f"[{self.theme.BLUE_SOFT}]API key help:[/{self.theme.BLUE_SOFT}] {escape(UNLIMITEDSURF_API_KEY_HINT_URL)}",
+        ]
+        if selected:
+            provider = str(selected.get("provider") or "").strip()
+            tier = str(selected.get("tier") or "").strip()
+            suffix = f" | {provider}" if provider else ""
+            suffix += f" | {tier}" if tier else ""
+            lines.insert(1, f"[{self.theme.BLUE_SOFT}]Selected model:[/{self.theme.BLUE_SOFT}] {escape(selected['display_name'])} ({escape(selected['id'])}){escape(suffix)}")
+            lines.insert(2, f"[{self.theme.BLUE_SOFT}]Transport:[/{self.theme.BLUE_SOFT}] unlimited.surf SSE")
+            lines.insert(3, f"[{self.theme.BLUE_SOFT}]Context:[/{self.theme.BLUE_SOFT}] {int(selected.get('context_length') or 0):,} tokens")
+
+        self.console.print()
+        self.console.print(
+            Panel(
+                Text.from_markup("\n".join(lines)),
+                title=f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} unlimited.surf Source {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]",
+                border_style=self.theme.BORDER_PRIMARY,
+                box=box.ROUNDED,
+                padding=(1, 2),
+            )
+        )
+        self.console.print()
+        return True
+
+    def _cmd_unlimitedsurf_key(self, api_key_value: str = "") -> bool:
+        from ..unlimitedsurf import (
+            UNLIMITEDSURF_API_KEY_HINT_URL,
+            mask_secret,
+            normalize_unlimitedsurf_config,
+            resolve_unlimitedsurf_api_key,
+        )
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        us_cfg = normalize_unlimitedsurf_config(getattr(config, "unlimitedsurf", {}))
+        current = resolve_unlimitedsurf_api_key(us_cfg)
+        api_key = str(api_key_value or "").strip()
+        if not api_key:
+            self.console.print(f"[{self.theme.TEXT_DIM}]Get your unlimited.surf API key here: {UNLIMITEDSURF_API_KEY_HINT_URL}[/{self.theme.TEXT_DIM}]")
+            self.console.print(f"[{self.theme.TEXT_DIM}]Current unlimited.surf key: {mask_secret(current)}[/{self.theme.TEXT_DIM}]")
+            api_key = Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] unlimited.surf API Key",
+                password=True,
+                default="",
+            ).strip()
+        if not api_key:
+            self.console.print(f"[{self.theme.TEXT_DIM}]unlimited.surf key unchanged.[/{self.theme.TEXT_DIM}]")
+            return True
+        us_cfg["api_key"] = api_key
+        config.unlimitedsurf = normalize_unlimitedsurf_config(us_cfg)
+        config_manager.save(config)
+        self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} unlimited.surf API key saved.[/{self.theme.MINT_VIBRANT}]")
+        if self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+        return True
+
+    def _cmd_unlimitedsurf_activate(self) -> bool:
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+        config = config_manager.load()
+        if not self._ensure_unlimitedsurf_configuration(config):
+            return True
+        config_manager.save(config)
+        if self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+        return self._cmd_unlimitedsurf_status()
+
+    def _cmd_unlimitedsurf_model(self, model_query: str) -> bool:
+        from ..unlimitedsurf import (
+            apply_unlimitedsurf_model_selection,
+            get_unlimitedsurf_model_catalog,
+            normalize_unlimitedsurf_config,
+        )
+
+        config_manager = self.app.get('config_manager')
+        us_cfg = {}
+        if config_manager:
+            config = config_manager.load()
+            if not self._ensure_unlimitedsurf_configuration(config):
+                return True
+            us_cfg = normalize_unlimitedsurf_config(getattr(config, "unlimitedsurf", {}))
+
+        return self._select_external_provider_model(
+            config_attr="unlimitedsurf",
+            normalize_config=normalize_unlimitedsurf_config,
+            catalog=get_unlimitedsurf_model_catalog(us_cfg.get("api_url"), fetch_live=True, timeout=15),
+            provider_label="unlimited.surf",
+            active_source="unlimitedsurf",
+            model_query=model_query,
+            provider_command="us",
+            post_select_config=apply_unlimitedsurf_model_selection,
+        )
+
+    def _cmd_unlimitedsurf_endpoint(self, endpoint_value: str) -> bool:
+        from ..unlimitedsurf import (
+            UNLIMITEDSURF_DEFAULT_BASE_URL,
+            normalize_unlimitedsurf_config,
+            resolve_unlimitedsurf_base_url,
+        )
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        us_cfg = normalize_unlimitedsurf_config(getattr(config, "unlimitedsurf", {}))
+        candidate = str(endpoint_value or "").strip()
+        if not candidate:
+            current_url = str(us_cfg.get("api_url", UNLIMITEDSURF_DEFAULT_BASE_URL)).strip()
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Current unlimited.surf base URL: {current_url}[/{self.theme.TEXT_DIM}]"
+            )
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Use 'clear' to restore the default. You may paste the root URL, /api/chat, or /api/models; Reverie normalizes it to the root.[/{self.theme.TEXT_DIM}]"
+            )
+            candidate = Prompt.ask(
+                "unlimited.surf base URL",
+                default=current_url,
+            ).strip()
+
+        if candidate.lower() in ("clear", "default", "none", "off"):
+            candidate = UNLIMITEDSURF_DEFAULT_BASE_URL
+
+        us_cfg["api_url"] = resolve_unlimitedsurf_base_url(candidate or UNLIMITEDSURF_DEFAULT_BASE_URL)
+        config.unlimitedsurf = normalize_unlimitedsurf_config(us_cfg)
+        config_manager.save(config)
+        if self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} unlimited.surf base URL set to: {escape(config.unlimitedsurf.get('api_url', UNLIMITEDSURF_DEFAULT_BASE_URL))}[/{self.theme.MINT_VIBRANT}]"
+        )
+        return True
+
+    def _cmd_unlimitedsurf_effort(self, value: str) -> bool:
+        from ..unlimitedsurf import (
+            UNLIMITEDSURF_EFFORTS,
+            normalize_unlimitedsurf_config,
+            normalize_unlimitedsurf_effort,
+        )
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        us_cfg = normalize_unlimitedsurf_config(getattr(config, "unlimitedsurf", {}))
+        if not value.strip():
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Current unlimited.surf effort: {us_cfg.get('effort', 'medium')} ({', '.join(UNLIMITEDSURF_EFFORTS)})[/{self.theme.TEXT_DIM}]"
+            )
+            return True
+        normalized = normalize_unlimitedsurf_effort(value)
+        us_cfg["effort"] = normalized
+        config.unlimitedsurf = normalize_unlimitedsurf_config(us_cfg)
+        config_manager.save(config)
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} unlimited.surf effort set to {normalized}.[/{self.theme.MINT_VIBRANT}]"
+        )
+        if self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+        return True
+
+    def cmd_sensenova(self, args: str) -> bool:
+        """Manage SenseNova source settings."""
+        raw = args.strip()
+        lowered = raw.lower()
+        if not raw or lowered in ("status", "check"):
+            return self._cmd_sensenova_status()
+        if lowered in ("key", "apikey", "api-key", "login"):
+            return self._cmd_sensenova_key()
+        if lowered in ("activate", "use"):
+            return self._cmd_sensenova_activate()
+        if lowered == "model":
+            return self._cmd_sensenova_model("")
+        if lowered.startswith("model "):
+            return self._cmd_sensenova_model(raw[6:].strip())
+        if lowered in ("thinking", "reasoning", "reasoning-effort"):
+            return self._cmd_sensenova_reasoning("")
+        if lowered.startswith("thinking "):
+            return self._cmd_sensenova_reasoning(raw[9:].strip())
+        if lowered.startswith("reasoning "):
+            return self._cmd_sensenova_reasoning(raw[10:].strip())
+        if lowered.startswith("reasoning-effort "):
+            return self._cmd_sensenova_reasoning(raw[17:].strip())
+        if lowered in ("none", "off", "low", "medium", "high"):
+            return self._cmd_sensenova_reasoning(raw)
+        if lowered in ("endpoint", "url", "base-url", "baseurl"):
+            return self._cmd_sensenova_endpoint("")
+        if lowered.startswith("endpoint "):
+            return self._cmd_sensenova_endpoint(raw[9:].strip())
+        if lowered.startswith("url "):
+            return self._cmd_sensenova_endpoint(raw[4:].strip())
+        if lowered.startswith("base-url "):
+            return self._cmd_sensenova_endpoint(raw[9:].strip())
+        if lowered.startswith("baseurl "):
+            return self._cmd_sensenova_endpoint(raw[8:].strip())
+
+        self.console.print(
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /sensenova [status|key|activate|model|reasoning|endpoint][/{self.theme.AMBER_GLOW}]"
+        )
+        return True
+
+    def _ensure_sensenova_configuration(self, config) -> bool:
+        from ..sensenova import normalize_sensenova_config, resolve_sensenova_api_key
+
+        sensenova_cfg = normalize_sensenova_config(getattr(config, "sensenova", {}))
+        api_key = resolve_sensenova_api_key(sensenova_cfg)
+        if not api_key:
+            self.console.print()
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Set SENSENOVA_API_KEY, SENSE_API_KEY, or paste a SenseNova API key here.[/{self.theme.TEXT_DIM}]"
+            )
+            api_key = Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] SenseNova API Key",
+                password=True,
+            ).strip()
+            if not api_key:
+                self.console.print(
+                    f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} SenseNova API key is required to activate this source.[/{self.theme.CORAL_SOFT}]"
+                )
+                return False
+        sensenova_cfg["api_key"] = api_key
+        config.sensenova = normalize_sensenova_config(sensenova_cfg)
+        config.active_model_source = "sensenova"
+        return True
+
+    def _cmd_sensenova_status(self) -> bool:
+        from ..sensenova import (
+            SENSENOVA_REASONING_EFFORTS,
+            mask_secret,
+            normalize_sensenova_config,
+            resolve_sensenova_api_key,
+            resolve_sensenova_selected_model,
+        )
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        sensenova_cfg = normalize_sensenova_config(getattr(config, "sensenova", {}))
+        selected = resolve_sensenova_selected_model(sensenova_cfg)
+        effective_api_key = resolve_sensenova_api_key(sensenova_cfg)
+        key_origin = " (from environment)" if effective_api_key and not str(sensenova_cfg.get("api_key", "") or "").strip() else ""
+        model_source = str(getattr(config, "active_model_source", "standard") or "standard").strip().lower()
+
+        lines = [
+            f"[{self.theme.BLUE_SOFT}]Active model source:[/{self.theme.BLUE_SOFT}] {self._format_model_source_label(model_source)}",
+            f"[{self.theme.BLUE_SOFT}]Configured key:[/{self.theme.BLUE_SOFT}] {mask_secret(effective_api_key)}{key_origin}",
+            f"[{self.theme.BLUE_SOFT}]OpenAI base URL:[/{self.theme.BLUE_SOFT}] {escape(str(sensenova_cfg.get('api_url', '')))}",
+            f"[{self.theme.BLUE_SOFT}]Endpoint:[/{self.theme.BLUE_SOFT}] {escape(str(sensenova_cfg.get('endpoint', '')))}",
+            f"[{self.theme.BLUE_SOFT}]Reasoning effort:[/{self.theme.BLUE_SOFT}] {escape(str(sensenova_cfg.get('reasoning_effort', 'medium')))}",
+            f"[{self.theme.BLUE_SOFT}]Reasoning choices:[/{self.theme.BLUE_SOFT}] {', '.join(SENSENOVA_REASONING_EFFORTS)}",
+            f"[{self.theme.BLUE_SOFT}]Default max tokens:[/{self.theme.BLUE_SOFT}] {sensenova_cfg.get('max_tokens', 65536)}",
+        ]
+        if selected:
+            lines.insert(1, f"[{self.theme.BLUE_SOFT}]Selected model:[/{self.theme.BLUE_SOFT}] {escape(selected['display_name'])} ({escape(selected['id'])})")
+            lines.insert(2, f"[{self.theme.BLUE_SOFT}]Transport:[/{self.theme.BLUE_SOFT}] OpenAI SDK")
+            lines.insert(3, f"[{self.theme.BLUE_SOFT}]Context:[/{self.theme.BLUE_SOFT}] {int(selected.get('context_length') or 0):,} tokens")
+
+        self.console.print()
+        self.console.print(
+            Panel(
+                Text.from_markup("\n".join(lines)),
+                title=f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} SenseNova Source {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]",
+                border_style=self.theme.BORDER_PRIMARY,
+                box=box.ROUNDED,
+                padding=(1, 2),
+            )
+        )
+        self.console.print()
+        return True
+
+    def _cmd_sensenova_key(self) -> bool:
+        from ..sensenova import mask_secret, normalize_sensenova_config, resolve_sensenova_api_key
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        sensenova_cfg = normalize_sensenova_config(getattr(config, "sensenova", {}))
+        current = resolve_sensenova_api_key(sensenova_cfg)
+        self.console.print(f"[{self.theme.TEXT_DIM}]Current SenseNova key: {mask_secret(current)}[/{self.theme.TEXT_DIM}]")
+        api_key = Prompt.ask(
+            f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] SenseNova API Key",
+            password=True,
+            default="",
+        ).strip()
+        if not api_key:
+            self.console.print(f"[{self.theme.TEXT_DIM}]SenseNova key unchanged.[/{self.theme.TEXT_DIM}]")
+            return True
+        sensenova_cfg["api_key"] = api_key
+        config.sensenova = normalize_sensenova_config(sensenova_cfg)
+        config_manager.save(config)
+        self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} SenseNova API key saved.[/{self.theme.MINT_VIBRANT}]")
+        return True
+
+    def _cmd_sensenova_activate(self) -> bool:
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+        config = config_manager.load()
+        if not self._ensure_sensenova_configuration(config):
+            return True
+        config_manager.save(config)
+        if self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+        return self._cmd_sensenova_status()
+
+    def _cmd_sensenova_model(self, model_query: str) -> bool:
+        from ..sensenova import get_sensenova_model_catalog, normalize_sensenova_config
+
+        return self._select_external_provider_model(
+            config_attr="sensenova",
+            normalize_config=normalize_sensenova_config,
+            catalog=get_sensenova_model_catalog(),
+            provider_label="SenseNova",
+            active_source="sensenova",
+            model_query=model_query,
+            post_select_config=lambda cfg, _model: normalize_sensenova_config(cfg),
+        )
+
+    def _cmd_sensenova_endpoint(self, endpoint_value: str) -> bool:
+        from ..sensenova import normalize_sensenova_config
+
+        return self._configure_provider_endpoint(
+            config_attr="sensenova",
+            normalize_config=normalize_sensenova_config,
+            provider_label="SenseNova",
+            endpoint_value=endpoint_value,
+        )
+
+    def _cmd_sensenova_reasoning(self, value: str) -> bool:
+        from ..sensenova import (
+            SENSENOVA_REASONING_EFFORTS,
+            normalize_sensenova_config,
+            normalize_sensenova_reasoning_effort,
+        )
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        sensenova_cfg = normalize_sensenova_config(getattr(config, "sensenova", {}))
+        if not value.strip():
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Current SenseNova reasoning_effort: {sensenova_cfg.get('reasoning_effort', 'medium')} ({', '.join(SENSENOVA_REASONING_EFFORTS)})[/{self.theme.TEXT_DIM}]"
+            )
+            return True
+        normalized = normalize_sensenova_reasoning_effort(value)
+        sensenova_cfg["reasoning_effort"] = normalized
+        config.sensenova = normalize_sensenova_config(sensenova_cfg)
+        config_manager.save(config)
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} SenseNova reasoning_effort set to {normalized}.[/{self.theme.MINT_VIBRANT}]"
+        )
+        if self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+        return True
 
     def cmd_modelscope(self, args: str) -> bool:
         """Manage ModelScope source settings."""

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 import time
 import uuid
@@ -12,11 +11,15 @@ from pathlib import Path
 from typing import Any, Dict, Generator, Iterable, List, Optional, Tuple
 from urllib.parse import urlencode
 
+from .proxy import resolve_proxy_url_with_source
+
 
 WEBGEMINI_DEFAULT_MODEL_ID = "gemini-3.5-flash-thinking"
 WEBGEMINI_DEFAULT_MODEL_DISPLAY_NAME = "Gemini 3.5 Flash Thinking"
 WEBGEMINI_DEFAULT_GEMINI_BL = "boq_assistant-bard-web-server_20260525.09_p0"
 WEBGEMINI_DEFAULT_TIMEOUT = 180
+WEBGEMINI_DEFAULT_RETRY_ATTEMPTS = 2
+WEBGEMINI_DEFAULT_RETRY_DELAY = 1
 WEBGEMINI_DEFAULT_CONTEXT_TOKENS = 128_000
 WEBGEMINI_DEFAULT_MAX_OUTPUT_TOKENS = 20_000
 WEBGEMINI_ORIGIN = "https://gemini.google.com"
@@ -117,6 +120,8 @@ def default_webgemini_config() -> Dict[str, Any]:
         "cookie_file": "",
         "proxy": "",
         "timeout": WEBGEMINI_DEFAULT_TIMEOUT,
+        "retry_attempts": WEBGEMINI_DEFAULT_RETRY_ATTEMPTS,
+        "retry_delay": WEBGEMINI_DEFAULT_RETRY_DELAY,
         "max_context_tokens": WEBGEMINI_DEFAULT_CONTEXT_TOKENS,
     }
 
@@ -160,6 +165,8 @@ def normalize_webgemini_config(raw_webgemini: Any) -> Dict[str, Any]:
 
     for key, default_value in (
         ("timeout", WEBGEMINI_DEFAULT_TIMEOUT),
+        ("retry_attempts", WEBGEMINI_DEFAULT_RETRY_ATTEMPTS),
+        ("retry_delay", WEBGEMINI_DEFAULT_RETRY_DELAY),
         ("max_context_tokens", WEBGEMINI_DEFAULT_CONTEXT_TOKENS),
     ):
         try:
@@ -260,7 +267,7 @@ def _account_prefix(cfg: Dict[str, Any]) -> str:
 
 
 def _build_stream_generate_request(prompt: str, model_mode: int, think_mode: int, cfg: Dict[str, Any]) -> Tuple[str, Dict[str, str], str]:
-    inner: List[Any] = [None] * 80
+    inner: List[Any] = [None] * 102
     inner[0] = [prompt, 0, None, None, None, None, 0]
     inner[1] = ["en"]
     inner[2] = ["", "", "", None, None, None, None, None, None, ""]
@@ -279,7 +286,7 @@ def _build_stream_generate_request(prompt: str, model_mode: int, think_mode: int
     inner[68] = 1
     inner[79] = model_mode
 
-    params: Dict[str, str] = {"f.req": json.dumps([None, json.dumps(inner)], separators=(",", ":"))}
+    params: Dict[str, str] = {"f.req": json.dumps([None, json.dumps(inner)])}
     xsrf = str(cfg.get("xsrf_token", "") or "").strip()
     if xsrf:
         params["at"] = xsrf
@@ -295,6 +302,11 @@ def _build_stream_generate_request(prompt: str, model_mode: int, think_mode: int
         "Origin": WEBGEMINI_ORIGIN,
         "Referer": f"{WEBGEMINI_ORIGIN}{prefix}/app",
         "X-Same-Domain": "1",
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     }
     if prefix:
@@ -308,21 +320,41 @@ def _build_stream_generate_request(prompt: str, model_mode: int, think_mode: int
 
 
 def clean_webgemini_text(text: str) -> str:
-    return re.sub(
+    cleaned = re.sub(
         r"```(?:python|javascript|text)\\?code_(?:reference|stdout)&code_event_index=\d+\n.*?```\n?",
         "",
         str(text or ""),
         flags=re.DOTALL,
     )
+    cleaned = re.sub(r"http://googleusercontent\.com/card_content/\d+\n?", "", cleaned)
+    return cleaned.strip()
+
+
+def resolve_webgemini_proxy(webgemini_config: Any) -> Tuple[str, str]:
+    """Return the proxy URL/source WebGemini will force onto HTTP clients."""
+    cfg = normalize_webgemini_config(webgemini_config)
+    return resolve_proxy_url_with_source(cfg.get("proxy", ""), prefer_system=True)
+
+
+def _webgemini_httpx_client(cfg: Dict[str, Any]):
+    import httpx
+
+    proxy, _source = resolve_webgemini_proxy(cfg)
+    timeout = httpx.Timeout(
+        timeout=float(cfg.get("timeout", WEBGEMINI_DEFAULT_TIMEOUT) or WEBGEMINI_DEFAULT_TIMEOUT),
+        connect=10.0,
+    )
+    transport = httpx.HTTPTransport(proxy=proxy) if proxy else httpx.HTTPTransport()
+    return httpx.Client(transport=transport, timeout=timeout, verify=True, trust_env=False)
 
 
 def _extract_texts_from_web_line(line: str) -> List[str]:
-    if '"wrb.fr"' not in line or len(line) < 200:
+    if '"wrb.fr"' not in line:
         return []
     try:
         arr = json.loads(line)
         inner_str = arr[0][2]
-        if not inner_str or len(inner_str) < 50:
+        if not inner_str:
             return []
         inner = json.loads(inner_str)
     except (json.JSONDecodeError, IndexError, TypeError):
@@ -431,42 +463,45 @@ def iter_webgemini_text_deltas(
     tools: Optional[List[Dict[str, Any]]] = None,
 ) -> Generator[str, None, None]:
     """Yield text deltas from Gemini Web StreamGenerate."""
-    import requests
-
     cfg = normalize_webgemini_config(webgemini_config)
     prompt = messages_to_webgemini_prompt(messages, tools=None)
     if not prompt.strip():
         raise ValueError("WebGemini prompt is empty")
     _, model_mode, think_mode = _resolve_model_mode(model, cfg)
     url, headers, body = _build_stream_generate_request(prompt, model_mode, think_mode, cfg)
-    proxy = str(cfg.get("proxy", "") or os.getenv("HTTPS_PROXY", "") or os.getenv("HTTP_PROXY", "") or "").strip()
-    proxies = {"http": proxy, "https": proxy} if proxy else None
 
-    previous_text = ""
-    with requests.post(
-        url,
-        headers=headers,
-        data=body,
-        stream=True,
-        timeout=(10, int(cfg.get("timeout", WEBGEMINI_DEFAULT_TIMEOUT))),
-        proxies=proxies,
-    ) as response:
-        response.raise_for_status()
-        buffer = ""
-        for chunk in response.iter_content(chunk_size=8192, decode_unicode=True):
-            buffer += chunk.decode("utf-8", errors="replace") if isinstance(chunk, bytes) else str(chunk or "")
-            error_match = re.search(r"BardErrorInfo\s*\[(\d+)\]", buffer)
-            if error_match:
-                raise RuntimeError(f"Gemini upstream rejected request: BardErrorInfo [{error_match.group(1)}]")
-            while "\n" in buffer:
-                line, buffer = buffer.split("\n", 1)
-                for text in _extract_texts_from_web_line(line):
-                    if len(text) <= len(previous_text):
-                        continue
-                    delta = clean_webgemini_text(text[len(previous_text):])
-                    previous_text = text
-                    if delta:
-                        yield delta
+    attempts = max(1, int(cfg.get("retry_attempts", WEBGEMINI_DEFAULT_RETRY_ATTEMPTS) or WEBGEMINI_DEFAULT_RETRY_ATTEMPTS))
+    last_error: Optional[BaseException] = None
+    for attempt in range(attempts):
+        previous_text = ""
+        try:
+            with _webgemini_httpx_client(cfg) as client:
+                with client.stream("POST", url, content=body, headers=headers) as response:
+                    response.raise_for_status()
+                    buffer = ""
+                    for chunk in response.iter_text():
+                        buffer += str(chunk or "")
+                        error_match = re.search(r"BardErrorInfo\s*\[(\d+)\]", buffer)
+                        if error_match:
+                            raise RuntimeError(f"Gemini upstream rejected request: BardErrorInfo [{error_match.group(1)}]")
+                        while "\n" in buffer:
+                            line, buffer = buffer.split("\n", 1)
+                            for text in _extract_texts_from_web_line(line):
+                                if len(text) <= len(previous_text):
+                                    continue
+                                delta = clean_webgemini_text(text[len(previous_text):])
+                                previous_text = text
+                                if delta:
+                                    yield delta
+            return
+        except Exception as exc:
+            if previous_text:
+                raise
+            last_error = exc
+            if attempt < attempts - 1:
+                time.sleep(max(0, int(cfg.get("retry_delay", WEBGEMINI_DEFAULT_RETRY_DELAY) or 0)))
+    if last_error:
+        raise last_error
 
 
 def generate_webgemini_message(
@@ -477,26 +512,34 @@ def generate_webgemini_message(
     tools: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[str, List[Dict[str, Any]]]:
     """Generate a full WebGemini message and parse optional tool calls."""
-    import requests
-
     cfg = normalize_webgemini_config(webgemini_config)
     prompt = messages_to_webgemini_prompt(messages, tools=tools)
     if not prompt.strip():
         raise ValueError("WebGemini prompt is empty")
     _, model_mode, think_mode = _resolve_model_mode(model, cfg)
     url, headers, body = _build_stream_generate_request(prompt, model_mode, think_mode, cfg)
-    proxy = str(cfg.get("proxy", "") or os.getenv("HTTPS_PROXY", "") or os.getenv("HTTP_PROXY", "") or "").strip()
-    proxies = {"http": proxy, "https": proxy} if proxy else None
 
-    response = requests.post(
-        url,
-        headers=headers,
-        data=body,
-        timeout=(10, int(cfg.get("timeout", WEBGEMINI_DEFAULT_TIMEOUT))),
-        proxies=proxies,
-    )
-    response.raise_for_status()
-    text = extract_webgemini_response_text(response.text)
+    last_error: Optional[BaseException] = None
+    text = ""
+    attempts = max(1, int(cfg.get("retry_attempts", WEBGEMINI_DEFAULT_RETRY_ATTEMPTS) or WEBGEMINI_DEFAULT_RETRY_ATTEMPTS))
+    for attempt in range(attempts):
+        try:
+            with _webgemini_httpx_client(cfg) as client:
+                response = client.post(url, content=body, headers=headers)
+                response.raise_for_status()
+                text = extract_webgemini_response_text(response.text)
+            if text:
+                break
+            proxy, source = resolve_webgemini_proxy(cfg)
+            last_error = RuntimeError(
+                f"Gemini Web response did not contain a text payload; proxy={proxy or 'direct'} ({source})"
+            )
+        except Exception as exc:
+            last_error = exc
+        if attempt < attempts - 1:
+            time.sleep(max(0, int(cfg.get("retry_delay", WEBGEMINI_DEFAULT_RETRY_DELAY) or 0)))
+    if not text and last_error and not isinstance(last_error, RuntimeError):
+        raise last_error
     if tools:
         return parse_webgemini_tool_calls(text)
     return text, []

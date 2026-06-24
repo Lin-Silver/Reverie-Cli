@@ -14,8 +14,8 @@ from ..tools.registry import get_tool_classes_for_mode
 
 
 ARTIFACTS_DIR = "artifacts"
-TASKS_ARTIFACT_PATH = f"{ARTIFACTS_DIR}/Tasks.md"
-ATLAS_TASK_ARTIFACT_PATH = f"{ARTIFACTS_DIR}/task.md"
+TASKS_ARTIFACT_PATH = f"{ARTIFACTS_DIR}/task.md"
+ATLAS_TASK_ARTIFACT_PATH = TASKS_ARTIFACT_PATH
 ATLAS_RESUME_INDEX_ARTIFACT_PATH = f"{ARTIFACTS_DIR}/atlas/resume_index.md"
 IMPLEMENTATION_PLAN_ARTIFACT_PATH = f"{ARTIFACTS_DIR}/implementation_plan.md"
 WALKTHROUGH_ARTIFACT_PATH = f"{ARTIFACTS_DIR}/walkthrough.md"
@@ -101,12 +101,24 @@ def _append_shared_prompt_guidance(additional_rules: str, normalized_mode: str, 
     """Inject shared system-level guidance for every Reverie mode."""
     shared_sections = [PROJECT_CODING_GUARDRAILS]
 
+    shared_sections.append(f"""
+## Goal-Driven Task Ledger
+- For multi-step, cross-file, verification-heavy, or ambiguous work, create and maintain a detailed checklist with `task_manager` in `{TASKS_ARTIFACT_PATH}` before broad implementation.
+- Break work into small, concrete, verifiable tasks. Each task should name one investigation, edit, integration step, or validation check.
+- Treat the task ledger as durable system-level context for the active session: unfinished tasks remain active context until `task_manager` marks them completed or cancelled.
+- Do not stop, finish, or give a final completion answer while `{TASKS_ARTIFACT_PATH}` contains any `[ ]` or `[/]` task that still applies to the user's request.
+- Before ending, call `task_manager(action="list")` when a ledger exists, then mark every completed task with `task_manager(action="update", ..., status="done")`; only then summarize.
+- Completed tasks may be omitted from future active reasoning once `task_manager` has persisted `[x]`, but do not remove or ignore unfinished tasks to save tokens.
+- This is Goal-Driven execution: task management exists to keep the objective explicit, detailed, and persistent until the requested outcome is actually reached.
+""".strip())
+
     shared_sections.append("""
 ## Context Engine
 - Context Engine is available in every mode.
 - Treat `codebase-retrieval` as the primary repository-intelligence entrypoint, not as an optional search tool.
 - When a task depends on repository state, start with `codebase-retrieval` before `ReadFile`, `ReadFolder`, direct file tools, edits, plans, or architecture claims.
 - For large repositories, unfamiliar areas, multi-file features, bugs, refactors, migrations, API/config changes, or ambiguous requests, the default first tool call is exactly `codebase-retrieval(query_type="task", query="<the active request>")`.
+- When you need fast project orientation or likely files before a full workset, call `codebase-retrieval(query_type="explore", query="<the active request>")`; it uses FastContext-style parallel READ/GLOB/GREP evidence and returns file/line citations.
 - After the task-level retrieval, drill down with `symbol`, `file`, `dependencies`, `memory`, or `lsp` as needed before editing.
 - Use direct file reads only after Context Engine has produced a workset, or when the user named an exact file and the task is trivial.
 - Do not rely on conversational memory alone when the repository can be inspected directly.
@@ -978,8 +990,7 @@ Current date: {current_date}.
 Reverie-Atlas is not a documentation generator. It is a **deep-reasoning delivery system** that treats documentation as a living engineering contract - researching rigorously, specifying precisely, confirming with the user, then implementing with deliberate care and continuous verification.
 
 Core identity invariants:
-- This mode never uses `task_manager` or `{TASKS_ARTIFACT_PATH}`.
-- This mode uses `atlas_delivery_orchestrator` as the durable ledger for document state, slices, blockers, checkpoints, and closure readiness.
+- This mode uses `atlas_delivery_orchestrator` as the durable ledger for document state, slices, blockers, checkpoints, and closure readiness, and uses `task_manager` to keep `{TASKS_ARTIFACT_PATH}` synchronized as the visible Goal-Driven checklist.
 - This mode treats the project-local `{ARTIFACTS_DIR}/` directory as the document system of record and re-anchors on those artifacts before major Atlas decisions.
 - Atlas keeps a detailed task tree in `{ATLAS_TASK_ARTIFACT_PATH}` and keeps it synchronized with delivery progress, using `[x]` for completed items.
 - Atlas maintains a dedicated resume entrypoint at `{ATLAS_RESUME_INDEX_ARTIFACT_PATH}` so fresh sessions know which artifacts to read first.

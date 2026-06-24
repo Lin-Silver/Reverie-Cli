@@ -16,18 +16,75 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
 
 try:
-    from .version import __version__
+    from .version import CORE_INTERFACE_VERSION, __version__
     from .tls import configure_tls_ca_bundle
 except ImportError:  # PyInstaller may execute this file as a top-level script.
     package_root = Path(__file__).resolve().parent.parent
     package_root_text = str(package_root)
     if package_root_text not in sys.path:
         sys.path.insert(0, package_root_text)
-    from reverie.version import __version__
+    from reverie.version import CORE_INTERFACE_VERSION, __version__
     from reverie.tls import configure_tls_ca_bundle
 
 
 configure_tls_ca_bundle()
+
+
+DIRECT_COMMANDS = {
+    "help",
+    "model",
+    "codex",
+    "webgemini",
+    "wgemini",
+    "aihubmix",
+    "aihub",
+    "agnes",
+    "ag",
+    "sensenova",
+    "sense",
+    "us",
+    "unlimitedsurf",
+    "unlimited.surf",
+    "nvidia",
+    "modelscope",
+    "mode",
+    "status",
+    "doctor",
+    "harness",
+    "search",
+    "sessions",
+    "history",
+    "total",
+    "clear",
+    "clean",
+    "index",
+    "tools",
+    "browser",
+    "skills",
+    "plugins",
+    "mcp",
+    "setting",
+    "settings",
+    "rules",
+    "workspace",
+    "tti",
+    "rollback",
+    "undo",
+    "redo",
+    "checkpoints",
+    "operations",
+    "gdd",
+    "assets",
+    "blueprint",
+    "bp",
+    "scaffold",
+    "engine",
+    "modeling",
+    "blender",
+    "playtest",
+    "pt",
+    "ce",
+}
 
 
 def _configure_stdio_for_safe_output() -> None:
@@ -151,8 +208,85 @@ def _resolve_prompt_text(args: argparse.Namespace, project_root: Path) -> str | 
     return prompt_text
 
 
-def main():
+def _split_direct_command_args(argv: list[str]) -> tuple[Path, list[str]]:
+    """Extract direct-command project path flags without invoking argparse."""
+    project_path = "."
+    command_tokens: list[str] = []
+    index = 0
+    while index < len(argv):
+        token = str(argv[index] or "")
+        if token in {"--path", "--project", "--cwd", "-C"}:
+            index += 1
+            if index < len(argv):
+                project_path = str(argv[index] or ".")
+            index += 1
+            continue
+        if token.startswith("--path="):
+            project_path = token.split("=", 1)[1] or "."
+            index += 1
+            continue
+        if token.startswith("--project="):
+            project_path = token.split("=", 1)[1] or "."
+            index += 1
+            continue
+        if token.startswith("--cwd="):
+            project_path = token.split("=", 1)[1] or "."
+            index += 1
+            continue
+        command_tokens.append(token)
+        index += 1
+    return Path(project_path).expanduser().resolve(), command_tokens
+
+
+def _run_direct_command_if_requested(argv: list[str]) -> int | None:
+    """Run slash-command handlers from one-line terminal invocations."""
+    if not argv:
+        return None
+    project_root, command_tokens = _split_direct_command_args(argv)
+    if not command_tokens:
+        return None
+    first = str(command_tokens[0] or "").strip()
+    command_name = first[1:] if first.startswith("/") else first
+    command_name = command_name.lower()
+    if command_name not in DIRECT_COMMANDS:
+        return None
+
+    direct_name = command_tokens[0][1:] if command_tokens[0].startswith("/") else command_tokens[0]
+    if direct_name.lower() == "ce":
+        command_tokens[0] = "CE"
+    if direct_name.lower() in {"setting", "settings"} and len(command_tokens) == 1:
+        command_tokens.append("status")
+
+    if not project_root.exists():
+        print(f"Error: Path does not exist: {project_root}")
+        return 1
+    if not project_root.is_dir():
+        print(f"Error: Path is not a directory: {project_root}")
+        return 1
+
+    from reverie.cli.commands import CommandHandler
+    from reverie.cli.interface import ReverieInterface
+
+    _configure_stdio_for_safe_output()
+    interface = ReverieInterface(project_root, headless=True)
+    handler = CommandHandler(interface.console, interface._get_app_context())
+    command_line = " ".join(command_tokens)
+    if not command_line.startswith("/"):
+        command_line = "/" + command_line
+    try:
+        should_continue = handler.handle(command_line)
+    finally:
+        interface._persist_runtime_stats()
+    return 0 if should_continue is not False else 0
+
+
+def main(argv: list[str] | None = None):
     """Main entry point for Reverie Cli"""
+    argv = list(sys.argv[1:] if argv is None else argv)
+    direct_command_result = _run_direct_command_if_requested(argv)
+    if direct_command_result is not None:
+        return direct_command_result
+
     parser = argparse.ArgumentParser(
         description="Reverie - World-Class Context Engine Coding Assistant",
         prog="reverie"
@@ -171,12 +305,6 @@ def main():
         help='Show version and exit'
     )
 
-    parser.add_argument(
-        '--sdk-bridge',
-        action='store_true',
-        help=argparse.SUPPRESS
-    )
-    
     parser.add_argument(
         '--index-only',
         action='store_true',
@@ -216,15 +344,12 @@ def main():
         help='Write structured JSON output for prompt mode'
     )
     
-    args = parser.parse_args()
-
-    if args.sdk_bridge:
-        from reverie.sdk_bridge import main as sdk_bridge_main
-
-        return sdk_bridge_main()
+    args = parser.parse_args(argv)
     
     if args.version:
         print(f"Reverie Cli v{__version__}")
+        print(f"Core Interface v{CORE_INTERFACE_VERSION}")
+        print("Kernel: python")
         return 0
     
     # Resolve project path

@@ -27,9 +27,9 @@ class CodebaseRetrievalTool(BaseTool):
     
     name = "codebase-retrieval"
     aliases = ("codebase_retrieval", "retrieve_codebase", "repo_context")
-    search_hint = "inspect files symbols dependencies memory and lsp"
+    search_hint = "inspect files symbols dependencies memory lsp and fast context"
     tool_category = "retrieval"
-    tool_tags = ("codebase", "symbol", "file", "dependency", "memory", "lsp", "search")
+    tool_tags = ("codebase", "symbol", "file", "dependency", "memory", "lsp", "search", "fastcontext")
     read_only = True
     concurrency_safe = True
     
@@ -42,6 +42,7 @@ Query types:
 - file: Get the structure and contents of a file
 - search: Search for symbols matching a pattern
 - dependencies: Get what a symbol depends on or what depends on it
+- explore: FastContext-style parallel READ/GLOB/GREP exploration with file/line citations
 - task: Build a curated multi-file context package for a user request or edit intent
 - memory: Query workspace-global memory distilled from past sessions
 - lsp: Query optional LSP-powered symbols, definitions, or diagnostics
@@ -50,14 +51,15 @@ Examples:
 - Query a function: {"query_type": "symbol", "query": "MyClass.my_method"}
 - Search for classes: {"query_type": "search", "query": "Controller", "filter_kind": "class"}
 - Get file structure: {"query_type": "file", "query": "src/utils/helpers.py"}
-- Find dependencies: {"query_type": "dependencies", "query": "process_data", "direction": "outgoing"}"""
+- Find dependencies: {"query_type": "dependencies", "query": "process_data", "direction": "outgoing"}
+- Explore likely files fast: {"query_type": "explore", "query": "where is settings persistence handled"}"""
     
     parameters = {
         "type": "object",
         "properties": {
             "query_type": {
                 "type": "string",
-                "enum": ["symbol", "file", "search", "dependencies", "outline", "task", "memory", "lsp"],
+                "enum": ["symbol", "file", "search", "dependencies", "outline", "explore", "task", "memory", "lsp"],
                 "description": "Type of query to perform"
             },
             "query": {
@@ -227,7 +229,7 @@ Examples:
         character = self._normalize_int(kwargs.get('character', 0), 0)
         
         retriever = None
-        if query_type in {"symbol", "file", "search", "dependencies", "outline", "task"}:
+        if query_type in {"symbol", "file", "search", "dependencies", "outline", "explore", "task"}:
             retriever = self._get_retriever()
             if not retriever:
                 return ToolResult.fail(
@@ -253,6 +255,9 @@ Examples:
             
             elif query_type == "outline":
                 return self._query_outline(retriever, query)
+
+            elif query_type == "explore":
+                return self._query_explore(retriever, query, max_files=max_files, limit=limit)
 
             elif query_type == "task":
                 return self._query_task(
@@ -554,6 +559,20 @@ Examples:
         """Get outline/structure of a file"""
         return self._query_file(retriever, file_path, include_source=False)
 
+    def _query_explore(self, retriever, query: str, *, max_files: int, limit: int) -> ToolResult:
+        """Run FastContext-style repository exploration."""
+        if not hasattr(retriever, "explore_fast_context"):
+            return ToolResult.fail("FastContext exploration is not available in this Context Engine.")
+        result = retriever.explore_fast_context(
+            query,
+            max_hits=max(8, int(limit or 20)),
+            max_files=max(4, int(max_files or 8)),
+        )
+        return ToolResult.ok(
+            result.render_markdown(limit=max(8, int(limit or 20))),
+            data=result.to_dict(),
+        )
+
     def _query_task(
         self,
         retriever,
@@ -587,6 +606,7 @@ Examples:
                 'token_estimate': result.token_estimate,
                 'workspace': result.metadata.get('workspace', {}),
                 'evidence_sources': result.metadata.get('evidence_sources', []),
+                'fast_context': result.metadata.get('fast_context', {}),
                 'file_evidence': {
                     item.file_path: list(item.evidence)
                     for item in result.relevant_files

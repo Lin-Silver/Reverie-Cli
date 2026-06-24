@@ -236,11 +236,10 @@ if defined REVERIE_FFMPEG_PATH (
 
 set "ICON_ICO=%ROOT_DIR%\reverie.ico"
 set "ICON_PNG=%ROOT_DIR%\reverie.png"
-set "GUI_ICON_ICO=%REPO_ROOT%\Reverie UI\src\Reverie.UI\Assets\reverie.ico"
 set "REVERIE_ICON_PATH="
 
 if exist "%ICON_PNG%" (
-    python "%ROOT_DIR%\scripts\generate_reverie_icons.py" --source "%ICON_PNG%" "%ICON_ICO%" "%GUI_ICON_ICO%"
+    python "%ROOT_DIR%\scripts\generate_reverie_icons.py" --source "%ICON_PNG%" "%ICON_ICO%"
     if %ERRORLEVEL% neq 0 (
         echo [ERROR] Failed to generate icons from %ICON_PNG%.
         set "BUILD_EXIT_CODE=1"

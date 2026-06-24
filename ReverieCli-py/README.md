@@ -15,9 +15,9 @@ Reverie CLI is a context-engine-powered AI coding assistant for large repositori
 
 Current stable repository version: `v2.3.3`.
 
-- Reverie UI now uses the CLI as an embedded SDK bridge with real Plugins, Settings, Chats, Automations, and Release lookup surfaces.
+- Reverie CLI now exposes a stable terminal core interface for future desktop hosts through direct one-line commands such as `reverie.exe setting status`.
 - GitHub Release publishing now builds the Python `reverie.exe`, the four plugin executables, and `plugins-manifest.json` directly into the latest Release.
-- Desktop startup, bridge event handling, plugin refresh, and long transcript rendering were optimized for lower UI churn.
+- Prompt mode, direct settings commands, plugin refresh, and long transcript handling were optimized for lower host overhead.
 
 For the full release notes, see [docs/changelog.md](docs/changelog.md).
 
@@ -70,12 +70,14 @@ reverie --prompt-file task.md    # run a long prompt from a file
 Get-Content task.md | reverie --prompt-stdin  # run a long prompt from stdin
 reverie -p "fix failing tests" --report-file artifacts/prompt_report.json
 reverie /path/to/project -p "add a health check" --mode reverie-atlas
+reverie setting status       # run a CLI command directly without entering the TUI
+reverie setting mode reverie # update configuration from one terminal command
 reverie --version            # print version
 ```
 
-`reverie --sdk-bridge` starts the long-lived JSONL SDK bridge used by Reverie UI.
-It is hidden from normal help output because it is intended for desktop hosts and
-tooling integrations, not interactive terminal use.
+`reverie -v` prints both the software version and the stable Core Interface version.
+Future desktop hosts should use the direct command surface plus the `.reverie`
+configuration directory instead of an embedded JSONL bridge.
 
 `--report-file` writes structured JSON for prompt runs, including the final output, activity events, UI events, and a harness report that summarizes tasks, checkpoints, command audit evidence, verification posture, and recent run-history trends. Prompt-mode runs now also persist lightweight harness snapshots in the project cache so `/doctor` can show score and verification drift over time.
 
@@ -169,7 +171,7 @@ cd ReverieCli-py
 ```
 
 `build.bat` runs from `ReverieCli-py` and writes the Python PyInstaller executable to the repository-root `dist\reverie.exe`.
-GitHub Actions builds that Python PyInstaller executable as the primary `dist\reverie.exe`, runs the same release job on a daily schedule, and refreshes the rolling `latest` release assets used by Reverie UI's auto-download fallback.
+GitHub Actions builds that Python PyInstaller executable as the primary `dist\reverie.exe`, runs the same release job on a daily schedule, and refreshes the rolling `latest` release assets.
 
 The packaged `dist/reverie.exe` now includes the built-in Reverie-Gamer runtime flows in one file, including `/engine video`, `/engine renpy`, `/modeling primitive`, and `/blender`. `build.bat` installs the Blender, Godot, O3DE, and Game Models runtime plugins into `dist/.reverie/plugins/`: Blender can unpack its portable runtime when the build input zip is present and can prepare plugin-local MMD Tools for PMD/PMX/VMD/VPD import, Godot can discover/download official GitHub releases or clone source, O3DE can clone source plus write a plugin-local SDK manifest, and Game Models can prepare a plugin-local venv plus selectable HuggingFace model snapshots such as TRELLIS `low_vram` for local asset assistance. If `ffmpeg` is available during build, `build.bat` bundles it into the executable so `mp4` and `gif` export work without a separate system install. If not, frame-sequence export still works and encoded video falls back to an external `ffmpeg` at runtime.
 

@@ -328,7 +328,7 @@ def test_task_drawer_prefers_markdown_over_stale_json(tmp_path: Path) -> None:
     artifacts_dir = tmp_path / "artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
     json_path = artifacts_dir / "task_list.json"
-    markdown_path = artifacts_dir / "Tasks.md"
+    markdown_path = artifacts_dir / "task.md"
     json_path.write_text(
         json.dumps(
             {
@@ -365,7 +365,7 @@ def test_task_manager_updates_by_exact_name_and_syncs_checklist(tmp_path: Path) 
     updated = tool.execute(action="update", target="Add DB schema", status="done")
 
     assert updated.success is True
-    checklist = (tmp_path / "artifacts" / "Tasks.md").read_text(encoding="utf-8")
+    checklist = (tmp_path / "artifacts" / "task.md").read_text(encoding="utf-8")
     assert "[x] Add DB schema" in checklist
     assert "[ ] Add repository tests" in checklist
     assert not (tmp_path / "artifacts" / "task_list.json").exists()
@@ -405,7 +405,7 @@ def test_task_manager_imports_legacy_json_then_saves_markdown_only(tmp_path: Pat
     result = tool.execute(action="list")
 
     assert result.success is True
-    checklist = (artifacts_dir / "Tasks.md").read_text(encoding="utf-8")
+    checklist = (artifacts_dir / "task.md").read_text(encoding="utf-8")
     assert "[/] Migrate task persistence" in checklist
     assert "  [x] Keep checklist editable" in checklist
     assert not legacy_json.exists()
@@ -414,23 +414,23 @@ def test_task_manager_imports_legacy_json_then_saves_markdown_only(tmp_path: Pat
 def test_completed_task_artifact_cleanup_removes_finished_checklists(tmp_path: Path) -> None:
     artifacts_dir = tmp_path / "artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
-    canonical = artifacts_dir / "Tasks.md"
-    atlas = artifacts_dir / "task.md"
+    canonical = artifacts_dir / "task.md"
+    legacy = artifacts_dir / "Tasks.md"
     canonical.write_text("[x] Add task cleanup\n  [X] Verify cleanup\n", encoding="utf-8")
-    atlas.write_text("Main task\n\nSubgoal 1\n[x]Finish Atlas slice\n", encoding="utf-8")
+    legacy.write_text("[x]Finish legacy slice\n", encoding="utf-8")
 
     deleted = cleanup_completed_task_artifacts(tmp_path)
 
     assert set(path.name for path in deleted) == {"Tasks.md", "task.md"}
     assert not canonical.exists()
-    assert not atlas.exists()
+    assert not legacy.exists()
 
 
 def test_completed_task_artifact_cleanup_keeps_incomplete_checklists(tmp_path: Path) -> None:
     artifacts_dir = tmp_path / "artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
-    canonical = artifacts_dir / "Tasks.md"
-    atlas = artifacts_dir / "task.md"
+    canonical = artifacts_dir / "task.md"
+    atlas = artifacts_dir / "Tasks.md"
     canonical.write_text("[x] Add task cleanup\n[ ] Verify cleanup\n", encoding="utf-8")
     atlas.write_text("Main task\n\nSubgoal 1\n[x]Finish slice\n[/]Run validation\n", encoding="utf-8")
 

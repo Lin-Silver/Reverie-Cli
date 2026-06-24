@@ -214,6 +214,9 @@ def test_config_manager_creates_default_config_file_for_manual_editing(tmp_path:
     assert config.text_to_video["agnes"]["default_model"] == "agnes-video-v2.0"
     assert config.aihubmix["selected_model_id"] == "gpt-5.5-free"
     assert config.agnes["selected_model_id"] == "agnes-2.0-flash"
+    assert config.sensenova["selected_model_id"] == "deepseek-v4-flash"
+    assert config.sensenova["max_context_tokens"] == 1_000_000
+    assert config.sensenova["reasoning_effort"] == "medium"
     assert config.modelscope["selected_model_id"] == "ZhipuAI/GLM-5.1"
     saved_payload = json.loads(config_path.read_text(encoding="utf-8"))
     assert saved_payload["tool_output_style"] == "compact"
@@ -226,6 +229,9 @@ def test_config_manager_creates_default_config_file_for_manual_editing(tmp_path:
     assert saved_payload["text_to_video"]["agnes"]["default_model"] == "agnes-video-v2.0"
     assert saved_payload["aihubmix"]["selected_model_id"] == "gpt-5.5-free"
     assert saved_payload["agnes"]["selected_model_id"] == "agnes-2.0-flash"
+    assert saved_payload["sensenova"]["selected_model_id"] == "deepseek-v4-flash"
+    assert saved_payload["sensenova"]["max_context_tokens"] == 1_000_000
+    assert saved_payload["sensenova"]["reasoning_effort"] == "medium"
     assert saved_payload["modelscope"]["selected_model_id"] == "ZhipuAI/GLM-5.1"
     assert notice is not None
     assert notice["title"] == "Created default config"

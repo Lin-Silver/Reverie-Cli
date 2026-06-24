@@ -34,12 +34,17 @@ from ..nvidia import (
     build_nvidia_openai_options,
     get_nvidia_model_metadata,
     is_nvidia_api_url,
+    is_nvidia_model,
     nvidia_model_allows_tools,
     nvidia_model_requires_system_message_first,
 )
 from ..aihubmix import build_aihubmix_openai_options
 from ..agnes import build_agnes_openai_options
 from ..modelscope import build_modelscope_anthropic_options
+from ..unlimitedsurf import (
+    build_unlimitedsurf_chat_payload,
+    parse_unlimitedsurf_stream_event,
+)
 from ..webgemini import (
     generate_webgemini_message,
     iter_webgemini_text_deltas,
@@ -2083,6 +2088,14 @@ class ReverieAgent:
             except Exception:
                 return timeout_value
 
+        if self._is_active_model_source("unlimitedsurf") and self.provider == "request":
+            try:
+                cfg = getattr(config, "unlimitedsurf", {})
+                if isinstance(cfg, dict):
+                    return max(timeout_value, int(cfg.get("timeout", timeout_value)))
+            except Exception:
+                return timeout_value
+
         return timeout_value
 
     def _build_request_headers(self, stream: bool) -> Dict[str, str]:
@@ -2107,6 +2120,15 @@ class ReverieAgent:
 
         if self._openai_request_fallback_active:
             return prepared
+
+        if self._is_active_model_source("unlimitedsurf"):
+            cfg = getattr(self.config, "unlimitedsurf", {}) if self.config else {}
+            effort = cfg.get("effort", self.thinking_mode) if isinstance(cfg, dict) else self.thinking_mode
+            return build_unlimitedsurf_chat_payload(
+                messages=prepared.get("messages", []),
+                model_id=prepared.get("model", self.model),
+                effort=effort,
+            )
 
         if self._is_nvidia_request():
             prepared = apply_nvidia_request_defaults(prepared, getattr(self.config, "nvidia", {}))
@@ -2275,6 +2297,9 @@ class ReverieAgent:
         ) and not nvidia_model_allows_tools(self.model):
             return []
 
+        if self._is_active_model_source("unlimitedsurf"):
+            return []
+
         return schemas
 
     def _resolve_messages_for_request(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -2301,21 +2326,21 @@ class ReverieAgent:
         model_for_sdk = self.model
         prepared_messages = list(messages or [])
         
-        nvidia_options: Dict[str, Any] = {}
+        provider_options: Dict[str, Any] = {}
         extra_body: Optional[Dict[str, Any]] = None
         
         if self._is_active_model_source("nvidia"):
-            nvidia_options = build_nvidia_openai_options(getattr(self.config, "nvidia", {}), model_for_sdk)
-            if nvidia_options:
-                option_model = str(nvidia_options.get("model", "") or "").strip()
+            provider_options = build_nvidia_openai_options(getattr(self.config, "nvidia", {}), model_for_sdk)
+            if provider_options:
+                option_model = str(provider_options.get("model", "") or "").strip()
                 if option_model:
                     model_for_sdk = option_model
-                extra_body = nvidia_options.get("extra_body")
+                extra_body = provider_options.get("extra_body")
         elif self._is_active_model_source("aihubmix"):
-            nvidia_options = build_aihubmix_openai_options(getattr(self.config, "aihubmix", {}), model_for_sdk)
+            provider_options = build_aihubmix_openai_options(getattr(self.config, "aihubmix", {}), model_for_sdk)
         elif self._is_active_model_source("agnes"):
-            nvidia_options = build_agnes_openai_options(getattr(self.config, "agnes", {}), model_for_sdk)
-            extra_body = nvidia_options.get("extra_body")
+            provider_options = build_agnes_openai_options(getattr(self.config, "agnes", {}), model_for_sdk)
+            extra_body = provider_options.get("extra_body")
         else:
             extra_body = self._openai_extra_body_for_thinking()
             if extra_body is not None and isinstance(model_for_sdk, str) and "(" in model_for_sdk and ")" in model_for_sdk:
@@ -2326,8 +2351,8 @@ class ReverieAgent:
         elif prepared_messages:
             prepared_messages = _coalesce_system_messages_to_front(prepared_messages)
         if self._is_active_model_source("nvidia"):
-            nvidia_options = self._clamp_nvidia_options_for_messages(
-                nvidia_options,
+            provider_options = self._clamp_nvidia_options_for_messages(
+                provider_options,
                 model_id=model_for_sdk,
                 messages=prepared_messages,
                 tools=tools if tools else None,
@@ -2345,10 +2370,10 @@ class ReverieAgent:
             kwargs["extra_body"] = extra_body
         
         # Add provider-specific OpenAI-compatible options.
-        if nvidia_options:
+        if provider_options:
             for key in ("temperature", "top_p", "max_tokens"):
-                if key in nvidia_options:
-                    kwargs[key] = nvidia_options[key]
+                if key in provider_options:
+                    kwargs[key] = provider_options[key]
         
         return kwargs
 
@@ -2473,6 +2498,8 @@ class ReverieAgent:
         """Return a user-facing provider label for request-provider errors."""
         if self._is_nvidia_request():
             return "NVIDIA API"
+        if self._is_active_model_source("unlimitedsurf"):
+            return "unlimited.surf API"
         return "Request provider"
 
     def _resolve_anthropic_max_tokens(self) -> int:
@@ -2664,6 +2691,13 @@ class ReverieAgent:
         provider_label: str,
     ) -> Generator[Dict[str, Any], None, None]:
         """Translate OpenAI-compatible SSE chunks into normalized events."""
+        if self._is_active_model_source("unlimitedsurf"):
+            for data_str in self._iter_sse_data_strings(response):
+                event = parse_unlimitedsurf_stream_event(data_str)
+                if event:
+                    yield event
+            return
+
         for data_str in self._iter_sse_data_strings(response):
             try:
                 chunk_data = json.loads(data_str)
@@ -3062,13 +3096,34 @@ class ReverieAgent:
                             arguments=str(fn.get("arguments", "") or "{}"),
                         )
                     state.set_finish_reason("tool_calls" if tool_calls else "stop")
+                    if not text and not tool_calls:
+                        raise ValueError(
+                            "WebGemini returned an empty response. Check network/proxy access to gemini.google.com, "
+                            "or configure a Gemini cookie/XSRF token if upstream now requires authentication."
+                        )
                 else:
+                    saw_delta = False
                     for delta in iter_webgemini_text_deltas(
                         messages=messages,
                         model=self.model,
                         webgemini_config={**cfg, "timeout": effective_timeout},
                     ):
+                        if str(delta or "").strip():
+                            saw_delta = True
                         yield from self._apply_stream_event(state, {"type": "content", "text": delta})
+                    if not saw_delta:
+                        text, _ = generate_webgemini_message(
+                            messages=messages,
+                            model=self.model,
+                            webgemini_config={**cfg, "timeout": effective_timeout},
+                            tools=None,
+                        )
+                        if not text:
+                            raise ValueError(
+                                "WebGemini returned an empty response. Check network/proxy access to gemini.google.com, "
+                                "or configure a Gemini cookie/XSRF token if upstream now requires authentication."
+                            )
+                        yield from self._apply_stream_event(state, {"type": "content", "text": text})
                     state.set_finish_reason("stop")
             except Exception as exc:
                 if _should_recover_partial_stream_error(state, exc):
@@ -3112,6 +3167,8 @@ class ReverieAgent:
         chunks: List[str] = []
         for chunk in self._process_streaming_webgemini(session_id=session_id):
             if chunk in (THINKING_START_MARKER, THINKING_END_MARKER):
+                continue
+            if decode_stream_event(chunk) is not None:
                 continue
             chunks.append(chunk)
         return "".join(chunks)
@@ -3433,30 +3490,30 @@ class ReverieAgent:
             messages = self._build_messages(resolve_local_images=True)
             effective_timeout = self._resolve_provider_timeout()
             # For OpenAI-compatible SDK calls, include thinking flags via extra_body when applicable
-            nvidia_options: Dict[str, Any] = {}
+            provider_options: Dict[str, Any] = {}
             model_for_sdk = self.model
             if self._is_active_model_source("nvidia"):
-                nvidia_options = build_nvidia_openai_options(
+                provider_options = build_nvidia_openai_options(
                     getattr(self.config, "nvidia", {}),
                     model_for_sdk,
                 )
-                option_model = str(nvidia_options.get("model", "") or "").strip()
+                option_model = str(provider_options.get("model", "") or "").strip()
                 if option_model:
                     model_for_sdk = option_model
                 # For NVIDIA models, use NVIDIA-specific extra_body (don't merge with generic thinking)
-                extra_body = nvidia_options.get("extra_body")
+                extra_body = provider_options.get("extra_body")
             elif self._is_active_model_source("aihubmix"):
-                nvidia_options = build_aihubmix_openai_options(
+                provider_options = build_aihubmix_openai_options(
                     getattr(self.config, "aihubmix", {}),
                     model_for_sdk,
                 )
                 extra_body = None
             elif self._is_active_model_source("agnes"):
-                nvidia_options = build_agnes_openai_options(
+                provider_options = build_agnes_openai_options(
                     getattr(self.config, "agnes", {}),
                     model_for_sdk,
                 )
-                extra_body = nvidia_options.get("extra_body")
+                extra_body = provider_options.get("extra_body")
             else:
                 extra_body = self._openai_extra_body_for_thinking()
             if extra_body is not None and isinstance(model_for_sdk, str) and "(" in model_for_sdk and ")" in model_for_sdk:
@@ -3467,8 +3524,8 @@ class ReverieAgent:
             elif messages:
                 messages = _coalesce_system_messages_to_front(messages)
             if self._is_active_model_source("nvidia"):
-                nvidia_options = self._clamp_nvidia_options_for_messages(
-                    nvidia_options,
+                provider_options = self._clamp_nvidia_options_for_messages(
+                    provider_options,
                     model_id=model_for_sdk,
                     messages=messages,
                     tools=tools if tools else None,
@@ -3490,9 +3547,9 @@ class ReverieAgent:
                     **{
                         key: value
                         for key, value in {
-                            "temperature": nvidia_options.get("temperature"),
-                            "top_p": nvidia_options.get("top_p"),
-                            "max_tokens": nvidia_options.get("max_tokens"),
+                            "temperature": provider_options.get("temperature"),
+                            "top_p": provider_options.get("top_p"),
+                            "max_tokens": provider_options.get("max_tokens"),
                         }.items()
                         if value is not None
                     },
@@ -3507,9 +3564,9 @@ class ReverieAgent:
                     **{
                         key: value
                         for key, value in {
-                            "temperature": nvidia_options.get("temperature"),
-                            "top_p": nvidia_options.get("top_p"),
-                            "max_tokens": nvidia_options.get("max_tokens"),
+                            "temperature": provider_options.get("temperature"),
+                            "top_p": provider_options.get("top_p"),
+                            "max_tokens": provider_options.get("max_tokens"),
                         }.items()
                         if value is not None
                     },
@@ -3786,30 +3843,30 @@ class ReverieAgent:
             messages = self._build_messages(resolve_local_images=True)
             effective_timeout = self._resolve_provider_timeout()
             # For OpenAI-compatible SDK calls, include thinking flags via extra_body when applicable
-            nvidia_options: Dict[str, Any] = {}
+            provider_options: Dict[str, Any] = {}
             model_for_sdk = self.model
             if self._is_active_model_source("nvidia"):
-                nvidia_options = build_nvidia_openai_options(
+                provider_options = build_nvidia_openai_options(
                     getattr(self.config, "nvidia", {}),
                     model_for_sdk,
                 )
-                option_model = str(nvidia_options.get("model", "") or "").strip()
+                option_model = str(provider_options.get("model", "") or "").strip()
                 if option_model:
                     model_for_sdk = option_model
                 # For NVIDIA models, use NVIDIA-specific extra_body (don't merge with generic thinking)
-                extra_body = nvidia_options.get("extra_body")
+                extra_body = provider_options.get("extra_body")
             elif self._is_active_model_source("aihubmix"):
-                nvidia_options = build_aihubmix_openai_options(
+                provider_options = build_aihubmix_openai_options(
                     getattr(self.config, "aihubmix", {}),
                     model_for_sdk,
                 )
                 extra_body = None
             elif self._is_active_model_source("agnes"):
-                nvidia_options = build_agnes_openai_options(
+                provider_options = build_agnes_openai_options(
                     getattr(self.config, "agnes", {}),
                     model_for_sdk,
                 )
-                extra_body = nvidia_options.get("extra_body")
+                extra_body = provider_options.get("extra_body")
             else:
                 extra_body = self._openai_extra_body_for_thinking()
             if extra_body is not None and isinstance(model_for_sdk, str) and "(" in model_for_sdk and ")" in model_for_sdk:
@@ -3820,8 +3877,8 @@ class ReverieAgent:
             elif messages:
                 messages = _coalesce_system_messages_to_front(messages)
             if self._is_active_model_source("nvidia"):
-                nvidia_options = self._clamp_nvidia_options_for_messages(
-                    nvidia_options,
+                provider_options = self._clamp_nvidia_options_for_messages(
+                    provider_options,
                     model_id=model_for_sdk,
                     messages=messages,
                     tools=tools if tools else None,
@@ -3844,9 +3901,9 @@ class ReverieAgent:
                     **{
                         key: value
                         for key, value in {
-                            "temperature": nvidia_options.get("temperature"),
-                            "top_p": nvidia_options.get("top_p"),
-                            "max_tokens": nvidia_options.get("max_tokens"),
+                            "temperature": provider_options.get("temperature"),
+                            "top_p": provider_options.get("top_p"),
+                            "max_tokens": provider_options.get("max_tokens"),
                         }.items()
                         if value is not None
                     },
@@ -3861,9 +3918,9 @@ class ReverieAgent:
                     **{
                         key: value
                         for key, value in {
-                            "temperature": nvidia_options.get("temperature"),
-                            "top_p": nvidia_options.get("top_p"),
-                            "max_tokens": nvidia_options.get("max_tokens"),
+                            "temperature": provider_options.get("temperature"),
+                            "top_p": provider_options.get("top_p"),
+                            "max_tokens": provider_options.get("max_tokens"),
                         }.items()
                         if value is not None
                     },
@@ -4018,6 +4075,13 @@ class ReverieAgent:
     
     def _process_non_streaming_request(self, session_id: str = "default") -> str:
         """Process without streaming using requests library"""
+        if self._is_active_model_source("unlimitedsurf"):
+            chunks: List[str] = []
+            for chunk in self._process_streaming_request(session_id=session_id):
+                if decode_stream_event(chunk) is None:
+                    chunks.append(chunk)
+            return "".join(chunks)
+
         import requests
         
         tools = self.get_visible_tool_schemas()

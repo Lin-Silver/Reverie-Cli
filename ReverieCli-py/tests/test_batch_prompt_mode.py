@@ -3,7 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from reverie.agent.agent import THINKING_END_MARKER, THINKING_START_MARKER
-from reverie.__main__ import _decode_prompt_bytes, _resolve_prompt_text
+from reverie.__main__ import _decode_prompt_bytes, _resolve_prompt_text, main
 from reverie.cli.interface import PromptRunResult, ReverieInterface, _sanitize_prompt_output_text
 from reverie.config import Config, ModelConfig
 
@@ -232,6 +232,15 @@ def test_prompt_at_file_shorthand_reads_multiline_text(tmp_path: Path, monkeypat
 
     assert _resolve_prompt_text(args, tmp_path) == prompt_text
     assert _decode_prompt_bytes(prompt_text.encode("utf-8")) == prompt_text
+
+
+def test_version_output_includes_core_interface(capsys) -> None:
+    assert main(["-v"]) == 0
+
+    output = capsys.readouterr().out
+    assert "Reverie Cli v" in output
+    assert "Core Interface v1.0" in output
+    assert "Kernel: python" in output
 
 
 def test_sanitize_prompt_output_text_removes_leaked_thinking():

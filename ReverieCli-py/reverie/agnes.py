@@ -18,7 +18,7 @@ AGNES_DEFAULT_MAX_TOKENS = 65_536
 AGNES_PRO_MAX_TOKENS = 256_000
 AGNES_DEFAULT_TEMPERATURE = 0.7
 AGNES_DEFAULT_TOP_P = 1.0
-AGNES_DEFAULT_THINKING_MODE = "medium"
+AGNES_DEFAULT_THINKING_MODE = "low"
 AGNES_THINKING_BUDGETS = {
     "low": 1024,
     "medium": 4096,
@@ -33,7 +33,7 @@ AGNES_THINKING_LABELS = {
 AGNES_THINKING_DESCRIPTIONS = {
     "none": "Disable Agnes thinking for lower latency.",
     "low": "Use a small thinking budget for straightforward prompts.",
-    "medium": "Use the provider-recommended thinking budget for coding and reasoning.",
+    "medium": "Use the provider-recommended thinking budget for heavier coding and reasoning.",
     "high": "Use a larger thinking budget for complex coding, debugging, and agent tasks.",
 }
 

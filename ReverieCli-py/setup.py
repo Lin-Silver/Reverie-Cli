@@ -42,6 +42,7 @@ setup(
         
         # HTTP and API
         "requests>=2.31.0",
+        "httpx>=0.25.0",
         "openai>=1.20.0",
         "anthropic>=0.40.0",
 

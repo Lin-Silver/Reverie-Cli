@@ -367,7 +367,9 @@ def test_nvidia_catalog_contains_deepseek_v4_models_with_effort_control():
         assert metadata["max_output_tokens"] == 262144
         assert metadata["thinking"] is True
         assert metadata["thinking_control"] == "effort"
-        assert [item["id"] for item in metadata["thinking_options"]] == ["high", "max", "none"]
+    assert [item["id"] for item in catalog_by_id["deepseek-ai/deepseek-v4-pro"]["thinking_options"]] == ["high", "max", "none"]
+    assert [item["id"] for item in catalog_by_id["deepseek-ai/deepseek-v4-flash"]["thinking_options"]] == ["none", "low", "medium", "high"]
+    assert catalog_by_id["deepseek-ai/deepseek-v4-flash"]["default_thinking_choice"] == "medium"
 
 
 def test_nvidia_reasoning_effort_defaults_to_high_and_normalizes_aliases():
@@ -399,9 +401,13 @@ def test_nvidia_openai_options_for_deepseek_v4_default_to_high_reasoning():
     }
 
 
-def test_nvidia_openai_options_for_deepseek_v4_can_select_high_or_non_think():
-    high = build_nvidia_openai_options(
-        {"selected_model_id": "deepseek-ai/deepseek-v4-flash", "reasoning_effort": "high"},
+def test_nvidia_openai_options_for_deepseek_v4_flash_uses_four_choice_reasoning():
+    medium = build_nvidia_openai_options(
+        {"selected_model_id": "deepseek-ai/deepseek-v4-flash"},
+        "deepseek-ai/deepseek-v4-flash",
+    )
+    low = build_nvidia_openai_options(
+        {"selected_model_id": "deepseek-ai/deepseek-v4-flash", "reasoning_effort": "low"},
         "deepseek-ai/deepseek-v4-flash",
     )
     off = build_nvidia_openai_options(
@@ -409,10 +415,16 @@ def test_nvidia_openai_options_for_deepseek_v4_can_select_high_or_non_think():
         "deepseek-ai/deepseek-v4-flash",
     )
 
-    assert high["extra_body"] == {
+    assert medium["extra_body"] == {
         "chat_template_kwargs": {
             "thinking": True,
-            "reasoning_effort": "high",
+            "reasoning_effort": "medium",
+        }
+    }
+    assert low["extra_body"] == {
+        "chat_template_kwargs": {
+            "thinking": True,
+            "reasoning_effort": "low",
         }
     }
     assert off["extra_body"] == {"chat_template_kwargs": {"thinking": False}}

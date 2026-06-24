@@ -118,7 +118,7 @@ def test_agnes_openai_options_match_provider_defaults() -> None:
         "temperature": 0.7,
         "top_p": 1.0,
         "max_tokens": 65536,
-        "extra_body": {"thinking": {"type": "enabled", "budget_tokens": 4096}},
+        "extra_body": {"thinking": {"type": "enabled", "budget_tokens": 1024}},
     }
 
 

@@ -1349,7 +1349,7 @@ def test_doctor_command_renders_harness_audit(tmp_path: Path, monkeypatch) -> No
     project_root = tmp_path / "project"
     project_root.mkdir(parents=True, exist_ok=True)
     (project_root / "artifacts").mkdir(parents=True, exist_ok=True)
-    (project_root / "artifacts" / "Tasks.md").write_text("[/] Audit harness\n[x] Add report\n", encoding="utf-8")
+    (project_root / "artifacts" / "task.md").write_text("[/] Audit harness\n[x] Add report\n", encoding="utf-8")
 
     monkeypatch.setattr("reverie.config.get_app_root", lambda: app_root)
     monkeypatch.setattr("reverie.config.get_launcher_root", lambda: app_root)
@@ -1434,7 +1434,7 @@ def test_harness_capability_report_uses_goal_to_recovery_layers(tmp_path: Path, 
     project_root.mkdir(parents=True, exist_ok=True)
     artifacts_dir = project_root / "artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
-    (artifacts_dir / "Tasks.md").write_text("[/] Audit harness\n[x] Add report\n", encoding="utf-8")
+    (artifacts_dir / "task.md").write_text("[/] Audit harness\n[x] Add report\n", encoding="utf-8")
 
     monkeypatch.setattr("reverie.config.get_app_root", lambda: app_root)
     monkeypatch.setattr("reverie.config.get_launcher_root", lambda: app_root)
@@ -1478,7 +1478,7 @@ def test_harness_prompt_guidance_mentions_task_ledger_and_recovery(tmp_path: Pat
     project_root.mkdir(parents=True, exist_ok=True)
     artifacts_dir = project_root / "artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
-    (artifacts_dir / "Tasks.md").write_text("[/] Audit harness\n[ ] Tighten recovery loop\n", encoding="utf-8")
+    (artifacts_dir / "task.md").write_text("[/] Audit harness\n[ ] Tighten recovery loop\n", encoding="utf-8")
 
     monkeypatch.setattr("reverie.config.get_app_root", lambda: app_root)
     monkeypatch.setattr("reverie.config.get_launcher_root", lambda: app_root)

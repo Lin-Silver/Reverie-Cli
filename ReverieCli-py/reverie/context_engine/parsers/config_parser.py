@@ -101,7 +101,7 @@ class ConfigParser(BaseParser):
         """Parse YAML configuration"""
         try:
             import yaml
-            data = yaml.safe_load(content)
+            data = yaml.load(content, Loader=yaml.BaseLoader)
             if isinstance(data, dict):
                 self._extract_from_dict(data, result, prefix="")
         except ImportError:
@@ -175,7 +175,8 @@ class ConfigParser(BaseParser):
         parent: Optional[str] = None
     ) -> None:
         """Recursively extract configuration from dictionary"""
-        for key, value in data.items():
+        for raw_key, value in data.items():
+            key = str(raw_key)
             qname = f"{self._module_name}.{prefix}{key}" if prefix else f"{self._module_name}.{key}"
             
             # Find line number

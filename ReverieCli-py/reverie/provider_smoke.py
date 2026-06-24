@@ -42,6 +42,12 @@ from .nvidia import (
     normalize_nvidia_config,
     resolve_nvidia_request_url,
 )
+from .unlimitedsurf import (
+    build_unlimitedsurf_chat_payload,
+    build_unlimitedsurf_runtime_model_data,
+    normalize_unlimitedsurf_config,
+    parse_unlimitedsurf_stream_event,
+)
 from .webgemini import (
     build_webgemini_runtime_model_data,
     iter_webgemini_text_deltas,
@@ -49,7 +55,7 @@ from .webgemini import (
 )
 
 
-BUILTIN_PROVIDER_NAMES = ("aihubmix", "agnes", "modelscope", "nvidia", "codex", "webgemini")
+BUILTIN_PROVIDER_NAMES = ("aihubmix", "agnes", "modelscope", "nvidia", "codex", "webgemini", "unlimitedsurf")
 
 
 @dataclass
@@ -71,6 +77,7 @@ def _redact(text: Any) -> str:
         r"(?i)\b(sk-[A-Za-z0-9_\-]{12,})\b",
         r"(?i)\b(ms-[A-Za-z0-9_\-]{12,})\b",
         r"(?i)\b(nvapi-[A-Za-z0-9_\-]{12,})\b",
+        r"(?i)\b(ua__[A-Za-z0-9_\-]{12,})\b",
         r"(?i)\b(gh[pousr]_[A-Za-z0-9_]{16,})\b",
         r"(?i)(api[_-]?key|token|secret|password)\s*[:=]\s*['\"]?[^'\"\s,;]{8,}",
         r"(?i)(Bearer\s+)[A-Za-z0-9._\-]{12,}",
@@ -286,7 +293,6 @@ def smoke_agnes(config: Config, timeout_seconds: int = 45, model_id: str = "") -
         if stream is not None and hasattr(stream, "close"):
             stream.close()
 
-
 def smoke_nvidia(config: Config, timeout_seconds: int = 45, model_id: str = "") -> ProviderSmokeResult:
     provider = "nvidia"
     cfg = normalize_nvidia_config(config.nvidia)
@@ -358,6 +364,50 @@ def smoke_nvidia(config: Config, timeout_seconds: int = 45, model_id: str = "") 
             response.close()
 
 
+def smoke_unlimitedsurf(config: Config, timeout_seconds: int = 45, model_id: str = "") -> ProviderSmokeResult:
+    provider = "unlimitedsurf"
+    cfg = normalize_unlimitedsurf_config(config.unlimitedsurf)
+    if model_id:
+        cfg["selected_model_id"] = str(model_id or "").strip()
+        cfg = normalize_unlimitedsurf_config(cfg)
+    runtime = build_unlimitedsurf_runtime_model_data(cfg)
+    model = str((runtime or {}).get("model") or cfg.get("selected_model_id") or "")
+    if not runtime or not runtime.get("api_key"):
+        return _skipped(provider, model, "missing_credentials")
+
+    start = time.perf_counter()
+    response = None
+    try:
+        response = _requests_post_stream(
+            runtime["base_url"],
+            {
+                "Authorization": f"Bearer {runtime['api_key']}",
+                "Content-Type": "application/json",
+                "Accept": "text/event-stream",
+            },
+            build_unlimitedsurf_chat_payload(
+                messages=[{"role": "user", "content": "Reply with OK."}],
+                model_id=model,
+                effort=cfg.get("effort", "medium"),
+            ),
+            timeout_seconds=timeout_seconds,
+        )
+        saw_text = False
+        for data_str in _iter_sse_data_strings(response):
+            event = parse_unlimitedsurf_stream_event(data_str)
+            if event and event.get("type") == "content" and str(event.get("text") or "").strip():
+                saw_text = True
+                break
+        if not saw_text:
+            raise RuntimeError("unlimited.surf returned no text delta")
+        return ProviderSmokeResult(provider=provider, model=model, status="ok", latency_ms=int((time.perf_counter() - start) * 1000))
+    except Exception as exc:
+        return _result_from_error(provider, model, start, exc)
+    finally:
+        if response is not None:
+            response.close()
+
+
 def smoke_codex(config: Config, timeout_seconds: int = 60, model_id: str = "") -> ProviderSmokeResult:
     provider = "codex"
     cfg = normalize_codex_config(config.codex)
@@ -416,13 +466,17 @@ def smoke_webgemini(config: Config, timeout_seconds: int = 60, model_id: str = "
 
     start = time.perf_counter()
     try:
+        saw_text = False
         for text in iter_webgemini_text_deltas(
             messages=[{"role": "user", "content": "Reply with OK."}],
             model=model,
             webgemini_config={**cfg, "timeout": timeout_seconds},
         ):
             if str(text or "").strip():
+                saw_text = True
                 break
+        if not saw_text:
+            raise RuntimeError("WebGemini returned no text delta")
         return ProviderSmokeResult(provider=provider, model=model, status="ok", latency_ms=int((time.perf_counter() - start) * 1000))
     except Exception as exc:
         return _result_from_error(provider, model, start, exc)
@@ -435,6 +489,7 @@ SMOKE_RUNNERS: Dict[str, Callable[[Config, int, str], ProviderSmokeResult]] = {
     "nvidia": smoke_nvidia,
     "codex": smoke_codex,
     "webgemini": smoke_webgemini,
+    "unlimitedsurf": smoke_unlimitedsurf,
 }
 
 

@@ -23,6 +23,7 @@ from collections import defaultdict
 
 from .symbol_table import Symbol, SymbolTable, SymbolKind
 from .dependency_graph import DependencyGraph, DependencyType
+from .fast_context import FastContextExplorer, FastContextResult
 from .workspace import WorkspaceProfile, detect_workspace_profile
 
 
@@ -360,6 +361,7 @@ class ContextRetriever:
         reason: str,
         score: float = 0.0,
         line: Optional[int] = None,
+        line_end: Optional[int] = None,
         detail: str = "",
     ) -> None:
         normalized = self._normalize_file_path(file_path)
@@ -370,6 +372,8 @@ class ContextRetriever:
         }
         if line is not None:
             item["line"] = int(line)
+        if line_end is not None:
+            item["line_end"] = int(line_end)
         if detail:
             item["detail"] = str(detail)[:300]
         bucket = evidence_by_file.setdefault(normalized, [])
@@ -433,6 +437,59 @@ class ContextRetriever:
                 }
             )
         return hits
+
+    def _run_fast_context_for_task(
+        self,
+        query: str,
+        term_weights: Dict[str, float],
+        anchors: Dict[str, List[str]],
+        *,
+        max_files: int,
+    ) -> FastContextResult:
+        """Run the FastContext read/glob/grep explorer for task retrieval."""
+        explorer = FastContextExplorer(self.project_root, file_info=self.file_info)
+        return explorer.explore(
+            query,
+            term_weights=term_weights,
+            anchors=anchors,
+            max_hits=max(24, max_files * 12),
+            max_files=max(8, max_files * 3),
+        )
+
+    def explore_fast_context(self, query: str, *, max_hits: int = 80, max_files: int = 20) -> FastContextResult:
+        """Expose FastContext exploration for the codebase-retrieval tool."""
+        query_text = str(query or "").strip()
+        return FastContextExplorer(self.project_root, file_info=self.file_info).explore(
+            query_text,
+            term_weights=self._build_task_term_weights(query_text),
+            anchors=self._extract_query_anchors(query_text),
+            max_hits=max_hits,
+            max_files=max_files,
+        )
+
+    @staticmethod
+    def _language_for_path(file_path: str) -> str:
+        suffix = Path(str(file_path or "")).suffix.lower()
+        return {
+            ".py": "python",
+            ".js": "javascript",
+            ".jsx": "javascript",
+            ".ts": "typescript",
+            ".tsx": "typescript",
+            ".rs": "rust",
+            ".go": "go",
+            ".java": "java",
+            ".cs": "csharp",
+            ".cpp": "cpp",
+            ".c": "c",
+            ".h": "c",
+            ".hpp": "cpp",
+            ".md": "markdown",
+            ".json": "json",
+            ".yaml": "yaml",
+            ".yml": "yaml",
+            ".toml": "toml",
+        }.get(suffix, suffix.lstrip(".") or "text")
 
     def _run_fts_for_task(self, term_weights: Dict[str, float], limit: int = 40) -> List[Dict[str, Any]]:
         """Build a small in-memory FTS index from cached summaries and keywords."""
@@ -933,6 +990,7 @@ class ContextRetriever:
                     normalized_changed_files.add(self._normalize_file_path(path))
 
         evidence_by_file: Dict[str, List[Dict[str, Any]]] = {}
+        fast_context_result: Optional[FastContextResult] = None
         for path in normalized_active_files:
             self._merge_file_evidence(evidence_by_file, path, source="activity", reason="active_file", score=2.2)
         for path in normalized_changed_files:
@@ -1000,6 +1058,58 @@ class ContextRetriever:
                 query_text=query_text,
                 anchor_file_terms=anchor_file_terms,
             )
+            if candidate:
+                file_candidates.append(candidate)
+                seen_file_candidates.add(file_path)
+
+        try:
+            fast_context_result = self._run_fast_context_for_task(
+                query_text,
+                term_weights,
+                anchors,
+                max_files=max_files,
+            )
+        except Exception:
+            fast_context_result = None
+
+        for hit in (fast_context_result.hits if fast_context_result else []):
+            file_path = self._normalize_file_path(hit.file_path)
+            if not file_path:
+                continue
+            self._merge_file_evidence(
+                evidence_by_file,
+                file_path,
+                source=f"fastcontext:{hit.source}",
+                reason=hit.reason,
+                score=float(hit.score),
+                line=hit.line_start or None,
+                line_end=hit.line_end or None,
+                detail=hit.snippet,
+            )
+            if file_path in seen_file_candidates:
+                continue
+            info = self._get_file_info_record(file_path)
+            candidate = self._score_file_for_task(
+                file_path=file_path,
+                info=info,
+                term_weights=term_weights,
+                active_files=normalized_active_files,
+                changed_files=normalized_changed_files,
+                base_score=float(hit.score),
+                reason_override=f"fastcontext:{hit.source}",
+                query_text=query_text,
+                anchor_file_terms=anchor_file_terms,
+            )
+            if candidate is None and Path(file_path).is_file():
+                candidate = TaskContextFile(
+                    file_path=file_path,
+                    language=self._language_for_path(file_path),
+                    score=max(0.3, float(hit.score)),
+                    summary=f"FastContext {hit.source} evidence for {query_text[:80]}",
+                    reasons=[f"fastcontext:{hit.source}", hit.reason],
+                    top_symbols=[],
+                    tags=["fastcontext"],
+                )
             if candidate:
                 file_candidates.append(candidate)
                 seen_file_candidates.add(file_path)
@@ -1230,6 +1340,7 @@ class ContextRetriever:
                         if evidence.get("source")
                     }
                 ),
+                "fast_context": fast_context_result.to_dict() if fast_context_result else {},
             },
         )
         self._task_cache[cache_key] = (now, result)
@@ -1465,7 +1576,11 @@ class ContextRetriever:
             for evidence in item.evidence[:4]:
                 line = f"  evidence: {evidence.get('source')}:{evidence.get('reason')}"
                 if evidence.get("line"):
-                    line += f":{evidence.get('line')}"
+                    line_end = evidence.get("line_end") or evidence.get("line")
+                    if line_end and line_end != evidence.get("line"):
+                        line += f":{evidence.get('line')}-{line_end}"
+                    else:
+                        line += f":{evidence.get('line')}"
                 if evidence.get("detail"):
                     line += f" :: {evidence.get('detail')}"
                 parts.append(line)

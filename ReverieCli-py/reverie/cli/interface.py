@@ -116,7 +116,7 @@ _TASK_COUNTER_FIELDS = ("NOT_STARTED", "IN_PROGRESS", "COMPLETED", "CANCELLED")
 def _task_artifact_paths(project_root: Path) -> tuple[Path, Path]:
     """Return the legacy JSON and canonical Markdown task artifact paths."""
     artifacts_dir = Path(project_root) / "artifacts"
-    return artifacts_dir / "task_list.json", artifacts_dir / "Tasks.md"
+    return artifacts_dir / "task_list.json", artifacts_dir / "task.md"
 
 
 def _load_task_entries_from_json(raw_data: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -204,6 +204,15 @@ def _load_task_drawer_snapshot(project_root: Path, max_visible: Optional[int] = 
         source_path = str(markdown_path)
         try:
             entries = _load_task_entries_from_markdown(markdown_path.read_text(encoding="utf-8"))
+        except Exception:
+            entries = []
+
+    legacy_markdown_path = markdown_path.parent / "Tasks.md"
+    if not entries and legacy_markdown_path.exists():
+        source = "markdown"
+        source_path = str(legacy_markdown_path)
+        try:
+            entries = _load_task_entries_from_markdown(legacy_markdown_path.read_text(encoding="utf-8"))
         except Exception:
             entries = []
 
@@ -1152,6 +1161,7 @@ class ReverieInterface:
             "codex": "/codex",
             "aihubmix": "/aihubmix key or /aihubmix activate",
             "agnes": "/agnes key or /agnes activate",
+            "unlimitedsurf": "/us key or /us activate",
             "nvidia": "/nvidia key or /nvidia activate",
             "modelscope": "/modelscope key or /modelscope activate",
             "webgemini": "/webgemini activate",
@@ -1242,6 +1252,7 @@ class ReverieInterface:
             "anthropic": "Anthropic",
             "codex": "Codex",
             "aihubmix": "AIhubMix",
+            "unlimitedsurf": "unlimited.surf",
             "nvidia": "NVIDIA",
             "modelscope": "ModelScope",
         }
@@ -1249,6 +1260,7 @@ class ReverieInterface:
             "standard": "config.json",
             "codex": "Codex",
             "aihubmix": "AIhubMix",
+            "unlimitedsurf": "unlimited.surf",
             "nvidia": "NVIDIA",
             "modelscope": "ModelScope",
         }

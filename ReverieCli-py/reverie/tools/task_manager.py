@@ -152,7 +152,7 @@ class TaskStore:
         """Configure persistence paths and load data."""
         artifacts_dir = project_root / ARTIFACTS_DIR_NAME
         self.file_path = artifacts_dir / "task_list.json"
-        self.markdown_path = artifacts_dir / "Tasks.md"
+        self.markdown_path = artifacts_dir / "task.md"
         self.load()
         
     def save(self):
@@ -175,12 +175,22 @@ class TaskStore:
         self.tasks = {}
         self.root_tasks = []
 
-        if self.markdown_path and self.markdown_path.exists():
-            try:
-                self._load_from_checklist(self.markdown_path.read_text(encoding="utf-8"))
-                return
-            except Exception as e:
-                print(f"Failed to load tasks markdown: {e}")
+        markdown_candidates = []
+        if self.markdown_path:
+            markdown_candidates.append(self.markdown_path)
+            legacy_markdown = self.markdown_path.parent / "Tasks.md"
+            if legacy_markdown != self.markdown_path:
+                markdown_candidates.append(legacy_markdown)
+
+        for markdown_path in markdown_candidates:
+            if markdown_path.exists():
+                try:
+                    self._load_from_checklist(markdown_path.read_text(encoding="utf-8"))
+                    if markdown_path != self.markdown_path:
+                        self.save()
+                    return
+                except Exception as e:
+                    print(f"Failed to load tasks markdown: {e}")
 
         if self.file_path and self.file_path.exists():
             try:
@@ -506,7 +516,7 @@ def cleanup_completed_task_artifacts(project_root: Path) -> List[Path]:
     artifacts_dir = Path(project_root) / ARTIFACTS_DIR_NAME
     deleted_paths: List[Path] = []
 
-    for path in (artifacts_dir / "Tasks.md", artifacts_dir / "task.md"):
+    for path in (artifacts_dir / "task.md", artifacts_dir / "Tasks.md"):
         if not path.exists() or not path.is_file():
             continue
         try:

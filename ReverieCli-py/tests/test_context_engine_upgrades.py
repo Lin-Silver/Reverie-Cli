@@ -3,12 +3,15 @@ import json
 
 from reverie.context_engine.compressor import ContextCompressor, MEMORY_BLOCK_HEADER
 from reverie.context_engine.dependency_graph import DependencyGraph
+from reverie.context_engine.fast_context import FastContextExplorer
 from reverie.context_engine.fragments import make_context_fragment, render_context_fragments
 from reverie.context_engine.indexer import FileInfo
+from reverie.context_engine.parsers.config_parser import ConfigParser
 from reverie.context_engine.retriever import ContextRetriever
 from reverie.context_engine.symbol_table import Symbol, SymbolKind, SymbolTable
 from reverie.context_engine.workspace import detect_workspace_profile
 from reverie.session.memory_indexer import MemoryIndexer
+from reverie.tools.codebase_retrieval import CodebaseRetrievalTool
 
 
 def test_task_context_prioritizes_file_and_symbol_anchors(tmp_path: Path) -> None:
@@ -125,6 +128,69 @@ def test_task_context_includes_workspace_instructions_and_evidence(tmp_path: Pat
     assert "index" in result.metadata["evidence_sources"]
 
 
+def test_fast_context_explorer_returns_line_citations(tmp_path: Path) -> None:
+    target = tmp_path / "src" / "settings.py"
+    target.parent.mkdir()
+    target.write_text(
+        "class SettingsStore:\n"
+        "    def save_config(self):\n"
+        "        return 'persist workspace settings quickly'\n",
+        encoding="utf-8",
+    )
+    file_info = {
+        str(target): FileInfo(
+            path=str(target),
+            mtime=1,
+            size=target.stat().st_size,
+            content_hash="a",
+            language="python",
+            symbol_names=["SettingsStore", "save_config"],
+            keywords=["settings", "config", "persist"],
+            tags=["config"],
+            summary="Settings persistence store",
+        )
+    }
+
+    result = FastContextExplorer(tmp_path, file_info=file_info).explore(
+        "Where is workspace settings persistence saved?",
+        term_weights={"settings": 1.0, "persistence": 0.8, "saved": 0.6},
+        max_hits=8,
+        max_files=4,
+    )
+
+    assert result.hits
+    assert any(Path(hit.file_path) == target and hit.line_start >= 1 for hit in result.hits)
+    assert "settings.py" in result.render_markdown()
+
+
+def test_codebase_retrieval_explore_exposes_fast_context(tmp_path: Path) -> None:
+    target = tmp_path / "src" / "context_engine.py"
+    target.parent.mkdir()
+    target.write_text("def fast_context_lookup():\n    return 'line evidence'\n", encoding="utf-8")
+    file_info = {
+        str(target): FileInfo(
+            path=str(target),
+            mtime=1,
+            size=target.stat().st_size,
+            content_hash="a",
+            language="python",
+            symbol_names=["fast_context_lookup"],
+            keywords=["fast", "context", "lookup"],
+            tags=["engine"],
+            summary="Fast context lookup helper",
+        )
+    }
+    retriever = ContextRetriever(SymbolTable(), DependencyGraph(), tmp_path, file_info=file_info)
+    tool = CodebaseRetrievalTool({"project_root": tmp_path, "retriever": retriever})
+
+    result = tool.execute(query_type="explore", query="fast context lookup", limit=8)
+
+    assert result.success is True
+    assert "FastContext Exploration" in result.output
+    assert result.data["hits"]
+    assert any("context_engine.py" in hit["file_path"] for hit in result.data["hits"])
+
+
 def test_workspace_profile_detects_nested_project_boundaries(tmp_path: Path) -> None:
     (tmp_path / "package.json").write_text("{}", encoding="utf-8")
     nested = tmp_path / "packages" / "api"
@@ -135,6 +201,24 @@ def test_workspace_profile_detects_nested_project_boundaries(tmp_path: Path) -> 
     kinds = {boundary.kind for boundary in profile.project_boundaries}
 
     assert {"node", "go"} <= kinds
+
+
+def test_config_parser_keeps_github_actions_on_key_as_string(tmp_path: Path) -> None:
+    workflow = tmp_path / ".github" / "workflows" / "tests.yaml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text(
+        "name: Tests\n"
+        "on:\n"
+        "  push:\n"
+        "    branches: [main]\n",
+        encoding="utf-8",
+    )
+
+    result = ConfigParser(tmp_path).parse_file(workflow)
+
+    assert not result.errors
+    assert any(symbol.name == "on" for symbol in result.symbols)
+    assert all(isinstance(symbol.name, str) for symbol in result.symbols)
 
 
 def test_compressor_uses_deterministic_fallback_when_provider_fails(tmp_path: Path) -> None:

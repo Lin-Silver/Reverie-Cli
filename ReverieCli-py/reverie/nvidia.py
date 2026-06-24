@@ -133,6 +133,12 @@ NVIDIA_REASONING_LOW_MEDIUM_HIGH_OPTIONS = (
     _thinking_option("medium", "Medium", "Balanced reasoning depth."),
     _thinking_option("high", "High", "Detailed step-by-step reasoning."),
 )
+NVIDIA_REASONING_NONE_LOW_MEDIUM_HIGH_OPTIONS = (
+    _thinking_option("none", "Non-think", "Disable reasoning tokens."),
+    _thinking_option("low", "Low", "Basic reasoning with lower latency."),
+    _thinking_option("medium", "Medium", "Balanced reasoning depth."),
+    _thinking_option("high", "High", "Detailed step-by-step reasoning."),
+)
 
 
 def _normalize_thinking_options(options: Any) -> List[Dict[str, str]]:
@@ -374,11 +380,11 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
     _openai_model(
         "deepseek-ai/deepseek-v4-flash",
         "DeepSeek V4 Flash",
-        "OpenAI SDK transport with 1M context and selectable Non-think/High/Max chat-template reasoning.",
+        "OpenAI SDK transport with 1M context and selectable none/low/medium/high reasoning_effort.",
         thinking=True,
         thinking_control="effort",
-        thinking_options=list(NVIDIA_REASONING_NONE_HIGH_MAX_OPTIONS),
-        default_thinking_choice="high",
+        thinking_options=list(NVIDIA_REASONING_NONE_LOW_MEDIUM_HIGH_OPTIONS),
+        default_thinking_choice="medium",
         context_length=NVIDIA_DEEPSEEK_V4_CONTEXT_TOKENS,
         max_output_tokens=NVIDIA_DEEPSEEK_V4_MAX_OUTPUT_TOKENS,
     ),

@@ -44,6 +44,7 @@ from .commit_history_indexer import CommitHistoryIndexer, CommitPattern, CodeEvo
 from .context_engine_core import ContextEngineCore, ContextQuery, ContextResult
 from .lsp_manager import LSPManager
 from .workspace import WorkspaceProfile, ProjectBoundary, InstructionLayer, detect_workspace_profile
+from .fast_context import FastContextExplorer, FastContextHit, FastContextResult
 from .fragments import (
     ContextFragment,
     estimate_tokens,
@@ -115,6 +116,9 @@ __all__ = [
     'ProjectBoundary',
     'InstructionLayer',
     'detect_workspace_profile',
+    'FastContextExplorer',
+    'FastContextHit',
+    'FastContextResult',
     'ContextFragment',
     'estimate_tokens',
     'make_context_fragment',

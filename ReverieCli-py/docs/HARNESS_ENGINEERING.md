@@ -112,7 +112,7 @@ That gives Reverie a historical stability surface instead of a one-shot inspecti
 
 ### 5. Task Snapshot Became A First-Class Harness Signal
 
-The harness layer derives a compact task snapshot from `task_list.json` or `Tasks.md`, including:
+The harness layer derives a compact task snapshot from `task_list.json` or `task.md` (`Tasks.md` is still read as a legacy fallback), including:
 
 - active task
 - next task

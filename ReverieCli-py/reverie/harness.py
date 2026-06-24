@@ -145,7 +145,7 @@ _PLAYBOOK_SEVERITY_ORDER = {
 
 def _task_paths(project_root: Path) -> tuple[Path, Path]:
     artifacts_dir = Path(project_root) / "artifacts"
-    return artifacts_dir / "task_list.json", artifacts_dir / "Tasks.md"
+    return artifacts_dir / "task_list.json", artifacts_dir / "task.md"
 
 
 def _coerce_datetime(value: Any) -> Optional[datetime]:
@@ -257,6 +257,26 @@ def _parse_task_entries(project_root: Path) -> Dict[str, Any]:
         source = "markdown"
         try:
             for raw_line in markdown_path.read_text(encoding="utf-8").splitlines():
+                match = _TASK_LINE_RE.match(raw_line)
+                if not match:
+                    continue
+                state = _TASK_STATE_NAMES.get(match.group("state"), "NOT_STARTED")
+                entry = {
+                    "id": "",
+                    "name": match.group("name").strip(),
+                    "state": state,
+                    "phase": "",
+                }
+                entries.append(entry)
+                counts[state] += 1
+        except Exception:
+            entries = []
+
+    legacy_markdown_path = markdown_path.parent / "Tasks.md"
+    if not entries and legacy_markdown_path.exists():
+        source = "markdown"
+        try:
+            for raw_line in legacy_markdown_path.read_text(encoding="utf-8").splitlines():
                 match = _TASK_LINE_RE.match(raw_line)
                 if not match:
                     continue

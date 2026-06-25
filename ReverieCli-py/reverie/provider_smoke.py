@@ -43,10 +43,9 @@ from .nvidia import (
     resolve_nvidia_request_url,
 )
 from .unlimitedsurf import (
-    build_unlimitedsurf_chat_payload,
+    build_unlimitedsurf_anthropic_options,
     build_unlimitedsurf_runtime_model_data,
     normalize_unlimitedsurf_config,
-    parse_unlimitedsurf_stream_event,
 )
 from .webgemini import (
     build_webgemini_runtime_model_data,
@@ -376,36 +375,28 @@ def smoke_unlimitedsurf(config: Config, timeout_seconds: int = 45, model_id: str
         return _skipped(provider, model, "missing_credentials")
 
     start = time.perf_counter()
-    response = None
     try:
-        response = _requests_post_stream(
-            runtime["base_url"],
-            {
-                "Authorization": f"Bearer {runtime['api_key']}",
-                "Content-Type": "application/json",
-                "Accept": "text/event-stream",
-            },
-            build_unlimitedsurf_chat_payload(
-                messages=[{"role": "user", "content": "Reply with OK."}],
-                model_id=model,
-                effort=cfg.get("effort", "medium"),
-            ),
-            timeout_seconds=timeout_seconds,
+        from anthropic import Anthropic
+
+        client = Anthropic(
+            base_url=runtime["base_url"],
+            api_key=runtime["api_key"],
+            timeout=timeout_seconds,
+            max_retries=0,
+            default_headers=dict(runtime.get("custom_headers") or {}),
         )
-        saw_text = False
-        for data_str in _iter_sse_data_strings(response):
-            event = parse_unlimitedsurf_stream_event(data_str)
-            if event and event.get("type") == "content" and str(event.get("text") or "").strip():
-                saw_text = True
-                break
-        if not saw_text:
-            raise RuntimeError("unlimited.surf returned no text delta")
+        options = build_unlimitedsurf_anthropic_options(cfg, model_id=model)
+        with client.messages.stream(
+            model=model,
+            messages=[{"role": "user", "content": "Reply with OK."}],
+            max_tokens=min(16, int(options.get("max_tokens") or 16)),
+        ) as stream:
+            for text in stream.text_stream:
+                if str(text or "").strip():
+                    break
         return ProviderSmokeResult(provider=provider, model=model, status="ok", latency_ms=int((time.perf_counter() - start) * 1000))
     except Exception as exc:
         return _result_from_error(provider, model, start, exc)
-    finally:
-        if response is not None:
-            response.close()
 
 
 def smoke_codex(config: Config, timeout_seconds: int = 60, model_id: str = "") -> ProviderSmokeResult:

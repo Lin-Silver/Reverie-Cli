@@ -1,8 +1,7 @@
-"""unlimited.surf request-provider helpers."""
+"""unlimited.surf Anthropic-compatible provider helpers."""
 
 from __future__ import annotations
 
-import json
 import os
 from typing import Any, Dict, List, Optional
 
@@ -10,14 +9,13 @@ import requests
 
 
 UNLIMITEDSURF_DEFAULT_BASE_URL = "https://unlimited.surf"
-UNLIMITEDSURF_DEFAULT_CHAT_ENDPOINT = "/api/chat"
+UNLIMITEDSURF_DEFAULT_MESSAGES_ENDPOINT = "/v1/messages"
+UNLIMITEDSURF_DEFAULT_CHAT_ENDPOINT = UNLIMITEDSURF_DEFAULT_MESSAGES_ENDPOINT
 UNLIMITEDSURF_DEFAULT_MODELS_ENDPOINT = "/api/models"
 UNLIMITEDSURF_DEFAULT_MODEL_ID = "gateway-gpt-5"
 UNLIMITEDSURF_DEFAULT_MODEL_DISPLAY_NAME = "GPT-5"
 UNLIMITEDSURF_DEFAULT_CONTEXT_TOKENS = 128_000
 UNLIMITEDSURF_DEFAULT_MAX_TOKENS = 16_384
-UNLIMITEDSURF_DEFAULT_EFFORT = "medium"
-UNLIMITEDSURF_EFFORTS = ("low", "medium", "high")
 UNLIMITEDSURF_API_KEY_HINT_URL = "https://unlimited.surf"
 
 
@@ -35,14 +33,14 @@ def _unlimitedsurf_model(
         "id": str(model_id or "").strip(),
         "display_name": str(display_name or model_id or "").strip(),
         "description": str(description or "").strip(),
-        "transport": "request",
+        "transport": "anthropic",
         "context_length": int(context_length or UNLIMITEDSURF_DEFAULT_CONTEXT_TOKENS),
         "max_output_tokens": int(max_output_tokens or UNLIMITEDSURF_DEFAULT_MAX_TOKENS),
         "provider": str(provider or "").strip(),
         "tier": str(tier or "").strip(),
         "vision": False,
         "thinking": True,
-        "tool_calling": False,
+        "tool_calling": True,
     }
 
 
@@ -65,11 +63,10 @@ def default_unlimitedsurf_config() -> Dict[str, Any]:
         "selected_model_id": UNLIMITEDSURF_DEFAULT_MODEL_ID,
         "selected_model_display_name": UNLIMITEDSURF_DEFAULT_MODEL_DISPLAY_NAME,
         "api_url": UNLIMITEDSURF_DEFAULT_BASE_URL,
-        "endpoint": UNLIMITEDSURF_DEFAULT_CHAT_ENDPOINT,
+        "endpoint": UNLIMITEDSURF_DEFAULT_MESSAGES_ENDPOINT,
         "max_context_tokens": UNLIMITEDSURF_DEFAULT_CONTEXT_TOKENS,
         "timeout": 60,
         "max_tokens": UNLIMITEDSURF_DEFAULT_MAX_TOKENS,
-        "effort": UNLIMITEDSURF_DEFAULT_EFFORT,
     }
 
 
@@ -80,28 +77,8 @@ def _display_name_from_id(model_id: Any) -> str:
     return text.replace("_", " ").replace("-", " ").title()
 
 
-def normalize_unlimitedsurf_effort(value: Any) -> str:
-    """Normalize the unlimited.surf `effort` request field."""
-    text = str(value or "").strip().lower().replace("_", "-")
-    aliases = {
-        "": UNLIMITEDSURF_DEFAULT_EFFORT,
-        "default": UNLIMITEDSURF_DEFAULT_EFFORT,
-        "auto": UNLIMITEDSURF_DEFAULT_EFFORT,
-        "normal": UNLIMITEDSURF_DEFAULT_EFFORT,
-        "med": "medium",
-        "minimal": "low",
-        "light": "low",
-        "deep": "high",
-        "max": "high",
-    }
-    normalized = aliases.get(text, text)
-    if normalized not in UNLIMITEDSURF_EFFORTS:
-        return UNLIMITEDSURF_DEFAULT_EFFORT
-    return normalized
-
-
 def resolve_unlimitedsurf_base_url(api_url: Any) -> str:
-    """Resolve and normalize the unlimited.surf base URL."""
+    """Resolve the Anthropic SDK base URL for unlimited.surf."""
     base = str(api_url or "").strip()
     if not base:
         return UNLIMITEDSURF_DEFAULT_BASE_URL
@@ -110,7 +87,10 @@ def resolve_unlimitedsurf_base_url(api_url: Any) -> str:
     base = base.rstrip("/")
     lower = base.lower()
     for suffix in (
-        UNLIMITEDSURF_DEFAULT_CHAT_ENDPOINT,
+        "/v1/messages",
+        "/messages",
+        "/v1",
+        "/api/chat",
         UNLIMITEDSURF_DEFAULT_MODELS_ENDPOINT,
         "/api",
     ):
@@ -120,17 +100,14 @@ def resolve_unlimitedsurf_base_url(api_url: Any) -> str:
     return base.rstrip("/") or UNLIMITEDSURF_DEFAULT_BASE_URL
 
 
+def resolve_unlimitedsurf_messages_url(api_url: Any) -> str:
+    """Resolve the effective unlimited.surf Anthropic Messages endpoint."""
+    return f"{resolve_unlimitedsurf_base_url(api_url)}{UNLIMITEDSURF_DEFAULT_MESSAGES_ENDPOINT}"
+
+
 def resolve_unlimitedsurf_chat_url(api_url: Any, endpoint: Any = "") -> str:
-    """Resolve the effective unlimited.surf chat endpoint URL."""
-    base = resolve_unlimitedsurf_base_url(api_url)
-    raw_endpoint = str(endpoint or UNLIMITEDSURF_DEFAULT_CHAT_ENDPOINT).strip()
-    if not raw_endpoint or raw_endpoint.lower() in {"clear", "default", "none", "off"}:
-        raw_endpoint = UNLIMITEDSURF_DEFAULT_CHAT_ENDPOINT
-    if raw_endpoint.startswith(("http://", "https://")):
-        return raw_endpoint.rstrip("/")
-    if raw_endpoint.startswith("/"):
-        return f"{base}{raw_endpoint}"
-    return f"{base}/{raw_endpoint}"
+    """Backward-compatible alias for the Anthropic Messages endpoint."""
+    return resolve_unlimitedsurf_messages_url(api_url)
 
 
 def resolve_unlimitedsurf_models_url(api_url: Any) -> str:
@@ -332,9 +309,8 @@ def normalize_unlimitedsurf_config(raw_unlimitedsurf: Any) -> Dict[str, Any]:
     cfg["enabled"] = bool(cfg.get("enabled", True))
     cfg["api_key"] = str(cfg.get("api_key", "") or "").strip()
     cfg["api_url"] = resolve_unlimitedsurf_base_url(cfg.get("api_url", UNLIMITEDSURF_DEFAULT_BASE_URL))
-    cfg["endpoint"] = str(cfg.get("endpoint", UNLIMITEDSURF_DEFAULT_CHAT_ENDPOINT) or "").strip()
-    if not cfg["endpoint"] or cfg["endpoint"].lower() in {"clear", "default", "none", "off"}:
-        cfg["endpoint"] = UNLIMITEDSURF_DEFAULT_CHAT_ENDPOINT
+    cfg["endpoint"] = UNLIMITEDSURF_DEFAULT_MESSAGES_ENDPOINT
+    cfg.pop("effort", None)
     cfg["selected_model_id"] = (
         str(cfg.get("selected_model_id", UNLIMITEDSURF_DEFAULT_MODEL_ID) or "").strip()
         or UNLIMITEDSURF_DEFAULT_MODEL_ID
@@ -343,7 +319,6 @@ def normalize_unlimitedsurf_config(raw_unlimitedsurf: Any) -> Dict[str, Any]:
         str(cfg.get("selected_model_display_name", "") or "").strip()
         or _display_name_from_id(cfg["selected_model_id"])
     )
-    cfg["effort"] = normalize_unlimitedsurf_effort(cfg.get("effort", UNLIMITEDSURF_DEFAULT_EFFORT))
 
     for key, default_value in (
         ("max_context_tokens", UNLIMITEDSURF_DEFAULT_CONTEXT_TOKENS),
@@ -386,110 +361,33 @@ def build_unlimitedsurf_runtime_model_data(
     return {
         "model": selected["id"],
         "model_display_name": selected["display_name"],
-        "base_url": resolve_unlimitedsurf_chat_url(cfg.get("api_url", UNLIMITEDSURF_DEFAULT_BASE_URL), cfg.get("endpoint", "")),
+        "base_url": resolve_unlimitedsurf_base_url(cfg.get("api_url", UNLIMITEDSURF_DEFAULT_BASE_URL)),
         "api_key": api_key,
         "max_context_tokens": int(selected.get("context_length") or cfg.get("max_context_tokens", UNLIMITEDSURF_DEFAULT_CONTEXT_TOKENS)),
-        "provider": "request",
+        "provider": "anthropic",
         "supports_vision": False,
-        "thinking_mode": normalize_unlimitedsurf_effort(cfg.get("effort")),
+        "thinking_mode": None,
         "endpoint": "",
-        "custom_headers": {},
+        "custom_headers": {"User-Agent": "Reverie-Cli/Anthropic-Compatible"},
         "vision": False,
     }
 
 
-def _message_content_to_text(content: Any) -> str:
-    if content is None:
-        return ""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, (int, float, bool)):
-        return str(content)
-    if isinstance(content, (list, tuple)):
-        parts = [_message_content_to_text(item) for item in content]
-        return "\n".join(part for part in parts if part)
-    if isinstance(content, dict):
-        part_type = str(content.get("type", "") or "").strip().lower()
-        if part_type in {"text", "input_text", "output_text"}:
-            return _message_content_to_text(content.get("text"))
-        if "text" in content:
-            return _message_content_to_text(content.get("text"))
-        if "content" in content:
-            return _message_content_to_text(content.get("content"))
-        if part_type in {"image", "input_image", "image_url", "video_url"}:
-            return "[unsupported visual attachment omitted]"
-        return ""
-    return str(content)
-
-
-def build_unlimitedsurf_message_text(messages: List[Dict[str, Any]]) -> str:
-    """Flatten Reverie chat messages into unlimited.surf's single `message` field."""
-    normalized: List[tuple[str, str]] = []
-    for message in messages or []:
-        if not isinstance(message, dict):
-            continue
-        role = str(message.get("role", "message") or "message").strip().lower()
-        content = _message_content_to_text(message.get("content")).strip()
-        if not content:
-            continue
-        normalized.append((role, content))
-
-    if len(normalized) == 1 and normalized[0][0] == "user":
-        return normalized[0][1]
-
-    role_labels = {
-        "system": "System",
-        "user": "User",
-        "assistant": "Assistant",
-        "tool": "Tool",
-    }
-    lines = []
-    for role, content in normalized:
-        label = role_labels.get(role, role.title() or "Message")
-        lines.append(f"{label}: {content}")
-    return "\n\n".join(lines).strip()
-
-
-def build_unlimitedsurf_chat_payload(
-    *,
-    messages: List[Dict[str, Any]],
-    model_id: Any,
-    effort: Any = UNLIMITEDSURF_DEFAULT_EFFORT,
+def build_unlimitedsurf_anthropic_options(
+    unlimitedsurf_config: Any,
+    model_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Build the unlimited.surf `/api/chat` request payload."""
-    return {
-        "message": build_unlimitedsurf_message_text(messages),
-        "model": str(model_id or UNLIMITEDSURF_DEFAULT_MODEL_ID).strip() or UNLIMITEDSURF_DEFAULT_MODEL_ID,
-        "effort": normalize_unlimitedsurf_effort(effort),
-    }
-
-
-def parse_unlimitedsurf_stream_event(data_str: Any) -> Optional[Dict[str, Any]]:
-    """Translate one unlimited.surf SSE data frame into a normalized stream event."""
-    text = str(data_str or "").strip()
-    if not text or text == "[DONE]":
-        return None
+    """Return Anthropic SDK request options for the selected unlimited.surf model."""
+    cfg = normalize_unlimitedsurf_config(unlimitedsurf_config)
+    selected = resolve_unlimitedsurf_selected_model(cfg, model_id=model_id)
+    model_limit = int((selected or {}).get("max_output_tokens") or UNLIMITEDSURF_DEFAULT_MAX_TOKENS)
     try:
-        payload = json.loads(text)
-    except json.JSONDecodeError:
-        return {"type": "content", "text": text}
-    if not isinstance(payload, dict):
-        return None
-
-    error = payload.get("error")
-    if error:
-        raise RuntimeError(str(error))
-
-    delta = payload.get("delta")
-    if delta is not None:
-        delta_text = str(delta)
-        if delta_text:
-            return {"type": "content", "text": delta_text}
-
-    if payload.get("finish") or payload.get("done"):
-        return {"type": "finish", "reason": str(payload.get("reason") or "stop")}
-
-    return None
+        configured_limit = int(cfg.get("max_tokens", UNLIMITEDSURF_DEFAULT_MAX_TOKENS))
+    except (TypeError, ValueError):
+        configured_limit = UNLIMITEDSURF_DEFAULT_MAX_TOKENS
+    if configured_limit <= 0:
+        configured_limit = UNLIMITEDSURF_DEFAULT_MAX_TOKENS
+    return {"max_tokens": min(configured_limit, model_limit)}
 
 
 def mask_secret(value: Any) -> str:

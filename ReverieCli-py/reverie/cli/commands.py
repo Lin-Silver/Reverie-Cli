@@ -7357,10 +7357,6 @@ class CommandHandler:
             return self._cmd_unlimitedsurf_model("")
         if lowered.startswith("model "):
             return self._cmd_unlimitedsurf_model(raw[6:].strip())
-        if lowered in ("effort", "thinking", "reasoning"):
-            return self._cmd_unlimitedsurf_effort("")
-        if lowered.startswith(("effort ", "thinking ", "reasoning ")):
-            return self._cmd_unlimitedsurf_effort(raw.split(None, 1)[1].strip())
         if lowered in ("endpoint", "url", "base-url", "baseurl"):
             return self._cmd_unlimitedsurf_endpoint("")
         if lowered.startswith("endpoint "):
@@ -7373,7 +7369,7 @@ class CommandHandler:
             return self._cmd_unlimitedsurf_endpoint(raw[8:].strip())
 
         self.console.print(
-            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /us [status|key|activate|model|effort|endpoint][/{self.theme.AMBER_GLOW}]"
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /us [status|key|activate|model|endpoint][/{self.theme.AMBER_GLOW}]"
         )
         return True
 
@@ -7412,7 +7408,7 @@ class CommandHandler:
             mask_secret,
             normalize_unlimitedsurf_config,
             resolve_unlimitedsurf_api_key,
-            resolve_unlimitedsurf_chat_url,
+            resolve_unlimitedsurf_messages_url,
             resolve_unlimitedsurf_models_url,
             resolve_unlimitedsurf_selected_model,
         )
@@ -7435,10 +7431,9 @@ class CommandHandler:
         lines = [
             f"[{self.theme.BLUE_SOFT}]Active model source:[/{self.theme.BLUE_SOFT}] {self._format_model_source_label(model_source)}",
             f"[{self.theme.BLUE_SOFT}]Configured key:[/{self.theme.BLUE_SOFT}] {mask_secret(effective_api_key)}{key_origin}",
-            f"[{self.theme.BLUE_SOFT}]Chat endpoint:[/{self.theme.BLUE_SOFT}] {escape(resolve_unlimitedsurf_chat_url(us_cfg.get('api_url'), us_cfg.get('endpoint')))}",
+            f"[{self.theme.BLUE_SOFT}]Messages endpoint:[/{self.theme.BLUE_SOFT}] {escape(resolve_unlimitedsurf_messages_url(us_cfg.get('api_url')))}",
             f"[{self.theme.BLUE_SOFT}]Models endpoint:[/{self.theme.BLUE_SOFT}] {escape(resolve_unlimitedsurf_models_url(us_cfg.get('api_url')))}",
             f"[{self.theme.BLUE_SOFT}]Public models loaded:[/{self.theme.BLUE_SOFT}] {len(catalog)}",
-            f"[{self.theme.BLUE_SOFT}]Effort:[/{self.theme.BLUE_SOFT}] {escape(str(us_cfg.get('effort', 'medium')))}",
             f"[{self.theme.BLUE_SOFT}]Default max tokens:[/{self.theme.BLUE_SOFT}] {us_cfg.get('max_tokens', 16384)}",
             f"[{self.theme.BLUE_SOFT}]API key help:[/{self.theme.BLUE_SOFT}] {escape(UNLIMITEDSURF_API_KEY_HINT_URL)}",
         ]
@@ -7448,7 +7443,7 @@ class CommandHandler:
             suffix = f" | {provider}" if provider else ""
             suffix += f" | {tier}" if tier else ""
             lines.insert(1, f"[{self.theme.BLUE_SOFT}]Selected model:[/{self.theme.BLUE_SOFT}] {escape(selected['display_name'])} ({escape(selected['id'])}){escape(suffix)}")
-            lines.insert(2, f"[{self.theme.BLUE_SOFT}]Transport:[/{self.theme.BLUE_SOFT}] unlimited.surf SSE")
+            lines.insert(2, f"[{self.theme.BLUE_SOFT}]Transport:[/{self.theme.BLUE_SOFT}] Anthropic SDK")
             lines.insert(3, f"[{self.theme.BLUE_SOFT}]Context:[/{self.theme.BLUE_SOFT}] {int(selected.get('context_length') or 0):,} tokens")
 
         self.console.print()
@@ -7566,7 +7561,7 @@ class CommandHandler:
                 f"[{self.theme.TEXT_DIM}]Current unlimited.surf base URL: {current_url}[/{self.theme.TEXT_DIM}]"
             )
             self.console.print(
-                f"[{self.theme.TEXT_DIM}]Use 'clear' to restore the default. You may paste the root URL, /api/chat, or /api/models; Reverie normalizes it to the root.[/{self.theme.TEXT_DIM}]"
+                f"[{self.theme.TEXT_DIM}]Use 'clear' to restore the default. You may paste the root URL, /v1/messages, or /api/models; Reverie normalizes it to the Anthropic SDK base URL.[/{self.theme.TEXT_DIM}]"
             )
             candidate = Prompt.ask(
                 "unlimited.surf base URL",
@@ -7584,38 +7579,6 @@ class CommandHandler:
         self.console.print(
             f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} unlimited.surf base URL set to: {escape(config.unlimitedsurf.get('api_url', UNLIMITEDSURF_DEFAULT_BASE_URL))}[/{self.theme.MINT_VIBRANT}]"
         )
-        return True
-
-    def _cmd_unlimitedsurf_effort(self, value: str) -> bool:
-        from ..unlimitedsurf import (
-            UNLIMITEDSURF_EFFORTS,
-            normalize_unlimitedsurf_config,
-            normalize_unlimitedsurf_effort,
-        )
-
-        config_manager = self.app.get('config_manager')
-        if not config_manager:
-            self.console.print(
-                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
-            )
-            return True
-
-        config = config_manager.load()
-        us_cfg = normalize_unlimitedsurf_config(getattr(config, "unlimitedsurf", {}))
-        if not value.strip():
-            self.console.print(
-                f"[{self.theme.TEXT_DIM}]Current unlimited.surf effort: {us_cfg.get('effort', 'medium')} ({', '.join(UNLIMITEDSURF_EFFORTS)})[/{self.theme.TEXT_DIM}]"
-            )
-            return True
-        normalized = normalize_unlimitedsurf_effort(value)
-        us_cfg["effort"] = normalized
-        config.unlimitedsurf = normalize_unlimitedsurf_config(us_cfg)
-        config_manager.save(config)
-        self.console.print(
-            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} unlimited.surf effort set to {normalized}.[/{self.theme.MINT_VIBRANT}]"
-        )
-        if self.app.get('reinit_agent'):
-            self.app['reinit_agent']()
         return True
 
     def cmd_sensenova(self, args: str) -> bool:

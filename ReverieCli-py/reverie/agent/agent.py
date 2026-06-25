@@ -41,10 +41,7 @@ from ..nvidia import (
 from ..aihubmix import build_aihubmix_openai_options
 from ..agnes import build_agnes_openai_options
 from ..modelscope import build_modelscope_anthropic_options
-from ..unlimitedsurf import (
-    build_unlimitedsurf_chat_payload,
-    parse_unlimitedsurf_stream_event,
-)
+from ..unlimitedsurf import build_unlimitedsurf_anthropic_options
 from ..webgemini import (
     generate_webgemini_message,
     iter_webgemini_text_deltas,
@@ -1884,6 +1881,8 @@ class ReverieAgent:
                     "base_url": self.base_url if self.base_url else None,
                     "timeout": self._resolve_provider_timeout(),
                 }
+                if self.custom_headers:
+                    client_kwargs["default_headers"] = dict(self.custom_headers)
                 try:
                     self._client = anthropic.Anthropic(**client_kwargs)
                 except TypeError:
@@ -2088,7 +2087,7 @@ class ReverieAgent:
             except Exception:
                 return timeout_value
 
-        if self._is_active_model_source("unlimitedsurf") and self.provider == "request":
+        if self._is_active_model_source("unlimitedsurf") and self.provider == "anthropic":
             try:
                 cfg = getattr(config, "unlimitedsurf", {})
                 if isinstance(cfg, dict):
@@ -2120,15 +2119,6 @@ class ReverieAgent:
 
         if self._openai_request_fallback_active:
             return prepared
-
-        if self._is_active_model_source("unlimitedsurf"):
-            cfg = getattr(self.config, "unlimitedsurf", {}) if self.config else {}
-            effort = cfg.get("effort", self.thinking_mode) if isinstance(cfg, dict) else self.thinking_mode
-            return build_unlimitedsurf_chat_payload(
-                messages=prepared.get("messages", []),
-                model_id=prepared.get("model", self.model),
-                effort=effort,
-            )
 
         if self._is_nvidia_request():
             prepared = apply_nvidia_request_defaults(prepared, getattr(self.config, "nvidia", {}))
@@ -2295,9 +2285,6 @@ class ReverieAgent:
             self._is_active_model_source("nvidia")
             or self._is_nvidia_request()
         ) and not nvidia_model_allows_tools(self.model):
-            return []
-
-        if self._is_active_model_source("unlimitedsurf"):
             return []
 
         return schemas
@@ -2498,8 +2485,6 @@ class ReverieAgent:
         """Return a user-facing provider label for request-provider errors."""
         if self._is_nvidia_request():
             return "NVIDIA API"
-        if self._is_active_model_source("unlimitedsurf"):
-            return "unlimited.surf API"
         return "Request provider"
 
     def _resolve_anthropic_max_tokens(self) -> int:
@@ -2508,6 +2493,17 @@ class ReverieAgent:
         if self._is_active_model_source("modelscope"):
             try:
                 options = build_modelscope_anthropic_options(getattr(self.config, "modelscope", {}), self.model)
+                candidate = int(options.get("max_tokens", max_tokens))
+                if candidate > 0:
+                    return candidate
+            except Exception:
+                return max_tokens
+        if self._is_active_model_source("unlimitedsurf"):
+            try:
+                options = build_unlimitedsurf_anthropic_options(
+                    getattr(self.config, "unlimitedsurf", {}),
+                    self.model,
+                )
                 candidate = int(options.get("max_tokens", max_tokens))
                 if candidate > 0:
                     return candidate
@@ -2691,13 +2687,6 @@ class ReverieAgent:
         provider_label: str,
     ) -> Generator[Dict[str, Any], None, None]:
         """Translate OpenAI-compatible SSE chunks into normalized events."""
-        if self._is_active_model_source("unlimitedsurf"):
-            for data_str in self._iter_sse_data_strings(response):
-                event = parse_unlimitedsurf_stream_event(data_str)
-                if event:
-                    yield event
-            return
-
         for data_str in self._iter_sse_data_strings(response):
             try:
                 chunk_data = json.loads(data_str)
@@ -4075,13 +4064,6 @@ class ReverieAgent:
     
     def _process_non_streaming_request(self, session_id: str = "default") -> str:
         """Process without streaming using requests library"""
-        if self._is_active_model_source("unlimitedsurf"):
-            chunks: List[str] = []
-            for chunk in self._process_streaming_request(session_id=session_id):
-                if decode_stream_event(chunk) is None:
-                    chunks.append(chunk)
-            return "".join(chunks)
-
         import requests
         
         tools = self.get_visible_tool_schemas()

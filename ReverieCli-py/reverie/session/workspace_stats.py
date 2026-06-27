@@ -21,7 +21,7 @@ import time
 from ..inline_images import count_multimodal_value_tokens
 
 
-WORKSPACE_STATS_SCHEMA_VERSION = 1
+WORKSPACE_STATS_SCHEMA_VERSION = 2
 WORKSPACE_STATS_FILENAME = "workspace_stats.json"
 
 
@@ -156,6 +156,51 @@ class ModelUsageSummary:
 
 
 @dataclass
+class OperationUsageSummary:
+    operation_key: str
+    category: str
+    name: str
+    plugin_id: str = ""
+    calls: int = 0
+    successes: int = 0
+    failures: int = 0
+    total_duration_ms: int = 0
+    last_session_id: str = ""
+    last_used_at: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        average_duration_ms = self.total_duration_ms / self.calls if self.calls else 0.0
+        return {
+            "operation_key": self.operation_key,
+            "category": self.category,
+            "name": self.name,
+            "plugin_id": self.plugin_id,
+            "calls": self.calls,
+            "successes": self.successes,
+            "failures": self.failures,
+            "total_duration_ms": self.total_duration_ms,
+            "average_duration_ms": average_duration_ms,
+            "last_session_id": self.last_session_id,
+            "last_used_at": self.last_used_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "OperationUsageSummary":
+        return cls(
+            operation_key=_clean_text(data.get("operation_key")),
+            category=_clean_text(data.get("category")) or "tool",
+            name=_clean_text(data.get("name")),
+            plugin_id=_clean_text(data.get("plugin_id")),
+            calls=_coerce_nonnegative_int(data.get("calls")),
+            successes=_coerce_nonnegative_int(data.get("successes")),
+            failures=_coerce_nonnegative_int(data.get("failures")),
+            total_duration_ms=_coerce_nonnegative_int(data.get("total_duration_ms")),
+            last_session_id=_clean_text(data.get("last_session_id")),
+            last_used_at=_clean_text(data.get("last_used_at")),
+        )
+
+
+@dataclass
 class WorkspaceStatsState:
     schema_version: int = WORKSPACE_STATS_SCHEMA_VERSION
     workspace_id: str = ""
@@ -167,6 +212,7 @@ class WorkspaceStatsState:
     total_active_seconds: float = 0.0
     model_usage: Dict[str, ModelUsageSummary] = field(default_factory=dict)
     session_usage: Dict[str, SessionUsageSummary] = field(default_factory=dict)
+    operation_usage: Dict[str, OperationUsageSummary] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -180,12 +226,14 @@ class WorkspaceStatsState:
             "total_active_seconds": self.total_active_seconds,
             "model_usage": {key: item.to_dict() for key, item in self.model_usage.items()},
             "session_usage": {key: item.to_dict() for key, item in self.session_usage.items()},
+            "operation_usage": {key: item.to_dict() for key, item in self.operation_usage.items()},
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "WorkspaceStatsState":
         model_usage_raw = data.get("model_usage") or {}
         session_usage_raw = data.get("session_usage") or {}
+        operation_usage_raw = data.get("operation_usage") or {}
         return cls(
             schema_version=_coerce_nonnegative_int(data.get("schema_version")) or WORKSPACE_STATS_SCHEMA_VERSION,
             workspace_id=_clean_text(data.get("workspace_id")),
@@ -203,6 +251,11 @@ class WorkspaceStatsState:
             session_usage={
                 str(key): SessionUsageSummary.from_dict(value)
                 for key, value in session_usage_raw.items()
+                if isinstance(value, dict)
+            },
+            operation_usage={
+                str(key): OperationUsageSummary.from_dict(value)
+                for key, value in operation_usage_raw.items()
                 if isinstance(value, dict)
             },
         )
@@ -442,6 +495,7 @@ class WorkspaceStatsManager:
         usage_payload = self._usage_dict(usage)
         input_tokens = usage_payload.get("input_tokens")
         output_tokens = usage_payload.get("output_tokens")
+        total_tokens = usage_payload.get("total_tokens")
 
         if input_tokens is None:
             input_tokens = self.count_messages_tokens(request_messages)
@@ -466,6 +520,15 @@ class WorkspaceStatsManager:
                     )
                 except Exception:
                     output_tokens += self.count_text_tokens(str(tool_calls))
+        if total_tokens is not None:
+            if "input_tokens" in usage_payload and "output_tokens" not in usage_payload:
+                output_tokens = max(_coerce_nonnegative_int(total_tokens) - _coerce_nonnegative_int(input_tokens), 0)
+            elif "output_tokens" in usage_payload and "input_tokens" not in usage_payload:
+                input_tokens = max(_coerce_nonnegative_int(total_tokens) - _coerce_nonnegative_int(output_tokens), 0)
+            elif "input_tokens" not in usage_payload and "output_tokens" not in usage_payload:
+                estimated_input = min(_coerce_nonnegative_int(input_tokens), _coerce_nonnegative_int(total_tokens))
+                input_tokens = estimated_input
+                output_tokens = max(_coerce_nonnegative_int(total_tokens) - estimated_input, 0)
 
         usage_key = self._usage_key(provider, source, model, model_display_name)
         summary = self.state.model_usage.get(usage_key)
@@ -498,6 +561,43 @@ class WorkspaceStatsManager:
 
         self.save(force=force)
 
+    def record_operation(
+        self,
+        *,
+        category: str,
+        name: str,
+        success: bool = True,
+        duration_ms: int = 0,
+        plugin_id: str = "",
+        session_id: str = "",
+        force: bool = False,
+    ) -> None:
+        """Persist one AI-visible tool, plugin-tool, or skill activation."""
+        clean_category = _clean_text(category) or "tool"
+        clean_name = _clean_text(name)
+        clean_plugin_id = _clean_text(plugin_id)
+        if not clean_name:
+            return
+        operation_key = f"{clean_category}::{clean_plugin_id}::{clean_name}"
+        summary = self.state.operation_usage.get(operation_key)
+        if summary is None:
+            summary = OperationUsageSummary(
+                operation_key=operation_key,
+                category=clean_category,
+                name=clean_name,
+                plugin_id=clean_plugin_id,
+            )
+        summary.calls += 1
+        if success:
+            summary.successes += 1
+        else:
+            summary.failures += 1
+        summary.total_duration_ms += _coerce_nonnegative_int(duration_ms)
+        summary.last_session_id = _clean_text(session_id) or summary.last_session_id
+        summary.last_used_at = _now_iso()
+        self.state.operation_usage[operation_key] = summary
+        self.save(force=force)
+
     def build_dashboard_data(self) -> Dict[str, Any]:
         model_rows = sorted(
             (
@@ -521,6 +621,20 @@ class WorkspaceStatsManager:
         total_input = sum(_coerce_nonnegative_int(item.get("input_tokens")) for item in model_rows)
         total_output = sum(_coerce_nonnegative_int(item.get("output_tokens")) for item in model_rows)
         total_calls = sum(_coerce_nonnegative_int(item.get("calls")) for item in model_rows)
+        operation_rows = sorted(
+            (summary.to_dict() for summary in self.state.operation_usage.values()),
+            key=lambda item: (
+                -_coerce_nonnegative_int(item.get("calls")),
+                item.get("category", ""),
+                item.get("name", ""),
+            ),
+        )
+        operation_category_totals: Dict[str, int] = {}
+        for row in operation_rows:
+            category = _clean_text(row.get("category")) or "tool"
+            operation_category_totals[category] = operation_category_totals.get(category, 0) + _coerce_nonnegative_int(
+                row.get("calls")
+            )
         source_aggregate: Dict[str, Dict[str, Any]] = {}
         for row in model_rows:
             source_key = _clean_text(row.get("source")) or "standard"
@@ -575,10 +689,17 @@ class WorkspaceStatsManager:
             "total_active_seconds": self.state.total_active_seconds,
             "total_input_tokens": total_input,
             "total_output_tokens": total_output,
+            "total_tokens": total_input + total_output,
             "total_calls": total_calls,
             "model_usage": model_rows,
             "source_usage": source_rows,
             "session_usage": session_rows,
+            "operation_usage": operation_rows,
+            "operation_category_totals": operation_category_totals,
+            "total_tool_calls": operation_category_totals.get("tool", 0)
+            + operation_category_totals.get("plugin-tool", 0),
+            "total_plugin_tool_calls": operation_category_totals.get("plugin-tool", 0),
+            "total_skill_activations": operation_category_totals.get("skill", 0),
         }
 
     @classmethod
@@ -598,19 +719,21 @@ class WorkspaceStatsManager:
     @classmethod
     def discover_workspaces(cls, app_root: Optional[Path] = None) -> List[Dict[str, Any]]:
         root = Path(app_root or Path.cwd())
-        projects_dir = root / ".reverie" / "project_caches"
-        if not projects_dir.exists():
-            return []
-
-        discovered: List[Dict[str, Any]] = []
-        for cache_dir in sorted(projects_dir.iterdir(), key=lambda item: item.name.lower()):
-            if not cache_dir.is_dir():
+        project_roots = (
+            root / ".reverie" / "projects",
+            root / ".reverie" / "project_caches",
+        )
+        discovered_by_workspace: Dict[str, Dict[str, Any]] = {}
+        for projects_dir in project_roots:
+            if not projects_dir.exists():
                 continue
-            manager = cls.from_cache_dir(cache_dir)
-            dashboard = manager.build_dashboard_data()
-            sessions_count = len(list((cache_dir / "sessions").glob("*.json")))
-            discovered.append(
-                {
+            for cache_dir in sorted(projects_dir.iterdir(), key=lambda item: item.name.lower()):
+                if not cache_dir.is_dir() or not (cache_dir / WORKSPACE_STATS_FILENAME).exists():
+                    continue
+                manager = cls.from_cache_dir(cache_dir)
+                dashboard = manager.build_dashboard_data()
+                sessions_count = len(list((cache_dir / "sessions").glob("*.json")))
+                item = {
                     "cache_dir": str(cache_dir),
                     "workspace_id": dashboard["workspace_id"],
                     "workspace_path": dashboard["workspace_path"],
@@ -620,11 +743,19 @@ class WorkspaceStatsManager:
                     "total_active_seconds": dashboard["total_active_seconds"],
                     "total_input_tokens": dashboard["total_input_tokens"],
                     "total_output_tokens": dashboard["total_output_tokens"],
+                    "total_tokens": dashboard["total_tokens"],
                     "total_calls": dashboard["total_calls"],
+                    "total_tool_calls": dashboard["total_tool_calls"],
+                    "total_plugin_tool_calls": dashboard["total_plugin_tool_calls"],
+                    "total_skill_activations": dashboard["total_skill_activations"],
                     "session_count": sessions_count,
                     "model_count": len(dashboard["model_usage"]),
                 }
-            )
+                workspace_key = str(dashboard.get("workspace_id") or dashboard.get("workspace_path") or cache_dir)
+                existing = discovered_by_workspace.get(workspace_key)
+                if existing is None or str(item["updated_at"]) > str(existing.get("updated_at", "")):
+                    discovered_by_workspace[workspace_key] = item
+        discovered = list(discovered_by_workspace.values())
         discovered.sort(key=lambda item: item.get("updated_at", ""), reverse=True)
         return discovered
 

@@ -18,7 +18,6 @@ Tools available to the AI Agent:
 - skill_lookup: Inspect discovered SKILL.md instructions
 - list_mcp_resources/read_mcp_resource: Inspect MCP resources exposed by connected servers
 - media_generation_capabilities: Inspect runtime image/video generation capability profiles
-- count_tokens: Count tokens in text or current conversation
 """
 
 from .base import BaseTool, ToolResult, ToolResultStatus
@@ -64,8 +63,6 @@ from .game_modeling_workbench import GameModelingWorkbenchTool
 from .blender_modeling_workbench import BlenderModelingWorkbenchTool
 from .atlas_delivery_orchestrator import AtlasDeliveryOrchestratorTool
 from .reverie_engine import ReverieEngineTool
-from .reverie_engine_lite import ReverieEngineLiteTool
-from .token_counter import TokenCounterTool
 from .mode_switch import ModeSwitchTool
 from .computer_control import ComputerControlTool
 from .mcp_dynamic import MCPDynamicTool
@@ -119,8 +116,6 @@ __all__ = [
     "BlenderModelingWorkbenchTool",
     "AtlasDeliveryOrchestratorTool",
     "ReverieEngineTool",
-    "ReverieEngineLiteTool",
-    "TokenCounterTool",
     "ModeSwitchTool",
     "ComputerControlTool",
     "MCPDynamicTool",

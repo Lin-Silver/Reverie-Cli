@@ -42,7 +42,6 @@
         "media_generation_capabilities",
         "text_to_image",
         "text_to_video",
-        "count_tokens",
         "task_manager",
         "subagent",
         "userInput",
@@ -76,14 +75,12 @@
         "media_generation_capabilities",
         "text_to_image",
         "text_to_video",
-        "count_tokens",
         "task_manager",
         "userInput",
         "switch_mode",
         "game_design_orchestrator",
         "game_project_scaffolder",
         "reverie_engine",
-        "reverie_engine_lite",
         "game_playtest_lab",
         "game_modeling_workbench",
         "blender_modeling_workbench",
@@ -122,7 +119,6 @@
         "media_generation_capabilities",
         "text_to_image",
         "text_to_video",
-        "count_tokens",
         "userInput",
         "switch_mode",
         "atlas_delivery_orchestrator"
@@ -151,7 +147,6 @@
         "media_generation_capabilities",
         "text_to_image",
         "text_to_video",
-        "count_tokens",
         "userInput",
         "switch_mode"
       ]
@@ -179,7 +174,6 @@
         "media_generation_capabilities",
         "text_to_image",
         "text_to_video",
-        "count_tokens",
         "userInput",
         "switch_mode"
       ]
@@ -208,7 +202,6 @@
         "media_generation_capabilities",
         "text_to_image",
         "text_to_video",
-        "count_tokens",
         "userInput",
         "switch_mode",
         "ask_clarification",
@@ -240,7 +233,6 @@
         "media_generation_capabilities",
         "text_to_image",
         "text_to_video",
-        "count_tokens",
         "userInput",
         "switch_mode",
         "task_boundary",
@@ -270,7 +262,6 @@
         "media_generation_capabilities",
         "text_to_image",
         "text_to_video",
-        "count_tokens",
         "userInput",
         "computer_control"
       ]
@@ -533,17 +524,6 @@
         "media_generation_capabilities(detail=\"summary\", modality=\"video\")"
       ]
     },
-    "count_tokens": {
-      "purpose": "Estimate tokens for text or the current conversation.",
-      "use_when": "Context usage may affect completion.",
-      "parameters": {
-        "text": "Optional text to count.",
-        "check_current_conversation": "Set true to count current conversation."
-      },
-      "examples": [
-        "count_tokens(check_current_conversation=true)"
-      ]
-    },
     "task_manager": {
       "purpose": "Maintain a checklist-first task system for larger work.",
       "use_when": "The task is multi-step, cross-layer, long-running, or user requested progress tracking.",
@@ -694,17 +674,6 @@
       },
       "examples": [
         "reverie_engine(action=\"validate\", project_dir=\"game\")"
-      ]
-    },
-    "reverie_engine_lite": {
-      "purpose": "Work with the lightweight Reverie Engine runtime.",
-      "use_when": "A compact built-in runtime is enough.",
-      "parameters": {
-        "action": "Runtime action.",
-        "project_dir": "Optional project path."
-      },
-      "examples": [
-        "reverie_engine_lite(action=\"inspect\", project_dir=\"game\")"
       ]
     },
     "game_playtest_lab": {

@@ -283,9 +283,9 @@ def default_gamer_mode_config() -> Dict[str, Any]:
     return {
         "target_engine": "reverie_engine",
         "supported_dimensions": ["2D", "2.5D", "3D"],
-        "supported_engines": ["reverie_engine", "reverie_engine_lite", "custom", "web", "pygame", "love2d", "cocos2d", "godot", "o3de"],
+        "supported_engines": ["reverie_engine", "custom", "web", "pygame", "love2d", "cocos2d", "godot", "o3de"],
         "supported_frameworks": [
-            "reverie_engine", "reverie_engine_lite", "phaser", "pixijs", "threejs", "pygame", "love2d", "cocos2d", "godot", "o3de"
+            "reverie_engine", "phaser", "pixijs", "threejs", "pygame", "love2d", "cocos2d", "godot", "o3de"
         ],
         "asset_tracking_enabled": True,
         "asset_packaging_enabled": True,

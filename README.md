@@ -11,6 +11,7 @@
 - **Browser automation**: Embedded Chromium runtime for web inspection and interaction
 - **Subagent delegation**: Parallel investigation and implementation tasks
 - **Harness audit**: Prompt-level reporting, verification tracking, playbook recommendations
+- **Specialist runtime plugins**: Ren'Py and Live2D/Cubism Galgame workflows are delivered through plugin-owned `rc_*` tools, skills, and prompt guidance
 
 ---
 
@@ -110,6 +111,7 @@ Reverie-Gamer mode includes a full modeling pipeline:
 - **Model registry sync**: Auto-generate `model_registry.yaml` from `assets/models/` directories
 - **Godot integration**: Project scanning, headless import validation, editor launch
 - **Source/Runtime separation**: `assets/models/source/` for authoring, `assets/models/runtime/` for engine-facing exports
+- **Galgame plugins**: Ren'Py and Live2D/Cubism support lives in `plugins/renpy/` and `plugins/live2d/` so the core CLI stays focused on foundation workflows
 
 ### Browser Automation
 

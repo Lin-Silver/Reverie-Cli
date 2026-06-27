@@ -18,6 +18,7 @@ import time
 import zipfile
 
 from .protocol import (
+    RC_PROTOCOL_VERSION,
     RuntimePluginCommandSpec,
     RuntimePluginHandshake,
     build_runtime_tool_name,
@@ -118,6 +119,8 @@ class RuntimePluginRecord:
     source_entry_path: Optional[Path] = None
     build_commands: tuple[str, ...] = ()
     manifest_warnings: tuple[str, ...] = ()
+    enabled: bool = True
+    trusted: bool = True
 
     @property
     def is_ready(self) -> bool:
@@ -129,7 +132,7 @@ class RuntimePluginRecord:
 
     @property
     def protocol_supported(self) -> bool:
-        return self.protocol_status == "supported" and self.protocol is not None
+        return self.enabled and self.trusted and self.protocol_status == "supported" and self.protocol is not None
 
     @property
     def status_label(self) -> str:
@@ -151,6 +154,9 @@ class RuntimePluginRecord:
             "timeout": "RC Timeout",
             "no-entry": "No Entry",
             "sdk-only": "SDK Only",
+            "disabled": "Disabled",
+            "untrusted": "Untrusted",
+            "incompatible": "RC Incompatible",
         }
         return labels.get(self.protocol_status, self.protocol_status.replace("-", " ").title())
 
@@ -251,7 +257,11 @@ class RuntimePluginSnapshot:
 
     @property
     def noncompliant_count(self) -> int:
-        return sum(1 for record in self.records if record.protocol_status not in {"supported", "sdk-only", "no-entry"})
+        return sum(
+            1
+            for record in self.records
+            if record.protocol_status not in {"supported", "sdk-only", "no-entry", "disabled", "untrusted"}
+        )
 
     @property
     def tool_count(self) -> int:
@@ -377,6 +387,40 @@ DEFAULT_RUNTIME_PLUGIN_CATALOG: tuple[RuntimePluginSpec, ...] = (
         },
     ),
     RuntimePluginSpec(
+        plugin_id="renpy",
+        display_name="Ren'Py Engine Plugin",
+        runtime_family="visual-novel-engine",
+        description="Ren'Py-focused runtime management, project/script inspection, lint/compile/distribute workflows, and Galgame production support.",
+        source_repo_hint="https://github.com/renpy/renpy",
+        delivery="plugin-exe",
+        capabilities=("renpy", "visual-novel", "galgame", "rpy-outline", "runtime-install", "lint", "compile", "distribute", "mcp-contract", "engine-plugin"),
+        entry_candidates={
+            "windows": ("dist/reverie-renpy.exe", "plugin.py", "reverie-renpy.exe"),
+            "linux": ("dist/reverie-renpy", "plugin.py", "reverie-renpy"),
+            "darwin": ("dist/reverie-renpy", "plugin.py", "reverie-renpy"),
+        },
+        sdk_download_page="https://github.com/renpy/renpy",
+        sdk_archive_hint="Keep Ren'Py runtime checkouts or launcher artifacts under `.reverie/plugins/renpy/runtime/`; use the protocol tools for script analysis and engine-specific guidance.",
+        sdk_install_hint="Expected development entry: `plugins/renpy/plugin.py`; packaged entry: `.reverie/plugins/renpy/dist/reverie-renpy.exe`.",
+    ),
+    RuntimePluginSpec(
+        plugin_id="live2d",
+        display_name="Live2D Cubism Plugin",
+        runtime_family="interactive-character-runtime",
+        description="Cubism Core deployment, Live2D model validation, dynamic CG control planning, project staging, and MCP bridge contracts for Galgame workflows.",
+        source_repo_hint="https://github.com/Mitscherlich/live2d-mcp",
+        delivery="plugin-exe",
+        capabilities=("live2d", "cubism-core", "model3-validation", "dynamic-cg", "galgame", "motion-routing", "expression-routing", "lip-sync", "mcp-contract", "engine-plugin"),
+        entry_candidates={
+            "windows": ("dist/reverie-live2d.exe", "plugin.py", "reverie-live2d.exe"),
+            "linux": ("dist/reverie-live2d", "plugin.py", "reverie-live2d"),
+            "darwin": ("dist/reverie-live2d", "plugin.py", "reverie-live2d"),
+        },
+        sdk_download_page="https://www.live2d.com/en/sdk/download/web/",
+        sdk_archive_hint="Place `CubismSdkForWeb-5-r.5.zip` beside the workspace or pass it to `rc_live2d_install_cubism_core`; the plugin extracts only `Core/live2dcubismcore.min.js`.",
+        sdk_install_hint="Expected development entry: `plugins/live2d/plugin.py`; packaged entry: `.reverie/plugins/live2d/dist/reverie-live2d.exe`.",
+    ),
+    RuntimePluginSpec(
         plugin_id="gltf-validator",
         display_name="glTF Validator",
         runtime_family="validator",
@@ -411,7 +455,7 @@ class RuntimePluginManager:
     PROTOCOL_TIMEOUT_SECONDS = 30.0
     TOOL_TIMEOUT_SECONDS = 1200.0
     BUILD_TIMEOUT_SECONDS = 1800.0
-    PROTOCOL_CACHE_VERSION = 1
+    PROTOCOL_CACHE_VERSION = 2
     PROTOCOL_PROBE_WORKERS = 8
 
     def __init__(self, app_root: Path, *, catalog: Iterable[RuntimePluginSpec] | None = None, source_root: Path | None = None) -> None:
@@ -430,7 +474,9 @@ class RuntimePluginManager:
         self._generation = 0
         self._template_catalog: tuple[RuntimePluginTemplateRecord, ...] = tuple()
         self.protocol_cache_path = self.app_root / ".reverie" / "runtime-plugin-protocol-cache.json"
+        self.state_path = self.app_root / ".reverie" / "plugin-state.json"
         self._protocol_cache = self._load_protocol_cache()
+        self._plugin_state = self._load_plugin_state()
 
     def _resolve_source_root(self) -> Path:
         """Return the editable source-plugin tree for the current runtime."""
@@ -466,6 +512,55 @@ class RuntimePluginManager:
     def get_generation(self) -> int:
         """Return the current dynamic-tool generation counter."""
         return int(self._generation)
+
+    def _load_plugin_state(self) -> dict[str, Any]:
+        try:
+            payload = json.loads(self.state_path.read_text(encoding="utf-8"))
+            plugins = payload.get("plugins") if isinstance(payload, dict) else None
+            if isinstance(plugins, dict):
+                return {"version": 1, "plugins": dict(plugins)}
+        except Exception:
+            pass
+        return {"version": 1, "plugins": {}}
+
+    def _save_plugin_state(self) -> None:
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = self.state_path.with_suffix(self.state_path.suffix + ".tmp")
+        temp_path.write_text(json.dumps(self._plugin_state, ensure_ascii=False, indent=2), encoding="utf-8")
+        temp_path.replace(self.state_path)
+
+    def get_plugin_state(self, plugin_id: str) -> dict[str, bool]:
+        normalized_id = sanitize_plugin_identifier(plugin_id or "")
+        plugins = self._plugin_state.get("plugins")
+        raw = plugins.get(normalized_id) if isinstance(plugins, dict) else None
+        state = raw if isinstance(raw, dict) else {}
+        return {
+            "enabled": bool(state.get("enabled", True)),
+            "trusted": bool(state.get("trusted", True)),
+        }
+
+    def _set_plugin_state_value(self, plugin_id: str, key: str, value: bool) -> RuntimePluginRecord | None:
+        normalized_id = sanitize_plugin_identifier(plugin_id or "")
+        if not normalized_id:
+            raise ValueError("Plugin id is required.")
+        plugins = self._plugin_state.setdefault("plugins", {})
+        if not isinstance(plugins, dict):
+            plugins = {}
+            self._plugin_state["plugins"] = plugins
+        current = self.get_plugin_state(normalized_id)
+        current[key] = bool(value)
+        plugins[normalized_id] = current
+        self._save_plugin_state()
+        self.scan(force_protocol_refresh=bool(value))
+        return self.get_record(normalized_id, force_refresh=False)
+
+    def set_plugin_enabled(self, plugin_id: str, enabled: bool) -> RuntimePluginRecord | None:
+        """Persist plugin activation and rebuild tools/prompt metadata."""
+        return self._set_plugin_state_value(plugin_id, "enabled", enabled)
+
+    def set_plugin_trust(self, plugin_id: str, trusted: bool) -> RuntimePluginRecord | None:
+        """Persist whether plugin-provided code and instructions may be activated."""
+        return self._set_plugin_state_value(plugin_id, "trusted", trusted)
 
     def get_tool_definitions(self, *, force_refresh: bool = False) -> list[dict[str, Any]]:
         """Return dynamic tool metadata synthesized from `-RC` plugin handshakes."""
@@ -531,7 +626,12 @@ class RuntimePluginManager:
                     record = self._record_from_generic_directory(install_dir)
             records_by_id[record.plugin_id] = record
 
-        base_records = tuple(sorted(records_by_id.values(), key=self._sort_key))
+        base_records = tuple(
+            sorted(
+                (self._apply_plugin_state(record) for record in records_by_id.values()),
+                key=self._sort_key,
+            )
+        )
         records = self._attach_protocol_records(base_records, force_refresh=force_protocol_refresh)
         snapshot = RuntimePluginSnapshot(
             install_root=self.install_root,
@@ -543,6 +643,10 @@ class RuntimePluginManager:
         self._snapshot = snapshot
         self._rebuild_tool_catalog(records)
         return snapshot
+
+    def _apply_plugin_state(self, record: RuntimePluginRecord) -> RuntimePluginRecord:
+        state = self.get_plugin_state(record.plugin_id)
+        return replace(record, enabled=state["enabled"], trusted=state["trusted"])
 
     def _load_protocol_cache(self) -> dict[str, Any]:
         try:
@@ -636,7 +740,7 @@ class RuntimePluginManager:
         attached: list[Optional[RuntimePluginRecord]] = [None] * len(records)
         pending: list[tuple[int, RuntimePluginRecord]] = []
         for index, record in enumerate(records):
-            if not record.is_ready or record.entry_path is None or (
+            if not record.enabled or not record.trusted or not record.is_ready or record.entry_path is None or (
                 record.delivery_label == "sdk-runtime" and record.manifest_path is None
             ):
                 attached[index] = self._attach_protocol(record)
@@ -690,6 +794,8 @@ class RuntimePluginManager:
             "protocol_ready_count": snapshot.protocol_ready_count,
             "noncompliant_count": snapshot.noncompliant_count,
             "tool_count": snapshot.tool_count,
+            "enabled_count": sum(1 for record in snapshot.records if record.enabled),
+            "trusted_count": sum(1 for record in snapshot.records if record.trusted),
             "template_count": len(templates),
             "summary_label": snapshot.summary_label(),
             "ready_names": snapshot.ready_names(),
@@ -732,7 +838,11 @@ class RuntimePluginManager:
         install_dir = (record.install_dir if record is not None else self.install_root / normalized).resolve()
         sdk_dir = (install_dir / (spec.sdk_dir_name or "runtime")).resolve()
         manifest_path = install_dir / "sdk_manifest.json"
-        entry_path = self._resolve_from_candidates(install_dir, spec.entry_candidates)
+        entry_path = self._resolve_from_candidates(
+            install_dir,
+            spec.entry_candidates,
+            allow_metadata=True,
+        )
         archive_path = self._find_bundled_sdk_archive(spec)
         status = "ready" if entry_path is not None else ("prepared" if manifest_path.exists() or sdk_dir.exists() else "missing")
         return {
@@ -1303,19 +1413,23 @@ class RuntimePluginManager:
                     "notes": notes,
                     "tool_count": str(record.protocol_tool_count),
                     "command_count": str(record.protocol_command_count),
+                    "enabled": "yes" if record.enabled else "no",
+                    "trusted": "yes" if record.trusted else "no",
                 }
             )
         return rows
 
-    def describe_for_prompt(self) -> str:
+    def describe_for_prompt(self, mode: str = "") -> str:
         """Return a compact system-prompt addendum for plugin management."""
+        from reverie.modes import normalize_mode
+
         snapshot = self.get_snapshot(force_refresh=False)
+        normalized_mode = normalize_mode(mode) if str(mode or "").strip() else ""
         lines = [
             "## Runtime Plugins",
             "- Plugins provide portable, plugin-local SDK/runtime environments under the app data `.reverie/plugins` directory.",
-            "- Protocol-ready plugins expose `rc_<plugin>_<command>` tools directly to the model when their command metadata allows the active mode.",
+            "- Only enabled and trusted protocol-ready plugins expose `rc_<plugin>_<command>` tools, prompt guidance, or plugin skills.",
             "- Use plugin tools for environment deployment, executable discovery, software launch, and runtime execution; use built-in authoring tools for planning and content generation.",
-            "- The official Blender plugin embeds Blender Portable in its plugin executable; call `rc_blender_ensure_runtime` before `rc_blender_run_script` when direct Blender execution is needed, use `rc_blender_ensure_mmd_tools` / `rc_blender_import_mmd_model` for PMD/PMX/VMD/VPD MMD assets, and use `rc_blender_mcp_install` / `rc_blender_mcp_start` / `rc_blender_mcp_info` for optional plugin-managed Blender MCP. Only treat Blender MCP as prompt-available after its MCP tools/list discovery succeeds.",
         ]
         if not snapshot.records:
             lines.append("- No plugin directories are currently detected under `.reverie/plugins`.")
@@ -1326,13 +1440,95 @@ class RuntimePluginManager:
                 if len(ready) > 5:
                     preview = f"{preview}, +{len(ready) - 5} more"
                 lines.append(f"- Protocol tool providers detected: {preview}.")
+            for record in snapshot.records:
+                if not record.protocol_supported or record.protocol is None:
+                    continue
+                protocol = record.protocol
+                if normalized_mode and protocol.include_modes and normalized_mode not in protocol.include_modes:
+                    continue
+                if normalized_mode and normalized_mode in protocol.exclude_modes:
+                    continue
+                if protocol.tool_call_hint:
+                    lines.append(f"- `{record.plugin_id}` tool guidance: {protocol.tool_call_hint}")
+                if protocol.system_prompt:
+                    lines.extend(
+                        [
+                            "",
+                            f"### Plugin Instructions: {record.display_name}",
+                            protocol.system_prompt,
+                        ]
+                    )
         return "\n".join(lines)
+
+    def get_skill_definitions(self, *, force_refresh: bool = False) -> list[dict[str, Any]]:
+        """Return virtual SKILL.md records supplied by enabled, trusted plugins."""
+        snapshot = self.get_snapshot(force_refresh=force_refresh)
+        definitions: list[dict[str, Any]] = []
+        for record in snapshot.records:
+            if not record.protocol_supported or record.protocol is None:
+                continue
+            for skill in record.protocol.skills:
+                definitions.append(
+                    {
+                        "plugin_id": record.plugin_id,
+                        "plugin_display_name": record.display_name,
+                        "name": skill.name,
+                        "description": skill.description,
+                        "body": skill.body,
+                        "include_modes": list(skill.include_modes),
+                        "exclude_modes": list(skill.exclude_modes),
+                        "metadata": dict(skill.metadata),
+                        "entry_path": str(record.entry_path or ""),
+                        "install_dir": str(record.install_dir),
+                    }
+                )
+        return definitions
+
+    def get_mcp_server_definitions(self, *, force_refresh: bool = False) -> dict[str, dict[str, Any]]:
+        """Return transient MCP server definitions supplied by enabled, trusted plugins."""
+        from ..mcp import normalize_mcp_server_config
+
+        snapshot = self.get_snapshot(force_refresh=force_refresh)
+        definitions: dict[str, dict[str, Any]] = {}
+        for record in snapshot.records:
+            if not record.protocol_supported or record.protocol is None:
+                continue
+            for server in record.protocol.mcp_servers:
+                base_name = sanitize_plugin_identifier(server.name)
+                if not base_name:
+                    continue
+                server_name = base_name if base_name.startswith(f"{record.plugin_id}_") else f"{record.plugin_id}_{base_name}"
+                raw_config = dict(server.config)
+                raw_config.setdefault("enabled", True)
+                raw_config.setdefault("trust", True)
+                if server.include_modes:
+                    raw_config["includeModes"] = list(server.include_modes)
+                elif record.protocol.include_modes:
+                    raw_config["includeModes"] = list(record.protocol.include_modes)
+                exclude_modes = list(record.protocol.exclude_modes)
+                for mode in server.exclude_modes:
+                    if mode not in exclude_modes:
+                        exclude_modes.append(mode)
+                if exclude_modes:
+                    raw_config["excludeModes"] = exclude_modes
+                normalized = normalize_mcp_server_config(server_name, raw_config)
+                normalized["name"] = server_name
+                normalized["plugin_id"] = record.plugin_id
+                normalized["plugin_display_name"] = record.display_name
+                normalized["plugin_mcp_description"] = server.description
+                normalized["source"] = "runtime-plugin"
+                definitions[server_name] = normalized
+        return definitions
 
     def call_tool(self, plugin_id: str, command_name: str, arguments: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         """Call one Reverie CLI runtime-plugin command."""
         record = self.get_record(plugin_id, force_refresh=False)
         if record is None:
             raise RuntimeError(f"Runtime plugin '{plugin_id}' is not currently detected.")
+        if not record.enabled:
+            raise RuntimeError(f"Runtime plugin '{plugin_id}' is disabled.")
+        if not record.trusted:
+            raise RuntimeError(f"Runtime plugin '{plugin_id}' is not trusted.")
         if not record.protocol_supported or record.protocol is None:
             raise RuntimeError(f"Runtime plugin '{plugin_id}' does not support the Reverie CLI protocol.")
 
@@ -1569,6 +1765,10 @@ class RuntimePluginManager:
         )
 
     def _attach_protocol(self, record: RuntimePluginRecord) -> RuntimePluginRecord:
+        if not record.enabled:
+            return replace(record, protocol_status="disabled", protocol_error="", protocol=None)
+        if not record.trusted:
+            return replace(record, protocol_status="untrusted", protocol_error="", protocol=None)
         if not record.is_ready or record.entry_path is None:
             return replace(record, protocol_status="no-entry", protocol_error="", protocol=None)
         if record.delivery_label == "sdk-runtime" and record.manifest_path is None:
@@ -1622,6 +1822,13 @@ class RuntimePluginManager:
         stderr = str(result.get("stderr", "") or "").strip()
         parsed = self._parse_json_object(stdout)
         if isinstance(parsed, dict):
+            protocol_version = str(parsed.get("protocol_version") or "").strip()
+            if protocol_version and protocol_version != RC_PROTOCOL_VERSION:
+                return {
+                    "status": "incompatible",
+                    "error": f"Unsupported RC protocol version: {protocol_version}",
+                    "protocol": None,
+                }
             protocol = normalize_runtime_handshake(
                 parsed,
                 fallback_plugin_id=record.plugin_id,
@@ -1656,7 +1863,7 @@ class RuntimePluginManager:
         lookup: dict[str, dict[str, Any]] = {}
 
         for record in records:
-            if not record.protocol_supported or record.protocol is None:
+            if not record.enabled or not record.trusted or not record.protocol_supported or record.protocol is None:
                 continue
 
             for command in record.protocol.tool_commands:
@@ -2375,14 +2582,24 @@ class RuntimePluginManager:
             resolved = resolved.absolute()
         return resolved if self._is_launch_target(resolved) else None
 
-    def _resolve_from_candidates(self, install_dir: Path, entry_candidates: dict[str, tuple[str, ...]]) -> Optional[Path]:
+    def _resolve_from_candidates(
+        self,
+        install_dir: Path,
+        entry_candidates: dict[str, tuple[str, ...]],
+        *,
+        allow_metadata: bool = False,
+    ) -> Optional[Path]:
         if not install_dir.exists():
             return None
         patterns = list(entry_candidates.get(self._platform, ()))
         patterns.extend(pattern for pattern in entry_candidates.get("default", ()) if pattern not in patterns)
         for pattern in patterns:
             for match in self._iter_candidate_matches(install_dir, pattern):
-                if self._is_launch_target(match):
+                if self._is_launch_target(match) or (
+                    allow_metadata
+                    and match.is_file()
+                    and match.suffix.lower() in {".json", ".yaml", ".yml", ".md", ".txt"}
+                ):
                     return match.resolve(strict=False)
         return None
 
@@ -2467,7 +2684,13 @@ class RuntimePluginManager:
     def _is_launch_target(self, path: Path) -> bool:
         if not path.exists():
             return False
-        return path.is_file() or path.name.lower().endswith(".app")
+        if path.name.lower().endswith(".app"):
+            return True
+        if not path.is_file():
+            return False
+        if path.suffix.lower() in {".exe", ".py", ".cmd", ".bat", ".ps1", ".sh"}:
+            return True
+        return not path.suffix and platform.system() != "Windows" and os.access(path, os.X_OK)
 
     def _sort_key(self, record: RuntimePluginRecord) -> tuple[int, str, str]:
         status_priority = {

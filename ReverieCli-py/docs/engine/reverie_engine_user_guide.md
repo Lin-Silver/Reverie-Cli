@@ -3,7 +3,7 @@
 ## Overview
 
 `reverie_engine` is Reverie CLI's canonical built-in runtime surface.
-`reverie_engine_lite` remains available as a compatibility alias, but both names point to the same implementation.
+The previous lightweight compatibility package has been migrated into `reverie.engine`; new projects should use only `reverie_engine`.
 
 This runtime is designed for `Reverie-Gamer` workflows that need:
 
@@ -70,15 +70,34 @@ In short:
 
 For quick generated starter assets, `/modeling primitive` can create a built-in runtime `.gltf` plus preview image directly into the standard project layout. For richer authored assets, `/blender create <model_name> <brief>` generates a `.blend` source, `.glb` runtime export, preview render, audit evidence, and optional repair loop without configuring an external MCP server.
 
-## Ren'Py And Video Integration
+## Galgame And Plugin Boundaries
 
-The same built-in engine surface now also supports:
+The built-in engine keeps only lightweight, reusable runtime surfaces:
 
-- importing a practical Ren'Py subset through `/engine renpy`
-- exporting frame sequences, `gif`, or `mp4` playblasts through `/engine video`
-- packaging those capabilities into the Windows one-file `reverie.exe`
+- first-party scene/prefab/project scaffolding
+- smoke validation and playtest telemetry
+- lightweight Live2D bridge files that consume already-deployed Cubism Core
+- frame sequences, `gif`, or `mp4` playblasts through `/engine video`
 
 When `ffmpeg` is available at build time, the packaged executable embeds it so encoded video export works out of the box. If `ffmpeg` is not bundled, frame-sequence export still works and encoded video falls back to an external runtime install.
+
+Specialized Galgame work is owned by plugins:
+
+- `plugins/renpy/`: Ren'Py-specific `.rpy` script inspection, engine workflow guidance, and future lint/package/runtime commands.
+- `plugins/live2d/`: Cubism Core deployment, Live2D manifest inspection, dynamic CG guidance, and future MCP-style model control helpers.
+
+The legacy `/engine renpy` importer remains a compatibility path for a practical Ren'Py subset, but full Ren'Py engine support should be delivered through the Ren'Py plugin rather than expanded inside the core CLI.
+
+## Roadmap
+
+Future game-development work should prioritize:
+
+1. Build packaged `reverie-renpy.exe` and `reverie-live2d.exe` plugin releases and install them into `dist/.reverie/plugins/`.
+2. Add plugin-local Ren'Py runtime deployment, lint, launch, packaging, and project-template commands.
+3. Extend the Live2D plugin with MCP-compatible expression, motion, lip-sync, and scene-command bridges inspired by open Live2D MCP projects.
+4. Keep Reverie-Gamer's prompt work focused on game concept quality, routes, system design, asset contracts, and verification plans.
+5. Add Galgame-focused smoke projects that combine TTI backgrounds/still CG, optional TTV inserts, and Live2D interactive character manifests.
+6. Keep public imports consolidated on `reverie.engine` and avoid reintroducing legacy runtime aliases.
 
 ## Verification Expectations
 

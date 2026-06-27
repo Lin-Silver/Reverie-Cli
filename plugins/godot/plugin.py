@@ -104,6 +104,7 @@ class GodotRuntimePlugin(ReverieRuntimePluginHost):
             "display_name": "Godot Runtime Plugin",
             "version": PLUGIN_VERSION,
             "runtime_family": "engine",
+            "include_modes": ["reverie", "reverie-gamer"],
             "description": (
                 "Godot wrapper plugin for runtime detection, install management, "
                 "project scanning, editor launch, and headless validation."
@@ -121,6 +122,19 @@ class GodotRuntimePlugin(ReverieRuntimePluginHost):
                 "Prefer the exposed rc_godot_* tools instead of inventing shell commands for Godot. "
                 "Keep downloads, source clones, and runtime installs inside the plugin-local depot."
             ),
+            "skills": [
+                {
+                    "name": "godot-runtime-workflow",
+                    "description": "Use the Godot plugin for project inspection, runtime setup, editor launch, and headless verification.",
+                    "include_modes": ["reverie", "reverie-gamer"],
+                    "body": (
+                        "For Godot tasks, inspect runtime_status and scan_project before making runtime assumptions. "
+                        "Use ensure_runtime only when a usable runtime is absent. After changing a Godot project, run "
+                        "headless_check and report its actual result. Keep every downloaded runtime and source checkout "
+                        "inside the plugin-local depot."
+                    ),
+                }
+            ],
             "commands": [
                 {
                     "name": "runtime_status",

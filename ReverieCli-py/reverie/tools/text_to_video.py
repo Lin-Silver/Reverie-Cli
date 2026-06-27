@@ -444,11 +444,16 @@ The tool uses provider profiles from the text-to-video registry:
                 raw.update({k: v for k, v in nested.items() if k not in raw or not raw.get(k)})
         else:
             raw = {"raw": data}
+        raw_id = str(raw.get("id", "") or "").strip()
+        raw_video_id = str(raw.get("video_id", "") or "").strip()
+        raw_task_id = str(raw.get("task_id", "") or "").strip()
+        video_id = raw_video_id or (raw_id if raw_id.startswith("video_") else "")
+        task_id = raw_task_id or (raw_id if not raw_id.startswith("video_") else "")
         return {
             **raw,
-            "id": str(raw.get("id", "") or "").strip(),
-            "task_id": str(raw.get("task_id") or raw.get("id") or "").strip(),
-            "video_id": str(raw.get("video_id", "") or "").strip(),
+            "id": raw_id,
+            "task_id": task_id,
+            "video_id": video_id,
             "status": str(raw.get("status") or raw.get("state") or raw.get("task_status") or "").strip().lower(),
             "progress": raw.get("progress"),
             "video_url": self._extract_video_url(raw),

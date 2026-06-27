@@ -1436,9 +1436,15 @@ class SseMCPClient(BaseMCPClient):
 class MCPRuntime:
     """Load MCP config, discover tools, and execute MCP calls on demand."""
 
-    def __init__(self, config_manager: MCPConfigManager, project_root: Optional[Path] = None):
+    def __init__(
+        self,
+        config_manager: MCPConfigManager,
+        project_root: Optional[Path] = None,
+        runtime_plugin_manager: Any = None,
+    ):
         self.config_manager = config_manager
         self.project_root = Path(project_root).resolve() if project_root is not None else None
+        self.runtime_plugin_manager = runtime_plugin_manager
         self._lock = threading.RLock()
         self._config = normalize_mcp_config({})
         self._config_signature = ""
@@ -1446,6 +1452,7 @@ class MCPRuntime:
         self._tool_catalog: List[Dict[str, Any]] = []
         self._tool_lookup: Dict[str, Dict[str, Any]] = {}
         self._catalog_signature = ""
+        self._catalog_server_signature = ""
         self._catalog_ready = False
         self._generation = 0
         self._active_mode = "reverie"
@@ -1465,6 +1472,13 @@ class MCPRuntime:
             self.project_root = Path(project_root).resolve() if project_root is not None else None
             for client in self._clients.values():
                 client.set_project_root(self.project_root)
+
+    def set_runtime_plugin_manager(self, manager: Any) -> None:
+        """Attach the runtime plugin manager used for transient plugin MCP overlays."""
+        with self._lock:
+            self.runtime_plugin_manager = manager
+            self._catalog_ready = False
+            self._generation += 1
 
     def set_active_mode(self, mode: str) -> None:
         """Limit startup discovery to MCP servers visible in the active Reverie mode."""
@@ -1497,6 +1511,7 @@ class MCPRuntime:
         self._tool_catalog = []
         self._tool_lookup = {}
         self._catalog_signature = ""
+        self._catalog_server_signature = ""
         self._catalog_ready = False
         self._generation += 1
         return True
@@ -1511,7 +1526,22 @@ class MCPRuntime:
             return self._generation
 
     def _get_effective_servers_locked(self) -> Dict[str, Dict[str, Any]]:
-        return get_effective_mcp_servers(self._config, mode=self._active_mode)
+        servers = get_effective_mcp_servers(self._config, mode=self._active_mode)
+        manager = self.runtime_plugin_manager
+        if manager is None or not hasattr(manager, "get_mcp_server_definitions"):
+            return servers
+        try:
+            plugin_servers = manager.get_mcp_server_definitions(force_refresh=False)
+        except Exception:
+            logger.debug("Failed to load plugin MCP server definitions.", exc_info=True)
+            return servers
+        for server_name, server_cfg in (plugin_servers or {}).items():
+            if not isinstance(server_cfg, dict):
+                continue
+            normalized = normalize_mcp_server_config(str(server_name), server_cfg)
+            if _mcp_server_visible_in_mode(normalized, self._active_mode):
+                servers[str(server_name)] = normalized
+        return servers
 
     def _create_client_locked(self, server_name: str, server_cfg: Dict[str, Any]) -> BaseMCPClient:
         server_type = str(server_cfg.get("type", "stdio") or "stdio").strip().lower()
@@ -1547,6 +1577,7 @@ class MCPRuntime:
     ) -> List[Dict[str, Any]]:
         self._refresh_config_locked(force=False)
         effective_servers = self._get_effective_servers_locked()
+        self._catalog_server_signature = _stable_json_signature(effective_servers)
         used_names: set[str] = set()
         catalog: List[Dict[str, Any]] = []
         lookup: Dict[str, Dict[str, Any]] = {}
@@ -1603,6 +1634,9 @@ class MCPRuntime:
         with self._lock:
             if self._catalog_ready and not force_refresh:
                 effective_servers = self._get_effective_servers_locked()
+                server_signature = _stable_json_signature(effective_servers)
+                if server_signature != self._catalog_server_signature:
+                    return self._rebuild_catalog_locked(force_refresh=False, timeout_ms=timeout_ms)
                 any_dirty = False
                 for server_name, server_cfg in effective_servers.items():
                     client = self._get_client_locked(server_name, server_cfg)

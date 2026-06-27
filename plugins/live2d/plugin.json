@@ -1,0 +1,58 @@
+{
+  "schema_version": "2.0",
+  "id": "live2d",
+  "display_name": "Live2D Cubism Plugin",
+  "runtime_family": "interactive-character-runtime",
+  "version": "0.2.0",
+  "delivery": "python-exe",
+  "template": "runtime_python_exe",
+  "description": "Live2D/Cubism Core deployment, .model3.json validation, dynamic CG control planning, project staging, and MCP bridge contracts for Reverie-Gamer.",
+  "source_repo_hint": "https://github.com/Mitscherlich/live2d-mcp",
+  "entry": {
+    "preferred": {
+      "windows": "dist/reverie-live2d.exe",
+      "linux": "dist/reverie-live2d",
+      "darwin": "dist/reverie-live2d",
+      "default": "plugin.py"
+    },
+    "fallbacks": {
+      "default": "plugin.py"
+    },
+    "strategy": "prefer-packaged",
+    "allow_source_fallback": true
+  },
+  "packaging": {
+    "format": "pyinstaller-onefile",
+    "compiled": {
+      "windows": "dist/reverie-live2d.exe",
+      "linux": "dist/reverie-live2d",
+      "darwin": "dist/reverie-live2d"
+    },
+    "source": {
+      "default": "plugin.py"
+    },
+    "build": {
+      "windows": [
+        "build.bat"
+      ],
+      "default": [
+        "python -m PyInstaller --noconfirm --clean --onefile --name reverie-live2d plugin.py"
+      ]
+    }
+  },
+  "capabilities": [
+    "live2d",
+    "cubism-core",
+    "dynamic-cg",
+    "galgame",
+    "manifest-inspection",
+    "model3-validation",
+    "motion-routing",
+    "expression-routing",
+    "lip-sync-plan",
+    "project-staging",
+    "mcp-contract",
+    "mcp-guidance",
+    "engine-plugin"
+  ]
+}

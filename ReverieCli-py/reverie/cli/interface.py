@@ -56,7 +56,7 @@ from ..config import (
 from ..harness import build_harness_prompt_guidance, build_prompt_harness_report, persist_prompt_harness_run
 from ..atlas import build_atlas_additional_rules, normalize_atlas_mode_config
 from ..mcp import MCPConfigManager, MCPRuntime
-from ..engine_lite.modeling import ASHFOX_DEFAULT_ENDPOINT, ASHFOX_MCP_SERVER_NAME
+from ..engine.modeling import ASHFOX_DEFAULT_ENDPOINT, ASHFOX_MCP_SERVER_NAME
 from ..rules_manager import RulesManager
 from ..skills_manager import SkillsManager
 from ..session import SessionManager
@@ -894,11 +894,19 @@ class ReverieInterface:
         self.config_manager.ensure_dirs()
         self.mcp_config_manager = MCPConfigManager(self.config_manager.app_root)
         self.mcp_config_manager.ensure_dirs()
-        self.skills_manager = SkillsManager(self.project_root, self.config_manager.app_root)
         self.runtime_plugin_manager = RuntimePluginManager(self.config_manager.app_root)
+        self.skills_manager = SkillsManager(
+            self.project_root,
+            self.config_manager.app_root,
+            runtime_plugin_manager=self.runtime_plugin_manager,
+        )
         self._startup_discovery_ready = False
         self._ensure_builtin_mcp_servers()
-        self.mcp_runtime = MCPRuntime(self.mcp_config_manager, project_root=self.project_root)
+        self.mcp_runtime = MCPRuntime(
+            self.mcp_config_manager,
+            project_root=self.project_root,
+            runtime_plugin_manager=self.runtime_plugin_manager,
+        )
         self.rules_manager = RulesManager(project_root)
         self._context_engine_init_lock = threading.RLock()
         self._context_engine_warmup_thread: Optional[threading.Thread] = None
@@ -1304,6 +1312,12 @@ class ReverieInterface:
                     summaries.append(f"{label}: {future.result()}")
                 except Exception as exc:
                     errors.append(f"{label}: {exc}")
+
+        if not errors:
+            try:
+                summaries.append(f"plugin skills: {self.skills_manager.scan().summary_label()}")
+            except Exception as exc:
+                errors.append(f"plugin skills: {exc}")
 
         self._startup_discovery_ready = True
         if errors:
@@ -2576,6 +2590,15 @@ class ReverieInterface:
                 status="success",
                 detail=resolved_names,
             )
+            current_session = self.session_manager.get_current_session()
+            for record in resolved_skill_records:
+                self.workspace_stats_manager.record_operation(
+                    category="skill",
+                    name=record.name,
+                    plugin_id=str(getattr(record, "plugin_id", "") or ""),
+                    success=True,
+                    session_id=str(getattr(current_session, "id", "") or ""),
+                )
         for missing_name in missing_skill_names:
             self._show_activity_event(
                 "Skills",
@@ -3729,6 +3752,7 @@ class ReverieInterface:
         """Append TTI model metadata from config.json into model context."""
         base_rules = (self.rules_manager.get_rules_text() or "").strip()
         normalized_mode = normalize_mode(getattr(config, "mode", "reverie"))
+        self.skills_manager.set_active_mode(normalized_mode)
 
         memory_title = "Computer Controller History" if normalized_mode == "computer-controller" else "Workspace Global Memory"
         memory_label = "computer-control history archive" if normalized_mode == "computer-controller" else "workspace global memory"
@@ -3786,7 +3810,7 @@ class ReverieInterface:
                     mcp_runtime=self.mcp_runtime,
                 ),
                 self.mcp_runtime.describe_for_prompt(),
-                self.runtime_plugin_manager.describe_for_prompt() if include_discovery_status else "",
+                self.runtime_plugin_manager.describe_for_prompt(normalized_mode) if include_discovery_status else "",
                 self.skills_manager.describe_for_prompt(force_refresh=False) if include_discovery_status else "",
                 atlas_block,
                 memory_block,
@@ -3888,6 +3912,7 @@ class ReverieInterface:
             'workspace_stats_manager': self.workspace_stats_manager,
             'lifecycle_manager': self.lifecycle_manager,
             'project_data_dir': self.project_data_dir,
+            'headless': self.headless,
             'subagent_manager': self.subagent_manager,
             'agent': self.agent, 'start_time': self.start_time, 
             'total_active_time': self.total_active_time,

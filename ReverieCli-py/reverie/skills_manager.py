@@ -12,6 +12,8 @@ import time
 
 import yaml
 
+from .modes import normalize_mode
+
 
 _FRONTMATTER_RE = re.compile(r"\A---\s*\r?\n(.*?)\r?\n---\s*(?:\r?\n|$)", re.DOTALL)
 _EXPLICIT_SKILL_RE = re.compile(r"(?<![A-Za-z0-9_.-])\$([A-Za-z0-9][A-Za-z0-9._-]*)")
@@ -117,9 +119,11 @@ class SkillRoot:
     @property
     def scope_label(self) -> str:
         labels = {
+            "builtin": "Built-in",
             "workspace": "Workspace",
             "app": "App",
             "user": "User",
+            "plugin": "Plugin",
         }
         return labels.get(self.scope, self.scope.title())
 
@@ -146,6 +150,8 @@ class SkillRecord:
     metadata: dict[str, Any]
     lookup_key: str
     match_tokens: frozenset[str]
+    source_uri: str = ""
+    plugin_id: str = ""
 
     @property
     def scope_label(self) -> str:
@@ -197,9 +203,11 @@ class SkillsSnapshot:
 class SkillsManager:
     """Discover SKILL.md directories and render Codex-style prompt guidance."""
 
-    def __init__(self, project_root: Path, app_root: Path) -> None:
+    def __init__(self, project_root: Path, app_root: Path, runtime_plugin_manager: Any = None) -> None:
         self.project_root = Path(project_root).resolve()
         self.app_root = Path(app_root).resolve()
+        self.runtime_plugin_manager = runtime_plugin_manager
+        self.active_mode = "reverie"
         self._snapshot: Optional[SkillsSnapshot] = None
         self._generation = 0
         self._signature = ""
@@ -221,6 +229,16 @@ class SkillsManager:
             seen_paths.add(normalized)
             deduped.append(root)
         return tuple(deduped)
+
+    def set_runtime_plugin_manager(self, manager: Any) -> None:
+        self.runtime_plugin_manager = manager
+        self._snapshot = None
+
+    def set_active_mode(self, mode: Any) -> None:
+        normalized = normalize_mode(mode)
+        if normalized != self.active_mode:
+            self.active_mode = normalized
+            self._snapshot = None
 
     def get_generation(self) -> int:
         """Return the current snapshot generation counter."""
@@ -253,6 +271,8 @@ class SkillsManager:
                 if error is not None:
                     errors.append(error)
 
+        records.extend(self._load_plugin_skills())
+
         records.sort(key=lambda item: (item.root.priority, item.name.lower(), str(item.path_to_skill_md).lower()))
         errors.sort(key=lambda item: (item.root.priority, str(item.path).lower()))
 
@@ -271,6 +291,8 @@ class SkillsManager:
                     "path": str(record.path_to_skill_md),
                     "scope": record.root.scope,
                     "label": record.root.label,
+                    "body": record.body,
+                    "source_uri": record.source_uri,
                 }
                 for record in snapshot.records
             ],
@@ -290,6 +312,70 @@ class SkillsManager:
             self._generation += 1
         self._snapshot = snapshot
         return snapshot
+
+    def _load_plugin_skills(self) -> list[SkillRecord]:
+        manager = self.runtime_plugin_manager
+        if manager is None or not hasattr(manager, "get_skill_definitions"):
+            return []
+        try:
+            definitions = manager.get_skill_definitions(force_refresh=False)
+        except Exception:
+            return []
+
+        records: list[SkillRecord] = []
+        for definition in definitions:
+            if not isinstance(definition, dict):
+                continue
+            include_modes = {
+                normalize_mode(mode)
+                for mode in (definition.get("include_modes", []) or [])
+                if str(mode or "").strip()
+            }
+            exclude_modes = {
+                normalize_mode(mode)
+                for mode in (definition.get("exclude_modes", []) or [])
+                if str(mode or "").strip()
+            }
+            if include_modes and self.active_mode not in include_modes:
+                continue
+            if self.active_mode in exclude_modes:
+                continue
+
+            plugin_id = str(definition.get("plugin_id") or "").strip()
+            name = str(definition.get("name") or "").strip()
+            body = str(definition.get("body") or "").strip()
+            if not plugin_id or not name or not body:
+                continue
+            description = str(definition.get("description") or "").strip() or f"Instructions supplied by plugin {plugin_id}."
+            install_dir = Path(str(definition.get("install_dir") or self.app_root / ".reverie" / "plugins" / plugin_id))
+            virtual_path = install_dir / "__plugin_skills__" / _normalize_skill_key(name) / "SKILL.md"
+            source_uri = f"plugin://{plugin_id}/skills/{_normalize_skill_key(name)}"
+            metadata = definition.get("metadata")
+            normalized_name = _normalize_skill_key(name)
+            root = SkillRoot("plugin", f"plugin:{plugin_id}", install_dir, -5)
+            records.append(
+                SkillRecord(
+                    name=name,
+                    description=description,
+                    path_to_skill_md=virtual_path,
+                    skill_dir=virtual_path.parent,
+                    root=root,
+                    body=body,
+                    metadata=dict(metadata) if isinstance(metadata, dict) else {},
+                    lookup_key=normalized_name,
+                    match_tokens=frozenset(
+                        {
+                            token
+                            for token in re.split(r"[-._/\\]+", normalized_name)
+                            if token
+                        }
+                        | _extract_tokens(description)
+                    ),
+                    source_uri=source_uri,
+                    plugin_id=plugin_id,
+                )
+            )
+        return records
 
     def _iter_skill_files(self, root_path: Path) -> list[Path]:
         """Return candidate SKILL.md files from one root, recursively."""
@@ -408,9 +494,15 @@ class SkillsManager:
             return None
 
         wanted_key = _normalize_skill_key(wanted)
-        wanted_path = str(Path(wanted).resolve(strict=False)).lower() if ("SKILL.md" in wanted or "\\" in wanted or "/" in wanted) else ""
+        wanted_path = (
+            str(Path(wanted).resolve(strict=False)).lower()
+            if ("SKILL.md" in wanted or "\\" in wanted or "/" in wanted) and not wanted.startswith("plugin://")
+            else ""
+        )
 
         for record in snapshot.records:
+            if record.source_uri and record.source_uri.lower() == wanted.lower():
+                return record
             if wanted_path and str(record.path_to_skill_md).lower() == wanted_path:
                 return record
             if record.lookup_key == wanted_key:
@@ -517,7 +609,7 @@ class SkillsManager:
                 [
                     "<skill>",
                     f"<name>{record.name}</name>",
-                    f"<path>{record.path_to_skill_md}</path>",
+                    f"<path>{record.source_uri or record.path_to_skill_md}</path>",
                     body,
                     "</skill>",
                     "",
@@ -544,7 +636,8 @@ class SkillsManager:
             lines.append("- Available skills:")
             for record in snapshot.records[:max_items]:
                 lines.append(
-                    f"  - `{record.name}` ({record.scope_label}, {record.root_label}): {record.summary} (file: {record.path_to_skill_md})"
+                    f"  - `{record.name}` ({record.scope_label}, {record.root_label}): {record.summary} "
+                    f"(source: {record.source_uri or record.path_to_skill_md})"
                 )
             if len(snapshot.records) > max_items:
                 lines.append(f"  - Additional skills not shown: {len(snapshot.records) - max_items}")

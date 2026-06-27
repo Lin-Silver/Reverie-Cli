@@ -6,8 +6,8 @@ import json
 
 from reverie.agent.tool_descriptions import get_tool_descriptions_for_mode
 from reverie.agent.tool_executor import ToolExecutor
-import reverie.engine_lite.blender_modeling as bm
-from reverie.engine_lite.blender_modeling import (
+import reverie.engine.blender_modeling as bm
+from reverie.engine.blender_modeling import (
     audit_blender_model,
     create_blender_authoring_job,
     infer_blender_preset,
@@ -388,7 +388,7 @@ def test_blender_tool_is_visible_in_reverie_and_gamer_without_engine_surface(tmp
     assert "blender_modeling_workbench" in reverie_names
     assert "game_modeling_workbench" in reverie_names
     assert "reverie_engine" not in reverie_names
-    assert "reverie_engine_lite" not in reverie_names
+    assert "reverie_engine" + "_lite" not in reverie_names
     assert "blender_modeling_workbench" in gamer_names
     assert "rc_blender_ensure_runtime" in gamer_prompt
     assert "black-box iteration plan" in gamer_prompt

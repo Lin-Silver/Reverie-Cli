@@ -148,7 +148,7 @@ reverie/
 ??? session/                 # sessions, checkpoints, rollback, archives, memory
 ??? tools/                   # tool implementations exposed to the agent
 ??? engine/                  # canonical public built-in engine API
-??? engine_lite/             # shared runtime, project, and modeling implementation
+??? engine/                  # shared runtime, project, and modeling implementation
 ??? skills_manager.py        # SKILL.md discovery, matching, and prompt injection helpers
 ??? writer/                  # writer mode helpers
 ```

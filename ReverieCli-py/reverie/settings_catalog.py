@@ -28,9 +28,14 @@ def setting_thinking_output_choices() -> List[str]:
     return ["full", "compact", "hidden"]
 
 
-def get_setting_items(config: Any, config_manager: Any, rules_manager: Any = None) -> List[Dict[str, Any]]:
+def get_setting_items(
+    config: Any,
+    config_manager: Any,
+    rules_manager: Any = None,
+    runtime_plugin_manager: Any = None,
+) -> List[Dict[str, Any]]:
     """Build setting metadata shared by terminal and desktop UI renderers."""
-    return [
+    items = [
         {
             "name": "Mode",
             "key": "mode",
@@ -141,6 +146,27 @@ def get_setting_items(config: Any, config_manager: Any, rules_manager: Any = Non
             "command": "/setting rules",
         },
     ]
+    if runtime_plugin_manager is not None:
+        try:
+            snapshot = runtime_plugin_manager.get_snapshot(force_refresh=False)
+        except Exception:
+            snapshot = None
+        for record in getattr(snapshot, "records", ()) or ():
+            items.append(
+                {
+                    "name": f"Plugin: {record.display_name}",
+                    "key": f"plugin_enabled:{record.plugin_id}",
+                    "kind": "plugin-bool",
+                    "plugin_id": record.plugin_id,
+                    "value": bool(record.enabled),
+                    "trusted": bool(record.trusted),
+                    "description": (
+                        "Enable or disable this plugin's executable tools, system-prompt instructions, and virtual skills."
+                    ),
+                    "command": f"/plugins enable {record.plugin_id} | /plugins disable {record.plugin_id}",
+                }
+            )
+    return items
 
 
 def parse_bool(value: Any) -> Optional[bool]:
@@ -204,15 +230,28 @@ def apply_setting_value(
     rules_manager: Any,
     key: str,
     value: Any,
+    runtime_plugin_manager: Any = None,
 ) -> Tuple[bool, str, bool]:
     """Mutate one setting. Returns (success, message, should_reinit_agent)."""
     normalized_key = str(key or "").strip()
-    items = {str(item.get("key") or ""): item for item in get_setting_items(config, config_manager, rules_manager)}
+    items = {
+        str(item.get("key") or ""): item
+        for item in get_setting_items(config, config_manager, rules_manager, runtime_plugin_manager)
+    }
     item = items.get(normalized_key)
     if item is None:
         return False, f"Unknown setting: {normalized_key}", False
 
     kind = str(item.get("kind") or "").strip()
+    if kind == "plugin-bool":
+        if runtime_plugin_manager is None:
+            return False, "Runtime plugin manager not available.", False
+        parsed = parse_bool(value)
+        if parsed is None:
+            return False, "Plugin state expects on/off.", False
+        plugin_id = str(item.get("plugin_id") or "").strip()
+        runtime_plugin_manager.set_plugin_enabled(plugin_id, parsed)
+        return True, f"Plugin {plugin_id} {'enabled' if parsed else 'disabled'}.", True
     if kind == "readonly":
         return False, f"{item.get('name', normalized_key)} is read-only.", False
     if kind == "workspace":

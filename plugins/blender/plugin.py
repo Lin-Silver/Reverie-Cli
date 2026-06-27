@@ -155,6 +155,19 @@ class BlenderRuntimePlugin(ReverieRuntimePluginHost):
                 "asset planning with rc_blender_ensure_runtime and rc_blender_run_script "
                 "for execution."
             ),
+            "skills": [
+                {
+                    "name": "blender-production-runtime",
+                    "description": "Execute auditable Blender asset workflows through the portable plugin runtime.",
+                    "include_modes": [],
+                    "body": (
+                        "Use blender_modeling_workbench for plans and generated bpy scripts, then use this plugin for "
+                        "runtime deployment and execution. Check runtime_status before direct execution. For PMX/PMD/VMD/VPD "
+                        "assets prefer import_mmd_model. Verify exported .blend/.glb/.gltf artifacts before claiming success. "
+                        "Only advertise Blender MCP after mcp_info reports a successful tools/list probe."
+                    ),
+                }
+            ],
             "commands": [
                 {
                     "name": "mcp_install",

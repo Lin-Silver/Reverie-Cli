@@ -48,8 +48,6 @@ from .game_modeling_workbench import GameModelingWorkbenchTool
 from .blender_modeling_workbench import BlenderModelingWorkbenchTool
 from .atlas_delivery_orchestrator import AtlasDeliveryOrchestratorTool
 from .reverie_engine import ReverieEngineTool
-from .reverie_engine_lite import ReverieEngineLiteTool
-from .token_counter import TokenCounterTool
 from .mode_switch import ModeSwitchTool
 from .computer_control import ComputerControlTool
 from .mcp_resource_tools import ListMcpResourcesTool, ReadMcpResourceTool
@@ -232,8 +230,6 @@ def _register_builtin_tools() -> None:
     register_tool_class(BlenderModelingWorkbenchTool, include_modes=reverie_modeling_modes)
     register_tool_class(AtlasDeliveryOrchestratorTool, include_modes=("reverie-atlas",))
     register_tool_class(ReverieEngineTool, include_modes=reverie_game_modes)
-    register_tool_class(ReverieEngineLiteTool, include_modes=reverie_game_modes)
-    register_tool_class(TokenCounterTool)
     register_tool_class(ModeSwitchTool, exclude_modes=("computer-controller",))
     register_tool_class(ComputerControlTool, include_modes=("computer-controller",))
 

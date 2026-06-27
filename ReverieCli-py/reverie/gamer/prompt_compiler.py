@@ -438,7 +438,7 @@ def _infer_runtime_preferences(
             explicit = "godot"
         elif _matches_any(text, tokens, {"o3de"}):
             explicit = "o3de"
-    if explicit and explicit not in {"godot", "o3de", "reverie_engine", "reverie_engine_lite", "custom"}:
+    if explicit and explicit not in {"godot", "o3de", "reverie_engine", "custom"}:
         unsupported_explicit = explicit
         explicit = ""
 

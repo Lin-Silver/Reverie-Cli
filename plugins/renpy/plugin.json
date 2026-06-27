@@ -1,0 +1,57 @@
+{
+  "schema_version": "2.0",
+  "id": "renpy",
+  "display_name": "Ren'Py Engine Plugin",
+  "runtime_family": "visual-novel-engine",
+  "version": "0.2.0",
+  "delivery": "python-exe",
+  "template": "runtime_python_exe",
+  "description": "Ren'Py-focused runtime management, .rpy project/script inspection, lint/compile/distribute workflows, and Galgame production support for Reverie-Gamer.",
+  "source_repo_hint": "https://github.com/renpy/renpy",
+  "entry": {
+    "preferred": {
+      "windows": "dist/reverie-renpy.exe",
+      "linux": "dist/reverie-renpy",
+      "darwin": "dist/reverie-renpy",
+      "default": "plugin.py"
+    },
+    "fallbacks": {
+      "default": "plugin.py"
+    },
+    "strategy": "prefer-packaged",
+    "allow_source_fallback": true
+  },
+  "packaging": {
+    "format": "pyinstaller-onefile",
+    "compiled": {
+      "windows": "dist/reverie-renpy.exe",
+      "linux": "dist/reverie-renpy",
+      "darwin": "dist/reverie-renpy"
+    },
+    "source": {
+      "default": "plugin.py"
+    },
+    "build": {
+      "windows": [
+        "build.bat"
+      ],
+      "default": [
+        "python -m PyInstaller --noconfirm --clean --onefile --name reverie-renpy plugin.py"
+      ]
+    }
+  },
+  "capabilities": [
+    "renpy",
+    "visual-novel",
+    "galgame",
+    "rpy-outline",
+    "project-inspection",
+    "runtime-install",
+    "lint",
+    "compile",
+    "distribute",
+    "mcp-contract",
+    "script-guidance",
+    "engine-plugin"
+  ]
+}

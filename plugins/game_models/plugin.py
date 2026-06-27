@@ -389,6 +389,7 @@ class GameModelsPlugin(ReverieRuntimePluginHost):
             "display_name": "Game Auxiliary Models",
             "version": PLUGIN_VERSION,
             "runtime_family": "model-depot",
+            "include_modes": ["reverie-gamer"],
             "description": "Plugin-local deployment manager for open auxiliary game asset models.",
             "tool_call_hint": (
                 "Use rc_game_models_list_models to inspect supported models, "
@@ -402,6 +403,19 @@ class GameModelsPlugin(ReverieRuntimePluginHost):
                 "Do not download model files to C:\\Users, global cache folders, or system SDK paths. "
                 "TRELLIS Text XLarge supports an 8GB low_vram attempt profile; HY-Motion remains guarded by allow_heavy."
             ),
+            "skills": [
+                {
+                    "name": "game-model-deployment",
+                    "description": "Plan, select, and verify auxiliary local game-asset model packages.",
+                    "include_modes": ["reverie-gamer"],
+                    "body": (
+                        "Before downloading a model, call deployment_plan with the actual RAM and VRAM budget, then "
+                        "use select_model or download_model with dry_run when appropriate. Never claim a model is ready "
+                        "until model_status confirms its files or registered external path. Keep venvs, caches, manifests, "
+                        "and snapshots in the plugin-local game_models depot."
+                    ),
+                }
+            ],
             "commands": [
                 {
                     "name": "list_models",

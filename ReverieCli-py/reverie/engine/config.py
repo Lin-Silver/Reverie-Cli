@@ -13,8 +13,7 @@ from .modeling import ASHFOX_DEFAULT_ENDPOINT, ASHFOX_MCP_SERVER_NAME
 
 ENGINE_BRAND = "Reverie Engine"
 ENGINE_NAME = "reverie_engine"
-ENGINE_COMPAT_NAME = "reverie_engine_lite"
-ENGINE_ALIASES = (ENGINE_NAME, ENGINE_COMPAT_NAME)
+ENGINE_ALIASES = (ENGINE_NAME,)
 SUPPORTED_DIMENSIONS = ("2D", "2.5D", "3D")
 
 
@@ -47,7 +46,7 @@ def normalize_genre(value: str | None) -> str:
 
 def canonical_engine_name(value: str | None) -> str:
     raw = str(value or "").strip().lower()
-    return ENGINE_NAME if raw in {"", ENGINE_NAME, ENGINE_COMPAT_NAME} else raw
+    return ENGINE_NAME if raw in {"", ENGINE_NAME} else raw
 
 
 def is_builtin_engine_name(value: str | None) -> bool:

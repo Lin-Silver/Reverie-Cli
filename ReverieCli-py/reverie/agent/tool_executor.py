@@ -167,6 +167,33 @@ class ToolExecutor:
         except Exception:
             logger.debug("Failed to record Memory OS tool event", exc_info=True)
 
+    def _record_operation_usage(self, tool: Any, result: ToolResult, duration_ms: int = 0) -> None:
+        manager = self.context.get("workspace_stats_manager")
+        if manager is None or not hasattr(manager, "record_operation"):
+            return
+        tool_name = str(getattr(tool, "name", tool) or "").strip()
+        metadata = getattr(tool, "metadata", {}) if tool is not None else {}
+        plugin_id = str(metadata.get("plugin_id") or "").strip() if isinstance(metadata, dict) else ""
+        category = "plugin-tool" if plugin_id else "tool"
+        session_id = "default"
+        agent = self.context.get("agent")
+        if agent is not None and hasattr(agent, "_current_session_details"):
+            try:
+                session_id = agent._current_session_details("default")[0]
+            except Exception:
+                pass
+        try:
+            manager.record_operation(
+                category=category,
+                name=tool_name,
+                plugin_id=plugin_id,
+                success=bool(result.success),
+                duration_ms=max(int(duration_ms), 0),
+                session_id=session_id,
+            )
+        except Exception:
+            logger.debug("Failed to record tool usage statistics", exc_info=True)
+
     def _candidate_file_paths(self, tool_name: str, arguments: Dict[str, Any]) -> List[Path]:
         if tool_name not in {"str_replace_editor", "create_file", "delete_file", "file_ops"}:
             return []
@@ -801,9 +828,11 @@ class ToolExecutor:
                 actor="tool",
                 tags=["tool", "error", str(tool_name or "")],
             )
+            self._record_operation_usage(tool_name, result)
             return result
         
         normalized_arguments = self._normalize_arguments(tool, arguments)
+        before_snapshots = self._snapshot_file_paths(self._candidate_file_paths(tool.name, normalized_arguments))
         self._record_memory_event(
             "tool_call",
             {
@@ -840,6 +869,7 @@ class ToolExecutor:
                 arguments=normalized_arguments,
                 result=result,
             )
+            self._record_operation_usage(tool, result)
             return result
 
         subagent_denial = self._subagent_scope_denial(tool, normalized_arguments)
@@ -859,6 +889,7 @@ class ToolExecutor:
                 actor="tool",
                 tags=["tool", "error", tool.name],
             )
+            self._record_operation_usage(tool, result)
             return result
         
         previous_tool_name = self.context.get("active_tool_name")
@@ -894,10 +925,10 @@ class ToolExecutor:
                     actor="tool",
                     tags=["tool", "error", tool.name],
                 )
+                self._record_operation_usage(tool, result)
                 return result
 
         started = time.perf_counter()
-        before_snapshots = self._snapshot_file_paths(self._candidate_file_paths(tool.name, normalized_arguments))
         try:
             result = tool.execute(**normalized_arguments)
             result = self._apply_result_budget(tool, result)
@@ -912,6 +943,7 @@ class ToolExecutor:
                     )
                 except Exception as exc:
                     logger.debug("Lifecycle post-tool hook failed: %s", exc, exc_info=True)
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
             self._record_memory_event(
                 "tool_result",
                 {
@@ -922,7 +954,7 @@ class ToolExecutor:
                     "output": result.output,
                     "error": result.error,
                     "status": str(getattr(result.status, "value", "success")),
-                    "elapsed_ms": int((time.perf_counter() - started) * 1000),
+                    "elapsed_ms": elapsed_ms,
                 },
                 actor="tool",
                 tags=["tool", "success" if result.success else "error", tool.name],
@@ -946,6 +978,7 @@ class ToolExecutor:
                 arguments=normalized_arguments,
                 result=result,
             )
+            self._record_operation_usage(tool, result, elapsed_ms)
             return result
         except Exception as e:
             result = ToolResult.fail(f"Tool execution error: {str(e)}")
@@ -960,6 +993,7 @@ class ToolExecutor:
                     )
                 except Exception as exc:
                     logger.debug("Lifecycle error hook failed: %s", exc, exc_info=True)
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
             self._record_memory_event(
                 "tool_result",
                 {
@@ -970,11 +1004,12 @@ class ToolExecutor:
                     "output": "",
                     "error": result.error,
                     "status": str(getattr(result.status, "value", "error")),
-                    "elapsed_ms": int((time.perf_counter() - started) * 1000),
+                    "elapsed_ms": elapsed_ms,
                 },
                 actor="tool",
                 tags=["tool", "error", tool.name],
             )
+            self._record_operation_usage(tool, result, elapsed_ms)
             return result
         finally:
             self.context["active_tool_name"] = previous_tool_name

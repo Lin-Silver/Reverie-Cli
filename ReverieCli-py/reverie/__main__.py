@@ -343,6 +343,12 @@ def main(argv: list[str] | None = None):
         '--report-file',
         help='Write structured JSON output for prompt mode'
     )
+
+    parser.add_argument(
+        '--sdk-bridge',
+        action='store_true',
+        help='Run the JSONL settings/plugin bridge on stdin/stdout'
+    )
     
     args = parser.parse_args(argv)
     
@@ -351,6 +357,11 @@ def main(argv: list[str] | None = None):
         print(f"Core Interface v{CORE_INTERFACE_VERSION}")
         print("Kernel: python")
         return 0
+
+    if args.sdk_bridge:
+        from reverie.sdk_bridge import main as sdk_bridge_main
+
+        return sdk_bridge_main()
     
     # Resolve project path
     project_root = Path(args.path).resolve()

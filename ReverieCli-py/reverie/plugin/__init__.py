@@ -6,6 +6,8 @@ from .protocol import (
     RC_PROTOCOL_VERSION,
     RuntimePluginCommandSpec,
     RuntimePluginHandshake,
+    RuntimePluginMcpServerSpec,
+    RuntimePluginSkillSpec,
     build_runtime_tool_name,
     normalize_runtime_handshake,
 )
@@ -36,6 +38,8 @@ __all__ = [
     "RuntimePluginCommandSpec",
     "RuntimePluginDynamicTool",
     "RuntimePluginHandshake",
+    "RuntimePluginMcpServerSpec",
+    "RuntimePluginSkillSpec",
     "RuntimePluginManager",
     "RuntimePluginRecord",
     "RuntimePluginSnapshot",

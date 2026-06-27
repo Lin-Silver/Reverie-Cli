@@ -125,14 +125,19 @@ def generate_agnes_image(
     payload: Dict[str, Any] = {
         "model": model_id,
         "prompt": prompt,
-        "n": image_count,
-        "size": normalized_size,
-        "quality": normalized_quality,
-        "response_format": normalized_response_format,
-        "extra_body": {"response_format": normalized_response_format},
     }
+    if image_count != 1:
+        payload["n"] = image_count
+    if normalized_size not in {"auto", DEFAULT_SIZE}:
+        payload["size"] = normalized_size
+    if normalized_quality != "auto":
+        payload["quality"] = normalized_quality
+    if normalized_response_format == "url":
+        payload["response_format"] = "url"
     if isinstance(extra_body, dict):
-        payload["extra_body"].update({k: v for k, v in extra_body.items() if v is not None})
+        compact_extra = {k: v for k, v in extra_body.items() if v is not None}
+        if compact_extra:
+            payload["extra_body"] = compact_extra
     if seed is not None:
         try:
             payload["seed"] = int(seed)

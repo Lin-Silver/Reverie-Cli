@@ -78,6 +78,7 @@ class O3DESourceSDKPlugin(ReverieRuntimePluginHost):
             "display_name": "O3DE Source SDK Plugin",
             "version": PLUGIN_VERSION,
             "runtime_family": "engine",
+            "include_modes": ["reverie", "reverie-gamer"],
             "description": "O3DE source checkout, version discovery, SDK manifest, and project validation prep.",
             "tool_call_hint": (
                 "Use rc_o3de_list_versions before choosing a source version, "
@@ -88,6 +89,18 @@ class O3DESourceSDKPlugin(ReverieRuntimePluginHost):
                 "This plugin keeps O3DE source and SDK metadata inside .reverie/plugins/o3de. "
                 "Do not install O3DE into global folders or C drive user caches unless the user explicitly asks."
             ),
+            "skills": [
+                {
+                    "name": "o3de-sdk-workflow",
+                    "description": "Manage and verify the plugin-local O3DE source SDK workflow.",
+                    "include_modes": ["reverie", "reverie-gamer"],
+                    "body": (
+                        "Treat O3DE support as source-SDK and artifact-validation work until native build helpers are "
+                        "actually detected. Inspect runtime_status and source_status first, use list_versions before "
+                        "choosing a release, and keep source plus SDK manifests under .reverie/plugins/o3de."
+                    ),
+                }
+            ],
             "commands": [
                 {
                     "name": "runtime_status",

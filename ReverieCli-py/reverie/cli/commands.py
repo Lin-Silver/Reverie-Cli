@@ -976,14 +976,33 @@ class CommandHandler:
 
     def _get_context_usage_snapshot(self, agent: Any, config_manager: Any) -> Optional[Dict[str, Any]]:
         """Fetch current context usage statistics for the active conversation."""
-        from ..tools.token_counter import TokenCounterTool
+        from ..session.workspace_stats import WorkspaceStatsManager
 
-        token_counter = TokenCounterTool({'project_root': self.app.get('project_root')})
-        token_counter.context = {'agent': agent, 'config_manager': config_manager}
-        result = token_counter.execute(check_current_conversation=True)
-        if result.success and result.data:
-            return result.data
-        return None
+        if agent is None:
+            return None
+        system_tokens = WorkspaceStatsManager.count_text_tokens(getattr(agent, "system_prompt", ""))
+        messages = list(getattr(agent, "messages", []) or [])
+        messages_tokens = WorkspaceStatsManager.count_messages_tokens(messages)
+        total_tokens = system_tokens + messages_tokens
+        max_tokens = 128000
+        try:
+            config = config_manager.load() if config_manager else None
+            active_model = getattr(config, "active_model", None)
+            max_tokens = int(
+                getattr(active_model, "max_context_tokens", None)
+                or getattr(config, "max_context_tokens", 128000)
+                or 128000
+            )
+        except Exception:
+            pass
+        return {
+            "system_tokens": system_tokens,
+            "messages_tokens": messages_tokens,
+            "total_tokens": total_tokens,
+            "max_tokens": max_tokens,
+            "percentage": (total_tokens / max_tokens * 100.0) if max_tokens else 0.0,
+            "message_count": len(messages),
+        }
     
     def handle(self, command_line: str) -> bool:
         """
@@ -2107,7 +2126,6 @@ class CommandHandler:
     _TOOL_LIST_LABELS: Dict[str, tuple[str, str]] = {
         "codebase-retrieval": ("Search Code", "codebase-retrieval"),
         "command_exec": ("Shell", "command_exec"),
-        "count_tokens": ("Count Tokens", "count_tokens"),
         "create_file": ("WriteFile", "create_file"),
         "delete_file": ("DeleteFile", "delete_file"),
         "file_ops": ("File Ops", "file_ops"),
@@ -4627,6 +4645,14 @@ class CommandHandler:
             force_refresh = True
         elif query.startswith("inspect "):
             return self._cmd_plugins_inspect(raw_query[8:].strip())
+        elif query.startswith("enable "):
+            return self._cmd_plugins_set_state(raw_query[7:].strip(), enabled=True)
+        elif query.startswith("disable "):
+            return self._cmd_plugins_set_state(raw_query[8:].strip(), enabled=False)
+        elif query.startswith("trust "):
+            return self._cmd_plugins_set_state(raw_query[6:].strip(), trusted=True)
+        elif query.startswith("untrust "):
+            return self._cmd_plugins_set_state(raw_query[8:].strip(), trusted=False)
         elif query == "scaffold":
             return self._cmd_plugins_scaffold("")
         elif query.startswith("scaffold "):
@@ -4688,12 +4714,14 @@ class CommandHandler:
             return True
         else:
             self.console.print(
-                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /plugins [status|rescan|path|sdk [plugin-id]|deploy <plugin-id>|models [list|plan|select|download|status]|run <plugin-id>|inspect <plugin-id>|scaffold <plugin-id>|validate <plugin-id>|build <plugin-id>|templates|template inspect <template-id>][/{self.theme.AMBER_GLOW}]"
+                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /plugins [status|rescan|enable <id>|disable <id>|trust <id>|untrust <id>|path|sdk [plugin-id]|deploy <plugin-id>|models [list|plan|select|download|status]|run <plugin-id>|inspect <plugin-id>|scaffold <plugin-id>|validate <plugin-id>|build <plugin-id>|templates|template inspect <template-id>][/{self.theme.AMBER_GLOW}]"
             )
             return True
 
         summary = runtime_plugin_manager.get_status_summary(force_refresh=force_refresh)
         rows = runtime_plugin_manager.list_display_rows(force_refresh=False)
+        if force_refresh and self.app.get("skills_manager"):
+            self.app["skills_manager"].scan()
         if force_refresh and self.app.get('refresh_agent_prompt_guidance'):
             self.app['refresh_agent_prompt_guidance']()
 
@@ -4708,6 +4736,8 @@ class CommandHandler:
             [
                 ("Summary", summary.get("summary_label", "0 detected | 0 ready | 0 rc | 0 tools")),
                 ("Detected", str(summary.get("detected_count", 0))),
+                ("Enabled", str(summary.get("enabled_count", 0))),
+                ("Trusted", str(summary.get("trusted_count", 0))),
                 ("Ready", str(summary.get("ready_count", 0))),
                 ("Invalid Manifests", str(summary.get("invalid_count", 0))),
                 ("RC Ready", str(summary.get("protocol_ready_count", 0))),
@@ -4737,6 +4767,8 @@ class CommandHandler:
         table.add_column("Runtime", style=f"bold {self.theme.BLUE_SOFT}", width=20)
         table.add_column("Type", style=self.theme.TEXT_SECONDARY, width=12)
         table.add_column("Delivery", style=self.theme.TEXT_SECONDARY, width=14)
+        table.add_column("Enabled", style=self.theme.TEXT_SECONDARY, width=8)
+        table.add_column("Trust", style=self.theme.TEXT_SECONDARY, width=9)
         table.add_column("Status", style=self.theme.TEXT_SECONDARY, width=16)
         table.add_column("Protocol", style=self.theme.TEXT_SECONDARY, width=14)
         table.add_column("Tools", style=self.theme.TEXT_SECONDARY, width=6)
@@ -4769,6 +4801,8 @@ class CommandHandler:
                 row.get("name", ""),
                 row.get("family", ""),
                 row.get("delivery", ""),
+                row.get("enabled", "yes"),
+                row.get("trusted", "yes"),
                 f"[{status_color}]{escape(row.get('status_label', ''))}[/{status_color}]",
                 f"[{protocol_color}]{escape(row.get('protocol_label', ''))}[/{protocol_color}]",
                 row.get("tool_count", "0"),
@@ -4779,6 +4813,45 @@ class CommandHandler:
 
         self.console.print(table)
         self.console.print()
+        return True
+
+    def _cmd_plugins_set_state(
+        self,
+        plugin_id: str,
+        *,
+        enabled: Optional[bool] = None,
+        trusted: Optional[bool] = None,
+    ) -> bool:
+        """Persist plugin activation/trust and refresh dependent runtime surfaces."""
+        manager = self.app.get("runtime_plugin_manager")
+        wanted = str(plugin_id or "").strip()
+        if not manager or not wanted:
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /plugins enable|disable|trust|untrust <plugin-id>[/{self.theme.AMBER_GLOW}]"
+            )
+            return True
+        record = manager.get_record(wanted, force_refresh=False)
+        if record is None:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Runtime plugin not found: {escape(wanted)}[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+        if enabled is not None:
+            manager.set_plugin_enabled(record.plugin_id, enabled)
+        if trusted is not None:
+            manager.set_plugin_trust(record.plugin_id, trusted)
+        skills_manager = self.app.get("skills_manager")
+        if skills_manager:
+            skills_manager.scan()
+        refresh_prompt = self.app.get("refresh_agent_prompt_guidance")
+        if refresh_prompt:
+            refresh_prompt()
+        state = manager.get_plugin_state(record.plugin_id)
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Plugin {escape(record.plugin_id)}: "
+            f"{'enabled' if state['enabled'] else 'disabled'}, "
+            f"{'trusted' if state['trusted'] else 'untrusted'}.[/{self.theme.MINT_VIBRANT}]"
+        )
         return True
 
     def _parse_plugins_action_tokens(self, args: str) -> tuple[List[str], Dict[str, str], set[str]]:
@@ -5711,6 +5784,8 @@ class CommandHandler:
                 ("Plugin ID", record.plugin_id),
                 ("Runtime Type", record.runtime_family),
                 ("Delivery", record.delivery_label),
+                ("Enabled", "yes" if record.enabled else "no"),
+                ("Trusted", "yes" if record.trusted else "no"),
                 ("Entry Status", record.status_label),
                 ("Protocol", record.protocol_label),
                 ("Entry", record.entry_display),
@@ -5762,6 +5837,7 @@ class CommandHandler:
             ("System Prompt", protocol.system_prompt or "(none)"),
             ("Commands", str(len(protocol.commands))),
             ("Exposed Tools", str(len(protocol.tool_commands))),
+            ("Skills", str(len(protocol.skills))),
         ]
         self.console.print(self._build_key_value_table(protocol_rows))
         self.console.print()
@@ -8308,13 +8384,6 @@ class CommandHandler:
             post_select_config=self._configure_nvidia_thinking_for_model,
         )
 
-    def cmd_web(self, args: str) -> bool:
-        """Legacy compatibility stub for the removed WebAI2API integration."""
-        self.console.print(
-            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} The WebAI2API integration has been removed from this build.[/{self.theme.AMBER_GLOW}]"
-        )
-        return True
-
     def cmd_model(self, args: str) -> bool:
         """List and select models, or add/delete one"""
         args = args.strip().lower()
@@ -8870,7 +8939,7 @@ class CommandHandler:
             target_engine = Prompt.ask(
                 f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Target Engine",
                 default="reverie_engine",
-                choices=["reverie_engine", "reverie_engine_lite", "custom", "phaser", "pixijs", "threejs", "pygame", "love2d", "godot", "o3de"]
+                choices=["reverie_engine", "custom", "phaser", "pixijs", "threejs", "pygame", "love2d", "godot", "o3de"]
             )
             target_platform = Prompt.ask(
                 f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Target Platform",
@@ -9276,7 +9345,7 @@ class CommandHandler:
             target_engine = Prompt.ask(
                 f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Target Engine",
                 default="reverie_engine",
-                choices=["reverie_engine", "reverie_engine_lite", "custom", "phaser", "pixijs", "threejs", "pygame", "love2d", "godot", "o3de"],
+                choices=["reverie_engine", "custom", "phaser", "pixijs", "threejs", "pygame", "love2d", "godot", "o3de"],
             ).strip()
             camera_model = Prompt.ask(
                 f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Camera Model",
@@ -10691,7 +10760,20 @@ class CommandHandler:
             return True
 
         selected_workspace = None
-        if len(workspaces) == 1 and args.strip().lower() not in {"choose", "select"}:
+        active_stats_manager = self.app.get("workspace_stats_manager")
+        active_cache_dir = Path(
+            getattr(active_stats_manager, "project_data_dir", self.app.get("project_data_dir") or "")
+        ).resolve()
+        if self.app.get("headless"):
+            selected_workspace = next(
+                (
+                    item
+                    for item in workspaces
+                    if Path(str(item.get("cache_dir") or "")).resolve() == active_cache_dir
+                ),
+                workspaces[0],
+            )
+        elif len(workspaces) == 1 and args.strip().lower() not in {"choose", "select"}:
             selected_workspace = workspaces[0]
         else:
             selector_items = [
@@ -10722,7 +10804,6 @@ class CommandHandler:
             selected_workspace = result.selected_item.metadata
 
         cache_dir = Path(str(selected_workspace.get("cache_dir") or ""))
-        active_stats_manager = self.app.get("workspace_stats_manager")
         if active_stats_manager:
             try:
                 active_stats_manager.flush()
@@ -10760,6 +10841,10 @@ class CommandHandler:
         summary.add_row("Model Calls", f"[{self.theme.PURPLE_SOFT}]{dashboard.get('total_calls', 0):,}[/{self.theme.PURPLE_SOFT}]")
         summary.add_row("Input Tokens", f"[{self.theme.BLUE_SOFT}]{dashboard.get('total_input_tokens', 0):,}[/{self.theme.BLUE_SOFT}]")
         summary.add_row("Output Tokens", f"[{self.theme.PINK_SOFT}]{dashboard.get('total_output_tokens', 0):,}[/{self.theme.PINK_SOFT}]")
+        summary.add_row("Total Tokens", f"[bold {self.theme.MINT_SOFT}]{dashboard.get('total_tokens', 0):,}[/bold {self.theme.MINT_SOFT}]")
+        summary.add_row("AI Tool Calls", f"[{self.theme.BLUE_SOFT}]{dashboard.get('total_tool_calls', 0):,}[/{self.theme.BLUE_SOFT}]")
+        summary.add_row("Plugin Tool Calls", f"[{self.theme.PURPLE_SOFT}]{dashboard.get('total_plugin_tool_calls', 0):,}[/{self.theme.PURPLE_SOFT}]")
+        summary.add_row("Skill Activations", f"[{self.theme.AMBER_GLOW}]{dashboard.get('total_skill_activations', 0):,}[/{self.theme.AMBER_GLOW}]")
         summary.add_row("Sessions", f"[{self.theme.TEXT_SECONDARY}]{len(session_rows)}[/{self.theme.TEXT_SECONDARY}]")
         self.console.print(
             Panel(
@@ -10913,6 +10998,35 @@ class CommandHandler:
             model_table.add_row("No model usage recorded yet", "", "", "", "", "")
         self.console.print(model_table)
 
+        operation_table = Table(
+            title=f"[bold {self.theme.AMBER_GLOW}]{self.deco.CRYSTAL} AI Operations[/bold {self.theme.AMBER_GLOW}]",
+            box=box.ROUNDED,
+            border_style=self.theme.BORDER_SECONDARY,
+            expand=True,
+        )
+        operation_table.add_column("Type", style=self.theme.TEXT_DIM, no_wrap=True)
+        operation_table.add_column("Operation", style=f"bold {self.theme.BLUE_SOFT}")
+        operation_table.add_column("Plugin", style=self.theme.PURPLE_SOFT, no_wrap=True)
+        operation_table.add_column("Calls", style=self.theme.TEXT_SECONDARY, justify="right")
+        operation_table.add_column("OK", style=self.theme.MINT_SOFT, justify="right")
+        operation_table.add_column("Failed", style=self.theme.CORAL_SOFT, justify="right")
+        operation_table.add_column("Avg ms", style=self.theme.TEXT_DIM, justify="right")
+        operation_table.add_column("Last Used", style=self.theme.TEXT_DIM, no_wrap=True)
+        for row in dashboard.get("operation_usage", []) or []:
+            operation_table.add_row(
+                str(row.get("category") or "tool"),
+                str(row.get("name") or ""),
+                str(row.get("plugin_id") or "-"),
+                f"{int(row.get('calls', 0)):,}",
+                f"{int(row.get('successes', 0)):,}",
+                f"{int(row.get('failures', 0)):,}",
+                f"{float(row.get('average_duration_ms', 0) or 0):.1f}",
+                str(row.get("last_used_at") or "")[:16].replace("T", " "),
+            )
+        if not (dashboard.get("operation_usage") or []):
+            operation_table.add_row("No AI operations recorded yet", "", "", "", "", "", "", "")
+        self.console.print(operation_table)
+
         sessions_table = Table(
             title=f"[bold {self.theme.BLUE_SOFT}]{self.deco.CRYSTAL} Session Summary[/bold {self.theme.BLUE_SOFT}]",
             box=box.ROUNDED,
@@ -10939,6 +11053,9 @@ class CommandHandler:
             sessions_table.add_row("", "No sessions recorded", "", "", "", "")
         self.console.print(sessions_table)
         self.console.print()
+
+        if self.app.get("headless"):
+            return True
 
         try:
             choice = Prompt.ask(
@@ -11235,7 +11352,12 @@ class CommandHandler:
 
     def _get_setting_items(self, config, config_manager, rules_manager) -> List[Dict[str, Any]]:
         """Build setting metadata for the interactive settings view."""
-        return get_setting_items(config, config_manager, rules_manager)
+        return get_setting_items(
+            config,
+            config_manager,
+            rules_manager,
+            self.app.get("runtime_plugin_manager"),
+        )
 
     def _setting_display_value(self, item: Dict[str, Any], config, config_manager, rules_manager) -> str:
         """Render a compact value label for a settings item."""
@@ -11244,6 +11366,17 @@ class CommandHandler:
 
         if kind == "readonly" and key == "active_model_source":
             return self._format_model_source_label(str(getattr(config, "active_model_source", "standard")).lower())
+        if kind == "plugin-bool":
+            manager = self.app.get("runtime_plugin_manager")
+            plugin_id = str(item.get("plugin_id") or "").strip()
+            state = manager.get_plugin_state(plugin_id) if manager else {"enabled": False, "trusted": False}
+            enabled_label = (
+                f"[{self.theme.MINT_SOFT}]ON[/{self.theme.MINT_SOFT}]"
+                if state.get("enabled")
+                else f"[{self.theme.TEXT_DIM}]OFF[/{self.theme.TEXT_DIM}]"
+            )
+            trust_label = "trusted" if state.get("trusted") else "untrusted"
+            return f"{enabled_label} [{self.theme.TEXT_DIM}]{trust_label}[/{self.theme.TEXT_DIM}]"
         if kind == "workspace":
             enabled = bool(config_manager.is_workspace_mode())
             return f"[{self.theme.MINT_SOFT}]Workspace[/{self.theme.MINT_SOFT}]" if enabled else f"[{self.theme.PURPLE_MEDIUM}]Global[/{self.theme.PURPLE_MEDIUM}]"
@@ -11907,6 +12040,20 @@ class CommandHandler:
 
         if kind in ("readonly", "rules"):
             return False
+        if kind == "plugin-bool":
+            manager = self.app.get("runtime_plugin_manager")
+            if manager is None:
+                return False
+            plugin_id = str(item.get("plugin_id") or "").strip()
+            state = manager.get_plugin_state(plugin_id)
+            manager.set_plugin_enabled(plugin_id, not bool(state.get("enabled")))
+            skills_manager = self.app.get("skills_manager")
+            if skills_manager:
+                skills_manager.scan()
+            refresh_prompt = self.app.get("refresh_agent_prompt_guidance")
+            if refresh_prompt:
+                refresh_prompt()
+            return True
         if kind == "workspace":
             target = not bool(config_manager.is_workspace_mode())
             success, _ = self._apply_workspace_mode_setting(target)
@@ -11950,6 +12097,8 @@ class CommandHandler:
             return True
         if kind == "readonly":
             return False
+        if kind == "plugin-bool":
+            return self._setting_step_item(item, config, config_manager, rules_manager, 1)
         if kind == "workspace":
             success, _ = self._apply_workspace_mode_setting(not bool(config_manager.is_workspace_mode()))
             return success
@@ -12944,20 +13093,21 @@ class CommandHandler:
             )
 
             try:
-                from ..tools.token_counter import TokenCounterTool
-                token_counter = TokenCounterTool({'project_root': self.app.get('project_root')})
-                token_counter.context = {'agent': agent, 'config_manager': config_manager}
-                result = token_counter.execute(check_current_conversation=True)
-
-                if result.success:
-                    self.console.print(result.output)
-                else:
-                    self._show_activity_event(
-                        "Context Engine",
-                        "Failed to get statistics.",
-                        status="error",
-                        detail=str(result.error or ""),
+                usage = self._get_context_usage_snapshot(agent, config_manager)
+                if not usage:
+                    raise RuntimeError("No active conversation found.")
+                self.console.print(
+                    self._build_key_value_table(
+                        [
+                            ("System Prompt", f"{usage['system_tokens']:,} tokens"),
+                            ("Messages", f"{usage['messages_tokens']:,} tokens"),
+                            ("Total Context", f"{usage['total_tokens']:,} tokens"),
+                            ("Context Limit", f"{usage['max_tokens']:,} tokens"),
+                            ("Usage", f"{usage['percentage']:.1f}%"),
+                            ("Messages Counted", str(usage["message_count"])),
+                        ]
                     )
+                )
             except Exception as e:
                 self._show_activity_event(
                     "Context Engine",

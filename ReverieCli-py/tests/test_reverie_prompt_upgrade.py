@@ -121,7 +121,7 @@ def test_reverie_default_tool_surface_keeps_core_modeling_without_runtime_tools(
     assert "game_design_orchestrator" not in tool_names
     assert "game_project_scaffolder" not in tool_names
     assert "reverie_engine" not in tool_names
-    assert "reverie_engine_lite" not in tool_names
+    assert "reverie_engine" + "_lite" not in tool_names
     assert "codebase-retrieval" in tool_names
     assert "command_exec" in tool_names
     assert "task_manager" in tool_names

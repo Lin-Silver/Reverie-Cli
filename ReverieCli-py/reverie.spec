@@ -9,7 +9,7 @@ binaries = []
 hiddenimports = ['rich', 'rich.console', 'rich.panel', 'rich.table', 'rich.syntax', 'rich.markdown', 'rich.progress', 'rich.prompt', 'rich.text', 'click', 'requests', 'openai', 'git', 'ddgs', 'bs4', 'yaml', 'tqdm', 
                  'pyglet', 'moderngl', 'glcontext',
                  'reverie.cli.input_handler', 'reverie.cli.commands', 'reverie.cli.display', 'reverie.cli.theme', 'reverie.cli.markdown_formatter', 'reverie.cli.session_ui',
-                 'reverie.config', 'reverie.rules_manager', 'reverie.session', 'reverie.agent', 'reverie.context_engine',
+                 'reverie.config', 'reverie.sdk_bridge', 'reverie.rules_manager', 'reverie.session', 'reverie.agent', 'reverie.context_engine',
                  'reverie.engine_lite', 'reverie.engine_lite.video', 'reverie.engine_lite.renpy_import', 'reverie.engine_lite.procedural_assets', 'reverie.engine_lite.blender_modeling',
                  'reverie.tools.registry', 'reverie.tools.browser_controler', 'reverie.tools.reverie_engine', 'reverie.tools.reverie_engine_lite', 'reverie.tools.game_modeling_workbench', 'reverie.tools.blender_modeling_workbench']
 

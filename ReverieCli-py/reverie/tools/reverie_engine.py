@@ -10,7 +10,6 @@ from .base import BaseTool, ToolResult
 from ..engine import (
     ArchetypeDocument,
     ENGINE_BRAND,
-    ENGINE_COMPAT_NAME,
     ENGINE_NAME,
     benchmark_project,
     build_engine_config,
@@ -34,7 +33,7 @@ from ..engine import (
     validate_project,
     validate_scene_document,
 )
-from ..engine_lite.serialization import node_from_dict
+from ..engine.serialization import node_from_dict
 
 
 class _BaseReverieEngineTool(BaseTool):
@@ -520,7 +519,3 @@ class _BaseReverieEngineTool(BaseTool):
 
 class ReverieEngineTool(_BaseReverieEngineTool):
     name = ENGINE_NAME
-
-
-class ReverieEngineLiteTool(_BaseReverieEngineTool):
-    name = ENGINE_COMPAT_NAME

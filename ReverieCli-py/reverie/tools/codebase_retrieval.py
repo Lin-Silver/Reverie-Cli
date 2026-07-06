@@ -597,8 +597,25 @@ Examples:
             active_files=active_files,
             changed_files=changed_files,
         )
+        project_memory = []
+        output = result.context_string
+        if include_memory:
+            try:
+                from .memory_retrieval import get_memory_os_from_context
+
+                memory_os = get_memory_os_from_context(self.context)
+                project_memory = memory_os.recall(query, limit=4)
+            except Exception:
+                project_memory = []
+            if project_memory:
+                memory_lines = ["## Persistent Project Memory"]
+                memory_lines.extend(
+                    f"- {hit.item.id} [{hit.item.memory_type} v{hit.item.version} provenance={hit.item.provenance}] {hit.item.content}"
+                    for hit in project_memory
+                )
+                output = output.rstrip() + "\n\n" + "\n".join(memory_lines)
         return ToolResult.ok(
-            result.context_string,
+            output,
             data={
                 'query': query,
                 'files': [item.file_path for item in result.relevant_files],
@@ -611,11 +628,40 @@ Examples:
                     item.file_path: list(item.evidence)
                     for item in result.relevant_files
                 },
+                'project_memory': [
+                    {
+                        'id': hit.item.id,
+                        'type': hit.item.memory_type,
+                        'content': hit.item.content,
+                        'score': hit.score,
+                        'provenance': hit.item.provenance,
+                        'version': hit.item.version,
+                    }
+                    for hit in project_memory
+                ],
             }
         )
 
     def _query_memory(self, query: str, limit: int) -> ToolResult:
-        """Query workspace-global memory."""
+        """Query persistent project memory, with legacy session memory as fallback."""
+        try:
+            from .memory_retrieval import get_memory_os_from_context
+
+            memory_os = get_memory_os_from_context(self.context)
+            hits = memory_os.recall(query, limit=max(1, limit))
+        except Exception:
+            hits = []
+        if hits:
+            lines = ["# Persistent Project Memory"]
+            lines.extend(
+                f"- {hit.item.id} [{hit.item.scope}/{hit.item.memory_type} v{hit.item.version} "
+                f"confidence={hit.item.confidence:.2f} provenance={hit.item.provenance}] {hit.item.content}"
+                for hit in hits
+            )
+            return ToolResult.ok(
+                "\n".join(lines),
+                data={"count": len(hits), "memory_ids": [hit.item.id for hit in hits], "backend": "memory_os"},
+            )
         memory_indexer = self.context.get("memory_indexer")
         if not memory_indexer:
             return ToolResult.fail("Workspace memory index is not available.")

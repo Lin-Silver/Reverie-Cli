@@ -11,9 +11,25 @@ from uuid import uuid4
 MEMORY_CONTEXT_PROMPT_HEADER = "[REVERIE CONTEXT ENGINE MEMORY PACKAGE]"
 
 MEMORY_SCOPES = ("session", "project", "workflow", "procedural")
-MEMORY_TYPES = (
+MEMANTO_MEMORY_TYPES = (
+    "instruction",
     "fact",
+    "decision",
+    "goal",
+    "commitment",
     "preference",
+    "relationship",
+    "context",
+    "event",
+    "learning",
+    "observation",
+    "artifact",
+    "error",
+)
+
+# Keep Reverie's established specialist categories while accepting the full
+# Memanto-inspired typed-memory vocabulary.
+MEMORY_TYPES = MEMANTO_MEMORY_TYPES + (
     "project_decision",
     "failure_experience",
     "success_workflow",
@@ -129,6 +145,15 @@ class MemoryItem:
     source_event_ids: List[str] = field(default_factory=list)
     status: str = "active"
     metadata: Dict[str, Any] = field(default_factory=dict)
+    provenance: str = "observed"
+    source: str = ""
+    version: int = 1
+    supersedes: List[str] = field(default_factory=list)
+    superseded_by: str = ""
+    valid_from: str = ""
+    valid_to: str = ""
+    last_accessed_at: str = ""
+    access_count: int = 0
 
     def fingerprint(self) -> str:
         import hashlib
@@ -157,6 +182,15 @@ class MemoryItem:
             "source_event_ids": list(self.source_event_ids or []),
             "status": str(self.status or "active"),
             "metadata": dict(self.metadata or {}),
+            "provenance": str(self.provenance or "observed"),
+            "source": str(self.source or ""),
+            "version": max(1, int(self.version or 1)),
+            "supersedes": [str(item) for item in (self.supersedes or []) if str(item or "").strip()],
+            "superseded_by": str(self.superseded_by or ""),
+            "valid_from": str(self.valid_from or ""),
+            "valid_to": str(self.valid_to or ""),
+            "last_accessed_at": str(self.last_accessed_at or ""),
+            "access_count": max(0, int(self.access_count or 0)),
             "fingerprint": self.fingerprint(),
         }
 
@@ -176,6 +210,15 @@ class MemoryItem:
             source_event_ids=[str(item) for item in (data.get("source_event_ids") or []) if str(item or "").strip()],
             status=str(data.get("status") or "active"),
             metadata=dict(data.get("metadata") or {}),
+            provenance=str(data.get("provenance") or "observed"),
+            source=str(data.get("source") or ""),
+            version=max(1, int(data.get("version") or 1)),
+            supersedes=[str(item) for item in (data.get("supersedes") or []) if str(item or "").strip()],
+            superseded_by=str(data.get("superseded_by") or ""),
+            valid_from=str(data.get("valid_from") or ""),
+            valid_to=str(data.get("valid_to") or ""),
+            last_accessed_at=str(data.get("last_accessed_at") or ""),
+            access_count=max(0, int(data.get("access_count") or 0)),
         )
 
 
@@ -184,6 +227,7 @@ class MemorySearchHit:
     item: MemoryItem
     score: float
     reasons: List[str] = field(default_factory=list)
+    components: Dict[str, float] = field(default_factory=dict)
 
 
 @dataclass

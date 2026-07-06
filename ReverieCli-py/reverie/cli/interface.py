@@ -50,6 +50,7 @@ from ..config import (
     ModelConfig,
     Config,
     get_computer_controller_data_dir,
+    model_source_display_name,
     normalize_thinking_output_style,
     normalize_tool_output_style,
 )
@@ -412,6 +413,16 @@ def _sanitize_prompt_output_text(output_text: str, thinking_text: str) -> str:
     return cleaned.strip()
 
 
+def _split_prompt_error(output_text: str) -> tuple[str, str]:
+    cleaned = str(output_text or "").strip()
+    marker = "Error processing message:"
+    marker_index = cleaned.rfind(marker)
+    if marker_index < 0:
+        return cleaned, ""
+    user_output = cleaned[:marker_index].rstrip()
+    return user_output, cleaned[marker_index:].strip()
+
+
 def _strip_leaked_prompt_reasoning_prefix(output_text: str) -> str:
     cleaned = str(output_text or "").strip()
     if not cleaned:
@@ -699,6 +710,41 @@ def _missing_prompt_requested_files(project_root: Path, prompt_text: str) -> Lis
     return missing
 
 
+def _writer_project_progress(project_root: Path, prompt_text: str) -> Optional[Dict[str, Any]]:
+    """Return persisted Writer progress when a prompt names a native novel id."""
+    match = re.search(r"novel_id\s*(?:为|=|:)\s*([\w.-]+)", str(prompt_text or ""), flags=re.IGNORECASE)
+    if not match:
+        return None
+    state_path = Path(project_root) / "novels" / match.group(1) / "tracking" / "state.json"
+    if not state_path.is_file():
+        return {"novel_id": match.group(1), "exists": False}
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"novel_id": match.group(1), "exists": True, "invalid": True}
+    return {
+        "novel_id": match.group(1),
+        "exists": True,
+        "invalid": False,
+        "configured": bool(state.get("configured")),
+        "status": str(state.get("status", "") or ""),
+        "total_chars": int(state.get("total_chars", 0) or 0),
+        "target_chars": int(state.get("target_chars", 0) or 0),
+        "completed_chapters": int(state.get("completed_chapters", 0) or 0),
+        "active_chapter": state.get("active_chapter"),
+    }
+
+
+def _effective_stream_responses(config: Config, mode: Optional[str] = None) -> bool:
+    """Return the actual stream setting after applying transport safety overrides."""
+    configured = bool(getattr(config, "stream_responses", True))
+    active_mode = normalize_mode(mode or getattr(config, "mode", ""))
+    active_source = str(getattr(config, "active_model_source", "") or "").strip().lower()
+    if active_mode == "writer" and active_source == "sensenova":
+        return True
+    return configured
+
+
 def _build_prompt_followup_message(
     mode: str,
     original_prompt: str,
@@ -721,6 +767,26 @@ def _build_prompt_followup_message(
         )
 
     if normalized_mode == "writer":
+        project_progress = _writer_project_progress(project_root, original_prompt)
+        if project_progress:
+            if (
+                not project_progress.get("exists")
+                or project_progress.get("invalid")
+                or not project_progress.get("configured")
+                or int(project_progress.get("total_chars", 0)) < int(project_progress.get("target_chars", 0))
+                or project_progress.get("active_chapter") is not None
+                or str(project_progress.get("status", "")).lower() != "complete"
+            ):
+                return (
+                    f"Continue the native Writer project `{project_progress['novel_id']}` now. "
+                    "Inspect it with `serial_novel` status/context, perform the exact next incomplete lifecycle stage, "
+                    "and keep drafting and committing chapters until its persisted target is met. "
+                    "Do not restart, ask for approval, or merely describe the next step; finish with `audit`, then call "
+                    "`complete` when the audit is ready. Verify the persisted status is `complete` before reporting success."
+                )
+            # A named native project is the Writer deliverable. Do not reinterpret tool
+            # parameters such as data.append_content as missing file paths after completion.
+            return None
         missing_files = _missing_prompt_requested_files(project_root, original_prompt)
         if not missing_files and not _prompt_requests_followup_approval(output_text):
             return None
@@ -1169,6 +1235,7 @@ class ReverieInterface:
             "codex": "/codex",
             "aihubmix": "/aihubmix key or /aihubmix activate",
             "agnes": "/agnes key or /agnes activate",
+            "sensenova": "/sensenova key or /sensenova activate",
             "unlimitedsurf": "/us key or /us activate",
             "nvidia": "/nvidia key or /nvidia activate",
             "modelscope": "/modelscope key or /modelscope activate",
@@ -1179,7 +1246,7 @@ class ReverieInterface:
 
     def _show_unconfigured_model_notice(self, config: Config) -> None:
         """Explain how to configure Reverie without forcing the setup wizard."""
-        if config.active_model is not None or self.config_manager.is_configured():
+        if config.active_model is not None:
             return
         self._show_activity_event(
             "Model",
@@ -1252,27 +1319,27 @@ class ReverieInterface:
 
     def _resolve_provider_label(self, config: Config) -> str:
         """Resolve the user-facing provider/source label."""
-        provider_name = str(getattr(config.active_model, "provider", "openai-sdk") if config.active_model else "openai-sdk").strip().lower()
+        active_model = config.active_model
+        provider_name = str(getattr(active_model, "provider", "") if active_model else "").strip().lower()
         source_name = str(getattr(config, "active_model_source", "standard") or "standard").strip().lower()
         provider_labels = {
-            "openai-sdk": "OpenAI",
-            "request": "Relay",
+            "openai-chat": "OpenAI Chat Completions",
+            "openai-responses": "OpenAI Responses",
+            "request": "Python requests",
+            "curl": "curl",
             "anthropic": "Anthropic",
             "codex": "Codex",
             "aihubmix": "AIhubMix",
+            "agnes": "Agnes",
+            "sensenova": "SenseNova",
             "unlimitedsurf": "unlimited.surf",
             "nvidia": "NVIDIA",
             "modelscope": "ModelScope",
+            "webgemini": "WebGemini",
         }
-        source_labels = {
-            "standard": "config.json",
-            "codex": "Codex",
-            "aihubmix": "AIhubMix",
-            "unlimitedsurf": "unlimited.surf",
-            "nvidia": "NVIDIA",
-            "modelscope": "ModelScope",
-        }
-        return source_labels.get(source_name, "") or provider_labels.get(provider_name, provider_name or "provider")
+        if source_name == "standard":
+            return provider_labels.get(provider_name, model_source_display_name(source_name))
+        return model_source_display_name(source_name)
 
     def _format_startup_timing_meta(self, meta: str = "") -> str:
         """Append startup phase timing while the interactive shell is booting."""
@@ -1374,7 +1441,7 @@ class ReverieInterface:
         mode_label = str(getattr(config, "mode", "reverie") or "reverie").upper()
         theme_label = str(getattr(config, "theme", "default") or "default").strip() or "default"
         source_label = str(getattr(config, "active_model_source", "standard") or "standard").strip() or "standard"
-        stream_label = "stream on" if bool(getattr(config, "stream_responses", True)) else "stream off"
+        stream_label = "stream on" if _effective_stream_responses(config) else "stream off"
         status_label = "status on" if bool(getattr(config, "show_status_line", True)) else "status off"
         thinking_label = normalize_thinking_output_style(getattr(config, "thinking_output_style", "full"))
         self._show_activity_event(
@@ -1416,7 +1483,7 @@ class ReverieInterface:
         project_label = self._truncate_label(self.project_root.name or str(self.project_root), 12 if tiny else 18)
 
         reasoning_label = ""
-        provider_name = str(getattr(active_model, "provider", "openai-sdk") if active_model else "openai-sdk").strip().lower()
+        provider_name = str(getattr(active_model, "provider", "openai-chat") if active_model else "openai-chat").strip().lower()
         if provider_name == "codex" and active_model:
             from ..codex import get_codex_reasoning_label
 
@@ -2077,6 +2144,11 @@ class ReverieInterface:
         """Whether the current model/source can accept inline visual `@file` attachments."""
         active_source = str(getattr(config, "active_model_source", "standard") or "standard").strip().lower()
         active_model = getattr(config, "active_model", None)
+        if active_model is None:
+            models = list(getattr(config, "models", []) or [])
+            active_index = int(getattr(config, "active_model_index", 0) or 0)
+            if 0 <= active_index < len(models):
+                active_model = models[active_index]
         model_name = str(
             getattr(active_model, "model_display_name", "")
             or getattr(active_model, "model", "")
@@ -2086,7 +2158,7 @@ class ReverieInterface:
         if active_source == "codex":
             return True, ""
 
-        if active_source in {"standard", "aihubmix", "agnes"}:
+        if active_source in {"standard", "aihubmix", "agnes", "sensenova"}:
             if bool(getattr(active_model, "supports_vision", False)):
                 return True, ""
             return False, f"{model_name} is not configured with supports_vision=true."
@@ -2113,8 +2185,13 @@ class ReverieInterface:
             if selected:
                 return get_nvidia_model_vision_modalities(selected.get("id"))
             return []
-        if active_source in {"codex", "standard", "aihubmix", "agnes"}:
+        if active_source in {"codex", "standard", "aihubmix", "agnes", "sensenova"}:
             active_model = getattr(config, "active_model", None)
+            if active_model is None:
+                models = list(getattr(config, "models", []) or [])
+                active_index = int(getattr(config, "active_model_index", 0) or 0)
+                if 0 <= active_index < len(models):
+                    active_model = models[active_index]
             if active_source == "codex" or bool(getattr(active_model, "supports_vision", False)):
                 return ["image"]
         return []
@@ -2695,9 +2772,10 @@ class ReverieInterface:
             
             try:
                 self._prime_context_engine_background()
+                stream_enabled = _effective_stream_responses(config)
                 response_stream = self.agent.process_message(
                     outbound_message,
-                    stream=config.stream_responses,
+                    stream=stream_enabled,
                     session_id=session_id,
                     user_display_text=agent_display_text,
                 )
@@ -3448,7 +3526,7 @@ class ReverieInterface:
                 include_discovery_status=include_discovery_status,
             ),
             "mode": config.mode or "reverie",
-            "provider": getattr(model, 'provider', 'openai-sdk'),
+            "provider": getattr(model, 'provider', 'openai-chat'),
             "thinking_mode": getattr(model, 'thinking_mode', None),
             "endpoint": getattr(model, 'endpoint', ''),
             "custom_headers": getattr(model, 'custom_headers', {}),
@@ -3601,10 +3679,11 @@ class ReverieInterface:
                 output_chunks: List[str] = []
                 thinking_chunks: List[str] = []
                 in_thinking_mode = False
+                stream_enabled = _effective_stream_responses(base_config)
 
                 response_stream = self.agent.process_message(
                     turn_text,
-                    stream=base_config.stream_responses,
+                    stream=stream_enabled,
                     session_id=session.id,
                     user_display_text=turn_text,
                 )
@@ -3625,8 +3704,21 @@ class ReverieInterface:
                         output_chunks.append(chunk)
 
                 turn_thinking = "".join(thinking_chunks).strip()
-                turn_output = _sanitize_prompt_output_text("".join(output_chunks).strip(), turn_thinking)
-                turn_error = turn_output if turn_output.startswith("Error processing message:") else ""
+                streamed_output = "".join(output_chunks).strip()
+                final_assistant_output = ""
+                for history_message in reversed(self.agent.get_history()):
+                    if not isinstance(history_message, dict) or history_message.get("role") != "assistant":
+                        continue
+                    content = history_message.get("content")
+                    candidate = content.strip() if isinstance(content, str) else ""
+                    if candidate and candidate in streamed_output:
+                        final_assistant_output = candidate
+                        break
+                turn_output = _sanitize_prompt_output_text(
+                    final_assistant_output or streamed_output,
+                    turn_thinking,
+                )
+                turn_output, turn_error = _split_prompt_error(turn_output)
                 return turn_output, turn_thinking, turn_error
 
             active_prompt = prompt_text
@@ -3670,6 +3762,18 @@ class ReverieInterface:
                 active_prompt = followup_message
 
             thinking_text = "\n\n".join(part for part in thinking_parts if part).strip()
+
+            if not error_text and normalize_mode(base_config.mode) == "writer":
+                writer_progress = _writer_project_progress(self.project_root, prompt_text)
+                if writer_progress and (
+                    not writer_progress.get("exists")
+                    or writer_progress.get("invalid")
+                    or str(writer_progress.get("status", "")).lower() != "complete"
+                ):
+                    error_text = (
+                        f"Native Writer project `{writer_progress['novel_id']}` did not reach persisted "
+                        "status `complete` before the one-shot run ended."
+                    )
 
             try:
                 self.session_manager.update_messages(self.agent.get_history())
@@ -3977,6 +4081,11 @@ class ReverieInterface:
                 f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Does this model support vision/image input?",
                 default=False,
             )
+            provider = Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] API Call Method",
+                choices=["openai-chat", "openai-responses", "anthropic", "request", "curl"],
+                default="openai-chat",
+            ).strip().lower()
             
             model_config = ModelConfig(
                 model=model_name,
@@ -3984,6 +4093,7 @@ class ReverieInterface:
                 base_url=base_url,
                 api_key=api_key,
                 max_context_tokens=max_tokens_int,
+                provider=provider,
                 supports_vision=supports_vision,
             )
             

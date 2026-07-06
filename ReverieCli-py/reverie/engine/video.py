@@ -14,7 +14,7 @@ import sys
 
 from PIL import Image, ImageDraw, ImageFont
 
-from .app import EngineLiteApp, RuntimeProfile, load_project_scene
+from .app import ReverieEngineApp, RuntimeProfile, load_project_scene
 from .config import load_engine_config
 from .rendering import RenderCommand, RenderFrame, RenderMode
 
@@ -423,7 +423,7 @@ def export_project_video(
     renderer = PlayblastFrameRenderer(width=width, height=height)
     manifest_frames: list[Dict[str, Any]] = []
 
-    app = EngineLiteApp(
+    app = ReverieEngineApp(
         tree,
         profile=RuntimeProfile(
             title=title,

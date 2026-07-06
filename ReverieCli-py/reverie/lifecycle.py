@@ -321,12 +321,20 @@ class LifecycleManager:
 
     def _context_summary(self, context: Dict[str, Any]) -> Dict[str, Any]:
         project_root = context.get("project_root")
+        session_id = ""
+        session_manager = context.get("session_manager")
+        if session_manager is not None and hasattr(session_manager, "get_current_session"):
+            try:
+                current_session = session_manager.get_current_session()
+                session_id = str(getattr(current_session, "id", "") or "")
+            except Exception:
+                session_id = ""
         return {
             "project_root": str(project_root) if project_root else "",
             "tool_call_id": str(context.get("active_tool_call_id") or ""),
             "subagent_id": str(context.get("subagent_id") or "main"),
             "is_subagent": bool(context.get("is_subagent", False)),
-            "session_id": getattr(context.get("session_manager"), "current_session_id", ""),
+            "session_id": session_id,
         }
 
     def summary(self) -> Dict[str, Any]:

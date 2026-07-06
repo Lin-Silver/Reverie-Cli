@@ -700,7 +700,7 @@ class ContextCompressor:
         try:
             usage_info = None
             # Use the provided client to summarize based on provider
-            if provider == "openai-sdk":
+            if provider in {"openai-sdk", "openai-chat"}:
                 # If model indicates thinking-capable mode, include chat_template_kwargs
                 extra_body = _openai_extra_body_for_model(model)
                 model_for_sdk, extra_body, nvidia_options = _resolve_nvidia_openai_call_options(
@@ -719,6 +719,17 @@ class ContextCompressor:
                     kwargs["extra_body"] = extra_body
                 response = client.chat.completions.create(**kwargs)
                 summary = response.choices[0].message.content
+                usage_info = getattr(response, "usage", None)
+            elif provider == "openai-responses":
+                from ..codex import build_codex_request_payload
+
+                converted = build_codex_request_payload(model, prompt, tools=None, stream=False)
+                response = client.responses.create(
+                    model=model,
+                    input=converted["input"],
+                    stream=False,
+                )
+                summary = str(getattr(response, "output_text", "") or "")
                 usage_info = getattr(response, "usage", None)
             elif provider == "request":
                 # Use requests library for request provider

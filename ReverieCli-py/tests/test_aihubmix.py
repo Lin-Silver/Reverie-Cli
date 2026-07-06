@@ -55,7 +55,7 @@ def test_config_active_model_resolves_aihubmix(monkeypatch) -> None:
     assert active is not None
     assert active.model == "gpt-5.5-free-high"
     assert active.model_display_name == "GPT-5.5 Free High"
-    assert active.provider == "openai-sdk"
+    assert active.provider == "openai-chat"
 
 
 def test_aihubmix_openai_options_match_provider_defaults() -> None:

@@ -9,7 +9,7 @@ def generate_boss_system(
     game_request: Dict[str, Any],
     blueprint: Dict[str, Any],
     *,
-    runtime_id: str = "godot",
+    runtime_id: str = "reverie_engine",
     boss_count: int = 1,
 ) -> Dict[str, Any]:
     """Generate boss encounter system with phases, patterns, and mechanics."""
@@ -48,10 +48,9 @@ def generate_boss_system(
             "victory_rewards": True,
         },
         "implementation": {
-            "godot": _godot_boss_implementation(bosses),
-            "o3de": _o3de_boss_implementation(bosses),
             "reverie_engine": _reverie_boss_implementation(bosses),
         },
+        "runtime": "reverie_engine",
         "telemetry_events": [
             "boss_encounter_started",
             "boss_phase_changed",

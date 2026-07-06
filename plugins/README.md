@@ -17,14 +17,10 @@ Plugins in Reverie CLI are portable software/runtime bundles, not another user-f
 
 - `plugins/blender/`
   Official Blender Portable plugin. Its packaged `reverie-blender.exe` embeds `blender-5.1.1-windows-x64.zip`, can unpack it on demand with `rc_blender_ensure_runtime` or `/plugins deploy blender`, and can clone MMD Tools into its plugin-local `addons/` folder for PMD/PMX/VMD/VPD import workflows.
-- `plugins/godot/`
-  Godot runtime manager for detection, registration, GitHub release download/unpack, source checkout, project scanning, launch, and headless checks.
-- `plugins/o3de/`
-  O3DE source SDK manager for GitHub version discovery, plugin-local source checkout, and local SDK manifest generation.
 - `plugins/game_models/`
   Game auxiliary model depot manager for plugin-local Python venvs, HuggingFace model snapshots/caches, 8GB-VRAM deployment planning, selectable model profiles, and guarded heavy-model downloads.
 - `plugins/renpy/`
-  Ren'Py engine plugin for Galgame production guidance, `.rpy` script outline inspection, plugin-owned Ren'Py runtime integration, and virtual skill/system-prompt support.
+  Optional external Ren'Py SDK manager for native lint, compile, and distribution. Reverie Engine owns `.rpy` inspection, outlining, validation, and migration.
 - `plugins/live2d/`
   Live2D/Cubism plugin for extracting Cubism Core from the user's Cubism SDK zip, checking Live2D project manifests, and guiding interactive dynamic CG workflows.
 
@@ -68,7 +64,7 @@ Model snapshots, caches, and virtual environments must stay inside `dist/.reveri
 
 Reverie-Gamer should propose creative direction, routes, systems, asset contracts, and verification plans. Specialized visual-novel execution belongs in plugins:
 
-1. Build or install `plugins/renpy/` when a project needs Ren'Py-specific `.rpy` authoring, project inspection, runtime install, linting, compile, distribute, or engine documentation.
+1. Use the built-in `reverie_engine` tool for Ren'Py inspection, outlining, parser validation, import, and migration. Install `plugins/renpy/` only when native SDK lint, compile, or distribution is required.
 2. Build or install `plugins/live2d/` when a Galgame needs Cubism Core, `.model3.json` dependency validation, model staging, motion/expression/lip-sync planning, or MCP-style character control.
 3. Keep Cubism SDK files, Ren'Py runtime artifacts, generated MCP helpers, and engine-specific docs under `dist/.reverie/plugins/<plugin-id>/`.
 4. Use built-in TTI/TTV tools for still CG, backgrounds, mood images, and short video inserts; use Live2D for reusable interactive character performance.

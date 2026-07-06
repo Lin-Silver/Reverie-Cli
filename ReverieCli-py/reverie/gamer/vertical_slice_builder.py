@@ -1994,6 +1994,8 @@ def build_vertical_slice_project(
             "fallback_reason": selection["fallback_reason"],
             "profiles": selection["profiles"],
             "reference_alignment": selection.get("reference_alignment", {}),
+            "legacy_source": selection.get("legacy_source", ""),
+            "unified_runtime": True,
         },
         root / "artifacts" / "reference_intelligence.json": reference_intelligence,
         root / "artifacts" / "production_plan.json": production_plan,
@@ -2058,21 +2060,6 @@ def build_vertical_slice_project(
                 overwrite=overwrite,
             )
         )
-    if selected_runtime == "godot":
-        extra_runtime_files.extend(
-            _augment_godot_slice(
-                root,
-                compiled_request,
-                system_bundle,
-                content_expansion,
-                asset_pipeline,
-                roster_strategy=roster_strategy,
-                live_ops_plan=live_ops_plan,
-                runtime_delivery_plan=runtime_delivery_plan,
-                overwrite=overwrite,
-            )
-        )
-
     verification = adapter.validate_project(root)
     slice_score = evaluate_slice_score(
         compiled_request,

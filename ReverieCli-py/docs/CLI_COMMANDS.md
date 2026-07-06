@@ -26,7 +26,7 @@ Notes:
 | `/model` | Open the standard model selector |
 | `/model add` | Add a standard model preset |
 | `/model delete <number>` | Delete a standard model preset |
-| `/subagent` | Open the base-Reverie Subagent roster TUI |
+| `/subagent` | Open the managed SubAgent roster TUI |
 | `/subagent create` | Select a model and create a Subagent identified by ID |
 | `/subagent list` | Show configured Subagents, model sources, colors, and status |
 | `/subagent model <id>` | Change a Subagent's default model |
@@ -35,14 +35,14 @@ Notes:
 | `/mode` | Show current mode and available modes. All modes share Context Engine; the selected mode changes the workflow and specialized tools. |
 | `/mode reverie` | Switch to the general-purpose coding mode |
 | `/mode reverie-atlas` | Switch to the document-driven spec development mode |
-| `/mode reverie-gamer` | Switch to the game-development mode |
+| `/mode reverie-gamer` | Switch to the work-in-progress game-development mode |
 | `/mode reverie-ant` | Switch to the long-running execution and verification mode |
 | `/mode spec-driven` | Switch to the spec authoring mode |
 | `/mode spec-vibe` | Switch to the lighter spec implementation mode |
 | `/mode writer` | Switch to the writing and narrative continuity mode |
-| `/mode computer-controller` | Switch to the pinned NVIDIA desktop-autopilot mode |
+| `/mode computer-controller` | Switch to the pinned NVIDIA desktop orchestrator with an embedded Open Computer Use-compatible desktop runtime |
 
-Subagents are enabled only in base `reverie` mode. They inherit the active Reverie system prompt, tool/plugin/MCP/skill surface, and workspace context, but each configured Subagent stores only its ID, color, and selected default model.
+SubAgents are enabled in `reverie` and `computer-controller` modes, including NVIDIA-backed Controller sessions. Children have isolated sessions and selective context; the main Computer Controller remains the only desktop actor. Computer Controller is entered explicitly, but once active it may hand off to another mode with `switch_mode` when desktop control is no longer the primary job.
 
 ## Providers
 
@@ -197,6 +197,7 @@ Notes:
 | `/scaffold modules` | Generate the module-map document |
 | `/scaffold pipeline` | Generate the content-pipeline document |
 | `/engine` | Show the current Reverie Engine profile |
+| `/engine scope [dimension] [genre] [quality] [world_structure]` | Check whether a game brief fits the supported engine scope |
 | `/engine create` | Create a Reverie Engine project skeleton |
 | `/engine sample <name>` | Materialize a bundled engine sample |
 | `/engine run` | Run the entry scene |
@@ -204,6 +205,8 @@ Notes:
 | `/engine smoke` | Run deterministic smoke flow |
 | `/engine video` | Export a playblast-style frame sequence or encoded video |
 | `/engine renpy <script_path> [conversation_id] [entry_label]` | Import a Ren'Py `.rpy` dialogue script into Reverie's `dialogue.yaml` |
+| `/engine inspect-legacy <source_dir>` | Inspect a Godot, O3DE, or Ren'Py project before migration |
+| `/engine migrate <source_dir> <output_dir>` | Create a Reverie Engine project from a supported legacy source |
 | `/engine health` | Create a health report |
 | `/engine benchmark` | Record coarse baseline measurements |
 | `/engine package` | Create a portable runtime bundle |
@@ -238,6 +241,10 @@ Notes:
 | `/playtest gates` | Generate milestone quality gates |
 | `/playtest analyze <session_log_path>` | Analyze a playtest session log |
 | `/playtest feedback <feedback_path>` | Synthesize feedback from a file |
+
+## Project memory tools
+
+Project memory is integrated into Context Engine and normally called by the AI automatically. The underlying tool actions are `memory_manager` (`remember`, `list`, `get`, `correct`, `delete`, `consolidate`, `conflicts`, `status`) and `memory_retrieval` (`recall`, `answer`). See [Context Engine Project Memory](CONTEXT_ENGINE_MEMORY.md).
 
 ## Tips
 

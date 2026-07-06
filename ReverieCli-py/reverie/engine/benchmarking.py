@@ -1,4 +1,4 @@
-"""Performance baselines for Reverie Engine Lite."""
+"""Performance baselines for Reverie Engine."""
 
 from __future__ import annotations
 

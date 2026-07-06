@@ -1,4 +1,4 @@
-"""Lightweight math helpers for Reverie Engine Lite."""
+"""Math helpers for Reverie Engine."""
 
 from __future__ import annotations
 

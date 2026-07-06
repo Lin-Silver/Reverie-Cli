@@ -666,9 +666,9 @@ def scan_reference_catalog(
     """Scan the local references workspace and return a compact catalog."""
 
     reference_root = _repo_root(project_root=project_root, app_root=app_root)
-    plugin_roots = _plugin_depot_roots(project_root=project_root, app_root=app_root)
-    fingerprint = _reference_fingerprint(reference_root) + "|" + _plugin_depot_fingerprint(plugin_roots)
-    cache_key = str(reference_root) + "|" + ";".join(str(root) for root in plugin_roots)
+    plugin_roots: List[Path] = []
+    fingerprint = _reference_fingerprint(reference_root)
+    cache_key = str(reference_root)
     cached = _REFERENCE_SCAN_CACHE.get(cache_key)
     if cached and cached.get("fingerprint") == fingerprint:
         payload = deepcopy(cached.get("payload", {}))
@@ -680,28 +680,6 @@ def scan_reference_catalog(
         _analyze_godot_demo_projects(reference_root),
         _analyze_o3de_multiplayersample(reference_root),
         _analyze_o3de_multiplayersample_assets(reference_root),
-        _analyze_plugin_source_sdk(
-            plugin_roots,
-            plugin_id="godot",
-            reference_id="godot-source-sdk",
-            display_name="Godot Source SDK",
-            engine="godot",
-            markers=("SConstruct", "main/main.cpp"),
-            signals=("source_sdk", "open_runtime", "engine_source", "plugin_local_depot"),
-            usage=("Use as plugin-local source context for Godot versioning, engine builds, and runtime integration planning.",),
-            runtime_affinity={"godot": 0.72, "o3de": 0.08, "reverie_engine": 0.12},
-        ),
-        _analyze_plugin_source_sdk(
-            plugin_roots,
-            plugin_id="o3de",
-            reference_id="o3de-source-sdk",
-            display_name="O3DE Source SDK",
-            engine="o3de",
-            markers=("scripts/o3de.py", "scripts/o3de.bat", "cmake"),
-            signals=("source_sdk", "open_runtime", "large_scale_3d", "plugin_local_depot"),
-            usage=("Use as plugin-local source context for O3DE SDK manifests, native build planning, and Asset Processor integration.",),
-            runtime_affinity={"o3de": 0.78, "godot": 0.08, "reverie_engine": 0.1},
-        ),
         _analyze_cross_runtime_tool(
             reference_root,
             "blender",
@@ -1057,15 +1035,6 @@ def _toolchain_matrix(detected_repositories: List[Dict[str, Any]]) -> List[Dict[
             "seed a third-person 3D action project foundation",
             "borrow project layout and scene conventions",
             "shape future large-scale runtime architecture choices",
-        ),
-    )
-    add(
-        "open_runtime_source_sdks",
-        "plugin-local open-runtime source SDKs",
-        ("godot-source-sdk", "o3de-source-sdk"),
-        (
-            "keep source checkouts beside the executable under `.reverie/plugins`",
-            "derive native build and import validation steps from plugin SDK manifests",
         ),
     )
     add(

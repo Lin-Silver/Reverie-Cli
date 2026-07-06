@@ -1,8 +1,8 @@
 """Ren'Py runtime plugin for Reverie CLI.
 
-This plugin keeps Ren'Py-specific guidance, runtime management, and project
-checks outside the core Reverie package while exposing protocol tools and
-skills to Reverie-Gamer.
+This optional plugin only manages an external Ren'Py SDK for native lint,
+compile, and distribution. Reverie Engine owns project inspection, outlining,
+validation, and migration directly.
 """
 
 from __future__ import annotations
@@ -53,10 +53,6 @@ def _runtime_dir() -> Path:
 
 def _source_dir() -> Path:
     return _plugin_root() / "source"
-
-
-def _mcp_dir() -> Path:
-    return _plugin_root() / "mcp"
 
 
 def _resolve_input_path(raw_path: Any, project_root: Any = "") -> Path:
@@ -423,34 +419,6 @@ def _distribute(payload: dict[str, Any]) -> dict[str, Any]:
     return _renpy_action(payload, "distribute")
 
 
-def _mcp_status(_payload: dict[str, Any]) -> dict[str, Any]:
-    mcp = _mcp_dir()
-    data = {
-        "mcp_dir": str(mcp),
-        "installed": mcp.exists() and any(mcp.iterdir()),
-        "repository": RENPY_REPOSITORY,
-        "note": "Ren'Py has no first-party MCP server bundled by this plugin yet; use mcp_info as a future integration contract.",
-    }
-    return {"success": True, "output": f"Ren'Py MCP bridge installed={'yes' if data['installed'] else 'no'}", "error": "", "data": data}
-
-
-def _mcp_info(_payload: dict[str, Any]) -> dict[str, Any]:
-    data = {
-        "server_name": "renpy_reference",
-        "enabled": False,
-        "type": "stdio",
-        "command": sys.executable,
-        "args": ["-m", "renpy_mcp.server"],
-        "cwd": str(_mcp_dir()),
-        "env": {"REVERIE_RENPY_RUNTIME": str(_runtime_dir())},
-        "includeTools": ["renpy_project_info", "renpy_lint", "renpy_compile"],
-        "includeModes": ["reverie-gamer"],
-        "tools_list_ok": False,
-        "guidance": "Install or provide an actual Ren'Py MCP bridge under the plugin mcp/ folder before enabling this server.",
-    }
-    return {"success": True, "output": "Ren'Py MCP integration contract returned; server is disabled until a bridge is installed.", "error": "", "data": data}
-
-
 def _command_schema_project() -> dict[str, Any]:
     return {
         "type": "object",
@@ -474,37 +442,20 @@ def _build_handshake() -> dict[str, Any]:
         "version": PLUGIN_VERSION,
         "runtime_family": "visual-novel-engine",
         "include_modes": ["reverie-gamer"],
-        "description": "Ren'Py-specific engine guidance, runtime management, script inspection, and packaging support for Galgame production.",
-        "tool_call_hint": "Use rc_renpy_project_inspect and rc_renpy_script_outline before editing; use rc_renpy_lint/compile/distribute when a plugin-local Ren'Py runtime is installed.",
+        "description": "Optional Ren'Py SDK management and native lint/compile/distribute support for migrated Galgame projects.",
+        "tool_call_hint": "Use reverie_engine for project inspection, outlining, parser validation, and migration; use rc_renpy_lint/compile/distribute only when native Ren'Py SDK verification is required.",
         "system_prompt": (
-            "For Galgame or Ren'Py work, keep core Reverie-Gamer focused on creative direction, scenario design, "
-            "asset planning, and verification. Use the Ren'Py plugin for .rpy syntax, labels, menus, screens, "
-            "transforms, lint, compile, distribution, and runtime-specific constraints. Do not add Ren'Py engine code "
-            "to the core Reverie CLI package; install or reference Ren'Py artifacts inside the plugin runtime folder."
+            "Reverie Engine owns .rpy inspection, labels, menus, conversion, and migration. Use this plugin only "
+            "for an optional external Ren'Py SDK and native lint, compile, or distribution checks."
         ),
-        "mcp_servers": [
-            {
-                "name": "renpy_reference",
-                "description": "Disabled placeholder contract for a future plugin-local Ren'Py MCP bridge.",
-                "enabled": False,
-                "type": "stdio",
-                "command": sys.executable,
-                "args": ["-m", "renpy_mcp.server"],
-                "cwd": str(_mcp_dir()),
-                "env": {"REVERIE_RENPY_RUNTIME": str(_runtime_dir())},
-                "includeTools": ["renpy_project_info", "renpy_lint", "renpy_compile"],
-                "include_modes": ["reverie-gamer"],
-            }
-        ],
         "skills": [
             {
                 "name": "renpy-galgame-workflow",
                 "description": "Author, verify, and package Ren'Py Galgame projects through a plugin-owned workflow.",
                 "include_modes": ["reverie-gamer"],
                 "body": (
-                    "Use Ren'Py as a specialized plugin target. Start by outlining routes, labels, character aliases, "
-                    "CG/background requirements, Live2D/static sprite needs, audio cues, persistent variables, and save data. "
-                    "Use `rc_renpy_project_inspect` and `rc_renpy_script_outline` before editing. When a plugin-local runtime is "
+                    "Start by using `reverie_engine` to outline routes, labels, character aliases, CG/background requirements, "
+                    "Live2D/static sprite needs, audio cues, persistent variables, and save data. When a plugin-local runtime is "
                     "installed, run `rc_renpy_lint` before claiming script correctness, `rc_renpy_compile` before packaging, and "
                     "`rc_renpy_distribute` for release builds. Coordinate Live2D model checks through the Live2D plugin."
                 ),
@@ -531,20 +482,6 @@ def _build_handshake() -> dict[str, Any]:
             },
             {"name": "list_runtime", "description": "List plugin-local Ren'Py runtime entries and source hints.", "parameters": {"type": "object", "properties": {}, "required": []}, "expose_as_tool": True, "include_modes": ["reverie-gamer"]},
             {"name": "guidance", "description": "Return Ren'Py-specific production guidance for Galgame work.", "parameters": {"type": "object", "properties": {}, "required": []}, "expose_as_tool": True, "include_modes": ["reverie-gamer"]},
-            {
-                "name": "project_inspect",
-                "description": "Inspect a Ren'Py project for script, asset, and Live2D reference coverage.",
-                "parameters": {"type": "object", "properties": {"project_root": {"type": "string"}, "project_dir": {"type": "string"}}, "required": ["project_root"]},
-                "expose_as_tool": True,
-                "include_modes": ["reverie-gamer"],
-            },
-            {
-                "name": "script_outline",
-                "description": "Summarize labels, characters, images, screens, menus, jumps, and Live2D references in a .rpy file.",
-                "parameters": {"type": "object", "properties": {"project_root": {"type": "string"}, "script_path": {"type": "string"}}, "required": ["script_path"]},
-                "expose_as_tool": True,
-                "include_modes": ["reverie-gamer"],
-            },
             {"name": "lint", "description": "Run or dry-run Ren'Py lint for a project using the plugin-local runtime.", "parameters": _command_schema_project(), "expose_as_tool": True, "include_modes": ["reverie-gamer"]},
             {"name": "compile", "description": "Run or dry-run Ren'Py compile for a project using the plugin-local runtime.", "parameters": _command_schema_project(), "expose_as_tool": True, "include_modes": ["reverie-gamer"]},
             {
@@ -554,8 +491,6 @@ def _build_handshake() -> dict[str, Any]:
                 "expose_as_tool": True,
                 "include_modes": ["reverie-gamer"],
             },
-            {"name": "mcp_status", "description": "Inspect plugin-local Ren'Py MCP bridge placeholder status.", "parameters": {"type": "object", "properties": {}, "required": []}, "expose_as_tool": True, "include_modes": ["reverie-gamer"]},
-            {"name": "mcp_info", "description": "Return the Ren'Py MCP bridge contract for future MCP registration.", "parameters": {"type": "object", "properties": {}, "required": []}, "expose_as_tool": True, "include_modes": ["reverie-gamer"]},
         ],
     }
 
@@ -565,13 +500,9 @@ _COMMANDS = {
     "runtime_install": _runtime_install,
     "list_runtime": _list_runtime,
     "guidance": _guidance,
-    "project_inspect": _project_inspect,
-    "script_outline": _script_outline,
     "lint": _lint,
     "compile": _compile,
     "distribute": _distribute,
-    "mcp_status": _mcp_status,
-    "mcp_info": _mcp_info,
 }
 
 

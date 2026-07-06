@@ -18,7 +18,7 @@ import time
 import zipfile
 
 
-PLUGIN_VERSION = "0.4.0"
+PLUGIN_VERSION = "0.5.0"
 ARCHIVE_NAME = "blender-5.1.1-windows-x64.zip"
 MMD_TOOLS_REPO_URL = "https://github.com/MMD-Blender/blender_mmd_tools.git"
 MMD_TOOLS_MODULE = "mmd_tools"
@@ -29,6 +29,7 @@ BLENDER_MCP_SERVER_NAME = "blender"
 BLENDER_MCP_DEFAULT_HOST = "127.0.0.1"
 BLENDER_MCP_DEFAULT_PORT = 9876
 BLENDER_MCP_START_MARKER = "REVERIE_BLENDER_MCP_START="
+BLENDER_SCENE_INSPECTION_MARKER = "REVERIE_BLENDER_SCENE_INSPECTION="
 MMD_MODEL_EXTENSIONS = {".pmd", ".pmx"}
 MMD_MOTION_EXTENSIONS = {".vmd"}
 MMD_POSE_EXTENSIONS = {".vpd"}
@@ -434,6 +435,24 @@ class BlenderRuntimePlugin(ReverieRuntimePluginHost):
                     "include_modes": []
                 },
                 {
+                    "name": "inspect_scene",
+                    "description": "Inspect a .blend file in background mode and return bounded scene, object, material, animation, image, and missing-file metadata.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "blend_path": {"type": "string", "description": "Existing .blend file to inspect."},
+                            "blender_executable": {"type": "string", "description": "Optional absolute Blender executable path."},
+                            "max_items": {"type": "integer", "description": "Maximum records per metadata collection. Defaults to 200."},
+                            "timeout_seconds": {"type": "integer", "description": "Inspection timeout. Defaults to 120 seconds."},
+                            "auto_prepare": {"type": "boolean", "description": "Deploy the embedded portable runtime if Blender is missing. Defaults to true."}
+                        },
+                        "required": ["blend_path"]
+                    },
+                    "expose_as_tool": True,
+                    "include_modes": [],
+                    "guidance": "Use this after authoring or importing a .blend file and before claiming that scene structure, materials, animations, and linked assets are healthy."
+                },
+                {
                     "name": "import_mmd_model",
                     "description": "Import an MMD PMD/PMX model through MMD Tools, optionally apply VMD motion or VPD pose, save .blend, and optionally export glTF/GLB.",
                     "parameters": {
@@ -564,6 +583,9 @@ class BlenderRuntimePlugin(ReverieRuntimePluginHost):
 
         if command_name == "run_script":
             return self._run_script(payload)
+
+        if command_name == "inspect_scene":
+            return self._inspect_scene(payload)
 
         if command_name == "import_mmd_model":
             return self._import_mmd_model(payload)
@@ -1258,6 +1280,106 @@ if strict and not result["success"]:
         if completed.returncode == 0:
             return self._ok("Blender script completed.", data)
         return self._fail("Blender script failed.", data)
+
+    def _inspect_scene(self, payload: dict[str, Any]) -> dict[str, Any]:
+        blend_path = self._resolve_existing_path(payload.get("blend_path"))
+        if blend_path is None:
+            return self._fail("blend_path does not exist.", {"blend_path": str(payload.get("blend_path") or "")})
+        if blend_path.suffix.lower() != ".blend":
+            return self._fail("blend_path must end with .blend.", {"blend_path": str(blend_path)})
+
+        detection, deploy_result = self._ensure_ready_detection(payload)
+        if not detection["available"]:
+            return self._fail("No Blender executable detected.", {"detected": detection, "deployment": deploy_result})
+        try:
+            max_items = max(1, min(int(payload.get("max_items") or 200), 2000))
+        except (TypeError, ValueError):
+            max_items = 200
+        script_payload = json.dumps(
+            {
+                "blend_path": str(blend_path),
+                "max_items": max_items,
+                "marker": BLENDER_SCENE_INSPECTION_MARKER,
+            },
+            ensure_ascii=False,
+        )
+        script = f"""
+import bpy
+import json
+import os
+
+payload = json.loads({json.dumps(script_payload)})
+bpy.ops.wm.open_mainfile(filepath=payload["blend_path"])
+limit = int(payload["max_items"])
+
+def bounded(values):
+    return list(values)[:limit]
+
+objects = [
+    {{
+        "name": obj.name,
+        "type": obj.type,
+        "collection_count": len(obj.users_collection),
+        "material_slots": len(getattr(obj, "material_slots", [])),
+        "parent": obj.parent.name if obj.parent else "",
+        "hidden_render": bool(obj.hide_render),
+    }}
+    for obj in bounded(bpy.data.objects)
+]
+images = []
+missing_files = []
+for image in bounded(bpy.data.images):
+    resolved = bpy.path.abspath(image.filepath) if image.filepath else ""
+    item = {{"name": image.name, "path": resolved, "packed": image.packed_file is not None}}
+    images.append(item)
+    if resolved and not item["packed"] and not os.path.exists(resolved):
+        missing_files.append(resolved)
+
+result = {{
+    "blend_path": bpy.data.filepath,
+    "scene": bpy.context.scene.name if bpy.context.scene else "",
+    "counts": {{
+        "scenes": len(bpy.data.scenes),
+        "objects": len(bpy.data.objects),
+        "meshes": len(bpy.data.meshes),
+        "armatures": len(bpy.data.armatures),
+        "materials": len(bpy.data.materials),
+        "collections": len(bpy.data.collections),
+        "actions": len(bpy.data.actions),
+        "images": len(bpy.data.images),
+    }},
+    "objects": objects,
+    "materials": [material.name for material in bounded(bpy.data.materials)],
+    "collections": [collection.name for collection in bounded(bpy.data.collections)],
+    "actions": [{{"name": action.name, "frame_range": list(action.frame_range)}} for action in bounded(bpy.data.actions)],
+    "images": images,
+    "missing_files": sorted(set(missing_files)),
+    "truncated": any(len(values) > limit for values in (bpy.data.objects, bpy.data.materials, bpy.data.collections, bpy.data.actions, bpy.data.images)),
+}}
+print(payload["marker"] + json.dumps(result, ensure_ascii=False))
+"""
+        completed = self._run_blender_python(
+            detection["path"],
+            script,
+            int(payload.get("timeout_seconds") or 120),
+        )
+        scene = self._extract_marker_json(
+            f"{completed.get('stdout', '')}\n{completed.get('stderr', '')}",
+            BLENDER_SCENE_INSPECTION_MARKER,
+        )
+        data = {
+            "detected": detection,
+            "deployment": deploy_result,
+            "command": completed.get("command", []),
+            "exit_code": completed.get("exit_code"),
+            "scene": scene,
+            "stdout": str(completed.get("stdout", ""))[-6000:],
+            "stderr": str(completed.get("stderr", ""))[-6000:],
+        }
+        if completed.get("exit_code") == 0 and scene:
+            missing_count = len(scene.get("missing_files", []) or [])
+            return self._ok(f"Blender scene inspected; missing linked files={missing_count}.", data)
+        return self._fail("Blender scene inspection failed or returned no metadata marker.", data)
 
     def _import_mmd_model(self, payload: dict[str, Any]) -> dict[str, Any]:
         model_path = self._resolve_existing_path(payload.get("model_path"))

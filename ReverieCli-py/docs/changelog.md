@@ -1,5 +1,20 @@
 ## Unreleased
 
+### Writer Mode
+
+* Added the Writer-only `serial_novel` native tool for persistent project bibles, chapter control cards, committed chapter files, continuity/timeline/foreshadowing ledgers, interruption recovery, deterministic quality gates, and disk-backed completion audits.
+* Reduced Writer's tool surface to Context Engine retrieval, WebSearch/WebFetch, project memory, interaction, mode switching, and native fiction tools; terminal, browser controller, media, runtime-plugin, generic file-editor, Skill discovery, and dynamic MCP tools are hidden.
+* Added automatic novel-intent routing to Writer from every other mode, plus a transport-level first-tool requirement and JSON-to-tool-call compatibility for providers that return named tool arguments as plain text.
+* Added one-shot project-state continuation, JSON-string argument compatibility, target-bound chapter stopping, and tests that materialize and audit a 100,000-character manuscript.
+* Fixed append-only chapter recovery after length-gate failures: Writer now reloads the preserved pending draft from disk, trims overlap against the next continuation, auto-promotes short direct-prose retries back into `commit_chapter`, and forces a same-turn retry when the model only repeats the preserved tail.
+* Re-validated packaged `dist\reverie.exe` Writer continuations on SenseNova 6.7 Flash Lite with a real prompt-mode run that recovered through the chapter-4 and chapter-5 shortfall path, committed both chapters, and refreshed the mirrored TXT exports without outer auto-followup rescue.
+* Documented the MIT-licensed community projects that informed the original document-first implementation: Novel Control Station, chinese-novelist-skill, and oh-story-claudecode.
+
+### Release Accuracy
+
+* Removed retired Godot and O3DE assets and claims from the rolling `latest` GitHub Release. The release workflow now explicitly deletes stale `reverie-godot.exe` and `reverie-o3de.exe` assets before uploading current Blender and Game Models plugins.
+* Corrected the Reverie Engine guide: Godot and O3DE are migration/reference inputs, not current runtime plugins.
+
 ### Provider and Stability
 
 * Added the WebGemini built-in source, using Gemini Web's anonymous StreamGenerate protocol for Gemini Flash, Thinking, Pro preference, Auto, and Lite model modes with optional cookie/proxy settings.
@@ -41,7 +56,7 @@
 
 ### Plugins and Release Automation
 
-* Added a main-branch GitHub Actions release pipeline that builds `reverie.exe`, `reverie-blender.exe`, `reverie-godot.exe`, `reverie-o3de.exe`, and `reverie-game-models.exe`, verifies plugin `-RC` handshakes, generates `plugins-manifest.json`, and uploads all release assets directly to the rolling latest Release.
+* Added the main-branch GitHub Actions release pipeline that now ships `reverie.exe`, `reverie-blender.exe`, `reverie-game-models.exe`, and `plugins-manifest.json` to the rolling latest Release, while explicitly deleting stale Godot/O3DE assets before upload.
 * Added remote plugin manifest parsing and fallback asset inference for `https://api.github.com/repos/Lin-Silver/Reverie-Cli/releases/latest`, while keeping the GUI usable from local plugin scans when GitHub is unavailable.
 * Added bridge tests covering settings metadata, remote manifest parsing, session operations, plugin action payloads, source plugin validation, and local automation persistence.
 
@@ -65,6 +80,7 @@
 * Added NVIDIA catalog support for `moonshotai/kimi-k2.6` with a request-transport profile that matches the provider `chat_template_kwargs.thinking` payload.
 * Removed deprecated NVIDIA catalog entries for `minimaxai/minimax-m2.5` and `moonshotai/kimi-k2-thinking`; use `minimaxai/minimax-m2.7` and `moonshotai/kimi-k2.6` instead.
 * Added NVIDIA catalog entries for `deepseek-ai/deepseek-v4-pro` and `deepseek-ai/deepseek-v4-flash`, including 1M context metadata and selectable `max`/`high`/`off` thinking depth through `/nvidia thinking`.
+* Added NVIDIA catalog support for `z-ai/glm-5.2` with its own OpenAI-compatible profile, 1M context metadata, alias normalization for `z-ai/glm5.2`, and default sampling that matches NVIDIA's hosted chat-completions example.
 * Added the official `game_models` runtime plugin for plugin-local auxiliary game model deployment, selectable model profiles, 8GB-VRAM planning, HuggingFace snapshot downloads/caches, TRELLIS `low_vram` selection, Hunyuan3D-2mini registration, and guarded HY-Motion registration.
 * Added `/plugins models ...` commands so users can plan, select, download, dry-run, and inspect game auxiliary models without relying only on `rc_game_models_*` dynamic tools.
 * Upgraded generated humanoid Blender scaffolds with a fused continuous body-core mesh and body-continuity reports, reducing disconnected limb/torso failures before layered clothing, hair, accessories, and weapons are added.

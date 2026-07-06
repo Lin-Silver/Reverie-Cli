@@ -127,7 +127,7 @@ def test_subagent_config_normalizes_and_round_trips() -> None:
     assert serialized["subagents"]["agents"][0]["id"] == "worker one"
 
 
-def test_subagent_tool_is_only_visible_in_base_reverie(tmp_path: Path) -> None:
+def test_subagent_tool_is_visible_in_reverie_and_computer_controller(tmp_path: Path) -> None:
     executor = ToolExecutor(tmp_path)
     reverie_names = {
         schema["function"]["name"]
@@ -137,12 +137,17 @@ def test_subagent_tool_is_only_visible_in_base_reverie(tmp_path: Path) -> None:
         schema["function"]["name"]
         for schema in executor.get_tool_schemas(mode="reverie-gamer")
     }
+    controller_names = {
+        schema["function"]["name"]
+        for schema in executor.get_tool_schemas(mode="computer-controller")
+    }
 
     assert "subagent" in reverie_names
+    assert "subagent" in controller_names
     assert "subagent" not in gamer_names
 
 
-def test_subagent_is_disabled_with_nvidia_source(tmp_path: Path) -> None:
+def test_subagent_is_available_with_nvidia_source(tmp_path: Path) -> None:
     nvidia_cfg = default_nvidia_config()
     nvidia_cfg["api_key"] = "nv-test-key"
     config = Config(
@@ -153,13 +158,9 @@ def test_subagent_is_disabled_with_nvidia_source(tmp_path: Path) -> None:
     )
     manager = SubagentManager(_FakeInterface(tmp_path, config))
 
-    assert not manager.is_available()
-    try:
-        manager.ensure_available()
-    except RuntimeError as exc:
-        assert "NVIDIA source" in str(exc)
-    else:
-        raise AssertionError("NVIDIA source should disable Subagents")
+    assert manager.is_available()
+    manager.ensure_available()
+    manager.shutdown()
 
 
 def test_context_engine_remains_visible_when_source_string_pollutes_mode(tmp_path: Path) -> None:
@@ -172,7 +173,7 @@ def test_context_engine_remains_visible_when_source_string_pollutes_mode(tmp_pat
     assert "codebase-retrieval" in names
 
 
-def test_nvidia_source_hides_subagent_schema_but_keeps_context_engine(tmp_path: Path) -> None:
+def test_nvidia_source_exposes_subagent_schema_and_context_engine(tmp_path: Path) -> None:
     nvidia_cfg = default_nvidia_config()
     nvidia_cfg["api_key"] = "nv-test-key"
     config = Config(
@@ -188,7 +189,7 @@ def test_nvidia_source_hides_subagent_schema_but_keeps_context_engine(tmp_path: 
         for schema in executor.get_tool_schemas(mode="reverie")
     }
 
-    assert "subagent" not in names
+    assert "subagent" in names
     assert "codebase-retrieval" in names
 
 

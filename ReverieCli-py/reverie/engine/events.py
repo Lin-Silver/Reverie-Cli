@@ -1,4 +1,4 @@
-"""Signals and event bus primitives for Reverie Engine Lite."""
+"""Signals and event bus primitives for Reverie Engine."""
 
 from __future__ import annotations
 

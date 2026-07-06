@@ -5,9 +5,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
+from copy import deepcopy
 import json
 import os
 import shutil
+import threading
+import time
 import urllib.error
 import urllib.request
 
@@ -20,6 +23,8 @@ SOURCE_MODEL_EXTENSIONS = (".bbmodel", ".blend", ".fbx", ".dae", ".obj", ".gltf"
 RUNTIME_MODEL_EXTENSIONS = (".glb", ".gltf", ".fbx", ".obj", ".dae")
 PREVIEW_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp")
 PREFERRED_RUNTIME_EXTENSIONS = (".glb", ".gltf", ".fbx", ".obj", ".dae")
+_MODELING_STACK_CACHE: tuple[float, Dict[str, Any]] | None = None
+_MODELING_STACK_CACHE_LOCK = threading.RLock()
 
 
 def _utc_now() -> str:
@@ -208,37 +213,54 @@ def project_modeling_paths(project_root: str | Path) -> Dict[str, Path]:
     }
 
 
-def detect_modeling_stack(project_root: str | Path) -> Dict[str, Any]:
-    blockbench = _detect_blockbench_installation()
-    ashfox = _probe_ashfox_endpoint(ASHFOX_DEFAULT_ENDPOINT)
-    blockbench_available = bool(blockbench["installed"] or ashfox["reachable"])
+def detect_modeling_stack(
+    project_root: str | Path,
+    *,
+    refresh: bool = False,
+    cache_ttl_seconds: float = 30.0,
+) -> Dict[str, Any]:
+    """Detect optional modeling tools, caching the process-wide external probe."""
+    del project_root  # Detection is machine-local rather than project-local.
+    global _MODELING_STACK_CACHE
+    now = time.monotonic()
+    with _MODELING_STACK_CACHE_LOCK:
+        if not refresh and _MODELING_STACK_CACHE is not None:
+            cached_at, cached_payload = _MODELING_STACK_CACHE
+            if now - cached_at <= max(0.0, float(cache_ttl_seconds or 0.0)):
+                return deepcopy(cached_payload)
 
-    return {
-        "mode": "reverie-gamer",
-        "integration": "built_in_headless_modeling_with_optional_ashfox_mcp",
-        "headless_blockbench": {
-            "available": True,
-            "can_validate": True,
-            "can_export_simple_cuboids": True,
-            "formats": [".bbmodel", ".gltf"],
-            "notes": "Reverie can validate simple `.bbmodel` files and export cuboid elements to glTF without launching Blockbench.",
-        },
-        "blockbench": {
-            **blockbench,
-            "available": blockbench_available,
-        },
-        "ashfox": {
-            "available": bool(ashfox["reachable"]),
-            "reachable": bool(ashfox["reachable"]),
-            "endpoint": ASHFOX_DEFAULT_ENDPOINT,
-            "server_name": ASHFOX_MCP_SERVER_NAME,
-            "tool_count": int(ashfox.get("tool_count", 0)),
-            "session_id": str(ashfox.get("session_id", "") or ""),
-            "error": str(ashfox.get("error", "") or ""),
-            "manual_dependency": True,
-            "install_hint": "Install the Ashfox plugin inside Blockbench, launch Blockbench, and keep the local MCP endpoint running for live editor automation; headless `.bbmodel` validation/export remains available without it.",
-        },
-    }
+        blockbench = _detect_blockbench_installation()
+        ashfox = _probe_ashfox_endpoint(ASHFOX_DEFAULT_ENDPOINT)
+        blockbench_available = bool(blockbench["installed"] or ashfox["reachable"])
+
+        result = {
+            "mode": "reverie-gamer",
+            "integration": "built_in_headless_modeling_with_optional_ashfox_mcp",
+            "headless_blockbench": {
+                "available": True,
+                "can_validate": True,
+                "can_export_simple_cuboids": True,
+                "formats": [".bbmodel", ".gltf"],
+                "notes": "Reverie can validate simple `.bbmodel` files and export cuboid elements to glTF without launching Blockbench.",
+            },
+            "blockbench": {
+                **blockbench,
+                "available": blockbench_available,
+            },
+            "ashfox": {
+                "available": bool(ashfox["reachable"]),
+                "reachable": bool(ashfox["reachable"]),
+                "endpoint": ASHFOX_DEFAULT_ENDPOINT,
+                "server_name": ASHFOX_MCP_SERVER_NAME,
+                "tool_count": int(ashfox.get("tool_count", 0)),
+                "session_id": str(ashfox.get("session_id", "") or ""),
+                "error": str(ashfox.get("error", "") or ""),
+                "manual_dependency": True,
+                "install_hint": "Install the Ashfox plugin inside Blockbench, launch Blockbench, and keep the local MCP endpoint running for live editor automation; headless `.bbmodel` validation/export remains available without it.",
+            },
+        }
+        _MODELING_STACK_CACHE = (time.monotonic(), result)
+        return deepcopy(result)
 
 
 def build_model_pipeline_manifest(project_root: str | Path) -> Dict[str, Any]:

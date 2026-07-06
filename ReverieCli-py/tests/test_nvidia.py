@@ -139,6 +139,7 @@ def test_nvidia_catalog_context_lengths_match_model_cards():
         "minimaxai/minimax-m2.7": 204800,
         "minimaxai/minimax-m3": 1000000,
         "qwen/qwen3.5-397b-a17b": 262144,
+        "z-ai/glm-5.2": 1000000,
         "z-ai/glm-5.1": 131072,
         "z-ai/glm4.7": 131072,
         "stepfun-ai/step-3.5-flash": 256000,
@@ -166,6 +167,45 @@ def test_nvidia_catalog_contains_glm_51():
     assert metadata["transport"] == "openai-sdk"
     assert metadata["thinking"] is True
     assert metadata["thinking_control"] == "toggle"
+
+
+def test_nvidia_catalog_contains_glm_52():
+    metadata = get_nvidia_model_metadata("z-ai/glm-5.2")
+    alias_metadata = get_nvidia_model_metadata("z-ai/glm5.2")
+
+    assert metadata is not None
+    assert metadata["id"] == "z-ai/glm-5.2"
+    assert metadata["display_name"] == "GLM-5.2"
+    assert metadata["transport"] == "openai-sdk"
+    assert metadata["thinking"] is False
+    assert metadata["context_length"] == 1000000
+    assert alias_metadata is not None
+    assert alias_metadata["id"] == "z-ai/glm-5.2"
+
+
+def test_nvidia_openai_options_for_glm_52_match_expected_defaults():
+    options = build_nvidia_openai_options(
+        {"selected_model_id": "z-ai/glm-5.2"},
+        "z-ai/glm-5.2",
+    )
+
+    assert options == {
+        "temperature": 1.0,
+        "top_p": 1.0,
+        "max_tokens": 16384,
+    }
+
+
+def test_nvidia_openai_options_for_glm_52_caps_requested_output_tokens():
+    options = build_nvidia_openai_options(
+        {
+            "selected_model_id": "z-ai/glm-5.2",
+            "max_tokens": 65536,
+        },
+        "z-ai/glm-5.2",
+    )
+
+    assert options["max_tokens"] == 32768
 
 
 def test_nvidia_catalog_contains_glm_47_and_aliases():
@@ -495,6 +535,7 @@ def test_nvidia_openai_options_for_nemotron_and_gpt_oss_use_model_specific_effor
 
 
 def test_nvidia_model_specific_profiles_are_resolved_by_model_id():
+    assert resolve_nvidia_model_profile_name("z-ai/glm-5.2") == "glm_5_2"
     assert resolve_nvidia_model_profile_name("z-ai/glm-5.1") == "glm_5_1"
     assert resolve_nvidia_model_profile_name("z-ai/glm4.7") == "glm_5_1"
     assert resolve_nvidia_model_profile_name("deepseek-ai/deepseek-v4-pro") == "deepseek_v4"

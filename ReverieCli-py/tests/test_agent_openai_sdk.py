@@ -1,5 +1,7 @@
+import json
 import sys
 import types
+from pathlib import Path
 from types import SimpleNamespace
 
 from rich.console import Console
@@ -8,6 +10,7 @@ from reverie.agent.agent import ReverieAgent, decode_stream_event
 from reverie.codex import build_codex_request_payload
 from reverie.cli.display import DisplayComponents
 from reverie.cli.help_catalog import HELP_TOPICS
+from reverie.tools.serial_novel import DEFAULT_OUTPUT_DIR, STATE_SCHEMA
 
 
 def _nvidia_config() -> SimpleNamespace:
@@ -50,6 +53,48 @@ def _standard_config() -> SimpleNamespace:
         api_enable_debug_logging=False,
         active_model_source="standard",
     )
+
+
+def _seed_writer_project(
+    tmp_path: Path,
+    novel_id: str,
+    *,
+    chapter: int = 1,
+    pending_recovery_mode: str = "",
+    pending_requires_reprepare: bool = False,
+    pending_recommended_append_chars: int = 0,
+) -> Path:
+    project_dir = tmp_path / DEFAULT_OUTPUT_DIR / novel_id
+    (project_dir / "tracking").mkdir(parents=True, exist_ok=True)
+    (project_dir / "control-cards").mkdir(parents=True, exist_ok=True)
+    state = {
+        "schema": STATE_SCHEMA,
+        "status": "writing",
+        "novel_id": novel_id,
+        "active_chapter": chapter,
+    }
+    (project_dir / "tracking" / "state.json").write_text(
+        json.dumps(state, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (project_dir / "control-cards" / f"chapter-{chapter:04d}.json").write_text(
+        json.dumps({"chapter": chapter, "title": "Prepared"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    if pending_recovery_mode or pending_requires_reprepare or pending_recommended_append_chars:
+        (project_dir / "drafts").mkdir(parents=True, exist_ok=True)
+        (project_dir / "drafts" / f"chapter-{chapter:04d}.json").write_text(
+            json.dumps(
+                {
+                    "recovery_mode": pending_recovery_mode,
+                    "requires_reprepare": pending_requires_reprepare,
+                    "recommended_append_chars": pending_recommended_append_chars,
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+    return project_dir
 
 
 def test_openai_sdk_client_receives_resolved_provider_timeout_when_needed(monkeypatch, tmp_path):
@@ -168,6 +213,363 @@ def test_openai_sdk_provider_error_preserves_tool_fields_on_retry_failure(tmp_pa
     assert "tools" in calls[1]
     assert calls[1]["tools"] == calls[0]["tools"]
     assert calls[1]["messages"] == calls[0]["messages"]
+
+
+def test_agnes_retries_once_with_fresh_user_query_after_tool_chain(tmp_path):
+    class FakeProviderError(Exception):
+        status_code = 400
+
+    calls = []
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            calls.append(dict(kwargs))
+            if len(calls) == 1:
+                raise FakeProviderError("No user query found in messages.")
+            return "ok"
+
+    config = _standard_config()
+    config.active_model_source = "agnes"
+    fake_client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+    agent = ReverieAgent(
+        base_url="https://apihub.agnes-ai.com/v1",
+        api_key="x",
+        model="agnes-2.0-flash",
+        project_root=tmp_path,
+        provider="openai-sdk",
+        config=config,
+    )
+    agent._ensure_client = lambda: fake_client
+    agent.messages = [{"role": "user", "content": "Build and verify CardBattle."}]
+
+    response = agent._create_openai_chat_completion(
+        model="agnes-2.0-flash",
+        messages=[
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "Build and verify CardBattle."},
+            {"role": "assistant", "content": None, "tool_calls": []},
+            {"role": "tool", "tool_call_id": "call_1", "content": "verified"},
+        ],
+        stream=True,
+    )
+
+    assert response == "ok"
+    assert len(calls) == 2
+    assert calls[1]["messages"][:-1] == calls[0]["messages"]
+    assert calls[1]["messages"][-1] == {
+        "role": "user",
+        "content": "Build and verify CardBattle.",
+    }
+
+
+def test_sensenova_retries_once_with_fresh_user_query_after_tool_chain(tmp_path):
+    class FakeProviderError(Exception):
+        status_code = 400
+
+    calls = []
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            calls.append(dict(kwargs))
+            if len(calls) == 1:
+                raise FakeProviderError("No user query found in messages.")
+            return "ok"
+
+    config = _standard_config()
+    config.active_model_source = "sensenova"
+    config.sensenova = {"selected_model_id": "sensenova-6.7-flash-lite"}
+    fake_client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+    agent = ReverieAgent(
+        base_url="https://token.sensenova.cn/v1",
+        api_key="x",
+        model="sensenova-6.7-flash-lite",
+        project_root=tmp_path,
+        provider="openai-sdk",
+        config=config,
+    )
+    agent._ensure_client = lambda: fake_client
+    agent.messages = [{"role": "user", "content": "Continue and complete the novel."}]
+
+    response = agent._create_openai_chat_completion(
+        model="sensenova-6.7-flash-lite",
+        messages=[
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "Continue and complete the novel."},
+            {"role": "tool", "tool_call_id": "call_1", "content": "audit passed"},
+        ],
+        stream=True,
+    )
+
+    assert response == "ok"
+    assert len(calls) == 2
+    assert calls[1]["messages"][-1] == {
+        "role": "user",
+        "content": "Continue and complete the novel.",
+    }
+
+
+def test_sensenova_non_streaming_sdk_preserves_reasoning_effort_and_sampling_options(tmp_path):
+    captured = {}
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content="ok", reasoning=None, reasoning_content=None, tool_calls=[]),
+                        finish_reason="stop",
+                    )
+                ]
+            )
+
+    config = _standard_config()
+    config.active_model_source = "sensenova"
+    config.sensenova = {"selected_model_id": "sensenova-6.7-flash-lite", "reasoning_effort": "none"}
+    fake_client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+    agent = ReverieAgent(
+        base_url="https://token.sensenova.cn/v1",
+        api_key="x",
+        model="sensenova-6.7-flash-lite",
+        project_root=tmp_path,
+        provider="openai-sdk",
+        config=config,
+        mode="writer",
+    )
+    agent._ensure_client = lambda: fake_client
+    agent.get_visible_tool_schemas = lambda mode=None: []
+    agent.messages = [{"role": "user", "content": "Write the next novel chapter."}]
+
+    result = agent._process_non_streaming_openai_sdk(session_id="test")
+
+    assert result == "ok"
+    assert captured["stream"] is False
+    assert captured["extra_body"] == {
+        "reasoning_effort": "none",
+        "top_k": 20,
+        "min_p": 0.0,
+        "repetition_penalty": 1.0,
+    }
+    assert captured["temperature"] == 0.7
+    assert captured["top_p"] == 0.8
+    assert captured["presence_penalty"] == 1.5
+    assert captured["max_tokens"] == 6144
+
+
+def test_sensenova_openai_chat_prefers_http_fallback_only_in_writer_direct_prose(tmp_path):
+    config = _standard_config()
+    config.active_model_source = "sensenova"
+    config.sensenova = {"selected_model_id": "sensenova-6.7-flash-lite"}
+    agent = ReverieAgent(
+        base_url="https://token.sensenova.cn/v1",
+        api_key="x",
+        model="sensenova-6.7-flash-lite",
+        project_root=tmp_path,
+        provider="openai-chat",
+        config=config,
+        mode="writer",
+    )
+    agent.messages = [{"role": "user", "content": "Continue the novel."}]
+    agent._writer_should_hide_tools_for_direct_prose = lambda: True
+
+    called = []
+
+    def fake_http(session_id: str = "default"):
+        called.append(("http", session_id))
+        yield "http-fallback"
+
+    def fake_sdk(session_id: str = "default"):
+        called.append(("sdk", session_id))
+        yield "sdk"
+
+    agent._process_streaming_openai_http_fallback = fake_http
+    agent._process_streaming_openai_sdk = fake_sdk
+
+    chunks = list(agent._process_streaming(session_id="writer-test"))
+
+    assert agent._should_use_openai_http_fallback() is True
+    assert chunks == ["http-fallback"]
+    assert called == [("http", "writer-test")]
+
+
+def test_sensenova_http_fallback_streaming_preserves_openai_payload_options(tmp_path):
+    captured = {}
+
+    class FakeResponse:
+        def close(self):
+            return None
+
+    config = _standard_config()
+    config.active_model_source = "sensenova"
+    config.sensenova = {
+        "selected_model_id": "sensenova-6.7-flash-lite",
+        "reasoning_effort": "none",
+    }
+    agent = ReverieAgent(
+        base_url="https://token.sensenova.cn/v1",
+        api_key="x",
+        model="sensenova-6.7-flash-lite",
+        project_root=tmp_path,
+        provider="openai-chat",
+        config=config,
+        mode="writer",
+    )
+    agent.messages = [{"role": "user", "content": "Write the next novel chapter."}]
+    agent.get_visible_tool_schemas = lambda mode=None: []
+
+    def fake_make_direct_request(payload, *, stream):
+        captured["payload"] = dict(payload)
+        captured["stream"] = stream
+        return FakeResponse()
+
+    agent._make_direct_request = fake_make_direct_request
+    agent._iter_request_stream_events = lambda response, provider_label: iter(
+        [
+            {"type": "content", "text": "ok"},
+            {"type": "finish", "reason": "stop"},
+        ]
+    )
+
+    chunks = list(agent._process_streaming_openai_http_fallback(session_id="writer-test"))
+
+    assert captured["stream"] is True
+    assert captured["payload"]["model"] == "sensenova-6.7-flash-lite"
+    assert captured["payload"]["stream"] is True
+    assert captured["payload"]["temperature"] == 0.7
+    assert captured["payload"]["top_p"] == 0.8
+    assert captured["payload"]["presence_penalty"] == 1.5
+    assert captured["payload"]["max_tokens"] == 6144
+    assert captured["payload"]["extra_body"] == {
+        "reasoning_effort": "none",
+        "top_k": 20,
+        "min_p": 0.0,
+        "repetition_penalty": 1.0,
+    }
+    assert not captured["payload"].get("tools")
+    assert any(chunk == "ok" for chunk in chunks)
+
+
+def test_sensenova_request_messages_proactively_end_with_user_query(tmp_path):
+    config = _standard_config()
+    config.active_model_source = "sensenova"
+    config.sensenova = {"selected_model_id": "sensenova-6.7-flash-lite"}
+    agent = ReverieAgent(
+        base_url="https://token.sensenova.cn/v1",
+        api_key="x",
+        model="sensenova-6.7-flash-lite",
+        project_root=tmp_path,
+        provider="openai-sdk",
+        config=config,
+    )
+    agent.messages = [
+        {"role": "user", "content": "Continue the novel."},
+        {"role": "assistant", "content": None, "tool_calls": []},
+        {"role": "tool", "tool_call_id": "call_1", "content": "chapter committed"},
+    ]
+
+    messages = agent._build_messages()
+
+    assert messages[-1]["role"] == "user"
+    assert "immediately preceding tool result" in messages[-1]["content"]
+    assert "do not resend unchanged tool arguments" in messages[-1]["content"]
+    assert agent.messages[-1]["role"] == "tool"
+
+
+def test_sensenova_writer_context_followup_requests_append_only_plain_prose(tmp_path):
+    _seed_writer_project(
+        tmp_path,
+        "writer-append-followup",
+        pending_recovery_mode="append_only",
+        pending_recommended_append_chars=600,
+    )
+    config = _standard_config()
+    config.active_model_source = "sensenova"
+    config.sensenova = {"selected_model_id": "sensenova-6.7-flash-lite"}
+    agent = ReverieAgent(
+        base_url="https://token.sensenova.cn/v1",
+        api_key="x",
+        model="sensenova-6.7-flash-lite",
+        project_root=tmp_path,
+        provider="openai-sdk",
+        mode="writer",
+        config=config,
+    )
+    agent.messages = [
+        {"role": "user", "content": "Continue the novel."},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {
+                        "name": "serial_novel",
+                        "arguments": '{"action":"context","novel_id":"writer-append-followup"}',
+                    },
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_1", "content": "Preserved draft tail available."},
+    ]
+
+    messages = agent._build_messages()
+
+    assert messages[-1]["role"] == "user"
+    assert "Write only the missing new chapter prose in plain text." in messages[-1]["content"]
+    assert "Provide at least 600 new non-whitespace characters." in messages[-1]["content"]
+    assert "data.append_content automatically" in messages[-1]["content"]
+    assert "Do not repeat the preserved tail" in messages[-1]["content"]
+    assert agent.messages[-1]["role"] == "tool"
+
+
+def test_sensenova_writer_failed_commit_followup_requires_prepare_chapter(tmp_path):
+    _seed_writer_project(
+        tmp_path,
+        "writer-reprepare-followup",
+        pending_recovery_mode="reprepare",
+        pending_requires_reprepare=True,
+    )
+    config = _standard_config()
+    config.active_model_source = "sensenova"
+    config.sensenova = {"selected_model_id": "sensenova-6.7-flash-lite"}
+    agent = ReverieAgent(
+        base_url="https://token.sensenova.cn/v1",
+        api_key="x",
+        model="sensenova-6.7-flash-lite",
+        project_root=tmp_path,
+        provider="openai-sdk",
+        mode="writer",
+        config=config,
+    )
+    agent.messages = [
+        {"role": "user", "content": "Continue the novel."},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {
+                        "name": "serial_novel",
+                        "arguments": (
+                            '{"action":"commit_chapter","novel_id":"writer-reprepare-followup","chapter":1}'
+                        ),
+                    },
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_1", "content": "Repair budget exhausted."},
+    ]
+
+    messages = agent._build_messages()
+
+    assert messages[-1]["role"] == "user"
+    assert "action='prepare_chapter'" in messages[-1]["content"]
+    assert "materially revised outline/control card" in messages[-1]["content"]
+    assert "Do not call commit_chapter yet" in messages[-1]["content"]
+    assert agent.messages[-1]["role"] == "tool"
 
 
 def test_legacy_nvidia_default_timeout_does_not_override_global_timeout_when_needed(monkeypatch, tmp_path):

@@ -1,4 +1,4 @@
-"""Runtime telemetry utilities for Reverie Engine Lite."""
+"""Runtime telemetry utilities for Reverie Engine."""
 
 from __future__ import annotations
 

@@ -29,6 +29,10 @@ from .agnes import (
     build_agnes_runtime_model_data,
     normalize_agnes_config,
 )
+from .sensenova import (
+    build_sensenova_runtime_model_data,
+    normalize_sensenova_config,
+)
 from .config import Config, get_app_root
 from .modelscope import (
     build_modelscope_anthropic_options,
@@ -54,7 +58,16 @@ from .webgemini import (
 )
 
 
-BUILTIN_PROVIDER_NAMES = ("aihubmix", "agnes", "modelscope", "nvidia", "codex", "webgemini", "unlimitedsurf")
+BUILTIN_PROVIDER_NAMES = (
+    "aihubmix",
+    "agnes",
+    "sensenova",
+    "modelscope",
+    "nvidia",
+    "codex",
+    "webgemini",
+    "unlimitedsurf",
+)
 
 
 @dataclass
@@ -292,6 +305,67 @@ def smoke_agnes(config: Config, timeout_seconds: int = 45, model_id: str = "") -
         if stream is not None and hasattr(stream, "close"):
             stream.close()
 
+
+def smoke_sensenova(config: Config, timeout_seconds: int = 45, model_id: str = "") -> ProviderSmokeResult:
+    provider = "sensenova"
+    cfg = normalize_sensenova_config(config.sensenova)
+    runtime = build_sensenova_runtime_model_data(cfg, model_id=model_id or None)
+    model = str((runtime or {}).get("model") or model_id or cfg.get("selected_model_id") or "")
+    if not runtime or not runtime.get("api_key"):
+        return _skipped(provider, model, "missing_credentials")
+
+    start = time.perf_counter()
+    try:
+        if str(runtime.get("provider") or "").strip().lower() == "openai-chat":
+            from openai import OpenAI
+
+            client = OpenAI(
+                base_url=runtime["base_url"],
+                api_key=runtime["api_key"],
+                timeout=timeout_seconds,
+                max_retries=0,
+            )
+            response = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": "Reply only with OK."}],
+                max_tokens=1024,
+                stream=False,
+            )
+            text = str(response.choices[0].message.content or "") if response.choices else ""
+            if not text.strip():
+                raise RuntimeError("SenseNova returned no text content")
+            return ProviderSmokeResult(
+                provider=provider,
+                model=model,
+                status="ok",
+                latency_ms=int((time.perf_counter() - start) * 1000),
+            )
+
+        from anthropic import Anthropic
+
+        client = Anthropic(
+            base_url=runtime["base_url"],
+            auth_token=runtime["api_key"],
+            timeout=timeout_seconds,
+            max_retries=0,
+        )
+        with client.messages.stream(
+            model=model,
+            messages=[{"role": "user", "content": "Reply with OK."}],
+            max_tokens=16,
+        ) as stream:
+            for text in stream.text_stream:
+                if str(text or "").strip():
+                    break
+        return ProviderSmokeResult(
+            provider=provider,
+            model=model,
+            status="ok",
+            latency_ms=int((time.perf_counter() - start) * 1000),
+        )
+    except Exception as exc:
+        return _result_from_error(provider, model, start, exc)
+
 def smoke_nvidia(config: Config, timeout_seconds: int = 45, model_id: str = "") -> ProviderSmokeResult:
     provider = "nvidia"
     cfg = normalize_nvidia_config(config.nvidia)
@@ -476,6 +550,7 @@ def smoke_webgemini(config: Config, timeout_seconds: int = 60, model_id: str = "
 SMOKE_RUNNERS: Dict[str, Callable[[Config, int, str], ProviderSmokeResult]] = {
     "aihubmix": smoke_aihubmix,
     "agnes": smoke_agnes,
+    "sensenova": smoke_sensenova,
     "modelscope": smoke_modelscope,
     "nvidia": smoke_nvidia,
     "codex": smoke_codex,

@@ -34,7 +34,7 @@ from ..modes import (
     list_modes,
     normalize_mode,
 )
-from ..config import normalize_thinking_output_style, normalize_tool_output_style
+from ..config import model_source_display_name, normalize_thinking_output_style, normalize_tool_output_style
 from ..settings_catalog import (
     apply_workspace_mode_setting,
     get_setting_items,
@@ -3616,14 +3616,14 @@ class CommandHandler:
         Supported:
         - /tti models      -> list TTI models and pick default model
         - /tti add         -> add a TTI model to config
-        - /tti source      -> select local, AIhubMix, Pollinations, or Agnes TTI source
+        - /tti source      -> select local, AIhubMix, Pollinations, Agnes, or SenseNova TTI source
         - /tti <prompt>    -> generate one image with default model/default params
         """
         raw = args.strip()
         if not raw:
             self.console.print(
                 f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} "
-                f"Usage: /tti models OR /tti source [local|aihubmix|pollinations|agnes] OR /tti add OR /tti <your prompt>"
+                f"Usage: /tti models OR /tti source [local|aihubmix|pollinations|agnes|sensenova] OR /tti add OR /tti <your prompt>"
                 f"[/{self.theme.AMBER_GLOW}]"
             )
             return True
@@ -3787,12 +3787,12 @@ class CommandHandler:
         candidate = normalize_tti_source(raw_value, default="") if raw_value else ""
         if raw_value and not candidate:
             self.console.print(
-                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid TTI source: {escape(raw_value)}. Use local, aihubmix, pollinations, or agnes.[/{self.theme.CORAL_SOFT}]"
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid TTI source: {escape(raw_value)}. Use local, aihubmix, pollinations, agnes, or sensenova.[/{self.theme.CORAL_SOFT}]"
             )
             return True
         if not candidate:
             current = normalize_tti_source(tti_cfg.get("active_source", "local"))
-            candidate = Prompt.ask("TTI source", default=current, choices=["local", "aihubmix", "pollinations", "agnes"]).strip().lower()
+            candidate = Prompt.ask("TTI source", default=current, choices=["local", "aihubmix", "pollinations", "agnes", "sensenova"]).strip().lower()
             candidate = normalize_tti_source(candidate)
 
         if candidate == "pollinations":
@@ -3836,6 +3836,27 @@ class CommandHandler:
                     return True
                 agnes_cfg["api_key"] = api_key
                 config.agnes = normalize_agnes_config(agnes_cfg)
+
+        if candidate == "sensenova":
+            from ..sensenova import normalize_sensenova_config, resolve_sensenova_api_key
+
+            sensenova_cfg = normalize_sensenova_config(getattr(config, "sensenova", {}))
+            if not resolve_sensenova_api_key(sensenova_cfg):
+                self.console.print()
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]SenseNova image generation uses the shared top-level SenseNova API key.[/{self.theme.TEXT_DIM}]"
+                )
+                api_key = Prompt.ask(
+                    f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] SenseNova API Key",
+                    password=True,
+                ).strip()
+                if not api_key:
+                    self.console.print(
+                        f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} SenseNova API key is required to activate this TTI source.[/{self.theme.CORAL_SOFT}]"
+                    )
+                    return True
+                sensenova_cfg["api_key"] = api_key
+                config.sensenova = normalize_sensenova_config(sensenova_cfg)
 
         tti_cfg["active_source"] = candidate
         config.text_to_image = tti_cfg
@@ -4829,6 +4850,46 @@ class CommandHandler:
             self.console.print(
                 f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /plugins enable|disable|trust|untrust <plugin-id>[/{self.theme.AMBER_GLOW}]"
             )
+            return True
+
+        if normalize_tti_source(tti_cfg.get("active_source", "local")) == "sensenova":
+            from ..sensenova_tti_profiles.registry import get_sensenova_tti_model_catalog
+            from .tui_selector import ModelSelector, SelectorAction
+
+            tti_sensenova = tti_cfg.get("sensenova", {}) if isinstance(tti_cfg.get("sensenova"), dict) else {}
+            default_model = str(tti_sensenova.get("default_model", "sensenova-u1-fast") or "sensenova-u1-fast").strip()
+            catalog = get_sensenova_tti_model_catalog()
+            models_data = [
+                {
+                    "id": str(index),
+                    "name": str(model.get("display_name", model.get("id", ""))),
+                    "description": f"{model.get('id', '')} | {model.get('description', '')}",
+                    "model": model,
+                }
+                for index, model in enumerate(catalog)
+            ]
+            current_model_id = next(
+                (str(index) for index, model in enumerate(catalog) if str(model.get("id", "")).lower() == default_model.lower()),
+                None,
+            )
+            selector = ModelSelector(console=self.console, models=models_data, current_model=current_model_id)
+            result = selector.run()
+            if result.action != SelectorAction.SELECT or not result.selected_item:
+                return True
+            try:
+                selected_model = catalog[int(result.selected_item.id)]
+            except (ValueError, IndexError):
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid model selection.[/{self.theme.CORAL_SOFT}]")
+                return True
+            tti_sensenova["default_model"] = selected_model["id"]
+            tti_cfg["sensenova"] = tti_sensenova
+            config.text_to_image = tti_cfg
+            config_manager.save(config)
+            self.console.print(
+                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Default SenseNova TTI model set to: {selected_model['display_name']}[/{self.theme.MINT_VIBRANT}]"
+            )
+            if self.app.get('reinit_agent'):
+                self.app['reinit_agent']()
             return True
         record = manager.get_record(wanted, force_refresh=False)
         if record is None:
@@ -5877,18 +5938,7 @@ class CommandHandler:
 
     def _format_model_source_label(self, source: str) -> str:
         """Return a readable model source label."""
-        mapping = {
-            "standard": "Custom Providers",
-            "codex": "Codex",
-            "aihubmix": "AIhubMix",
-            "agnes": "Agnes",
-            "sensenova": "SenseNova",
-            "unlimitedsurf": "unlimited.surf",
-            "nvidia": "NVIDIA",
-            "modelscope": "ModelScope",
-            "webgemini": "WebGemini",
-        }
-        return mapping.get(str(source or "").strip().lower(), "Custom Providers")
+        return model_source_display_name(source)
 
     def _configure_provider_endpoint(
         self,
@@ -7743,11 +7793,19 @@ class CommandHandler:
         effective_api_key = resolve_sensenova_api_key(sensenova_cfg)
         key_origin = " (from environment)" if effective_api_key and not str(sensenova_cfg.get("api_key", "") or "").strip() else ""
         model_source = str(getattr(config, "active_model_source", "standard") or "standard").strip().lower()
+        transport_id = str((selected or {}).get("transport") or "openai-chat").strip().lower()
+        transport_label = "OpenAI Chat" if transport_id == "openai-chat" else "Anthropic Messages"
+        transport_detail = (
+            "OpenAI-compatible Chat Completions"
+            if transport_id == "openai-chat"
+            else "Anthropic Messages"
+        )
 
         lines = [
             f"[{self.theme.BLUE_SOFT}]Active model source:[/{self.theme.BLUE_SOFT}] {self._format_model_source_label(model_source)}",
             f"[{self.theme.BLUE_SOFT}]Configured key:[/{self.theme.BLUE_SOFT}] {mask_secret(effective_api_key)}{key_origin}",
-            f"[{self.theme.BLUE_SOFT}]OpenAI base URL:[/{self.theme.BLUE_SOFT}] {escape(str(sensenova_cfg.get('api_url', '')))}",
+            f"[{self.theme.BLUE_SOFT}]API base URL:[/{self.theme.BLUE_SOFT}] {escape(str(sensenova_cfg.get('api_url', '')))}",
+            f"[{self.theme.BLUE_SOFT}]Chat transport:[/{self.theme.BLUE_SOFT}] {transport_detail}",
             f"[{self.theme.BLUE_SOFT}]Endpoint:[/{self.theme.BLUE_SOFT}] {escape(str(sensenova_cfg.get('endpoint', '')))}",
             f"[{self.theme.BLUE_SOFT}]Reasoning effort:[/{self.theme.BLUE_SOFT}] {escape(str(sensenova_cfg.get('reasoning_effort', 'medium')))}",
             f"[{self.theme.BLUE_SOFT}]Reasoning choices:[/{self.theme.BLUE_SOFT}] {', '.join(SENSENOVA_REASONING_EFFORTS)}",
@@ -7755,7 +7813,7 @@ class CommandHandler:
         ]
         if selected:
             lines.insert(1, f"[{self.theme.BLUE_SOFT}]Selected model:[/{self.theme.BLUE_SOFT}] {escape(selected['display_name'])} ({escape(selected['id'])})")
-            lines.insert(2, f"[{self.theme.BLUE_SOFT}]Transport:[/{self.theme.BLUE_SOFT}] OpenAI SDK")
+            lines.insert(2, f"[{self.theme.BLUE_SOFT}]Transport:[/{self.theme.BLUE_SOFT}] {transport_label}")
             lines.insert(3, f"[{self.theme.BLUE_SOFT}]Context:[/{self.theme.BLUE_SOFT}] {int(selected.get('context_length') or 0):,} tokens")
 
         self.console.print()
@@ -8467,14 +8525,6 @@ class CommandHandler:
         return True
 
     def _require_subagent_mode(self) -> bool:
-        config_manager = self.app.get('config_manager')
-        config = config_manager.load() if config_manager else None
-        active_source = str(getattr(config, "active_model_source", "standard") or "standard").strip().lower()
-        if active_source == "nvidia":
-            self.console.print(
-                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Subagents are disabled for the NVIDIA source. Use Context Engine retrieval instead.[/{self.theme.AMBER_GLOW}]"
-            )
-            return False
         current_mode = self._current_mode_name()
         non_reverie_modes = {
             "reverie-gamer",
@@ -8483,12 +8533,11 @@ class CommandHandler:
             "spec-driven",
             "spec-vibe",
             "writer",
-            "computer-controller",
         }
-        if current_mode == "reverie" or current_mode not in non_reverie_modes:
+        if current_mode in {"reverie", "computer-controller"} or current_mode not in non_reverie_modes:
             return True
         self.console.print(
-            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Subagents are only available in base Reverie mode. Switch with `/mode reverie`.[/{self.theme.AMBER_GLOW}]"
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Subagents are available in Reverie and Computer Controller modes.[/{self.theme.AMBER_GLOW}]"
         )
         return False
 
@@ -8939,7 +8988,7 @@ class CommandHandler:
             target_engine = Prompt.ask(
                 f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Target Engine",
                 default="reverie_engine",
-                choices=["reverie_engine", "custom", "phaser", "pixijs", "threejs", "pygame", "love2d", "godot", "o3de"]
+                choices=["reverie_engine", "custom", "phaser", "pixijs", "threejs", "pygame", "love2d"]
             )
             target_platform = Prompt.ask(
                 f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Target Platform",
@@ -9345,7 +9394,7 @@ class CommandHandler:
             target_engine = Prompt.ask(
                 f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Target Engine",
                 default="reverie_engine",
-                choices=["reverie_engine", "custom", "phaser", "pixijs", "threejs", "pygame", "love2d", "godot", "o3de"],
+                choices=["reverie_engine", "custom", "phaser", "pixijs", "threejs", "pygame", "love2d"],
             ).strip()
             camera_model = Prompt.ask(
                 f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Camera Model",
@@ -9609,6 +9658,7 @@ class CommandHandler:
                 "\n".join(
                     [
                         "/engine profile",
+                        "/engine scope [dimension] [genre] [quality] [world_structure]",
                         "/engine create",
                         "/engine sample [2d_platformer|topdown_action|iso_adventure|3d_arena|galgame_live2d|tower_defense]",
                         "/engine run [scene_path]",
@@ -9616,6 +9666,8 @@ class CommandHandler:
                         "/engine smoke [scene_path]",
                         "/engine video [mp4|gif|frames] [scene_path]",
                         "/engine renpy <script_path> [conversation_id] [entry_label]",
+                        "/engine inspect-legacy <source_dir>",
+                        "/engine migrate <source_dir> <output_dir>",
                         "/engine health",
                         "/engine benchmark",
                         "/engine package",
@@ -9627,14 +9679,30 @@ class CommandHandler:
 
         if action == "profile":
             result = tool.execute(action="inspect_project", output_dir=output_dir)
-            capability_text = "\n".join(
-                f"- {name}: {'available' if available else 'missing'}"
-                for name, available in runtime_capabilities(self._get_project_root()).items()
+            capability_text = json.dumps(
+                runtime_capabilities(self._get_project_root()),
+                ensure_ascii=False,
+                indent=2,
             )
             if result.success:
                 self._print_game_panel("Reverie Engine Profile", f"{result.output}\n\nCapabilities:\n{capability_text}")
             else:
                 self._print_tool_result("Reverie Engine Profile", result)
+            return True
+
+        if action == "scope":
+            dimension = tokens[1] if len(tokens) > 1 else "2D"
+            genre = tokens[2] if len(tokens) > 2 else "sandbox"
+            quality = tokens[3] if len(tokens) > 3 else "indie"
+            world_structure = tokens[4] if len(tokens) > 4 else "focused"
+            result = tool.execute(
+                action="assess_scope",
+                dimension=dimension,
+                genre=genre,
+                quality_tier=quality,
+                world_structure=world_structure,
+            )
+            self._print_tool_result("Reverie Engine Scope", result)
             return True
 
         if action == "create":
@@ -9786,6 +9854,31 @@ class CommandHandler:
             self._print_tool_result("Reverie Engine Ren'Py Import", result)
             return True
 
+        if action in {"inspect-legacy", "inspect_legacy"}:
+            source_dir = tokens[1] if len(tokens) > 1 else Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Legacy Project Directory"
+            ).strip()
+            result = tool.execute(action="inspect_legacy_project", source_dir=source_dir)
+            self._print_tool_result("Reverie Engine Legacy Inspection", result)
+            return True
+
+        if action in {"migrate", "migrate-legacy"}:
+            source_dir = tokens[1] if len(tokens) > 1 else Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Legacy Project Directory"
+            ).strip()
+            target_dir = tokens[2] if len(tokens) > 2 else Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Reverie Engine Output Directory",
+                default="migrated-reverie-game",
+            ).strip()
+            result = tool.execute(
+                action="migrate_legacy_project",
+                source_dir=source_dir,
+                output_dir=target_dir,
+                overwrite=False,
+            )
+            self._print_tool_result("Reverie Engine Migration", result)
+            return True
+
         if action == "test":
             validation = tool.execute(action="validate_project", output_dir=output_dir)
             self._print_tool_result("Reverie Engine Validation", validation)
@@ -9835,7 +9928,7 @@ class CommandHandler:
             return True
 
         self.console.print(
-            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /engine [profile|create|sample|run|validate|smoke|video|renpy|health|benchmark|package|test][/{self.theme.AMBER_GLOW}]"
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /engine [profile|scope|create|sample|run|validate|smoke|video|renpy|inspect-legacy|migrate|health|benchmark|package|test][/{self.theme.AMBER_GLOW}]"
         )
         return True
 
@@ -10296,6 +10389,11 @@ class CommandHandler:
             except ValueError:
                 max_tokens = 128000
             supports_vision = Confirm.ask("Does this model support vision/image input?", default=False)
+            provider = Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] API Call Method",
+                choices=["openai-chat", "openai-responses", "anthropic", "request", "curl"],
+                default="openai-chat",
+            ).strip().lower()
             
             # Create config object
             new_model = ModelConfig(
@@ -10304,11 +10402,12 @@ class CommandHandler:
                 base_url=base_url,
                 api_key=api_key,
                 max_context_tokens=max_tokens,
+                provider=provider,
                 supports_vision=supports_vision,
             )
             
             # Optional: Verify connection
-            if Confirm.ask("Verify connection before saving?", default=True):
+            if provider == "openai-chat" and Confirm.ask("Verify connection before saving?", default=True):
                  with self.console.status(f"[{self.theme.PURPLE_SOFT}]{self.deco.SPARKLE} Verifying connection...[/{self.theme.PURPLE_SOFT}]"):
                      try:
                          from openai import OpenAI

@@ -181,30 +181,23 @@
     "writer": {
       "title": "Writer Tool Surface",
       "workflow": [
-        "Use `ask_clarification` early when format, genre, tone, length, POV, tense, or style brief is missing.",
-        "Use `userInput` when you need explicit outline approval or a blocking creative decision.",
-        "Use writer memory and consistency tools to preserve continuity across long-form output."
+        "For a novel or serial request, call `serial_novel` before drafting prose; infer safe creative defaults from the brief instead of forcing a questionnaire.",
+        "Use `serial_novel` to persist project bibles, chapter control cards, committed chapters, continuity ledgers, resumable progress, and verified character totals.",
+        "Use `ask_clarification` or `userInput` only when a genuinely blocking creative decision cannot be inferred from the request.",
+        "Use writer analysis tools after drafting, then commit every accepted chapter through `serial_novel`."
       ],
       "tools": [
         "codebase-retrieval",
-        "git-commit-retrieval",
         "str_replace_editor",
         "create_file",
-        "file_ops",
-        "delete_file",
-        "command_exec",
         "web_search",
         "web_fetch",
-        "browser_controler",
-        "skill_lookup",
-        "list_mcp_resources",
-        "read_mcp_resource",
-        "media_generation_capabilities",
-        "text_to_image",
-        "text_to_video",
+        "memory_retrieval",
+        "memory_manager",
         "userInput",
         "switch_mode",
         "ask_clarification",
+        "serial_novel",
         "novel_context_manager",
         "consistency_checker",
         "plot_analyzer"
@@ -248,14 +241,8 @@
       "tools": [
         "codebase-retrieval",
         "git-commit-retrieval",
-        "str_replace_editor",
-        "create_file",
-        "file_ops",
-        "delete_file",
-        "command_exec",
         "web_search",
         "web_fetch",
-        "browser_controler",
         "skill_lookup",
         "list_mcp_resources",
         "read_mcp_resource",
@@ -263,7 +250,17 @@
         "text_to_image",
         "text_to_video",
         "userInput",
-        "computer_control"
+        "subagent",
+        "list_apps",
+        "get_app_state",
+        "click",
+        "perform_secondary_action",
+        "scroll",
+        "drag",
+        "type_text",
+        "press_key",
+        "set_value",
+        "switch_mode"
       ]
     }
   },
@@ -538,15 +535,20 @@
       ]
     },
     "subagent": {
-      "purpose": "Delegate bounded Reverie-mode subtasks to configured subagents.",
-      "use_when": "Parallel investigation or implementation would help and the task is self-contained.",
+      "purpose": "Create and manage isolated SubAgents, background runs, scopes, and selective context.",
+      "use_when": "The main Reverie or Computer Controller Agent should delegate bounded coding, research, or verification.",
       "parameters": {
-        "action": "Subagent action.",
-        "prompt": "Delegated task instructions.",
-        "agent_id": "Optional configured agent id."
+        "action": "create, delete, set_model, list, delegate, start, status, wait, cancel, remember, context, forget, or clear_context.",
+        "subagent_id": "Configured or requested SubAgent id.",
+        "task": "Self-contained delegated task.",
+        "read_scope": "Optional bounded read paths.",
+        "write_scope": "Optional bounded write paths; omitted means read-only.",
+        "context_keys": "Selected persistent keys to inject into this run."
       },
       "examples": [
-        "subagent(action=\"run\", prompt=\"inspect failing test logs and summarize root cause\")"
+        "subagent(action=\"create\", subagent_id=\"coder\", mode=\"reverie\")",
+        "subagent(action=\"start\", subagent_id=\"coder\", task=\"write the scoped script\", write_scope=[\"scripts\"])",
+        "subagent(action=\"wait\", run_id=\"coder-...\", timeout=30)"
       ]
     },
     "userInput": {
@@ -905,21 +907,82 @@
         "notify_user(Message=\"Plan is ready for review\", PathsToReview=[\"artifacts/task.md\"], BlockedOnUser=true)"
       ]
     },
-    "computer_control": {
-      "purpose": "Observe and control the desktop.",
-      "use_when": "Computer Controller mode needs visual UI automation.",
+    "serial_novel": {
+      "purpose": "Create, resume, validate, and complete persistent long-form fiction projects with disk-backed evidence.",
+      "use_when": "Writer mode receives a novel, serial, continuation, or 100k-character fiction request.",
       "parameters": {
-        "action": "observe, observe_window, click, type, key, hotkey, scroll, or related desktop action.",
-        "x": "Optional screen x coordinate.",
-        "y": "Optional screen y coordinate.",
-        "text": "Optional text to type.",
-        "grid_cols": "Optional observation grid columns.",
-        "grid_rows": "Optional observation grid rows."
+        "action": "bootstrap, configure, prepare_chapter, commit_chapter, context, status, audit, complete, or list_projects.",
+        "novel_id": "Stable project id reused in later prompts.",
+        "chapter": "One-based chapter number for chapter actions.",
+        "data": "Project bibles, chapter control card, or committed chapter content and state updates."
       },
       "examples": [
-        "computer_control(action=\"observe\", grid_cols=3, grid_rows=3)",
-        "computer_control(action=\"click\", x=640, y=420)"
+        "serial_novel(action=\"bootstrap\", novel_id=\"glass-tide\", title=\"Glass Tide\", brief=\"...\", target_chars=100000)",
+        "serial_novel(action=\"prepare_chapter\", novel_id=\"glass-tide\", chapter=1, title=\"The Rain Market\", data={\"outline\":\"...\"})",
+        "serial_novel(action=\"audit\", novel_id=\"glass-tide\")"
       ]
+    },
+    "get_app_state": {
+      "purpose": "Capture an app screenshot and indexed accessibility tree.",
+      "use_when": "Before every Computer Use action in an assistant turn.",
+      "parameters": {
+        "app": "Running app name, window title, executable, or PID.",
+        "show_full_text": "Whether accessibility text may exceed 500 characters."
+      },
+      "examples": ["get_app_state(app=\"Code\")"]
+    },
+    "list_apps": {
+      "purpose": "List running apps with accessible top-level windows.",
+      "use_when": "Discovering the exact app identifier before observation.",
+      "parameters": {},
+      "examples": ["list_apps()"]
+    },
+    "click": {
+      "purpose": "Click an indexed accessibility element or screenshot coordinate.",
+      "use_when": "Activating a desktop control after get_app_state.",
+      "parameters": {
+        "app": "Observed app.",
+        "element_index": "Preferred target from the accessibility tree.",
+        "x": "Fallback screenshot-relative x coordinate.",
+        "y": "Fallback screenshot-relative y coordinate."
+      },
+      "examples": ["click(app=\"Code\", element_index=\"12\")"]
+    },
+    "perform_secondary_action": {
+      "purpose": "Invoke an accessibility action such as Invoke, Toggle, Select, Expand, or Collapse.",
+      "use_when": "The observed element advertises a suitable secondary action.",
+      "parameters": {"app": "Observed app.", "element_index": "Element target.", "action": "Advertised action."},
+      "examples": ["perform_secondary_action(app=\"Code\", element_index=\"12\", action=\"Invoke\")"]
+    },
+    "scroll": {
+      "purpose": "Scroll an observed accessibility element.",
+      "use_when": "Moving a scrollable region by pages.",
+      "parameters": {"app": "Observed app.", "element_index": "Scrollable element.", "direction": "up, down, left, or right.", "pages": "Page count."},
+      "examples": ["scroll(app=\"Code\", element_index=\"4\", direction=\"down\", pages=1)"]
+    },
+    "drag": {
+      "purpose": "Drag between screenshot-relative coordinates.",
+      "use_when": "Operating canvas or slider surfaces without semantic actions.",
+      "parameters": {"app": "Observed app.", "from_x": "Start x.", "from_y": "Start y.", "to_x": "End x.", "to_y": "End y."},
+      "examples": ["drag(app=\"Blockbench\", from_x=100, from_y=100, to_x=220, to_y=180)"]
+    },
+    "type_text": {
+      "purpose": "Type literal text into the focused control.",
+      "use_when": "An observed editor or field already has focus.",
+      "parameters": {"app": "Observed app.", "text": "Literal text."},
+      "examples": ["type_text(app=\"Code\", text=\"print('ok')\")"]
+    },
+    "press_key": {
+      "purpose": "Press a key or key combination.",
+      "use_when": "Navigation or shortcuts are more reliable than pointing.",
+      "parameters": {"app": "Observed app.", "key": "xdotool-style key, such as Return or ctrl+s."},
+      "examples": ["press_key(app=\"Code\", key=\"ctrl+s\")"]
+    },
+    "set_value": {
+      "purpose": "Set a value through Windows UI Automation.",
+      "use_when": "The observed element advertises SetValue.",
+      "parameters": {"app": "Observed app.", "element_index": "Settable element.", "value": "New value."},
+      "examples": ["set_value(app=\"Notepad\", element_index=\"6\", value=\"hello\")"]
     }
   },
   "dynamic_tools": [

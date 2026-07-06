@@ -1,4 +1,4 @@
-"""Built-in sample definitions for Reverie Engine Lite."""
+"""Built-in sample definitions for Reverie Engine."""
 
 from __future__ import annotations
 

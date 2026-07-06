@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -11,18 +12,25 @@ from ..engine import (
     ArchetypeDocument,
     ENGINE_BRAND,
     ENGINE_NAME,
+    assess_project_scope,
     benchmark_project,
     build_engine_config,
     build_project_health_report,
     create_project_skeleton,
     export_project_video,
     import_renpy_script,
+    inspect_legacy_project,
+    inspect_renpy_project,
     inspect_project,
     materialize_sample,
     package_project,
+    migrate_legacy_project,
+    normalize_genre,
+    outline_renpy_script,
     pack_archetype,
     run_project_smoke,
     runtime_capabilities,
+    supported_game_families,
     save_archetype,
     save_prefab,
     save_scene,
@@ -31,6 +39,7 @@ from ..engine import (
     validate_engine_config_schema,
     validate_gameplay_manifest_schema,
     validate_project,
+    validate_renpy_project,
     validate_scene_document,
 )
 from ..engine.serialization import node_from_dict
@@ -52,6 +61,8 @@ class _BaseReverieEngineTool(BaseTool):
             "action": {
                 "type": "string",
                 "enum": [
+                    "list_capabilities",
+                    "assess_scope",
                     "create_project",
                     "inspect_project",
                     "generate_scene",
@@ -68,6 +79,11 @@ class _BaseReverieEngineTool(BaseTool):
                     "benchmark_project",
                     "export_video",
                     "import_renpy",
+                    "inspect_renpy",
+                    "outline_renpy",
+                    "validate_renpy",
+                    "inspect_legacy_project",
+                    "migrate_legacy_project",
                 ],
                 "description": "Reverie Engine action",
             },
@@ -75,6 +91,9 @@ class _BaseReverieEngineTool(BaseTool):
             "project_name": {"type": "string", "description": "Project name for create_project"},
             "dimension": {"type": "string", "description": "2D, 2.5D, or 3D"},
             "genre": {"type": "string", "description": "Gameplay profile such as platformer, galgame, tower_defense, or arena"},
+            "quality_tier": {"type": "string", "description": "Production tier such as indie, AA, or AAA"},
+            "world_structure": {"type": "string", "description": "World shape such as focused, hub, regional, or open_world"},
+            "source_dir": {"type": "string", "description": "Legacy Godot, O3DE, or Ren'Py source project directory"},
             "sample_name": {
                 "type": "string",
                 "description": "Sample to materialize: 2d_platformer, iso_adventure, 3d_arena, galgame_live2d, or tower_defense",
@@ -109,8 +128,33 @@ class _BaseReverieEngineTool(BaseTool):
         self.project_root = Path(context.get("project_root")) if context and context.get("project_root") else Path.cwd()
 
     def execute(self, **kwargs) -> ToolResult:
+        if "output_dir" not in kwargs and kwargs.get("project_dir"):
+            kwargs["output_dir"] = kwargs["project_dir"]
+        if kwargs.get("action") == "run_smoke" and "output_dir" not in kwargs and kwargs.get("output_path"):
+            output_candidate = Path(str(kwargs["output_path"])).expanduser()
+            if output_candidate.is_dir():
+                kwargs["output_dir"] = str(output_candidate)
+                kwargs.pop("output_path", None)
+        nested_data = kwargs.get("data")
+        if isinstance(nested_data, dict) and kwargs.get("action") in {"assess_scope", "create_project"}:
+            for key in (
+                "output_dir",
+                "project_name",
+                "dimension",
+                "genre",
+                "quality_tier",
+                "world_structure",
+                "sample_name",
+                "overwrite",
+            ):
+                if key not in kwargs and key in nested_data:
+                    kwargs[key] = nested_data[key]
         action = kwargs.get("action")
         try:
+            if action == "list_capabilities":
+                return self._list_capabilities(kwargs)
+            if action == "assess_scope":
+                return self._assess_scope(kwargs)
             if action == "create_project":
                 return self._create_project(kwargs)
             if action == "inspect_project":
@@ -143,6 +187,16 @@ class _BaseReverieEngineTool(BaseTool):
                 return self._export_video(kwargs)
             if action == "import_renpy":
                 return self._import_renpy(kwargs)
+            if action == "inspect_renpy":
+                return self._inspect_renpy(kwargs)
+            if action == "outline_renpy":
+                return self._outline_renpy(kwargs)
+            if action == "validate_renpy":
+                return self._validate_renpy(kwargs)
+            if action == "inspect_legacy_project":
+                return self._inspect_legacy_project(kwargs)
+            if action == "migrate_legacy_project":
+                return self._migrate_legacy_project(kwargs)
             return ToolResult.fail(f"Unknown action: {action}")
         except Exception as exc:
             return ToolResult.fail(f"Error executing {action}: {str(exc)}")
@@ -153,18 +207,38 @@ class _BaseReverieEngineTool(BaseTool):
             purpose=f"resolve {ENGINE_BRAND} project path",
         )
 
+    def _list_capabilities(self, kwargs: Dict[str, Any]) -> ToolResult:
+        root = self._resolve_output_dir(kwargs)
+        capabilities = runtime_capabilities(root)
+        families = supported_game_families()
+        return ToolResult.ok(
+            f"{ENGINE_BRAND} unified runtime: {len(families)} game families across 2D, 2.5D, and focused 3D",
+            {"capabilities": capabilities, "game_families": families},
+        )
+
+    def _assess_scope(self, kwargs: Dict[str, Any]) -> ToolResult:
+        assessment = assess_project_scope(
+            dimension=str(kwargs.get("dimension") or "2D"),
+            genre=str(kwargs.get("genre") or "sandbox"),
+            quality_tier=str(kwargs.get("quality_tier") or "indie"),
+            world_structure=str(kwargs.get("world_structure") or "focused"),
+        )
+        status = "supported" if assessment["supported"] else "out of scope"
+        return ToolResult.ok(f"{ENGINE_BRAND} scope assessment: {status}", assessment)
+
     def _create_project(self, kwargs: Dict[str, Any]) -> ToolResult:
         output_dir = self._resolve_output_dir(kwargs)
         project_name = kwargs.get("project_name") or output_dir.name or "Reverie Game"
         dimension = kwargs.get("dimension", "2D")
         sample_name = kwargs.get("sample_name")
         overwrite = kwargs.get("overwrite", False)
+        genre = kwargs.get("genre") or self._infer_genre_from_project_name(str(project_name))
         result = create_project_skeleton(
             output_dir,
             project_name=project_name,
             dimension=dimension,
             sample_name=sample_name,
-            genre=kwargs.get("genre"),
+            genre=genre,
             overwrite=overwrite,
         )
         output = (
@@ -180,6 +254,33 @@ class _BaseReverieEngineTool(BaseTool):
         if sample_name:
             output += f"\nSample materialized: {sample_name}"
         return ToolResult.ok(output, {"project_root": str(output_dir), **result})
+
+    @staticmethod
+    def _infer_genre_from_project_name(project_name: str) -> str:
+        compact_name = re.sub(r"[^a-z0-9]+", "", str(project_name or "").lower())
+        for family in supported_game_families():
+            genre_id = str(family.get("id") or "")
+            if genre_id != "sandbox" and genre_id.replace("_", "") in compact_name:
+                return genre_id
+        hints = {
+            "card": "card_game",
+            "deck": "card_game",
+            "visualnovel": "galgame",
+            "galgame": "galgame",
+            "towerdefense": "tower_defense",
+            "platform": "platformer",
+            "metroid": "metroidvania",
+            "rogue": "roguelike",
+            "rhythm": "rhythm",
+            "racing": "racing",
+            "shooter": "shooter",
+            "survival": "survival",
+            "tactics": "tactics",
+        }
+        for token, genre_id in hints.items():
+            if token in compact_name:
+                return genre_id
+        return normalize_genre(None)
 
     def _inspect_project(self, kwargs: Dict[str, Any]) -> ToolResult:
         output_dir = self._resolve_output_dir(kwargs)
@@ -512,6 +613,59 @@ class _BaseReverieEngineTool(BaseTool):
         if result.get("warning_count"):
             output += f"\nWarnings: {result['warning_count']}"
         return ToolResult.ok(output, result)
+
+    def _resolve_renpy_source(self, kwargs: Dict[str, Any], *, require_script: bool = False) -> Path:
+        raw_path = kwargs.get("script_path") if require_script else kwargs.get("source_dir") or kwargs.get("output_dir", ".")
+        return self.resolve_workspace_path(
+            raw_path or ".",
+            purpose="resolve built-in Ren'Py source path",
+        )
+
+    def _inspect_renpy(self, kwargs: Dict[str, Any]) -> ToolResult:
+        source = self._resolve_renpy_source(kwargs)
+        result = inspect_renpy_project(source)
+        return ToolResult.ok(
+            f"Inspected Ren'Py project with the built-in engine parser: {result['script_count']} script(s)",
+            result,
+        )
+
+    def _outline_renpy(self, kwargs: Dict[str, Any]) -> ToolResult:
+        source = self._resolve_renpy_source(kwargs, require_script=True)
+        result = outline_renpy_script(source)
+        return ToolResult.ok(
+            f"Outlined Ren'Py script: {result['counts']['labels']} label(s), {result['counts']['menus']} menu(s)",
+            result,
+        )
+
+    def _validate_renpy(self, kwargs: Dict[str, Any]) -> ToolResult:
+        source = self._resolve_renpy_source(kwargs)
+        result = validate_renpy_project(source)
+        return ToolResult.ok(
+            f"Validated Ren'Py source with the built-in engine parser: {'ok' if result['valid'] else 'issues found'}",
+            result,
+        )
+
+    def _inspect_legacy_project(self, kwargs: Dict[str, Any]) -> ToolResult:
+        source = self._resolve_renpy_source(kwargs)
+        result = inspect_legacy_project(source)
+        return ToolResult.ok(
+            f"Legacy project source: {result.get('source_engine') or 'not detected'} -> {ENGINE_NAME}",
+            result,
+        )
+
+    def _migrate_legacy_project(self, kwargs: Dict[str, Any]) -> ToolResult:
+        source = self._resolve_renpy_source(kwargs)
+        output_dir = self._resolve_output_dir(kwargs)
+        result = migrate_legacy_project(
+            source,
+            output_dir,
+            project_name=str(kwargs.get("project_name") or ""),
+            overwrite=bool(kwargs.get("overwrite", False)),
+        )
+        return ToolResult.ok(
+            f"Migrated {result['source_engine']} source into {ENGINE_BRAND} at {output_dir}",
+            result,
+        )
 
     def get_execution_message(self, **kwargs) -> str:
         return f"{ENGINE_BRAND}: {kwargs.get('action', 'unknown')}"

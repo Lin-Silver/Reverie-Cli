@@ -279,6 +279,8 @@ class FastContextExplorer:
                 command,
                 cwd=str(self.project_root),
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 capture_output=True,
                 timeout=max(1.0, float(timeout_seconds or 5.0)),
             )

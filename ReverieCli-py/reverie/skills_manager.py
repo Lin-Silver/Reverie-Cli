@@ -13,6 +13,7 @@ import time
 import yaml
 
 from .modes import normalize_mode
+from .builtin_skills import BUILTIN_SKILL_MODES
 
 
 _FRONTMATTER_RE = re.compile(r"\A---\s*\r?\n(.*?)\r?\n---\s*(?:\r?\n|$)", re.DOTALL)
@@ -266,7 +267,7 @@ class SkillsManager:
                     continue
                 seen_skill_paths.add(normalized_path)
                 record, error = self._load_skill(skill_md, root)
-                if record is not None:
+                if record is not None and self._skill_visible_in_active_mode(record):
                     records.append(record)
                 if error is not None:
                     errors.append(error)
@@ -312,6 +313,17 @@ class SkillsManager:
             self._generation += 1
         self._snapshot = snapshot
         return snapshot
+
+    def _skill_visible_in_active_mode(self, record: SkillRecord) -> bool:
+        """Apply package-owned mode gates to built-in skills."""
+        if record.root.scope != "builtin":
+            return True
+        include_modes = {
+            normalize_mode(mode)
+            for mode in BUILTIN_SKILL_MODES.get(record.lookup_key, ())
+            if str(mode or "").strip()
+        }
+        return not include_modes or self.active_mode in include_modes
 
     def _load_plugin_skills(self) -> list[SkillRecord]:
         manager = self.runtime_plugin_manager

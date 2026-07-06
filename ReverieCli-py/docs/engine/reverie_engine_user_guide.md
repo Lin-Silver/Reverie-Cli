@@ -55,7 +55,7 @@ The built-in engine is data-driven:
 - content data is YAML or JSON
 - model assets are tracked through `data/models/model_registry.yaml`
 
-The main Reverie executable does not embed full desktop DCC/editor applications by default. The official Blender plugin can embed Blender Portable inside `reverie-blender.exe` and unpack it into `.reverie/plugins/blender/runtime/` on demand; Godot and O3DE plugins manage releases, source checkouts, and SDK metadata under `.reverie/plugins/<plugin-id>/runtime/` and `.reverie/plugins/<plugin-id>/source/`. Blender authoring is handled by the built-in `blender_modeling_workbench` tool through background `bpy` scripts, while Blockbench authoring remains available through the built-in Ashfox MCP integration when that optional editor/plugin pair is running.
+The main Reverie executable does not embed full desktop DCC/editor applications by default. The official Blender plugin can embed Blender Portable inside `reverie-blender.exe` and unpack it into `.reverie/plugins/blender/runtime/` on demand. Blender authoring is handled by the built-in `blender_modeling_workbench` tool through background `bpy` scripts, while Blockbench authoring remains available through the built-in Ashfox MCP integration when that optional editor/plugin pair is running. Godot and O3DE are migration inputs and implementation references inside Reverie Engine; they no longer have release plugins.
 
 ## Modeling Integration
 
@@ -70,7 +70,7 @@ In short:
 
 For quick generated starter assets, `/modeling primitive` can create a built-in runtime `.gltf` plus preview image directly into the standard project layout. For richer authored assets, `/blender create <model_name> <brief>` generates a `.blend` source, `.glb` runtime export, preview render, audit evidence, and optional repair loop without configuring an external MCP server.
 
-## Galgame And Plugin Boundaries
+## Galgame And Migration Boundaries
 
 The built-in engine keeps only lightweight, reusable runtime surfaces:
 
@@ -81,23 +81,37 @@ The built-in engine keeps only lightweight, reusable runtime surfaces:
 
 When `ffmpeg` is available at build time, the packaged executable embeds it so encoded video export works out of the box. If `ffmpeg` is not bundled, frame-sequence export still works and encoded video falls back to an external runtime install.
 
-Specialized Galgame work is owned by plugins:
+Ren'Py analysis and migration are built into Reverie Engine:
 
-- `plugins/renpy/`: Ren'Py-specific `.rpy` script inspection, engine workflow guidance, and future lint/package/runtime commands.
+- `reverie_engine`: `.rpy` project inspection, script outlines, parser validation, dialogue import, and full project migration.
+- `plugins/renpy/`: optional external Ren'Py SDK management for native lint, compile, and distribution only.
 - `plugins/live2d/`: Cubism Core deployment, Live2D manifest inspection, dynamic CG guidance, and future MCP-style model control helpers.
 
-The legacy `/engine renpy` importer remains a compatibility path for a practical Ren'Py subset, but full Ren'Py engine support should be delivered through the Ren'Py plugin rather than expanded inside the core CLI.
+Godot and O3DE no longer ship as runtime plugins. Use `/engine inspect-legacy` and `/engine migrate` to move portable assets and supported content into one Reverie Engine project; native scripts and scene semantics remain explicit manual-review items.
+
+## Playable Contract And Runtime Evidence
+
+Every supported game family now seeds a deterministic stateful slice contract rather than a single isolated action. The smoke path starts an objective, performs a genre-specific challenge, grants a reward, completes the slice, writes and reads a real save slot, and records executed frames plus measured average frame time. Card games preserve their draw/play/victory sequence before the common completion step.
+
+Reverie-Gamer evaluates the resulting smoke or playtest telemetry. A slice cannot score 70 or receive a credible/strong verdict unless evidence proves:
+
+- a successful run with session start and end
+- inspectable events with no failure event
+- executed frames and frame timing within the target budget
+- every requested combat, quest, reward, and save/load loop
+
+Missing evidence caps the score at 69. Planning documents, packet counts, or declared tests cannot satisfy this runtime gate.
+
+The production scope remains explicit: AAA/3A projects and 3D open-world games are unsupported. Passing the deterministic contract proves the generated foundation's tested loop; it does not certify final art, platform compliance, or subjective polish.
 
 ## Roadmap
 
 Future game-development work should prioritize:
 
-1. Build packaged `reverie-renpy.exe` and `reverie-live2d.exe` plugin releases and install them into `dist/.reverie/plugins/`.
-2. Add plugin-local Ren'Py runtime deployment, lint, launch, packaging, and project-template commands.
-3. Extend the Live2D plugin with MCP-compatible expression, motion, lip-sync, and scene-command bridges inspired by open Live2D MCP projects.
-4. Keep Reverie-Gamer's prompt work focused on game concept quality, routes, system design, asset contracts, and verification plans.
-5. Add Galgame-focused smoke projects that combine TTI backgrounds/still CG, optional TTV inserts, and Live2D interactive character manifests.
-6. Keep public imports consolidated on `reverie.engine` and avoid reintroducing legacy runtime aliases.
+1. Expand the built-in migration coverage while keeping unsupported native code visible for manual review.
+2. Extend the Live2D plugin with verified expression, motion, lip-sync, and scene-command bridges.
+3. Add Galgame-focused smoke projects that combine TTI backgrounds/still CG, optional TTV inserts, and Live2D interactive character manifests.
+4. Keep public imports consolidated on `reverie.engine` and avoid reintroducing runtime aliases.
 
 ## Verification Expectations
 

@@ -4,7 +4,14 @@ from types import SimpleNamespace
 
 from reverie.agent.agent import THINKING_END_MARKER, THINKING_START_MARKER
 from reverie.__main__ import _decode_prompt_bytes, _resolve_prompt_text, main
-from reverie.cli.interface import PromptRunResult, ReverieInterface, _sanitize_prompt_output_text
+from reverie.cli.interface import (
+    PromptRunResult,
+    ReverieInterface,
+    _build_prompt_followup_message,
+    _effective_stream_responses,
+    _sanitize_prompt_output_text,
+    _split_prompt_error,
+)
 from reverie.config import Config, ModelConfig
 
 
@@ -97,6 +104,54 @@ class _WriterAutoContinueAgent(_FakeAgent):
             self.turn += 1
             yield "Created outline.md, chapter1.md, and continuity_note.md //END//"
         self.messages.append({"role": "assistant", "content": "completed"})
+
+
+class _IncompleteNativeWriterAgent(_FakeAgent):
+    def __init__(self, project_root: Path) -> None:
+        super().__init__()
+        self.project_root = Path(project_root)
+        self.mode = "writer"
+
+    def process_message(self, user_message, stream=True, session_id="default", user_display_text=None):
+        self.messages.append({"role": "user", "content": user_message})
+        state_dir = self.project_root / "novels" / "native-project" / "tracking"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        (state_dir / "state.json").write_text(
+            json.dumps(
+                {
+                    "configured": True,
+                    "status": "writing",
+                    "total_chars": 6000,
+                    "target_chars": 6000,
+                    "completed_chapters": 3,
+                    "active_chapter": None,
+                }
+            ),
+            encoding="utf-8",
+        )
+        yield "The project is complete."
+        self.messages.append({"role": "assistant", "content": "The project is complete."})
+
+
+class _StreamCaptureAgent(_FakeAgent):
+    def __init__(self) -> None:
+        super().__init__()
+        self.stream_values = []
+
+    def process_message(self, user_message, stream=True, session_id="default", user_display_text=None):
+        self.stream_values.append(bool(stream))
+        self.messages.append({"role": "user", "content": user_message})
+        yield "OK //END//"
+        self.messages.append({"role": "assistant", "content": "OK //END//"})
+
+
+def test_prompt_error_is_detected_after_partial_assistant_output() -> None:
+    output, error = _split_prompt_error(
+        "Created the project.\n\nError processing message: upstream provider rejected the continuation"
+    )
+
+    assert output == "Created the project."
+    assert error == "Error processing message: upstream provider rejected the continuation"
 
 
 def test_run_prompt_once_collects_output_and_events(tmp_path, monkeypatch):
@@ -380,3 +435,134 @@ def test_run_prompt_once_auto_continues_writer_when_files_missing(tmp_path, monk
     assert (tmp_path / "outline.md").exists()
     assert (tmp_path / "chapter1.md").exists()
     assert (tmp_path / "continuity_note.md").exists()
+
+
+def test_effective_stream_responses_forces_writer_sensenova() -> None:
+    config = Config(
+        models=[
+            ModelConfig(
+                model="sensenova-6.7-flash-lite",
+                model_display_name="SenseNova 6.7 Flash Lite",
+                base_url="https://example.com/v1",
+                api_key="test-key",
+            )
+        ],
+        active_model_index=0,
+        mode="writer",
+        stream_responses=False,
+        active_model_source="sensenova",
+    )
+
+    assert _effective_stream_responses(config) is True
+    assert _effective_stream_responses(config, mode="writer") is True
+    assert _effective_stream_responses(config, mode="reverie") is False
+
+
+def test_run_prompt_once_forces_streaming_for_writer_sensenova(tmp_path, monkeypatch):
+    interface = ReverieInterface(tmp_path, headless=True)
+    config = Config(
+        models=[
+            ModelConfig(
+                model="sensenova-6.7-flash-lite",
+                model_display_name="SenseNova 6.7 Flash Lite",
+                base_url="https://example.com/v1",
+                api_key="test-key",
+            )
+        ],
+        active_model_index=0,
+        mode="writer",
+        stream_responses=False,
+        active_model_source="sensenova",
+    )
+
+    captured = _StreamCaptureAgent()
+
+    monkeypatch.setattr(interface.config_manager, "load", lambda: config)
+    monkeypatch.setattr(interface, "ensure_context_engine", lambda announce=False: True)
+    monkeypatch.setattr(interface, "_sync_workspace_memory_message", lambda session: None)
+    monkeypatch.setattr(interface.workspace_stats_manager, "update_session_snapshot", lambda *args, **kwargs: None)
+    monkeypatch.setattr(interface.workspace_stats_manager, "flush", lambda: None)
+    monkeypatch.setattr(interface, "_init_agent", lambda config_override=None, persist_config_changes=True: setattr(interface, "agent", captured))
+
+    result = interface.run_prompt_once(
+        "Say hello.",
+        mode_override="writer",
+        no_index=True,
+    )
+
+    assert result.success is True
+    assert captured.stream_values == [True]
+
+
+def test_writer_followup_requires_persisted_complete_status(tmp_path):
+    state_dir = tmp_path / "novels" / "native-project" / "tracking"
+    state_dir.mkdir(parents=True)
+    state_path = state_dir / "state.json"
+    state = {
+        "configured": True,
+        "status": "writing",
+        "total_chars": 6000,
+        "target_chars": 6000,
+        "completed_chapters": 3,
+        "active_chapter": None,
+    }
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+
+    followup = _build_prompt_followup_message(
+        "writer",
+        "Continue novel_id=native-project",
+        "Audit passed and the project is complete.",
+        tmp_path,
+    )
+    assert followup is not None
+    assert "`complete`" in followup
+    assert "persisted status" in followup
+
+    state["status"] = "complete"
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    assert _build_prompt_followup_message(
+        "writer",
+        "Continue novel_id=native-project with data.append_content",
+        "Approved. Completed.",
+        tmp_path,
+    ) is None
+
+
+def test_writer_prompt_result_fails_when_native_status_never_completes(tmp_path, monkeypatch):
+    interface = ReverieInterface(tmp_path, headless=True)
+    config = Config(
+        models=[
+            ModelConfig(
+                model="fake-model",
+                model_display_name="Fake Model",
+                base_url="https://example.com/v1",
+                api_key="test-key",
+            )
+        ],
+        active_model_index=0,
+        mode="writer",
+    )
+    monkeypatch.setattr(interface.config_manager, "load", lambda: config)
+    monkeypatch.setattr(interface, "ensure_context_engine", lambda announce=False: True)
+    monkeypatch.setattr(interface, "_sync_workspace_memory_message", lambda session: None)
+    monkeypatch.setattr(interface.workspace_stats_manager, "update_session_snapshot", lambda *args, **kwargs: None)
+    monkeypatch.setattr(interface.workspace_stats_manager, "flush", lambda: None)
+    monkeypatch.setattr(
+        interface,
+        "_init_agent",
+        lambda config_override=None, persist_config_changes=True: setattr(
+            interface,
+            "agent",
+            _IncompleteNativeWriterAgent(tmp_path),
+        ),
+    )
+
+    result = interface.run_prompt_once(
+        "Continue novel_id=native-project",
+        mode_override="writer",
+        no_index=True,
+    )
+
+    assert result.success is False
+    assert result.auto_followup_count == 3
+    assert "did not reach persisted status `complete`" in result.error

@@ -192,7 +192,9 @@ def test_compile_request_reduces_ambitious_3d_prompt_to_vertical_slice(tmp_path:
     assert payload["experience"]["dimension"] == "3D"
     assert payload["experience"]["camera_model"] == "third_person"
     assert payload["production"]["delivery_scope"] == "vertical_slice"
-    assert payload["runtime_preferences"]["preferred_runtime"] == "godot"
+    assert payload["runtime_preferences"]["preferred_runtime"] == "reverie_engine"
+    assert payload["experience"]["world_structure"] == "regional_zones"
+    assert payload["production"]["engine_scope"]["supported"] is False
 
 
 def test_compile_request_understands_chinese_large_scale_action_prompt(tmp_path: Path) -> None:
@@ -216,31 +218,33 @@ def test_compile_request_understands_chinese_large_scale_action_prompt(tmp_path:
     ]
     assert payload["creative_target"]["reference_profile"]["scale_profile"] == "large_scale_anime_action"
     assert payload["experience"]["dimension"] == "3D"
-    assert payload["experience"]["world_structure"] == "open_world_regions"
+    assert payload["experience"]["world_structure"] == "regional_zones"
     assert payload["experience"]["party_model"] == "character_swap_party"
     assert payload["production"]["delivery_scope"] == "vertical_slice"
     assert payload["production"]["continuation_ready"] is True
-    assert payload["production"]["target_quality"] == "aaa"
+    assert payload["production"]["target_quality"] == "aa"
+    assert payload["production"]["requested_target_quality"] == "aaa"
+    assert payload["production"]["engine_scope"]["supported"] is False
     assert "verified 3d slice" in payload["production"]["one_prompt_goal"]
-    assert "multi-region" in payload["production"]["full_game_aspiration"]
+    assert "AA-or-smaller" in payload["production"]["full_game_aspiration"]
     assert payload["production"]["live_service_profile"]["enabled"] is True
     assert "anime_action_service_grammar" in payload["production"]["default_design_capabilities"]
-    assert large_scale_profile["project_shape"] == "anime_action_open_world"
-    assert large_scale_profile["launch_region_target"] == 3
-    assert large_scale_profile["post_launch_region_target"] == 6
+    assert large_scale_profile["project_shape"] == "regional_action_rpg"
+    assert large_scale_profile["launch_region_target"] == 1
+    assert large_scale_profile["post_launch_region_target"] == 2
     assert large_scale_profile["starter_party_size"] == 4
-    assert large_scale_profile["world_cell_strategy"] == "region_cells_with_landmark_routes"
+    assert large_scale_profile["world_cell_strategy"] == "bounded_region_cells"
     assert large_scale_profile["content_cadence"] == "six_week_content_cycles"
     assert "party_roster" in large_scale_profile["runtime_contracts"]
-    assert "world_streaming" in large_scale_profile["runtime_contracts"]
+    assert "world_streaming" not in large_scale_profile["runtime_contracts"]
     assert "commission_board" in large_scale_profile["runtime_contracts"]
     assert "elemental_matrix" in large_scale_profile["runtime_contracts"]
     assert "character_swap" in payload["systems"]["specialized"]
     assert "elemental_reaction" in payload["systems"]["specialized"]
-    assert "open_world_exploration" in payload["systems"]["specialized"]
-    assert payload["runtime_preferences"]["preferred_runtime"] == "godot"
+    assert "regional_exploration" in payload["systems"]["specialized"]
+    assert payload["runtime_preferences"]["preferred_runtime"] == "reverie_engine"
     assert "PC" in payload["quality_targets"]["target_platforms"]
-    assert payload["quality_targets"]["graphics_quality"] == "AAA"
+    assert payload["quality_targets"]["graphics_quality"] == "AA"
     assert directive["mode"] == "fresh_project"
     assert "expand_region" in directive["operations"]
     assert "refresh_content_expansion" in directive["operations"]
@@ -266,7 +270,7 @@ def test_compile_request_understands_hub_service_action_prompt(tmp_path: Path) -
     assert "reference_implied_live_service" in payload["production"]["live_service_profile"]["signals"]
     assert "world_route_onboarding" in payload["production"]["default_design_capabilities"]
     assert "party_synergy_role_matrix" in payload["production"]["default_design_capabilities"]
-    assert payload["runtime_preferences"]["preferred_runtime"] == "godot"
+    assert payload["runtime_preferences"]["preferred_runtime"] == "reverie_engine"
 
 
 def test_plan_production_emits_system_specs_and_task_graph(tmp_path: Path) -> None:
@@ -349,7 +353,7 @@ def test_plan_production_emits_system_specs_and_task_graph(tmp_path: Path) -> No
     assert game_program["large_scale_blueprint"]["starter_party_size"] >= 4
     assert game_program["production_scale"]["project_scale"] == "large_scale"
     assert "PC" in game_program["platform_strategy"]["target_platforms"]
-    assert game_program["product_strategy"]["target_quality"] == "aaa"
+    assert game_program["product_strategy"]["target_quality"] == "aa"
     assert game_program["product_strategy"]["vision_statement"]
     assert game_program["product_strategy"]["unique_selling_points"]
     assert game_program["world_fantasy"]["world_design"]
@@ -364,7 +368,7 @@ def test_plan_production_emits_system_specs_and_task_graph(tmp_path: Path) -> No
     assert len(design_intelligence["player_personas"]) >= 3
     assert len(design_intelligence["balance_lab"]["doubling_halving_probes"]) >= 4
     assert any("remappable controls" in item for item in design_intelligence["accessibility_baseline"]["required_features"])
-    assert any(item["id"] == "godot_navigation_3d" for item in design_intelligence["source_library"])
+    assert any(item["id"] == "mda_framework" for item in design_intelligence["source_library"])
     assert len(gameplay_factory["experience_design"]["balance_probe_ids"]) >= 4
     assert "safe tutorial beat" in gameplay_factory["encounter_grammar"]
     assert campaign_program["chapter_order"][0]["region_id"] == "starter_ruins"
@@ -375,7 +379,8 @@ def test_plan_production_emits_system_specs_and_task_graph(tmp_path: Path) -> No
     assert any(item["runtime_id"] == "godot" for item in reference_intelligence["runtime_alignment"])
     assert reference_intelligence["toolchain_matrix"]
     assert any(item["id"] == "slice_bootstrap" for item in reference_intelligence["adoption_plan"])
-    assert runtime_capability_graph["selected_runtime"] == "godot"
+    assert runtime_capability_graph["selected_runtime"] == "reverie_engine"
+    assert runtime_capability_graph["unified_runtime"] is True
     assert runtime_capability_graph["selected_summary"]["scale_fit"]["score"] >= 0
     assert runtime_delivery_plan["delivery_tracks"]["world_scale_track"] == "single_slice_lane"
     assert runtime_delivery_plan["delivery_tracks"]["launch_region_target"] >= 1
@@ -395,7 +400,7 @@ def test_plan_production_emits_system_specs_and_task_graph(tmp_path: Path) -> No
     assert content_matrix["release_forecast"]["project_shape"] == "regional_action_rpg"
     assert content_matrix["release_forecast"]["launch_region_count"] >= 1
     assert content_matrix["release_forecast"]["starter_party_size"] >= 4
-    assert content_matrix["release_forecast"]["target_quality"] == "aaa"
+    assert content_matrix["release_forecast"]["target_quality"] == "aa"
     assert "PC" in content_matrix["release_forecast"]["target_platforms"]
     assert len(content_expansion["region_seeds"]) >= 3
     assert len(asset_pipeline["production_queue"]) >= 6
@@ -412,7 +417,7 @@ def test_plan_production_emits_system_specs_and_task_graph(tmp_path: Path) -> No
     )
     assert any("continuous body core" in item for item in asset_pipeline["local_model_assistants"]["character_modeling_contract"])
     assert len(character_kits["hero_kits"]) >= 4
-    assert asset_pipeline["import_profile"]["runtime"] == "godot"
+    assert asset_pipeline["import_profile"]["runtime"] == "reverie_engine"
     assert world_program["world_topology"]["nodes"]
     assert world_program["streaming_plan"]["streaming_model"]
     assert world_program["live_ops_surfaces"]
@@ -526,7 +531,7 @@ def test_reference_intelligence_influences_runtime_delivery_and_guardrails(tmp_p
     assert runtime_registry["reference_alignment"]["godot"]["reference_fit_score"] >= 0
 
 
-def test_compile_request_sets_aaa_quality_profile_for_large_scale_prompt(tmp_path: Path) -> None:
+def test_compile_request_reduces_aaa_open_world_profile_to_supported_scope(tmp_path: Path) -> None:
     tool = GameDesignOrchestratorTool({"project_root": tmp_path})
 
     result = tool.execute(
@@ -537,8 +542,11 @@ def test_compile_request_sets_aaa_quality_profile_for_large_scale_prompt(tmp_pat
 
     assert result.success is True
     payload = json.loads((tmp_path / "artifacts" / "game_request.json").read_text(encoding="utf-8"))
-    assert payload["production"]["target_quality"] == "aaa"
-    assert payload["quality_targets"]["target_resolution"] == "4K"
+    assert payload["production"]["target_quality"] == "aa"
+    assert payload["production"]["requested_target_quality"] == "aaa"
+    assert payload["production"]["engine_scope"]["supported"] is False
+    assert payload["experience"]["world_structure"] == "regional_zones"
+    assert payload["quality_targets"]["target_resolution"] == "1440p"
     assert "PC" in payload["quality_targets"]["target_platforms"]
     assert payload["quality_targets"]["content_hours"]
 
@@ -654,7 +662,7 @@ def test_generate_vertical_slice_builds_verified_reverie_engine_project(tmp_path
     assert (slice_root / "data" / "content" / "world_graph.yaml").exists()
 
 
-def test_generate_vertical_slice_builds_godot_foundation(tmp_path: Path) -> None:
+def test_legacy_godot_request_builds_unified_reverie_foundation(tmp_path: Path) -> None:
     _seed_reference_workspace(tmp_path)
     tool = GameProjectScaffolderTool({"project_root": tmp_path})
 
@@ -667,175 +675,18 @@ def test_generate_vertical_slice_builds_godot_foundation(tmp_path: Path) -> None
     )
 
     assert result.success is True
-    assert result.data["runtime"] == "godot"
+    assert result.data["runtime"] == "reverie_engine"
     assert result.data["verification"]["valid"] is True
     assert result.data["slice_score"]["score"] >= 70
 
-    slice_root = tmp_path / "godot_slice" / "engine" / "godot"
-    assert (slice_root / "project.godot").exists()
-    assert (slice_root / "scenes" / "main.tscn").exists()
-    assert (slice_root / "scripts" / "player_controller.gd").exists()
-    assert (slice_root / "scripts" / "enemy_dummy.gd").exists()
-    assert (slice_root / "scripts" / "enemy_projectile.gd").exists()
-    assert (slice_root / "scripts" / "combat_feedback.gd").exists()
-    assert (slice_root / "scripts" / "npc_anchor.gd").exists()
-    assert (slice_root / "scripts" / "region_gateway.gd").exists()
-    assert (slice_root / "scripts" / "reward_cache.gd").exists()
-    assert (slice_root / "scripts" / "region_objective_site.gd").exists()
-    assert (slice_root / "scripts" / "encounter_director.gd").exists()
-    assert (slice_root / "scripts" / "region_manager.gd").exists()
-    assert (slice_root / "autoload" / "game_state.gd").exists()
-    assert (slice_root / "autoload" / "save_service.gd").exists()
-    assert (slice_root / "data" / "combat.json").exists()
-    assert (slice_root / "data" / "quest_flow.json").exists()
-    assert (slice_root / "data" / "asset_registry.json").exists()
-    assert (slice_root / "data" / "asset_import_profile.json").exists()
-    assert (slice_root / "data" / "region_seeds.json").exists()
-    assert (slice_root / "data" / "region_layouts.json").exists()
-    assert (slice_root / "data" / "region_objectives.json").exists()
-    assert (slice_root / "data" / "patrol_routes.json").exists()
-    assert (slice_root / "data" / "alert_networks.json").exists()
-    assert (slice_root / "data" / "world_graph.json").exists()
-    assert (slice_root / "data" / "npc_roster.json").exists()
-    assert (slice_root / "data" / "quest_arcs.json").exists()
-    assert (slice_root / "data" / "party_roster.json").exists()
-    assert (slice_root / "data" / "elemental_matrix.json").exists()
-    assert (slice_root / "data" / "world_streaming.json").exists()
-    assert (slice_root / "data" / "commission_board.json").exists()
-    assert (slice_root / "data" / "slice_manifest.json").exists()
-    assert (slice_root / "data" / "world_slice.json").exists()
-    assert (tmp_path / "godot_slice" / "artifacts" / "asset_pipeline.json").exists()
-    assert (tmp_path / "godot_slice" / "data" / "models" / "model_registry.yaml").exists()
-    assert (tmp_path / "godot_slice" / "assets" / "models" / "source" / "player_avatar.bbmodel").exists()
-
-    enemy_dummy_script = (slice_root / "scripts" / "enemy_dummy.gd").read_text(encoding="utf-8")
-    main_script = (slice_root / "scripts" / "main.gd").read_text(encoding="utf-8")
-    combat_payload = json.loads((slice_root / "data" / "combat.json").read_text(encoding="utf-8"))
-    quest_flow_payload = json.loads((slice_root / "data" / "quest_flow.json").read_text(encoding="utf-8"))
-    party_roster_payload = json.loads((slice_root / "data" / "party_roster.json").read_text(encoding="utf-8"))
-    elemental_matrix_payload = json.loads((slice_root / "data" / "elemental_matrix.json").read_text(encoding="utf-8"))
-    world_streaming_payload = json.loads((slice_root / "data" / "world_streaming.json").read_text(encoding="utf-8"))
-    commission_board_payload = json.loads((slice_root / "data" / "commission_board.json").read_text(encoding="utf-8"))
-    manifest_payload = json.loads((slice_root / "data" / "slice_manifest.json").read_text(encoding="utf-8"))
-    asset_registry_payload = json.loads((slice_root / "data" / "asset_registry.json").read_text(encoding="utf-8"))
-    asset_import_profile_payload = json.loads((slice_root / "data" / "asset_import_profile.json").read_text(encoding="utf-8"))
-    game_state_script = (slice_root / "autoload" / "game_state.gd").read_text(encoding="utf-8")
-    assert '@export var squad_role: String = "default"' in enemy_dummy_script
-    assert "func _run_search_logic(delta: float) -> void:" in enemy_dummy_script
-    assert '_alert_search_duration = float(alert_network.get("search_duration_seconds", 3.0))' in enemy_dummy_script
-    assert 'enemy.squad_role = str(enemy_spec.get("squad_role", "default"))' in main_script
-    assert any(item["combat_role"] == "ranged" for item in combat_payload["enemy_defaults"])
-    assert any(item["combat_tier"] == "elite" for item in combat_payload["enemy_defaults"])
-    assert any(item["combat_tier"] == "boss" for item in combat_payload["enemy_defaults"])
-    assert any(item["id"] == "shrine_guardian_finale" for item in combat_payload["encounter_templates"])
-    assert any(item["id"] == "overlook_elite_detour" for item in combat_payload["encounter_templates"])
-    assert any(item["id"] == "cloudstep_relay_push" for item in combat_payload["encounter_templates"])
-    assert any(item["id"] == "echo_spire_hold" for item in combat_payload["encounter_templates"])
-    assert len(combat_payload["pattern_library"]["elite_vanguard"]["phase_profiles"]) >= 2
-    assert len(combat_payload["pattern_library"]["shrine_guardian"]["phase_profiles"]) >= 3
-    assert len(combat_payload["player_actions"]["combo_chain"]) >= 3
-    assert combat_payload["player_actions"]["skill_loadout"]["heavy"]["name"] == "skybreak"
-    assert combat_payload["player_actions"]["guard"]["enabled"] is True
-    assert combat_payload["player_actions"]["guard"]["perfect_guard_window_seconds"] > 0
-    assert combat_payload["player_actions"]["player_hurt_reaction_seconds"] > 0
-    assert [item["id"] for item in quest_flow_payload["objectives"]][:2] == ["meet_guide", "reach_ruins"]
-    assert any(item["id"] == "defeat_warden" for item in quest_flow_payload["objectives"])
-    assert quest_flow_payload["active_arc"]["id"] == "purification_path"
-    assert any(item["objective_id"] == "cloudstep_relay" for item in quest_flow_payload["region_handoffs"])
-    assert any(item["encounter_id"] == "cloudstep_relay_push" for item in quest_flow_payload["region_handoffs"])
-    assert any(item["combat_role"] == "ranged" for item in manifest_payload["enemies"])
-    assert any(item["combat_tier"] == "elite" for item in manifest_payload["enemies"])
-    assert any(item["combat_tier"] == "boss" for item in manifest_payload["enemies"])
-    assert any(item.get("archetype_id") == "sentinel_ranged" for item in manifest_payload["enemies"])
-    assert any(item.get("squad_role") == "suppressor" for item in manifest_payload["enemies"])
-    assert any(item.get("squad_role") == "anchor" for item in manifest_payload["enemies"])
-    assert any(item["region_id"] == "cloudstep_basin" for item in manifest_payload["enemies"])
-    assert any(item["region_id"] == "echo_watch" for item in manifest_payload["enemies"])
-    assert any(item["pattern_profile_id"] == "shrine_guardian" for item in manifest_payload["enemies"])
-    assert any(item["pattern_profile_id"] == "elite_vanguard" for item in manifest_payload["enemies"])
-    assert any(item["critical_path"] is False for item in manifest_payload["enemies"])
-    assert any(item["max_poise"] > 3.0 for item in manifest_payload["enemies"])
-    assert any(item["reward_id"] == "route_sigil" for item in manifest_payload["reward_sites"])
-    assert any(item["id"] == "overlook_cache" for item in manifest_payload["reward_sites"])
-    assert manifest_payload["active_region_id"] == "starter_ruins"
-    assert len(manifest_payload["region_layouts"]) >= 3
-    assert len(manifest_payload["region_objectives"]) >= 2
-    assert len(manifest_payload["patrol_routes"]) >= 3
-    assert any(item["id"] == "cloudstep_relay_arc" for item in manifest_payload["patrol_routes"])
-    assert any("cloudstep_basin_sentinel_ranged" in item["assigned_enemy_ids"] for item in manifest_payload["patrol_routes"])
-    assert len(manifest_payload["alert_networks"]) >= 3
-    assert any(item["id"] == "cloudstep_relay_alert" for item in manifest_payload["alert_networks"])
-    assert any("cloudstep_basin_sentinel_melee" in item["assigned_enemy_ids"] for item in manifest_payload["alert_networks"])
-    assert any(item.get("search_duration_seconds", 0) > 0 for item in manifest_payload["alert_networks"])
-    assert any(item.get("anchor_point") for item in manifest_payload["alert_networks"])
-    assert any(item["id"] == "cloudstep_relay" for item in manifest_payload["region_objectives"])
-    assert any(item.get("region_objective_id") == "cloudstep_relay" for item in manifest_payload["region_layouts"])
-    assert any(item["target_region"] == "cloudstep_basin" for item in manifest_payload["region_gateways"])
-    assert any(item["region_id"] == "cloudstep_basin" for item in manifest_payload["region_gateways"])
-    assert any(item["id"] == "cloudstep_basin" for item in manifest_payload["world_graph"]["nodes"])
-    assert any(item.get("region_objective_id") == "cloudstep_relay" for item in manifest_payload["world_graph"]["nodes"])
-    assert any(item["objective_id"] == "cloudstep_relay" for item in manifest_payload["world_graph"]["regional_goals"])
-    assert any(item["route_id"] == "cloudstep_relay_arc" for item in manifest_payload["world_graph"]["patrol_lanes"])
-    assert any(item["network_id"] == "cloudstep_relay_alert" for item in manifest_payload["world_graph"]["guard_networks"])
-    assert any(item.get("search_duration_seconds", 0) > 0 for item in manifest_payload["world_graph"]["guard_networks"])
-    assert any(item.get("anchor_point") for item in manifest_payload["world_graph"]["guard_networks"])
-    assert any(item["id"] == "shrine_guardian_finale" for item in manifest_payload["encounters"])
-    assert any(item["id"] == "overlook_elite_detour" for item in manifest_payload["encounters"])
-    assert any(item["id"] == "cloudstep_relay_push" for item in manifest_payload["encounters"])
-    assert any(item["id"] == "echo_spire_hold" for item in manifest_payload["encounters"])
-    assert any(item["id"] == "player_avatar" for item in asset_registry_payload["modeling_seed"])
-    assert asset_import_profile_payload["import_profile"]["runtime"] == "godot"
-    assert asset_import_profile_payload["runtime_delivery"]["asset_registry_path"] == "engine/godot/data/asset_registry.json"
-    assert party_roster_payload["party_slots"]
-    assert party_roster_payload["active_party_slot_ids"]
-    assert party_roster_payload["starter_party_size"] >= 1
-    assert elemental_matrix_payload["reaction_rules"]
-    assert "starter_affinities" in elemental_matrix_payload
-    assert world_streaming_payload["stream_cells"]
-    assert world_streaming_payload["loaded_region_ids"]
-    assert "runtime_delivery_track" in world_streaming_payload
-    assert commission_board_payload["commission_slots"]
-    assert commission_board_payload["active_commission_ids"]
-    assert manifest_payload["party_roster"]["starter_party_size"] >= 1
-    assert "active_party_slot_ids" in manifest_payload["party_roster"]
-    assert "starter_affinities" in manifest_payload["elemental_matrix"]
-    assert "loaded_region_ids" in manifest_payload["world_streaming"]
-    assert manifest_payload["commission_board"]["active_commission_ids"]
-    assert 'const PARTY_ROSTER_PATH := "res://data/party_roster.json"' in game_state_script
-    assert 'const ELEMENTAL_MATRIX_PATH := "res://data/elemental_matrix.json"' in game_state_script
-    assert 'const WORLD_STREAMING_PATH := "res://data/world_streaming.json"' in game_state_script
-    assert 'const COMMISSION_BOARD_PATH := "res://data/commission_board.json"' in game_state_script
-    assert "func get_party_summary_text() -> String:" in game_state_script
-    assert "func get_streaming_summary_text() -> String:" in game_state_script
-    assert "func get_commission_summary_text() -> String:" in game_state_script
-    assert len(manifest_payload["region_gateways"]) >= 2
-    assert len(manifest_payload["npc_beacons"]) >= 3
-    assert manifest_payload["active_arc"]["id"] == "purification_path"
-    assert combat_payload["player_actions"]["lock_on_enabled"] is True
-    assert combat_payload["player_actions"]["skill_name"] == "focus_burst"
-    assert combat_payload["player_actions"]["dash_i_frames_seconds"] > 0
-
-    artifact_root = tmp_path / "godot_slice" / "artifacts"
-    assert (artifact_root / "game_program.json").exists()
-    assert (artifact_root / "design_intelligence.json").exists()
-    assert (artifact_root / "design_playbook.md").exists()
-    assert (artifact_root / "campaign_program.json").exists()
-    assert (artifact_root / "roster_strategy.json").exists()
-    assert (artifact_root / "live_ops_plan.json").exists()
-    assert (artifact_root / "production_operating_model.json").exists()
-    assert (artifact_root / "reference_intelligence.json").exists()
-    assert (artifact_root / "runtime_capability_graph.json").exists()
-    assert (artifact_root / "runtime_delivery_plan.json").exists()
-    assert (artifact_root / "system_specs.json").exists()
-    assert (artifact_root / "task_graph.json").exists()
-    assert (artifact_root / "content_expansion.json").exists()
-    assert (artifact_root / "asset_pipeline.json").exists()
-    assert (artifact_root / "world_program.json").exists()
-    assert (artifact_root / "region_kits.json").exists()
-    assert (artifact_root / "faction_graph.json").exists()
-    assert (artifact_root / "expansion_backlog.json").exists()
-    assert (artifact_root / "resume_state.json").exists()
-    assert (tmp_path / "godot_slice" / "playtest" / "quality_gates.json").exists()
-    assert (tmp_path / "godot_slice" / "playtest" / "performance_budget.json").exists()
-    assert (tmp_path / "godot_slice" / "playtest" / "combat_feel_report.json").exists()
-    assert (tmp_path / "godot_slice" / "playtest" / "slice_score.json").exists()
+    unified_root = tmp_path / "godot_slice"
+    runtime_registry = json.loads((unified_root / "artifacts" / "runtime_registry.json").read_text(encoding="utf-8"))
+    asset_pipeline = json.loads((unified_root / "artifacts" / "asset_pipeline.json").read_text(encoding="utf-8"))
+    assert runtime_registry["selected_runtime"] == "reverie_engine"
+    assert runtime_registry["legacy_source"] == "godot"
+    assert asset_pipeline["import_profile"]["runtime"] == "reverie_engine"
+    assert (unified_root / "data" / "config" / "engine.yaml").exists()
+    assert (unified_root / "data" / "scenes" / "main.relscene.json").exists()
+    assert (unified_root / "data" / "content" / "encounters.yaml").exists()
+    assert (unified_root / "data" / "content" / "quests.yaml").exists()
+    assert not (unified_root / "engine" / "godot").exists()

@@ -29,9 +29,14 @@ setup(
     packages=find_packages(),
     include_package_data=True,
     package_data={
-        "reverie": ["builtin_skills/*/SKILL.md"],
+        "reverie": [
+            "builtin_skills/*/SKILL.md",
+            "builtin_skills/*/agents/*.yaml",
+            "builtin_skills/*/references/*.md",
+            "engine/vendor/live2d/*.js",
+            "computer_use/*.md",
+        ],
         "reverie.agent": ["tool_manifest.json"],
-        "reverie.engine_lite": ["vendor/live2d/live2dcubismcore.min.js"],
     },
     python_requires=">=3.10",
     install_requires=[
@@ -58,6 +63,7 @@ setup(
         "PyYAML>=6.0.0",
         "tiktoken>=0.5.0",
         "Pillow>=10.0.0",
+        "uiautomation==2.0.29; platform_system == 'Windows'",
 
         # Reverie Engine runtime
         "pyglet>=2.0.16",

@@ -1,4 +1,4 @@
-"""Serializable components for Reverie Engine Lite."""
+"""Serializable components for Reverie Engine."""
 
 from __future__ import annotations
 

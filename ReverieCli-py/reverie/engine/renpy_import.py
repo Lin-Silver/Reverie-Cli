@@ -16,6 +16,9 @@ _DEFINE_CHARACTER_RE = re.compile(r"^define\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*Cha
 _DEFAULT_RE = re.compile(r"^default\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)\s*$")
 _LABEL_RE = re.compile(r"^label\s+([A-Za-z0-9_\.]+)\s*:\s*$")
 _JUMP_RE = re.compile(r"^(jump|call)\s+([A-Za-z0-9_\.]+)\s*$")
+_IMAGE_DECLARATION_RE = re.compile(r"^\s*image\s+(.+?)\s*=")
+_SCREEN_DECLARATION_RE = re.compile(r"^\s*screen\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+_MENU_DECLARATION_RE = re.compile(r"^\s*menu\s*:")
 _STOP_RE = re.compile(r"^stop\s+([A-Za-z_][A-Za-z0-9_]*)\b(.*)$")
 _VOICE_RE = re.compile(r"^voice\s+(.+)$")
 _SPEAKER_LINE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s+")
@@ -1033,9 +1036,126 @@ def import_renpy_script(
     }
 
 
+def outline_renpy_script(script_path: str | Path) -> Dict[str, Any]:
+    """Return a built-in structural outline for a Ren'Py script."""
+    source_path = Path(script_path).expanduser().resolve(strict=False)
+    if not source_path.is_file():
+        raise FileNotFoundError(f"Ren'Py script not found: {source_path}")
+    text = source_path.read_text(encoding="utf-8", errors="replace")
+    parsed = parse_renpy_script(text, conversation_id=source_path.stem)
+    labels: list[Dict[str, Any]] = []
+    characters: list[Dict[str, Any]] = []
+    images: list[Dict[str, Any]] = []
+    screens: list[Dict[str, Any]] = []
+    menus: list[Dict[str, Any]] = []
+    jumps: list[Dict[str, Any]] = []
+    warnings = list(parsed.warnings)
+    for line_number, raw_line in enumerate(text.splitlines(), start=1):
+        stripped = raw_line.strip()
+        if match := _LABEL_RE.match(stripped):
+            labels.append({"name": match.group(1), "line": line_number})
+        if match := _DEFINE_CHARACTER_RE.match(stripped):
+            characters.append(
+                {
+                    "alias": match.group(1),
+                    "name": _quoted_value(match.group(2)) or parsed.characters.get(match.group(1), ""),
+                    "line": line_number,
+                }
+            )
+        if match := _IMAGE_DECLARATION_RE.match(raw_line):
+            images.append({"name": match.group(1).strip(), "line": line_number})
+        if match := _SCREEN_DECLARATION_RE.match(raw_line):
+            screens.append({"name": match.group(1), "line": line_number})
+        if _MENU_DECLARATION_RE.match(raw_line):
+            menus.append({"line": line_number})
+        if match := _JUMP_RE.match(stripped):
+            jumps.append({"kind": match.group(1), "target": match.group(2), "line": line_number})
+        if stripped.startswith(("python:", "init python:")):
+            warnings.append(f"line {line_number}: embedded Python requires manual migration review")
+        if "Live2D(" in raw_line or "live2d" in raw_line.lower():
+            warnings.append(f"line {line_number}: Live2D reference requires model dependency validation")
+    return {
+        "script_path": str(source_path),
+        "entry_label": parsed.entry_label,
+        "labels": labels,
+        "characters": characters,
+        "images": images,
+        "screens": screens,
+        "menus": menus,
+        "jumps": jumps,
+        "warnings": sorted(set(warnings)),
+        "counts": {
+            "labels": len(labels),
+            "characters": len(characters),
+            "images": len(images),
+            "screens": len(screens),
+            "menus": len(menus),
+            "jumps": len(jumps),
+        },
+    }
+
+
+def inspect_renpy_project(project_root: str | Path) -> Dict[str, Any]:
+    """Inspect a Ren'Py source project without requiring a Ren'Py runtime or MCP server."""
+    root = Path(project_root).expanduser().resolve(strict=False)
+    if not root.is_dir():
+        raise FileNotFoundError(f"Ren'Py project not found: {root}")
+    game_dir = root / "game" if (root / "game").is_dir() else root
+    scripts = sorted(game_dir.rglob("*.rpy"))
+    assets = [path for path in game_dir.rglob("*") if path.is_file()]
+    images = [path for path in assets if path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".avif"}]
+    audio = [path for path in assets if path.suffix.lower() in {".ogg", ".mp3", ".wav", ".flac"}]
+    outlines: list[Dict[str, Any]] = []
+    errors: list[str] = []
+    for script in scripts:
+        try:
+            outlines.append(outline_renpy_script(script))
+        except Exception as exc:
+            errors.append(f"{script}: {exc}")
+    return {
+        "project_root": str(root),
+        "game_dir": str(game_dir),
+        "script_count": len(scripts),
+        "image_count": len(images),
+        "audio_count": len(audio),
+        "has_options": (game_dir / "options.rpy").exists(),
+        "has_script": (game_dir / "script.rpy").exists(),
+        "live2d_script_refs": [
+            outline["script_path"]
+            for outline in outlines
+            if any("Live2D" in warning or "live2d" in warning for warning in outline["warnings"])
+        ],
+        "scripts": [str(path.relative_to(root)) for path in scripts],
+        "outlines": outlines,
+        "errors": errors,
+        "valid": bool(scripts) and not errors,
+        "analysis_backend": "reverie_engine_builtin",
+    }
+
+
+def validate_renpy_project(project_root: str | Path) -> Dict[str, Any]:
+    """Parse every .rpy file and report migration-safe validation results."""
+    inspection = inspect_renpy_project(project_root)
+    warnings = [
+        warning
+        for outline in inspection["outlines"]
+        for warning in outline.get("warnings", [])
+    ]
+    return {
+        "valid": bool(inspection["valid"]),
+        "script_count": inspection["script_count"],
+        "errors": list(inspection["errors"]),
+        "warnings": sorted(set(warnings)),
+        "validation_mode": "reverie_engine_parser",
+    }
+
+
 __all__ = [
     "ParsedRenPyScript",
     "compile_renpy_script",
     "import_renpy_script",
+    "inspect_renpy_project",
+    "outline_renpy_script",
     "parse_renpy_script",
+    "validate_renpy_project",
 ]

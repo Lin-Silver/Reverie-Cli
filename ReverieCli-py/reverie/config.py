@@ -75,10 +75,60 @@ from .version import CONFIG_VERSION, __version__
 
 EXTERNAL_MODEL_SOURCES = ("codex", "aihubmix", "agnes", "sensenova", "unlimitedsurf", "nvidia", "modelscope", "webgemini")
 SUPPORTED_ACTIVE_MODEL_SOURCES = ("standard",) + EXTERNAL_MODEL_SOURCES
+MODEL_SOURCE_DISPLAY_NAMES = {
+    "standard": "Custom Provider",
+    "codex": "Codex",
+    "aihubmix": "AIhubMix",
+    "agnes": "Agnes",
+    "sensenova": "SenseNova",
+    "unlimitedsurf": "unlimited.surf",
+    "nvidia": "NVIDIA",
+    "modelscope": "ModelScope",
+    "webgemini": "WebGemini",
+}
 SUPPORTED_TOOL_OUTPUT_STYLES = ("compact", "condensed", "full")
 SUPPORTED_THINKING_OUTPUT_STYLES = ("hidden", "compact", "full")
-SUPPORTED_TTI_SOURCES = ("local", "aihubmix", "pollinations", "agnes")
+SUPPORTED_TTI_SOURCES = ("local", "aihubmix", "pollinations", "agnes", "sensenova")
 SUPPORTED_TTV_SOURCES = ("agnes",)
+SUPPORTED_MODEL_PROVIDERS = (
+    "request",
+    "anthropic",
+    "openai-chat",
+    "openai-responses",
+    "curl",
+    "codex",
+    "webgemini",
+)
+
+
+def normalize_model_provider(value: Any, default: str = "openai-chat") -> str:
+    """Normalize persisted model transport names to one stable spelling."""
+    candidate = str(value or "").strip().lower().replace("_", "-")
+    aliases = {
+        "openai": "openai-chat",
+        "openai-old": "openai-chat",
+        "openai-sdk": "openai-chat",
+        "openai-chat.completions": "openai-chat",
+        "openai-chat-completions": "openai-chat",
+        "chat.completions": "openai-chat",
+        "chat-completions": "openai-chat",
+        "openai-res": "openai-responses",
+        "openai-response": "openai-responses",
+        "responses": "openai-responses",
+    }
+    candidate = aliases.get(candidate, candidate)
+    if candidate in SUPPORTED_MODEL_PROVIDERS:
+        return candidate
+    return default
+
+
+def is_config_version_older(value: Any, target: str = CONFIG_VERSION) -> bool:
+    """Return whether a dotted config version predates the target version."""
+    def parts(raw: Any) -> tuple[int, ...]:
+        numbers = [int(piece) for piece in re.findall(r"\d+", str(raw or ""))[:3]]
+        return tuple((numbers + [0, 0, 0])[:3])
+
+    return parts(value) < parts(target)
 
 
 def normalize_active_model_source(value: Any, default: str = "standard") -> str:
@@ -94,6 +144,12 @@ def normalize_active_model_source(value: Any, default: str = "standard") -> str:
     if candidate in SUPPORTED_ACTIVE_MODEL_SOURCES:
         return candidate
     return default
+
+
+def model_source_display_name(value: Any) -> str:
+    """Return the canonical user-facing name for a model source."""
+    source = normalize_active_model_source(value)
+    return MODEL_SOURCE_DISPLAY_NAMES[source]
 
 
 def normalize_tool_output_style(value: Any, default: str = "compact") -> str:
@@ -242,6 +298,13 @@ def default_text_to_image_config() -> Dict[str, Any]:
             "default_quality": "auto",
             "response_format": "b64_json",
         },
+        "sensenova": {
+            "enabled": True,
+            "base_url": "https://token.sensenova.cn/v1",
+            "default_model": "sensenova-u1-fast",
+            "timeout": 300,
+            "default_size": "2752x1536",
+        },
     }
 
 
@@ -328,7 +391,7 @@ _SUBAGENT_COLOR_PALETTE = (
 def default_subagent_config() -> Dict[str, Any]:
     """Default configuration for base Reverie subagents."""
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "enabled": True,
         "agents": [],
     }
@@ -383,6 +446,10 @@ def normalize_subagent_config(raw_config: Any) -> Dict[str, Any]:
         except (TypeError, ValueError):
             model_index = 0
 
+        subagent_mode = normalize_mode(raw_agent.get("mode", "reverie"))
+        if subagent_mode == "computer-controller":
+            subagent_mode = "reverie"
+
         agents.append(
             {
                 "id": subagent_id,
@@ -391,6 +458,7 @@ def normalize_subagent_config(raw_config: Any) -> Dict[str, Any]:
                 "color": str(raw_agent.get("color") or _subagent_color_for_id(subagent_id)).strip(),
                 "created_at": str(raw_agent.get("created_at") or "").strip(),
                 "updated_at": str(raw_agent.get("updated_at") or "").strip(),
+                "mode": subagent_mode,
                 "model_ref": {
                     "source": source,
                     "index": max(0, model_index),
@@ -719,7 +787,7 @@ class ModelConfig:
     base_url: str
     api_key: str = ""
     max_context_tokens: Optional[int] = None
-    provider: str = "openai-sdk"  # Options: openai-sdk, request, anthropic
+    provider: str = "openai-chat"
     supports_vision: bool = False
     thinking_mode: Optional[str] = None  # Legacy/runtime-only provider option; not persisted for standard models
     endpoint: str = ""  # Optional custom endpoint path/url for OpenAI-compatible providers
@@ -731,7 +799,7 @@ class ModelConfig:
             "model_display_name": self.model_display_name,
             "base_url": self.base_url,
             "api_key": self.api_key,
-            "provider": self.provider,
+            "provider": normalize_model_provider(self.provider),
             "supports_vision": bool(self.supports_vision),
             "custom_headers": dict(self.custom_headers or {}),
         }
@@ -759,7 +827,7 @@ class ModelConfig:
             base_url=data.get('base_url', ''),
             api_key=data.get('api_key', ''),
             max_context_tokens=data.get('max_context_tokens'),
-            provider=data.get('provider', 'openai-sdk'),
+            provider=normalize_model_provider(data.get('provider', 'openai-chat')),
             supports_vision=bool(data.get('supports_vision', data.get('vision', False))),
             thinking_mode=data.get('thinking_mode'),
             endpoint=str(data.get('endpoint', '') or '').strip(),
@@ -841,43 +909,35 @@ class Config:
 
         if source == "codex":
             runtime_codex_model = build_codex_runtime_model_data(self.codex)
-            if runtime_codex_model:
-                return ModelConfig.from_dict(runtime_codex_model)
+            return ModelConfig.from_dict(runtime_codex_model) if runtime_codex_model else None
 
         if source == "aihubmix":
             runtime_aihubmix_model = build_aihubmix_runtime_model_data(self.aihubmix)
-            if runtime_aihubmix_model:
-                return ModelConfig.from_dict(runtime_aihubmix_model)
+            return ModelConfig.from_dict(runtime_aihubmix_model) if runtime_aihubmix_model else None
 
         if source == "agnes":
             runtime_agnes_model = build_agnes_runtime_model_data(self.agnes)
-            if runtime_agnes_model:
-                return ModelConfig.from_dict(runtime_agnes_model)
+            return ModelConfig.from_dict(runtime_agnes_model) if runtime_agnes_model else None
 
         if source == "sensenova":
             runtime_sensenova_model = build_sensenova_runtime_model_data(self.sensenova)
-            if runtime_sensenova_model:
-                return ModelConfig.from_dict(runtime_sensenova_model)
+            return ModelConfig.from_dict(runtime_sensenova_model) if runtime_sensenova_model else None
 
         if source == "unlimitedsurf":
             runtime_unlimitedsurf_model = build_unlimitedsurf_runtime_model_data(self.unlimitedsurf)
-            if runtime_unlimitedsurf_model:
-                return ModelConfig.from_dict(runtime_unlimitedsurf_model)
+            return ModelConfig.from_dict(runtime_unlimitedsurf_model) if runtime_unlimitedsurf_model else None
 
         if source == "nvidia":
             runtime_nvidia_model = build_nvidia_runtime_model_data(runtime_nvidia_config)
-            if runtime_nvidia_model:
-                return ModelConfig.from_dict(runtime_nvidia_model)
+            return ModelConfig.from_dict(runtime_nvidia_model) if runtime_nvidia_model else None
 
         if source == "modelscope":
             runtime_modelscope_model = build_modelscope_runtime_model_data(self.modelscope)
-            if runtime_modelscope_model:
-                return ModelConfig.from_dict(runtime_modelscope_model)
+            return ModelConfig.from_dict(runtime_modelscope_model) if runtime_modelscope_model else None
 
         if source == "webgemini":
             runtime_webgemini_model = build_webgemini_runtime_model_data(self.webgemini)
-            if runtime_webgemini_model:
-                return ModelConfig.from_dict(runtime_webgemini_model)
+            return ModelConfig.from_dict(runtime_webgemini_model) if runtime_webgemini_model else None
 
         if 0 <= self.active_model_index < len(self.models):
             return self.models[self.active_model_index]
@@ -907,6 +967,12 @@ class Config:
             text_to_image["agnes"] = nested_agnes_tti
         else:
             text_to_image["agnes"] = dict(text_to_image_defaults["agnes"])
+        if isinstance(text_to_image.get("sensenova"), dict):
+            nested_sensenova_tti = dict(text_to_image_defaults["sensenova"])
+            nested_sensenova_tti.update(text_to_image.get("sensenova", {}))
+            text_to_image["sensenova"] = nested_sensenova_tti
+        else:
+            text_to_image["sensenova"] = dict(text_to_image_defaults["sensenova"])
         text_to_image['active_source'] = normalize_tti_source(text_to_image.get('active_source', 'local'))
         text_to_image['models'] = normalize_tti_models(
             text_to_image.get('models', []),
@@ -996,6 +1062,10 @@ class Config:
                 nested_agnes_tti = dict(default_text_to_image_config()["agnes"])
                 nested_agnes_tti.update(loaded_t2i.get("agnes", {}))
                 text_to_image["agnes"] = nested_agnes_tti
+            if isinstance(loaded_t2i.get("sensenova"), dict):
+                nested_sensenova_tti = dict(default_text_to_image_config()["sensenova"])
+                nested_sensenova_tti.update(loaded_t2i.get("sensenova", {}))
+                text_to_image["sensenova"] = nested_sensenova_tti
         top_level_tti_models = data.get('tti-models', None)
         if top_level_tti_models is not None:
             text_to_image['models'] = top_level_tti_models
@@ -1024,6 +1094,18 @@ class Config:
         agnes = normalize_agnes_config(raw_agnes)
         raw_sensenova = data.get('sensenova', data.get('sense', {}))
         sensenova = normalize_sensenova_config(raw_sensenova)
+        if not str(sensenova.get("api_key", "") or "").strip():
+            legacy_sensenova_model = next(
+                (
+                    model
+                    for model in models
+                    if "token.sensenova.cn" in str(model.base_url or "").lower()
+                    and str(model.api_key or "").strip()
+                ),
+                None,
+            )
+            if legacy_sensenova_model is not None:
+                sensenova["api_key"] = str(legacy_sensenova_model.api_key).strip()
         raw_unlimitedsurf = data.get('unlimitedsurf', data.get('unlimited_surf', data.get('us', {})))
         unlimitedsurf = normalize_unlimitedsurf_config(raw_unlimitedsurf)
         raw_nvidia = data.get('nvidia', {})
@@ -1594,13 +1676,17 @@ class ConfigManager:
         
         # Check if config_version is missing or outdated
         current_version = data.get('config_version', '0.0.0')
-        if current_version != CONFIG_VERSION:
+        if is_config_version_older(current_version):
             needs_update = True
         
         # Check if any model is missing provider field
         models = data.get('models', [])
         for model in models:
             if 'provider' not in model:
+                needs_update = True
+                break
+            raw_provider = str(model.get('provider', '') or '').strip().lower()
+            if normalize_model_provider(raw_provider) != raw_provider:
                 needs_update = True
                 break
         
@@ -1805,6 +1891,15 @@ class ConfigManager:
                         if field_name not in tti_agnes:
                             needs_update = True
                             break
+                tti_sensenova_defaults = default_text_to_image_config().get("sensenova", {})
+                tti_sensenova = text_to_image.get("sensenova", {})
+                if not isinstance(tti_sensenova, dict):
+                    needs_update = True
+                else:
+                    for field_name in tti_sensenova_defaults.keys():
+                        if field_name not in tti_sensenova:
+                            needs_update = True
+                            break
                 models = text_to_image.get('models', [])
                 if not isinstance(models, list):
                     needs_update = True
@@ -1873,6 +1968,8 @@ class ConfigManager:
         # The manager decides the active destination. Store that resolved mode
         # in the file so the next process selects the same config again.
         self._config.use_workspace_config = self._use_workspace_config
+        if is_config_version_older(self._config.config_version):
+            self._config.config_version = CONFIG_VERSION
         serialized = self._config.to_dict()
 
         write_json_secure(target_path, serialized)
@@ -1898,6 +1995,8 @@ class ConfigManager:
             return True
         if build_agnes_runtime_model_data(getattr(config, "agnes", {})):
             return True
+        if build_sensenova_runtime_model_data(getattr(config, "sensenova", {})):
+            return True
         if build_unlimitedsurf_runtime_model_data(getattr(config, "unlimitedsurf", {})):
             return True
         if build_modelscope_runtime_model_data(getattr(config, "modelscope", {})):
@@ -1907,6 +2006,8 @@ class ConfigManager:
             if build_nvidia_computer_controller_runtime_model_data(nvidia):
                 return True
         elif build_nvidia_runtime_model_data(nvidia):
+            return True
+        if build_webgemini_runtime_model_data(getattr(config, "webgemini", {})):
             return True
         return False
     
@@ -1932,12 +2033,16 @@ class ConfigManager:
                     config.active_model_source = "aihubmix"
                 elif build_agnes_runtime_model_data(getattr(config, "agnes", {})):
                     config.active_model_source = "agnes"
+                elif build_sensenova_runtime_model_data(getattr(config, "sensenova", {})):
+                    config.active_model_source = "sensenova"
                 elif build_unlimitedsurf_runtime_model_data(getattr(config, "unlimitedsurf", {})):
                     config.active_model_source = "unlimitedsurf"
                 elif build_nvidia_runtime_model_data(getattr(config, "nvidia", {})):
                     config.active_model_source = "nvidia"
                 elif build_modelscope_runtime_model_data(getattr(config, "modelscope", {})):
                     config.active_model_source = "modelscope"
+                elif build_webgemini_runtime_model_data(getattr(config, "webgemini", {})):
+                    config.active_model_source = "webgemini"
             self.save(config)
             return True
         return False

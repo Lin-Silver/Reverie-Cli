@@ -24,10 +24,12 @@ The plugin also manages MMD Tools as a plugin-local Blender add-on. It clones `h
   Launch Blender for interactive user work.
 - `run_script`
   Run a Blender Python script in background mode.
+- `inspect_scene`
+  Open a `.blend` file in background mode and report bounded scene, object, material, animation, image, and missing linked-file metadata.
 - `import_mmd_model`
   Import a `.pmx` or `.pmd` model through MMD Tools, optionally apply `.vmd` motion or `.vpd` pose, save a `.blend`, and optionally export `.glb`/`.gltf`.
 
-All exposed commands are intended to be available in every Reverie mode. In the model tool surface they appear as `rc_blender_ensure_runtime`, `rc_blender_runtime_status`, `rc_blender_mmd_tools_status`, `rc_blender_ensure_mmd_tools`, `rc_blender_detect_runtime`, `rc_blender_version`, `rc_blender_open_blender`, `rc_blender_run_script`, and `rc_blender_import_mmd_model`.
+All exposed commands are intended to be available in every Reverie mode. In the model tool surface they include `rc_blender_ensure_runtime`, `rc_blender_runtime_status`, `rc_blender_mmd_tools_status`, `rc_blender_ensure_mmd_tools`, `rc_blender_detect_runtime`, `rc_blender_version`, `rc_blender_open_blender`, `rc_blender_run_script`, `rc_blender_inspect_scene`, and `rc_blender_import_mmd_model`.
 
 The built-in `blender_modeling_workbench` remains the preferred authoring layer for generating auditable modeling scripts, production character pipeline plans, `.blend` files, `.glb` exports, and preview renders. This plugin supplies the portable Blender application that executes those scripts.
 

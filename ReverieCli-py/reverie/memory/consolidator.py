@@ -7,6 +7,7 @@ from typing import Any, Dict, Iterable, List
 
 from .event_store import EventStore
 from .models import EventRecord, MemoryItem, new_id, utc_now
+from .safety import redact_memory_text
 from .store import MemoryStore
 
 
@@ -22,7 +23,7 @@ _DECISION_RE = re.compile(r"\b(decided|decision|choose|adopt|keep|决定|采用|
 
 
 def _compact_text(value: Any, limit: int = 900) -> str:
-    text = " ".join(str(value or "").split())
+    text = " ".join(redact_memory_text(value).split())
     if len(text) <= limit:
         return text
     return text[: max(0, limit - 3)].rstrip() + "..."
@@ -201,5 +202,11 @@ class MemoryConsolidator:
             created_at=utc_now(),
             updated_at=utc_now(),
             source_event_ids=[event.id],
-            metadata={"session_id": event.session_id} if event.session_id else {},
+            metadata={
+                **({"session_id": event.session_id} if event.session_id else {}),
+                **({"workspace_id": event.workspace_id} if event.workspace_id else {}),
+            },
+            provenance="inferred_from_event",
+            source=event.actor or event.event_type,
+            valid_from=event.timestamp,
         )

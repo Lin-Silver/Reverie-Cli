@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from ..system_generators import CORE_PACKET_ORDER
+from .runtime_evidence import evaluate_runtime_evidence
 
 
 def _gate(
@@ -60,26 +61,38 @@ def evaluate_slice_score(
 
     runtime_result = dict(runtime_result or {})
     verification = dict(verification or {})
+    runtime_evidence = evaluate_runtime_evidence(
+        game_request,
+        blueprint,
+        system_bundle,
+        verification=verification,
+        runtime_result=runtime_result,
+    )
     packets = dict(system_bundle.get("packets", {}) or {})
     expected_packets = _expected_packets(game_request)
     present_packets = [packet_id for packet_id in expected_packets if packet_id in packets]
     missing_packets = [packet_id for packet_id in expected_packets if packet_id not in packets]
 
     runtime_files = list(runtime_result.get("files", []) or [])
-    runtime_checks = list(verification.get("checks", []) or verification.get("validation", {}).get("checks", []) or [])
-    runtime_gate_points = 20 if verification.get("valid", False) else 12 if runtime_files else 0
+    runtime_checks = list(runtime_evidence.get("checks", []) or [])
+    runtime_gate_points = 20 if runtime_evidence.get("valid", False) else 8 if runtime_evidence.get("run_observed", False) else 0
     gates = [
         _gate(
             "runtime_bootstrap",
             "Runtime Bootstrap",
             points=runtime_gate_points,
             max_points=20,
-            passed=bool(verification.get("valid", False)),
-            summary="Foundation boots and validation passes." if verification.get("valid", False) else "Foundation exists but runtime verification still needs work.",
+            passed=bool(runtime_evidence.get("valid", False)),
+            summary="Runtime execution and requested gameplay-loop evidence pass." if runtime_evidence.get("valid", False) else "Runtime execution evidence is missing or incomplete.",
             evidence={
                 "runtime": (runtime_profile or {}).get("id") or blueprint.get("meta", {}).get("target_engine", "reverie_engine"),
                 "runtime_files": len(runtime_files),
                 "check_count": len(runtime_checks),
+                "event_count": runtime_evidence.get("event_count", 0),
+                "failed_event_count": runtime_evidence.get("failed_event_count", 0),
+                "frame_count": runtime_evidence.get("frame_count", 0),
+                "frame_time_ms": runtime_evidence.get("frame_time_ms", 0),
+                "missing_loop_evidence": runtime_evidence.get("missing_loop_evidence", []),
             },
         )
     ]
@@ -200,13 +213,15 @@ def evaluate_slice_score(
         )
     )
 
-    score = sum(gate["points"] for gate in gates)
+    raw_score = sum(gate["points"] for gate in gates)
+    score = raw_score if runtime_evidence.get("valid", False) else min(raw_score, 69)
     blockers: List[str] = []
     recommendations: List[str] = []
 
-    if not verification.get("valid", False):
-        blockers.append("Runtime validation or smoke path is not yet passing.")
-        recommendations.append("Stabilize the boot path and rerun validation before expanding content breadth.")
+    if not runtime_evidence.get("valid", False):
+        blockers.append("Structured runtime evidence is missing or incomplete.")
+        blockers.extend(str(item) for item in runtime_evidence.get("blockers", []) if str(item).strip())
+        recommendations.append("Run the real smoke/playtest path and retain event, failure, frame-timing, and requested-loop telemetry before expanding content breadth.")
     if missing_packets:
         blockers.append("Missing critical system packets: " + ", ".join(missing_packets))
         recommendations.append("Generate and wire the missing system packets before adding more authored content.")
@@ -238,12 +253,14 @@ def evaluate_slice_score(
         "project_name": blueprint.get("meta", {}).get("project_name", "Untitled Reverie Slice"),
         "runtime": (runtime_profile or {}).get("id") or blueprint.get("meta", {}).get("target_engine", "reverie_engine"),
         "score": score,
+        "raw_score": raw_score,
         "max_score": 100,
         "verdict": verdict,
         "release_recommendation": release_recommendation,
         "blockers": blockers,
         "recommendations": recommendations,
         "gates": gates,
+        "runtime_evidence": runtime_evidence,
     }
 
 

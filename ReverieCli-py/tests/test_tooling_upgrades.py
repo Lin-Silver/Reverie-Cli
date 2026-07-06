@@ -447,6 +447,25 @@ def test_browser_controler_chromium_flags_support_minimized_background_launch() 
     assert "--start-minimized" in flags
 
 
+def test_browser_controler_devtools_actions_resolve_recorded_session_port(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("REVERIE_APP_ROOT", str(tmp_path / "app"))
+    tool = BrowserControlerTool({"project_root": tmp_path})
+    tool._save_browser_sessions({"acceptance": {"port": 45678}})
+    captured = {}
+
+    def fake_snapshot(**kwargs):
+        captured.update(kwargs)
+        return browser_controler_module.ToolResult.ok("snapshot")
+
+    monkeypatch.setattr(tool, "_devtools_snapshot", fake_snapshot)
+
+    result = tool.execute(action="devtools_snapshot", session_id="acceptance")
+
+    assert result.success is True
+    assert captured["port"] == 45678
+
+
+
 def test_browser_controler_debug_profiles_stay_isolated(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("REVERIE_APP_ROOT", str(tmp_path / "app"))
     tool = BrowserControlerTool({"project_root": tmp_path})
@@ -1044,7 +1063,8 @@ def test_github_action_schedules_latest_windows_exe_build() -> None:
     assert "python -m playwright install chromium" in workflow
     assert "python -m playwright install chromium --no-shell" in workflow
     assert "PLAYWRIGHT_BROWSERS_PATH" in workflow
-    assert "embedded Chromium Browser Controler runtime" in workflow
+    assert "embedded Chromium browser-control runtime" in workflow
+    assert "Open Computer Use desktop controller" in workflow
     assert "reverie.exe: primary Windows CLI executable" in workflow
     assert "Reverie CLI for Windows (Python full build)" in workflow
     assert "Blender runtime plugin" in workflow
@@ -1065,6 +1085,8 @@ def test_local_build_scripts_bundle_embedded_chromium() -> None:
         assert "PLAYWRIGHT_BROWSERS_PATH" in script
         assert "browser/ms-playwright" in script.replace("\\", "/")
     assert 'add_tree_if_exists(browser_src / "ms-playwright", "reverie_resources/browser/ms-playwright")' in spec
+    assert "Missing required bundled resources" in spec
+    assert 'playwright_root.rglob("chrome.exe")' in spec
     assert '"playwright>=1.56.0"' in setup
 
 

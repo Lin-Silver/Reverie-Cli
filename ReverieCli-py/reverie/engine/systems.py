@@ -150,6 +150,8 @@ class GameplayDirector:
         self.tower_blueprints: Dict[str, Dict[str, Any]] = {}
         self.waves: Dict[str, Dict[str, Any]] = {}
         self.economy: Dict[str, Any] = {}
+        self.rule_actions: Dict[str, Dict[str, Any]] = {}
+        self.rule_initial_state: Dict[str, Any] = {}
         self._consumed_triggers: set[str] = set()
         self._registered_live2d: set[str] = set()
         self._autostarted_waves: set[str] = set()
@@ -213,11 +215,27 @@ class GameplayDirector:
                 self.tower_blueprints.update(dict(payload["towers"]))
             if isinstance(payload.get("economy"), dict):
                 self.economy.update(dict(payload["economy"]))
+            if isinstance(payload.get("rules"), dict):
+                self.rule_actions.update(
+                    {str(key): dict(value) for key, value in payload["rules"].items() if isinstance(value, dict)}
+                )
+            if isinstance(payload.get("initial_state"), dict):
+                self.rule_initial_state.update(dict(payload["initial_state"]))
         self.paths.update(self.navigation.export_path_points())
 
     def _apply_economy_defaults(self) -> None:
         for key, value in dict(self.economy.get("starting_resources") or {}).items():
             self.state.resources[str(key)] = _coerce_int(value)
+        for key, value in dict(self.rule_initial_state.get("resources") or {}).items():
+            self.state.resources.setdefault(str(key), _coerce_int(value))
+        for key, value in dict(self.rule_initial_state.get("counters") or {}).items():
+            self.state.counters.setdefault(str(key), _coerce_int(value))
+        for key, value in dict(self.rule_initial_state.get("inventory") or {}).items():
+            self.state.inventory.setdefault(str(key), _coerce_int(value))
+        for key, value in dict(self.rule_initial_state.get("notes") or {}).items():
+            self.state.notes.setdefault(str(key), value)
+        for flag_name in _string_list(self.rule_initial_state.get("flags")):
+            self.state.flags.setdefault(flag_name, True)
         for quest_id, definition in self.quests.items():
             initial_state = str(definition.get("initial_state") or "inactive")
             self.state.quests[str(quest_id)] = initial_state
@@ -259,6 +277,12 @@ class GameplayDirector:
 
         for key, value in dict(conditions.get("requires_resources") or {}).items():
             if self.state.resources.get(str(key), 0) < _coerce_int(value):
+                return False
+        for key, value in dict(conditions.get("requires_inventory") or {}).items():
+            if self.state.inventory.get(str(key), 0) < _coerce_int(value):
+                return False
+        for key, value in dict(conditions.get("requires_counters_min") or {}).items():
+            if self.state.counters.get(str(key), 0.0) < _coerce_float(value, 0.0):
                 return False
         for key, value in dict(conditions.get("requires_notes") or {}).items():
             if self.state.notes.get(str(key)) != value:
@@ -606,6 +630,56 @@ class GameplayDirector:
             expression = str(action.get("expression") or "")
             if model_id:
                 self._emit_live2d_motion(model_id, motion, expression=expression, source="input")
+            return
+
+        self._execute_rule_action(action_name, action, frame_index=frame_index)
+
+    def _execute_rule_action(self, action_name: str, payload: Dict[str, Any], *, frame_index: int) -> bool:
+        definition = self.rule_actions.get(str(action_name))
+        if not isinstance(definition, dict):
+            return False
+        if not self._conditions_met(definition):
+            self.telemetry.log_event(
+                "rule_action_blocked",
+                action=action_name,
+                genre=self.genre,
+                frame_index=frame_index,
+                reason="conditions",
+            )
+            return False
+
+        costs = dict(definition.get("costs") or {})
+        for resource_id, amount in costs.items():
+            if self.state.resources.get(str(resource_id), 0) < _coerce_int(amount):
+                self.telemetry.log_event(
+                    "rule_action_blocked",
+                    action=action_name,
+                    genre=self.genre,
+                    frame_index=frame_index,
+                    reason=f"resource:{resource_id}",
+                )
+                return False
+        for resource_id, amount in costs.items():
+            self.state.add_resource(str(resource_id), -_coerce_int(amount))
+
+        self._apply_effects(dict(definition.get("effects") or {}))
+        event_name = str(definition.get("event") or "rule_action_executed").strip() or "rule_action_executed"
+        self.telemetry.log_event(
+            event_name,
+            action=action_name,
+            genre=self.genre,
+            frame_index=frame_index,
+            source=str(payload.get("source") or "input"),
+        )
+        if event_name != "rule_action_executed":
+            self.telemetry.log_event(
+                "rule_action_executed",
+                action=action_name,
+                genre=self.genre,
+                frame_index=frame_index,
+                event_name=event_name,
+            )
+        return True
 
     def start_dialogue(self, conversation_id: str, *, source: str = "") -> bool:
         self._ensure_content_loaded()
@@ -754,6 +828,19 @@ class GameplayDirector:
             amount = _coerce_int(value, 1)
             self.state.add_inventory(str(key), amount)
             self.telemetry.log_event("inventory_changed", item_id=str(key), amount=amount, source="effect")
+        for key, value in dict(effects.get("grant_rewards") or {}).items():
+            amount = _coerce_int(value, 1)
+            self.state.add_inventory(str(key), amount)
+            self.telemetry.log_event("inventory_changed", item_id=str(key), amount=amount, source="reward")
+            self.telemetry.log_event(
+                "reward_claimed",
+                reward_type=str(key),
+                amount=amount,
+                source="rule_effect",
+            )
+        for key, value in dict(effects.get("set_resources") or {}).items():
+            self.state.resources[str(key)] = _coerce_int(value, 0)
+            self.telemetry.log_event("resource_set", resource=str(key), value=self.state.resources[str(key)], source="effect")
         for quest_id in effects.get("activate_quests", []) or []:
             self.state.quests[str(quest_id)] = "active"
             self.telemetry.log_event("quest_updated", quest_id=str(quest_id), state="active", source="effect")

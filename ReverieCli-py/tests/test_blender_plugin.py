@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import importlib.util
+import json
 
 
 def _load_blender_plugin():
@@ -13,6 +14,16 @@ def _load_blender_plugin():
     return module
 
 
+def test_blender_build_script_rejects_stale_python_launchers() -> None:
+    build_script = (Path(__file__).resolve().parents[2] / "plugins" / "blender" / "build.bat").read_text(
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert 'import sys; print(sys.executable)' in build_script
+    assert 'import PyInstaller' in build_script
+
+
 def test_blender_plugin_exposes_mmd_tools_commands(tmp_path: Path, monkeypatch) -> None:
     module = _load_blender_plugin()
     plugin_root = tmp_path / "app" / ".reverie" / "plugins" / "blender"
@@ -22,10 +33,11 @@ def test_blender_plugin_exposes_mmd_tools_commands(tmp_path: Path, monkeypatch) 
     handshake = plugin.build_handshake()
     command_names = {item["name"] for item in handshake["commands"]}
 
-    assert handshake["version"] == "0.4.0"
+    assert handshake["version"] == "0.5.0"
     assert "mmd_tools_status" in command_names
     assert "ensure_mmd_tools" in command_names
     assert "import_mmd_model" in command_names
+    assert "inspect_scene" in command_names
     assert "PMD/PMX" in handshake["description"]
 
 
@@ -73,6 +85,37 @@ def test_blender_plugin_rejects_invalid_mmd_import_before_blender(tmp_path: Path
 
     assert result["success"] is False
     assert ".pmx or .pmd" in result["error"]
+
+
+def test_blender_plugin_inspects_scene_metadata_with_bounded_probe(tmp_path: Path, monkeypatch) -> None:
+    module = _load_blender_plugin()
+    plugin_root = tmp_path / "app" / ".reverie" / "plugins" / "blender"
+    blend_path = tmp_path / "hero.blend"
+    blend_path.write_bytes(b"BLENDER")
+    monkeypatch.setenv("REVERIE_BLENDER_PLUGIN_ROOT", str(plugin_root))
+    plugin = module.BlenderRuntimePlugin()
+    monkeypatch.setattr(
+        plugin,
+        "_ensure_ready_detection",
+        lambda payload: ({"available": True, "path": "blender.exe", "source": "test"}, None),
+    )
+
+    def fake_run(_blender_path, script_text, _timeout_seconds, **_kwargs):
+        assert "bpy.ops.wm.open_mainfile" in script_text
+        assert "max_items" in script_text and "12" in script_text
+        scene = {"scene": "Main", "counts": {"objects": 3}, "missing_files": []}
+        return {
+            "command": ["blender.exe", "--background"],
+            "exit_code": 0,
+            "stdout": module.BLENDER_SCENE_INSPECTION_MARKER + json.dumps(scene),
+            "stderr": "",
+        }
+
+    monkeypatch.setattr(plugin, "_run_blender_python", fake_run)
+    result = plugin.handle_command("inspect_scene", {"blend_path": str(blend_path), "max_items": 12})
+
+    assert result["success"] is True
+    assert result["data"]["scene"]["counts"]["objects"] == 3
 
 
 def test_blender_plugin_standalone_launcher_uses_plugin_subdirectory(tmp_path: Path, monkeypatch) -> None:

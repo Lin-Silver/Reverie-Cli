@@ -47,6 +47,7 @@ from .ant_tools import TaskBoundaryTool, NotifyUserTool
 from .novel_context_manager import NovelContextManagerTool
 from .consistency_checker_tool import ConsistencyCheckerTool
 from .plot_analyzer_tool import PlotAnalyzerTool
+from .serial_novel import SerialNovelTool
 from .game_asset_manager import GameAssetManagerTool
 from .game_balance_analyzer import GameBalanceAnalyzerTool
 from .level_design_tool import LevelDesignTool
@@ -64,7 +65,18 @@ from .blender_modeling_workbench import BlenderModelingWorkbenchTool
 from .atlas_delivery_orchestrator import AtlasDeliveryOrchestratorTool
 from .reverie_engine import ReverieEngineTool
 from .mode_switch import ModeSwitchTool
-from .computer_control import ComputerControlTool
+from .open_computer_use import (
+    COMPUTER_USE_TOOL_CLASSES,
+    ClickTool,
+    DragTool,
+    GetAppStateTool,
+    ListAppsTool,
+    PerformSecondaryActionTool,
+    PressKeyTool,
+    ScrollTool,
+    SetValueTool,
+    TypeTextTool,
+)
 from .mcp_dynamic import MCPDynamicTool
 from .mcp_resource_tools import ListMcpResourcesTool, ReadMcpResourceTool
 
@@ -100,6 +112,7 @@ __all__ = [
     "NovelContextManagerTool",
     "ConsistencyCheckerTool",
     "PlotAnalyzerTool",
+    "SerialNovelTool",
     "GameAssetManagerTool",
     "GameBalanceAnalyzerTool",
     "LevelDesignTool",
@@ -117,7 +130,16 @@ __all__ = [
     "AtlasDeliveryOrchestratorTool",
     "ReverieEngineTool",
     "ModeSwitchTool",
-    "ComputerControlTool",
+    "COMPUTER_USE_TOOL_CLASSES",
+    "ClickTool",
+    "DragTool",
+    "GetAppStateTool",
+    "ListAppsTool",
+    "PerformSecondaryActionTool",
+    "PressKeyTool",
+    "ScrollTool",
+    "SetValueTool",
+    "TypeTextTool",
     "MCPDynamicTool",
     "ListMcpResourcesTool",
     "ReadMcpResourceTool",

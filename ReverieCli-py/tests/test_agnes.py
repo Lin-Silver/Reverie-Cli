@@ -78,7 +78,7 @@ def test_config_active_model_resolves_agnes(monkeypatch) -> None:
     assert active is not None
     assert active.model == "agnes-2.0-flash"
     assert active.model_display_name == "Agnes 2.0 Flash"
-    assert active.provider == "openai-sdk"
+    assert active.provider == "openai-chat"
     assert active.supports_vision is True
 
 

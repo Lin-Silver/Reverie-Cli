@@ -1,7 +1,7 @@
 """
 Text-to-Image Tool
 
-Generate images from text prompts using local Comfy models, AIhubMix, Pollinations, or Agnes.
+Generate images from text prompts using local Comfy models, AIhubMix, Pollinations, Agnes, or SenseNova.
 """
 
 from __future__ import annotations
@@ -30,6 +30,12 @@ from ..agnes import (
     resolve_agnes_api_key,
     resolve_agnes_sdk_base_url,
 )
+from ..sensenova import (
+    SENSENOVA_DEFAULT_API_URL,
+    normalize_sensenova_config,
+    resolve_sensenova_api_key,
+    resolve_sensenova_sdk_base_url,
+)
 from ..aihubmix_tti_profiles.registry import (
     get_aihubmix_tti_model_catalog,
     get_aihubmix_tti_profile,
@@ -49,6 +55,11 @@ from ..agnes_tti_profiles.registry import (
     get_agnes_tti_profile,
     resolve_agnes_tti_model,
 )
+from ..sensenova_tti_profiles.registry import (
+    get_sensenova_tti_model_catalog,
+    get_sensenova_tti_profile,
+    resolve_sensenova_tti_model,
+)
 from ..config import (
     default_text_to_image_config,
     get_app_root,
@@ -61,7 +72,7 @@ from ..security_utils import is_path_within_workspace
 
 
 class TextToImageTool(BaseTool):
-    """Generate images via local Comfy models, AIhubMix, Pollinations, or Agnes."""
+    """Generate images via local Comfy models, AIhubMix, Pollinations, Agnes, or SenseNova."""
 
     name = "text_to_image"
     aliases = ("generate_image", "tti")
@@ -69,13 +80,14 @@ class TextToImageTool(BaseTool):
     tool_category = "image-generation"
     tool_tags = ("image", "generate", "art", "asset", "comfy", "prompt")
 
-    description = """Generate images from text prompts using configured local, AIhubMix, Pollinations, or Agnes models.
+    description = """Generate images from text prompts using configured local, AIhubMix, Pollinations, Agnes, or SenseNova models.
 
 Supports:
 - List configured text-to-image models from config.json
 - List AIhubMix image-generation models
 - List Pollinations free image-generation models
 - List Agnes image-generation models
+- List SenseNova image-generation models
 - Generate images by selecting configured model display name
 - Local Comfy parameter tuning
 - AIhubMix image API parameters: n, size, quality, aspect_ratio
@@ -88,7 +100,8 @@ Examples:
 - Generate with model display name: {"action": "generate", "prompt": "anime portrait", "model": "anime-xl"}
 - Generate with AIhubMix: {"action": "generate", "source": "aihubmix", "model": "gpt-image-2-free", "prompt": "a vase of flowers"}
 - Generate with Pollinations: {"action": "generate", "source": "pollinations", "model": "flux", "prompt": "a vase of flowers"}
-- Generate with Agnes: {"action": "generate", "source": "agnes", "model": "agnes-image-2.1-flash", "prompt": "a vase of flowers"}"""
+- Generate with Agnes: {"action": "generate", "source": "agnes", "model": "agnes-image-2.1-flash", "prompt": "a vase of flowers"}
+- Generate with SenseNova: {"action": "generate", "source": "sensenova", "model": "sensenova-u1-fast", "prompt": "an information-rich poster"}"""
 
     parameters = {
         "type": "object",
@@ -121,13 +134,13 @@ Examples:
             },
             "source": {
                 "type": "string",
-                "description": "Optional source override: local, aihubmix, pollinations, or agnes.",
+                "description": "Optional source override: local, aihubmix, pollinations, agnes, or sensenova.",
             },
             "prompt": {"type": "string", "description": "Positive prompt for image generation"},
             "negative_prompt": {"type": "string", "description": "Negative prompt override"},
             "model": {
                 "type": "string",
-                "description": "Local display name, AIhubMix image model id/display name, Pollinations model id/display name, or Agnes image model id/display name.",
+                "description": "Local display name or a remote AIhubMix, Pollinations, Agnes, or SenseNova image model id/display name.",
             },
             "display_name": {
                 "type": "string",
@@ -149,7 +162,7 @@ Examples:
             "sampler": {"type": "string", "description": "Sampler name"},
             "scheduler": {"type": "string", "description": "Scheduler name"},
             "batch_size": {"type": "integer", "description": "Batch size"},
-            "n": {"type": "integer", "description": "Remote image count. AIhubMix and Agnes support 1-10; Pollinations currently supports 1."},
+            "n": {"type": "integer", "description": "Remote image count. SenseNova U1 Fast and Pollinations currently support 1."},
             "size": {
                 "type": "string",
                 "description": "Remote image size: 1024x1024, 1024x1536, 1536x1024, or auto.",
@@ -324,6 +337,8 @@ Examples:
             return self._generate_pollinations(config=config, prompt=prompt, kwargs=kwargs)
         if source == "agnes":
             return self._generate_agnes(config=config, prompt=prompt, kwargs=kwargs)
+        if source == "sensenova":
+            return self._generate_sensenova(config=config, prompt=prompt, kwargs=kwargs)
 
         script_path = self._resolve_script_path(config=config, script_override=None)
         if not script_path.exists():
@@ -674,6 +689,111 @@ Examples:
             payload,
         )
 
+    def _get_sensenova_tti_runtime_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        defaults = default_text_to_image_config().get("sensenova", {})
+        tti_cfg = dict(defaults)
+        if isinstance(config.get("sensenova"), dict):
+            tti_cfg.update(config.get("sensenova", {}))
+
+        provider_cfg: Dict[str, Any] = {}
+        config_manager = self.context.get("config_manager") if isinstance(self.context, dict) else None
+        if config_manager is not None:
+            try:
+                loaded = config_manager.load()
+                provider_cfg = normalize_sensenova_config(getattr(loaded, "sensenova", {}))
+            except Exception:
+                provider_cfg = {}
+        if not provider_cfg:
+            provider_cfg = normalize_sensenova_config({})
+
+        api_key = resolve_sensenova_api_key(provider_cfg)
+        base_url = str(tti_cfg.get("base_url") or provider_cfg.get("api_url") or SENSENOVA_DEFAULT_API_URL).strip()
+        try:
+            timeout = int(tti_cfg.get("timeout", 300) or 300)
+        except (TypeError, ValueError):
+            timeout = 300
+        return {
+            "enabled": bool(tti_cfg.get("enabled", True)),
+            "api_key": api_key,
+            "base_url": resolve_sensenova_sdk_base_url(base_url),
+            "default_model": str(tti_cfg.get("default_model", "sensenova-u1-fast") or "sensenova-u1-fast").strip(),
+            "timeout": max(1, timeout),
+            "default_size": str(tti_cfg.get("default_size", "2752x1536") or "2752x1536").strip(),
+        }
+
+    def _generate_sensenova(self, *, config: Dict[str, Any], prompt: str, kwargs: Dict[str, Any]) -> ToolResult:
+        runtime_cfg = self._get_sensenova_tti_runtime_config(config)
+        if not runtime_cfg.get("enabled", True):
+            return ToolResult.fail("text_to_image.sensenova.enabled=false")
+        if not runtime_cfg.get("api_key"):
+            return ToolResult.fail(
+                "SenseNova API key is required. Set sensenova.api_key, SENSENOVA_API_KEY, or SENSE_API_KEY."
+            )
+
+        model_request = kwargs.get("display_name") or kwargs.get("model") or runtime_cfg.get("default_model")
+        selected = resolve_sensenova_tti_model(model_request)
+        if not selected:
+            available = ", ".join(item["id"] for item in get_sensenova_tti_model_catalog())
+            return ToolResult.fail(f"Unknown SenseNova TTI model '{model_request}'. Available models: {available}")
+        profile = get_sensenova_tti_profile(selected["id"])
+        if profile is None:
+            return ToolResult.fail(f"SenseNova TTI profile not found for model: {selected['id']}")
+
+        try:
+            output_path = self._resolve_output_path(
+                output_override=kwargs.get("output_path"),
+                configured_output=str(config.get("output_dir", ".")),
+            )
+        except ValueError as exc:
+            return ToolResult.fail(str(exc))
+
+        try:
+            from openai import OpenAI
+        except Exception as exc:
+            return ToolResult.fail(f"OpenAI Python SDK is required for SenseNova TTI: {exc}")
+        client_kwargs = {
+            "api_key": runtime_cfg["api_key"],
+            "base_url": runtime_cfg["base_url"],
+            "timeout": runtime_cfg["timeout"],
+        }
+        try:
+            client = OpenAI(**client_kwargs)
+        except TypeError:
+            client_kwargs.pop("timeout", None)
+            client = OpenAI(**client_kwargs)
+
+        try:
+            result = profile.generate_image(
+                client,
+                prompt=prompt,
+                output_path=output_path,
+                size=kwargs.get("size", runtime_cfg.get("default_size", "2752x1536")),
+            )
+        except Exception as exc:
+            return ToolResult.fail(f"SenseNova TTI generation failed for {selected['id']}: {exc}")
+
+        saved_images = [str(path) for path in result.get("saved_images", []) if str(path).strip()]
+        output_lines = [
+            "SenseNova text-to-image generation finished",
+            f"Model: {selected['display_name']} ({selected['id']})",
+            f"Base URL: {runtime_cfg['base_url']}",
+            f"Output target: {output_path}",
+        ]
+        if saved_images:
+            output_lines.append("Generated images:")
+            output_lines.extend(f"- {path}" for path in saved_images)
+        payload = {
+            "source": "sensenova",
+            "model": selected["id"],
+            "model_display_name": selected["display_name"],
+            "saved_images": saved_images,
+            "output_path": str(output_path),
+            "request": result.get("request", {}),
+        }
+        if saved_images:
+            return ToolResult.ok("\n".join(output_lines), payload)
+        return ToolResult.partial("\n".join(output_lines), "SenseNova response did not include image data.", payload)
+
     def _get_pollinations_tti_runtime_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
         defaults = default_text_to_image_config().get("pollinations", {})
         tti_cfg = dict(defaults)
@@ -924,6 +1044,10 @@ Examples:
                     nested = dict(default_text_to_image_config().get("agnes", {}))
                     nested.update(loaded_cfg.get("agnes", {}))
                     cfg["agnes"] = nested
+                if isinstance(loaded_cfg.get("sensenova"), dict):
+                    nested = dict(default_text_to_image_config().get("sensenova", {}))
+                    nested.update(loaded_cfg.get("sensenova", {}))
+                    cfg["sensenova"] = nested
         except Exception:
             pass
         if not isinstance(cfg.get("aihubmix"), dict):
@@ -932,6 +1056,8 @@ Examples:
             cfg["pollinations"] = dict(default_text_to_image_config().get("pollinations", {}))
         if not isinstance(cfg.get("agnes"), dict):
             cfg["agnes"] = dict(default_text_to_image_config().get("agnes", {}))
+        if not isinstance(cfg.get("sensenova"), dict):
+            cfg["sensenova"] = dict(default_text_to_image_config().get("sensenova", {}))
         cfg["models"] = normalize_tti_models(
             cfg.get("models", []),
             legacy_model_paths=cfg.get("model_paths", []),
@@ -1002,6 +1128,21 @@ Examples:
             return ToolResult.ok(
                 "Agnes text-to-image models:\n" + "\n".join(rows),
                 data={"models": data_rows, "source": "agnes", "default_model": runtime_cfg.get("default_model", "")},
+            )
+        if source == "sensenova":
+            runtime_cfg = self._get_sensenova_tti_runtime_config(config)
+            models = get_sensenova_tti_model_catalog()
+            default_model = str(runtime_cfg.get("default_model", "")).strip().lower()
+            rows = []
+            data_rows = []
+            for idx, item in enumerate(models):
+                is_default = str(item.get("id", "")).lower() == default_model
+                marker = "*" if is_default else " "
+                rows.append(f"{marker}[{idx}] {item['display_name']} | {item['id']} | API: {item.get('api', '')}")
+                data_rows.append({**item, "index": idx, "is_default": is_default})
+            return ToolResult.ok(
+                "SenseNova text-to-image models:\n" + "\n".join(rows),
+                data={"models": data_rows, "source": "sensenova", "default_model": runtime_cfg.get("default_model", "")},
             )
         models = config.get("models", [])
         default_display_name = str(config.get("default_model_display_name", "")).strip()
@@ -1328,6 +1469,30 @@ Examples:
                 ToolResult.ok(output, payload)
                 if ready
                 else ToolResult.partial(output, "Agnes TTI is not ready; configure the missing Agnes API key or model.", payload)
+            )
+        if source == "sensenova":
+            runtime_cfg = self._get_sensenova_tti_runtime_config(config)
+            models = get_sensenova_tti_model_catalog()
+            default_model = resolve_sensenova_tti_model(runtime_cfg.get("default_model"))
+            checks = [
+                {"id": "enabled", "ok": bool(config.get("enabled", True)), "detail": "text_to_image.enabled"},
+                {"id": "source", "ok": source == "sensenova", "detail": f"active source: {source}"},
+                {"id": "sensenova_enabled", "ok": bool(runtime_cfg.get("enabled", True)), "detail": "text_to_image.sensenova.enabled"},
+                {"id": "api_key", "ok": bool(runtime_cfg.get("api_key")), "detail": "sensenova.api_key, SENSENOVA_API_KEY, or SENSE_API_KEY"},
+                {"id": "base_url", "ok": bool(runtime_cfg.get("base_url")), "detail": runtime_cfg.get("base_url", "")},
+                {"id": "models", "ok": bool(models), "detail": f"{len(models)} SenseNova TTI profiles available"},
+                {"id": "default_model", "ok": bool(default_model), "detail": runtime_cfg.get("default_model", "")},
+            ]
+            ready = all(item["ok"] for item in checks)
+            output = "Text-to-image SenseNova diagnosis\n"
+            output += f"Ready: {'yes' if ready else 'no'}\n"
+            for check in checks:
+                output += f"- {check['id']}: {'ok' if check['ok'] else 'missing'} | {check['detail']}\n"
+            payload = {"ready": ready, "checks": checks, "models": models, "source": "sensenova"}
+            return (
+                ToolResult.ok(output, payload)
+                if ready
+                else ToolResult.partial(output, "SenseNova TTI is not ready; configure the shared SenseNova API key.", payload)
             )
         script_path = self._resolve_script_path(config=config, script_override=None)
         python_exe = self._select_python_executable(config=config, script_path=script_path)

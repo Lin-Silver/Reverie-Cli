@@ -13,10 +13,6 @@ def _utc_now() -> str:
 
 
 def _runtime_contract_root(runtime_id: str) -> tuple[str, str]:
-    if runtime_id == "godot":
-        return "engine/godot/data", ".json"
-    if runtime_id == "o3de":
-        return "engine/o3de/Registry", ".json"
     return "data/content", ".yaml"
 
 
@@ -90,6 +86,7 @@ def build_runtime_delivery_plan(
         "project_name": project_name(game_request, blueprint),
         "generated_at": _utc_now(),
         "runtime": selected_runtime,
+        "unified_runtime": True,
         "runtime_root": runtime_root,
         "delivery_phases": [
             {

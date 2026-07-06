@@ -7,7 +7,7 @@
 - **Context Engine**: Augment-style codebase retrieval, LSP integration, git history analysis
 - **Session management**: Conversation persistence, rotation, working memory injection, handoff packets
 - **Inline media**: Attach images and video directly in conversations
-- **3D/Game workflows**: Built-in Blender authoring, Blockbench `.bbmodel` validation, Godot project integration, Ashfox MCP support
+- **3D/Game workflows**: Built-in Blender authoring, Blockbench `.bbmodel` validation, legacy Godot/O3DE inspection and migration into Reverie Engine, Ashfox MCP support
 - **Browser automation**: Embedded Chromium runtime for web inspection and interaction
 - **Subagent delegation**: Parallel investigation and implementation tasks
 - **Harness audit**: Prompt-level reporting, verification tracking, playbook recommendations
@@ -47,7 +47,7 @@ Reverie supports a wide range of LLM providers out of the box. Each provider has
 | **NVIDIA** | NVIDIA-hosted catalog via `integrate.api.nvidia.com` | Qwen3.5 397B, DeepSeek V4 Pro/V4 Flash, Kimi K2.6, GLM-5.1/4.7, MiniMax M2.7/M3, Mistral Small 4, Mistral Medium 3.5, Mistral Large 3, Step-3.5/3.7-Flash, GPT-OSS-120B, Nemotron 3 Super, Qwen3.5 122B |
 | **ModelScope** | Anthropic-compatible API on `api-inference.modelscope.cn` — all models supporting the Anthropic SDK can be used | GLM-5.1, GLM-5, DeepSeek V4 Pro, DeepSeek V4 Flash, MiniMax M2.7, Qwen3.5 397B A17B (catalog is statically defined in code) |
 | **Codex** | ChatGPT backend (OpenAI-compatible Responses API) | GPT-5.5 and other ChatGPT/Codex models (auto-detected from local Codex source or CLI cache) |
-| **SenseNova** | ByteDance SenseNova OpenAI-compatible API | DeepSeek V4 Flash (1M context), SenseNova 6.7 Flash Lite (vision) |
+| **SenseNova** | SenseTime SenseNova API with model-specific OpenAI/Anthropic transports | DeepSeek V4 Flash (1M context), SenseNova 6.7 Flash Lite (vision) |
 | **unlimited.surf** | Gateway service with request transport | GPT-5 (via `unlimited.surf`), with selectable effort (low/medium/high) |
 | **AIHubMix** | Third-party API gateway (OpenAI-compatible) | GPT-5.5 Free (with/without reasoning), GPT-4o Free, GPT-4.1 Free |
 | **Agnes** | Agnes AI OpenAI-compatible API (text, image, video) | Agnes 2.0 Flash (vision + thinking), Agnes 1.5 Flash (vision), image/video generation |
@@ -67,8 +67,8 @@ Reverie ships with specialized modes that change tooling, system prompt rules, a
 | `reverie-ant` | Reverie-Ant | Structured long-running execution: planning, checkpoints, verification. |
 | `spec-driven` | Spec-Driven | Spec authoring: requirements, design, implementation task breakdown. |
 | `spec-vibe` | Spec-Vibe | Implementation mode for executing approved specs with a lighter workflow. |
-| `writer` | Writer | Creative writing: narrative drafting, continuity, long-form documentation. |
-| `computer-controller` | Computer Controller | Pinned NVIDIA desktop-autopilot mode for operating the Windows UI. Non-switchable; requires NVIDIA source. |
+| `writer` | Writer | Creative writing: persistent long-form fiction planning, serialized drafting, continuity control, and verified completion. |
+| `computer-controller` | Computer Controller | Pinned NVIDIA desktop orchestrator using an embedded Open Computer Use-compatible desktop runtime and managed Reverie SubAgents. Entered explicitly; it can still hand off to another mode when the task changes. |
 
 ### Context Engine
 
@@ -103,15 +103,15 @@ Attach images and videos directly in conversations:
 
 ### 3D / Game Modeling
 
-Reverie-Gamer mode includes a full modeling pipeline:
+Reverie-Gamer mode currently includes a work-in-progress modeling toolchain:
 
-- **Blender integration**: Built-in Blender authoring workflow — generate scripts, run in background mode, export `.blend`/`.glb`/`.gltf`, render previews
+- **Blender integration**: Blender plugin-assisted authoring workflow — generate scripts, run in background mode, export `.blend`/`.glb`/`.gltf`, render previews
 - **Blockbench `.bbmodel`**: Headless validation and export without launching Blockbench
 - **Ashfox MCP**: Live Blockbench automation via the Ashfox plugin (when running)
 - **Model registry sync**: Auto-generate `model_registry.yaml` from `assets/models/` directories
-- **Godot integration**: Project scanning, headless import validation, editor launch
+- **Unified Reverie Engine**: Godot scene patterns and O3DE data/asset-pipeline patterns are integrated into the built-in runtime; existing projects can be inspected and migrated
 - **Source/Runtime separation**: `assets/models/source/` for authoring, `assets/models/runtime/` for engine-facing exports
-- **Galgame plugins**: Ren'Py and Live2D/Cubism support lives in `plugins/renpy/` and `plugins/live2d/` so the core CLI stays focused on foundation workflows
+- **Galgame integration**: Reverie Engine directly inspects, validates, and imports Ren'Py scripts; the optional Ren'Py plugin is limited to native SDK lint/compile/distribute and Live2D/Cubism remains specialized
 
 ### Browser Automation
 
@@ -152,10 +152,8 @@ Reverie-Cli/
 │   ├── generate_image.py
 │   ├── pack_embedded.py
 │   └── ...
-├── plugins/                   ← Runtime plugins (Blender, Godot, O3DE, game_models)
+├── plugins/                   ← Optional runtime plugins (release assets: Blender + game_models; source plugins: Ren'Py SDK + Live2D)
 │   ├── blender/
-│   ├── godot/
-│   ├── o3de/
 │   └── game_models/
 ├── ReverieCli-py/             ← Python source (primary runtime)
 │   ├── reverie/
@@ -271,14 +269,17 @@ Reverie uses `config.json` stored in the project's `.reverie/` directory or the 
 
 ```json
 {
-  "version": "0.1.0",
-  "active_model_source": "nvidia",
-  "standard": {
-    "base_url": "https://api.openai.com/v1",
-    "api_key": "",
-    "model": "gpt-4o",
-    "provider": "openai"
-  },
+  "config_version": "2.3.4",
+  "active_model_source": "standard",
+  "models": [
+    {
+      "base_url": "https://api.openai.com/v1",
+      "api_key": "",
+      "model": "gpt-4o",
+      "model_display_name": "GPT-4o",
+      "provider": "openai-chat"
+    }
+  ],
   "nvidia": {
     "enabled": true,
     "api_key": "nvapi-...",
@@ -436,14 +437,14 @@ Execute approved specs with lighter workflow. Implements the `spec-driven` outpu
 ### Writer
 
 Creative writing mode with:
-- Novel context management
-- Consistency checking
-- Plot analysis
-- Character/arc tracking
+- `serial_novel` disk-backed project control
+- Chapter control cards, continuity ledgers, and resumable drafting
+- One TXT export per committed chapter plus merged `manuscript.txt`
+- Completion audits that verify the persisted novel state before finishing
 
 ### Computer Controller
 
-Desktop automation via NVIDIA's computer_control capability. Pinned to NVIDIA provider, non-switchable.
+Desktop orchestration through an embedded Open Computer Use-compatible desktop runtime, with scoped Reverie SubAgents for coding, repository work, and verification. The main controller remains the only desktop actor, is pinned to the NVIDIA provider, is entered explicitly for desktop work, and may hand off to another mode when the task is no longer primarily desktop work.
 
 ---
 
@@ -512,7 +513,7 @@ Connects to ChatGPT's backend API. Supports:
 
 ### SenseNova
 
-ByteDance's SenseNova platform with OpenAI-compatible API at `https://token.sensenova.cn/v1`:
+[SenseTime SenseNova](https://www.sensenova.cn/) with model-specific OpenAI/Anthropic-compatible transports at `https://token.sensenova.cn`:
 
 | Model ID | Display Name | Context | Thinking | Vision |
 |----------|-------------|---------|----------|--------|
@@ -574,7 +575,7 @@ Anonymous Gemini Web access via `gemini.google.com`. Models are selected by mode
 
 ### Standard (OpenAI-Compatible Presets)
 
-The `standard` source uses user-defined model presets stored in the `models` array of `config.json`. Each entry specifies a `base_url`, `api_key`, `model`, and optional `provider` label. This is for third-party OpenAI-compatible services (any provider exposing an OpenAI-compatible chat completions endpoint).
+The `standard` source uses user-defined model presets stored in the `models` array of `config.json`. Each entry specifies a `base_url`, `api_key`, `model`, and `provider` call method. Canonical methods are `openai-chat`, `openai-responses`, `anthropic`, `request`, and `curl`. For `curl`, URLs ending in `/responses` use the Responses format; URLs ending in `/chat/completions` use Chat Completions, while a bare API root defaults to Chat Completions. Legacy names such as `openai`, `openai-sdk`, `openai-old`, and `openai-res` are accepted on load and rewritten to the canonical names when the configuration is saved.
 
 ---
 

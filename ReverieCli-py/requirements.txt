@@ -39,6 +39,7 @@ tree-sitter-css>=0.20.0
 # Build and Deployment
 pyinstaller>=6.0.0
 pillow
+uiautomation==2.0.29; platform_system == "Windows"
 pyyaml
 
 # Reverie Engine runtime

@@ -517,7 +517,7 @@ class BrowserControlerTool(BaseTool):
             "port": {"type": "integer", "description": "Chrome DevTools Protocol remote debugging port for open_debug_page/devtools_* actions."},
             "target_id": {"type": "string", "description": "Optional DevTools target id for devtools_* actions."},
             "url_contains": {"type": "string", "description": "Optional target URL/title substring for activate_browser or devtools_* target selection."},
-            "session_id": {"type": "string", "description": "Optional Browser Controler session id for browser_session_* actions."},
+            "session_id": {"type": "string", "description": "Optional Browser Controler session id for browser_session_* and devtools_* actions."},
             "selector": {"type": "string", "description": "CSS selector for background DevTools DOM actions."},
             "role": {"type": "string", "description": "ARIA role filter for devtools_find."},
             "expression": {"type": "string", "description": "JavaScript expression to run through DevTools Runtime.evaluate."},
@@ -733,15 +733,20 @@ class BrowserControlerTool(BaseTool):
                     port=kwargs.get("port"),
                     timeout=float(kwargs.get("timeout", 5) or 5),
                 )
+            if action_name.startswith("devtools_"):
+                cdp_port = self._resolve_cdp_port(
+                    session_id=str(kwargs.get("session_id") or ""),
+                    port=kwargs.get("port"),
+                )
             if action_name == "devtools_targets":
                 return self._devtools_targets(
-                    port=int(kwargs.get("port", DEFAULT_CDP_PORT) or DEFAULT_CDP_PORT),
+                    port=cdp_port,
                     url_contains=str(kwargs.get("url_contains") or ""),
                     timeout=float(kwargs.get("timeout", 5) or 5),
                 )
             if action_name == "devtools_snapshot":
                 return self._devtools_snapshot(
-                    port=int(kwargs.get("port", DEFAULT_CDP_PORT) or DEFAULT_CDP_PORT),
+                    port=cdp_port,
                     target_id=str(kwargs.get("target_id") or ""),
                     url_contains=str(kwargs.get("url_contains") or ""),
                     max_chars=int(kwargs.get("max_chars", 30000) or 30000),
@@ -749,7 +754,7 @@ class BrowserControlerTool(BaseTool):
                 )
             if action_name == "devtools_screenshot":
                 return self._devtools_screenshot(
-                    port=int(kwargs.get("port", DEFAULT_CDP_PORT) or DEFAULT_CDP_PORT),
+                    port=cdp_port,
                     target_id=str(kwargs.get("target_id") or ""),
                     url_contains=str(kwargs.get("url_contains") or ""),
                     full_page=bool(kwargs.get("full_page", True)),
@@ -761,7 +766,7 @@ class BrowserControlerTool(BaseTool):
             if action_name == "devtools_eval":
                 return self._devtools_eval(
                     expression=str(kwargs.get("expression") or ""),
-                    port=int(kwargs.get("port", DEFAULT_CDP_PORT) or DEFAULT_CDP_PORT),
+                    port=cdp_port,
                     target_id=str(kwargs.get("target_id") or ""),
                     url_contains=str(kwargs.get("url_contains") or ""),
                     await_promise=bool(kwargs.get("await_promise", True)),
@@ -771,7 +776,7 @@ class BrowserControlerTool(BaseTool):
             if action_name == "devtools_console":
                 return self._devtools_console(
                     expression=str(kwargs.get("expression") or ""),
-                    port=int(kwargs.get("port", DEFAULT_CDP_PORT) or DEFAULT_CDP_PORT),
+                    port=cdp_port,
                     target_id=str(kwargs.get("target_id") or ""),
                     url_contains=str(kwargs.get("url_contains") or ""),
                     wait_seconds=float(kwargs.get("wait_seconds", 1.0) or 1.0),
@@ -781,7 +786,7 @@ class BrowserControlerTool(BaseTool):
             if action_name == "devtools_network":
                 return self._devtools_network(
                     url=kwargs.get("url"),
-                    port=int(kwargs.get("port", DEFAULT_CDP_PORT) or DEFAULT_CDP_PORT),
+                    port=cdp_port,
                     target_id=str(kwargs.get("target_id") or ""),
                     url_contains=str(kwargs.get("url_contains") or ""),
                     wait_seconds=float(kwargs.get("wait_seconds", 3.0) or 3.0),
@@ -800,7 +805,7 @@ class BrowserControlerTool(BaseTool):
             if action_name == "devtools_click":
                 return self._devtools_click(
                     selector=str(kwargs.get("selector") or ""),
-                    port=int(kwargs.get("port", DEFAULT_CDP_PORT) or DEFAULT_CDP_PORT),
+                    port=cdp_port,
                     target_id=str(kwargs.get("target_id") or ""),
                     url_contains=str(kwargs.get("url_contains") or ""),
                     timeout=float(kwargs.get("timeout", 5) or 5),
@@ -809,7 +814,7 @@ class BrowserControlerTool(BaseTool):
                 return self._devtools_type(
                     selector=str(kwargs.get("selector") or ""),
                     text=str(kwargs.get("text") or ""),
-                    port=int(kwargs.get("port", DEFAULT_CDP_PORT) or DEFAULT_CDP_PORT),
+                    port=cdp_port,
                     target_id=str(kwargs.get("target_id") or ""),
                     url_contains=str(kwargs.get("url_contains") or ""),
                     clear=bool(kwargs.get("clear", True)),
@@ -820,7 +825,7 @@ class BrowserControlerTool(BaseTool):
                 return self._devtools_upload(
                     selector=str(kwargs.get("selector") or ""),
                     file_path=kwargs.get("file_path"),
-                    port=int(kwargs.get("port", DEFAULT_CDP_PORT) or DEFAULT_CDP_PORT),
+                    port=cdp_port,
                     target_id=str(kwargs.get("target_id") or ""),
                     url_contains=str(kwargs.get("url_contains") or ""),
                     timeout=float(kwargs.get("timeout", 5) or 5),
@@ -830,7 +835,7 @@ class BrowserControlerTool(BaseTool):
                     selector=str(kwargs.get("selector") or ""),
                     text=str(kwargs.get("text") or ""),
                     expression=str(kwargs.get("expression") or ""),
-                    port=int(kwargs.get("port", DEFAULT_CDP_PORT) or DEFAULT_CDP_PORT),
+                    port=cdp_port,
                     target_id=str(kwargs.get("target_id") or ""),
                     url_contains=str(kwargs.get("url_contains") or ""),
                     wait_seconds=float(kwargs.get("wait_seconds", 10.0) or 10.0),
@@ -839,7 +844,7 @@ class BrowserControlerTool(BaseTool):
                 )
             if action_name == "devtools_accessibility_snapshot":
                 return self._devtools_accessibility_snapshot(
-                    port=int(kwargs.get("port", DEFAULT_CDP_PORT) or DEFAULT_CDP_PORT),
+                    port=cdp_port,
                     target_id=str(kwargs.get("target_id") or ""),
                     url_contains=str(kwargs.get("url_contains") or ""),
                     max_events=int(kwargs.get("max_events", 120) or 120),
@@ -847,7 +852,7 @@ class BrowserControlerTool(BaseTool):
                 )
             if action_name == "devtools_dom_outline":
                 return self._devtools_dom_outline(
-                    port=int(kwargs.get("port", DEFAULT_CDP_PORT) or DEFAULT_CDP_PORT),
+                    port=cdp_port,
                     target_id=str(kwargs.get("target_id") or ""),
                     url_contains=str(kwargs.get("url_contains") or ""),
                     max_events=int(kwargs.get("max_events", 120) or 120),
@@ -858,7 +863,7 @@ class BrowserControlerTool(BaseTool):
                     selector=str(kwargs.get("selector") or ""),
                     text=str(kwargs.get("text") or kwargs.get("filter_url") or ""),
                     role=str(kwargs.get("role") or ""),
-                    port=int(kwargs.get("port", DEFAULT_CDP_PORT) or DEFAULT_CDP_PORT),
+                    port=cdp_port,
                     target_id=str(kwargs.get("target_id") or ""),
                     url_contains=str(kwargs.get("url_contains") or ""),
                     max_events=int(kwargs.get("max_events", 80) or 80),
@@ -3694,6 +3699,20 @@ class BrowserControlerTool(BaseTool):
             return data if isinstance(data, dict) else {}
         except Exception:
             return {}
+
+    def _resolve_cdp_port(self, *, session_id: str = "", port: Any = None) -> int:
+        if port not in (None, ""):
+            return self._normalize_cdp_port(port)
+        selected_id = str(session_id or "").strip()
+        if not selected_id:
+            return DEFAULT_CDP_PORT
+        session = self._load_browser_sessions().get(selected_id)
+        if not isinstance(session, dict):
+            raise ValueError(f"Browser Controler session not found: {selected_id}")
+        selected_port = session.get("port")
+        if selected_port in (None, "", 0):
+            raise ValueError(f"Browser Controler session has no CDP port: {selected_id}")
+        return self._normalize_cdp_port(selected_port)
 
     def _save_browser_sessions(self, sessions: Dict[str, Any]) -> None:
         self.sessions_path.parent.mkdir(parents=True, exist_ok=True)

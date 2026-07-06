@@ -23,7 +23,7 @@ MODE_METADATA: Dict[str, Dict[str, object]] = {
     },
     "reverie-gamer": {
         "display_name": "Reverie-Gamer",
-        "description": "Game-production mode for compiling prompts into structured requests, runtime-aware blueprints, system packets, continuity artifacts, playable vertical slices, and verification loops.",
+        "description": "Work-in-progress game-production mode for compiling prompts into unified Reverie Engine projects, system packets, continuity artifacts, playable vertical slices, legacy-engine migrations, and verification loops.",
         "switchable": True,
     },
     "reverie-ant": {
@@ -43,12 +43,12 @@ MODE_METADATA: Dict[str, Dict[str, object]] = {
     },
     "writer": {
         "display_name": "Writer",
-        "description": "Creative writing mode for narrative drafting, continuity, and long-form documentation.",
+        "description": "Creative writing mode for autonomous, persistent long-form fiction planning, serialized drafting, continuity control, and verified completion.",
         "switchable": True,
     },
     "computer-controller": {
         "display_name": "Computer Controller",
-        "description": "Pinned NVIDIA desktop-autopilot mode for operating the Windows UI through computer_control.",
+        "description": "Pinned NVIDIA desktop orchestrator using an embedded Open Computer Use-compatible desktop runtime and managed Reverie SubAgents.",
         "switchable": False,
         "requires_source": "nvidia",
     },
@@ -187,6 +187,8 @@ MODE_TOOL_DISCOVERY_PROFILES: Dict[str, Dict[str, tuple[str, ...]]] = {
         ),
         "boost_tools": (
             "task_manager",
+            "memory_retrieval",
+            "memory_manager",
             "game_design_orchestrator",
             "game_project_scaffolder",
             "reverie_engine",
@@ -311,11 +313,13 @@ MODE_TOOL_DISCOVERY_PROFILES: Dict[str, Dict[str, tuple[str, ...]]] = {
     "writer": {
         "focus_categories": ("writer", "retrieval", "context", "coordination"),
         "boost_tools": (
+            "serial_novel",
             "novel_context_manager",
-            "ask_clarification",
-            "userInput",
             "consistency_checker",
             "plot_analyzer",
+            "memory_retrieval",
+            "memory_manager",
+            "ask_clarification",
         ),
         "domain_tokens": (
             "arc",
@@ -328,6 +332,10 @@ MODE_TOOL_DISCOVERY_PROFILES: Dict[str, Dict[str, tuple[str, ...]]] = {
             "genre",
             "length",
             "novel",
+            "fiction",
+            "longform",
+            "serialization",
+            "serial",
             "pov",
             "plot",
             "scene",
@@ -341,7 +349,18 @@ MODE_TOOL_DISCOVERY_PROFILES: Dict[str, Dict[str, tuple[str, ...]]] = {
     },
     "computer-controller": {
         "focus_categories": ("desktop", "vision", "coordination"),
-        "boost_tools": ("computer_control",),
+        "boost_tools": (
+            "list_apps",
+            "get_app_state",
+            "click",
+            "perform_secondary_action",
+            "scroll",
+            "drag",
+            "type_text",
+            "press_key",
+            "set_value",
+            "subagent",
+        ),
         "domain_tokens": (
             "app",
             "browser",

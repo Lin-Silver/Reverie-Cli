@@ -9,7 +9,7 @@ def generate_ability_system(
     game_request: Dict[str, Any],
     blueprint: Dict[str, Any],
     *,
-    runtime_id: str = "godot",
+    runtime_id: str = "reverie_engine",
 ) -> Dict[str, Any]:
     """Generate player ability system with skills, elements, and combos."""
     
@@ -118,10 +118,9 @@ def generate_ability_system(
             "energy_per_skill": 15,
         },
         "implementation": {
-            "godot": _godot_ability_implementation(abilities, has_elements),
-            "o3de": _o3de_ability_implementation(abilities, has_elements),
             "reverie_engine": _reverie_ability_implementation(abilities, has_elements),
         },
+        "runtime": "reverie_engine",
         "telemetry_events": [
             "ability_used",
             "combo_completed",

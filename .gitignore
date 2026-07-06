@@ -39,6 +39,9 @@ env/
 # Reverie local state and secrets
 .reverie/
 .env
+/API.md
+/CubismSdkForWeb-5-r.5.zip
 plugins/blender/*.zip
+ReverieCli-py/writer-source-smoke-*/
 ReverieCli-py/ui-runtime/appdata/
 Reverie UI/artifacts/

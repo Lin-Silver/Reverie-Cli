@@ -33,6 +33,7 @@ class ContextAssembler:
             len(recent_messages or []),
             id(code_retriever) if code_retriever is not None else 0,
             max_tokens,
+            self.memory_retriever.store.revision,
         )
         cached = self._cache.get(cache_key)
         if cached:
@@ -95,7 +96,8 @@ class ContextAssembler:
             evidence_ids = ",".join((item.source_event_ids or [])[:3])
             body = (
                 f"- {item.id} [{item.scope}/{item.memory_type} "
-                f"confidence={item.confidence:.2f} decay={item.decay:.2f}] "
+                f"confidence={item.confidence:.2f} version={item.version} "
+                f"provenance={item.provenance} decay={item.decay:.2f}] "
                 f"{item.content}"
             )
             if item.tags:

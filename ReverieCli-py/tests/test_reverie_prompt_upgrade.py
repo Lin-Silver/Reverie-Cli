@@ -166,9 +166,9 @@ def test_writer_prompt_allows_one_shot_requested_deliverables() -> None:
         additional_rules="This run was started through Reverie's one-shot prompt mode. There will be no follow-up turn.",
     )
 
-    assert "Exception for one-shot non-interactive prompt runs" in prompt
-    assert "keep the workflow lean" in prompt
-    assert "match the requested scope and avoid unnecessary expansion" in prompt
+    assert "The initial prompt authorizes autonomous planning and drafting" in prompt
+    assert "do not merely discuss a possible book" in prompt
+    assert "Repeat without asking for routine confirmation" in prompt
 
 
 def test_atlas_prompt_downgrades_simple_tasks_back_to_reverie() -> None:
@@ -183,19 +183,18 @@ def test_atlas_prompt_downgrades_simple_tasks_back_to_reverie() -> None:
 def test_writer_prompt_adds_style_brief_clarification_workflow() -> None:
     prompt = build_system_prompt(model_name="Test Model", mode="writer")
 
-    assert "Phase 0: Story Brief Calibration" in prompt
-    assert "use `ask_clarification` to confirm the style brief before outlining" in prompt
-    assert "use `userInput`" in prompt
-    assert "format, genre/subgenre, tone or atmosphere, target length, point of view, tense" in prompt
+    assert "Infer strong, genre-aware creative choices" in prompt
+    assert "Ask only when a missing decision is genuinely blocking" in prompt
+    assert "viewpoint distance, tense, diction, image families" in prompt
 
 
-def test_writer_tooling_guidance_biases_toward_ask_user_tools() -> None:
+def test_writer_tooling_guidance_biases_toward_native_project_tools() -> None:
     workflow = get_tool_descriptions_for_mode("writer")
     profile = get_mode_tool_discovery_profile("writer")
 
-    assert "Use `ask_clarification` early" in workflow
-    assert "Use `userInput` when you need explicit outline approval" in workflow
+    assert "call `serial_novel` before drafting prose" in workflow
+    assert "persist project bibles, chapter control cards" in workflow
+    assert "serial_novel" in profile["boost_tools"]
     assert "ask_clarification" in profile["boost_tools"]
-    assert "userInput" in profile["boost_tools"]
     for token in ("style", "tone", "voice", "genre", "pov", "tense", "audience", "length"):
         assert token in profile["domain_tokens"]

@@ -9,7 +9,7 @@ def generate_camera_system(
     game_request: Dict[str, Any],
     blueprint: Dict[str, Any],
     *,
-    runtime_id: str = "godot",
+    runtime_id: str = "reverie_engine",
 ) -> Dict[str, Any]:
     """Generate advanced camera system with lock-on, dynamic framing, and cinematic modes."""
     
@@ -100,10 +100,9 @@ def generate_camera_system(
         "camera_model": camera_model,
         "features": camera_features,
         "implementation": {
-            "godot": _godot_camera_implementation(camera_features),
-            "o3de": _o3de_camera_implementation(camera_features),
             "reverie_engine": _reverie_camera_implementation(camera_features),
         },
+        "runtime": "reverie_engine",
         "telemetry_events": [
             "camera_mode_changed",
             "lock_on_acquired",

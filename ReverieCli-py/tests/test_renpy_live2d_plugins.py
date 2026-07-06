@@ -4,6 +4,7 @@ from pathlib import Path
 import shutil
 import zipfile
 
+from reverie.engine import inspect_renpy_project, outline_renpy_script, validate_renpy_project
 from reverie.plugin.runtime_manager import RuntimePluginManager
 
 
@@ -17,7 +18,7 @@ def _install_source_plugin(app_root: Path, plugin_id: str) -> None:
     shutil.copytree(source, target, ignore=shutil.ignore_patterns("build", "dist", "__pycache__", "*.spec"))
 
 
-def test_renpy_plugin_exposes_prompt_skill_and_script_outline(tmp_path: Path) -> None:
+def test_renpy_analysis_is_built_into_engine_and_plugin_has_no_fake_mcp(tmp_path: Path) -> None:
     app_root = tmp_path / "app"
     _install_source_plugin(app_root, "renpy")
     project_root = tmp_path / "game"
@@ -48,24 +49,20 @@ def test_renpy_plugin_exposes_prompt_skill_and_script_outline(tmp_path: Path) ->
     assert "Ren'Py" in manager.describe_for_prompt("reverie-gamer")
     assert any(skill["name"] == "renpy-galgame-workflow" for skill in manager.get_skill_definitions())
     tool_names = {tool["name"] for tool in manager.get_tool_definitions()}
-    assert "rc_renpy_script_outline" in tool_names
-    assert "rc_renpy_project_inspect" in tool_names
+    assert "rc_renpy_script_outline" not in tool_names
+    assert "rc_renpy_project_inspect" not in tool_names
     assert "rc_renpy_lint" in tool_names
-    assert "renpy_reference" in manager.get_mcp_server_definitions()
+    assert "renpy_reference" not in manager.get_mcp_server_definitions()
 
-    result = manager.call_tool(
-        "renpy",
-        "script_outline",
-        {"project_root": str(project_root), "script_path": "script.rpy"},
-    )
+    result = outline_renpy_script(script_path)
+    inspected = inspect_renpy_project(project_root)
+    validation = validate_renpy_project(project_root)
 
-    assert result["success"] is True
-    assert [item["name"] for item in result["data"]["labels"]] == ["start", "route_a"]
-    assert result["data"]["characters"][0]["alias"] == "e"
-
-    inspected = manager.call_tool("renpy", "project_inspect", {"project_root": str(project_root)})
-    assert inspected["success"] is True
-    assert inspected["data"]["script_count"] == 1
+    assert [item["name"] for item in result["labels"]] == ["start", "route_a"]
+    assert result["characters"][0]["alias"] == "e"
+    assert inspected["script_count"] == 1
+    assert inspected["analysis_backend"] == "reverie_engine_builtin"
+    assert validation["valid"] is True
 
 
 def test_live2d_plugin_installs_cubism_core_from_sdk_zip(tmp_path: Path) -> None:

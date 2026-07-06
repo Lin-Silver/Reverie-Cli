@@ -152,8 +152,6 @@ jobs:
         run: |
           $plugins = @(
             @{ Id = "blender"; Path = "plugins\blender"; Exe = "reverie-blender.exe" },
-            @{ Id = "godot"; Path = "plugins\godot"; Exe = "reverie-godot.exe" },
-            @{ Id = "o3de"; Path = "plugins\o3de"; Exe = "reverie-o3de.exe" },
             @{ Id = "game_models"; Path = "plugins\game_models"; Exe = "reverie-game-models.exe" }
           )
           foreach ($plugin in $plugins) {
@@ -195,8 +193,6 @@ jobs:
           Copy-Item -LiteralPath $pythonCliSource -Destination $cliPath -Force
           $plugins = @(
             @{ Id = "blender"; Manifest = "plugins\blender\plugin.json"; Asset = "reverie-blender.exe"; Path = "plugins\blender\dist\reverie-blender.exe" },
-            @{ Id = "godot"; Manifest = "plugins\godot\plugin.json"; Asset = "reverie-godot.exe"; Path = "plugins\godot\dist\reverie-godot.exe" },
-            @{ Id = "o3de"; Manifest = "plugins\o3de\plugin.json"; Asset = "reverie-o3de.exe"; Path = "plugins\o3de\dist\reverie-o3de.exe" },
             @{ Id = "game_models"; Manifest = "plugins\game_models\plugin.json"; Asset = "reverie-game-models.exe"; Path = "plugins\game_models\dist\reverie-game-models.exe" }
           )
 
@@ -255,8 +251,8 @@ jobs:
           }
 
           $manifest = Get-Content .\dist\plugins-manifest.json -Raw | ConvertFrom-Json
-          if ($manifest.plugins.Count -ne 4) {
-            throw "Expected 4 compiled plugin entries in plugins-manifest.json."
+          if ($manifest.plugins.Count -ne 2) {
+            throw "Expected 2 compiled plugin entries in plugins-manifest.json."
           }
           foreach ($plugin in $manifest.plugins) {
             $assetPath = Join-Path $env:GITHUB_WORKSPACE "plugins\$($plugin.id)\dist\$($plugin.asset_name)"
@@ -278,8 +274,6 @@ jobs:
             dist/reverie.exe
             dist/plugins-manifest.json
             plugins/blender/dist/reverie-blender.exe
-            plugins/godot/dist/reverie-godot.exe
-            plugins/o3de/dist/reverie-o3de.exe
             plugins/game_models/dist/reverie-game-models.exe
 
       - name: Publish rolling latest release
@@ -297,12 +291,12 @@ jobs:
           Automated Windows release build from main.
 
           Files:
-          - reverie.exe: primary Windows CLI executable. This is the full Python PyInstaller build with bundled Python runtime, built-in skills, tool manifests, and the embedded Chromium Browser Controler runtime.
+          - reverie.exe: primary Windows CLI executable. This is the full Python PyInstaller build with bundled Python runtime, built-in skills, tool manifests, the embedded Chromium browser-control runtime, and the built-in Computer Controller desktop runtime/SubAgent orchestration stack.
           - plugins-manifest.json: release metadata consumed by Reverie UI/plugin download surfaces, including SHA-256 and file sizes.
           - reverie-blender.exe: Blender runtime plugin executable.
-          - reverie-godot.exe: Godot runtime plugin executable.
-          - reverie-o3de.exe: O3DE runtime plugin executable.
           - reverie-game-models.exe: Game Models runtime plugin executable.
+          - Godot and O3DE runtime patterns are built into Reverie Engine and no longer ship as plugins.
+          - Ren'Py and Live2D remain optional source plugins and are not uploaded as rolling Release assets.
 
           Commit: $env:GITHUB_SHA
           Event: $env:GITHUB_EVENT_NAME
@@ -316,12 +310,19 @@ jobs:
             gh release create latest --repo $env:GITHUB_REPOSITORY --title "Reverie CLI Latest" --notes $notes --latest
           }
 
+          # Uploading with --clobber does not remove differently named assets from
+          # earlier releases. Delete retired runtime plugins explicitly.
+          foreach ($retiredAsset in @("reverie-godot.exe", "reverie-o3de.exe")) {
+            gh release delete-asset latest $retiredAsset --repo $env:GITHUB_REPOSITORY --yes 2>$null
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "Retired asset already absent: $retiredAsset"
+            }
+          }
+
           $assets = @(
             @{ Path = "dist\reverie.exe"; Label = "Reverie CLI for Windows (Python full build)" },
             @{ Path = "dist\plugins-manifest.json"; Label = "Release manifest with hashes and plugin metadata" },
             @{ Path = "plugins\blender\dist\reverie-blender.exe"; Label = "Blender runtime plugin" },
-            @{ Path = "plugins\godot\dist\reverie-godot.exe"; Label = "Godot runtime plugin" },
-            @{ Path = "plugins\o3de\dist\reverie-o3de.exe"; Label = "O3DE runtime plugin" },
             @{ Path = "plugins\game_models\dist\reverie-game-models.exe"; Label = "Game Models runtime plugin" }
           )
           foreach ($asset in $assets) {

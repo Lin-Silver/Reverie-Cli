@@ -15,6 +15,7 @@ ENGINE_BRAND = "Reverie Engine"
 ENGINE_NAME = "reverie_engine"
 ENGINE_ALIASES = (ENGINE_NAME,)
 SUPPORTED_DIMENSIONS = ("2D", "2.5D", "3D")
+UNSUPPORTED_QUALITY_TIERS = ("aaa", "3a")
 
 
 def _as_list(values: Iterable[str] | None) -> list[str]:
@@ -40,6 +41,20 @@ def normalize_genre(value: str | None) -> str:
         "td": "tower_defense",
         "platform": "platformer",
         "arpg": "action_rpg",
+        "card": "card_game",
+        "card_battle": "card_game",
+        "card_battler": "card_game",
+        "deckbuilder": "card_game",
+        "deck_builder": "card_game",
+        "fighting_game": "fighting",
+        "fps": "shooter",
+        "tps": "shooter",
+        "management_sim": "management",
+        "real_time_strategy": "strategy",
+        "rts": "strategy",
+        "turn_based_strategy": "tactics",
+        "turn_based_tactics": "tactics",
+        "vn_game": "galgame",
     }
     return aliases.get(raw, raw or "sandbox")
 
@@ -87,6 +102,86 @@ GENRE_LIBRARY: Dict[str, Dict[str, Any]] = {
     "arena": {
         "label": "Arena Combat",
         "modules": ["scene", "physics", "input", "combat", "ai", "audio", "ui", "telemetry", "save_data"],
+        "supports_live2d": False,
+    },
+    "card_game": {
+        "label": "Card and Deckbuilding",
+        "modules": ["scene", "input", "turns", "cards", "economy", "audio", "ui", "telemetry", "save_data"],
+        "supports_live2d": False,
+    },
+    "fighting": {
+        "label": "Fighting",
+        "modules": ["scene", "physics", "input", "combat", "animation", "audio", "ui", "telemetry", "save_data"],
+        "supports_live2d": False,
+    },
+    "horror": {
+        "label": "Horror",
+        "modules": ["scene", "physics", "input", "ai", "dialogue", "audio", "ui", "telemetry", "save_data"],
+        "supports_live2d": False,
+    },
+    "idle": {
+        "label": "Idle and Incremental",
+        "modules": ["scene", "economy", "progression", "audio", "ui", "telemetry", "save_data"],
+        "supports_live2d": False,
+    },
+    "management": {
+        "label": "Management",
+        "modules": ["scene", "input", "simulation", "economy", "ai", "audio", "ui", "telemetry", "save_data"],
+        "supports_live2d": False,
+    },
+    "metroidvania": {
+        "label": "Metroidvania",
+        "modules": ["scene", "physics", "input", "combat", "quests", "inventory", "audio", "ui", "telemetry", "save_data"],
+        "supports_live2d": False,
+    },
+    "puzzle": {
+        "label": "Puzzle",
+        "modules": ["scene", "input", "rules", "audio", "ui", "telemetry", "save_data"],
+        "supports_live2d": False,
+    },
+    "racing": {
+        "label": "Racing",
+        "modules": ["scene", "physics", "input", "ai", "progression", "audio", "ui", "telemetry", "save_data"],
+        "supports_live2d": False,
+    },
+    "rhythm": {
+        "label": "Rhythm",
+        "modules": ["scene", "input", "timeline", "audio", "ui", "telemetry", "save_data"],
+        "supports_live2d": False,
+    },
+    "roguelike": {
+        "label": "Roguelike",
+        "modules": ["scene", "physics", "input", "combat", "procedural", "inventory", "audio", "ui", "telemetry", "save_data"],
+        "supports_live2d": False,
+    },
+    "shooter": {
+        "label": "Shooter",
+        "modules": ["scene", "physics", "input", "combat", "ai", "inventory", "audio", "ui", "telemetry", "save_data"],
+        "supports_live2d": False,
+    },
+    "simulation": {
+        "label": "Simulation",
+        "modules": ["scene", "physics", "input", "simulation", "ai", "economy", "audio", "ui", "telemetry", "save_data"],
+        "supports_live2d": False,
+    },
+    "sports": {
+        "label": "Sports",
+        "modules": ["scene", "physics", "input", "ai", "rules", "audio", "ui", "telemetry", "save_data"],
+        "supports_live2d": False,
+    },
+    "strategy": {
+        "label": "Strategy",
+        "modules": ["scene", "input", "ai", "rules", "economy", "navigation", "audio", "ui", "telemetry", "save_data"],
+        "supports_live2d": False,
+    },
+    "survival": {
+        "label": "Survival",
+        "modules": ["scene", "physics", "input", "combat", "ai", "inventory", "crafting", "audio", "ui", "telemetry", "save_data"],
+        "supports_live2d": False,
+    },
+    "tactics": {
+        "label": "Turn-based Tactics",
+        "modules": ["scene", "input", "turns", "ai", "rules", "navigation", "audio", "ui", "telemetry", "save_data"],
         "supports_live2d": False,
     },
 }
@@ -280,6 +375,50 @@ def default_modules_for_genre(genre: str) -> list[str]:
     return list(profile["modules"])
 
 
+def supported_game_families() -> list[Dict[str, Any]]:
+    """Return the canonical game-family catalog exposed by the unified engine."""
+    return [
+        {
+            "id": genre_id,
+            "label": str(profile["label"]),
+            "modules": list(profile["modules"]),
+            "dimensions": list(SUPPORTED_DIMENSIONS),
+        }
+        for genre_id, profile in sorted(GENRE_LIBRARY.items())
+    ]
+
+
+def assess_project_scope(
+    *,
+    dimension: str = "2D",
+    genre: str = "sandbox",
+    quality_tier: str = "indie",
+    world_structure: str = "focused",
+) -> Dict[str, Any]:
+    """Assess whether a project fits Reverie Engine's supported production envelope."""
+    dimension_key = normalize_dimension(dimension)
+    genre_key = normalize_genre(genre)
+    quality_key = str(quality_tier or "indie").strip().lower().replace("-", "_")
+    world_key = str(world_structure or "focused").strip().lower().replace("-", "_").replace(" ", "_")
+    blockers: list[str] = []
+    if quality_key in UNSUPPORTED_QUALITY_TIERS:
+        blockers.append("AAA/3A production is outside Reverie Engine's supported scope")
+    if dimension_key == "3D" and ("open_world" in world_key or genre_key in {"open_world", "open_world_rpg"}):
+        blockers.append("3D open-world production is outside Reverie Engine's supported scope")
+    return {
+        "supported": not blockers,
+        "engine": ENGINE_NAME,
+        "dimension": dimension_key,
+        "genre": genre_key,
+        "quality_tier": quality_key,
+        "world_structure": world_key,
+        "blockers": blockers,
+        "recommended_delivery": "focused_vertical_slice" if blockers else "full_project_or_vertical_slice",
+        "supported_dimensions": list(SUPPORTED_DIMENSIONS),
+        "supported_game_families": [item["id"] for item in supported_game_families()],
+    }
+
+
 def build_capabilities(genre: str, dimension: str, live2d_enabled: bool, modeling_enabled: bool = False) -> Dict[str, Any]:
     dimension = normalize_dimension(dimension)
     genre_key = normalize_genre(genre)
@@ -300,6 +439,10 @@ def build_capabilities(genre: str, dimension: str, live2d_enabled: bool, modelin
         "supports_ui": "ui" in profile["modules"],
         "supports_model_pipeline": bool(modeling_enabled),
         "supports_ashfox_mcp": bool(modeling_enabled),
+        "unified_runtime": True,
+        "heritage": ["reverie_engine", "godot_scene_patterns", "o3de_data_pipeline_patterns"],
+        "scope_exclusions": ["AAA/3A production", "3D open-world games"],
+        "supported_game_families": [item["id"] for item in supported_game_families()],
     }
 
 

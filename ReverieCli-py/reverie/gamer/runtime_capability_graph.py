@@ -11,10 +11,6 @@ def _utc_now() -> str:
 
 
 def _runtime_root(runtime_id: str) -> str:
-    if runtime_id == "godot":
-        return "engine/godot"
-    if runtime_id == "o3de":
-        return "engine/o3de"
     return "."
 
 
@@ -38,17 +34,11 @@ def _capability_summary(profile: Dict[str, Any]) -> Dict[str, Any]:
     if "streaming" in capabilities or "large-scale-3d" in capabilities:
         world_streaming = "regional_streaming_ready"
 
-    quest_cutscene = "data_driven_quest_flow"
-    if runtime_id == "godot":
-        quest_cutscene = "scene_driven_quest_flow"
-    elif runtime_id == "o3de":
-        quest_cutscene = "component_entity_flow"
+    quest_cutscene = "scene_and_component_driven_quest_flow"
 
     asset_import = "project_level_registry"
     if "gltf" in capabilities:
         asset_import = "gltf_scene_pipeline"
-    elif runtime_id == "o3de":
-        asset_import = "asset_processor_pipeline"
 
     performance_budget = "slice_friendly"
     if "large-scale-3d" in capabilities:
@@ -148,13 +138,15 @@ def build_runtime_capability_graph(
         + [
             {
                 "from": ref_id,
-                "to": runtime_id,
-                "relationship": "reference_supports_runtime",
+                "to": selected_runtime,
+                "relationship": "heritage_reference_informs_unified_runtime",
+                "source_engine": runtime_id,
             }
             for runtime_id, alignment in reference_alignment.items()
             for ref_id in alignment.get("supporting_references", []) or []
         ],
         "selected_summary": selected_summary,
+        "unified_runtime": True,
         "risk_nodes": [
             {
                 "id": f"{summary['runtime_id']}_validation_risk",

@@ -448,7 +448,7 @@ def _request_handoff_summary_text(
     workspace_stats_manager: Any = None,
     model_display_name: str = "",
 ) -> str:
-    if provider == "openai-sdk":
+    if provider in {"openai-sdk", "openai-chat"}:
         extra_body = _openai_extra_body_for_model(model)
         model_for_sdk, extra_body, nvidia_options = _resolve_nvidia_openai_call_options(
             model,
@@ -466,6 +466,24 @@ def _request_handoff_summary_text(
             kwargs["extra_body"] = extra_body
         response = client.chat.completions.create(**kwargs)
         response_text = str(response.choices[0].message.content or "").strip()
+        _record_handoff_usage(
+            workspace_stats_manager,
+            provider=provider,
+            model=model,
+            model_display_name=model_display_name,
+            prompt_messages=prompt_messages,
+            response_text=response_text,
+            usage=getattr(response, "usage", None),
+            session_id=session_id,
+        )
+        return response_text
+
+    if provider == "openai-responses":
+        from ..codex import build_codex_request_payload
+
+        converted = build_codex_request_payload(model, prompt_messages, tools=None, stream=False)
+        response = client.responses.create(model=model, input=converted["input"], stream=False)
+        response_text = str(getattr(response, "output_text", "") or "").strip()
         _record_handoff_usage(
             workspace_stats_manager,
             provider=provider,

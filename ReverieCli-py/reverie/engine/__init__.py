@@ -1,6 +1,6 @@
 """Canonical public entry points for Reverie Engine."""
 
-from .app import EngineLiteApp, RuntimeProfile, run_project, run_project_smoke, runtime_capabilities
+from .app import ReverieEngineApp, RuntimeProfile, run_project, run_project_smoke, runtime_capabilities
 from .config import (
     ENGINE_BRAND,
     ENGINE_NAME,
@@ -9,6 +9,7 @@ from .config import (
     RuntimeSettings,
     Live2DSettings,
     ModelingSettings,
+    assess_project_scope,
     build_engine_config,
     canonical_engine_name,
     discover_live2d_sdk,
@@ -16,6 +17,7 @@ from .config import (
     load_engine_config,
     normalize_dimension,
     normalize_genre,
+    supported_game_families,
 )
 from .components import (
     AnimatorComponent,
@@ -98,7 +100,16 @@ from .procedural_assets import (
     create_primitive_model,
     validate_blockbench_model_file,
 )
-from .renpy_import import ParsedRenPyScript, compile_renpy_script, import_renpy_script, parse_renpy_script
+from .renpy_import import (
+    ParsedRenPyScript,
+    compile_renpy_script,
+    import_renpy_script,
+    inspect_renpy_project,
+    outline_renpy_script,
+    parse_renpy_script,
+    validate_renpy_project,
+)
+from .migration import detect_legacy_project, inspect_legacy_project, migrate_legacy_project
 from .navigation import GridNavigationMap, NavigationPath, NavigationServer, TowerDefenseLane
 from .project import (
     build_project_health_report,
@@ -226,6 +237,7 @@ __all__ = [
     "benchmark_project",
     "benchmark_scene_instantiation",
     "audit_blender_model",
+    "assess_project_scope",
     "BlendMode",
     "ButtonComponent",
     "Camera",
@@ -245,7 +257,7 @@ __all__ = [
     "DialogueBoxComponent",
     "DialogueSession",
     "DirectionalLight",
-    "EngineLiteApp",
+    "ReverieEngineApp",
     "EngineWorldState",
     "EventBus",
     "GameplayDirector",
@@ -363,6 +375,8 @@ __all__ = [
     "discover_ffmpeg",
     "get_sample_definition",
     "import_renpy_script",
+    "inspect_legacy_project",
+    "inspect_renpy_project",
     "list_samples",
     "inspect_project",
     "inspect_modeling_workspace",
@@ -381,6 +395,7 @@ __all__ = [
     "pack_scene",
     "pack_archetype",
     "parse_renpy_script",
+    "outline_renpy_script",
     "overlap_shape",
     "project_modeling_paths",
     "blender_modeling_paths",
@@ -395,6 +410,7 @@ __all__ = [
     "run_blender_script",
     "run_project_smoke",
     "runtime_capabilities",
+    "supported_game_families",
     "save_packed_scene",
     "save_archetype",
     "save_prefab",
@@ -412,4 +428,7 @@ __all__ = [
     "validate_project",
     "validate_archetype_document",
     "validate_scene_document",
+    "validate_renpy_project",
+    "detect_legacy_project",
+    "migrate_legacy_project",
 ]

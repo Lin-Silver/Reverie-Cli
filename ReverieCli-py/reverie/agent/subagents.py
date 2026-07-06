@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from concurrent.futures import CancelledError, Future, ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from threading import Event, RLock
 from typing import Any, Dict, List, Optional
 import json
 import re
@@ -35,7 +37,7 @@ _NON_REVERIE_WORKFLOW_MODES = {
 def _is_base_reverie_mode(mode: Any) -> bool:
     """Treat unknown model-source strings as base Reverie workflow mode."""
     normalized = normalize_mode(mode)
-    return normalized == "reverie" or normalized not in _NON_REVERIE_WORKFLOW_MODES
+    return normalized in {"reverie", "computer-controller"} or normalized not in _NON_REVERIE_WORKFLOW_MODES
 
 
 def _utc_timestamp() -> str:
@@ -55,6 +57,7 @@ class SubagentSpec:
     name: str
     model_ref: Dict[str, Any]
     color: str
+    mode: str = "reverie"
     enabled: bool = True
     created_at: str = ""
     updated_at: str = ""
@@ -68,6 +71,7 @@ class SubagentSpec:
             name=str(data.get("name") or data.get("id") or ""),
             model_ref=dict(data.get("model_ref") or {}),
             color=str(data.get("color") or ""),
+            mode=normalize_mode(data.get("mode", "reverie")),
             enabled=bool(data.get("enabled", True)),
             created_at=str(data.get("created_at") or ""),
             updated_at=str(data.get("updated_at") or ""),
@@ -79,6 +83,7 @@ class SubagentSpec:
             "name": self.name or self.id,
             "enabled": self.enabled,
             "color": self.color or _subagent_color_for_id(self.id),
+            "mode": normalize_mode(self.mode),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "model_ref": dict(self.model_ref or {}),
@@ -98,6 +103,20 @@ class SubagentRun:
     summary: str = ""
     error: str = ""
     log_path: str = ""
+
+    @classmethod
+    def from_dict(cls, raw: Dict[str, Any]) -> "SubagentRun":
+        return cls(
+            run_id=str(raw.get("run_id") or ""),
+            subagent_id=str(raw.get("subagent_id") or ""),
+            task_id=str(raw.get("task_id") or ""),
+            status=str(raw.get("status") or "unknown"),
+            started_at=str(raw.get("started_at") or ""),
+            ended_at=str(raw.get("ended_at") or ""),
+            summary=str(raw.get("summary") or ""),
+            error=str(raw.get("error") or ""),
+            log_path=str(raw.get("log_path") or ""),
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -119,6 +138,10 @@ class SubagentManager:
     def __init__(self, interface: Any):
         self.interface = interface
         self._runs: Dict[str, SubagentRun] = {}
+        self._futures: Dict[str, Future[SubagentRun]] = {}
+        self._cancel_events: Dict[str, Event] = {}
+        self._run_lock = RLock()
+        self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="reverie-subagent")
 
     def _load_config(self) -> Config:
         loader = getattr(self.interface, "_load_active_runtime_config", None)
@@ -136,16 +159,11 @@ class SubagentManager:
 
     def is_available(self, config: Optional[Config] = None) -> bool:
         active_config = config or self._load_config()
-        if str(getattr(active_config, "active_model_source", "standard") or "standard").strip().lower() == "nvidia":
-            return False
         return _is_base_reverie_mode(getattr(active_config, "mode", "reverie"))
 
     def ensure_available(self, config: Optional[Config] = None) -> None:
         if not self.is_available(config):
-            active_config = config or self._load_config()
-            if str(getattr(active_config, "active_model_source", "standard") or "standard").strip().lower() == "nvidia":
-                raise RuntimeError("Subagents are disabled for the NVIDIA source. Use Context Engine retrieval instead.")
-            raise RuntimeError("Subagents are only available in base Reverie mode.")
+            raise RuntimeError("Subagents are only available in Reverie and computer-controller modes.")
 
     def list_specs(self, config: Optional[Config] = None) -> List[SubagentSpec]:
         active_config = config or self._load_config()
@@ -240,7 +258,7 @@ class SubagentManager:
 
         if source in EXTERNAL_MODEL_SOURCES:
             probe = Config.from_dict(active_config.to_dict())
-            probe.mode = "reverie"
+            probe.mode = spec.mode
             probe.active_model_source = source
             model = probe.active_model
             return ModelConfig.from_dict(model.to_dict()) if model else None
@@ -256,7 +274,13 @@ class SubagentManager:
                 return candidate
             index += 1
 
-    def create_subagent(self, model_ref: Dict[str, Any], *, subagent_id: str = "") -> SubagentSpec:
+    def create_subagent(
+        self,
+        model_ref: Dict[str, Any],
+        *,
+        subagent_id: str = "",
+        mode: str = "reverie",
+    ) -> SubagentSpec:
         config = self._load_config()
         self.ensure_available(config)
         section = normalize_subagent_config(getattr(config, "subagents", {}))
@@ -273,12 +297,14 @@ class SubagentManager:
                 "color": _subagent_color_for_id(new_id),
                 "created_at": now,
                 "updated_at": now,
+                "mode": normalize_mode(mode),
                 "model_ref": dict(model_ref or {}),
             }
         )
         section["agents"].append(spec.to_dict())
         config.subagents = normalize_subagent_config(section)
         self._save_config(config)
+        self._save_context(spec.id, {})
         return spec
 
     def delete_subagent(self, subagent_id: str) -> bool:
@@ -316,7 +342,7 @@ class SubagentManager:
         self._save_config(config)
         return updated
 
-    def _runs_dir(self, subagent_id: str) -> Path:
+    def _subagent_dir(self, subagent_id: str) -> Path:
         project_data_dir = getattr(self.interface, "project_data_dir", None)
         if project_data_dir is None:
             config_manager = getattr(self.interface, "config_manager", None)
@@ -325,7 +351,66 @@ class SubagentManager:
             from ..config import get_project_data_dir
 
             project_data_dir = get_project_data_dir(getattr(self.interface, "project_root", Path.cwd()))
-        return Path(project_data_dir) / "subagents" / _safe_subagent_id(subagent_id) / "runs"
+        return Path(project_data_dir) / "subagents" / _safe_subagent_id(subagent_id)
+
+    def _runs_dir(self, subagent_id: str) -> Path:
+        return self._subagent_dir(subagent_id) / "runs"
+
+    def _context_path(self, subagent_id: str) -> Path:
+        return self._subagent_dir(subagent_id) / "context.json"
+
+    def load_context(self, subagent_id: str) -> Dict[str, Any]:
+        path = self._context_path(subagent_id)
+        with self._run_lock:
+            if not path.exists():
+                return {}
+            try:
+                loaded = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return {}
+        return dict(loaded) if isinstance(loaded, dict) else {}
+
+    def _save_context(self, subagent_id: str, context: Dict[str, Any]) -> None:
+        path = self._context_path(subagent_id)
+        try:
+            serialized = json.dumps(dict(context), indent=2, ensure_ascii=False)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Subagent context must be JSON serializable: {exc}") from exc
+        with self._run_lock:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            pending = path.with_suffix(".json.tmp")
+            pending.write_text(serialized, encoding="utf-8")
+            pending.replace(path)
+
+    def remember_context(self, subagent_id: str, key: str, value: Any) -> Dict[str, Any]:
+        context_key = str(key or "").strip()
+        if not context_key:
+            raise ValueError("context_key is required")
+        with self._run_lock:
+            context = self.load_context(subagent_id)
+            context[context_key] = value
+            self._save_context(subagent_id, context)
+        return context
+
+    def forget_context(self, subagent_id: str, key: str) -> bool:
+        context_key = str(key or "").strip()
+        if not context_key:
+            raise ValueError("context_key is required")
+        with self._run_lock:
+            context = self.load_context(subagent_id)
+            removed = context_key in context
+            context.pop(context_key, None)
+            self._save_context(subagent_id, context)
+        return removed
+
+    def clear_context(self, subagent_id: str) -> None:
+        self._save_context(subagent_id, {})
+
+    def _selected_context(self, subagent_id: str, context_keys: Optional[List[str]]) -> Dict[str, Any]:
+        if not context_keys:
+            return {}
+        context = self.load_context(subagent_id)
+        return {key: context[key] for key in context_keys if key in context}
 
     def _build_assignment_prompt(
         self,
@@ -336,6 +421,7 @@ class SubagentManager:
         read_scope: Optional[List[str]] = None,
         write_scope: Optional[List[str]] = None,
         worker_role: str = "context_expert",
+        persistent_context: Optional[Dict[str, Any]] = None,
     ) -> str:
         role_text = "validator worker" if worker_role == "validator" else "Context Engine expert worker"
         lines = [
@@ -351,6 +437,14 @@ class SubagentManager:
         ]
         if expected_output:
             lines.extend(["", "## Expected Output", str(expected_output).strip()])
+        if persistent_context:
+            lines.extend(
+                [
+                    "",
+                    "## Persistent Context",
+                    json.dumps(persistent_context, indent=2, ensure_ascii=False),
+                ]
+            )
         if read_scope:
             lines.extend(["", "## Read Scope", "\n".join(f"- {item}" for item in read_scope)])
         if write_scope:
@@ -363,7 +457,10 @@ class SubagentManager:
     def _shared_context_from_interface(self) -> Dict[str, Any]:
         parent_agent = getattr(self.interface, "agent", None)
         if parent_agent is not None and getattr(parent_agent, "tool_executor", None) is not None:
-            return dict(getattr(parent_agent.tool_executor, "context", {}) or {})
+            context = dict(getattr(parent_agent.tool_executor, "context", {}) or {})
+            for key in {"agent", "session_manager", "operation_history", "rollback_manager"}:
+                context.pop(key, None)
+            return context
 
         context: Dict[str, Any] = {
             "config_manager": getattr(self.interface, "config_manager", None),
@@ -371,7 +468,6 @@ class SubagentManager:
             "mcp_runtime": getattr(self.interface, "mcp_runtime", None),
             "runtime_plugin_manager": getattr(self.interface, "runtime_plugin_manager", None),
             "skills_manager": getattr(self.interface, "skills_manager", None),
-            "session_manager": getattr(self.interface, "session_manager", None),
             "project_data_dir": getattr(self.interface, "project_data_dir", None),
             "memory_indexer": getattr(self.interface, "memory_indexer", None),
             "workspace_stats_manager": getattr(self.interface, "workspace_stats_manager", None),
@@ -403,13 +499,13 @@ class SubagentManager:
             indexer=getattr(self.interface, "indexer", None),
             git_integration=getattr(self.interface, "git_integration", None),
             additional_rules=additional_rules,
-            mode="reverie",
-            provider=getattr(model, "provider", "openai-sdk"),
+            mode=spec.mode,
+            provider=getattr(model, "provider", "openai-chat"),
             thinking_mode=getattr(model, "thinking_mode", None),
             endpoint=getattr(model, "endpoint", ""),
             custom_headers=getattr(model, "custom_headers", {}),
-            operation_history=getattr(self.interface, "operation_history", None),
-            rollback_manager=getattr(self.interface, "rollback_manager", None),
+            operation_history=None,
+            rollback_manager=None,
             config=config,
             agent_id=spec.id,
             agent_color=spec.color,
@@ -430,17 +526,10 @@ class SubagentManager:
         child.tool_executor.update_context("subagent_write_scope", list(write_scope or []))
         return child
 
-    def run_task(
+    def _prepare_run(
         self,
         subagent_id: str,
-        assignment: str,
-        *,
-        expected_output: str = "",
-        read_scope: Optional[List[str]] = None,
-        write_scope: Optional[List[str]] = None,
-        worker_role: str = "context_expert",
-        stream: bool = False,
-    ) -> SubagentRun:
+    ) -> tuple[SubagentRun, SubagentSpec, ModelConfig, Config]:
         config = self._load_config()
         self.ensure_available(config)
         spec = self.get_spec(subagent_id, config)
@@ -459,60 +548,194 @@ class SubagentManager:
             except TypeError:
                 ensure_context_engine()
 
-        run_id = f"{spec.id}-{uuid.uuid4().hex[:10]}"
-        started_at = _utc_timestamp()
         run = SubagentRun(
-            run_id=run_id,
+            run_id=f"{spec.id}-{uuid.uuid4().hex[:10]}",
             subagent_id=spec.id,
             task_id=uuid.uuid4().hex[:12],
-            status="running",
-            started_at=started_at,
+            status="queued",
+            started_at=_utc_timestamp(),
         )
-        self._runs[run_id] = run
-
         child_config = Config.from_dict(config.to_dict())
-        child_config.mode = "reverie"
-        child_agent = self._build_child_agent(
-            spec,
-            model,
-            child_config,
-            read_scope=read_scope,
-            write_scope=write_scope,
-        )
-        prompt = self._build_assignment_prompt(
-            spec=spec,
-            assignment=assignment,
-            expected_output=expected_output,
-            read_scope=read_scope,
-            write_scope=write_scope,
-            worker_role=worker_role,
-        )
+        child_config.mode = spec.mode
+        with self._run_lock:
+            self._runs[run.run_id] = run
+            self._cancel_events[run.run_id] = Event()
+        return run, spec, model, child_config
 
+    def _execute_task(
+        self,
+        run: SubagentRun,
+        spec: SubagentSpec,
+        model: ModelConfig,
+        child_config: Config,
+        assignment: str,
+        *,
+        expected_output: str = "",
+        read_scope: Optional[List[str]] = None,
+        write_scope: Optional[List[str]] = None,
+        worker_role: str = "context_expert",
+        stream: bool = False,
+        context_keys: Optional[List[str]] = None,
+        retain_summary: bool = False,
+    ) -> SubagentRun:
+        cancel_event = self._cancel_events[run.run_id]
         try:
-            chunks = list(
-                child_agent.process_message(
-                    prompt,
-                    stream=stream,
-                    session_id=run_id,
-                    user_display_text=str(assignment or "").strip(),
-                )
+            if cancel_event.is_set():
+                run.status = "cancelled"
+                return run
+            run.status = "running"
+            child_agent = self._build_child_agent(
+                spec,
+                model,
+                child_config,
+                read_scope=read_scope,
+                write_scope=write_scope,
             )
-            summary = "".join(str(chunk) for chunk in chunks).strip()
-            if summary.startswith("Error processing message:"):
+            prompt = self._build_assignment_prompt(
+                spec=spec,
+                assignment=assignment,
+                expected_output=expected_output,
+                read_scope=read_scope,
+                write_scope=write_scope,
+                worker_role=worker_role,
+                persistent_context=self._selected_context(spec.id, context_keys),
+            )
+            chunks: List[str] = []
+            response = child_agent.process_message(
+                prompt,
+                stream=stream,
+                session_id=run.run_id,
+                user_display_text=str(assignment or "").strip(),
+            )
+            for chunk in response:
+                if cancel_event.is_set():
+                    close = getattr(response, "close", None)
+                    if callable(close):
+                        close()
+                    break
+                chunks.append(str(chunk))
+            summary = "".join(chunks).strip()
+            if cancel_event.is_set():
+                run.status = "cancelled"
+            elif summary.startswith("Error processing message:"):
                 run.status = "failed"
                 run.error = summary
             else:
                 run.status = "completed"
                 run.summary = summary
+                if retain_summary:
+                    self.remember_context(spec.id, "last_summary", summary)
         except Exception as exc:
-            run.status = "failed"
-            run.error = str(exc)
+            if cancel_event.is_set():
+                run.status = "cancelled"
+            else:
+                run.status = "failed"
+                run.error = str(exc)
         finally:
             run.ended_at = _utc_timestamp()
             self._persist_run_log(run, spec, model, assignment)
-            self._runs[run_id] = run
+            with self._run_lock:
+                self._runs[run.run_id] = run
 
         return run
+
+    def run_task(
+        self,
+        subagent_id: str,
+        assignment: str,
+        *,
+        expected_output: str = "",
+        read_scope: Optional[List[str]] = None,
+        write_scope: Optional[List[str]] = None,
+        worker_role: str = "context_expert",
+        stream: bool = False,
+        context_keys: Optional[List[str]] = None,
+        retain_summary: bool = False,
+    ) -> SubagentRun:
+        run, spec, model, child_config = self._prepare_run(subagent_id)
+        return self._execute_task(
+            run,
+            spec,
+            model,
+            child_config,
+            assignment,
+            expected_output=expected_output,
+            read_scope=read_scope,
+            write_scope=write_scope,
+            worker_role=worker_role,
+            stream=stream,
+            context_keys=context_keys,
+            retain_summary=retain_summary,
+        )
+
+    def start_task(
+        self,
+        subagent_id: str,
+        assignment: str,
+        *,
+        expected_output: str = "",
+        read_scope: Optional[List[str]] = None,
+        write_scope: Optional[List[str]] = None,
+        worker_role: str = "context_expert",
+        stream: bool = False,
+        context_keys: Optional[List[str]] = None,
+        retain_summary: bool = False,
+    ) -> SubagentRun:
+        run, spec, model, child_config = self._prepare_run(subagent_id)
+        future = self._executor.submit(
+            self._execute_task,
+            run,
+            spec,
+            model,
+            child_config,
+            assignment,
+            expected_output=expected_output,
+            read_scope=read_scope,
+            write_scope=write_scope,
+            worker_role=worker_role,
+            stream=stream,
+            context_keys=context_keys,
+            retain_summary=retain_summary,
+        )
+        with self._run_lock:
+            self._futures[run.run_id] = future
+        return run
+
+    def cancel_task(self, run_id: str) -> Optional[SubagentRun]:
+        wanted = str(run_id or "").strip()
+        with self._run_lock:
+            run = self._runs.get(wanted)
+            future = self._futures.get(wanted)
+            cancel_event = self._cancel_events.get(wanted)
+            if run is None:
+                return None
+            if run.status in {"completed", "failed", "cancelled"}:
+                return run
+            if cancel_event is not None:
+                cancel_event.set()
+            if future is not None and future.cancel():
+                run.status = "cancelled"
+                run.ended_at = _utc_timestamp()
+            else:
+                run.status = "cancelling"
+            return run
+
+    def wait_task(self, run_id: str, timeout: Optional[float] = None) -> Optional[SubagentRun]:
+        wanted = str(run_id or "").strip()
+        with self._run_lock:
+            run = self._runs.get(wanted)
+            future = self._futures.get(wanted)
+        if run is None:
+            return None
+        if future is not None and not future.done():
+            try:
+                future.result(timeout=timeout)
+            except (CancelledError, FutureTimeoutError):
+                pass
+        return self.get_run(wanted)
+
+    def shutdown(self, wait: bool = False) -> None:
+        self._executor.shutdown(wait=wait, cancel_futures=True)
 
     def _persist_run_log(
         self,
@@ -534,7 +757,31 @@ class SubagentManager:
         log_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
     def get_run(self, run_id: str) -> Optional[SubagentRun]:
-        return self._runs.get(str(run_id or "").strip())
+        wanted = str(run_id or "").strip()
+        with self._run_lock:
+            active = self._runs.get(wanted)
+        if active is not None or not wanted:
+            return active
+
+        project_data_dir = getattr(self.interface, "project_data_dir", None)
+        if project_data_dir is None:
+            return None
+        for path in Path(project_data_dir).glob(f"subagents/*/runs/{wanted}.json"):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                run_payload = payload.get("run") if isinstance(payload, dict) else None
+                if not isinstance(run_payload, dict):
+                    continue
+                restored = SubagentRun.from_dict(run_payload)
+                restored.log_path = str(path)
+                with self._run_lock:
+                    self._runs[wanted] = restored
+                return restored
+            except (OSError, ValueError):
+                continue
+        return None
 
     def list_recent_runs(self) -> List[SubagentRun]:
-        return sorted(self._runs.values(), key=lambda item: item.started_at, reverse=True)
+        with self._run_lock:
+            runs = list(self._runs.values())
+        return sorted(runs, key=lambda item: item.started_at, reverse=True)

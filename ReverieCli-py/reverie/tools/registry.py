@@ -32,6 +32,7 @@ from .ant_tools import TaskBoundaryTool, NotifyUserTool
 from .novel_context_manager import NovelContextManagerTool
 from .consistency_checker_tool import ConsistencyCheckerTool
 from .plot_analyzer_tool import PlotAnalyzerTool
+from .serial_novel import SerialNovelTool
 from .game_asset_manager import GameAssetManagerTool
 from .game_balance_analyzer import GameBalanceAnalyzerTool
 from .level_design_tool import LevelDesignTool
@@ -49,7 +50,7 @@ from .blender_modeling_workbench import BlenderModelingWorkbenchTool
 from .atlas_delivery_orchestrator import AtlasDeliveryOrchestratorTool
 from .reverie_engine import ReverieEngineTool
 from .mode_switch import ModeSwitchTool
-from .computer_control import ComputerControlTool
+from .open_computer_use import COMPUTER_USE_TOOL_CLASSES
 from .mcp_resource_tools import ListMcpResourcesTool, ReadMcpResourceTool
 from .subagent import SubagentTool
 
@@ -183,37 +184,39 @@ def get_supported_modes_for_tool(tool_name: str, *, include_hidden: bool = False
 def _register_builtin_tools() -> None:
     reverie_game_modes = ("reverie-gamer",)
     reverie_modeling_modes = ("reverie", "reverie-gamer")
+    no_writer_or_computer = ("writer", "computer-controller")
 
-    register_tool_class(CodebaseRetrievalTool)
-    register_tool_class(GitCommitRetrievalTool)
-    register_tool_class(StrReplaceEditorTool)
-    register_tool_class(FileOpsTool)
-    register_tool_class(DeleteFileTool)
-    register_tool_class(CommandExecTool)
+    register_tool_class(CodebaseRetrievalTool, exclude_modes=("writer",))
+    register_tool_class(GitCommitRetrievalTool, exclude_modes=("writer",))
+    register_tool_class(StrReplaceEditorTool, exclude_modes=no_writer_or_computer)
+    register_tool_class(FileOpsTool, exclude_modes=no_writer_or_computer)
+    register_tool_class(DeleteFileTool, exclude_modes=no_writer_or_computer)
+    register_tool_class(CommandExecTool, exclude_modes=no_writer_or_computer)
     register_tool_class(WebSearchTool)
     register_tool_class(WebFetchTool)
-    register_tool_class(BrowserControlerTool)
+    register_tool_class(BrowserControlerTool, exclude_modes=no_writer_or_computer)
     register_tool_class(ToolCatalogTool, expose_schema=False)
     register_tool_class(TaskManagerTool, include_modes=("reverie", "reverie-gamer"))
-    register_tool_class(SubagentTool, include_modes=("reverie",))
+    register_tool_class(SubagentTool, include_modes=("reverie", "computer-controller"))
     register_tool_class(ContextManagementTool, expose_schema=False)
     register_tool_class(MemoryRetrievalTool)
     register_tool_class(MemoryManagerTool)
-    register_tool_class(EvolutionFeedbackTool)
-    register_tool_class(CreateFileTool)
+    register_tool_class(EvolutionFeedbackTool, exclude_modes=("writer",))
+    register_tool_class(CreateFileTool, exclude_modes=no_writer_or_computer)
     register_tool_class(UserInputTool)
-    register_tool_class(SkillLookupTool)
+    register_tool_class(SkillLookupTool, exclude_modes=("writer",))
     register_tool_class(ClarificationTool, include_modes=("writer",))
-    register_tool_class(MediaGenerationCapabilitiesTool)
-    register_tool_class(TextToImageTool)
-    register_tool_class(TextToVideoTool)
-    register_tool_class(ListMcpResourcesTool)
-    register_tool_class(ReadMcpResourceTool)
+    register_tool_class(MediaGenerationCapabilitiesTool, exclude_modes=("writer",))
+    register_tool_class(TextToImageTool, exclude_modes=("writer",))
+    register_tool_class(TextToVideoTool, exclude_modes=("writer",))
+    register_tool_class(ListMcpResourcesTool, exclude_modes=("writer",))
+    register_tool_class(ReadMcpResourceTool, exclude_modes=("writer",))
     register_tool_class(TaskBoundaryTool, include_modes=("reverie-ant",))
     register_tool_class(NotifyUserTool, include_modes=("reverie-ant",))
     register_tool_class(NovelContextManagerTool, include_modes=("writer",))
     register_tool_class(ConsistencyCheckerTool, include_modes=("writer",))
     register_tool_class(PlotAnalyzerTool, include_modes=("writer",))
+    register_tool_class(SerialNovelTool, include_modes=("writer",))
     register_tool_class(GameAssetManagerTool, include_modes=reverie_game_modes)
     register_tool_class(GameBalanceAnalyzerTool, include_modes=reverie_game_modes)
     register_tool_class(LevelDesignTool, include_modes=reverie_game_modes)
@@ -230,8 +233,9 @@ def _register_builtin_tools() -> None:
     register_tool_class(BlenderModelingWorkbenchTool, include_modes=reverie_modeling_modes)
     register_tool_class(AtlasDeliveryOrchestratorTool, include_modes=("reverie-atlas",))
     register_tool_class(ReverieEngineTool, include_modes=reverie_game_modes)
-    register_tool_class(ModeSwitchTool, exclude_modes=("computer-controller",))
-    register_tool_class(ComputerControlTool, include_modes=("computer-controller",))
+    register_tool_class(ModeSwitchTool)
+    for tool_class in COMPUTER_USE_TOOL_CLASSES:
+        register_tool_class(tool_class, include_modes=("computer-controller",))
 
 
 _register_builtin_tools()

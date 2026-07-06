@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, Optional
 
 from . import (
     deepseek_v4,
+    glm_5_2,
     glm_5_1,
     gpt_oss_120b,
     kimi_k2_6,
@@ -26,6 +27,7 @@ ProfileBuilder = Callable[[Dict[str, Any]], Dict[str, Any]]
 _OPENAI_PROFILES: Dict[str, ProfileBuilder] = {
     "nvidia/nemotron-3-super-120b-a12b": nemotron_3_super.build_openai_options,
     "minimaxai/minimax-m2.7": minimax.build_m27_openai_options,
+    "z-ai/glm-5.2": glm_5_2.build_openai_options,
     "z-ai/glm-5.1": glm_5_1.build_openai_options,
     "z-ai/glm4.7": glm_5_1.build_openai_options,
     "z-ai/glm-4.7": glm_5_1.build_openai_options,

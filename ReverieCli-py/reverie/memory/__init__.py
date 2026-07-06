@@ -9,6 +9,8 @@ from .models import (
     EventRecord,
     LearningProposal,
     MEMORY_CONTEXT_PROMPT_HEADER,
+    MEMANTO_MEMORY_TYPES,
+    MEMORY_TYPES,
     MemoryItem,
     MemorySearchHit,
 )
@@ -24,6 +26,8 @@ __all__ = [
     "EvolutionFeedbackPipeline",
     "LearningProposal",
     "MEMORY_CONTEXT_PROMPT_HEADER",
+    "MEMANTO_MEMORY_TYPES",
+    "MEMORY_TYPES",
     "MemoryConsolidator",
     "MemoryItem",
     "MemoryOS",

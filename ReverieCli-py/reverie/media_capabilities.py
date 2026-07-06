@@ -21,6 +21,8 @@ from .config import (
     sanitize_tti_path,
 )
 from .pollinations_tti_profiles.registry import get_pollinations_tti_model_catalog
+from .sensenova import normalize_sensenova_config, resolve_sensenova_api_key
+from .sensenova_tti_profiles.registry import get_sensenova_tti_model_catalog
 
 
 def _load_config(config_manager: Any = None, config: Any = None) -> Any:
@@ -39,7 +41,7 @@ def _merge_tti_config(config_obj: Any = None) -> Dict[str, Any]:
     loaded = getattr(config_obj, "text_to_image", None)
     if isinstance(loaded, dict):
         cfg.update(loaded)
-        for source in ("aihubmix", "pollinations", "agnes"):
+        for source in ("aihubmix", "pollinations", "agnes", "sensenova"):
             defaults = default_text_to_image_config().get(source, {})
             nested = dict(defaults)
             if isinstance(loaded.get(source), dict):
@@ -138,8 +140,10 @@ def build_media_capabilities(
 
     agnes_cfg = normalize_agnes_config(getattr(config_obj, "agnes", {}) if config_obj is not None else {})
     aihubmix_cfg = normalize_aihubmix_config(getattr(config_obj, "aihubmix", {}) if config_obj is not None else {})
+    sensenova_cfg = normalize_sensenova_config(getattr(config_obj, "sensenova", {}) if config_obj is not None else {})
     agnes_key_available = bool(resolve_agnes_api_key(agnes_cfg))
     aihubmix_key_available = bool(resolve_aihubmix_api_key(aihubmix_cfg))
+    sensenova_key_available = bool(resolve_sensenova_api_key(sensenova_cfg))
 
     local_models = _local_model_status(tti_cfg, root)
     image_sources = {
@@ -168,6 +172,12 @@ def build_media_capabilities(
             cfg=tti_cfg.get("agnes", {}),
             models=get_agnes_tti_model_catalog(),
             api_key_available=agnes_key_available,
+        ),
+        "sensenova": _remote_tti_source(
+            source="sensenova",
+            cfg=tti_cfg.get("sensenova", {}),
+            models=get_sensenova_tti_model_catalog(),
+            api_key_available=sensenova_key_available,
         ),
     }
 

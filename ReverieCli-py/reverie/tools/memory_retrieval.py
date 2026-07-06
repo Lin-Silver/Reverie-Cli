@@ -33,13 +33,19 @@ class MemoryRetrievalTool(BaseTool):
     read_only = True
     concurrency_safe = True
 
-    description = """Query Reverie's structured Memory OS.
+    description = """Recall or answer from Reverie's project-isolated persistent Memory OS.
 
-Use this to retrieve traceable long-term memory before making claims about user preferences, project decisions, failed attempts, or successful workflows."""
+Use this proactively before making claims about user preferences, project decisions, previous failures, successful workflows, or continuation state. Results are immediately searchable and include provenance, versions, temporal signals, and evidence."""
 
     parameters = {
         "type": "object",
         "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["recall", "answer"],
+                "description": "Recall ranked records or produce an evidence-grounded answer.",
+                "default": "recall",
+            },
             "query": {"type": "string", "description": "Current request or search query."},
             "scope": {
                 "type": "string",
@@ -53,6 +59,9 @@ Use this to retrieve traceable long-term memory before making claims about user 
                 "default": "",
             },
             "limit": {"type": "integer", "description": "Maximum results.", "default": 8},
+            "min_confidence": {"type": "number", "description": "Optional confidence floor from 0 to 1.", "default": 0.0},
+            "as_of": {"type": "string", "description": "Optional ISO timestamp for historical recall.", "default": ""},
+            "changed_since": {"type": "string", "description": "Optional ISO timestamp for memories changed since a point in time.", "default": ""},
             "explain": {"type": "boolean", "description": "Include ranking reasons and evidence ids.", "default": True},
         },
         "required": ["query"],
@@ -64,11 +73,20 @@ Use this to retrieve traceable long-term memory before making claims about user 
             return ToolResult.fail("query is required")
         limit = self._int(kwargs.get("limit"), 8)
         memory_os = get_memory_os_from_context(self.context)
+        filters = {
+            "scope": str(kwargs.get("scope") or ""),
+            "memory_type": str(kwargs.get("memory_type") or ""),
+            "min_confidence": self._float(kwargs.get("min_confidence"), 0.0),
+            "as_of": str(kwargs.get("as_of") or ""),
+            "changed_since": str(kwargs.get("changed_since") or ""),
+        }
+        if str(kwargs.get("action") or "recall").strip().lower() == "answer":
+            answer = memory_os.answer(query, limit=limit, **filters)
+            return ToolResult.ok(answer["answer"], answer)
         hits = memory_os.retriever.search(
             query,
-            scope=str(kwargs.get("scope") or ""),
-            memory_type=str(kwargs.get("memory_type") or ""),
             limit=limit,
+            **filters,
         )
         if not hits:
             return ToolResult.ok("No matching structured memories found.", {"memories": []})
@@ -104,6 +122,11 @@ Use this to retrieve traceable long-term memory before making claims about user 
                     "reasons": hit.reasons,
                     "evidence_event_ids": item.source_event_ids,
                     "tags": item.tags,
+                    "provenance": item.provenance,
+                    "source": item.source,
+                    "version": item.version,
+                    "supersedes": item.supersedes,
+                    "components": hit.components,
                 }
             )
         return ToolResult.ok("\n".join(lines), {"memories": data})
@@ -123,3 +146,11 @@ Use this to retrieve traceable long-term memory before making claims about user 
         except (TypeError, ValueError):
             parsed = default
         return max(1, min(parsed, 50))
+
+    @staticmethod
+    def _float(value: Any, default: float) -> float:
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            parsed = default
+        return max(0.0, min(parsed, 1.0))

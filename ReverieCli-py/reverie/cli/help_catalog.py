@@ -109,8 +109,8 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
     "subagent": {
         "command": "/subagent",
         "section": "Models & Modes",
-        "summary": "Create, inspect, and run base-Reverie Subagents with a selected default model.",
-        "detail": "Subagents are only enabled in base `reverie` mode. Each Subagent is identified by its ID, stores a selected default model, and inherits the active Reverie prompt, tools, plugins, MCP surface, and skills when the main agent delegates a task.",
+        "summary": "Create, inspect, and run isolated SubAgents from Reverie or Computer Controller.",
+        "detail": "SubAgents use a selected model and non-desktop workflow mode. They support scoped synchronous or background work, cooperative cancellation, and selectively retained context without inheriting the main session.",
         "overview": "selector, create, list, model <id>, run <id> <task>, delete <id>",
         "aliases": ["/subagents"],
         "subcommands": [
@@ -138,7 +138,7 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
             {"usage": "/mode spec-vibe", "description": "Switch to the lighter spec implementation mode."},
             {"usage": "/mode writer", "description": "Switch to the writing and narrative continuity mode."},
             {"usage": "/mode reverie-ant", "description": "Switch to the long-running execution and verification mode."},
-            {"usage": "/mode computer-controller", "description": "Switch to the pinned NVIDIA desktop-autopilot mode."},
+            {"usage": "/mode computer-controller", "description": "Switch to the pinned NVIDIA desktop orchestrator mode."},
         ],
         "examples": ["/mode", "/mode reverie-atlas", "/mode computer-controller"],
     },

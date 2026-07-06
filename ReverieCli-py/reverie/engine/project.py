@@ -127,6 +127,150 @@ def build_gameplay_manifest(project_name: str, dimension: str, genre: str) -> Di
     }
 
 
+GENRE_PRIMARY_ACTIONS: Dict[str, tuple[str, str, Dict[str, Any]]] = {
+    "sandbox": ("explore", "sandbox_explored", {"add_counters": {"exploration": 1}}),
+    "platformer": ("jump", "platformer_jump", {"add_counters": {"jumps": 1}}),
+    "adventure": ("investigate", "adventure_investigated", {"set_flags": ["clue:first"]}),
+    "action_rpg": ("attack", "action_rpg_attack", {"add_counters": {"attacks": 1}}),
+    "galgame": ("advance_story", "story_advanced", {"add_counters": {"story_beats": 1}}),
+    "tower_defense": ("plan_defense", "defense_planned", {"add_counters": {"defense_plans": 1}}),
+    "arena": ("arena_attack", "arena_attack", {"add_counters": {"attacks": 1}}),
+    "card_game": ("draw_card", "card_drawn", {"add_inventory": {"starter_card": 1}}),
+    "fighting": ("strike", "fighter_strike", {"add_counters": {"combo_hits": 1}}),
+    "horror": ("inspect_clue", "horror_clue_inspected", {"set_flags": ["clue:inspected"]}),
+    "idle": ("collect_income", "idle_income_collected", {"add_resources": {"gold": 1}}),
+    "management": ("assign_worker", "worker_assigned", {"add_counters": {"assigned_workers": 1}}),
+    "metroidvania": ("unlock_ability", "ability_unlocked", {"set_flags": ["ability:starter"]}),
+    "puzzle": ("solve_step", "puzzle_step_solved", {"add_counters": {"puzzle_steps": 1}}),
+    "racing": ("reach_checkpoint", "racing_checkpoint", {"add_counters": {"checkpoints": 1}}),
+    "rhythm": ("rhythm_hit", "rhythm_note_hit", {"add_counters": {"rhythm_combo": 1}}),
+    "roguelike": ("descend_floor", "roguelike_floor_entered", {"add_counters": {"floor": 1}}),
+    "shooter": ("fire_weapon", "weapon_fired", {"add_counters": {"shots": 1}}),
+    "simulation": ("simulate_tick", "simulation_tick", {"add_counters": {"simulation_ticks": 1}}),
+    "sports": ("score_point", "sports_point_scored", {"add_counters": {"score": 1}}),
+    "strategy": ("issue_order", "strategy_order_issued", {"add_counters": {"orders": 1}}),
+    "survival": ("craft_item", "survival_item_crafted", {"add_inventory": {"crafted_item": 1}}),
+    "tactics": ("end_turn", "tactics_turn_ended", {"add_counters": {"turn": 1}}),
+}
+
+
+GENRE_CHALLENGE_ACTIONS: Dict[str, tuple[str, str, str]] = {
+    "sandbox": ("collect_resource", "resource_collected", "finish_expedition"),
+    "platformer": ("land_jump", "platformer_landed", "reach_goal"),
+    "adventure": ("solve_clue", "mystery_solved", "complete_chapter"),
+    "action_rpg": ("defeat_enemy", "enemy_defeated", "claim_bounty"),
+    "galgame": ("make_choice", "story_choice_made", "complete_route"),
+    "tower_defense": ("complete_wave", "wave_completed", "secure_base"),
+    "arena": ("defeat_opponent", "opponent_defeated", "win_match"),
+    "fighting": ("finish_combo", "combo_completed", "win_round"),
+    "horror": ("escape_threat", "threat_escaped", "reach_safety"),
+    "idle": ("buy_upgrade", "idle_upgrade_bought", "complete_cycle"),
+    "management": ("complete_order", "management_order_completed", "close_day"),
+    "metroidvania": ("cross_ability_gate", "ability_gate_crossed", "reach_checkpoint"),
+    "puzzle": ("solve_puzzle", "puzzle_solved", "open_exit"),
+    "racing": ("finish_lap", "lap_completed", "claim_podium"),
+    "rhythm": ("finish_song", "song_completed", "record_score"),
+    "roguelike": ("clear_floor", "floor_cleared", "choose_reward"),
+    "shooter": ("defeat_target", "target_defeated", "complete_mission"),
+    "simulation": ("reach_stable_state", "simulation_stabilized", "complete_scenario"),
+    "sports": ("finish_match", "sports_match_completed", "record_result"),
+    "strategy": ("capture_objective", "objective_captured", "win_battle"),
+    "survival": ("survive_night", "night_survived", "secure_shelter"),
+    "tactics": ("complete_objective", "tactical_objective_completed", "win_encounter"),
+}
+
+
+def build_genre_rules(genre: str) -> Dict[str, Any]:
+    genre_key = str(genre or "sandbox").strip().lower()
+    action_id, event_name, effects = GENRE_PRIMARY_ACTIONS.get(genre_key, GENRE_PRIMARY_ACTIONS["sandbox"])
+    primary_effects = {
+        key: dict(value) if isinstance(value, dict) else list(value) if isinstance(value, list) else value
+        for key, value in effects.items()
+    }
+    primary_effects["activate_quests"] = ["slice_objective"]
+    primary_effects.setdefault("add_counters", {})["challenge_progress"] = 1
+    challenge_action, challenge_event, completion_action = GENRE_CHALLENGE_ACTIONS.get(
+        genre_key,
+        GENRE_CHALLENGE_ACTIONS["sandbox"],
+    )
+    payload = {
+        "schema_version": "reverie.game_rules/1",
+        "genre": genre_key,
+        "initial_state": {
+            "resources": {"energy": 10},
+            "counters": {"turn": 0},
+            "notes": {"rules_profile": genre_key},
+        },
+        "primary_action": action_id,
+        "smoke_actions": [action_id, challenge_action, completion_action],
+        "rules": {
+            action_id: {
+                "event": event_name,
+                "effects": primary_effects,
+            },
+            challenge_action: {
+                "event": challenge_event,
+                "conditions": {"requires_counters_min": {"challenge_progress": 1}},
+                "effects": {
+                    "complete_quests": ["slice_objective"],
+                    "grant_rewards": {"slice_reward": 1},
+                    "add_counters": {"challenge_resolved": 1},
+                },
+            },
+            completion_action: {
+                "event": "slice_completed",
+                "conditions": {"requires_inventory": {"slice_reward": 1}},
+                "effects": {
+                    "set_flags": ["slice:completed"],
+                    "add_counters": {"completed_slices": 1},
+                },
+            },
+        },
+    }
+    if genre_key == "card_game":
+        payload["initial_state"]["inventory"] = {"draw_pile": 5, "hand_card": 0}
+        payload["initial_state"]["counters"]["victory_progress"] = 0
+        payload["rules"] = {
+            "draw_card": {
+                "event": "card_drawn",
+                "conditions": {"requires_inventory": {"draw_pile": 1}},
+                "effects": {
+                    "add_inventory": {"draw_pile": -1, "hand_card": 1},
+                    "add_counters": {"cards_drawn": 1},
+                    "activate_quests": ["slice_objective"],
+                },
+            },
+            "play_card": {
+                "event": "card_played",
+                "conditions": {"requires_inventory": {"hand_card": 1}},
+                "costs": {"energy": 1},
+                "effects": {
+                    "add_inventory": {"hand_card": -1},
+                    "add_counters": {"cards_played": 1, "damage_dealt": 6, "victory_progress": 1},
+                },
+            },
+            "claim_victory": {
+                "event": "card_battle_won",
+                "conditions": {"requires_counters_min": {"victory_progress": 1}},
+                "effects": {
+                    "set_flags": ["victory:first_battle"],
+                    "complete_quests": ["slice_objective"],
+                    "grant_rewards": {"slice_reward": 1},
+                },
+            },
+            "complete_slice": {
+                "event": "slice_completed",
+                "conditions": {"requires_inventory": {"slice_reward": 1}},
+                "effects": {
+                    "set_flags": ["slice:completed"],
+                    "add_counters": {"completed_slices": 1},
+                },
+            },
+        }
+        payload["smoke_actions"] = ["draw_card", "play_card", "claim_victory", "complete_slice"]
+    return payload
+
+
 def build_live2d_manifest(enabled: bool) -> Dict[str, Any]:
     return {
         "enabled": enabled,
@@ -195,6 +339,9 @@ def create_project_skeleton(
         overwrite,
     ):
         written_files.append(str(output_dir / "data/content/gameplay_manifest.yaml"))
+    genre_rules = build_genre_rules(genre_name)
+    if _safe_write_yaml(output_dir / "data/content/rules.yaml", genre_rules, overwrite):
+        written_files.append(str(output_dir / "data/content/rules.yaml"))
     if _safe_write_yaml(output_dir / "data/live2d/models.yaml", build_live2d_manifest(live2d_enabled), overwrite):
         written_files.append(str(output_dir / "data/live2d/models.yaml"))
     if _safe_write(
@@ -261,6 +408,17 @@ def create_project_skeleton(
         overwrite,
     ):
         written_files.append(str(output_dir / "data/content/progression.yaml"))
+    if not sample_name and _safe_write_json(
+        output_dir / "playtest/logs/input_script.json",
+        {
+            "inputs": [
+                {"frame": index + 1, "action": action_id}
+                for index, action_id in enumerate(genre_rules.get("smoke_actions") or [genre_rules["primary_action"]])
+            ]
+        },
+        overwrite,
+    ):
+        written_files.append(str(output_dir / "playtest/logs/input_script.json"))
     if _safe_write_yaml(output_dir / "data/content/dialogue.yaml", {"conversations": {}}, overwrite):
         written_files.append(str(output_dir / "data/content/dialogue.yaml"))
     if _safe_write_yaml(output_dir / "data/content/tower_defense.yaml", {"paths": {}, "waves": {}, "towers": {}}, overwrite):

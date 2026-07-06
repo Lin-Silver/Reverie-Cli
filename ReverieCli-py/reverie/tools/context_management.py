@@ -310,7 +310,7 @@ class ContextManagementTool(BaseTool):
         
         # Get client
         client = None
-        if provider in ['openai-sdk', 'anthropic']:
+        if provider in ['openai-sdk', 'openai-chat', 'anthropic']:
             client = getattr(agent, '_client', None)
         
         # Compress

@@ -1,4 +1,4 @@
-"""SenseNova OpenAI-compatible source helpers."""
+"""SenseNova chat and media source helpers."""
 
 from __future__ import annotations
 
@@ -14,7 +14,14 @@ SENSENOVA_DEFAULT_MAX_TOKENS = 65_536
 SENSENOVA_DEFAULT_TEMPERATURE = 0.6
 SENSENOVA_DEFAULT_TOP_P = 0.95
 SENSENOVA_DEFAULT_REASONING_EFFORT = "medium"
-SENSENOVA_REASONING_EFFORTS = ("none", "low", "medium", "high")
+SENSENOVA_REASONING_EFFORTS = ("none", "low", "medium", "high", "max")
+SENSENOVA_FLASH_LITE_DEFAULT_MAX_TOKENS = 6_144
+SENSENOVA_FLASH_LITE_DEFAULT_TEMPERATURE = 0.7
+SENSENOVA_FLASH_LITE_DEFAULT_TOP_P = 0.8
+SENSENOVA_FLASH_LITE_DEFAULT_TOP_K = 20
+SENSENOVA_FLASH_LITE_DEFAULT_MIN_P = 0.0
+SENSENOVA_FLASH_LITE_DEFAULT_PRESENCE_PENALTY = 1.5
+SENSENOVA_FLASH_LITE_DEFAULT_REPETITION_PENALTY = 1.0
 
 
 def _sensenova_model(
@@ -26,18 +33,22 @@ def _sensenova_model(
     max_output_tokens: int = SENSENOVA_DEFAULT_MAX_TOKENS,
     vision: bool = False,
     thinking: bool = True,
+    transport: str = "openai-chat",
+    thinking_control: Optional[str] = None,
 ) -> Dict[str, Any]:
+    resolved_thinking_control = thinking_control or ("effort" if thinking else "none")
+    supports_effort_control = resolved_thinking_control == "effort"
     return {
         "id": model_id,
         "display_name": display_name,
         "description": description,
-        "transport": "openai-sdk",
+        "transport": transport,
         "context_length": int(context_length),
         "max_output_tokens": int(max_output_tokens),
         "vision": bool(vision),
         "thinking": bool(thinking),
         "tool_calling": True,
-        "thinking_control": "effort" if thinking else "none",
+        "thinking_control": resolved_thinking_control,
         "thinking_options": [
             {
                 "id": "none",
@@ -60,9 +71,9 @@ def _sensenova_model(
                 "description": "Detailed reasoning for complex prompts.",
             },
         ]
-        if thinking
+        if supports_effort_control
         else [],
-        "default_thinking_choice": SENSENOVA_DEFAULT_REASONING_EFFORT if thinking else "",
+        "default_thinking_choice": SENSENOVA_DEFAULT_REASONING_EFFORT if supports_effort_control else "",
     }
 
 
@@ -78,6 +89,8 @@ _SENSENOVA_MODEL_CATALOG: List[Dict[str, Any]] = [
         "SenseNova lightweight OpenAI-compatible flash model.",
         context_length=262_144,
         vision=True,
+        transport="openai-chat",
+        thinking_control="provider-managed",
     ),
 ]
 
@@ -122,6 +135,10 @@ def default_sensenova_config() -> Dict[str, Any]:
         "max_tokens": SENSENOVA_DEFAULT_MAX_TOKENS,
         "temperature": SENSENOVA_DEFAULT_TEMPERATURE,
         "top_p": SENSENOVA_DEFAULT_TOP_P,
+        "top_k": SENSENOVA_FLASH_LITE_DEFAULT_TOP_K,
+        "min_p": SENSENOVA_FLASH_LITE_DEFAULT_MIN_P,
+        "presence_penalty": SENSENOVA_FLASH_LITE_DEFAULT_PRESENCE_PENALTY,
+        "repetition_penalty": SENSENOVA_FLASH_LITE_DEFAULT_REPETITION_PENALTY,
         "reasoning_effort": SENSENOVA_DEFAULT_REASONING_EFFORT,
     }
 
@@ -158,6 +175,17 @@ def resolve_sensenova_sdk_base_url(api_url: Any) -> str:
     lower = base.lower()
     if lower.endswith("/chat/completions"):
         base = base[: -len("/chat/completions")]
+    return base.rstrip("/")
+
+
+def resolve_sensenova_anthropic_base_url(api_url: Any) -> str:
+    """Return the root URL expected by the Anthropic SDK."""
+    base = resolve_sensenova_sdk_base_url(api_url)
+    lower = base.lower()
+    for suffix in ("/v1/messages", "/messages", "/v1"):
+        if lower.endswith(suffix):
+            base = base[: -len(suffix)]
+            break
     return base.rstrip("/")
 
 
@@ -213,11 +241,18 @@ def normalize_sensenova_config(raw_sensenova: Any) -> Dict[str, Any]:
     for key, default_value in (
         ("temperature", SENSENOVA_DEFAULT_TEMPERATURE),
         ("top_p", SENSENOVA_DEFAULT_TOP_P),
+        ("min_p", SENSENOVA_FLASH_LITE_DEFAULT_MIN_P),
+        ("presence_penalty", SENSENOVA_FLASH_LITE_DEFAULT_PRESENCE_PENALTY),
+        ("repetition_penalty", SENSENOVA_FLASH_LITE_DEFAULT_REPETITION_PENALTY),
     ):
         try:
             cfg[key] = float(cfg.get(key, default_value))
         except (TypeError, ValueError):
             cfg[key] = default_value
+    try:
+        cfg["top_k"] = max(1, int(cfg.get("top_k", SENSENOVA_FLASH_LITE_DEFAULT_TOP_K)))
+    except (TypeError, ValueError):
+        cfg["top_k"] = SENSENOVA_FLASH_LITE_DEFAULT_TOP_K
 
     matched = resolve_sensenova_selected_model(cfg)
     if matched:
@@ -240,16 +275,71 @@ def build_sensenova_runtime_model_data(sensenova_config: Any, model_id: Optional
     selected = resolve_sensenova_selected_model(cfg, model_id=model_id)
     if not selected:
         return None
+    transport = str(selected.get("transport") or "openai-chat").strip().lower()
+    use_openai_chat = transport != "anthropic"
+    thinking_control = str(selected.get("thinking_control") or "none").strip().lower()
     return {
         "model": selected["id"],
         "model_display_name": selected["display_name"],
-        "base_url": resolve_sensenova_sdk_base_url(cfg.get("api_url", SENSENOVA_DEFAULT_API_URL)),
+        "base_url": (
+            resolve_sensenova_sdk_base_url(cfg.get("api_url", SENSENOVA_DEFAULT_API_URL))
+            if use_openai_chat
+            else resolve_sensenova_anthropic_base_url(cfg.get("api_url", SENSENOVA_DEFAULT_API_URL))
+        ),
         "api_key": api_key,
         "max_context_tokens": int(selected.get("context_length") or cfg.get("max_context_tokens", SENSENOVA_DEFAULT_CONTEXT_TOKENS)),
-        "provider": "openai-sdk",
+        "provider": "openai-chat" if use_openai_chat else "anthropic",
         "supports_vision": bool(selected.get("vision", False)),
-        "thinking_mode": normalize_sensenova_reasoning_effort(cfg.get("reasoning_effort")),
+        "thinking_mode": (
+            normalize_sensenova_reasoning_effort(cfg.get("reasoning_effort"))
+            if thinking_control == "effort"
+            else thinking_control
+        ),
         "endpoint": str(cfg.get("endpoint", "") or ""),
         "custom_headers": {},
         "vision": bool(selected.get("vision", False)),
+    }
+
+
+def build_sensenova_openai_options(sensenova_config: Any, model_id: Optional[str] = None) -> Dict[str, Any]:
+    """Build OpenAI Chat options for SenseNova models that use that transport."""
+    cfg = normalize_sensenova_config(sensenova_config)
+    selected = resolve_sensenova_selected_model(cfg, model_id=model_id)
+    selected_id = str((selected or {}).get("id") or "").strip().lower()
+    output_limit = int((selected or {}).get("max_output_tokens") or SENSENOVA_DEFAULT_MAX_TOKENS)
+    requested_max_tokens = max(1, int(cfg.get("max_tokens") or output_limit))
+    is_flash_lite = selected_id == "sensenova-6.7-flash-lite"
+    supports_reasoning_effort = selected_id in {"deepseek-v4-flash", "sensenova-6.7-flash-lite"}
+    if is_flash_lite and requested_max_tokens == SENSENOVA_DEFAULT_MAX_TOKENS:
+        requested_max_tokens = SENSENOVA_FLASH_LITE_DEFAULT_MAX_TOKENS
+    temperature = float(cfg.get("temperature", SENSENOVA_DEFAULT_TEMPERATURE))
+    top_p = float(cfg.get("top_p", SENSENOVA_DEFAULT_TOP_P))
+    if is_flash_lite and temperature == SENSENOVA_DEFAULT_TEMPERATURE:
+        temperature = SENSENOVA_FLASH_LITE_DEFAULT_TEMPERATURE
+    if is_flash_lite and top_p == SENSENOVA_DEFAULT_TOP_P:
+        top_p = SENSENOVA_FLASH_LITE_DEFAULT_TOP_P
+
+    extra_body: Dict[str, Any] = {}
+    if supports_reasoning_effort:
+        extra_body["reasoning_effort"] = normalize_sensenova_reasoning_effort(
+            cfg.get("reasoning_effort", SENSENOVA_DEFAULT_REASONING_EFFORT)
+        )
+    if is_flash_lite:
+        extra_body.update(
+            {
+                "top_k": int(cfg.get("top_k", SENSENOVA_FLASH_LITE_DEFAULT_TOP_K)),
+                "min_p": float(cfg.get("min_p", SENSENOVA_FLASH_LITE_DEFAULT_MIN_P)),
+                "repetition_penalty": float(
+                    cfg.get("repetition_penalty", SENSENOVA_FLASH_LITE_DEFAULT_REPETITION_PENALTY)
+                ),
+            }
+        )
+    return {
+        "temperature": temperature,
+        "top_p": top_p,
+        "presence_penalty": float(
+            cfg.get("presence_penalty", SENSENOVA_FLASH_LITE_DEFAULT_PRESENCE_PENALTY)
+        ),
+        "max_tokens": min(requested_max_tokens, output_limit),
+        "extra_body": extra_body,
     }

@@ -7,11 +7,12 @@ import shutil
 datas = [('README.md', '.')]
 binaries = []
 hiddenimports = ['rich', 'rich.console', 'rich.panel', 'rich.table', 'rich.syntax', 'rich.markdown', 'rich.progress', 'rich.prompt', 'rich.text', 'click', 'requests', 'openai', 'git', 'ddgs', 'bs4', 'yaml', 'tqdm', 
-                 'pyglet', 'moderngl', 'glcontext',
+                 'pyglet', 'moderngl', 'glcontext', 'uiautomation', 'comtypes',
                  'reverie.cli.input_handler', 'reverie.cli.commands', 'reverie.cli.display', 'reverie.cli.theme', 'reverie.cli.markdown_formatter', 'reverie.cli.session_ui',
                  'reverie.config', 'reverie.sdk_bridge', 'reverie.rules_manager', 'reverie.session', 'reverie.agent', 'reverie.context_engine',
-                 'reverie.engine_lite', 'reverie.engine_lite.video', 'reverie.engine_lite.renpy_import', 'reverie.engine_lite.procedural_assets', 'reverie.engine_lite.blender_modeling',
-                 'reverie.tools.registry', 'reverie.tools.browser_controler', 'reverie.tools.reverie_engine', 'reverie.tools.reverie_engine_lite', 'reverie.tools.game_modeling_workbench', 'reverie.tools.blender_modeling_workbench']
+                 'reverie.engine', 'reverie.engine.video', 'reverie.engine.renpy_import', 'reverie.engine.migration', 'reverie.engine.procedural_assets', 'reverie.engine.blender_modeling',
+                 'reverie.computer_use', 'reverie.tools.open_computer_use',
+                 'reverie.tools.registry', 'reverie.tools.browser_controler', 'reverie.tools.reverie_engine', 'reverie.tools.game_modeling_workbench', 'reverie.tools.blender_modeling_workbench']
 
 
 def add_data_if_exists(source_path: Path, target_dir: str) -> None:
@@ -74,6 +75,26 @@ else:
     comfy_src = repo_root / "Comfy"
     browser_src = repo_root / "reverie_resources" / "browser"
 
+required_bundle_files = [
+    comfy_src / "generate_image.py",
+    comfy_src / "embedded_comfy.b64",
+]
+missing_bundle_files = [str(path) for path in required_bundle_files if not path.is_file()]
+playwright_root = browser_src / "ms-playwright"
+embedded_browser_candidates = []
+if playwright_root.is_dir():
+    embedded_browser_candidates.extend(playwright_root.rglob("chrome.exe"))
+    embedded_browser_candidates.extend(playwright_root.rglob("chrome"))
+if missing_bundle_files or not embedded_browser_candidates:
+    details = missing_bundle_files
+    if not embedded_browser_candidates:
+        details.append(str(playwright_root / "chromium-*" / "chrome-*" / "chrome.exe"))
+    raise SystemExit(
+        "Missing required bundled resources. Run build.bat/build.sh or set "
+        "REVERIE_BUNDLE_RES_DIR to a prepared resource directory:\n- "
+        + "\n- ".join(details)
+    )
+
 icon_path_env = os.environ.get("REVERIE_ICON_PATH", "").strip()
 resolved_icon = None
 if icon_path_env:
@@ -90,14 +111,15 @@ add_data_if_exists(comfy_src / "generate_image.py", "reverie_resources/comfy")
 add_data_if_exists(comfy_src / "embedded_comfy.b64", "reverie_resources/comfy")
 add_tree_if_exists(browser_src / "ms-playwright", "reverie_resources/browser/ms-playwright")
 add_data_if_exists(repo_root / "reverie" / "agent" / "tool_manifest.json", "reverie/agent")
-add_data_if_exists(repo_root / "reverie" / "engine_lite" / "vendor" / "live2d" / "live2dcubismcore.min.js", "reverie/engine_lite/vendor/live2d")
+add_data_if_exists(repo_root / "reverie" / "engine" / "vendor" / "live2d" / "live2dcubismcore.min.js", "reverie/engine/vendor/live2d")
 add_tree_if_exists(repo_root / "reverie" / "builtin_skills", "reverie/builtin_skills")
+add_data_if_exists(repo_root / "reverie" / "computer_use" / "ATTRIBUTION.md", "reverie/computer_use")
 
 ffmpeg_binary = resolve_ffmpeg_binary()
 if ffmpeg_binary is not None:
     add_binary_if_exists(ffmpeg_binary, "reverie_resources/ffmpeg")
 
-for package_name in ('rich', 'bs4', 'pyglet', 'moderngl', 'glcontext'):
+for package_name in ('rich', 'bs4', 'pyglet', 'moderngl', 'glcontext', 'uiautomation', 'comtypes'):
     try:
         tmp_ret = collect_all(package_name)
         datas += tmp_ret[0]

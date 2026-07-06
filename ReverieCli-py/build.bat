@@ -171,38 +171,6 @@ if defined BLENDER_ARCHIVE_SOURCE (
     echo       Blender portable archive not found. Official Blender plugin build skipped.
 )
 
-if exist "%SHARED_PLUGINS_DIR%\godot\plugin.py" (
-    echo       Building official Godot plugin...
-    call "%SHARED_PLUGINS_DIR%\godot\build.bat"
-    if %ERRORLEVEL% neq 0 (
-        echo [ERROR] Failed to build Godot plugin executable.
-        set "BUILD_EXIT_CODE=1"
-        goto finish
-    )
-    python -c "from reverie.config import get_app_root; from reverie.plugin.runtime_manager import RuntimePluginManager; manager=RuntimePluginManager(get_app_root()); result=manager.install_source_plugin('godot', overwrite=True); location=result.get('target_path') or result.get('target_dir'); mode=result.get('install_mode') or 'directory-sync'; print(f'      Godot plugin installed ({mode}): {location}'); raise SystemExit(0 if result.get('success') else 1)"
-    if %ERRORLEVEL% neq 0 (
-        echo [ERROR] Failed to install Godot plugin into dist runtime depot.
-        set "BUILD_EXIT_CODE=1"
-        goto finish
-    )
-)
-
-if exist "%SHARED_PLUGINS_DIR%\o3de\plugin.py" (
-    echo       Building official O3DE plugin...
-    call "%SHARED_PLUGINS_DIR%\o3de\build.bat"
-    if %ERRORLEVEL% neq 0 (
-        echo [ERROR] Failed to build O3DE plugin executable.
-        set "BUILD_EXIT_CODE=1"
-        goto finish
-    )
-    python -c "from reverie.config import get_app_root; from reverie.plugin.runtime_manager import RuntimePluginManager; manager=RuntimePluginManager(get_app_root()); result=manager.install_source_plugin('o3de', overwrite=True); location=result.get('target_path') or result.get('target_dir'); mode=result.get('install_mode') or 'directory-sync'; print(f'      O3DE plugin installed ({mode}): {location}'); raise SystemExit(0 if result.get('success') else 1)"
-    if %ERRORLEVEL% neq 0 (
-        echo [ERROR] Failed to install O3DE plugin into dist runtime depot.
-        set "BUILD_EXIT_CODE=1"
-        goto finish
-    )
-)
-
 if exist "%SHARED_PLUGINS_DIR%\game_models\plugin.py" (
     echo       Building official Game Models plugin...
     call "%SHARED_PLUGINS_DIR%\game_models\build.bat"

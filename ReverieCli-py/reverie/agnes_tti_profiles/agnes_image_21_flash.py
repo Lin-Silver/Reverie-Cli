@@ -23,4 +23,8 @@ def metadata() -> Dict[str, Any]:
 
 
 def generate_image(**kwargs: Any) -> Dict[str, Any]:
+    if str(kwargs.get("response_format") or "b64_json").strip().lower() == "b64_json":
+        extra_body = dict(kwargs.get("extra_body") or {})
+        extra_body.setdefault("response_format", "b64_json")
+        kwargs["extra_body"] = extra_body
     return generate_agnes_image(model_id=MODEL_ID, display_name=DISPLAY_NAME, **kwargs)

@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable
 
+from ..engine.config import assess_project_scope
 from .scope_estimator import estimate_scope
 
 
@@ -442,18 +443,19 @@ def _infer_runtime_preferences(
         unsupported_explicit = explicit
         explicit = ""
 
-    external_preferred = bool(explicit in {"godot", "o3de"})
-    if not explicit and dimension == "3D" and _matches_any(text, tokens, {"genshin", "wuthering", "zenless", "\u5f00\u653e\u4e16\u754c", "open world"}):
-        explicit = "godot"
-        external_preferred = True
-
-    preferred = explicit or existing_runtime or "reverie_engine"
+    legacy_source = explicit if explicit in {"godot", "o3de"} else ""
+    existing_source = str(existing_runtime or "").strip().lower()
+    if existing_source in {"godot", "o3de", "renpy"} and not legacy_source:
+        legacy_source = existing_source
+    requested = "reverie_engine" if explicit in {"godot", "o3de"} else explicit
     return {
-        "requested_runtime": explicit,
+        "requested_runtime": requested,
         "unsupported_requested_runtime": unsupported_explicit,
-        "existing_runtime": str(existing_runtime or "").strip().lower(),
-        "preferred_runtime": preferred,
-        "external_runtime_preferred": external_preferred,
+        "existing_runtime": "reverie_engine" if existing_source in {"godot", "o3de", "renpy"} else existing_source,
+        "preferred_runtime": "reverie_engine",
+        "external_runtime_preferred": False,
+        "legacy_source": legacy_source,
+        "unified_runtime": True,
         "runtime_requirements": [
             "scene generation",
             "third-person movement support" if dimension == "3D" else "genre-correct movement support",
@@ -661,6 +663,40 @@ def compile_game_prompt(
         dimension=dimension,
         world_structure=world_structure,
     )
+    requested_target_quality = target_quality
+    requested_world_structure = world_structure
+    engine_scope = assess_project_scope(
+        dimension=dimension,
+        genre=primary_genre,
+        quality_tier=target_quality,
+        world_structure=world_structure,
+    )
+    if not engine_scope["supported"]:
+        if target_quality in {"aaa", "3a"}:
+            target_quality = "aa"
+        if dimension == "3D" and "open_world" in world_structure:
+            world_structure = "regional_zones"
+            special_features = [
+                "regional_exploration" if item == "open_world_exploration" else item
+                for item in special_features
+            ]
+            large_scale_profile.update(
+                {
+                    "project_shape": "regional_action_rpg",
+                    "launch_region_target": 1,
+                    "post_launch_region_target": 2,
+                    "world_cell_strategy": "bounded_region_cells",
+                    "runtime_contracts": [
+                        item
+                        for item in large_scale_profile.get("runtime_contracts", [])
+                        if item != "world_streaming"
+                    ],
+                }
+            )
+        engine_scope["delivery_quality_tier"] = target_quality
+        engine_scope["delivery_world_structure"] = world_structure
+        large_scale_profile["requested_world_structure"] = requested_world_structure
+        large_scale_profile["delivery_world_structure"] = world_structure
     quality_targets = _apply_quality_profile(
         _build_quality_targets(
             dimension,
@@ -734,6 +770,9 @@ def compile_game_prompt(
             "delivery_scope": scope["delivery_tier"],
             "complexity_score": scope["complexity_score"],
             "target_quality": target_quality,
+            "requested_target_quality": requested_target_quality,
+            "requested_world_structure": requested_world_structure,
+            "engine_scope": engine_scope,
             "content_scale": _content_scale(text, tokens, scope["delivery_tier"], world_structure),
             "deferred_features": scope["deferred_features"],
             "known_risks": scope["known_risks"],
@@ -741,8 +780,8 @@ def compile_game_prompt(
             "continuation_ready": True,
             "one_prompt_goal": "prompt -> game program -> runtime foundation -> verified 3d slice -> continuity pack",
             "full_game_aspiration": (
-                "multi-region, cross-platform, content-expanding 3D action production base"
-                if target_quality == "aaa"
+                "AA-or-smaller regional action game inspired by the requested large-scale references"
+                if requested_target_quality == "aaa"
                 else "credible production-ready action game foundation"
             ),
             "live_service_profile": live_service_profile,

@@ -1,4 +1,4 @@
-"""Input system for Reverie Engine Lite - keyboard, mouse, and gamepad support."""
+"""Input system for Reverie Engine - keyboard, mouse, and gamepad support."""
 
 from __future__ import annotations
 

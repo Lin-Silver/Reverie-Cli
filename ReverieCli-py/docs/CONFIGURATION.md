@@ -29,7 +29,7 @@ For each project Reverie creates a cache directory:
                 `-- command_audit.jsonl
 ```
 
-Additional subdirectories such as `indexes/`, `computer_control/`, `nexus/`, or `runtime_sandbox/` are created on demand under the same project cache root.
+Additional subdirectories such as `indexes/`, `computer_use/`, `nexus/`, or `runtime_sandbox/` are created on demand under the same project cache root.
 
 `<project-path-key>` is derived from the full absolute project path by replacing drive separators, path separators, and invalid filename characters. It does not append a hash. For example, `G:\Reverie\Reverie-Cli` becomes `G_Reverie_Reverie-Cli`.
 
@@ -82,11 +82,16 @@ Common top-level keys:
   "thinking_output_style": "full",
   "use_workspace_config": false,
   "text_to_image": {},
-  "geminicli": {},
   "codex": {},
+  "aihubmix": {},
+  "agnes": {},
+  "sensenova": {},
+  "unlimitedsurf": {},
   "nvidia": {},
   "modelscope": {},
+  "webgemini": {},
   "atlas_mode": {},
+  "subagents": {},
   "writer_mode": {},
   "gamer_mode": {}
 }
@@ -94,7 +99,7 @@ Common top-level keys:
 
 ## Custom Compatibility Providers
 
-`models` stores manually configured OpenAI-compatible or Anthropic-compatible model presets. This compatibility layer is for user-provided third-party services; built-in Gemini CLI, Codex, NVIDIA, and ModelScope sources use their own first-party runtime paths instead.
+`models` stores manually configured OpenAI-compatible or Anthropic-compatible model presets. This compatibility layer is for user-provided third-party services; built-in Codex, AIHubMix, Agnes, SenseNova, unlimited.surf, NVIDIA, ModelScope, and WebGemini sources use their own first-party runtime paths instead.
 
 - `model`
 - `model_display_name`
@@ -120,28 +125,52 @@ When `active_model_source` is `standard`, Reverie uses `active_model_index` to c
 
 ## Runtime Plugins
 
-Open runtime SDKs live under the executable-local `.reverie/plugins/<plugin-id>` depot.
+Optional heavyweight SDKs live under the executable-local `.reverie/plugins/<plugin-id>` depot.
 
-- Godot uses `rc_godot_list_versions`, `rc_godot_install_runtime`, `rc_godot_ensure_runtime`, and `rc_godot_clone_source` for GitHub release discovery, plugin-local downloads, and source checkouts.
-- O3DE uses `rc_o3de_list_versions`, `rc_o3de_clone_source`, and `rc_o3de_ensure_runtime` to create a plugin-local source SDK and `runtime/sdk_manifest.json`.
+- Godot and O3DE are no longer plugin runtimes. Reverie Engine consumes their project structures as migration/reference inputs through `inspect_legacy_project` and `migrate_legacy_project`.
+- Ren'Py project inspection and parsing are built into Reverie Engine; the optional Ren'Py plugin is only for native SDK lint, compile, and distribution.
 - Blender uses `rc_blender_mcp_install`, `rc_blender_mcp_start`, `rc_blender_mcp_stop`, `rc_blender_mcp_status`, and `rc_blender_mcp_info` to deploy and control the plugin-local Blender MCP bridge.
-- Do not place cloned engine source or SDK payloads in global user folders; Reverie expects them beside the executable under `.reverie/plugins`.
+- Do not place optional SDK payloads in global user folders; Reverie expects them beside the executable under `.reverie/plugins`.
 
 ## Built-In Model Sources
 
 Supported values for `active_model_source`:
 
 - `standard`
-- `geminicli`
 - `codex`
+- `aihubmix`
+- `agnes`
+- `sensenova`
+- `unlimitedsurf`
 - `nvidia`
 - `modelscope`
+- `webgemini`
 
-### Gemini CLI
+Older configs may still contain a `geminicli` block. That legacy section is not a current `active_model_source`; Gemini Web routing now uses `webgemini`.
 
-The `geminicli` section stores the selected Gemini model and optional endpoint override used by `/Geminicli`.
+### AIHubMix
 
-The endpoint field can point to either a base host or a full reverse-proxy endpoint. Reverie normalizes the URL so both layouts work.
+The `aihubmix` section stores the API key, selected model id/display name, OpenAI-compatible base URL, timeout, and context/output defaults used by the AIHubMix source.
+
+Reverie reads `AIHUBMIX_API_KEY` or `AIHUBMIX_TOKEN` automatically when present.
+
+### Agnes
+
+The `agnes` section stores the shared Agnes API key, selected chat model id/display name, OpenAI-compatible base URL, timeout, context/output defaults, and selected thinking depth.
+
+The same Agnes credential is also reused by Reverie's Agnes text-to-image and text-to-video tools.
+
+### SenseNova
+
+The `sensenova` section stores the SenseNova API key, selected model id/display name, OpenAI-compatible base URL, timeout, context/output defaults, and `reasoning_effort` for models that expose it.
+
+SenseNova text routing uses the OpenAI Chat or Anthropic-compatible transport required by the selected model profile. Reverie reads `SENSENOVA_API_KEY` or `SENSE_API_KEY` automatically when present.
+
+### unlimited.surf
+
+The `unlimitedsurf` section stores the unlimited.surf API key, selected model id/display name, Anthropic-compatible base URL, timeout, context/output defaults, and reasoning depth when the selected gateway model supports it.
+
+Reverie calls unlimited.surf through the Anthropic SDK and can refresh the public model catalog through `/us model`.
 
 ### Codex
 
@@ -162,6 +191,12 @@ Reverie normalizes ChatGPT and Codex URLs automatically, so these all work:
 - `https://chatgpt.com/backend-api/codex`
 - A full reverse-proxy `/responses` endpoint
 
+### WebGemini
+
+The `webgemini` section stores the selected Gemini Web mode, optional proxy override, optional cookie path, timeout, and context/output defaults used by the anonymous WebGemini transport.
+
+It does not require a direct API key for anonymous text routing. When no explicit proxy is configured, Reverie tries the Windows system proxy first and then `HTTPS_PROXY`/`HTTP_PROXY`.
+
 ### NVIDIA
 
 The `nvidia` section stores the NVIDIA API key, selected model, transport-specific defaults, and optional endpoint override used by the NVIDIA source.
@@ -179,7 +214,7 @@ Use `/nvidia model` or `/nvidia model <model-id>` to select the model. When the 
 
 NVIDIA request timeouts default to 60 seconds and follow the global `/setting timeout` unless the `nvidia.timeout` value is explicitly set to another value.
 
-NVIDIA GLM catalog entries include `z-ai/glm-5.1` and `z-ai/glm4.7`. The `z-ai/glm-4.7` spelling is accepted as an alias for selection, but NVIDIA's hosted chat-completions endpoint reports the canonical GLM-4.7 model id as `z-ai/glm4.7`.
+NVIDIA GLM catalog entries include `z-ai/glm-5.2`, `z-ai/glm-5.1`, and `z-ai/glm4.7`. The `z-ai/glm5.2` and `z-ai/glm5.1` spellings are accepted as aliases for selection, and `z-ai/glm-4.7` is accepted as an alias for GLM-4.7, but NVIDIA's hosted chat-completions endpoint reports the canonical GLM ids as `z-ai/glm-5.2`, `z-ai/glm-5.1`, and `z-ai/glm4.7`.
 
 ### ModelScope
 
@@ -288,7 +323,8 @@ Notes:
 - `text_to_image(action="prepare_models", package="ernie-image-turbo-gguf")` reports the app-local depot under `.reverie/plugins/Packages/comfyui/models`; pass `download=true` only when you want Reverie to fetch the large required auxiliary files there, and add `include_optional=true` only if you also want the optional prompt enhancer.
 - `output_dir` defaults to the project root when set to `"."`.
 - `requirements-tti.txt` is optional and only needed when you plan to run `/tti`.
-- In packaged Windows builds, bundled runtime assets are embedded by `build.bat`.
+- Packaged Windows builds embed the immutable `generate_image.py`, ComfyUI core archive, and bundled `ComfyUI-GGUF` node. Model weights and heavy Python packages such as PyTorch/CUDA remain app-local dependencies rather than being duplicated inside the CLI executable; use `text_to_image(action="diagnose", source="local")` to verify them before generation.
+- `build.bat`/`build.sh` also embed Reverie's dedicated Chromium distribution. The browser tool copies it into `.reverie/browser/runtime` on first use and only accepts its own runtime/profile/session paths; it does not reuse the user's system-browser profile.
 
 ## Atlas Mode Configuration
 

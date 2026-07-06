@@ -1,0 +1,4 @@
+interface:
+  display_name: "Reverie Engine"
+  short_description: "Build and verify unified Reverie Engine games"
+  default_prompt: "Use $reverie-engine to build and verify a focused game project."

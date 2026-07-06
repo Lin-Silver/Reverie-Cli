@@ -276,28 +276,13 @@ class ToolExecutor:
     def _tool_is_visible(self, name: str, tool: BaseTool, mode: object) -> bool:
         """Return whether a tool should be exposed in the supplied mode."""
         normalized_mode = normalize_mode(mode)
-        if name == "subagent" and self._active_model_source() == "nvidia":
+        if normalized_mode == "writer" and isinstance(tool, (MCPDynamicTool, RuntimePluginDynamicTool)):
             return False
         if isinstance(tool, MCPDynamicTool) and not tool.visible_in_mode(normalized_mode):
             return False
         if isinstance(tool, RuntimePluginDynamicTool) and not tool.visible_in_mode(normalized_mode):
             return False
         return is_tool_visible_in_mode(name, normalized_mode)
-
-    def _active_model_source(self) -> str:
-        """Resolve active model source from tool context without forcing a config dependency."""
-        config = self.context.get("config")
-        if config is None:
-            agent = self.context.get("agent")
-            config = getattr(agent, "config", None) if agent is not None else None
-        if config is None:
-            config_manager = self.context.get("config_manager")
-            if config_manager is not None and hasattr(config_manager, "load"):
-                try:
-                    config = config_manager.load()
-                except Exception:
-                    config = None
-        return str(getattr(config, "active_model_source", "standard") or "standard").strip().lower()
 
     def resolve_tool_name(self, name: str) -> str:
         """Resolve a tool name or alias to the registered primary tool name."""
@@ -594,6 +579,16 @@ class ToolExecutor:
                 return False
         return True
 
+    def _code_query_in_read_scope(self, arguments: Dict[str, Any], scope_paths: List[Path]) -> bool:
+        """Allow only code queries whose target path can be proven in scope."""
+        query_type = str(arguments.get("query_type") or "").strip().lower()
+        if query_type not in {"file", "outline"}:
+            return False
+        query = str(arguments.get("query") or "").strip()
+        if not query:
+            return False
+        return self._argument_paths_in_scope({"path": query}, scope_paths)
+
     def _subagent_scope_denial(self, tool: BaseTool, arguments: Dict[str, Any]) -> Optional[str]:
         """Enforce default read-only and optional scope bounds for subagents."""
         if not self.context.get("is_subagent"):
@@ -614,10 +609,16 @@ class ToolExecutor:
                 )
             return None
 
-        if read_scope and self._path_like_argument_values(arguments):
-            if not self._argument_paths_in_scope(arguments, read_scope):
+        if read_scope:
+            path_values = self._path_like_argument_values(arguments)
+            if path_values and not self._argument_paths_in_scope(arguments, read_scope):
                 return (
                     f"Subagent policy denied {tool.name}: read paths must be inside the assigned read_scope."
+                )
+            if tool.name == "codebase-retrieval" and not self._code_query_in_read_scope(arguments, read_scope):
+                return (
+                    f"Subagent policy denied {tool.name}: query scope cannot be safely proven "
+                    "inside the assigned read_scope."
                 )
         return None
 
@@ -832,6 +833,27 @@ class ToolExecutor:
             return result
         
         normalized_arguments = self._normalize_arguments(tool, arguments)
+        agent = self.context.get("agent")
+        active_mode = normalize_mode(getattr(agent, "mode", "reverie")) if agent is not None else "reverie"
+        if active_mode == "writer" and tool.name in {"str_replace_editor", "create_file", "delete_file", "file_ops"}:
+            raw_path = str(normalized_arguments.get("path", "") or "").strip()
+            if raw_path:
+                candidate = Path(raw_path)
+                if not candidate.is_absolute():
+                    candidate = self.project_root / candidate
+                candidate = candidate.resolve(strict=False)
+                novels_root = (self.project_root / "novels").resolve(strict=False)
+                reader_root = (self.project_root / "novel").resolve(strict=False)
+                if (
+                    candidate == novels_root
+                    or novels_root in candidate.parents
+                    or candidate == reader_root
+                    or reader_root in candidate.parents
+                ):
+                    return ToolResult.fail(
+                        "Writer project files under novels/ and novel/ are transaction-managed. "
+                        "Use serial_novel actions instead of generic file editing."
+                    )
         before_snapshots = self._snapshot_file_paths(self._candidate_file_paths(tool.name, normalized_arguments))
         self._record_memory_event(
             "tool_call",

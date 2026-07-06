@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Generator, AsyncGenerator, Callable
 from pathlib import Path
 import json
+import hashlib
 import time
 import re
 import logging
@@ -26,8 +27,15 @@ from ..context_engine.handoff import build_session_handoff_packet
 from ..inline_images import resolve_inline_image_content_for_request
 from ..memory import MEMORY_CONTEXT_PROMPT_HEADER, MemoryOS
 from ..modes import normalize_mode
+from ..config import model_source_display_name, normalize_model_provider
 from ..sse import iter_sse_data_strings as iter_provider_sse_data_strings
 from ..tools.base import ToolResult
+from ..tools.serial_novel import (
+    DEFAULT_OUTPUT_DIR,
+    PENDING_RECOVERY_APPEND_ONLY,
+    SerialNovelTool,
+    STATE_SCHEMA,
+)
 from ..tools.task_manager import cleanup_completed_task_artifacts
 from ..nvidia import (
     apply_nvidia_request_defaults,
@@ -40,6 +48,7 @@ from ..nvidia import (
 )
 from ..aihubmix import build_aihubmix_openai_options
 from ..agnes import build_agnes_openai_options
+from ..sensenova import build_sensenova_openai_options
 from ..modelscope import build_modelscope_anthropic_options
 from ..unlimitedsurf import build_unlimitedsurf_anthropic_options
 from ..webgemini import (
@@ -367,6 +376,16 @@ def _tool_result_content(result: ToolResult) -> Any:
     return result.output if result.success else f"Error: {result.error}"
 
 
+def _tool_result_history_content(result: ToolResult) -> str:
+    """Persist a compact tool result without inline media payloads."""
+    text = str(result.output if result.success else f"Error: {result.error}")
+    if isinstance(result.data, dict):
+        file_path = str(result.data.get("file_path") or "").strip()
+        if file_path and file_path not in text:
+            text = f"{text}\nMedia: {file_path}".strip()
+    return text
+
+
 def _build_assistant_history_message(
     content: Any,
     tool_calls: Optional[List[Dict[str, Any]]] = None,
@@ -684,7 +703,38 @@ def _convert_messages_to_anthropic_format(messages: List[Dict[str, Any]]) -> tup
 
     for msg in messages:
         role = str(msg.get("role", "") or "").strip().lower()
+        raw_content = msg.get("content", "")
         content_text = _extract_text_from_candidates(msg, "content")
+
+        anthropic_content: Any = content_text
+        if isinstance(raw_content, list):
+            blocks: List[Dict[str, Any]] = []
+            for part in raw_content:
+                if not isinstance(part, dict):
+                    if str(part or ""):
+                        blocks.append({"type": "text", "text": str(part)})
+                    continue
+                part_type = str(part.get("type", "") or "").strip().lower()
+                if part_type in {"text", "input_text", "output_text"}:
+                    text = _coerce_text_fragments(part.get("text"))
+                    if text:
+                        blocks.append({"type": "text", "text": text})
+                    continue
+                if part_type == "image_url":
+                    image_payload = part.get("image_url")
+                    url = str(image_payload.get("url", "") if isinstance(image_payload, dict) else image_payload or "").strip()
+                    if not url:
+                        continue
+                    data_match = re.match(r"^data:([^;,]+);base64,(.+)$", url, re.IGNORECASE | re.DOTALL)
+                    if data_match:
+                        source = {"type": "base64", "media_type": data_match.group(1), "data": data_match.group(2)}
+                    else:
+                        source = {"type": "url", "url": url}
+                    blocks.append({"type": "image", "source": source})
+                    continue
+                if part_type in {"image", "input_image"} and isinstance(part.get("source"), dict):
+                    blocks.append({"type": "image", "source": dict(part["source"])})
+            anthropic_content = blocks or content_text
 
         if role == "system":
             system_message = content_text
@@ -700,7 +750,7 @@ def _convert_messages_to_anthropic_format(messages: List[Dict[str, Any]]) -> tup
                     }
                 )
             else:
-                anthropic_messages.append({"role": "assistant", "content": content_text})
+                anthropic_messages.append({"role": "assistant", "content": anthropic_content})
             continue
 
         if role == "tool":
@@ -719,7 +769,7 @@ def _convert_messages_to_anthropic_format(messages: List[Dict[str, Any]]) -> tup
             )
             continue
 
-        anthropic_messages.append({"role": "user", "content": content_text})
+        anthropic_messages.append({"role": "user", "content": anthropic_content})
 
     return system_message, anthropic_messages
 
@@ -1181,6 +1231,101 @@ def _sanitize_tool_calls(tool_calls: list) -> None:
             tc["function"] = fn
 
 
+def _writer_history_elision(label: str, *, chars: int = 0, items: int = 0) -> str:
+    """Build a compact placeholder for large Writer-native payloads kept in history only."""
+    details: List[str] = []
+    if items > 0:
+        details.append(f"{items} items")
+    if chars > 0:
+        details.append(f"{chars} chars")
+    suffix = f" ({', '.join(details)})" if details else ""
+    return f"[Writer history elided: {label}{suffix}]"
+
+
+def _compact_writer_serial_novel_history_arguments(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """Strip large Writer-native prose payloads from stored history while keeping valid tool JSON."""
+    if not isinstance(arguments, dict):
+        return {}
+
+    compacted = dict(arguments)
+    data = compacted.get("data")
+    compacted_data = dict(data) if isinstance(data, dict) else None
+    action = str(compacted.get("action", "") or "").strip().lower()
+
+    def _compact_string_field(container: Dict[str, Any], key: str) -> None:
+        value = container.get(key)
+        if isinstance(value, str) and value.strip():
+            container[key] = _writer_history_elision(key, chars=len(value))
+
+    def _compact_list_field(container: Dict[str, Any], key: str) -> None:
+        value = container.get(key)
+        if not isinstance(value, list) or not value:
+            return
+        total_chars = sum(len(str(item)) for item in value)
+        container[key] = [_writer_history_elision(key, items=len(value), chars=total_chars)]
+
+    if action == "commit_chapter":
+        if compacted_data is not None:
+            for key in ("content", "append_content"):
+                value = compacted_data.get(key)
+                if isinstance(value, str) and value.strip():
+                    compacted_data.pop(key, None)
+    elif action == "configure":
+        if compacted_data is not None:
+            for key in ("world_bible", "cast_bible", "story_architecture", "style_guide", "roadmap"):
+                _compact_string_field(compacted_data, key)
+    elif action == "prepare_chapter":
+        if compacted_data is not None:
+            for key in ("outline", "opening_hook", "ending_hook"):
+                _compact_string_field(compacted_data, key)
+            for key in ("scene_beats", "continuity_requirements", "relationship_progression"):
+                _compact_list_field(compacted_data, key)
+
+    if compacted_data is not None:
+        compacted["data"] = compacted_data
+    return compacted
+
+
+def _compact_tool_calls_for_history(tool_calls: list, *, mode: str = "") -> list:
+    """Return a history-safe copy of tool calls without mutating live execution arguments."""
+    compacted: List[Dict[str, Any]] = []
+    writer_mode = normalize_mode(mode) == "writer"
+
+    for tool_call in tool_calls or []:
+        if not isinstance(tool_call, dict):
+            continue
+
+        function = tool_call.get("function")
+        if not isinstance(function, dict):
+            continue
+
+        cloned = {
+            "id": str(tool_call.get("id", "") or f"call_{uuid.uuid4().hex[:24]}"),
+            "type": "function",
+            "function": {
+                "name": str(function.get("name", "") or "").strip(),
+                "arguments": str(function.get("arguments", "") or ""),
+            },
+        }
+        thought_signature = str(
+            tool_call.get("thought_signature")
+            or tool_call.get("gemini_thought_signature")
+            or ""
+        ).strip()
+        if thought_signature:
+            cloned["thought_signature"] = thought_signature
+
+        if writer_mode and cloned["function"]["name"] == "serial_novel":
+            parsed = parse_tool_arguments(cloned["function"]["arguments"])
+            compacted_args = _compact_writer_serial_novel_history_arguments(parsed)
+            cloned["function"]["arguments"] = json.dumps(compacted_args, ensure_ascii=False)
+
+        compacted.append(cloned)
+
+    _sanitize_tool_calls(compacted)
+    return compacted
+
+
 def _sanitize_messages_for_relay(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Normalize message payloads before sending them to proxied/native providers."""
     sanitized_messages: List[Dict[str, Any]] = []
@@ -1585,6 +1730,106 @@ def make_api_request_with_retry(
     raise last_error or requests.RequestException("All retry attempts failed")
 
 
+class _CurlResponse:
+    """Small requests-like wrapper around a system curl invocation."""
+
+    def __init__(self, process: Any = None, *, stdout: str = "", stderr: str = "", returncode: int = 0):
+        self._process = process
+        self._stdout = stdout
+        self._stderr = stderr
+        self._returncode = int(returncode)
+
+    def json(self) -> Any:
+        if self._returncode != 0:
+            raise RuntimeError(self._stderr.strip() or f"curl exited with code {self._returncode}")
+        return json.loads(self._stdout)
+
+    def iter_lines(self, decode_unicode: bool = False, chunk_size: int = 0):
+        del chunk_size
+        if self._process is None or self._process.stdout is None:
+            for line in self._stdout.splitlines():
+                yield line if decode_unicode else line.encode("utf-8")
+            return
+        for line in self._process.stdout:
+            text = str(line).rstrip("\r\n")
+            yield text if decode_unicode else text.encode("utf-8")
+        stderr = self._process.stderr.read() if self._process.stderr is not None else ""
+        returncode = self._process.wait()
+        if returncode != 0:
+            raise RuntimeError(str(stderr or "").strip() or f"curl exited with code {returncode}")
+
+    def close(self) -> None:
+        if self._process is None:
+            return
+        if self._process.stdout is not None and not self._process.stdout.closed:
+            self._process.stdout.close()
+        stderr = self._process.stderr.read() if self._process.stderr is not None and not self._process.stderr.closed else ""
+        returncode = self._process.wait()
+        if returncode != 0:
+            raise RuntimeError(str(stderr or "").strip() or f"curl exited with code {returncode}")
+
+
+def _invoke_system_curl(
+    *,
+    url: str,
+    headers: Dict[str, str],
+    payload: Dict[str, Any],
+    stream: bool,
+    timeout: int,
+) -> _CurlResponse:
+    """POST JSON through the system curl executable without shell interpolation."""
+    import shutil
+    import subprocess
+
+    executable = shutil.which("curl.exe") or shutil.which("curl")
+    if not executable:
+        raise RuntimeError("System curl executable was not found on PATH")
+
+    command = [
+        executable,
+        "--silent",
+        "--show-error",
+        "--fail-with-body",
+        "--request",
+        "POST",
+        "--url",
+        str(url),
+        "--max-time",
+        str(max(int(timeout or 60), 1)),
+    ]
+    if stream:
+        command.append("--no-buffer")
+    for name, value in headers.items():
+        command.extend(["--header", f"{name}: {value}"])
+    command.extend(["--data-binary", json.dumps(payload, ensure_ascii=False, separators=(",", ":"))])
+
+    if stream:
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        return _CurlResponse(process)
+
+    completed = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=max(int(timeout or 60), 1) + 5,
+        check=False,
+    )
+    return _CurlResponse(
+        stdout=completed.stdout,
+        stderr=completed.stderr,
+        returncode=completed.returncode,
+    )
+
+
 class ReverieAgent:
     """
     The Reverie AI Agent.
@@ -1605,7 +1850,7 @@ class ReverieAgent:
         git_integration=None,
         additional_rules: str = "",
         mode: str = "reverie",
-        provider: str = "openai-sdk",
+        provider: str = "openai-chat",
         thinking_mode: Optional[str] = None,
         endpoint: str = "",
         custom_headers: Optional[Dict[str, str]] = None,
@@ -1627,7 +1872,7 @@ class ReverieAgent:
         self.additional_rules = additional_rules
         self.mode = mode
         self.ant_phase = "PLANNING"
-        self.provider = provider
+        self.provider = normalize_model_provider(provider)
         self.config = config
         self.thinking_mode = thinking_mode
         self.endpoint = str(endpoint or "").strip()
@@ -1749,7 +1994,7 @@ class ReverieAgent:
         model_display_name: Optional[str] = None,
         additional_rules: str = "",
         mode: str = "reverie",
-        provider: str = "openai-sdk",
+        provider: str = "openai-chat",
         thinking_mode: Optional[str] = None,
         endpoint: str = "",
         custom_headers: Optional[Dict[str, str]] = None,
@@ -1763,7 +2008,7 @@ class ReverieAgent:
         self.additional_rules = additional_rules
         self.mode = mode
         self.ant_phase = "PLANNING"
-        self.provider = provider
+        self.provider = normalize_model_provider(provider)
         self.config = config
         self.thinking_mode = thinking_mode
         self.endpoint = str(endpoint or "").strip()
@@ -1840,11 +2085,14 @@ class ReverieAgent:
     def _init_client(self) -> None:
         """Initialize client based on provider"""
         self._client = None
-        if self.provider == "openai-sdk":
+        if self.provider in {"openai-chat", "openai-responses"}:
             try:
                 from openai import OpenAI
+                sdk_base_url = str(self.base_url or "").strip().rstrip("/")
+                if self.provider == "openai-responses" and sdk_base_url.lower().endswith("/responses"):
+                    sdk_base_url = sdk_base_url[: -len("/responses")]
                 client_kwargs: Dict[str, Any] = {
-                    "base_url": self.base_url,
+                    "base_url": sdk_base_url,
                     "api_key": self.api_key,
                     "timeout": self._resolve_provider_timeout(),
                 }
@@ -1877,22 +2125,30 @@ class ReverieAgent:
             try:
                 import anthropic
                 client_kwargs: Dict[str, Any] = {
-                    "api_key": self.api_key,
                     "base_url": self.base_url if self.base_url else None,
                     "timeout": self._resolve_provider_timeout(),
                 }
+                if self._is_active_model_source("sensenova"):
+                    client_kwargs["auth_token"] = self.api_key
+                else:
+                    client_kwargs["api_key"] = self.api_key
                 if self.custom_headers:
                     client_kwargs["default_headers"] = dict(self.custom_headers)
                 try:
                     self._client = anthropic.Anthropic(**client_kwargs)
                 except TypeError:
+                    if "auth_token" in client_kwargs:
+                        client_kwargs["api_key"] = client_kwargs.pop("auth_token")
+                        headers = dict(client_kwargs.get("default_headers") or {})
+                        headers["Authorization"] = f"Bearer {self.api_key}"
+                        client_kwargs["default_headers"] = headers
                     client_kwargs.pop("timeout", None)
                     self._client = anthropic.Anthropic(**client_kwargs)
             except ImportError:
                 raise ImportError(
                     "Anthropic SDK not installed. Run: pip install anthropic"
                 )
-        elif self.provider == "request":
+        elif self.provider in {"request", "curl"}:
             # For request provider, we don't need a client object
             # We'll use requests library directly
             self._client = None
@@ -1901,7 +2157,7 @@ class ReverieAgent:
         else:
             raise ValueError(
                 f"Unknown provider: {self.provider}. "
-                f"Supported providers: openai-sdk, request, anthropic, codex, webgemini"
+                f"Supported providers: openai-chat, openai-responses, request, curl, anthropic, codex, webgemini"
             )
         self._client_config_key = self._provider_client_key()
 
@@ -1917,7 +2173,7 @@ class ReverieAgent:
 
     def _ensure_client(self) -> Any:
         """Create the SDK client only when a model call actually needs it."""
-        if self.provider not in {"openai-sdk", "anthropic"}:
+        if self.provider not in {"openai-chat", "openai-responses", "anthropic"}:
             return None
         client_key = self._provider_client_key()
         if self._client is None or self._client_config_key != client_key:
@@ -1931,8 +2187,15 @@ class ReverieAgent:
         This is used for endpoint override scenarios to mimic GCMP's per-model
         endpoint replacement behavior.
         """
-        if self.provider != "openai-sdk":
+        if self.provider != "openai-chat":
             return False
+
+        if (
+            self._is_active_model_source("sensenova")
+            and normalize_mode(self.mode) == "writer"
+            and self._writer_should_hide_tools_for_direct_prose()
+        ):
+            return True
 
         endpoint = str(self.endpoint or "").strip()
         if endpoint:
@@ -1962,6 +2225,23 @@ class ReverieAgent:
             return base_url
 
         return f"{base_url}/chat/completions"
+
+    def _resolve_curl_url(self) -> str:
+        """Resolve a curl endpoint, defaulting bare API roots to chat completions."""
+        endpoint = str(self.endpoint or "").strip()
+        base_url = str(self.base_url or "").strip().rstrip("/")
+        if endpoint:
+            if endpoint.startswith(("http://", "https://")):
+                return endpoint
+            return f"{base_url}/{endpoint.lstrip('/')}" if base_url else endpoint
+        lowered = base_url.lower()
+        if lowered.endswith(("/responses", "/chat/completions")):
+            return base_url
+        return f"{base_url}/chat/completions" if base_url else ""
+
+    def _curl_uses_responses(self) -> bool:
+        """Whether the configured curl URL targets the Responses API."""
+        return self._resolve_curl_url().lower().rstrip("/").endswith("/responses")
 
     def _process_streaming_openai_http_fallback(self, session_id: str = "default") -> Generator[str, None, None]:
         """
@@ -2063,7 +2343,7 @@ class ReverieAgent:
             except Exception:
                 return timeout_value
 
-        if self._is_active_model_source("modelscope") and self.provider in ("openai-sdk", "anthropic"):
+        if self._is_active_model_source("modelscope") and self.provider in ("openai-chat", "anthropic"):
             try:
                 cfg = getattr(config, "modelscope", {})
                 if isinstance(cfg, dict):
@@ -2071,7 +2351,7 @@ class ReverieAgent:
             except Exception:
                 return timeout_value
 
-        if self._is_active_model_source("aihubmix") and self.provider == "openai-sdk":
+        if self._is_active_model_source("aihubmix") and self.provider == "openai-chat":
             try:
                 cfg = getattr(config, "aihubmix", {})
                 if isinstance(cfg, dict):
@@ -2079,9 +2359,17 @@ class ReverieAgent:
             except Exception:
                 return timeout_value
 
-        if self._is_active_model_source("agnes") and self.provider == "openai-sdk":
+        if self._is_active_model_source("agnes") and self.provider == "openai-chat":
             try:
                 cfg = getattr(config, "agnes", {})
+                if isinstance(cfg, dict):
+                    return max(timeout_value, int(cfg.get("timeout", timeout_value)))
+            except Exception:
+                return timeout_value
+
+        if self._is_active_model_source("sensenova") and self.provider in ("anthropic", "openai-chat"):
+            try:
+                cfg = getattr(config, "sensenova", {})
                 if isinstance(cfg, dict):
                     return max(timeout_value, int(cfg.get("timeout", timeout_value)))
             except Exception:
@@ -2108,6 +2396,41 @@ class ReverieAgent:
         if "Accept" not in headers:
             headers["Accept"] = "text/event-stream" if stream else "application/json"
         return headers
+
+    def _make_direct_request(self, payload: Dict[str, Any], *, stream: bool) -> Any:
+        """Execute a basic JSON POST through requests or the system curl binary."""
+        effective_timeout = self._resolve_provider_timeout()
+        headers = self._build_request_headers(stream=stream)
+        if self.provider == "curl":
+            url = self._resolve_curl_url()
+            if not url:
+                raise ValueError("curl request URL is empty")
+            return _invoke_system_curl(
+                url=url,
+                headers=headers,
+                payload=payload,
+                stream=stream,
+                timeout=effective_timeout,
+            )
+
+        return make_api_request_with_retry(
+            url=self.base_url,
+            headers=headers,
+            payload=payload,
+            max_retries=self.api_max_retries,
+            initial_backoff=self.api_initial_backoff,
+            stream=stream,
+            timeout=effective_timeout,
+            on_retry=lambda delay, attempt, max_attempts, error: self._emit_api_retry_event(
+                provider_label=self._request_provider_label(),
+                model=payload.get("model", self.model),
+                stream=stream,
+                delay_seconds=delay,
+                attempt=attempt,
+                max_attempts=max_attempts,
+                error=error,
+            ),
+        )
 
     def _prepare_request_payload(self, payload: Dict[str, Any], session_id: str = "default") -> Dict[str, Any]:
         """Prepare request-provider payload for the generic request or NVIDIA direct API."""
@@ -2277,6 +2600,8 @@ class ReverieAgent:
             return []
 
         effective_mode = mode or self.mode or "reverie"
+        if effective_mode == "writer" and self._writer_should_hide_tools_for_direct_prose():
+            return []
         schemas = tool_executor.get_tool_schemas(mode=effective_mode)
         if not schemas:
             return []
@@ -2288,6 +2613,737 @@ class ReverieAgent:
             return []
 
         return schemas
+
+    def _writer_should_hide_tools_for_direct_prose(self) -> bool:
+        """Hide tools after Writer has prepared a chapter so the model drafts prose instead of empty tool calls."""
+        if normalize_mode(self.mode) != "writer":
+            return False
+
+        active_project = self._writer_active_project_state()
+        if not active_project or bool(active_project.get("pending_requires_reprepare")):
+            return False
+
+        latest_action = self._writer_latest_turn_serial_novel_action()
+        return latest_action in {"prepare_chapter", "context"}
+
+    def _writer_native_tool_choice(self) -> Optional[Dict[str, Any]]:
+        """Require Writer's native project tool for the first novel action in a turn."""
+        if normalize_mode(self.mode) != "writer":
+            return None
+
+        last_user_index, user_text = self._writer_latest_user_turn()
+        if last_user_index < 0:
+            return None
+
+        active_project = self._writer_active_project_state()
+        latest_action = self._writer_latest_turn_serial_novel_action()
+        serial_novel_called_this_turn = bool(latest_action)
+        novel_signals = (
+            "novel",
+            "serialized fiction",
+            "serial fiction",
+            "long-form fiction",
+            "continue",
+            "小说",
+            "长篇",
+            "连载",
+            "继续",
+            "续写",
+            "继续写",
+            "下一章",
+            "网文",
+        )
+        if not active_project and not any(signal in user_text for signal in novel_signals):
+            return None
+        if active_project:
+            if (
+                str(active_project.get("pending_recovery_mode") or "").strip()
+                == PENDING_RECOVERY_APPEND_ONLY
+                and not bool(active_project.get("pending_requires_reprepare"))
+            ):
+                return None
+            if bool(active_project.get("active_chapter_has_control_card")):
+                if latest_action in {"prepare_chapter", "context"}:
+                    return None
+                if serial_novel_called_this_turn:
+                    return None
+                return {"type": "function", "function": {"name": "serial_novel"}}
+            if latest_action in {"prepare_chapter", "context"}:
+                return None
+            return {"type": "function", "function": {"name": "serial_novel"}}
+
+        if serial_novel_called_this_turn:
+            if latest_action == "commit_chapter":
+                return {"type": "function", "function": {"name": "serial_novel"}}
+            return None
+        return {"type": "function", "function": {"name": "serial_novel"}}
+
+    def _writer_latest_user_turn(self) -> tuple[int, str]:
+        """Return the latest user-message index plus flattened text for Writer turn analysis."""
+        for index in range(len(self.messages) - 1, -1, -1):
+            message = self.messages[index]
+            if str(message.get("role", "") or "").strip().lower() != "user":
+                continue
+            return index, _coerce_text_fragments(message.get("content", "")).lower()
+        return -1, ""
+
+    def _writer_latest_turn_serial_novel_action(self) -> str:
+        """Return the last Writer-native action issued after the most recent user message."""
+        if normalize_mode(self.mode) != "writer":
+            return ""
+
+        last_user_index, _ = self._writer_latest_user_turn()
+        if last_user_index < 0:
+            return ""
+
+        latest_action = ""
+        for message in self.messages[last_user_index + 1 :]:
+            tool_calls = message.get("tool_calls", []) if isinstance(message.get("tool_calls"), list) else []
+            for tool_call in tool_calls:
+                function = tool_call.get("function", {}) if isinstance(tool_call, dict) else {}
+                if str(function.get("name", "") or "").strip() != "serial_novel":
+                    continue
+                arguments = parse_tool_arguments(function.get("arguments", ""))
+                latest_action = str(arguments.get("action", "") or "").strip().lower()
+        return latest_action
+
+    def _writer_latest_turn_serial_novel_id(self) -> str:
+        """Return the most recent Writer-native novel_id issued after the latest user message."""
+        if normalize_mode(self.mode) != "writer":
+            return ""
+
+        last_user_index, _ = self._writer_latest_user_turn()
+        if last_user_index < 0:
+            return ""
+
+        latest_novel_id = ""
+        for message in self.messages[last_user_index + 1 :]:
+            tool_calls = message.get("tool_calls", []) if isinstance(message.get("tool_calls"), list) else []
+            for tool_call in tool_calls:
+                function = tool_call.get("function", {}) if isinstance(tool_call, dict) else {}
+                if str(function.get("name", "") or "").strip() != "serial_novel":
+                    continue
+                arguments = parse_tool_arguments(function.get("arguments", ""))
+                novel_id = str(arguments.get("novel_id", "") or "").strip()
+                if novel_id:
+                    latest_novel_id = novel_id
+        return latest_novel_id
+
+    def _writer_active_project_state(self) -> Optional[Dict[str, Any]]:
+        """Return the single active Writer project with a prepared chapter, if one exists."""
+        if normalize_mode(self.mode) != "writer":
+            return None
+
+        root = self.project_root / DEFAULT_OUTPUT_DIR
+        if not root.is_dir():
+            return None
+
+        candidates: List[Dict[str, Any]] = []
+        for state_path in sorted(root.glob("*/tracking/state.json")):
+            try:
+                state = json.loads(state_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                continue
+            if not isinstance(state, dict):
+                continue
+            if state.get("schema") != STATE_SCHEMA or state.get("status") == "complete":
+                continue
+
+            novel_id = str(state.get("novel_id", "") or "").strip()
+            if not novel_id:
+                continue
+            try:
+                active_chapter = int(state.get("active_chapter") or 0)
+            except (TypeError, ValueError):
+                active_chapter = 0
+            if active_chapter < 1:
+                continue
+            project_dir = state_path.parent.parent
+            active_card_path = project_dir / "control-cards" / f"chapter-{active_chapter:04d}.json"
+            pending_recovery_mode = ""
+            pending_requires_reprepare = False
+            pending_recommended_append_chars = 0
+            pending_draft_path = project_dir / "drafts" / f"chapter-{active_chapter:04d}.json"
+            if pending_draft_path.is_file():
+                try:
+                    pending_draft = json.loads(pending_draft_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                    pending_draft = None
+                if isinstance(pending_draft, dict):
+                    pending_recovery_mode = str(pending_draft.get("recovery_mode") or "").strip()
+                    pending_requires_reprepare = bool(pending_draft.get("requires_reprepare"))
+                    try:
+                        pending_recommended_append_chars = int(
+                            pending_draft.get("recommended_append_chars") or 0
+                        )
+                    except (TypeError, ValueError):
+                        pending_recommended_append_chars = 0
+
+            candidates.append(
+                {
+                    "novel_id": novel_id,
+                    "active_chapter": active_chapter,
+                    "project_dir": project_dir,
+                    "active_chapter_has_control_card": active_card_path.is_file(),
+                    "pending_draft_path": pending_draft_path if pending_draft_path.is_file() else None,
+                    "pending_recovery_mode": pending_recovery_mode,
+                    "pending_requires_reprepare": pending_requires_reprepare,
+                    "pending_recommended_append_chars": pending_recommended_append_chars,
+                }
+            )
+
+        if len(candidates) == 1:
+            return candidates[0]
+
+        latest_novel_id = self._writer_latest_turn_serial_novel_id()
+        if latest_novel_id:
+            for candidate in candidates:
+                if candidate.get("novel_id") == latest_novel_id:
+                    return candidate
+
+        return None
+
+    @staticmethod
+    def _writer_normalize_direct_chapter_draft(content: str) -> str:
+        """Strip a model-added chapter heading before auto-committing raw prose."""
+        text = str(content or "").strip()
+        if not text:
+            return ""
+        lines = text.splitlines()
+        if not lines:
+            return text
+
+        first_line = re.sub(r"^#+\s*", "", lines[0]).strip()
+        if re.match(
+            r"^(?:第\s*[一二三四五六七八九十百零〇\d]+\s*[章节回卷集].*|chapter\s*\d+.*)$",
+            first_line,
+            flags=re.IGNORECASE,
+        ):
+            remainder = "\n".join(lines[1:]).lstrip()
+            if remainder:
+                return remainder.strip()
+        return text
+
+    @staticmethod
+    def _writer_count_non_whitespace_chars(content: str) -> int:
+        return sum(1 for char in str(content or "") if not char.isspace())
+
+    def _writer_pending_draft_content(self, active_project: Dict[str, Any]) -> str:
+        """Load the currently preserved Writer draft, if one exists."""
+        if not isinstance(active_project, dict):
+            return ""
+
+        pending_draft_path = active_project.get("pending_draft_path")
+        if not isinstance(pending_draft_path, Path) or not pending_draft_path.is_file():
+            return ""
+
+        try:
+            pending_draft = json.loads(pending_draft_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            return ""
+        if not isinstance(pending_draft, dict):
+            return ""
+        data = pending_draft.get("data")
+        if isinstance(data, dict):
+            return str(data.get("content") or "").strip()
+        return str(pending_draft.get("content") or "").strip()
+
+    def _writer_trim_append_only_direct_prose(
+        self,
+        active_project: Dict[str, Any],
+        content: str,
+    ) -> str:
+        """Drop any preserved-tail overlap before auto-submitting append-only prose."""
+        normalized = self._writer_normalize_direct_chapter_draft(content)
+        if not normalized or not isinstance(active_project, dict):
+            return normalized
+
+        if (
+            str(active_project.get("pending_recovery_mode") or "").strip()
+            != PENDING_RECOVERY_APPEND_ONLY
+            or bool(active_project.get("pending_requires_reprepare"))
+        ):
+            return normalized
+
+        prior_content = self._writer_pending_draft_content(active_project)
+        if not prior_content:
+            return normalized
+
+        try:
+            trimmed = SerialNovelTool._trim_append_only_overlap(prior_content, normalized)
+        except Exception:
+            logger.debug("Failed to trim Writer append-only overlap", exc_info=True)
+            return normalized
+        return str(trimmed or "").strip()
+
+    def _writer_direct_prose_autocommit_min_chars(self, active_project: Dict[str, Any]) -> int:
+        """Use a smaller floor for append-only recovery so short valid continuations still commit."""
+        if (
+            isinstance(active_project, dict)
+            and str(active_project.get("pending_recovery_mode") or "").strip() == PENDING_RECOVERY_APPEND_ONLY
+            and not bool(active_project.get("pending_requires_reprepare"))
+        ):
+            return 80
+        return 500
+
+    @staticmethod
+    def _writer_commit_call_has_prose(arguments: Dict[str, Any]) -> bool:
+        """Whether a Writer commit_chapter payload actually contains prose to commit."""
+        if str(arguments.get("action", "") or "").strip().lower() != "commit_chapter":
+            return False
+
+        data = arguments.get("data")
+        if isinstance(data, str) and data.strip():
+            parsed = parse_tool_arguments(data)
+            data = parsed if isinstance(parsed, dict) else {}
+        if not isinstance(data, dict):
+            data = {}
+
+        return bool(
+            str(data.get("content") or "").strip()
+            or str(data.get("append_content") or "").strip()
+        )
+
+    def _writer_retry_instruction_for_invalid_commit_tool_call(
+        self,
+        tool_calls: List[Dict[str, Any]],
+    ) -> str:
+        """Turn metadata-only Writer commit calls back into plain-prose drafting retries."""
+        if normalize_mode(self.mode) != "writer" or len(tool_calls) != 1:
+            return ""
+
+        function = (tool_calls[0].get("function") or {}) if isinstance(tool_calls[0], dict) else {}
+        if str(function.get("name", "") or "").strip() != "serial_novel":
+            return ""
+
+        arguments = parse_tool_arguments(function.get("arguments", ""))
+        if not isinstance(arguments, dict):
+            return ""
+        if str(arguments.get("action", "") or "").strip().lower() != "commit_chapter":
+            return ""
+        if self._writer_commit_call_has_prose(arguments):
+            return ""
+
+        active_project = self._writer_active_project_state()
+        if not active_project or not bool(active_project.get("active_chapter_has_control_card")):
+            return ""
+        if bool(active_project.get("pending_requires_reprepare")):
+            return ""
+
+        target_novel_id = str(arguments.get("novel_id", "") or "").strip()
+        if target_novel_id and target_novel_id != str(active_project.get("novel_id", "") or "").strip():
+            return ""
+        try:
+            target_chapter = int(arguments.get("chapter") or 0)
+        except (TypeError, ValueError):
+            target_chapter = 0
+        if target_chapter and target_chapter != int(active_project.get("active_chapter") or 0):
+            return ""
+
+        if str(active_project.get("pending_recovery_mode") or "").strip() == PENDING_RECOVERY_APPEND_ONLY:
+            return (
+                "Writer correction: a preserved draft tail already exists for the current chapter. "
+                "Do not emit JSON, XML, summaries, or serial_novel calls. "
+                "Write only the missing continuation in plain text starting immediately after the preserved tail. "
+                "Do not repeat preserved paragraphs. The client will send it as data.append_content automatically."
+            )
+
+        return (
+            "Writer correction: the current chapter control card is already prepared. "
+            "Do not emit JSON, XML, summaries, or serial_novel calls. "
+            "Write only the chapter prose in plain text for the current chapter. "
+            "The client will commit it automatically after the prose is complete."
+        )
+
+    def _writer_retry_instruction_for_short_direct_prose(self, content: str) -> str:
+        """Keep Writer recovery inside the same turn when direct prose is too short or repeats the tail."""
+        if normalize_mode(self.mode) != "writer":
+            return ""
+
+        raw_content = str(content or "").strip()
+        if not raw_content:
+            return ""
+
+        active_project = self._writer_active_project_state()
+        if not active_project or not bool(active_project.get("active_chapter_has_control_card")):
+            return ""
+        if bool(active_project.get("pending_requires_reprepare")):
+            return ""
+        if self._writer_latest_turn_serial_novel_action() not in {"prepare_chapter", "context"}:
+            return ""
+
+        normalized_content = self._writer_trim_append_only_direct_prose(active_project, raw_content)
+        min_chars = self._writer_direct_prose_autocommit_min_chars(active_project)
+        if self._writer_count_non_whitespace_chars(normalized_content) >= min_chars:
+            return ""
+
+        novel_id = str(active_project.get("novel_id", "") or "").strip()
+        try:
+            active_chapter = int(active_project.get("active_chapter") or 0)
+        except (TypeError, ValueError):
+            active_chapter = 0
+
+        scope_bits = []
+        if novel_id:
+            scope_bits.append(f"novel '{novel_id}'")
+        if active_chapter > 0:
+            scope_bits.append(f"chapter {active_chapter}")
+        prefix = "Continue the active Writer request from the immediately preceding tool result. "
+        if scope_bits:
+            prefix = (
+                "Continue the active Writer request from the immediately preceding tool result "
+                f"for {', '.join(scope_bits)}. "
+            )
+
+        if str(active_project.get("pending_recovery_mode") or "").strip() == PENDING_RECOVERY_APPEND_ONLY:
+            try:
+                append_chars = int(active_project.get("pending_recommended_append_chars") or 0)
+            except (TypeError, ValueError):
+                append_chars = 0
+            append_requirement = ""
+            if append_chars > 0:
+                append_requirement = f"Provide at least {append_chars} new non-whitespace characters. "
+            if not normalized_content:
+                return (
+                    f"{prefix}"
+                    "Your previous reply only repeated the preserved tail instead of adding new prose. "
+                    "Write only the missing new chapter continuation in plain text starting immediately after the "
+                    f"preserved tail shown in the tool result. {append_requirement}"
+                    "Do not repeat preserved paragraphs, do not lightly paraphrase them, and do not emit "
+                    "chapter headings, summaries, notes, JSON, XML, Markdown fences, or serial_novel/tool calls. "
+                    "The client will submit your text as data.append_content automatically."
+                )
+            return (
+                f"{prefix}"
+                "Your previous reply was still too short to submit as append-only recovery. "
+                "Write only the missing new chapter continuation in plain text starting immediately after the "
+                f"preserved tail shown in the tool result. {append_requirement}"
+                "Do not repeat preserved paragraphs, do not lightly paraphrase them, and do not emit "
+                "chapter headings, summaries, notes, JSON, XML, Markdown fences, or serial_novel/tool calls. "
+                "The client will submit your text as data.append_content automatically."
+            )
+
+        return (
+            f"{prefix}"
+            "The current chapter draft is not complete yet. Continue writing only the same chapter prose in plain "
+            "text. Provide substantially more content, and do not emit chapter headings, summaries, notes, JSON, "
+            "XML, Markdown fences, or serial_novel/tool calls. The client will commit the prose automatically after "
+            "it is long enough."
+        )
+
+    def _append_internal_system_message(
+        self,
+        messages: List[Dict[str, Any]],
+        content: str,
+    ) -> None:
+        """Append a deduplicated internal system reminder for the next continuation request."""
+        instruction = str(content or "").strip()
+        if not instruction:
+            return
+
+        def _append_once(target: List[Dict[str, Any]]) -> None:
+            if target:
+                last = target[-1]
+                if (
+                    str(last.get("role", "") or "").strip().lower() == "system"
+                    and _coerce_text_fragments(last.get("content", "")).strip() == instruction
+                ):
+                    return
+            target.append({"role": "system", "content": instruction})
+
+        _append_once(self.messages)
+        if messages is not self.messages:
+            _append_once(messages)
+
+    @staticmethod
+    def _latest_tool_name_from_messages(messages: List[Dict[str, Any]]) -> str:
+        """Resolve the function name for the most recent tool result in a message list."""
+        if not messages:
+            return ""
+        last_message = messages[-1]
+        if str(last_message.get("role", "") or "").strip().lower() != "tool":
+            return ""
+
+        target_tool_call_id = str(last_message.get("tool_call_id", "") or "").strip()
+        for message in reversed(messages[:-1]):
+            tool_calls = message.get("tool_calls", []) if isinstance(message.get("tool_calls"), list) else []
+            if not tool_calls:
+                continue
+            for tool_call in tool_calls:
+                if not isinstance(tool_call, dict):
+                    continue
+                if target_tool_call_id and str(tool_call.get("id", "") or "").strip() != target_tool_call_id:
+                    continue
+                function = tool_call.get("function", {}) if isinstance(tool_call.get("function"), dict) else {}
+                return str(function.get("name", "") or "").strip()
+        return ""
+
+    def _writer_sensenova_tool_result_followup(self, messages: List[Dict[str, Any]]) -> str:
+        """Return Writer-specific tool-result continuation guidance for SenseNova."""
+        if normalize_mode(self.mode) != "writer":
+            return ""
+        if self._latest_tool_name_from_messages(messages) != "serial_novel":
+            return ""
+
+        active_project = self._writer_active_project_state()
+        if not active_project:
+            return ""
+
+        latest_action = self._writer_latest_turn_serial_novel_action()
+        novel_id = str(active_project.get("novel_id", "") or "").strip()
+        try:
+            active_chapter = int(active_project.get("active_chapter") or 0)
+        except (TypeError, ValueError):
+            active_chapter = 0
+
+        scope_bits = []
+        if novel_id:
+            scope_bits.append(f"novel '{novel_id}'")
+        if active_chapter > 0:
+            scope_bits.append(f"chapter {active_chapter}")
+        scope = ", ".join(scope_bits)
+        prefix = "Continue the active Writer request from the immediately preceding tool result. "
+        if scope:
+            prefix = (
+                "Continue the active Writer request from the immediately preceding tool result "
+                f"for {scope}. "
+            )
+
+        if bool(active_project.get("pending_requires_reprepare")):
+            return (
+                f"{prefix}"
+                "Fix the planning failure by calling serial_novel with action='prepare_chapter' and a materially "
+                "revised outline/control card. Do not call commit_chapter yet, and do not draft chapter prose "
+                "until prepare_chapter succeeds. Preserve the original user requirements."
+            )
+
+        if latest_action not in {"prepare_chapter", "context"}:
+            return ""
+        if not bool(active_project.get("active_chapter_has_control_card")):
+            return ""
+
+        if str(active_project.get("pending_recovery_mode") or "").strip() == PENDING_RECOVERY_APPEND_ONLY:
+            try:
+                append_chars = int(active_project.get("pending_recommended_append_chars") or 0)
+            except (TypeError, ValueError):
+                append_chars = 0
+            append_requirement = ""
+            if append_chars > 0:
+                append_requirement = f"Provide at least {append_chars} new non-whitespace characters. "
+            return (
+                f"{prefix}"
+                "Write only the missing new chapter prose in plain text. Start immediately after the preserved tail "
+                f"shown in the tool result. {append_requirement}"
+                "Do not repeat the preserved tail, do not lightly paraphrase it, and do not include chapter headings, "
+                "summaries, notes, JSON, XML, Markdown fences, or serial_novel/tool calls. The client will submit "
+                "your text as data.append_content automatically. Preserve the prepared control card, continuity, "
+                "and original user requirements."
+            )
+
+        return (
+            f"{prefix}"
+            "The current chapter control card is already prepared. Write only the chapter prose in plain text for "
+            "this chapter. Do not emit chapter headings, summaries, notes, JSON, XML, Markdown fences, or "
+            "serial_novel/tool calls. Preserve the prepared control card, continuity, and original user "
+            "requirements. The client will commit the prose automatically after it is complete."
+        )
+
+    def _writer_anthropic_tool_choice(self) -> Optional[Dict[str, str]]:
+        """Translate Writer's required first tool into Anthropic tool-choice syntax."""
+        choice = self._writer_native_tool_choice()
+        if not choice:
+            return None
+        function = choice.get("function", {}) if isinstance(choice, dict) else {}
+        name = str(function.get("name", "") or "").strip()
+        return {"type": "tool", "name": name} if name else None
+
+    def _latest_user_text(self) -> str:
+        for message in reversed(self.messages):
+            if str(message.get("role", "") or "").strip().lower() == "user":
+                return _coerce_text_fragments(message.get("content", "")).strip()
+        return ""
+
+    def _writer_extract_textual_tool_call(self, raw: str) -> Optional[Dict[str, Any]]:
+        """Parse Writer pseudo-tool XML-ish wrappers that some providers emit as plain text."""
+        if normalize_mode(self.mode) != "writer":
+            return None
+
+        text = str(raw or "").strip()
+        marker_index = text.lower().find("<tool_call>")
+        if marker_index < 0:
+            return None
+        text = text[marker_index:]
+
+        function_match = re.search(r"<function=([A-Za-z0-9_.-]+)>", text, flags=re.IGNORECASE)
+        if not function_match:
+            return None
+
+        function_name = function_match.group(1).strip()
+        if not function_name:
+            return None
+
+        arguments: Dict[str, Any] = {}
+        for match in re.finditer(
+            r"<parameter=([A-Za-z0-9_.-]+)>\s*(.*?)\s*</parameter>",
+            text,
+            flags=re.IGNORECASE | re.DOTALL,
+        ):
+            key = match.group(1).strip()
+            value = match.group(2).strip()
+            if not key:
+                continue
+            arguments[key] = value
+
+        if not arguments:
+            return None
+
+        for key in ("chapter", "target_chars", "chapter_target_chars"):
+            value = arguments.get(key)
+            if not isinstance(value, str):
+                continue
+            try:
+                arguments[key] = int(value.strip())
+            except (TypeError, ValueError):
+                continue
+
+        data_value = arguments.get("data")
+        if isinstance(data_value, str) and data_value.strip():
+            parsed_data = parse_tool_arguments(data_value)
+            if parsed_data:
+                arguments["data"] = parsed_data
+
+        return {
+            "name": function_name,
+            "arguments": arguments,
+        }
+
+    def _promote_writer_json_tool_call(self, state: _StreamingTurnState) -> bool:
+        """Promote JSON text to a tool call for providers that ignore tool-call envelopes."""
+        if state.tool_calls:
+            return False
+        raw = state.cleaned_content()
+        if not raw:
+            return False
+
+        textual_tool_call = self._writer_extract_textual_tool_call(raw)
+        if textual_tool_call and textual_tool_call.get("name") == "serial_novel":
+            arguments = textual_tool_call.get("arguments")
+            if isinstance(arguments, dict) and arguments:
+                state.tool_calls = [
+                    {
+                        "id": f"writer_native_{uuid.uuid4().hex[:16]}",
+                        "type": "function",
+                        "function": {
+                            "name": "serial_novel",
+                            "arguments": json.dumps(arguments, ensure_ascii=False),
+                        },
+                    }
+                ]
+                state.collected_content = ""
+                state.set_finish_reason("tool_calls")
+                return True
+
+        if not self._writer_native_tool_choice():
+            return False
+
+        fenced = re.sub(r"^\s*```(?:json)?\s*|\s*```\s*$", "", raw, flags=re.IGNORECASE).strip()
+        start = fenced.find("{")
+        end = fenced.rfind("}")
+        if start < 0 or end <= start:
+            return False
+        try:
+            arguments = json.loads(fenced[start : end + 1])
+        except json.JSONDecodeError:
+            arguments = parse_tool_arguments(fenced[start : end + 1])
+        if not isinstance(arguments, dict) or not arguments:
+            return False
+        if isinstance(arguments.get("arguments"), dict):
+            arguments = dict(arguments["arguments"])
+
+        user_text = self._latest_user_text()
+        action = str(arguments.get("action", "") or "").strip().lower() or "bootstrap"
+        arguments["action"] = action
+        if action == "bootstrap":
+            arguments.setdefault("brief", user_text)
+            if not str(arguments.get("novel_id", "") or "").strip():
+                id_match = re.search(r"novel_id\s*(?:为|=|:)\s*([\w.-]+)", user_text, flags=re.IGNORECASE)
+                arguments["novel_id"] = (
+                    id_match.group(1)
+                    if id_match
+                    else f"novel-{hashlib.sha256(user_text.encode('utf-8')).hexdigest()[:10]}"
+                )
+            arguments.setdefault("title", "Untitled Novel")
+            target_match = re.search(
+                r"(\d[\d,]*)\s*(?:个)?(?:非空白)?(?:字|字符)|\b(\d+)\s*k\b",
+                user_text,
+                flags=re.IGNORECASE,
+            )
+            if target_match and not arguments.get("target_chars"):
+                if target_match.group(1):
+                    arguments["target_chars"] = int(target_match.group(1).replace(",", ""))
+                else:
+                    arguments["target_chars"] = int(target_match.group(2)) * 1000
+            elif "十万" in user_text and not arguments.get("target_chars"):
+                arguments["target_chars"] = 100000
+
+        state.tool_calls = [
+            {
+                "id": f"writer_native_{uuid.uuid4().hex[:16]}",
+                "type": "function",
+                "function": {
+                    "name": "serial_novel",
+                    "arguments": json.dumps(arguments, ensure_ascii=False),
+                },
+            }
+        ]
+        state.collected_content = ""
+        state.set_finish_reason("tool_calls")
+        return True
+
+    def _promote_writer_direct_prose_commit(self, state: _StreamingTurnState) -> bool:
+        """Recover a streamed chapter draft by committing it through serial_novel."""
+        if state.tool_calls or normalize_mode(self.mode) != "writer":
+            return False
+
+        active_project = self._writer_active_project_state()
+        if not active_project:
+            return False
+
+        normalized_content = self._writer_trim_append_only_direct_prose(
+            active_project,
+            state.cleaned_content(),
+        )
+        non_whitespace_chars = self._writer_count_non_whitespace_chars(normalized_content)
+        if non_whitespace_chars < self._writer_direct_prose_autocommit_min_chars(active_project):
+            return False
+
+        arguments = {
+            "action": "commit_chapter",
+            "novel_id": active_project["novel_id"],
+            "chapter": active_project["active_chapter"],
+            "data": {
+                (
+                    "append_content"
+                    if str(active_project.get("pending_recovery_mode") or "").strip()
+                    == PENDING_RECOVERY_APPEND_ONLY
+                    and not bool(active_project.get("pending_requires_reprepare"))
+                    else "content"
+                ): normalized_content,
+            },
+        }
+        state.tool_calls = [
+            {
+                "id": f"writer_commit_{uuid.uuid4().hex[:16]}",
+                "type": "function",
+                "function": {
+                    "name": "serial_novel",
+                    "arguments": json.dumps(arguments, ensure_ascii=False),
+                },
+            }
+        ]
+        state.collected_content = ""
+        state.set_finish_reason("tool_calls")
+        return True
 
     def _resolve_messages_for_request(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Resolve lightweight local-image markers into actual multimodal request payloads."""
@@ -2328,6 +3384,12 @@ class ReverieAgent:
         elif self._is_active_model_source("agnes"):
             provider_options = build_agnes_openai_options(getattr(self.config, "agnes", {}), model_for_sdk)
             extra_body = provider_options.get("extra_body")
+        elif self._is_active_model_source("sensenova"):
+            provider_options = build_sensenova_openai_options(
+                getattr(self.config, "sensenova", {}),
+                model_for_sdk,
+            )
+            extra_body = provider_options.get("extra_body")
         else:
             extra_body = self._openai_extra_body_for_thinking()
             if extra_body is not None and isinstance(model_for_sdk, str) and "(" in model_for_sdk and ")" in model_for_sdk:
@@ -2352,13 +3414,16 @@ class ReverieAgent:
         }
         if tools:
             kwargs["tools"] = tools
+            writer_choice = self._writer_native_tool_choice()
+            if writer_choice:
+                kwargs["tool_choice"] = writer_choice
 
         if extra_body is not None:
             kwargs["extra_body"] = extra_body
         
         # Add provider-specific OpenAI-compatible options.
         if provider_options:
-            for key in ("temperature", "top_p", "max_tokens"):
+            for key in ("temperature", "top_p", "presence_penalty", "max_tokens"):
                 if key in provider_options:
                     kwargs[key] = provider_options[key]
         
@@ -2382,6 +3447,7 @@ class ReverieAgent:
         retries = API_RETRY_ATTEMPTS
         last_error: Optional[Exception] = None
         call_kwargs = dict(kwargs)
+        fresh_user_query_retry_used = False
 
         for attempt in range(retries + 1):
             try:
@@ -2391,6 +3457,33 @@ class ReverieAgent:
             except Exception as exc:
                 last_error = exc
                 status_code = getattr(exc, "status_code", None)
+                if (
+                    (
+                        self._is_active_model_source("agnes")
+                        or self._is_active_model_source("sensenova")
+                    )
+                    and not fresh_user_query_retry_used
+                    and "no user query found in messages" in str(exc).lower()
+                ):
+                    retry_messages = list(call_kwargs.get("messages") or [])
+                    latest_user_query = self._latest_user_message_text().strip()
+                    retry_messages.append(
+                        {
+                            "role": "user",
+                            "content": latest_user_query
+                            or "Continue the active request using the completed tool results and report the verified outcome.",
+                        }
+                    )
+                    call_kwargs["messages"] = retry_messages
+                    fresh_user_query_retry_used = True
+                    source_label = model_source_display_name(
+                        str(getattr(self.config, "active_model_source", "") or "")
+                    )
+                    logger.warning(
+                        "%s requested a fresh user query after tool execution; retrying once with the active request",
+                        source_label,
+                    )
+                    continue
                 if (
                     _should_retry_without_tooling(status_code)
                     and isinstance(call_kwargs.get("tools"), list)
@@ -2429,12 +3522,9 @@ class ReverieAgent:
 
     def _openai_sdk_provider_label(self) -> str:
         """Return a user-facing label for OpenAI SDK backed requests."""
-        if self._is_active_model_source("nvidia"):
-            return "NVIDIA API"
-        if self._is_active_model_source("aihubmix"):
-            return "AIhubMix API"
-        if self._is_active_model_source("agnes"):
-            return "Agnes API"
+        source = str(getattr(getattr(self, "config", None), "active_model_source", "standard") or "standard")
+        if source != "standard":
+            return f"{model_source_display_name(source)} API"
         return "OpenAI-compatible API"
 
     def _model_request_stream_event(
@@ -2483,9 +3573,17 @@ class ReverieAgent:
 
     def _request_provider_label(self) -> str:
         """Return a user-facing provider label for request-provider errors."""
-        if self._is_nvidia_request():
-            return "NVIDIA API"
-        return "Request provider"
+        source = str(getattr(getattr(self, "config", None), "active_model_source", "standard") or "standard")
+        if source != "standard":
+            return f"{model_source_display_name(source)} API"
+        return "Python requests"
+
+    def _responses_provider_label(self, *, use_curl: bool = False) -> str:
+        """Return the source-aware label for Responses API calls."""
+        source = str(getattr(getattr(self, "config", None), "active_model_source", "standard") or "standard")
+        if source != "standard":
+            return f"{model_source_display_name(source)} API"
+        return "curl Responses API" if use_curl else "OpenAI Responses API"
 
     def _resolve_anthropic_max_tokens(self) -> int:
         """Return max_tokens for Anthropic-compatible providers."""
@@ -2509,7 +3607,30 @@ class ReverieAgent:
                     return candidate
             except Exception:
                 return max_tokens
+        if self._is_active_model_source("sensenova"):
+            try:
+                cfg = getattr(self.config, "sensenova", {})
+                candidate = int(cfg.get("max_tokens", max_tokens)) if isinstance(cfg, dict) else max_tokens
+                if candidate > 0:
+                    return candidate
+            except Exception:
+                return max_tokens
         return max_tokens
+
+    def _apply_sensenova_anthropic_options(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply SenseNova's documented Anthropic-compatible request options."""
+        if not self._is_active_model_source("sensenova"):
+            return kwargs
+        cfg = getattr(self.config, "sensenova", {})
+        if not isinstance(cfg, dict):
+            return kwargs
+        prepared = dict(kwargs)
+        prepared["temperature"] = float(cfg.get("temperature", 0.6))
+        prepared["top_p"] = float(cfg.get("top_p", 0.95))
+        effort = str(cfg.get("reasoning_effort", self.thinking_mode or "high") or "high").strip().lower()
+        if effort in {"low", "medium", "high", "max"}:
+            prepared["extra_body"] = {"output_config": {"effort": effort}}
+        return prepared
 
     def _completion_continuation_limit(self) -> int:
         """Return the continuation budget for a turn."""
@@ -2766,13 +3887,26 @@ class ReverieAgent:
         usage: Any = None,
     ) -> tuple[str, str]:
         """Store the finalized turn and report which follow-up path to take."""
+        self._promote_writer_json_tool_call(state)
+        self._promote_writer_direct_prose_commit(state)
+        retry_instruction = self._writer_retry_instruction_for_invalid_commit_tool_call(state.tool_calls)
+        if retry_instruction:
+            self._append_internal_system_message(messages, retry_instruction)
+            state.tool_calls = []
+            state.collected_content = ""
+            return "retry_direct_prose", ""
         clean_content = state.cleaned_content()
+        retry_instruction = self._writer_retry_instruction_for_short_direct_prose(clean_content)
+        if retry_instruction:
+            self._append_internal_system_message(messages, retry_instruction)
+            state.collected_content = ""
+            return "retry_direct_prose", ""
 
         if state.tool_calls:
-            _sanitize_tool_calls(state.tool_calls)
+            history_tool_calls = _compact_tool_calls_for_history(state.tool_calls, mode=self.mode)
             assistant_message = _build_assistant_history_message(
                 clean_content or None,
-                tool_calls=state.tool_calls,
+                tool_calls=history_tool_calls,
                 reasoning_content=state.collected_thinking,
             )
             self.messages.append(assistant_message)
@@ -2781,7 +3915,7 @@ class ReverieAgent:
                 request_messages=request_messages,
                 assistant_text=clean_content,
                 reasoning_text=state.collected_thinking,
-                tool_calls=state.tool_calls,
+                tool_calls=history_tool_calls,
                 usage=usage,
                 session_id=session_id,
             )
@@ -2911,25 +4045,30 @@ class ReverieAgent:
             agent_color=self.agent_color,
         )
 
-        tool_result_message = {
+        relay_tool_result_message = {
             "role": "tool",
             "tool_call_id": tool_call["id"],
             "content": _tool_result_content(result),
         }
-        self.messages.append(tool_result_message)
-        messages.append(tool_result_message)
+        self.messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": tool_call["id"],
+                "content": _tool_result_history_content(result),
+            }
+        )
+        messages.append(relay_tool_result_message)
 
     def _process_streaming_native_provider(self, provider_name: str, session_id: str = "default") -> Generator[str, None, None]:
         """Process streaming responses for the native Codex provider."""
         import requests
-
-        tools = self.get_visible_tool_schemas()
 
         max_continuations = self._completion_continuation_limit()
         continuation_count = 0
 
         while True:
             self._check_and_compress_context(session_id=session_id)
+            tools = self.get_visible_tool_schemas()
             messages = _sanitize_messages_for_relay(self._build_messages(resolve_local_images=True))
             request_messages = list(messages)
             parser_state: Dict[str, Any] = {}
@@ -3024,6 +4163,14 @@ class ReverieAgent:
                 continuation_count = 0
                 continue
 
+            if outcome == "retry_direct_prose":
+                continuation_count += 1
+                if continuation_count >= max_continuations:
+                    break
+
+                messages = _sanitize_messages_for_relay(self._build_messages(resolve_local_images=True))
+                continue
+
             if outcome == "content":
                 if self._should_end_generation(state.collected_content, state.finish_reason):
                     break
@@ -3048,13 +4195,13 @@ class ReverieAgent:
 
     def _process_streaming_webgemini(self, session_id: str = "default") -> Generator[str, None, None]:
         """Process streaming responses through Gemini Web's anonymous StreamGenerate endpoint."""
-        tools = self.get_visible_tool_schemas()
         cfg = normalize_webgemini_config(getattr(self.config, "webgemini", {}))
         max_continuations = self._completion_continuation_limit()
         continuation_count = 0
 
         while True:
             self._check_and_compress_context(session_id=session_id)
+            tools = self.get_visible_tool_schemas()
             request_messages = self._build_messages()
             messages = _sanitize_messages_for_relay(self._build_messages(resolve_local_images=True))
             effective_timeout = self._resolve_provider_timeout()
@@ -3138,6 +4285,12 @@ class ReverieAgent:
                     session_id=session_id,
                 )
                 continuation_count = 0
+                continue
+
+            if outcome == "retry_direct_prose":
+                continuation_count += 1
+                if continuation_count >= max_continuations:
+                    break
                 continue
 
             if outcome == "content":
@@ -3347,6 +4500,25 @@ class ReverieAgent:
             if not include_reasoning:
                 normalized.pop("reasoning_content", None)
             messages.append(normalized)
+        if (
+            self._is_active_model_source("sensenova")
+            and self.provider == "openai-chat"
+            and messages
+            and str(messages[-1].get("role", "")).lower() == "tool"
+        ):
+            followup_content = self._writer_sensenova_tool_result_followup(messages)
+            if not followup_content:
+                followup_content = (
+                    "Continue the active request from the immediately preceding tool result. "
+                    "If it failed, correct the exact error and do not resend unchanged tool arguments. "
+                    "Preserve the original user requirements."
+                )
+            messages.append(
+                {
+                    "role": "user",
+                    "content": followup_content,
+                }
+            )
         if resolve_local_images:
             return self._resolve_messages_for_request(messages)
         return messages
@@ -3450,13 +4622,20 @@ class ReverieAgent:
     
     def _process_streaming(self, session_id: str = "default") -> Generator[str, None, None]:
         """Process with streaming response"""
-        if self.provider == "openai-sdk":
+        if self.provider == "openai-chat":
             if self._should_use_openai_http_fallback():
                 yield from self._process_streaming_openai_http_fallback(session_id=session_id)
             else:
                 yield from self._process_streaming_openai_sdk(session_id=session_id)
+        elif self.provider == "openai-responses":
+            yield from self._process_streaming_openai_responses(session_id=session_id)
         elif self.provider == "request":
             yield from self._process_streaming_request(session_id=session_id)
+        elif self.provider == "curl":
+            if self._curl_uses_responses():
+                yield from self._process_streaming_openai_responses(session_id=session_id, use_curl=True)
+            else:
+                yield from self._process_streaming_request(session_id=session_id)
         elif self.provider == "anthropic":
             yield from self._process_streaming_anthropic(session_id=session_id)
         elif self.provider == "codex":
@@ -3465,16 +4644,113 @@ class ReverieAgent:
             yield from self._process_streaming_webgemini(session_id=session_id)
         else:
             raise ValueError(f"Unknown provider: {self.provider}")
+
+    def _build_openai_responses_payload(self, *, stream: bool) -> Dict[str, Any]:
+        """Build a minimal, provider-neutral OpenAI Responses request."""
+        from ..codex import build_codex_request_payload
+
+        converted = build_codex_request_payload(
+            model_name=self.model,
+            messages=self._build_messages(resolve_local_images=True),
+            tools=self.get_visible_tool_schemas() or None,
+            stream=stream,
+        )
+        payload: Dict[str, Any] = {
+            "model": converted["model"],
+            "input": converted["input"],
+            "stream": bool(stream),
+        }
+        if converted.get("tools"):
+            payload["tools"] = converted["tools"]
+        return payload
+
+    def _iter_openai_responses_sdk_events(self, response: Any) -> Generator[Dict[str, Any], None, None]:
+        """Translate OpenAI SDK Responses events to Reverie's shared event shape."""
+        from ..codex import parse_codex_sse_event
+
+        parser_state: Dict[str, Any] = {}
+        for sdk_event in response:
+            if isinstance(sdk_event, dict):
+                event_data = sdk_event
+            elif hasattr(sdk_event, "model_dump"):
+                event_data = sdk_event.model_dump()
+            else:
+                continue
+            events, parser_state = parse_codex_sse_event(
+                json.dumps(event_data, ensure_ascii=False),
+                parser_state,
+            )
+            for event in events:
+                yield event
+
+    def _iter_curl_responses_events(self, response: Any) -> Generator[Dict[str, Any], None, None]:
+        """Translate Responses SSE emitted by curl to Reverie's shared event shape."""
+        from ..codex import parse_codex_sse_event
+
+        parser_state: Dict[str, Any] = {}
+        for data_str in self._iter_sse_data_strings(response):
+            events, parser_state = parse_codex_sse_event(data_str, parser_state)
+            for event in events:
+                yield event
+
+    def _process_streaming_openai_responses(
+        self,
+        session_id: str = "default",
+        *,
+        use_curl: bool = False,
+    ) -> Generator[str, None, None]:
+        """Process a turn through OpenAI Responses using the SDK or system curl."""
+        while True:
+            self._check_and_compress_context(session_id=session_id)
+            request_messages = self._build_messages()
+            messages = self._build_messages(resolve_local_images=True)
+            payload = self._build_openai_responses_payload(stream=True)
+            effective_timeout = self._resolve_provider_timeout()
+            yield self._model_request_stream_event(
+                provider_label=self._responses_provider_label(use_curl=use_curl),
+                model=self.model,
+                stream=True,
+                timeout=effective_timeout,
+            )
+
+            if use_curl:
+                response = self._make_direct_request(payload, stream=True)
+                events = self._iter_curl_responses_events(response)
+            else:
+                client = self._ensure_client()
+                response = client.responses.create(**payload)
+                events = self._iter_openai_responses_sdk_events(response)
+
+            state = _StreamingTurnState()
+            try:
+                for event in events:
+                    yield from self._apply_stream_event(state, event)
+            finally:
+                for chunk in state.flush():
+                    yield chunk
+                self._close_stream_response(response)
+
+            outcome, _ = self._commit_stream_state(
+                state=state,
+                request_messages=request_messages,
+                messages=messages,
+                session_id=session_id,
+            )
+            if outcome == "tool_calls":
+                yield from self._execute_streamed_tool_calls(state.tool_calls, messages, session_id=session_id)
+                continue
+            if outcome == "retry_direct_prose":
+                continue
+            break
     
     def _process_streaming_openai_sdk(self, session_id: str = "default") -> Generator[str, None, None]:
         """Process with streaming response using OpenAI SDK"""
-        tools = self.get_visible_tool_schemas()
-        
         max_continuations = self._completion_continuation_limit()
         continuation_count = 0
         
         while True:
             self._check_and_compress_context(session_id=session_id)
+            tools = self.get_visible_tool_schemas()
             request_messages = self._build_messages()
             messages = self._build_messages(resolve_local_images=True)
             effective_timeout = self._resolve_provider_timeout()
@@ -3503,6 +4779,12 @@ class ReverieAgent:
                     model_for_sdk,
                 )
                 extra_body = provider_options.get("extra_body")
+            elif self._is_active_model_source("sensenova"):
+                provider_options = build_sensenova_openai_options(
+                    getattr(self.config, "sensenova", {}),
+                    model_for_sdk,
+                )
+                extra_body = provider_options.get("extra_body")
             else:
                 extra_body = self._openai_extra_body_for_thinking()
             if extra_body is not None and isinstance(model_for_sdk, str) and "(" in model_for_sdk and ")" in model_for_sdk:
@@ -3526,6 +4808,7 @@ class ReverieAgent:
                 timeout=effective_timeout,
             )
             if extra_body is not None:
+                writer_choice = self._writer_native_tool_choice() if tools else None
                 response = self._create_openai_chat_completion(
                     model=model_for_sdk,
                     messages=messages,
@@ -3533,28 +4816,33 @@ class ReverieAgent:
                     stream=True,
                     timeout=effective_timeout,
                     extra_body=extra_body,
+                    **({"tool_choice": writer_choice} if writer_choice else {}),
                     **{
                         key: value
                         for key, value in {
                             "temperature": provider_options.get("temperature"),
                             "top_p": provider_options.get("top_p"),
+                            "presence_penalty": provider_options.get("presence_penalty"),
                             "max_tokens": provider_options.get("max_tokens"),
                         }.items()
                         if value is not None
                     },
                 )
             else:
+                writer_choice = self._writer_native_tool_choice() if tools else None
                 response = self._create_openai_chat_completion(
                     model=model_for_sdk,
                     messages=messages,
                     tools=tools if tools else None,
                     stream=True,
                     timeout=effective_timeout,
+                    **({"tool_choice": writer_choice} if writer_choice else {}),
                     **{
                         key: value
                         for key, value in {
                             "temperature": provider_options.get("temperature"),
                             "top_p": provider_options.get("top_p"),
+                            "presence_penalty": provider_options.get("presence_penalty"),
                             "max_tokens": provider_options.get("max_tokens"),
                         }.items()
                         if value is not None
@@ -3591,6 +4879,14 @@ class ReverieAgent:
                 continuation_count = 0
                 continue
 
+            if outcome == "retry_direct_prose":
+                continuation_count += 1
+                if continuation_count >= max_continuations:
+                    break
+
+                messages = self._build_messages(resolve_local_images=True)
+                continue
+
             if outcome == "content":
                 if self._should_end_generation(state.collected_content, state.finish_reason):
                     break
@@ -3607,29 +4903,34 @@ class ReverieAgent:
     def _process_streaming_request(self, session_id: str = "default") -> Generator[str, None, None]:
         """Process with streaming response using requests library"""
         import requests
-        
-        tools = self.get_visible_tool_schemas()
-        
+
         max_continuations = self._completion_continuation_limit()
         continuation_count = 0
         
         while True:
             self._check_and_compress_context(session_id=session_id)
+            tools = self.get_visible_tool_schemas()
             request_messages = self._build_messages()
             messages = self._build_messages(resolve_local_images=True)
-            # Build payload
-            payload = {
-                "model": self.model,
-                "messages": messages,
-                "stream": True,
-            }
-            
-            # Add tools if available
-            if tools:
-                payload["tools"] = tools
+            if self._openai_request_fallback_active:
+                payload = self._build_openai_chat_completion_kwargs(
+                    messages=messages,
+                    tools=tools,
+                    stream=True,
+                )
+            else:
+                payload = {
+                    "model": self.model,
+                    "messages": messages,
+                    "stream": True,
+                }
+
+                if tools:
+                    payload["tools"] = tools
+                    writer_choice = self._writer_native_tool_choice()
+                    if writer_choice:
+                        payload["tool_choice"] = writer_choice
             payload = self._prepare_request_payload(payload, session_id=session_id)
-            headers = self._build_request_headers(stream=True)
-            
             # Make request with retry logic.
             # Streaming request-provider calls can take longer for large outputs,
             # so we respect the provider timeout resolution here.
@@ -3641,25 +4942,8 @@ class ReverieAgent:
                 timeout=effective_timeout,
             )
             try:
-                response = make_api_request_with_retry(
-                    url=self.base_url,
-                    headers=headers,
-                    payload=payload,
-                    max_retries=self.api_max_retries,
-                    initial_backoff=self.api_initial_backoff,
-                    stream=True,
-                    timeout=effective_timeout,
-                    on_retry=lambda delay, attempt, max_attempts, error: self._emit_api_retry_event(
-                        provider_label=self._request_provider_label(),
-                        model=payload.get("model", self.model),
-                        stream=True,
-                        delay_seconds=delay,
-                        attempt=attempt,
-                        max_attempts=max_attempts,
-                        error=error,
-                    ),
-                )
-            except requests.RequestException as e:
+                response = self._make_direct_request(payload, stream=True)
+            except (requests.RequestException, RuntimeError) as e:
                 logger.error(f"Streaming API request failed: {e}")
                 raise
             
@@ -3696,6 +4980,14 @@ class ReverieAgent:
                 continuation_count = 0
                 continue
 
+            if outcome == "retry_direct_prose":
+                continuation_count += 1
+                if continuation_count >= max_continuations:
+                    break
+
+                messages = self._build_messages(resolve_local_images=True)
+                continue
+
             if outcome == "content":
                 if self._should_end_generation(state.collected_content, state.finish_reason):
                     break
@@ -3711,14 +5003,13 @@ class ReverieAgent:
     
     def _process_streaming_anthropic(self, session_id: str = "default") -> Generator[str, None, None]:
         """Process with streaming response using Anthropic SDK"""
-        tools = self.get_visible_tool_schemas()
-        anthropic_tools = _convert_tools_to_anthropic_format(tools)
-        
         max_continuations = self._completion_continuation_limit()
         continuation_count = 0
         
         while True:
             self._check_and_compress_context(session_id=session_id)
+            tools = self.get_visible_tool_schemas()
+            anthropic_tools = _convert_tools_to_anthropic_format(tools)
             request_messages = self._build_messages()
             messages = self._build_messages(resolve_local_images=True)
             system_message, anthropic_messages = _convert_messages_to_anthropic_format(messages)
@@ -3734,6 +5025,10 @@ class ReverieAgent:
             
             if anthropic_tools:
                 kwargs["tools"] = anthropic_tools
+                writer_choice = self._writer_anthropic_tool_choice()
+                if writer_choice:
+                    kwargs["tool_choice"] = writer_choice
+            kwargs = self._apply_sensenova_anthropic_options(kwargs)
             
             # Make request
             client = self._ensure_client()
@@ -3790,6 +5085,14 @@ class ReverieAgent:
                     continuation_count = 0
                     continue
 
+                if outcome == "retry_direct_prose":
+                    continuation_count += 1
+                    if continuation_count >= max_continuations:
+                        break
+
+                    system_message, anthropic_messages = _convert_messages_to_anthropic_format(self._build_messages())
+                    continue
+
                 if outcome == "content":
                     if self._should_end_generation(state.collected_content, state.finish_reason):
                         break
@@ -3805,11 +5108,17 @@ class ReverieAgent:
     
     def _process_non_streaming(self, session_id: str = "default") -> str:
         """Process without streaming"""
-        if self.provider == "openai-sdk":
+        if self.provider == "openai-chat":
             if self._should_use_openai_http_fallback():
                 return self._process_non_streaming_openai_http_fallback(session_id=session_id)
             return self._process_non_streaming_openai_sdk(session_id=session_id)
+        elif self.provider == "openai-responses":
+            return self._process_non_streaming_openai_responses(session_id=session_id)
         elif self.provider == "request":
+            return self._process_non_streaming_request(session_id=session_id)
+        elif self.provider == "curl":
+            if self._curl_uses_responses():
+                return self._process_non_streaming_openai_responses(session_id=session_id, use_curl=True)
             return self._process_non_streaming_request(session_id=session_id)
         elif self.provider == "anthropic":
             return self._process_non_streaming_anthropic(session_id=session_id)
@@ -3819,15 +5128,74 @@ class ReverieAgent:
             return self._process_non_streaming_webgemini(session_id=session_id)
         else:
             raise ValueError(f"Unknown provider: {self.provider}")
+
+    def _responses_result_state(self, result: Any) -> tuple[_StreamingTurnState, Any]:
+        """Extract text, tool calls, and usage from one non-streaming Responses result."""
+        data = result if isinstance(result, dict) else result.model_dump()
+        state = _StreamingTurnState()
+        for item in data.get("output", []) or []:
+            item_type = str(item.get("type", "") or "").strip().lower()
+            if item_type == "message":
+                for part in item.get("content", []) or []:
+                    part_type = str(part.get("type", "") or "").strip().lower()
+                    if part_type in {"output_text", "text"}:
+                        state.add_content(part.get("text", ""))
+                continue
+            if item_type == "function_call":
+                state.update_tool_call(
+                    len(state.tool_calls),
+                    tool_call_id=str(item.get("call_id", "") or item.get("id", "")).strip(),
+                    name=str(item.get("name", "") or "").strip(),
+                    arguments=str(item.get("arguments", "") or ""),
+                )
+        state.flush()
+        state.set_finish_reason("tool_calls" if state.tool_calls else "stop")
+        return state, data.get("usage")
+
+    def _process_non_streaming_openai_responses(
+        self,
+        session_id: str = "default",
+        *,
+        use_curl: bool = False,
+    ) -> str:
+        """Process non-streaming Responses calls through the SDK or system curl."""
+        all_content: List[str] = []
+        while True:
+            self._check_and_compress_context(session_id=session_id)
+            request_messages = self._build_messages()
+            messages = self._build_messages(resolve_local_images=True)
+            payload = self._build_openai_responses_payload(stream=False)
+            if use_curl:
+                response = self._make_direct_request(payload, stream=False)
+                result = response.json()
+            else:
+                result = self._ensure_client().responses.create(**payload)
+            state, usage = self._responses_result_state(result)
+            outcome, content = self._commit_stream_state(
+                state=state,
+                request_messages=request_messages,
+                messages=messages,
+                session_id=session_id,
+                usage=usage,
+            )
+            if content:
+                all_content.append(content)
+            if outcome == "tool_calls":
+                for _ in self._execute_streamed_tool_calls(state.tool_calls, messages, session_id=session_id):
+                    pass
+                continue
+            if outcome == "retry_direct_prose":
+                continue
+            break
+        return "\n".join(all_content)
     
     def _process_non_streaming_openai_sdk(self, session_id: str = "default") -> str:
         """Process without streaming using OpenAI SDK"""
-        tools = self.get_visible_tool_schemas()
-        
         all_content = []
         
         while True:
             self._check_and_compress_context(session_id=session_id)
+            tools = self.get_visible_tool_schemas()
             request_messages = self._build_messages()
             messages = self._build_messages(resolve_local_images=True)
             effective_timeout = self._resolve_provider_timeout()
@@ -3853,6 +5221,12 @@ class ReverieAgent:
             elif self._is_active_model_source("agnes"):
                 provider_options = build_agnes_openai_options(
                     getattr(self.config, "agnes", {}),
+                    model_for_sdk,
+                )
+                extra_body = provider_options.get("extra_body")
+            elif self._is_active_model_source("sensenova"):
+                provider_options = build_sensenova_openai_options(
+                    getattr(self.config, "sensenova", {}),
                     model_for_sdk,
                 )
                 extra_body = provider_options.get("extra_body")
@@ -3892,6 +5266,7 @@ class ReverieAgent:
                         for key, value in {
                             "temperature": provider_options.get("temperature"),
                             "top_p": provider_options.get("top_p"),
+                            "presence_penalty": provider_options.get("presence_penalty"),
                             "max_tokens": provider_options.get("max_tokens"),
                         }.items()
                         if value is not None
@@ -3909,6 +5284,7 @@ class ReverieAgent:
                         for key, value in {
                             "temperature": provider_options.get("temperature"),
                             "top_p": provider_options.get("top_p"),
+                            "presence_penalty": provider_options.get("presence_penalty"),
                             "max_tokens": provider_options.get("max_tokens"),
                         }.items()
                         if value is not None
@@ -3926,20 +5302,24 @@ class ReverieAgent:
             
             # Check for tool calls
             if message.tool_calls:
-                # Add assistant message
-                assistant_message = _build_assistant_history_message(
-                    message_content or None,
-                    tool_calls=[
+                history_tool_calls = _compact_tool_calls_for_history(
+                    [
                         {
                             "id": tc.id,
                             "type": "function",
                             "function": {
                                 "name": tc.function.name,
-                                "arguments": tc.function.arguments
-                            }
+                                "arguments": tc.function.arguments,
+                            },
                         }
                         for tc in message.tool_calls
                     ],
+                    mode=self.mode,
+                )
+                # Add assistant message
+                assistant_message = _build_assistant_history_message(
+                    message_content or None,
+                    tool_calls=history_tool_calls,
                     reasoning_content=message_reasoning,
                 )
                 self.messages.append(assistant_message)
@@ -3948,7 +5328,7 @@ class ReverieAgent:
                     request_messages=request_messages,
                     assistant_text=message_content,
                     reasoning_text=message_reasoning,
-                    tool_calls=assistant_message.get("tool_calls"),
+                    tool_calls=history_tool_calls,
                     usage=getattr(response, "usage", None),
                     session_id=session_id,
                 )
@@ -4000,13 +5380,17 @@ class ReverieAgent:
                         all_content.append(f"[bold #ff5252]   ✘ Failed:[/bold #ff5252] [#ff8a80]{rich_escape(result.error or '')}[/#ff8a80]")
                     
                     # Add tool result
-                    tool_result_message = {
+                    relay_tool_result_message = {
                         "role": "tool",
                         "tool_call_id": tool_call.id,
                         "content": _tool_result_content(result)
                     }
-                    self.messages.append(tool_result_message)
-                    messages.append(tool_result_message)
+                    self.messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": _tool_result_history_content(result),
+                    })
+                    messages.append(relay_tool_result_message)
                 
                 # Continue to get response to tool results
                 continue
@@ -4065,51 +5449,36 @@ class ReverieAgent:
     def _process_non_streaming_request(self, session_id: str = "default") -> str:
         """Process without streaming using requests library"""
         import requests
-        
-        tools = self.get_visible_tool_schemas()
-        
+
         all_content = []
         
         while True:
             self._check_and_compress_context(session_id=session_id)
+            tools = self.get_visible_tool_schemas()
             request_messages = self._build_messages()
             messages = self._build_messages(resolve_local_images=True)
-            # Build payload
-            payload = {
-                "model": self.model,
-                "messages": messages,
-                "stream": False,
-            }
-            
-            # Add tools if available
-            if tools:
-                payload["tools"] = tools
+            if self._openai_request_fallback_active:
+                payload = self._build_openai_chat_completion_kwargs(
+                    messages=messages,
+                    tools=tools,
+                    stream=False,
+                )
+            else:
+                payload = {
+                    "model": self.model,
+                    "messages": messages,
+                    "stream": False,
+                }
+
+                if tools:
+                    payload["tools"] = tools
             payload = self._prepare_request_payload(payload, session_id=session_id)
-            headers = self._build_request_headers(stream=False)
-            
             # Make request with retry logic.
             # Long request-provider responses may need the provider timeout.
             effective_timeout = self._resolve_provider_timeout()
             try:
-                response = make_api_request_with_retry(
-                    url=self.base_url,
-                    headers=headers,
-                    payload=payload,
-                    max_retries=self.api_max_retries,
-                    initial_backoff=self.api_initial_backoff,
-                    stream=False,
-                    timeout=effective_timeout,
-                    on_retry=lambda delay, attempt, max_attempts, error: self._emit_api_retry_event(
-                        provider_label=self._request_provider_label(),
-                        model=payload.get("model", self.model),
-                        stream=False,
-                        delay_seconds=delay,
-                        attempt=attempt,
-                        max_attempts=max_attempts,
-                        error=error,
-                    ),
-                )
-            except requests.RequestException as e:
+                response = self._make_direct_request(payload, stream=False)
+            except (requests.RequestException, RuntimeError) as e:
                 logger.error(f"API request failed: {e}")
                 raise
             
@@ -4139,10 +5508,11 @@ class ReverieAgent:
             if tool_calls:
                 # Sanitize incoming tool-call argument strings before storing
                 _sanitize_tool_calls(tool_calls)
+                history_tool_calls = _compact_tool_calls_for_history(tool_calls, mode=self.mode)
                 # Add assistant message
                 assistant_message = _build_assistant_history_message(
                     message_content or None,
-                    tool_calls=tool_calls,
+                    tool_calls=history_tool_calls,
                     reasoning_content=message_reasoning,
                 )
                 self.messages.append(assistant_message)
@@ -4151,7 +5521,7 @@ class ReverieAgent:
                     request_messages=request_messages,
                     assistant_text=message_content,
                     reasoning_text=message_reasoning,
-                    tool_calls=tool_calls,
+                    tool_calls=history_tool_calls,
                     usage=usage_payload,
                     session_id=session_id,
                 )
@@ -4204,13 +5574,17 @@ class ReverieAgent:
                     else:
                         all_content.append(f"[bold #ff5252]   ✘ Failed:[/bold #ff5252] [#ff8a80]{rich_escape(result.error or '')}[/#ff8a80]")
                     
-                    tool_result_message = {
+                    relay_tool_result_message = {
                         "role": "tool",
                         "tool_call_id": tool_call["id"],
                         "content": _tool_result_content(result)
                     }
-                    self.messages.append(tool_result_message)
-                    messages.append(tool_result_message)
+                    self.messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call["id"],
+                        "content": _tool_result_history_content(result),
+                    })
+                    messages.append(relay_tool_result_message)
                 
                 continue
             
@@ -4263,13 +5637,12 @@ class ReverieAgent:
     
     def _process_non_streaming_anthropic(self, session_id: str = "default") -> str:
         """Process without streaming using Anthropic SDK"""
-        tools = self.get_visible_tool_schemas()
-        anthropic_tools = _convert_tools_to_anthropic_format(tools)
-        
         all_content = []
         
         while True:
             self._check_and_compress_context(session_id=session_id)
+            tools = self.get_visible_tool_schemas()
+            anthropic_tools = _convert_tools_to_anthropic_format(tools)
             messages = self._build_messages()
             request_messages = list(messages)
             system_message, anthropic_messages = _convert_messages_to_anthropic_format(messages)
@@ -4285,6 +5658,10 @@ class ReverieAgent:
             
             if anthropic_tools:
                 kwargs["tools"] = anthropic_tools
+                writer_choice = self._writer_anthropic_tool_choice()
+                if writer_choice:
+                    kwargs["tool_choice"] = writer_choice
+            kwargs = self._apply_sensenova_anthropic_options(kwargs)
             
             # Make request
             client = self._ensure_client()
@@ -4312,15 +5689,16 @@ class ReverieAgent:
             if collected_tool_calls:
                 # Sanitize tool args before adding to message history
                 _sanitize_tool_calls(collected_tool_calls)
+                history_tool_calls = _compact_tool_calls_for_history(collected_tool_calls, mode=self.mode)
                 assistant_message = _build_assistant_history_message(
                     collected_content or None,
-                    tool_calls=collected_tool_calls,
+                    tool_calls=history_tool_calls,
                 )
                 self.messages.append(assistant_message)
                 self._record_model_usage(
                     request_messages=request_messages,
                     assistant_text=collected_content,
-                    tool_calls=collected_tool_calls,
+                    tool_calls=history_tool_calls,
                     usage=getattr(response, "usage", None),
                     session_id=session_id,
                 )
@@ -4383,7 +5761,7 @@ class ReverieAgent:
                     tool_result_message = {
                         "role": "tool",
                         "tool_call_id": tool_call["id"],
-                        "content": _tool_result_content(result)
+                        "content": _tool_result_history_content(result)
                     }
                     self.messages.append(tool_result_message)
                     tool_result_blocks.append(_build_anthropic_tool_result_block(tool_call["id"], result))
@@ -4671,7 +6049,7 @@ class ReverieAgent:
         project_data_dir = self.tool_executor.context.get("project_data_dir")
         cache_dir = Path(project_data_dir) if project_data_dir else get_project_data_dir(Path(project_root))
         request_messages = self._build_messages()
-        client = self._ensure_client() if self.provider in {"openai-sdk", "anthropic"} else None
+        client = self._ensure_client() if self.provider in {"openai-chat", "openai-responses", "anthropic"} else None
 
         self._auto_context_compaction_active = True
         try:
@@ -4815,7 +6193,7 @@ class ReverieAgent:
             try:
                 handoff = build_session_handoff_packet(
                     messages=self._build_messages(),
-                    client=self._ensure_client() if self.provider in {"openai-sdk", "anthropic"} else None,
+                    client=self._ensure_client() if self.provider in {"openai-chat", "openai-responses", "anthropic"} else None,
                     model=self.model,
                     provider=self.provider,
                     session_id=session_id,

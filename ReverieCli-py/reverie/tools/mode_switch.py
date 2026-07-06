@@ -199,6 +199,23 @@ class ModeSwitchTool(BaseTool):
                 score += 8
                 reasons.append("explicit mode mention")
 
+            writer_signals = (
+                "novel",
+                "serialized fiction",
+                "serial fiction",
+                "write a story",
+                "long-form fiction",
+                "小说",
+                "长篇",
+                "连载",
+                "续写",
+                "网文",
+                "写故事",
+            )
+            if mode_name == "writer" and any(signal in lowered_query for signal in writer_signals):
+                score += 20
+                reasons.append("explicit long-form fiction intent")
+
             if not reasons and mode_name == "reverie":
                 score += 1
                 reasons.append("safe general fallback")

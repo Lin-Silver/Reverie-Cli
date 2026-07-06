@@ -9,7 +9,7 @@ def generate_traversal_system(
     game_request: Dict[str, Any],
     blueprint: Dict[str, Any],
     *,
-    runtime_id: str = "godot",
+    runtime_id: str = "reverie_engine",
 ) -> Dict[str, Any]:
     """Generate advanced traversal system with climbing, gliding, parkour."""
     
@@ -34,8 +34,6 @@ def generate_traversal_system(
             "climb_speed": 3.5,
             "ledge_grab_range": 1.8,
             "implementation": {
-                "godot": _godot_climbing_system(),
-                "o3de": _o3de_climbing_system(),
                 "reverie_engine": _reverie_climbing_system(),
             }
         })
@@ -50,8 +48,6 @@ def generate_traversal_system(
             "descent_rate": 2.5,
             "max_glide_angle": 45.0,
             "implementation": {
-                "godot": _godot_gliding_system(),
-                "o3de": _o3de_gliding_system(),
                 "reverie_engine": _reverie_gliding_system(),
             }
         })
@@ -67,8 +63,6 @@ def generate_traversal_system(
             "cooldown": 1.2,
             "iframe_duration": 0.15,
             "implementation": {
-                "godot": _godot_dash_system(),
-                "o3de": _o3de_dash_system(),
                 "reverie_engine": _reverie_dash_system(),
             }
         })
@@ -82,8 +76,6 @@ def generate_traversal_system(
             "wall_run_speed": 7.0,
             "vault_height": 2.0,
             "implementation": {
-                "godot": _godot_parkour_system(),
-                "o3de": _o3de_parkour_system(),
                 "reverie_engine": _reverie_parkour_system(),
             }
         })
@@ -92,6 +84,7 @@ def generate_traversal_system(
         "system_id": "traversal",
         "display_name": "Advanced Traversal System",
         "movement_model": movement_model,
+        "runtime": "reverie_engine",
         "abilities": traversal_abilities,
         "base_movement": {
             "walk_speed": 6.0,

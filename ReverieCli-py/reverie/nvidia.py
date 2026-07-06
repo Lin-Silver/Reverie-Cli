@@ -29,6 +29,7 @@ NVIDIA_DEFAULT_IMAGE_TOKEN_ESTIMATE = 1024
 NVIDIA_DEFAULT_CONTEXT_TOKENS = 262_144
 NVIDIA_NEMOTRON_3_SUPER_CONTEXT_TOKENS = 1_000_000
 NVIDIA_MINIMAX_CONTEXT_TOKENS = 204_800
+NVIDIA_GLM_5_2_CONTEXT_TOKENS = 1_000_000
 NVIDIA_GLM_CONTEXT_TOKENS = 131_072
 NVIDIA_STEP_FLASH_CONTEXT_TOKENS = 256_000
 NVIDIA_STEP_37_FLASH_MAX_OUTPUT_TOKENS = 16_384
@@ -225,6 +226,7 @@ def _openai_model(
     thinking_options: Optional[List[Dict[str, str]]] = None,
     default_thinking_choice: str = "",
     vision_modalities: Optional[List[str]] = None,
+    default_max_tokens: Optional[int] = None,
 ) -> Dict[str, Any]:
     profile_context_length = get_nvidia_profile_context_tokens(
         model_id,
@@ -241,6 +243,7 @@ def _openai_model(
         "thinking": bool(thinking),
         "context_length": profile_context_length,
         "max_output_tokens": int(max_output_tokens) if max_output_tokens else None,
+        "default_max_tokens": int(default_max_tokens) if default_max_tokens else None,
         "tool_calling": bool(tool_calling),
         "system_message_first": bool(system_message_first),
         "thinking_control": str(thinking_control or ("toggle" if thinking else "none")).strip().lower(),
@@ -329,6 +332,14 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         thinking_options=list(NVIDIA_THINKING_TOGGLE_OPTIONS),
         default_thinking_choice="true",
         context_length=NVIDIA_DEFAULT_CONTEXT_TOKENS,
+    ),
+    _openai_model(
+        "z-ai/glm-5.2",
+        "GLM-5.2",
+        "OpenAI SDK transport matching NVIDIA's chat-completions defaults.",
+        context_length=NVIDIA_GLM_5_2_CONTEXT_TOKENS,
+        max_output_tokens=32_768,
+        default_max_tokens=16_384,
     ),
     _openai_model(
         "z-ai/glm-5.1",
@@ -422,6 +433,7 @@ _NVIDIA_MODEL_METADATA = {
     str(item["id"]).strip().lower(): dict(item) for item in _NVIDIA_MODEL_CATALOG
 }
 _NVIDIA_MODEL_ALIASES = {
+    "z-ai/glm5.2": "z-ai/glm-5.2",
     "z-ai/glm5.1": "z-ai/glm-5.1",
     "z-ai/glm-4.7": "z-ai/glm4.7",
 }
@@ -942,9 +954,15 @@ def build_nvidia_openai_options(nvidia_config: Any, model_id: Optional[str] = No
         return {}
 
     try:
+        default_output = int(selected.get("default_max_tokens") or 0)
         output_limit = int(selected.get("max_output_tokens") or 0)
         context_length = int(selected.get("context_length") or 0)
-        if output_limit > 0:
+        if default_output > 0:
+            requested = int(cfg.get("max_tokens", default_output) or default_output)
+            cfg["max_tokens"] = max(1, requested)
+            if output_limit > 0:
+                cfg["max_tokens"] = min(int(cfg["max_tokens"]), output_limit)
+        elif output_limit > 0:
             cfg["max_tokens"] = min(max(int(cfg.get("max_tokens", 0) or 0), output_limit), output_limit)
         else:
             cfg["max_tokens"] = max(int(cfg.get("max_tokens", 0) or 0), context_length)

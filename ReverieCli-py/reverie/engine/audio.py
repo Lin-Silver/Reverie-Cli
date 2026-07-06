@@ -1,4 +1,4 @@
-"""Audio system for Reverie Engine Lite."""
+"""Audio system for Reverie Engine."""
 
 from __future__ import annotations
 

@@ -310,46 +310,6 @@ class RuntimePluginTemplateRecord:
 
 DEFAULT_RUNTIME_PLUGIN_CATALOG: tuple[RuntimePluginSpec, ...] = (
     RuntimePluginSpec(
-        plugin_id="godot",
-        display_name="Godot Editor",
-        runtime_family="engine",
-        description="Open-source 3D runtime/editor target with plugin-local GitHub release downloads and source checkout support.",
-        source_repo_hint="https://github.com/godotengine/godot",
-        delivery="sdk-runtime",
-        capabilities=("editor", "3d", "scene-import", "gltf", "github-release", "source-sdk"),
-        entry_candidates={
-            "windows": ("runtime/reverie-godot*.exe", "runtime/godot.exe", "runtime/Godot*.exe", "runtime/**/*.exe", "runtime/**/Godot*.exe", "runtime/**/godot*.exe", "reverie-godot*.exe", "godot.exe", "godot*.exe", "Godot*.exe", "bin/Godot*.exe"),
-            "linux": ("runtime/Godot*", "runtime/godot*", "runtime/**/Godot*", "runtime/**/godot*", "Godot*", "godot*", "bin/Godot*"),
-            "darwin": ("runtime/Godot*.app", "runtime/**/Godot*.app", "Godot*.app", "Godot*", "bin/Godot*"),
-        },
-        sdk_download_page="https://github.com/godotengine/godot/releases",
-        sdk_archive_hint="Use `/plugins deploy godot`, `rc_godot_list_versions`, or `rc_godot_install_runtime` to download an official release into `.reverie/plugins/godot/runtime/`.",
-        sdk_install_hint="Expected entry: `.reverie/plugins/godot/runtime/<version>/Godot*.exe`; source checkouts live under `.reverie/plugins/godot/source/`.",
-    ),
-    RuntimePluginSpec(
-        plugin_id="o3de",
-        display_name="O3DE Source SDK",
-        runtime_family="engine",
-        description="Open-source O3DE source SDK manager that clones GitHub source and writes plugin-local SDK manifests.",
-        source_repo_hint="https://github.com/o3de/o3de",
-        delivery="sdk-runtime",
-        capabilities=("engine", "large-scale-3d", "source-sdk", "github-release", "asset-processor-contract"),
-        entry_candidates={
-            "windows": (
-                "runtime/sdk_manifest.json",
-                "runtime/**/sdk_manifest.json",
-                "source/**/scripts/o3de.bat",
-                "source/**/scripts/o3de.py",
-                "source/**/build/windows/bin/profile/Editor.exe",
-            ),
-            "linux": ("runtime/sdk_manifest.json", "source/**/scripts/o3de.py", "source/**/build/linux/bin/profile/Editor"),
-            "darwin": ("runtime/sdk_manifest.json", "source/**/scripts/o3de.py", "source/**/build/mac/bin/profile/Editor.app"),
-        },
-        sdk_download_page="https://github.com/o3de/o3de/releases",
-        sdk_archive_hint="Use `/plugins deploy o3de`, `rc_o3de_list_versions`, or `rc_o3de_clone_source` to create `.reverie/plugins/o3de/source/` plus a runtime SDK manifest.",
-        sdk_install_hint="Expected manifest: `.reverie/plugins/o3de/runtime/sdk_manifest.json`; source checkout stays under `.reverie/plugins/o3de/source/`.",
-    ),
-    RuntimePluginSpec(
         plugin_id="game_models",
         display_name="Game Auxiliary Models",
         runtime_family="model-depot",
@@ -393,7 +353,7 @@ DEFAULT_RUNTIME_PLUGIN_CATALOG: tuple[RuntimePluginSpec, ...] = (
         description="Ren'Py-focused runtime management, project/script inspection, lint/compile/distribute workflows, and Galgame production support.",
         source_repo_hint="https://github.com/renpy/renpy",
         delivery="plugin-exe",
-        capabilities=("renpy", "visual-novel", "galgame", "rpy-outline", "runtime-install", "lint", "compile", "distribute", "mcp-contract", "engine-plugin"),
+        capabilities=("renpy", "visual-novel", "galgame", "runtime-install", "lint", "compile", "distribute", "builtin-engine-migration", "engine-plugin"),
         entry_candidates={
             "windows": ("dist/reverie-renpy.exe", "plugin.py", "reverie-renpy.exe"),
             "linux": ("dist/reverie-renpy", "plugin.py", "reverie-renpy"),

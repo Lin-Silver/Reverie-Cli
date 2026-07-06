@@ -18,26 +18,6 @@ def _display_name(raw: str, fallback: str) -> str:
 
 
 def _runtime_delivery(runtime: str) -> Dict[str, Any]:
-    normalized = str(runtime or "reverie_engine").strip().lower() or "reverie_engine"
-    if normalized == "godot":
-        return {
-            "runtime_root": "engine/godot",
-            "asset_registry_path": "engine/godot/data/asset_registry.json",
-            "import_profile_path": "engine/godot/data/asset_import_profile.json",
-            "notes": [
-                "Keep authored imports under engine/godot/assets while the project-level modeling workspace remains the source of truth.",
-                "Mirror approved runtime models from assets/models/runtime into authored Godot scenes once registry and import checks pass.",
-            ],
-        }
-    if normalized == "o3de":
-        return {
-            "runtime_root": "engine/o3de",
-            "asset_registry_path": "engine/o3de/Registry/asset_registry.json",
-            "import_profile_path": "engine/o3de/Registry/asset_import_profile.json",
-            "notes": [
-                "Use the project-level modeling workspace as the authoring source and promote validated exports into O3DE content gems later.",
-            ],
-        }
     return {
         "runtime_root": ".",
         "asset_registry_path": "data/content/asset_registry.yaml",
@@ -49,7 +29,7 @@ def _runtime_delivery(runtime: str) -> Dict[str, Any]:
 
 
 def _import_profile(runtime: str) -> Dict[str, Any]:
-    normalized = str(runtime or "reverie_engine").strip().lower() or "reverie_engine"
+    normalized = "reverie_engine"
     profile = {
         "runtime": normalized,
         "preferred_model_formats": [".glb", ".gltf"],
@@ -67,29 +47,18 @@ def _import_profile(runtime: str) -> Dict[str, Any]:
             "validate naming, dependencies, and per-slice budgets",
         ],
     }
-    if normalized == "godot":
-        profile.update(
-            {
-                "engine_asset_root": "engine/godot/assets",
-                "scene_integration": "Prefer glTF scene imports, keep scripts data-driven, and move final rigs into authored Godot scenes only after registry validation.",
-                "import_flags": ["generate_tangents_when_needed", "preserve_named_nodes", "track_collision_helpers"],
-            }
-        )
-        return profile
-    if normalized == "o3de":
-        profile.update(
-            {
-                "engine_asset_root": "engine/o3de/Assets",
-                "scene_integration": "Promote validated runtime exports into asset processor-friendly folders and bind gameplay prefabs after schema validation.",
-                "import_flags": ["asset_processor_ready", "streaming_budget_tags", "lod_group_required_for_large_props"],
-            }
-        )
-        return profile
     profile.update(
         {
             "engine_asset_root": "assets/models/runtime",
-            "scene_integration": "Built-in Reverie Engine content can reference runtime exports directly through registry and scene data.",
-            "import_flags": ["registry_sync_required", "starter_asset_ready", "smoke_import"],
+            "scene_integration": "Reverie Engine references runtime exports directly through its registry and scene/component data.",
+            "import_flags": [
+                "registry_sync_required",
+                "starter_asset_ready",
+                "smoke_import",
+                "preserve_named_nodes",
+                "streaming_budget_tags",
+            ],
+            "heritage": ["Godot glTF scene conventions", "O3DE asset validation and budget contracts"],
         }
     )
     return profile

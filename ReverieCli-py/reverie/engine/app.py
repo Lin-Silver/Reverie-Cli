@@ -1,4 +1,4 @@
-"""Runtime loop and smoke execution for Reverie Engine Lite."""
+"""Runtime loop and smoke execution for Reverie Engine."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, Optional
 import json
+import time
 import uuid
 
 try:
@@ -24,7 +25,7 @@ except Exception:  # pragma: no cover - optional dependency
     glcontext = None
 
 from .components import ColliderComponent, RigidBodyComponent
-from .config import load_engine_config, discover_live2d_sdk
+from .config import ENGINE_NAME, load_engine_config, discover_live2d_sdk, supported_game_families
 from .live2d import Live2DManager
 from .math3d import Vector2, Vector3
 from .modeling import detect_modeling_stack
@@ -62,6 +63,29 @@ def runtime_capabilities(project_root: str | Path | None = None) -> Dict[str, An
     blockbench = modeling_stack["blockbench"]
     ffmpeg_path = discover_ffmpeg()
     return {
+        "engine": ENGINE_NAME,
+        "unified_runtime": True,
+        "dimensions": ["2D", "2.5D", "3D"],
+        "game_families": [item["id"] for item in supported_game_families()],
+        "scope_exclusions": ["AAA/3A production", "3D open-world games"],
+        "systems": [
+            "scene_graph",
+            "components",
+            "signals",
+            "2d_and_3d_rendering",
+            "physics_and_queries",
+            "navigation",
+            "input",
+            "animation_and_timeline",
+            "audio",
+            "ui",
+            "localization",
+            "save_data",
+            "telemetry",
+            "live2d",
+            "asset_pipeline",
+            "headless_verification",
+        ],
         "pyglet": pyglet is not None,
         "moderngl": moderngl is not None,
         "glcontext": glcontext is not None,
@@ -77,7 +101,7 @@ def runtime_capabilities(project_root: str | Path | None = None) -> Dict[str, An
 
 
 @dataclass
-class EngineLiteApp:
+class ReverieEngineApp:
     scene_tree: SceneTree
     profile: RuntimeProfile = field(default_factory=RuntimeProfile)
     telemetry: TelemetryRecorder = field(
@@ -167,6 +191,7 @@ class EngineLiteApp:
         if self.ui_system:
             self.ui_system.update(Vector2(self.profile.width, self.profile.height), frame_index=0)
 
+        loop_started_at = time.perf_counter()
         for frame_index in range(frames):
             delta = 1.0 / self.profile.target_fps
 
@@ -221,6 +246,31 @@ class EngineLiteApp:
                     checkpoint_id=f"frame_{frame_index}",
                     elapsed_seconds=frame_index / self.profile.target_fps,
                 )
+
+        elapsed_seconds = max(0.0, time.perf_counter() - loop_started_at)
+        self.telemetry.increment("frames_executed", frames)
+        self.telemetry.metrics["frame_time_ms_average"] = (
+            (elapsed_seconds * 1000.0) / frames if frames > 0 else 0.0
+        )
+        self.telemetry.metrics["runtime_elapsed_seconds"] = elapsed_seconds
+
+        if self.save_data_manager and self.profile.headless:
+            save_path = self.save_data_manager.save_slot(
+                "smoke_autosave",
+                self.scene_tree,
+                gameplay=self.gameplay,
+                localization=self.localization_manager,
+                metadata={"purpose": "deterministic_smoke", "frames": frames},
+            )
+            self.telemetry.log_event("save_written", slot="smoke_autosave", path=str(save_path))
+            loaded_save = self.save_data_manager.load_slot("smoke_autosave")
+            if int(loaded_save.get("version", 0) or 0) != 1:
+                raise RuntimeError("Smoke save round-trip returned an unsupported save version")
+            self.telemetry.log_event(
+                "save_roundtrip_verified",
+                slot="smoke_autosave",
+                frame_index=int(loaded_save.get("frame_index", 0) or 0),
+            )
 
         self.telemetry.log_event(
             "session_end",
@@ -341,7 +391,7 @@ def run_project(
         headless=headless,
         fixed_step=float(runtime.get("fixed_step", 1.0 / 60.0)),
     )
-    app = EngineLiteApp(tree, profile=profile, config=config)
+    app = ReverieEngineApp(tree, profile=profile, config=config)
     summary = app.run_with_observer(frames=frames, input_script=input_script, frame_observer=frame_observer)
     log_path = None
     if output_log:

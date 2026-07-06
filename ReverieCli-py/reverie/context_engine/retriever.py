@@ -400,6 +400,8 @@ class ContextRetriever:
                 [rg, "--json", "--ignore-case", "--line-number", "--max-count", "4", pattern, str(self.project_root)],
                 cwd=str(self.project_root),
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 capture_output=True,
                 timeout=5,
             )

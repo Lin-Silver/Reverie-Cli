@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
+from .runtime_evidence import evaluate_runtime_evidence
+
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -24,8 +26,10 @@ def build_quality_gate_report(
     system_bundle: Dict[str, Any],
     *,
     runtime_profile: Dict[str, Any] | None = None,
+    runtime_result: Dict[str, Any] | None = None,
     verification: Dict[str, Any] | None = None,
     slice_score: Dict[str, Any] | None = None,
+    runtime_evidence: Dict[str, Any] | None = None,
     asset_pipeline: Dict[str, Any] | None = None,
     design_intelligence: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
@@ -35,6 +39,15 @@ def build_quality_gate_report(
     slice_score = dict(slice_score or {})
     asset_pipeline = dict(asset_pipeline or {})
     design_intelligence = dict(design_intelligence or {})
+    runtime_evidence = dict(runtime_evidence or slice_score.get("runtime_evidence", {}) or {})
+    if not runtime_evidence:
+        runtime_evidence = evaluate_runtime_evidence(
+            game_request,
+            blueprint,
+            system_bundle,
+            verification=verification,
+            runtime_result=runtime_result,
+        )
     packet_ids = list(system_bundle.get("packets", {}).keys())
     queue = list(asset_pipeline.get("production_queue", []) or [])
     personas = list(design_intelligence.get("player_personas", []) or [])
@@ -47,9 +60,15 @@ def build_quality_gate_report(
     gate_sets: List[Dict[str, Any]] = [
         {
             "id": "runtime_boot",
-            "status": _status(bool(verification.get("valid", False)), review=bool(verification)),
-            "summary": "Runtime validation and smoke path",
-            "evidence": {"validation_checks": len(verification.get("checks", []) or [])},
+            "status": _status(bool(runtime_evidence.get("valid", False)), review=bool(runtime_evidence.get("run_observed", False))),
+            "summary": "Observed runtime execution and requested gameplay-loop evidence",
+            "evidence": {
+                "event_count": int(runtime_evidence.get("event_count", 0) or 0),
+                "failed_event_count": int(runtime_evidence.get("failed_event_count", 0) or 0),
+                "frame_count": int(runtime_evidence.get("frame_count", 0) or 0),
+                "frame_time_ms": float(runtime_evidence.get("frame_time_ms", 0) or 0),
+                "missing_loop_evidence": list(runtime_evidence.get("missing_loop_evidence", []) or []),
+            },
         },
         {
             "id": "system_coverage",
@@ -107,7 +126,10 @@ def build_quality_gate_report(
         },
         {
             "id": "slice_readiness",
-            "status": _status(int(slice_score.get("score", 0) or 0) >= 70, review=int(slice_score.get("score", 0) or 0) >= 55),
+            "status": _status(
+                bool(runtime_evidence.get("valid", False)) and int(slice_score.get("score", 0) or 0) >= 70,
+                review=bool(runtime_evidence.get("valid", False)) and int(slice_score.get("score", 0) or 0) >= 55,
+            ),
             "summary": "Current slice score is strong enough for continued iteration",
             "evidence": {"slice_score": int(slice_score.get("score", 0) or 0)},
         },
@@ -121,4 +143,5 @@ def build_quality_gate_report(
         "runtime": (runtime_profile or {}).get("id") or blueprint.get("meta", {}).get("target_engine", "reverie_engine"),
         "overall_status": overall,
         "gate_sets": gate_sets,
+        "runtime_evidence": runtime_evidence,
     }

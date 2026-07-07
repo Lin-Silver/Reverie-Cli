@@ -2,6 +2,12 @@
 
 * Added the built-in Opencode (`/oc`) source with OpenCode Zen free chat-completions models.
 
+---
+
+## Reverie CLI v2.3.4 - Writer, Sources, Memory, and Engine Upgrades
+
+**Release Date:** 2026-07-06
+
 ### Writer Mode
 
 * Added the Writer-only `serial_novel` native tool for persistent project bibles, chapter control cards, committed chapter files, continuity/timeline/foreshadowing ledgers, interruption recovery, deterministic quality gates, and disk-backed completion audits.

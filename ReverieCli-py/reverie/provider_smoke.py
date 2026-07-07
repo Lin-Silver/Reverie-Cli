@@ -24,6 +24,12 @@ from .aihubmix import (
     build_aihubmix_runtime_model_data,
     normalize_aihubmix_config,
 )
+from .opencode import (
+    build_opencode_openai_options,
+    build_opencode_runtime_model_data,
+    normalize_opencode_config,
+    resolve_opencode_request_url,
+)
 from .agnes import (
     build_agnes_openai_options,
     build_agnes_runtime_model_data,
@@ -67,6 +73,7 @@ BUILTIN_PROVIDER_NAMES = (
     "codex",
     "webgemini",
     "unlimitedsurf",
+    "opencode",
 )
 
 
@@ -261,6 +268,51 @@ def smoke_aihubmix(config: Config, timeout_seconds: int = 45, model_id: str = ""
     finally:
         if stream is not None and hasattr(stream, "close"):
             stream.close()
+
+
+def smoke_opencode(config: Config, timeout_seconds: int = 45, model_id: str = "") -> ProviderSmokeResult:
+    provider = "opencode"
+    cfg = normalize_opencode_config(config.opencode)
+    if model_id:
+        cfg["selected_model_id"] = str(model_id or "").strip()
+        cfg = normalize_opencode_config(cfg)
+    runtime = build_opencode_runtime_model_data(cfg, model_id=model_id or None)
+    model = str((runtime or {}).get("model") or cfg.get("selected_model_id") or "")
+    if not runtime:
+        return _skipped(provider, model, "disabled")
+
+    smoke_cfg = {**cfg, "max_tokens": 16}
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": "Reply with OK."}],
+        "stream": True,
+    }
+    payload.update(build_opencode_openai_options(smoke_cfg, model))
+    payload["max_tokens"] = min(16, int(payload.get("max_tokens") or 16))
+
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream",
+    }
+    if str(runtime.get("api_key") or "").strip():
+        headers["Authorization"] = f"Bearer {runtime['api_key']}"
+
+    start = time.perf_counter()
+    response = None
+    try:
+        response = _requests_post_stream(
+            resolve_opencode_request_url(runtime["base_url"], runtime.get("endpoint", "")),
+            headers,
+            payload,
+            timeout_seconds=timeout_seconds,
+        )
+        next(_iter_sse_data_strings(response), "")
+        return ProviderSmokeResult(provider=provider, model=model, status="ok", latency_ms=int((time.perf_counter() - start) * 1000))
+    except Exception as exc:
+        return _result_from_error(provider, model, start, exc)
+    finally:
+        if response is not None:
+            response.close()
 
 
 def smoke_agnes(config: Config, timeout_seconds: int = 45, model_id: str = "") -> ProviderSmokeResult:
@@ -549,6 +601,7 @@ def smoke_webgemini(config: Config, timeout_seconds: int = 60, model_id: str = "
 
 SMOKE_RUNNERS: Dict[str, Callable[[Config, int, str], ProviderSmokeResult]] = {
     "aihubmix": smoke_aihubmix,
+    "opencode": smoke_opencode,
     "agnes": smoke_agnes,
     "sensenova": smoke_sensenova,
     "modelscope": smoke_modelscope,

@@ -1,4 +1,6 @@
-## Unreleased
+## Reverie CLI v2.3.5 - Unreleased
+
+* Added the built-in Opencode (`/oc`) source with OpenCode Zen free chat-completions models.
 
 ### Writer Mode
 

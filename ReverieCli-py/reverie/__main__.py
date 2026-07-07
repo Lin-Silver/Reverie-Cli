@@ -36,6 +36,8 @@ DIRECT_COMMANDS = {
     "codex",
     "webgemini",
     "wgemini",
+    "opencode",
+    "oc",
     "aihubmix",
     "aihub",
     "agnes",

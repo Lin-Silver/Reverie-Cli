@@ -48,6 +48,7 @@ from ..nvidia import (
 )
 from ..aihubmix import build_aihubmix_openai_options
 from ..agnes import build_agnes_openai_options
+from ..opencode import build_opencode_openai_options
 from ..sensenova import build_sensenova_openai_options
 from ..modelscope import build_modelscope_anthropic_options
 from ..unlimitedsurf import build_unlimitedsurf_anthropic_options
@@ -2359,6 +2360,14 @@ class ReverieAgent:
             except Exception:
                 return timeout_value
 
+        if self._is_active_model_source("opencode") and self.provider in ("openai-chat", "request"):
+            try:
+                cfg = getattr(config, "opencode", {})
+                if isinstance(cfg, dict):
+                    return max(timeout_value, int(cfg.get("timeout", timeout_value)))
+            except Exception:
+                return timeout_value
+
         if self._is_active_model_source("agnes") and self.provider == "openai-chat":
             try:
                 cfg = getattr(config, "agnes", {})
@@ -2388,9 +2397,10 @@ class ReverieAgent:
     def _build_request_headers(self, stream: bool) -> Dict[str, str]:
         """Build HTTP headers for the request provider."""
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
+        if str(self.api_key or "").strip():
+            headers["Authorization"] = f"Bearer {self.api_key}"
         if self.custom_headers:
             headers.update(self.custom_headers)
         if "Accept" not in headers:
@@ -3381,6 +3391,8 @@ class ReverieAgent:
                 extra_body = provider_options.get("extra_body")
         elif self._is_active_model_source("aihubmix"):
             provider_options = build_aihubmix_openai_options(getattr(self.config, "aihubmix", {}), model_for_sdk)
+        elif self._is_active_model_source("opencode"):
+            provider_options = build_opencode_openai_options(getattr(self.config, "opencode", {}), model_for_sdk)
         elif self._is_active_model_source("agnes"):
             provider_options = build_agnes_openai_options(getattr(self.config, "agnes", {}), model_for_sdk)
             extra_body = provider_options.get("extra_body")
@@ -4773,6 +4785,12 @@ class ReverieAgent:
                     model_for_sdk,
                 )
                 extra_body = None
+            elif self._is_active_model_source("opencode"):
+                provider_options = build_opencode_openai_options(
+                    getattr(self.config, "opencode", {}),
+                    model_for_sdk,
+                )
+                extra_body = None
             elif self._is_active_model_source("agnes"):
                 provider_options = build_agnes_openai_options(
                     getattr(self.config, "agnes", {}),
@@ -5215,6 +5233,12 @@ class ReverieAgent:
             elif self._is_active_model_source("aihubmix"):
                 provider_options = build_aihubmix_openai_options(
                     getattr(self.config, "aihubmix", {}),
+                    model_for_sdk,
+                )
+                extra_body = None
+            elif self._is_active_model_source("opencode"):
+                provider_options = build_opencode_openai_options(
+                    getattr(self.config, "opencode", {}),
                     model_for_sdk,
                 )
                 extra_body = None

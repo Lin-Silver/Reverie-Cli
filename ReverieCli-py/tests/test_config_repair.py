@@ -218,6 +218,7 @@ def test_config_manager_creates_default_config_file_for_manual_editing(tmp_path:
     assert config.sensenova["max_context_tokens"] == 1_000_000
     assert config.sensenova["reasoning_effort"] == "medium"
     assert config.modelscope["selected_model_id"] == "ZhipuAI/GLM-5.1"
+    assert config.opencode["selected_model_id"] == "deepseek-v4-flash-free"
     saved_payload = json.loads(config_path.read_text(encoding="utf-8"))
     assert saved_payload["tool_output_style"] == "compact"
     assert saved_payload["thinking_output_style"] == "full"
@@ -233,6 +234,7 @@ def test_config_manager_creates_default_config_file_for_manual_editing(tmp_path:
     assert saved_payload["sensenova"]["max_context_tokens"] == 1_000_000
     assert saved_payload["sensenova"]["reasoning_effort"] == "medium"
     assert saved_payload["modelscope"]["selected_model_id"] == "ZhipuAI/GLM-5.1"
+    assert saved_payload["opencode"]["selected_model_id"] == "deepseek-v4-flash-free"
     assert notice is not None
     assert notice["title"] == "Created default config"
 
@@ -273,6 +275,7 @@ def test_config_manager_auto_adds_tool_output_style_on_load(tmp_path: Path, monk
     assert repaired_payload["aihubmix"]["selected_model_id"] == "gpt-5.5-free"
     assert repaired_payload["agnes"]["selected_model_id"] == "agnes-2.0-flash"
     assert repaired_payload["modelscope"]["selected_model_id"] == "ZhipuAI/GLM-5.1"
+    assert repaired_payload["opencode"]["selected_model_id"] == "deepseek-v4-flash-free"
 
 
 def test_config_manager_migrates_standard_models_to_supports_vision(tmp_path: Path, monkeypatch) -> None:

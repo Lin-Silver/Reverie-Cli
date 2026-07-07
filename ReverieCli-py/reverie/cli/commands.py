@@ -70,6 +70,8 @@ class CommandHandler:
             'codex': self.cmd_codex,
             'webgemini': self.cmd_webgemini,
             'wgemini': self.cmd_webgemini,
+            'opencode': self.cmd_opencode,
+            'oc': self.cmd_opencode,
             'aihubmix': self.cmd_aihubmix,
             'aihub': self.cmd_aihubmix,
             'agnes': self.cmd_agnes,
@@ -6862,6 +6864,217 @@ class CommandHandler:
         self.console.print(
             f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} WebGemini proxy {'set to: ' + escape(candidate) if candidate else 'cleared.'}[/{self.theme.MINT_VIBRANT}]"
         )
+        return True
+
+    def cmd_opencode(self, args: str) -> bool:
+        """Manage OpenCode Zen free-model source settings."""
+        raw = args.strip()
+        lowered = raw.lower()
+        if not raw or lowered in ("status", "check"):
+            return self._cmd_opencode_status()
+        if lowered in ("key", "apikey", "api-key", "login"):
+            return self._cmd_opencode_key("")
+        if lowered.startswith(("key ", "apikey ", "api-key ", "login ")):
+            return self._cmd_opencode_key(raw.split(None, 1)[1].strip())
+        if lowered in ("activate", "use"):
+            return self._cmd_opencode_activate()
+        if lowered == "model":
+            return self._cmd_opencode_model("")
+        if lowered.startswith("model "):
+            return self._cmd_opencode_model(raw[6:].strip())
+        if lowered in ("endpoint", "url", "base-url", "baseurl"):
+            return self._cmd_opencode_endpoint("")
+        if lowered.startswith("endpoint "):
+            return self._cmd_opencode_endpoint(raw[9:].strip())
+        if lowered.startswith("url "):
+            return self._cmd_opencode_endpoint(raw[4:].strip())
+        if lowered.startswith("base-url "):
+            return self._cmd_opencode_endpoint(raw[9:].strip())
+        if lowered.startswith("baseurl "):
+            return self._cmd_opencode_endpoint(raw[8:].strip())
+
+        self.console.print(
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /opencode [status|key|activate|model|endpoint][/{self.theme.AMBER_GLOW}]"
+        )
+        return True
+
+    def _ensure_opencode_configuration(self, config) -> bool:
+        """Bind the OpenCode source without forcing a key for free models."""
+        from ..opencode import normalize_opencode_config
+
+        config.opencode = normalize_opencode_config(getattr(config, "opencode", {}))
+        config.active_model_source = "opencode"
+        return True
+
+    def _cmd_opencode_status(self) -> bool:
+        from ..opencode import (
+            OPENCODE_API_KEY_HINT_URL,
+            mask_secret,
+            normalize_opencode_config,
+            resolve_opencode_api_key,
+            resolve_opencode_request_url,
+            resolve_opencode_selected_model,
+        )
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        opencode_cfg = normalize_opencode_config(getattr(config, "opencode", {}))
+        selected = resolve_opencode_selected_model(opencode_cfg)
+        effective_api_key = resolve_opencode_api_key(opencode_cfg)
+        key_origin = " (from environment)" if effective_api_key and not str(opencode_cfg.get("api_key", "") or "").strip() else ""
+        model_source = str(getattr(config, "active_model_source", "standard") or "standard").strip().lower()
+
+        lines = [
+            f"[{self.theme.BLUE_SOFT}]Active model source:[/{self.theme.BLUE_SOFT}] {self._format_model_source_label(model_source)}",
+            f"[{self.theme.BLUE_SOFT}]Configured key:[/{self.theme.BLUE_SOFT}] {mask_secret(effective_api_key)}{key_origin}",
+            f"[{self.theme.BLUE_SOFT}]Auth mode:[/{self.theme.BLUE_SOFT}] Optional Bearer token; the bundled free models can be called anonymously.",
+            f"[{self.theme.BLUE_SOFT}]OpenAI base URL:[/{self.theme.BLUE_SOFT}] {escape(str(opencode_cfg.get('api_url', '')))}",
+            f"[{self.theme.BLUE_SOFT}]Chat endpoint:[/{self.theme.BLUE_SOFT}] {escape(resolve_opencode_request_url(opencode_cfg.get('api_url'), opencode_cfg.get('endpoint')))}",
+            f"[{self.theme.BLUE_SOFT}]Temperature:[/{self.theme.BLUE_SOFT}] {opencode_cfg.get('temperature', 0.7)}",
+            f"[{self.theme.BLUE_SOFT}]Default max tokens:[/{self.theme.BLUE_SOFT}] {opencode_cfg.get('max_tokens', 16384)}",
+            f"[{self.theme.BLUE_SOFT}]API key help:[/{self.theme.BLUE_SOFT}] {escape(OPENCODE_API_KEY_HINT_URL)}",
+        ]
+        if selected:
+            lines.insert(1, f"[{self.theme.BLUE_SOFT}]Selected model:[/{self.theme.BLUE_SOFT}] {escape(selected['display_name'])} ({escape(selected['id'])})")
+            lines.insert(2, f"[{self.theme.BLUE_SOFT}]Transport:[/{self.theme.BLUE_SOFT}] OpenAI Chat Completions")
+            lines.insert(3, f"[{self.theme.BLUE_SOFT}]Context:[/{self.theme.BLUE_SOFT}] {int(selected.get('context_length') or 0):,} tokens")
+
+        self.console.print()
+        self.console.print(
+            Panel(
+                Text.from_markup("\n".join(lines)),
+                title=f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Opencode Source {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]",
+                border_style=self.theme.BORDER_PRIMARY,
+                box=box.ROUNDED,
+                padding=(1, 2),
+            )
+        )
+        self.console.print()
+        return True
+
+    def _cmd_opencode_key(self, api_key_value: str = "") -> bool:
+        from ..opencode import (
+            OPENCODE_API_KEY_HINT_URL,
+            mask_secret,
+            normalize_opencode_config,
+            resolve_opencode_api_key,
+        )
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        opencode_cfg = normalize_opencode_config(getattr(config, "opencode", {}))
+        current = resolve_opencode_api_key(opencode_cfg)
+        api_key = str(api_key_value or "").strip()
+        if not api_key:
+            self.console.print(f"[{self.theme.TEXT_DIM}]OpenCode Zen key page: {OPENCODE_API_KEY_HINT_URL}[/{self.theme.TEXT_DIM}]")
+            self.console.print(f"[{self.theme.TEXT_DIM}]Current Opencode key: {mask_secret(current)}[/{self.theme.TEXT_DIM}]")
+            api_key = Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Opencode API Key",
+                password=True,
+                default="",
+            ).strip()
+        if not api_key:
+            self.console.print(f"[{self.theme.TEXT_DIM}]Opencode key unchanged.[/{self.theme.TEXT_DIM}]")
+            return True
+        opencode_cfg["api_key"] = api_key
+        config.opencode = normalize_opencode_config(opencode_cfg)
+        config_manager.save(config)
+        self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Opencode API key saved.[/{self.theme.MINT_VIBRANT}]")
+        if self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+        return True
+
+    def _cmd_opencode_activate(self) -> bool:
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        if not self._ensure_opencode_configuration(config):
+            return True
+        config_manager.save(config)
+        if self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+        return self._cmd_opencode_status()
+
+    def _cmd_opencode_model(self, model_query: str) -> bool:
+        from ..opencode import get_opencode_model_catalog, normalize_opencode_config
+
+        config_manager = self.app.get('config_manager')
+        if config_manager:
+            config = config_manager.load()
+            if not self._ensure_opencode_configuration(config):
+                return True
+
+        return self._select_external_provider_model(
+            config_attr="opencode",
+            normalize_config=normalize_opencode_config,
+            catalog=get_opencode_model_catalog(),
+            provider_label="Opencode",
+            active_source="opencode",
+            model_query=model_query,
+            provider_command="opencode",
+        )
+
+    def _cmd_opencode_endpoint(self, endpoint_value: str) -> bool:
+        from ..opencode import OPENCODE_DEFAULT_API_URL, normalize_opencode_config
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        opencode_cfg = normalize_opencode_config(getattr(config, "opencode", {}))
+        candidate = str(endpoint_value or "").strip()
+        if not candidate:
+            current_url = str(opencode_cfg.get("api_url", OPENCODE_DEFAULT_API_URL)).strip()
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Current OpenCode Zen base URL: {current_url}[/{self.theme.TEXT_DIM}]"
+            )
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Use 'clear' to restore the default. You may paste /v1/chat/completions or /v1/models; Reverie normalizes it back to /v1.[/{self.theme.TEXT_DIM}]"
+            )
+            candidate = Prompt.ask(
+                "OpenCode Zen base URL",
+                default=current_url,
+            ).strip()
+
+        if candidate.lower() in ("clear", "default", "none", "off"):
+            candidate = OPENCODE_DEFAULT_API_URL
+
+        if candidate and not candidate.startswith(("http://", "https://")):
+            candidate = f"https://{candidate}"
+
+        opencode_cfg["api_url"] = candidate or OPENCODE_DEFAULT_API_URL
+        config.opencode = normalize_opencode_config(opencode_cfg)
+        config_manager.save(config)
+
+        if self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+
+        self.console.print()
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Opencode base URL set to: {escape(config.opencode.get('api_url', OPENCODE_DEFAULT_API_URL))}[/{self.theme.MINT_VIBRANT}]"
+        )
+        self.console.print()
         return True
 
     def cmd_aihubmix(self, args: str) -> bool:

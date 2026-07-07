@@ -33,6 +33,11 @@ from .aihubmix import (
     default_aihubmix_config,
     normalize_aihubmix_config,
 )
+from .opencode import (
+    build_opencode_runtime_model_data,
+    default_opencode_config,
+    normalize_opencode_config,
+)
 from .agnes import (
     build_agnes_runtime_model_data,
     default_agnes_config,
@@ -73,7 +78,7 @@ from .webgemini import (
 from .modes import normalize_mode
 from .version import CONFIG_VERSION, __version__
 
-EXTERNAL_MODEL_SOURCES = ("codex", "aihubmix", "agnes", "sensenova", "unlimitedsurf", "nvidia", "modelscope", "webgemini")
+EXTERNAL_MODEL_SOURCES = ("codex", "aihubmix", "agnes", "sensenova", "unlimitedsurf", "nvidia", "modelscope", "webgemini", "opencode")
 SUPPORTED_ACTIVE_MODEL_SOURCES = ("standard",) + EXTERNAL_MODEL_SOURCES
 MODEL_SOURCE_DISPLAY_NAMES = {
     "standard": "Custom Provider",
@@ -85,6 +90,7 @@ MODEL_SOURCE_DISPLAY_NAMES = {
     "nvidia": "NVIDIA",
     "modelscope": "ModelScope",
     "webgemini": "WebGemini",
+    "opencode": "Opencode",
 }
 SUPPORTED_TOOL_OUTPUT_STYLES = ("compact", "condensed", "full")
 SUPPORTED_THINKING_OUTPUT_STYLES = ("hidden", "compact", "full")
@@ -139,6 +145,7 @@ def normalize_active_model_source(value: Any, default: str = "standard") -> str:
         "unlimited.surf": "unlimitedsurf",
         "unlimited_surf": "unlimitedsurf",
         "unlimitedsurf": "unlimitedsurf",
+        "oc": "opencode",
     }
     candidate = aliases.get(candidate, candidate)
     if candidate in SUPPORTED_ACTIVE_MODEL_SOURCES:
@@ -840,7 +847,7 @@ class Config:
     """Main configuration"""
     models: List[ModelConfig] = field(default_factory=list)
     active_model_index: int = 0
-    active_model_source: str = "standard"  # standard | codex | aihubmix | agnes | sensenova | unlimitedsurf | nvidia | modelscope | webgemini
+    active_model_source: str = "standard"  # standard | codex | aihubmix | agnes | sensenova | unlimitedsurf | nvidia | modelscope | webgemini | opencode
     mode: str = "reverie"
     theme: str = "default"
     max_context_tokens: int = 128000
@@ -871,6 +878,7 @@ class Config:
     nvidia: Dict[str, Any] = field(default_factory=default_nvidia_config)
     modelscope: Dict[str, Any] = field(default_factory=default_modelscope_config)
     webgemini: Dict[str, Any] = field(default_factory=default_webgemini_config)
+    opencode: Dict[str, Any] = field(default_factory=default_opencode_config)
     atlas_mode: Dict[str, Any] = field(default_factory=default_atlas_mode_config)
     subagents: Dict[str, Any] = field(default_factory=default_subagent_config)
     
@@ -939,6 +947,10 @@ class Config:
             runtime_webgemini_model = build_webgemini_runtime_model_data(self.webgemini)
             return ModelConfig.from_dict(runtime_webgemini_model) if runtime_webgemini_model else None
 
+        if source == "opencode":
+            runtime_opencode_model = build_opencode_runtime_model_data(self.opencode)
+            return ModelConfig.from_dict(runtime_opencode_model) if runtime_opencode_model else None
+
         if 0 <= self.active_model_index < len(self.models):
             return self.models[self.active_model_index]
         return None
@@ -1002,6 +1014,7 @@ class Config:
         nvidia = normalize_nvidia_config(self.nvidia)
         modelscope = normalize_modelscope_config(self.modelscope)
         webgemini = normalize_webgemini_config(self.webgemini)
+        opencode = normalize_opencode_config(self.opencode)
         atlas_mode = normalize_atlas_mode_config(self.atlas_mode)
         subagents = normalize_subagent_config(self.subagents)
         active_model_source = normalize_active_model_source(self.active_model_source)
@@ -1036,6 +1049,7 @@ class Config:
             'nvidia': nvidia,
             'modelscope': modelscope,
             'webgemini': webgemini,
+            'opencode': opencode,
             'atlas_mode': atlas_mode,
             'subagents': subagents,
         }
@@ -1114,6 +1128,8 @@ class Config:
         modelscope = normalize_modelscope_config(raw_modelscope)
         raw_webgemini = data.get('webgemini', {})
         webgemini = normalize_webgemini_config(raw_webgemini)
+        raw_opencode = data.get('opencode', data.get('oc', {}))
+        opencode = normalize_opencode_config(raw_opencode)
         raw_atlas_mode = data.get('atlas_mode', {})
         atlas_mode = normalize_atlas_mode_config(raw_atlas_mode)
         raw_subagents = data.get('subagents', {})
@@ -1150,6 +1166,7 @@ class Config:
             nvidia=nvidia,
             modelscope=modelscope,
             webgemini=webgemini,
+            opencode=opencode,
             atlas_mode=atlas_mode,
             subagents=subagents,
         )
@@ -1815,6 +1832,17 @@ class ConfigManager:
                     needs_update = True
                     break
 
+        # Check if opencode section is missing
+        if 'opencode' not in data:
+            needs_update = True
+        elif not isinstance(data.get('opencode'), dict):
+            needs_update = True
+        else:
+            for field_name in default_opencode_config().keys():
+                if field_name not in data.get('opencode', {}):
+                    needs_update = True
+                    break
+
         # Check if atlas_mode section is missing
         if 'atlas_mode' not in data:
             needs_update = True
@@ -2009,6 +2037,8 @@ class ConfigManager:
             return True
         if build_webgemini_runtime_model_data(getattr(config, "webgemini", {})):
             return True
+        if build_opencode_runtime_model_data(getattr(config, "opencode", {})):
+            return True
         return False
     
     def add_model(self, model_config: ModelConfig) -> None:
@@ -2043,6 +2073,8 @@ class ConfigManager:
                     config.active_model_source = "modelscope"
                 elif build_webgemini_runtime_model_data(getattr(config, "webgemini", {})):
                     config.active_model_source = "webgemini"
+                elif build_opencode_runtime_model_data(getattr(config, "opencode", {})):
+                    config.active_model_source = "opencode"
             self.save(config)
             return True
         return False

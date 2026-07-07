@@ -1233,6 +1233,7 @@ class ReverieInterface:
         source = str(getattr(config, "active_model_source", "standard") or "standard").strip().lower()
         source_commands = {
             "codex": "/codex",
+            "opencode": "/opencode activate",
             "aihubmix": "/aihubmix key or /aihubmix activate",
             "agnes": "/agnes key or /agnes activate",
             "sensenova": "/sensenova key or /sensenova activate",

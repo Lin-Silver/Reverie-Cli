@@ -27,7 +27,7 @@ Reverie-Gamer is currently aimed at:
 
 `one prompt -> structured request -> blueprint -> runtime-aware project foundation -> verified playable vertical slice -> iterative expansion`
 
-The current assessment and upgrade plan live in [docs/reverie_gamer_3d_game_generation_assessment.md](docs/reverie_gamer_3d_game_generation_assessment.md).
+Current priorities and completion gates live in the project [roadmap](docs/ROADMAP.md).
 
 ## Installation
 
@@ -126,25 +126,24 @@ For the full reference, see [docs/CLI_COMMANDS.md](docs/CLI_COMMANDS.md).
 
 ```text
 reverie/
-??? __main__.py              # CLI entry point
-??? config.py                # config loading, migration, model source state
-??? modes.py                 # mode registry and aliases
-??? atlas.py                 # Atlas mode config and rules
-??? codex.py                 # Codex provider integration
-??? modelscope.py            # ModelScope provider integration
-??? agent/                   # agent prompts, tool execution, orchestration
-??? cli/                     # command handling, TUI, display helpers
-??? context_engine/          # indexing, retrieval, semantic analysis, graph data
-??? gamer/                   # Gamer production pipeline and runtime generation
-?   ??? runtime_adapters/    # unified Reverie Engine delivery plus legacy-engine inspection/migration adapters
-?   ??? system_generators/   # combat, quest, progression, save/load, and world packets
-?   ??? verification/        # slice scoring and quality-gate helpers
-??? session/                 # sessions, checkpoints, rollback, archives, memory
-??? tools/                   # tool implementations exposed to the agent
-??? engine/                  # canonical public built-in engine API
-??? engine/                  # shared runtime, project, and modeling implementation
-??? computer_use/            # embedded Open Computer Use Windows adapter
-??? skills_manager.py        # SKILL.md discovery, matching, and prompt injection helpers
+├── __main__.py              # CLI entry point
+├── config.py                # config loading, migration, model source state
+├── modes.py                 # mode registry and aliases
+├── atlas.py                 # Atlas mode config and rules
+├── codex.py                 # Codex provider integration
+├── modelscope.py            # ModelScope provider integration
+├── agent/                   # agent prompts, tool execution, orchestration
+├── cli/                     # command handling, TUI, display helpers
+├── context_engine/          # indexing, retrieval, semantic analysis, graph data
+├── gamer/                   # Gamer production pipeline and runtime generation
+│   ├── runtime_adapters/    # engine delivery and legacy-engine inspection/migration
+│   ├── system_generators/   # combat, quest, progression, save/load, and world packets
+│   └── verification/        # slice scoring and quality-gate helpers
+├── session/                 # sessions, checkpoints, rollback, archives, memory
+├── tools/                   # tool implementations exposed to the agent
+├── engine/                  # public API, runtime, project, and modeling implementation
+├── computer_use/            # embedded Open Computer Use Windows adapter
+└── skills_manager.py        # SKILL.md discovery, matching, and prompt injection helpers
 ```
 
 ## Development
@@ -165,6 +164,7 @@ cd ReverieCli-py
 ```
 
 `build.bat` runs from `ReverieCli-py` and writes the Python PyInstaller executable to the repository-root `dist\reverie.exe`.
+Builds are incremental by default; use `--clean`, `--reinstall-deps`, `--refresh-browser`, or `--rebuild-plugins` when those parts need an explicit refresh.
 GitHub Actions builds that Python PyInstaller executable as the primary `dist\reverie.exe`, runs the same release job on a daily schedule, and refreshes the rolling `latest` release assets.
 
 The packaged `dist/reverie.exe` includes the unified Reverie Engine, work-in-progress Reverie-Gamer flows, the Gamer-only `reverie-engine` skill, `/engine video`, built-in Ren'Py inspection/migration, and modeling tools. Godot and O3DE no longer ship as runtime plugins; their useful scene, component, data-contract, and asset-pipeline patterns feed the one built-in engine. `build.bat` still installs the official Blender and Game Models plugins into `dist/.reverie/plugins/`; Ren'Py and Live2D remain optional source plugins instead of rolling Release assets. If `ffmpeg` is available during build, it is bundled for `mp4` and `gif` export; otherwise frame-sequence export remains available.
@@ -172,17 +172,17 @@ The packaged `dist/reverie.exe` includes the unified Reverie Engine, work-in-pro
 ## Documentation
 
 - [Documentation Index](docs/README.md)
-- [Chinese README / ?? README](docs/README.zh-CN.md)
+- [Chinese README / 中文说明](docs/README.zh-CN.md)
 - [Harness Engineering Notes](docs/HARNESS_ENGINEERING.md)
 - [Configuration Guide](docs/CONFIGURATION.md)
 - [CLI Command Reference](docs/CLI_COMMANDS.md)
 - [Context Engine Project Memory](docs/CONTEXT_ENGINE_MEMORY.md)
 - [Development Guide](docs/DEVELOPMENT.md)
+- [Roadmap](docs/ROADMAP.md)
 - [Reverie Engine User Guide](docs/engine/reverie_engine_user_guide.md)
 - [Reverie-Gamer Modeling Guide](docs/engine/reverie_gamer_modeling_pipeline.md)
-- [Reverie-Gamer Upgrade Plan](docs/reverie_gamer_3d_game_generation_assessment.md)
 - [Changelog](docs/changelog.md)
 
 ## License
 
-This repository is documented as MIT-licensed by the project author. If you distribute the project externally, add the final license file that matches your intended terms.
+This project is licensed under the MIT License. See the repository-root [LICENSE](../LICENSE).

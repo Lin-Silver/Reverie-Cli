@@ -12,6 +12,7 @@
 - **Subagent delegation**: Parallel investigation and implementation tasks
 - **Harness audit**: Prompt-level reporting, verification tracking, playbook recommendations
 - **Specialist runtime plugins**: Ren'Py and Live2D/Cubism Galgame workflows are delivered through plugin-owned `rc_*` tools, skills, and prompt guidance
+- **Roadmap**: Planned runtime, Gamer, harness, and release work is maintained in [one roadmap](ReverieCli-py/docs/ROADMAP.md)
 
 ---
 
@@ -998,7 +999,7 @@ Contributions are welcome:
 py -m venv venv
 .\venv\Scripts\Activate.ps1
 py -m pip install -r ReverieCli-py\requirements.txt
-py -m pip install -r ReverieCli-py\requirements-dev.txt
+py -m pip install -e "ReverieCli-py[dev,treesitter,build]"
 
 # Run tests
 py -m pytest
@@ -1008,7 +1009,7 @@ py -m pytest
 
 ## License
 
-This project is shared as open-source software. See the repository for details.
+This project is licensed under the [MIT License](LICENSE).
 
 ---
 

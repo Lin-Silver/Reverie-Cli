@@ -24,6 +24,10 @@ set "BLENDER_ARCHIVE_NAME=blender-5.1.1-windows-x64.zip"
 set "BLENDER_ARCHIVE_SOURCE="
 set "RECREATE_VENV=0"
 set "RUN_EXE_TEST=0"
+set "FORCE_CLEAN=0"
+set "FORCE_DEPS=0"
+set "FORCE_BROWSER=0"
+set "FORCE_PLUGINS=0"
 set "USER_FFMPEG_PATH=%REVERIE_FFMPEG_PATH%"
 set "REVERIE_FFMPEG_PATH="
 set "TMP=%LOCAL_TEMP_DIR%"
@@ -38,6 +42,10 @@ if "%~1"=="" goto args_done
 if /I "%~1"=="--recreate-venv" set "RECREATE_VENV=1"
 if /I "%~1"=="--reuse-venv" set "RECREATE_VENV=0"
 if /I "%~1"=="--test-exe" set "RUN_EXE_TEST=1"
+if /I "%~1"=="--clean" set "FORCE_CLEAN=1"
+if /I "%~1"=="--reinstall-deps" set "FORCE_DEPS=1"
+if /I "%~1"=="--refresh-browser" set "FORCE_BROWSER=1"
+if /I "%~1"=="--rebuild-plugins" set "FORCE_PLUGINS=1"
 shift
 goto parse_args
 
@@ -69,17 +77,20 @@ if not exist "%LOCAL_BUILD_ROOT%" mkdir "%LOCAL_BUILD_ROOT%" >nul 2>&1
 if not exist "%LOCAL_TEMP_DIR%" mkdir "%LOCAL_TEMP_DIR%" >nul 2>&1
 if not exist "%LOCAL_PIP_CACHE%" mkdir "%LOCAL_PIP_CACHE%" >nul 2>&1
 if not exist "%PYI_CONFIG_DIR%" mkdir "%PYI_CONFIG_DIR%" >nul 2>&1
+set "NEED_DEPS=0"
 if exist "%VENV_DIR%\Scripts\activate.bat" (
     if "%RECREATE_VENV%"=="1" (
         echo       Recreating %VENV_DIR%...
         rmdir /s /q "%VENV_DIR%"
         %PYTHON_EXE% -m venv "%VENV_DIR%"
+        set "NEED_DEPS=1"
     ) else (
         echo       Using existing %VENV_DIR%
     )
 ) else (
     echo       Creating %VENV_DIR%...
     %PYTHON_EXE% -m venv "%VENV_DIR%"
+    set "NEED_DEPS=1"
 )
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] Failed to create virtual environment.
@@ -103,18 +114,36 @@ if %ERRORLEVEL% neq 0 (
 
 echo.
 echo [3/6] Installing build dependencies...
-python -m pip install --upgrade pyinstaller pillow
-if %ERRORLEVEL% neq 0 (
-    echo [ERROR] Failed to install PyInstaller or Pillow.
-    set "BUILD_EXIT_CODE=1"
-    goto finish
+set "DEPS_STAMP=%LOCAL_BUILD_ROOT%\deps.stamp"
+set "CURRENT_DEPS_STAMP="
+for /f "delims=" %%S in ('python -c "import hashlib,pathlib,sys; h=hashlib.sha256(); [h.update(p.read_bytes()) for p in (pathlib.Path('requirements.txt'),pathlib.Path('setup.py')) if p.exists()]; h.update(sys.version.encode()); print(h.hexdigest())"') do set "CURRENT_DEPS_STAMP=%%S"
+if "%FORCE_DEPS%"=="1" set "NEED_DEPS=1"
+if not defined CURRENT_DEPS_STAMP set "NEED_DEPS=1"
+if exist "%DEPS_STAMP%" (
+    set "STORED_DEPS_STAMP="
+    set /p STORED_DEPS_STAMP=<"%DEPS_STAMP%"
+    if not "!CURRENT_DEPS_STAMP!"=="!STORED_DEPS_STAMP!" set "NEED_DEPS=1"
+) else (
+    set "NEED_DEPS=1"
 )
+if "%NEED_DEPS%"=="1" (
+    echo       Installing or refreshing Python dependencies...
+    python -m pip install --disable-pip-version-check --upgrade pyinstaller pillow
+    if errorlevel 1 (
+        echo [ERROR] Failed to install PyInstaller or Pillow.
+        set "BUILD_EXIT_CODE=1"
+        goto finish
+    )
 
-python -m pip install -e .
-if %ERRORLEVEL% neq 0 (
-    echo [ERROR] Failed to install Reverie into the build environment.
-    set "BUILD_EXIT_CODE=1"
-    goto finish
+    python -m pip install --disable-pip-version-check -e .
+    if errorlevel 1 (
+        echo [ERROR] Failed to install Reverie into the build environment.
+        set "BUILD_EXIT_CODE=1"
+        goto finish
+    )
+    >"%DEPS_STAMP%" echo !CURRENT_DEPS_STAMP!
+) else (
+    echo       Dependencies unchanged; reusing the existing build environment.
 )
 
 echo.
@@ -132,16 +161,20 @@ if not exist "%SHARED_COMFY_DIR%\embedded_comfy.b64" (
 
 if not exist "%BUNDLE_RES_DIR%\comfy" mkdir "%BUNDLE_RES_DIR%\comfy" >nul 2>&1
 if not exist "%BUNDLE_RES_DIR%\browser\ms-playwright" mkdir "%BUNDLE_RES_DIR%\browser\ms-playwright" >nul 2>&1
-copy /Y "%SHARED_COMFY_DIR%\generate_image.py" "%BUNDLE_RES_DIR%\comfy\generate_image.py" >nul
-copy /Y "%SHARED_COMFY_DIR%\embedded_comfy.b64" "%BUNDLE_RES_DIR%\comfy\embedded_comfy.b64" >nul
+xcopy /D /Y "%SHARED_COMFY_DIR%\generate_image.py" "%BUNDLE_RES_DIR%\comfy\generate_image.py" >nul
+xcopy /D /Y "%SHARED_COMFY_DIR%\embedded_comfy.b64" "%BUNDLE_RES_DIR%\comfy\embedded_comfy.b64" >nul
 set "PLAYWRIGHT_BROWSERS_PATH=%BUNDLE_RES_DIR%\browser\ms-playwright"
-python -m playwright install chromium --no-shell
+set "NEED_BROWSER=0"
+if "%FORCE_BROWSER%"=="1" set "NEED_BROWSER=1"
+if "%NEED_BROWSER%"=="0" python -c "from pathlib import Path; raise SystemExit(0 if any(Path(r'%PLAYWRIGHT_BROWSERS_PATH%').rglob('chrome.exe')) else 1)" >nul 2>&1
+if errorlevel 1 set "NEED_BROWSER=1"
+if "%NEED_BROWSER%"=="1" python -m playwright install chromium --no-shell
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] Failed to install embedded Chromium for Browser Controler.
     set "BUILD_EXIT_CODE=1"
     goto finish
 )
-dir /s /b "%PLAYWRIGHT_BROWSERS_PATH%\chrome.exe" >nul 2>&1
+python -c "from pathlib import Path; raise SystemExit(0 if any(Path(r'%PLAYWRIGHT_BROWSERS_PATH%').rglob('chrome.exe')) else 1)" >nul 2>&1
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] Embedded Chromium install did not produce chrome.exe.
     set "BUILD_EXIT_CODE=1"
@@ -154,15 +187,23 @@ if not defined BLENDER_ARCHIVE_SOURCE if exist "%ROOT_DIR%\%BLENDER_ARCHIVE_NAME
 if not defined BLENDER_ARCHIVE_SOURCE if exist "%SHARED_PLUGINS_DIR%\blender\%BLENDER_ARCHIVE_NAME%" set "BLENDER_ARCHIVE_SOURCE=%SHARED_PLUGINS_DIR%\blender\%BLENDER_ARCHIVE_NAME%"
 if defined BLENDER_ARCHIVE_SOURCE (
     echo       Blender portable archive build input: %BLENDER_ARCHIVE_SOURCE%
-    echo       Building official Blender plugin with embedded portable archive...
-    call "%SHARED_PLUGINS_DIR%\blender\build.bat"
-    if %ERRORLEVEL% neq 0 (
-        echo [ERROR] Failed to build Blender plugin executable.
-        set "BUILD_EXIT_CODE=1"
-        goto finish
+    set "BUILD_BLENDER_PLUGIN=0"
+    if "%FORCE_PLUGINS%"=="1" set "BUILD_BLENDER_PLUGIN=1"
+    if "%BUILD_BLENDER_PLUGIN%"=="0" python -c "from pathlib import Path; o=Path(r'%SHARED_PLUGINS_DIR%\blender\dist\reverie-blender.exe'); i=[Path(r'%SHARED_PLUGINS_DIR%\blender\plugin.py'),Path(r'%SHARED_PLUGINS_DIR%\blender\plugin.json'),Path(r'%BLENDER_ARCHIVE_SOURCE%')]; raise SystemExit(0 if o.is_file() and all(not p.is_file() or o.stat().st_mtime >= p.stat().st_mtime for p in i) else 1)" >nul 2>&1
+    if errorlevel 1 set "BUILD_BLENDER_PLUGIN=1"
+    if "%BUILD_BLENDER_PLUGIN%"=="1" (
+        echo       Building official Blender plugin with embedded portable archive...
+        call "%SHARED_PLUGINS_DIR%\blender\build.bat"
+        if errorlevel 1 (
+            echo [ERROR] Failed to build Blender plugin executable.
+            set "BUILD_EXIT_CODE=1"
+            goto finish
+        )
+    ) else (
+        echo       Reusing up-to-date Blender plugin executable.
     )
     python -c "from reverie.config import get_app_root; from reverie.plugin.runtime_manager import RuntimePluginManager; manager=RuntimePluginManager(get_app_root()); result=manager.install_source_plugin('blender', overwrite=True); location=result.get('target_path') or result.get('target_dir'); mode=result.get('install_mode') or 'directory-sync'; print(f'      Blender plugin installed ({mode}): {location}'); raise SystemExit(0 if result.get('success') else 1)"
-    if %ERRORLEVEL% neq 0 (
+    if errorlevel 1 (
         echo [ERROR] Failed to install Blender plugin into dist runtime depot.
         set "BUILD_EXIT_CODE=1"
         goto finish
@@ -172,15 +213,23 @@ if defined BLENDER_ARCHIVE_SOURCE (
 )
 
 if exist "%SHARED_PLUGINS_DIR%\game_models\plugin.py" (
-    echo       Building official Game Models plugin...
-    call "%SHARED_PLUGINS_DIR%\game_models\build.bat"
-    if %ERRORLEVEL% neq 0 (
-        echo [ERROR] Failed to build Game Models plugin executable.
-        set "BUILD_EXIT_CODE=1"
-        goto finish
+    set "BUILD_GAME_MODELS_PLUGIN=0"
+    if "%FORCE_PLUGINS%"=="1" set "BUILD_GAME_MODELS_PLUGIN=1"
+    if "%BUILD_GAME_MODELS_PLUGIN%"=="0" python -c "from pathlib import Path; o=Path(r'%SHARED_PLUGINS_DIR%\game_models\dist\reverie-game-models.exe'); i=[Path(r'%SHARED_PLUGINS_DIR%\game_models\plugin.py'),Path(r'%SHARED_PLUGINS_DIR%\game_models\plugin.json')]; raise SystemExit(0 if o.is_file() and all(not p.is_file() or o.stat().st_mtime >= p.stat().st_mtime for p in i) else 1)" >nul 2>&1
+    if errorlevel 1 set "BUILD_GAME_MODELS_PLUGIN=1"
+    if "%BUILD_GAME_MODELS_PLUGIN%"=="1" (
+        echo       Building official Game Models plugin...
+        call "%SHARED_PLUGINS_DIR%\game_models\build.bat"
+        if errorlevel 1 (
+            echo [ERROR] Failed to build Game Models plugin executable.
+            set "BUILD_EXIT_CODE=1"
+            goto finish
+        )
+    ) else (
+        echo       Reusing up-to-date Game Models plugin executable.
     )
     python -c "from reverie.config import get_app_root; from reverie.plugin.runtime_manager import RuntimePluginManager; manager=RuntimePluginManager(get_app_root()); result=manager.install_source_plugin('game_models', overwrite=True); location=result.get('target_path') or result.get('target_dir'); mode=result.get('install_mode') or 'directory-sync'; print(f'      Game Models plugin installed ({mode}): {location}'); raise SystemExit(0 if result.get('success') else 1)"
-    if %ERRORLEVEL% neq 0 (
+    if errorlevel 1 (
         echo [ERROR] Failed to install Game Models plugin into dist runtime depot.
         set "BUILD_EXIT_CODE=1"
         goto finish
@@ -227,12 +276,16 @@ if defined REVERIE_ICON_PATH (
 
 echo.
 echo [6/6] Building executable...
-if exist "%PYI_WORK_DIR%" rmdir /s /q "%PYI_WORK_DIR%"
-if exist "%PYI_SPEC_DIR%" rmdir /s /q "%PYI_SPEC_DIR%"
+set "PYI_CLEAN_ARG="
+if "%FORCE_CLEAN%"=="1" (
+    set "PYI_CLEAN_ARG=--clean"
+    if exist "%PYI_WORK_DIR%" rmdir /s /q "%PYI_WORK_DIR%"
+    if exist "%PYI_SPEC_DIR%" rmdir /s /q "%PYI_SPEC_DIR%"
+)
 if exist "%PYI_DIST_DIR%\%EXE_NAME%.exe" del /f /q "%PYI_DIST_DIR%\%EXE_NAME%.exe" >nul 2>&1
 set "PYI_PYTHONWARNINGS=ignore:Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.:UserWarning"
 set "PYTHONWARNINGS=%PYI_PYTHONWARNINGS%"
-PyInstaller --noconfirm --clean --distpath "%PYI_DIST_DIR%" --workpath "%PYI_WORK_DIR%" reverie.spec
+PyInstaller --noconfirm %PYI_CLEAN_ARG% --distpath "%PYI_DIST_DIR%" --workpath "%PYI_WORK_DIR%" reverie.spec
 set "PYTHONWARNINGS="
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] Build failed.

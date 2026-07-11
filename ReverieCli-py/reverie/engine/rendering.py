@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from array import array
 from dataclasses import dataclass, field
 from enum import Enum
 import math
+from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 try:
@@ -338,12 +340,25 @@ class RenderingServer:
         mode: RenderMode = RenderMode.RENDER_2D,
         *,
         headless: bool = True,
+        asset_root: str | Path | None = None,
     ) -> None:
         self.mode = mode
         self.viewport = Viewport()
-        self.backend = RenderBackend.HEADLESS if headless else RenderBackend.NATIVE
+        self.requested_backend = RenderBackend.HEADLESS if headless else RenderBackend.NATIVE
+        self.backend = self.requested_backend
+        self.asset_root = Path(asset_root).resolve() if asset_root is not None else Path.cwd()
         self.active_camera: Optional[Camera] = None
         self.ctx: Optional[Any] = None
+        self._framebuffer: Optional[Any] = None
+        self._color_target: Optional[Any] = None
+        self._depth_target: Optional[Any] = None
+        self._program: Optional[Any] = None
+        self._texture_cache: Dict[str, Any] = {}
+        self._gpu_mesh_cache: Dict[str, tuple[Any, Any, Any, tuple[Any, ...]]] = {}
+        self.mesh_library = MeshLibrary()
+        self._native_draw_calls = 0
+        self._fallback_reason = ""
+        self._native_errors: List[str] = []
         self._initialized = False
         self._canvas_layers: Dict[int, CanvasLayerState] = {}
         self._ui_commands: List[RenderCommand] = []
@@ -361,18 +376,98 @@ class RenderingServer:
 
         if moderngl is None:
             self.backend = RenderBackend.HEADLESS
+            self._fallback_reason = "moderngl is not installed"
             self._initialized = True
             return True
 
         try:
             self.ctx = moderngl.create_standalone_context()
+            self._program = self.ctx.program(
+                vertex_shader="""
+                    #version 330
+                    in vec3 in_position;
+                    in vec2 in_uv;
+                    out vec2 uv;
+                    uniform mat4 model;
+                    uniform mat4 view;
+                    uniform mat4 projection;
+                    void main() {
+                        uv = in_uv;
+                        gl_Position = projection * view * model * vec4(in_position, 1.0);
+                    }
+                """,
+                fragment_shader="""
+                    #version 330
+                    uniform vec4 albedo;
+                    uniform bool use_texture;
+                    uniform sampler2D albedo_texture;
+                    in vec2 uv;
+                    out vec4 fragment_color;
+                    void main() {
+                        fragment_color = albedo * (use_texture ? texture(albedo_texture, uv) : vec4(1.0));
+                    }
+                """,
+            )
+            self._create_render_target()
             self._initialized = True
             return True
-        except Exception:
+        except Exception as exc:
+            self._release_native_resources()
             self.backend = RenderBackend.HEADLESS
-            self.ctx = None
+            self._fallback_reason = f"native initialization failed: {exc}"
             self._initialized = True
             return True
+
+    def _create_render_target(self) -> None:
+        if self.ctx is None:
+            return
+        self._release_render_target()
+        size = (max(int(self.viewport.width), 1), max(int(self.viewport.height), 1))
+        self._color_target = self.ctx.texture(size, 4)
+        self._color_target.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        self._depth_target = self.ctx.depth_renderbuffer(size)
+        self._framebuffer = self.ctx.framebuffer(
+            color_attachments=[self._color_target],
+            depth_attachment=self._depth_target,
+        )
+
+    def _release_render_target(self) -> None:
+        for resource_name in ("_framebuffer", "_depth_target", "_color_target"):
+            resource = getattr(self, resource_name, None)
+            if resource is not None:
+                try:
+                    resource.release()
+                except Exception:
+                    pass
+                setattr(self, resource_name, None)
+
+    def _release_native_resources(self) -> None:
+        self._release_render_target()
+        for texture in self._texture_cache.values():
+            try:
+                texture.release()
+            except Exception:
+                pass
+        self._texture_cache.clear()
+        for vertex_array, index_buffer, vertex_buffer, _signature in self._gpu_mesh_cache.values():
+            for resource in (vertex_array, index_buffer, vertex_buffer):
+                try:
+                    resource.release()
+                except Exception:
+                    pass
+        self._gpu_mesh_cache.clear()
+        if self._program is not None:
+            try:
+                self._program.release()
+            except Exception:
+                pass
+            self._program = None
+        if self.ctx is not None:
+            try:
+                self.ctx.release()
+            except Exception:
+                pass
+            self.ctx = None
 
     def begin_frame(self) -> None:
         self._canvas_layers.clear()
@@ -381,10 +476,17 @@ class RenderingServer:
         self.active_camera = None
 
     def set_viewport(self, width: int, height: int, *, name: str | None = None) -> None:
+        previous_size = (self.viewport.width, self.viewport.height)
         self.viewport.width = max(int(width), 1)
         self.viewport.height = max(int(height), 1)
         if name:
             self.viewport.name = str(name)
+        if (
+            self.backend == RenderBackend.NATIVE
+            and self.ctx is not None
+            and previous_size != (self.viewport.width, self.viewport.height)
+        ):
+            self._create_render_target()
 
     def set_camera(self, camera: Camera) -> None:
         self.active_camera = camera
@@ -423,20 +525,30 @@ class RenderingServer:
         ordered_commands = self._ordered_commands()
 
         if self.backend == RenderBackend.NATIVE and self.ctx is not None:
-            self.ctx.clear(
+            if self._framebuffer is None:
+                self._create_render_target()
+            self._framebuffer.use()
+            self._framebuffer.clear(
                 self.viewport.clear_color.x,
                 self.viewport.clear_color.y,
                 self.viewport.clear_color.z,
                 self.viewport.clear_color.w,
+                depth=1.0,
             )
-            projection = (
-                self.active_camera.get_projection_matrix(self.viewport)
-                if self.active_camera is not None
-                else Matrix4.identity()
-            )
+            self._native_draw_calls = 0
+            self._native_errors.clear()
+            if self.active_camera is not None:
+                projection = self.active_camera.get_projection_matrix(self.viewport)
+            elif self.mode == RenderMode.RENDER_3D:
+                projection = Camera3D().get_projection_matrix(self.viewport)
+            else:
+                projection = Camera2D().get_projection_matrix(self.viewport)
             view = self.active_camera.get_view_matrix() if self.active_camera is not None else Matrix4.identity()
             for command in ordered_commands:
-                self._render_command(command, projection, view)
+                try:
+                    self._render_command(command, projection, view)
+                except Exception as exc:
+                    self._native_errors.append(f"{command.source_node}: {exc}")
 
         command_breakdown: Dict[str, int] = defaultdict(int)
         primitive_breakdown: Dict[str, int] = defaultdict(int)
@@ -474,7 +586,14 @@ class RenderingServer:
         last = self.last_frame()
         return {
             "initialized": self._initialized,
+            "requested_backend": self.requested_backend.value,
             "backend": self.backend.value,
+            "native_ready": self.backend == RenderBackend.NATIVE and self._framebuffer is not None,
+            "native_draw_calls": self._native_draw_calls,
+            "gpu_mesh_count": len(self._gpu_mesh_cache),
+            "texture_count": len(self._texture_cache),
+            "native_errors": list(self._native_errors),
+            "fallback_reason": self._fallback_reason,
             "mode": self.mode.value,
             "frame_count": len(self._frame_history),
             "viewport": self.viewport.to_dict(),
@@ -482,9 +601,7 @@ class RenderingServer:
         }
 
     def shutdown(self) -> None:
-        if self.ctx is not None:
-            self.ctx.release()
-            self.ctx = None
+        self._release_native_resources()
         self._initialized = False
         self.begin_frame()
 
@@ -512,8 +629,120 @@ class RenderingServer:
         return ordered
 
     def _render_command(self, command: RenderCommand, projection: Matrix4, view: Matrix4) -> None:
-        """Native rendering hook. Left intentionally lightweight for now."""
-        _ = (command, projection, view)
+        """Render one mesh command into the native framebuffer."""
+        if not command.visible or self.ctx is None or self._program is None:
+            return
+        mesh = self.mesh_library.get(command.mesh_id)
+        if mesh is None:
+            mesh = self.mesh_library.get("quad" if command.pipeline != "world_3d" else "cube")
+        if mesh is None or not mesh.vertices or not mesh.indices:
+            raise ValueError(f"mesh has no renderable geometry: {command.mesh_id}")
+
+        vertex_array = self._gpu_mesh(command.mesh_id, mesh)
+        self._program["model"].write(array("f", command.transform.to_matrix().m).tobytes())
+        self._program["view"].write(array("f", view.m).tobytes())
+        self._program["projection"].write(array("f", projection.m).tobytes())
+        self._program["albedo"].value = tuple(command.material.albedo_color.to_list())
+        texture = self._load_texture(command.material.albedo_texture)
+        self._program["use_texture"].value = texture is not None
+        if texture is not None:
+            texture.use(location=0)
+            self._program["albedo_texture"].value = 0
+
+        if command.material.depth_test:
+            self.ctx.enable(moderngl.DEPTH_TEST)
+        else:
+            self.ctx.disable(moderngl.DEPTH_TEST)
+        if command.material.transparent:
+            self.ctx.enable(moderngl.BLEND)
+            if command.material.blend_mode == BlendMode.ADD:
+                self.ctx.blend_func = moderngl.SRC_ALPHA, moderngl.ONE
+            elif command.material.blend_mode == BlendMode.MULTIPLY:
+                self.ctx.blend_func = moderngl.DST_COLOR, moderngl.ZERO
+            else:
+                self.ctx.blend_func = moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA
+        else:
+            self.ctx.disable(moderngl.BLEND)
+        vertex_array.render(mode=moderngl.TRIANGLES)
+        self._native_draw_calls += 1
+
+    def _gpu_mesh(self, mesh_id: str, mesh: "Mesh") -> Any:
+        signature = (tuple(mesh.vertices), tuple(mesh.indices), tuple(mesh.uvs))
+        cached = self._gpu_mesh_cache.get(mesh_id)
+        if cached is not None and cached[3] == signature:
+            return cached[0]
+        if cached is not None:
+            for resource in cached[:3]:
+                resource.release()
+        vertex_count = len(mesh.vertices) // 3
+        uv_values = list(mesh.uvs)
+        if len(uv_values) < vertex_count * 2:
+            uv_values.extend([0.0] * (vertex_count * 2 - len(uv_values)))
+        interleaved: list[float] = []
+        for index in range(vertex_count):
+            interleaved.extend(mesh.vertices[index * 3 : index * 3 + 3])
+            interleaved.extend(uv_values[index * 2 : index * 2 + 2])
+        vertex_buffer = self.ctx.buffer(array("f", interleaved).tobytes())
+        index_buffer = self.ctx.buffer(array("I", mesh.indices).tobytes())
+        vertex_array = self.ctx.vertex_array(
+            self._program,
+            [(vertex_buffer, "3f 2f", "in_position", "in_uv")],
+            index_buffer=index_buffer,
+            index_element_size=4,
+        )
+        self._gpu_mesh_cache[mesh_id] = (vertex_array, index_buffer, vertex_buffer, signature)
+        return vertex_array
+
+    def _load_texture(self, texture_path: str) -> Optional[Any]:
+        raw_path = str(texture_path or "").strip()
+        if not raw_path or self.ctx is None:
+            return None
+        path = Path(raw_path)
+        if not path.is_absolute():
+            path = self.asset_root / path
+        try:
+            resolved = path.resolve()
+            resolved.relative_to(self.asset_root)
+        except (OSError, ValueError):
+            raise ValueError(f"texture path is outside the asset root: {raw_path}")
+        cache_key = str(resolved)
+        if cache_key in self._texture_cache:
+            return self._texture_cache[cache_key]
+        if not resolved.is_file():
+            self._native_errors.append(f"texture does not exist; using albedo color: {raw_path}")
+            return None
+        try:
+            from PIL import Image
+        except ImportError as exc:  # pragma: no cover - declared runtime dependency
+            raise RuntimeError("Pillow is required to load textures") from exc
+        with Image.open(resolved) as source:
+            image = source.convert("RGBA").transpose(Image.Transpose.FLIP_TOP_BOTTOM)
+            texture = self.ctx.texture(image.size, 4, image.tobytes())
+        texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        texture.repeat_x = False
+        texture.repeat_y = False
+        self._texture_cache[cache_key] = texture
+        return texture
+
+    def read_pixels(self) -> bytes:
+        """Return the latest native RGBA framebuffer, bottom row first."""
+        if self.backend != RenderBackend.NATIVE or self._framebuffer is None:
+            raise RuntimeError(self._fallback_reason or "native renderer is not available")
+        return self._framebuffer.read(components=4, alignment=1)
+
+    def save_frame(self, output_path: str) -> str:
+        """Save the latest native framebuffer as a top-left-origin PNG image."""
+        try:
+            from PIL import Image
+        except ImportError as exc:  # pragma: no cover - declared runtime dependency
+            raise RuntimeError("Pillow is required to save native frames") from exc
+        image = Image.frombytes(
+            "RGBA",
+            (self.viewport.width, self.viewport.height),
+            self.read_pixels(),
+        ).transpose(Image.Transpose.FLIP_TOP_BOTTOM)
+        image.save(output_path, format="PNG")
+        return output_path
 
 
 @dataclass
@@ -596,11 +825,17 @@ class MeshLibrary:
 class Renderer:
     """High-level renderer that synchronizes a scene tree into a rendering server."""
 
-    def __init__(self, mode: RenderMode = RenderMode.RENDER_2D, *, headless: bool = True):
+    def __init__(
+        self,
+        mode: RenderMode = RenderMode.RENDER_2D,
+        *,
+        headless: bool = True,
+        asset_root: str | Path | None = None,
+    ):
         self.mode = mode
-        self.server = RenderingServer(mode, headless=headless)
+        self.server = RenderingServer(mode, headless=headless, asset_root=asset_root)
         self.viewport = self.server.viewport
-        self.mesh_library = MeshLibrary()
+        self.mesh_library = self.server.mesh_library
 
     @property
     def active_camera(self) -> Optional[Camera]:
@@ -667,6 +902,12 @@ class Renderer:
 
     def shutdown(self) -> None:
         self.server.shutdown()
+
+    def read_pixels(self) -> bytes:
+        return self.server.read_pixels()
+
+    def save_frame(self, output_path: str) -> str:
+        return self.server.save_frame(output_path)
 
     def _iter_nodes(self, scene_source: "SceneTree | Node"):
         if hasattr(scene_source, "iter_nodes"):

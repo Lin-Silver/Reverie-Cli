@@ -126,13 +126,25 @@ class AudioManager:
         self.master_volume: float = 1.0
         self.music_volume: float = 1.0
         self.sfx_volume: float = 1.0
-        self._initialized = pyglet is not None
+        self._initialized = pyglet is not None and Player is not None and load_audio is not None
+        self._backend_operational = False
+        self._last_error = "" if self._initialized else "pyglet media backend is not installed"
         for name, parent, tags in self.DEFAULT_BUSES:
             self.create_bus(name, parent=parent, tags=tags)
 
     def is_available(self) -> bool:
-        """Check if audio system is available."""
+        """Check whether the audio API and decoder backend are installed."""
         return self._initialized
+
+    def backend_status(self) -> Dict[str, Any]:
+        """Describe installed and proven playback capability separately."""
+        return {
+            "backend": "pyglet" if self._initialized else "unavailable",
+            "installed": self._initialized,
+            "operational": self._backend_operational,
+            "mode": "playback" if self._backend_operational else ("unverified" if self._initialized else "unavailable"),
+            "last_error": self._last_error,
+        }
 
     def create_bus(
         self,
@@ -219,8 +231,11 @@ class AudioManager:
                 duration=source.duration if hasattr(source, "duration") else 0.0,
             )
             self.streams[audio_id] = stream
+            self._backend_operational = True
+            self._last_error = ""
             return True
-        except Exception:
+        except Exception as exc:
+            self._last_error = str(exc)
             return False
 
     def unload_stream(self, audio_id: str) -> None:
@@ -268,8 +283,9 @@ class AudioManager:
             try:
                 player_obj = Player()
                 player_obj.queue(stream.source)
-            except Exception:
-                player_obj = None
+            except Exception as exc:
+                self._last_error = str(exc)
+                return None
 
         resolved_bus = self._bus_for_category(category, bus)
         audio_player = AudioPlayer(
@@ -281,6 +297,8 @@ class AudioManager:
             category=str(category or "sfx").strip().lower(),
         )
         self.players[player_id] = audio_player
+        self._backend_operational = player_obj is not None
+        self._last_error = ""
         self._apply_player_volume(audio_player)
         return audio_player
 
@@ -298,9 +316,9 @@ class AudioManager:
 
     def play(self, player_id: str) -> bool:
         player = self.players.get(player_id)
-        if player:
+        if player and player.player is not None:
             player.play()
-            return True
+            return player.playing
         return False
 
     def play_oneshot(
@@ -318,9 +336,9 @@ class AudioManager:
 
         player_id = f"oneshot_{uuid.uuid4().hex[:8]}"
         player = self.create_player(player_id, audio_id, loop=False, volume=volume, bus=bus, category=category)
-        if player:
+        if player and player.player is not None:
             player.play()
-            return True
+            return player.playing
         return False
 
     def stop(self, player_id: str) -> bool:
@@ -411,6 +429,7 @@ class AudioManager:
     def mix_snapshot(self) -> Dict[str, Any]:
         return {
             "available": self._initialized,
+            "backend_status": self.backend_status(),
             "master_volume": round(self.master_volume, 4),
             "music_volume": round(self.music_volume, 4),
             "sfx_volume": round(self.sfx_volume, 4),

@@ -366,14 +366,17 @@ class Live2DManager:
         placeholder_count = sum(1 for model in manifest.models.values() if model.placeholder)
         real_model_count = len(manifest.models) - placeholder_count
         placeholder_only = bool(manifest.models) and real_model_count == 0
+        assets_valid = real_model_count > 0 and not validation_errors
         if not manifest.enabled:
             status = "disabled"
         elif validation_errors:
             status = "blocked"
+        elif not manifest.models:
+            status = "unconfigured"
         elif placeholder_only:
             status = "bridge-placeholder-ready"
         else:
-            status = "runtime-ready"
+            status = "assets-ready"
         return {
             "schema": "reverie.live2d_readiness.v1",
             "enabled": manifest.enabled,
@@ -387,9 +390,13 @@ class Live2DManager:
             "sdk_path": str(sdk_path) if sdk_path else "",
             "validation_errors": validation_errors,
             "status": status,
+            "assets_valid": assets_valid,
+            "bridge_available": sdk_path is not None and (placeholder_only or assets_valid),
+            "native_renderer_implemented": False,
             "notes": [
                 "Placeholder-only manifests validate the bridge and routing path but do not prove a real Cubism model is present.",
                 "Real Live2D models require Cubism Core plus `.model3.json`, moc, texture, and optional motion/expression assets.",
+                "Assets-ready confirms validated assets and the browser bridge; Reverie does not currently provide a native Cubism renderer.",
             ],
         }
 

@@ -1069,7 +1069,6 @@ class TaskManagerTool(BaseTool):
     
     def _reorganize(self, tasks: List[Dict]) -> ToolResult:
         """Reorganize tasks (bulk update for reordering)"""
-        # For now, this is similar to batch update
         return self._update_batch(tasks)
 
     def _filtered_markdown(self, filters: Dict) -> str:

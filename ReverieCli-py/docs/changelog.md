@@ -1,6 +1,6 @@
 ## Reverie CLI v2.3.5 - Unreleased
 
-* Added the built-in Opencode (`/oc`) source with OpenCode Zen free chat-completions models.
+* Added the built-in Opencode (`/oc`) source, completed the native ModernGL framebuffer path and backend diagnostics, consolidated duplicate engine/Gamer internals, aligned packaging and release checks, repaired documentation and licensing, and moved all planned work into one maintained roadmap.
 
 ---
 
@@ -143,7 +143,7 @@
 
 ### Docs and Validation
 
-* Added `docs/SUBAGENT_UPGRADE.md` with the configuration shape, TUI flow, runtime behavior, log paths, and validation notes.
+* Added the managed SubAgent guide with the configuration shape, TUI flow, runtime behavior, log paths, and validation notes.
 * Added a real local OpenAI-compatible Subagent test that delegates a small task, invokes Reverie's actual `create_file` tool, and verifies the produced workspace file.
 
 ---

@@ -62,9 +62,11 @@ def runtime_capabilities(project_root: str | Path | None = None) -> Dict[str, An
     ashfox = modeling_stack["ashfox"]
     blockbench = modeling_stack["blockbench"]
     ffmpeg_path = discover_ffmpeg()
+    native_render_dependencies = moderngl is not None and glcontext is not None
     return {
         "engine": ENGINE_NAME,
         "unified_runtime": True,
+        "maturity": "alpha",
         "dimensions": ["2D", "2.5D", "3D"],
         "game_families": [item["id"] for item in supported_game_families()],
         "scope_exclusions": ["AAA/3A production", "3D open-world games"],
@@ -86,6 +88,19 @@ def runtime_capabilities(project_root: str | Path | None = None) -> Dict[str, An
             "asset_pipeline",
             "headless_verification",
         ],
+        "capability_levels": {
+            "scene_graph": "runtime",
+            "physics_and_queries": "runtime",
+            "navigation": "runtime",
+            "input": "runtime",
+            "animation_and_timeline": "runtime",
+            "save_data": "runtime",
+            "headless_verification": "runtime",
+            "native_rendering": "available" if native_render_dependencies else "dependency-missing",
+            "audio": "installed-unverified" if pyglet is not None else "dependency-missing",
+            "live2d": "browser-bridge" if sdk_path is not None else "asset-contract-only",
+            "game_production": "work-in-progress",
+        },
         "pyglet": pyglet is not None,
         "moderngl": moderngl is not None,
         "glcontext": glcontext is not None,
@@ -157,7 +172,9 @@ class ReverieEngineApp:
             if dimension == "3D"
             else (RenderMode.RENDER_2D_ISOMETRIC if dimension == "2.5D" else RenderMode.RENDER_2D)
         )
-        self.renderer = Renderer(render_mode, headless=self.profile.headless)
+        resource_manager = getattr(self.scene_tree, "resource_manager", None)
+        asset_root = resource_manager.project_root if resource_manager else None
+        self.renderer = Renderer(render_mode, headless=self.profile.headless, asset_root=asset_root)
         self.renderer.initialize()
 
         # Add rigid bodies to physics world
@@ -280,6 +297,7 @@ class ReverieEngineApp:
         )
 
         rendering_summary = self.renderer.summary() if self.renderer else {}
+        audio_summary = self.audio_manager.summary() if self.audio_manager else {}
 
         # Cleanup
         if self.renderer:
@@ -300,8 +318,8 @@ class ReverieEngineApp:
             summary["localization"] = self.localization_manager.summary()
         if self.save_data_manager:
             summary["save_data"] = {"slots": self.save_data_manager.list_slots()}
-        if self.audio_manager:
-            summary["audio"] = self.audio_manager.summary()
+        if audio_summary:
+            summary["audio"] = audio_summary
         return summary
 
     def _apply_input(self, frame_index: int, script: Iterable[dict]) -> None:

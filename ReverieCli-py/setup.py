@@ -25,7 +25,8 @@ setup(
     description="World-Class Context Engine Coding Assistant",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/raiden/reverie-cli",
+    url="https://github.com/Lin-Silver/Reverie-Cli",
+    license="MIT",
     packages=find_packages(),
     include_package_data=True,
     package_data={
@@ -63,6 +64,7 @@ setup(
         "PyYAML>=6.0.0",
         "tiktoken>=0.5.0",
         "Pillow>=10.0.0",
+        "jsonschema>=4.21.0",
         "uiautomation==2.0.29; platform_system == 'Windows'",
 
         # Reverie Engine runtime
@@ -82,6 +84,14 @@ setup(
             "tree-sitter-python>=0.20.0",
             "tree-sitter-javascript>=0.20.0",
             "tree-sitter-typescript>=0.20.0",
+            "tree-sitter-c>=0.20.0",
+            "tree-sitter-cpp>=0.20.0",
+            "tree-sitter-rust>=0.20.0",
+            "tree-sitter-go>=0.20.0",
+            "tree-sitter-java>=0.20.0",
+            "tree-sitter-c-sharp>=0.20.0",
+            "tree-sitter-html>=0.20.0",
+            "tree-sitter-css>=0.20.0",
         ],
         "build": [
             "pyinstaller>=6.0.0",
@@ -96,7 +106,6 @@ setup(
         "Development Status :: 3 - Alpha",
         "Environment :: Console",
         "Intended Audience :: Developers",
-        "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.10",

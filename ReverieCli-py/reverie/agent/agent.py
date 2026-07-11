@@ -1949,15 +1949,10 @@ class ReverieAgent:
     def set_ant_phase(self, phase: str) -> None:
         """Update Antigravity phase (PLANNING/EXECUTION)"""
         if phase in ["PLANNING", "EXECUTION", "VERIFICATION"]:
-            # Verification shares EXECUTION prompt but might have minor differences in future
-            # For now mapping VERIFICATION to EXECUTION for prompt logic if needed,
-            # or just keeping the phase state for the tool.
-            # System prompt only distinguishes PLANNING vs EXECUTION.
             self.ant_phase = phase
-            
-            # Map VERIFICATION to EXECUTION for prompt selection if strictly binary
+
             prompt_phase = "EXECUTION" if phase in ["EXECUTION", "VERIFICATION"] else "PLANNING"
-            
+
             self.system_prompt = build_system_prompt(
                 model_name=self.model_display_name,
                 additional_rules=self.additional_rules,

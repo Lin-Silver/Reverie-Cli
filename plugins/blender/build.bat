@@ -34,7 +34,6 @@ if not defined ARCHIVE_SOURCE (
 
 "%PYTHON_EXE%" -m PyInstaller ^
   --noconfirm ^
-  --clean ^
   --onefile ^
   --name "%PLUGIN_NAME%" ^
   --specpath build ^

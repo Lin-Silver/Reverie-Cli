@@ -20,7 +20,6 @@ if exist "%~dp0..\..\venv\Scripts\python.exe" (
 
 "%PYTHON_EXE%" -m PyInstaller ^
   --noconfirm ^
-  --clean ^
   --onefile ^
   --name "%PLUGIN_NAME%" ^
   --specpath build ^

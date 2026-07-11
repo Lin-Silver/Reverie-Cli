@@ -1728,10 +1728,6 @@ class ContextRetriever:
             if sym.type_annotation or sym.return_type:
                 score *= 1.1
 
-            # Boost if in the same file or package as reference symbols (heuristics)
-            # This requires 'boost' map to contain 'reference_file' or similar metadata
-            # For now, we rely on the specific boost list passed in.
-            
             # Apply custom boost
             if boost and sym.qualified_name in boost:
                 score *= boost[sym.qualified_name]

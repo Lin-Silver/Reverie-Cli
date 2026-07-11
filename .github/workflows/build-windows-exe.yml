@@ -291,7 +291,7 @@ jobs:
           Automated Windows release build from main.
 
           Files:
-          - reverie.exe: primary Windows CLI executable. This is the full Python PyInstaller build with bundled Python runtime, built-in skills, tool manifests, the embedded Chromium browser-control runtime, and the built-in Computer Controller desktop runtime/SubAgent orchestration stack.
+          - reverie.exe: primary Windows CLI executable. This is the full Python PyInstaller build with bundled Python runtime, built-in skills, tool manifests, the embedded Chromium browser-control runtime, and the built-in Open Computer Use desktop controller/SubAgent orchestration stack.
           - plugins-manifest.json: release metadata consumed by Reverie UI/plugin download surfaces, including SHA-256 and file sizes.
           - reverie-blender.exe: Blender runtime plugin executable.
           - reverie-game-models.exe: Game Models runtime plugin executable.

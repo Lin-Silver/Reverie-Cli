@@ -15,5 +15,4 @@ class SessionUI:
     
     def show_selector(self) -> Optional[str]:
         """Show interactive session selector, returns selected session ID"""
-        # This is handled by CommandHandler for now
         pass

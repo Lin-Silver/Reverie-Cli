@@ -18,12 +18,19 @@ EXE_NAME="reverie"
 
 RECREATE_VENV=0
 RUN_EXE_TEST=0
+FORCE_CLEAN=0
+FORCE_DEPS=0
+FORCE_BROWSER=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --recreate-venv) RECREATE_VENV=1 ;;
         --reuse-venv)   RECREATE_VENV=0 ;;
         --test-exe)     RUN_EXE_TEST=1 ;;
+        --clean)        FORCE_CLEAN=1 ;;
+        --reinstall-deps) FORCE_DEPS=1 ;;
+        --refresh-browser) FORCE_BROWSER=1 ;;
+        --rebuild-plugins) : ;; # Kept for parity with build.bat.
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
     shift
@@ -54,9 +61,11 @@ mkdir -p "$OUTPUT_DIR" "$BUILD_DIR" "$LOCAL_TEMP_DIR" "$LOCAL_PIP_CACHE"
 
 echo "[2/6] Preparing virtual environment..."
 USE_VENV=true
+NEED_DEPS=0
 if [ -d "$VENV_DIR" ] && [ "$RECREATE_VENV" = "1" ]; then
     echo "      Recreating $VENV_DIR ..."
     rm -rf "$VENV_DIR"
+    NEED_DEPS=1
 fi
 
 if [ ! -d "$VENV_DIR" ]; then
@@ -65,6 +74,7 @@ if [ ! -d "$VENV_DIR" ]; then
         echo "      [WARN] python3-venv not available, installing dependencies system-wide (user mode)."
         USE_VENV=false
     }
+    NEED_DEPS=1
 fi
 
 if [ "$USE_VENV" = "true" ]; then
@@ -77,17 +87,28 @@ else
 fi
 
 echo "[3/6] Installing build dependencies..."
-if [ "$USE_VENV" = "true" ]; then
-    pip install --upgrade pip --quiet
-    pip install pyinstaller pillow --quiet
-    pip install -e . --quiet
+DEPS_STAMP="$BUILD_DIR/deps.stamp"
+CURRENT_DEPS_STAMP=$($PYTHON_CMD -c "import hashlib,pathlib,sys; h=hashlib.sha256(); [h.update(p.read_bytes()) for p in (pathlib.Path('requirements.txt'),pathlib.Path('setup.py')) if p.exists()]; h.update(sys.version.encode()); print(h.hexdigest())")
+if [ "$FORCE_DEPS" = "1" ] || [ ! -s "$DEPS_STAMP" ] || [ "$(<"$DEPS_STAMP")" != "$CURRENT_DEPS_STAMP" ]; then
+    NEED_DEPS=1
+fi
+
+if [ "$NEED_DEPS" = "1" ]; then
+    echo "      Installing or refreshing Python dependencies..."
+    if [ "$USE_VENV" = "true" ]; then
+        pip install --disable-pip-version-check --upgrade pyinstaller pillow --quiet
+        pip install --disable-pip-version-check -e . --quiet
+    else
+        $PIP_CMD pyinstaller pillow 2>/dev/null || true
+        $PIP_CMD -e . 2>/dev/null || {
+            # glcontext may fail to build without X11 headers; try installing deps manually
+            $PIP_CMD rich click tqdm requests openai anthropic GitPython ddgs beautifulsoup4 PyYAML tiktoken Pillow pyglet moderngl 2>/dev/null || true
+            $PIP_CMD -e . 2>/dev/null || true
+        }
+    fi
+    printf '%s\n' "$CURRENT_DEPS_STAMP" > "$DEPS_STAMP"
 else
-    $PIP_CMD pyinstaller pillow 2>/dev/null || true
-    $PIP_CMD -e . 2>/dev/null || {
-        # glcontext may fail to build without X11 headers; try installing deps manually
-        $PIP_CMD rich click tqdm requests openai anthropic GitPython ddgs beautifulsoup4 PyYAML tiktoken Pillow pyglet moderngl 2>/dev/null || true
-        $PIP_CMD -e . 2>/dev/null || true
-    }
+    echo "      Dependencies unchanged; reusing the existing build environment."
 fi
 
 echo "[4/6] Preparing bundled resources..."
@@ -102,11 +123,20 @@ if [ ! -f "$SHARED_COMFY_DIR/embedded_comfy.b64" ]; then
     exit 1
 fi
 
-cp "$SHARED_COMFY_DIR/generate_image.py" "$BUNDLE_RES_DIR/comfy/generate_image.py"
-cp "$SHARED_COMFY_DIR/embedded_comfy.b64" "$BUNDLE_RES_DIR/comfy/embedded_comfy.b64"
+cp -u "$SHARED_COMFY_DIR/generate_image.py" "$BUNDLE_RES_DIR/comfy/generate_image.py"
+cp -u "$SHARED_COMFY_DIR/embedded_comfy.b64" "$BUNDLE_RES_DIR/comfy/embedded_comfy.b64"
 export PLAYWRIGHT_BROWSERS_PATH="$BUNDLE_RES_DIR/browser/ms-playwright"
-$PYTHON_CMD -m playwright install chromium --no-shell 2>/dev/null || true
 CHROMIUM_EXE=$(find "$PLAYWRIGHT_BROWSERS_PATH" -type f \( -name chrome -o -name chrome.exe \) -print -quit 2>/dev/null)
+NEED_BROWSER=0
+if [ "$FORCE_BROWSER" = "1" ] || [ -z "$CHROMIUM_EXE" ]; then
+    NEED_BROWSER=1
+fi
+if [ "$NEED_BROWSER" = "1" ]; then
+    $PYTHON_CMD -m playwright install chromium --no-shell 2>/dev/null || true
+    CHROMIUM_EXE=$(find "$PLAYWRIGHT_BROWSERS_PATH" -type f \( -name chrome -o -name chrome.exe \) -print -quit 2>/dev/null)
+else
+    echo "      Reusing embedded Chromium."
+fi
 if [ -z "$CHROMIUM_EXE" ]; then
     echo "      [WARN] Embedded Chromium install failed. Browser tool may not work at runtime."
 fi
@@ -135,7 +165,11 @@ else
 fi
 
 echo "[6/6] Building executable..."
-rm -rf "$PYI_WORK_DIR"
+PYI_CLEAN_ARG=()
+if [ "$FORCE_CLEAN" = "1" ]; then
+    rm -rf "$PYI_WORK_DIR"
+    PYI_CLEAN_ARG=(--clean)
+fi
 
 export TMP="$LOCAL_TEMP_DIR"
 export TEMP="$LOCAL_TEMP_DIR"
@@ -143,7 +177,7 @@ export TMPDIR="$LOCAL_TEMP_DIR"
 export PIP_CACHE_DIR="$LOCAL_PIP_CACHE"
 export PYTHONWARNINGS="ignore:Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.:UserWarning"
 
-$PYTHON_CMD -m PyInstaller --noconfirm --clean --distpath "$OUTPUT_DIR" --workpath "$PYI_WORK_DIR" reverie.spec
+$PYTHON_CMD -m PyInstaller --noconfirm "${PYI_CLEAN_ARG[@]}" --distpath "$OUTPUT_DIR" --workpath "$PYI_WORK_DIR" reverie.spec
 
 export PYTHONWARNINGS=""
 

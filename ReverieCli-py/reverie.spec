@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_all
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 from pathlib import Path
 import os
 import shutil
@@ -8,6 +8,7 @@ datas = [('README.md', '.')]
 binaries = []
 hiddenimports = ['rich', 'rich.console', 'rich.panel', 'rich.table', 'rich.syntax', 'rich.markdown', 'rich.progress', 'rich.prompt', 'rich.text', 'click', 'requests', 'openai', 'git', 'ddgs', 'bs4', 'yaml', 'tqdm', 
                  'pyglet', 'moderngl', 'glcontext', 'uiautomation', 'comtypes',
+                 'pyglet.app', 'pyglet.media', 'pyglet.media.codecs', 'pyglet.media.codecs.base', 'pyglet.media.codecs.wave', 'pyglet.media.codecs.wmf', 'pyglet.window', 'pyglet.window.key', 'pyglet.window.mouse', 'pyglet.gl', 'pyglet.gl.wgl', 'comtypes.client',
                  'reverie.cli.input_handler', 'reverie.cli.commands', 'reverie.cli.display', 'reverie.cli.theme', 'reverie.cli.markdown_formatter', 'reverie.cli.session_ui',
                  'reverie.config', 'reverie.sdk_bridge', 'reverie.rules_manager', 'reverie.session', 'reverie.agent', 'reverie.context_engine',
                  'reverie.engine', 'reverie.engine.video', 'reverie.engine.renpy_import', 'reverie.engine.migration', 'reverie.engine.procedural_assets', 'reverie.engine.blender_modeling',
@@ -121,10 +122,8 @@ if ffmpeg_binary is not None:
 
 for package_name in ('rich', 'bs4', 'pyglet', 'moderngl', 'glcontext', 'uiautomation', 'comtypes'):
     try:
-        tmp_ret = collect_all(package_name)
-        datas += tmp_ret[0]
-        binaries += tmp_ret[1]
-        hiddenimports += tmp_ret[2]
+        datas += collect_data_files(package_name, include_py_files=False)
+        binaries += collect_dynamic_libs(package_name)
     except Exception:
         pass
 

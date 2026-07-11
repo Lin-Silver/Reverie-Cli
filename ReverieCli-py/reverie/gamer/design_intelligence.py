@@ -2,50 +2,22 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, List
 
-from .system_generators.shared import project_name, target_runtime
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-
-
-def _unique(values: Iterable[str]) -> List[str]:
-    seen: set[str] = set()
-    ordered: List[str] = []
-    for value in values:
-        item = str(value or "").strip()
-        if not item or item in seen:
-            continue
-        seen.add(item)
-        ordered.append(item)
-    return ordered
-
-
-def _references(game_request: Dict[str, Any]) -> List[str]:
-    return _unique(game_request.get("creative_target", {}).get("references", []) or [])
-
-
-def _specialized(game_request: Dict[str, Any]) -> set[str]:
-    return {
-        str(item).strip()
-        for item in game_request.get("systems", {}).get("specialized", []) or []
-        if str(item).strip()
-    }
-
-
-def _party_model(game_request: Dict[str, Any]) -> str:
-    return str(game_request.get("experience", {}).get("party_model", "single_hero_focus")).strip() or "single_hero_focus"
+from .system_generators.shared import (
+    creative_references as _references,
+    live_service_enabled as _live_service_enabled,
+    party_model as _party_model,
+    project_name,
+    specialized_systems as _specialized,
+    target_runtime,
+    unique_strings as _unique,
+    utc_now as _utc_now,
+)
 
 
 def _world_structure(game_request: Dict[str, Any]) -> str:
     return str(game_request.get("experience", {}).get("world_structure", "regional_action_slice")).strip() or "regional_action_slice"
-
-
-def _live_service_enabled(game_request: Dict[str, Any]) -> bool:
-    return bool(game_request.get("production", {}).get("live_service_profile", {}).get("enabled", False))
 
 
 def _default_capabilities(game_request: Dict[str, Any]) -> List[Dict[str, Any]]:

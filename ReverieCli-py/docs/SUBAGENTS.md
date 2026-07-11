@@ -1,6 +1,6 @@
-# Reverie Subagent Upgrade
+# Managed SubAgents
 
-This note documents Reverie's managed SubAgent runtime.
+This guide documents Reverie's managed SubAgent runtime.
 
 ## Scope
 

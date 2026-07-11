@@ -13,6 +13,21 @@ This runtime is designed for `Reverie-Gamer` workflows that need:
 - content, telemetry, and playtest structure
 - an integrated modeling pipeline for authored assets
 
+## Runtime Maturity
+
+Reverie Engine is an alpha runtime. Its capability report deliberately separates declared APIs from paths that have runtime evidence:
+
+| Surface | Current level |
+| --- | --- |
+| Scene graph, deterministic gameplay, physics queries, navigation, input, save data | Runtime implemented and covered by headless integration tests |
+| Native rendering | ModernGL framebuffer rendering for primitive/custom meshes, transforms, flat or textured materials, depth, alpha/add/multiply blending, pixel readback, and PNG capture |
+| Native presentation | Off-screen framebuffer only; a desktop window/event-loop presentation layer is not yet part of the engine |
+| Audio | Pyglet decoding/playback when the host backend succeeds; status distinguishes installed, unverified, operational, and failed states |
+| Live2D | Manifest validation, Cubism Core discovery, motion routing, and browser-bridge generation; no native Cubism renderer |
+| Reverie-Gamer | Work in progress: project planning, generation, deterministic slice execution, and evidence gates are implemented, but this is not a general one-prompt production-game guarantee |
+
+`/engine profile` exposes these distinctions under `capability_levels`. A dependency being importable is not treated as proof that a native device or external asset pipeline works.
+
 ## Standard Project Layout
 
 The built-in engine now seeds a project with these key areas:
@@ -85,7 +100,7 @@ Ren'Py analysis and migration are built into Reverie Engine:
 
 - `reverie_engine`: `.rpy` project inspection, script outlines, parser validation, dialogue import, and full project migration.
 - `plugins/renpy/`: optional external Ren'Py SDK management for native lint, compile, and distribution only.
-- `plugins/live2d/`: Cubism Core deployment, Live2D manifest inspection, dynamic CG guidance, and future MCP-style model control helpers.
+- `plugins/live2d/`: Cubism Core deployment, Live2D manifest inspection, and dynamic CG guidance.
 
 Godot and O3DE no longer ship as runtime plugins. Use `/engine inspect-legacy` and `/engine migrate` to move portable assets and supported content into one Reverie Engine project; native scripts and scene semantics remain explicit manual-review items.
 
@@ -104,15 +119,6 @@ Missing evidence caps the score at 69. Planning documents, packet counts, or dec
 
 The production scope remains explicit: AAA/3A projects and 3D open-world games are unsupported. Passing the deterministic contract proves the generated foundation's tested loop; it does not certify final art, platform compliance, or subjective polish.
 
-## Roadmap
-
-Future game-development work should prioritize:
-
-1. Expand the built-in migration coverage while keeping unsupported native code visible for manual review.
-2. Extend the Live2D plugin with verified expression, motion, lip-sync, and scene-command bridges.
-3. Add Galgame-focused smoke projects that combine TTI backgrounds/still CG, optional TTV inserts, and Live2D interactive character manifests.
-4. Keep public imports consolidated on `reverie.engine` and avoid reintroducing runtime aliases.
-
 ## Verification Expectations
 
 When content changes in a Reverie Engine project, the preferred baseline is:
@@ -125,3 +131,5 @@ When content changes in a Reverie Engine project, the preferred baseline is:
 6. `/modeling ashfox validate` when using the live Ashfox MCP workflow
 
 That keeps the engine layout, content registry, and active model-authoring workflow in sync.
+
+Planned runtime and Gamer work is maintained in the project [Roadmap](../ROADMAP.md).

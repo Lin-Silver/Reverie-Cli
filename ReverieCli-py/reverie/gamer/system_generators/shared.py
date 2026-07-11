@@ -2,7 +2,43 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def unique_strings(values: Iterable[str]) -> List[str]:
+    seen: set[str] = set()
+    ordered: List[str] = []
+    for value in values:
+        item = str(value or "").strip()
+        if item and item not in seen:
+            seen.add(item)
+            ordered.append(item)
+    return ordered
+
+
+def creative_references(game_request: Dict[str, Any]) -> List[str]:
+    return unique_strings(game_request.get("creative_target", {}).get("references", []) or [])
+
+
+def specialized_systems(game_request: Dict[str, Any]) -> set[str]:
+    return {
+        str(item).strip()
+        for item in game_request.get("systems", {}).get("specialized", []) or []
+        if str(item).strip()
+    }
+
+
+def party_model(game_request: Dict[str, Any]) -> str:
+    return str(game_request.get("experience", {}).get("party_model", "single_hero_focus")).strip() or "single_hero_focus"
+
+
+def live_service_enabled(game_request: Dict[str, Any]) -> bool:
+    return bool(game_request.get("production", {}).get("live_service_profile", {}).get("enabled", False))
 
 
 def project_name(game_request: Dict[str, Any], blueprint: Dict[str, Any]) -> str:
@@ -36,11 +72,7 @@ def source_systems(game_request: Dict[str, Any], candidates: Iterable[str]) -> L
 
 
 def reference_titles(game_request: Dict[str, Any]) -> List[str]:
-    return [
-        str(item).strip()
-        for item in game_request.get("creative_target", {}).get("references", [])
-        if str(item).strip()
-    ]
+    return creative_references(game_request)
 
 
 def experience(game_request: Dict[str, Any]) -> Dict[str, Any]:

@@ -91,7 +91,7 @@ def build_bootstrap() -> str:
     )
 
 
-def build_engine_config(project_name: str, dimension: str, sample_name: str | None = None, genre: str | None = None) -> Dict[str, Any]:
+def build_project_engine_config(project_name: str, dimension: str, sample_name: str | None = None, genre: str | None = None) -> Dict[str, Any]:
     profile = build_engine_profile(project_name, dimension, sample_name=sample_name, genre=genre)
     profile["content"] = {
         "scene_format": ".relscene.json",
@@ -305,7 +305,7 @@ def create_project_skeleton(
     overwrite: bool = False,
 ) -> Dict[str, Any]:
     output_dir = Path(output_dir)
-    engine_config = build_engine_config(project_name, dimension, sample_name=sample_name, genre=genre)
+    engine_config = build_project_engine_config(project_name, dimension, sample_name=sample_name, genre=genre)
     genre_name = str(engine_config.get("project", {}).get("genre") or "sandbox")
     live2d_enabled = bool(engine_config.get("live2d", {}).get("enabled", False))
     created_directories: list[str] = []
@@ -468,7 +468,7 @@ def materialize_sample(output_dir: Path, sample_name: str, *, overwrite: bool = 
 
     if _safe_write_yaml(
         output_dir / "data/config/engine.yaml",
-        build_engine_config(sample["project_name"], sample["dimension"], sample_name=sample_name, genre=sample.get("genre")),
+        build_project_engine_config(sample["project_name"], sample["dimension"], sample_name=sample_name, genre=sample.get("genre")),
         overwrite,
     ):
         files.append(str(output_dir / "data/config/engine.yaml"))

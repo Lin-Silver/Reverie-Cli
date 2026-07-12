@@ -17,6 +17,7 @@ import time
 import uuid
 from urllib.parse import urlparse
 
+from .diagnostics import report_suppressed_exception
 from .security_utils import write_json_secure
 from .version import __version__
 
@@ -807,7 +808,7 @@ def refresh_codex_access_token(refresh_token: str) -> Optional[Dict[str, Any]]:
             if isinstance(loaded, dict):
                 current.update(loaded)
         except Exception:
-            pass
+            report_suppressed_exception("load Codex account metadata")
 
     tokens = current.get("tokens")
     if not isinstance(tokens, dict):

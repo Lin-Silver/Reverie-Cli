@@ -20,6 +20,7 @@ import json
 import time
 import logging
 
+from ..diagnostics import report_suppressed_exception
 from .symbol_table import SymbolTable, Symbol
 from .dependency_graph import DependencyGraph
 from .semantic_indexer import SemanticIndexer, SemanticNode, CodePattern
@@ -244,7 +245,7 @@ class ContextEngineCore:
                 kind_filter = SymbolKind[filter_kind.upper()]
                 symbols = [s for s in symbols if s.kind == kind_filter]
             except KeyError:
-                pass
+                report_suppressed_exception("apply Context Engine symbol-kind filter")
         
         result = {
             'query': pattern,

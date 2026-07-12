@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 from uuid import uuid4
 
+from .diagnostics import report_suppressed_exception
+
 
 AUDIT_SCHEMA_VERSION = "reverie.lifecycle.audit.v1"
 HOOK_CONFIG_VERSION = "reverie.lifecycle.hooks.v1"
@@ -197,7 +199,7 @@ class LifecycleManager:
             try:
                 self.save_rules()
             except Exception:
-                pass
+                report_suppressed_exception("persist lifecycle rules")
 
     def _default_rules(self) -> List[LifecycleHookRule]:
         return [

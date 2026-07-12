@@ -49,4 +49,4 @@ Recovery playbooks cover common failure classes such as failing verification, sc
 
 The harness reads the current task artifact and identifies the active task, next task, multiple in-progress lanes, and a compact checklist sample. Operation history and prompt-run history are reliability inputs rather than transcript decoration.
 
-The source of truth remains the runtime state and its tests. This guide describes implemented behavior only. Planned harness work is maintained in the project [Roadmap](ROADMAP.md).
+The source of truth remains the runtime state and its tests. This guide describes implemented behavior only.

@@ -14,6 +14,7 @@ Provides:
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 
+from ..diagnostics import report_suppressed_exception
 from .base import BaseTool, ToolResult
 
 
@@ -169,9 +170,9 @@ Examples:
                     try:
                         ensure_context_engine()
                     except Exception:
-                        pass
+                        report_suppressed_exception("initialize Context Engine from tool context")
                 except Exception:
-                    pass
+                    report_suppressed_exception("recover Context Engine tool context")
 
             latest_context = self.context
             agent = self.context.get("agent")
@@ -428,7 +429,7 @@ Examples:
         try:
             relative_label = str(resolved_path.relative_to(self.get_project_root()))
         except Exception:
-            pass
+            report_suppressed_exception("make codebase retrieval path project-relative")
 
         lines = raw_text.splitlines()
         output_parts = [
@@ -680,7 +681,7 @@ Examples:
                 try:
                     ensure_lsp_manager()
                 except Exception:
-                    pass
+                    report_suppressed_exception("initialize LSP manager for codebase retrieval")
                 lsp_manager = self.context.get("lsp_manager")
         if not lsp_manager:
             return ToolResult.fail("LSP manager is not available.")

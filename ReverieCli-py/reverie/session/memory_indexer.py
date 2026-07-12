@@ -18,6 +18,8 @@ import re
 import logging
 from collections import defaultdict
 
+from ..diagnostics import report_suppressed_exception
+
 from ..context_engine.fragments import ContextFragment, make_context_fragment, truncate_to_token_cap
 
 
@@ -745,7 +747,7 @@ class MemoryIndexer:
                 age_days = max(0.0, (now - fragment_time).total_seconds() / 86400.0)
                 scores[fragment_id] += max(0.0, 0.35 * (1.0 - min(age_days / 30.0, 1.0)))
             except Exception:
-                pass
+                report_suppressed_exception("score session-memory recency", logger=logger)
         
         # Sort by score
         sorted_fragments = sorted(

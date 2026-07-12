@@ -13,6 +13,7 @@ import json
 
 from .base import BaseTool, ToolResult
 from ..config import get_app_root
+from ..diagnostics import report_suppressed_exception
 from ..engine import canonical_engine_name, create_project_skeleton, is_builtin_engine_name
 from ..gamer.prompt_compiler import compile_game_prompt
 from ..gamer.production_plan import build_blueprint_from_request
@@ -614,7 +615,7 @@ class GameProjectScaffolderTool(BaseTool):
             try:
                 return json.loads(request_path.read_text(encoding="utf-8"))
             except Exception:
-                pass
+                report_suppressed_exception("load an existing compiled game request")
         request = compile_game_prompt(
             self._resolve_prompt(kwargs),
             project_name=kwargs.get("project_name", output_dir.name or "Untitled Reverie Slice"),

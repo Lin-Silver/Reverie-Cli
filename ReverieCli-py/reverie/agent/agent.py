@@ -23,6 +23,7 @@ from rich.markup import escape as rich_escape
 
 from .system_prompt import build_system_prompt
 from .tool_executor import ToolExecutor
+from ..diagnostics import report_suppressed_exception
 from ..context_engine.handoff import build_session_handoff_packet
 from ..inline_images import resolve_inline_image_content_for_request
 from ..memory import MEMORY_CONTEXT_PROMPT_HEADER, MemoryOS
@@ -901,8 +902,8 @@ def _decode_jsonish_string(body: str, quote: str) -> str:
     if quote == '"':
         try:
             return json.loads(f'"{body}"')
-        except Exception:
-            pass
+        except json.JSONDecodeError as exc:
+            logger.debug("Relaxed JSON string decode fallback: %s", exc)
     return _decode_jsonish_escapes(body)
 
 
@@ -1114,16 +1115,12 @@ def parse_tool_arguments(raw: str) -> Dict[str, Any]:
         logger.debug(f"Tool arguments JSON decode failed (fast path): {e}")
 
     # Try a sanitized JSON attempt (remove control chars / trailing commas)
+    sanitized = re.sub(r"[\x00-\x08\x0b-\x0c\x0e-\x1f]", "", raw)
+    sanitized = re.sub(r",\s*([\}\]])", r"\1", sanitized)
     try:
-        sanitized = re.sub(r"[\x00-\x08\x0b-\x0c\x0e-\x1f]", "", raw)
-        sanitized = re.sub(r",\s*([\}\]])", r"\1", sanitized)
-        try:
-            return json.loads(sanitized)
-        except Exception:
-            pass
-    except Exception:
-        # continue to heuristics
-        pass
+        return json.loads(sanitized)
+    except json.JSONDecodeError as exc:
+        logger.debug("Tool arguments JSON decode failed (sanitized path): %s", exc)
 
     # Generic key/value fallback for simple primitive payloads.
     # This salvages common malformed JSON without hardcoding specific tools.
@@ -2075,7 +2072,7 @@ class ReverieAgent:
             try:
                 return httpx.Client(proxy=proxy_val, trust_env=False)
             except Exception:
-                pass
+                report_suppressed_exception("create provider proxy client", logger=logger)
         return None
 
     def _init_client(self) -> None:

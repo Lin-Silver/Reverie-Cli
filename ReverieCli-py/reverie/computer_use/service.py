@@ -17,6 +17,8 @@ import re
 import sys
 import time
 
+from ..diagnostics import report_suppressed_exception
+
 
 class ComputerUseError(RuntimeError):
     """A user-facing desktop automation failure."""
@@ -226,7 +228,7 @@ class OpenComputerUseService:
             try:
                 return self._safe_text(pattern.Value, full=full)
             except Exception:
-                pass
+                report_suppressed_exception("read desktop value pattern")
         return ""
 
     def _record(self, control: Any, index: int, bounds: Dict[str, int], *, full: bool) -> ElementRecord:

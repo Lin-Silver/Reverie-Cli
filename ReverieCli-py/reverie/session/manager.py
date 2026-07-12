@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from ..diagnostics import report_suppressed_exception
+
 SESSION_INDEX_FILENAME = 'session_index.json'
 
 
@@ -196,7 +198,7 @@ class SessionManager:
                 try:
                     temp_path.unlink(missing_ok=True)
                 except OSError:
-                    pass
+                    report_suppressed_exception("remove failed session-write temporary file")
             raise
 
     def _load_session_index(self) -> Dict[str, Dict[str, Any]]:
@@ -354,7 +356,7 @@ class SessionManager:
         try:
             self.memory_indexer.refresh_session(session_id)
         except Exception:
-            pass
+            report_suppressed_exception("refresh session memory index")
 
     def _save_state(self, session_id: Optional[str]) -> None:
         if not session_id:

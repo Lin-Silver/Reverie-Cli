@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import os
 
+from ..diagnostics import report_suppressed_exception
+
 
 @dataclass
 class CommitInfo:
@@ -256,7 +258,7 @@ class GitIntegration:
                 commit = self._repo.commit(blame[0].commit_hash)
                 return self._commit_to_info(commit)
             except Exception:
-                pass
+                report_suppressed_exception("resolve Git blame commit")
         return None
     
     def get_commit_details(self, commit_hash: str) -> Optional[CommitDetails]:

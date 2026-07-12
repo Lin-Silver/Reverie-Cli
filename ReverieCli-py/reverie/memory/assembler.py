@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from ..context_engine.fragments import estimate_tokens, truncate_to_token_cap
-from .models import ContextPackage, MEMORY_CONTEXT_PROMPT_HEADER, MemorySearchHit
+from .models import MemoryContextPackage, MEMORY_CONTEXT_PROMPT_HEADER, MemorySearchHit
 from .retriever import MemoryRetriever
 
 
@@ -14,7 +14,7 @@ class ContextAssembler:
 
     def __init__(self, memory_retriever: MemoryRetriever):
         self.memory_retriever = memory_retriever
-        self._cache: Dict[tuple[Any, ...], ContextPackage] = {}
+        self._cache: Dict[tuple[Any, ...], MemoryContextPackage] = {}
 
     def assemble(
         self,
@@ -24,7 +24,7 @@ class ContextAssembler:
         session_id: str = "",
         recent_messages: Optional[List[Dict[str, Any]]] = None,
         max_tokens: int = 6000,
-    ) -> ContextPackage:
+    ) -> MemoryContextPackage:
         query_text = str(query or "").strip()
         max_tokens = max(800, int(max_tokens or 6000))
         cache_key = (
@@ -66,7 +66,7 @@ class ContextAssembler:
         ]
         content = "\n\n".join(section for section in sections if section).strip()
         content = truncate_to_token_cap(content, max_tokens)
-        package = ContextPackage(
+        package = MemoryContextPackage(
             query=query_text,
             content=content,
             token_estimate=estimate_tokens(content),

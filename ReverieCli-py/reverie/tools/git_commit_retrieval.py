@@ -12,6 +12,7 @@ Essential for understanding the evolution of the codebase.
 from typing import Optional, Dict
 from pathlib import Path
 
+from ..diagnostics import report_suppressed_exception
 from .base import BaseTool, ToolResult
 
 
@@ -100,7 +101,7 @@ Examples:
                     try:
                         ensure_git_integration()
                     except Exception:
-                        pass
+                        report_suppressed_exception("initialize Git integration from tool context")
                     self._git = self.context.get('git_integration')
         return self._git
     

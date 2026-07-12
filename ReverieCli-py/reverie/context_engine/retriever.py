@@ -21,6 +21,7 @@ import subprocess
 import time
 from collections import defaultdict
 
+from ..diagnostics import report_suppressed_exception
 from .symbol_table import Symbol, SymbolTable, SymbolKind
 from .dependency_graph import DependencyGraph, DependencyType
 from .fast_context import FastContextExplorer, FastContextResult
@@ -28,7 +29,7 @@ from .workspace import WorkspaceProfile, detect_workspace_profile
 
 
 @dataclass
-class ContextPackage:
+class RetrievedContextPackage:
     """
     A package of context ready to be sent to the model.
     
@@ -49,6 +50,10 @@ class ContextPackage:
     @property
     def file_count(self) -> int:
         return len(self.file_contents)
+
+
+# Compatibility alias for integrations written before the domain-specific name.
+ContextPackage = RetrievedContextPackage
 
 
 @dataclass
@@ -597,13 +602,13 @@ class ContextRetriever:
                 try:
                     add_candidate(str(resolved.relative_to(self.project_root)))
                 except Exception:
-                    pass
+                    report_suppressed_exception("make retrieval candidate project-relative")
             else:
                 project_path = self.project_root / path
                 add_candidate(str(project_path))
                 add_candidate(str(project_path.resolve()))
         except Exception:
-            pass
+            report_suppressed_exception("resolve retrieval candidate path")
 
         for candidate in candidates:
             info = self.file_info.get(candidate)
@@ -808,7 +813,7 @@ class ContextRetriever:
         include_dependencies: bool = True,
         relevance_boost: Optional[Dict[str, float]] = None,
         prioritize_game_code: bool = True
-    ) -> ContextPackage:
+    ) -> RetrievedContextPackage:
         """
         Build a "minimal but complete" context package.
         
@@ -824,7 +829,7 @@ class ContextRetriever:
             prioritize_game_code: Prioritize game logic symbols over utility code
         
         Returns:
-            ContextPackage ready for model consumption
+            RetrievedContextPackage ready for model consumption
         """
         max_tokens = max_tokens or self.DEFAULT_TOKEN_BUDGET
         
@@ -909,7 +914,7 @@ class ContextRetriever:
             [sym.file_path for sym in included_symbols if sym.file_path]
         )
 
-        return ContextPackage(
+        return RetrievedContextPackage(
             symbols=included_symbols,
             dependencies=dependencies,
             file_contents=file_contents,
@@ -1278,7 +1283,7 @@ class ContextRetriever:
             try:
                 commit_candidates.extend(self.git_integration.search_commits(query_text, limit=3))
             except Exception:
-                pass
+                report_suppressed_exception("search Git commit context")
             for file_candidate in selected_file_list[:3]:
                 try:
                     commit_candidates.extend(self.git_integration.get_file_history(file_candidate.file_path, limit=2))
@@ -1697,7 +1702,7 @@ class ContextRetriever:
                         'symbols': len(symbols)
                     })
         except Exception:
-            pass
+            report_suppressed_exception("collect project-tree retrieval context")
         
         return structure
     

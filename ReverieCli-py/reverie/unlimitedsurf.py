@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
+from .diagnostics import report_suppressed_exception
 
 UNLIMITEDSURF_DEFAULT_BASE_URL = "https://unlimited.surf"
 UNLIMITEDSURF_DEFAULT_MESSAGES_ENDPOINT = "/v1/messages"
@@ -228,7 +229,7 @@ def get_unlimitedsurf_model_catalog(
             if live_models:
                 return live_models
         except Exception:
-            pass
+            report_suppressed_exception("load unlimited.surf model catalog")
     return [dict(item) for item in _UNLIMITEDSURF_FALLBACK_MODEL_CATALOG]
 
 

@@ -11,6 +11,8 @@ import shutil
 import stat
 import tempfile
 
+from .diagnostics import report_suppressed_exception
+
 
 class WorkspaceSecurityError(ValueError):
     """Raised when a tool attempts to access a path outside the active workspace."""
@@ -40,7 +42,7 @@ def apply_restrictive_permissions(path: Path) -> None:
         else:
             os.chmod(target, 0o600)
     except Exception:
-        pass
+        report_suppressed_exception("apply restrictive file permissions")
 
 
 def write_json_secure(path: Path, data: Any) -> None:
@@ -63,7 +65,7 @@ def write_json_secure(path: Path, data: Any) -> None:
             try:
                 os.fsync(temp_file.fileno())
             except OSError:
-                pass
+                report_suppressed_exception("flush atomic-write temporary file")
             temp_name = temp_file.name
 
         temp_path = Path(temp_name)
@@ -77,7 +79,7 @@ def write_json_secure(path: Path, data: Any) -> None:
                 try:
                     leftover.unlink()
                 except Exception:
-                    pass
+                    report_suppressed_exception("remove atomic-write temporary file")
 
 
 def get_workspace_root(project_root: Any = None) -> Path:

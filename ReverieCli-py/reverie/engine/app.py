@@ -45,13 +45,17 @@ from .ui import UISystem
 
 
 @dataclass
-class RuntimeProfile:
+class EngineRuntimeProfile:
     title: str = "Reverie Engine"
     width: int = 1280
     height: int = 720
     target_fps: int = 60
     headless: bool = True
     fixed_step: float = 1.0 / 60.0
+
+
+# Compatibility alias for integrations written before the domain-specific name.
+RuntimeProfile = EngineRuntimeProfile
 
 
 def runtime_capabilities(project_root: str | Path | None = None) -> Dict[str, Any]:
@@ -118,7 +122,7 @@ def runtime_capabilities(project_root: str | Path | None = None) -> Dict[str, An
 @dataclass
 class ReverieEngineApp:
     scene_tree: SceneTree
-    profile: RuntimeProfile = field(default_factory=RuntimeProfile)
+    profile: EngineRuntimeProfile = field(default_factory=EngineRuntimeProfile)
     telemetry: TelemetryRecorder = field(
         default_factory=lambda: TelemetryRecorder(session_id=f"engine-{uuid.uuid4().hex[:8]}")
     )
@@ -403,7 +407,7 @@ def run_project(
 ) -> Dict[str, Any]:
     tree, resources, config = load_project_scene(project_root, scene_path)
     runtime = dict(config.get("runtime") or {})
-    profile = RuntimeProfile(
+    profile = EngineRuntimeProfile(
         title=str(runtime.get("window_title") or "Reverie Engine"),
         target_fps=int(runtime.get("target_fps", 60)),
         headless=headless,

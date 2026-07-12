@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from .base import BaseTool, ToolResult
+from ..diagnostics import report_suppressed_exception
 from ..engine import (
     ASHFOX_DEFAULT_ENDPOINT,
     ASHFOX_MCP_SERVER_NAME,
@@ -138,7 +139,7 @@ class GameModelingWorkbenchTool(BaseTool):
                 if server_name:
                     return server_name
             except Exception:
-                pass
+                report_suppressed_exception("load Ashfox server name from gamer configuration")
         return ASHFOX_MCP_SERVER_NAME
 
     def _ashfox_runtime(self):

@@ -18,6 +18,8 @@ import json
 import os
 import time
 
+from ..diagnostics import report_suppressed_exception
+
 from ..inline_images import count_multimodal_value_tokens
 
 
@@ -316,7 +318,7 @@ class WorkspaceStatsManager:
             try:
                 return len(encoding.encode(raw_text))
             except Exception:
-                pass
+                report_suppressed_exception("estimate token count with tiktoken")
         return max(1, len(raw_text) // 4)
 
     @classmethod

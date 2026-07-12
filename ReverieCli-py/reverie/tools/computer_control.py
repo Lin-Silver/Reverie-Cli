@@ -16,6 +16,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
+from ..diagnostics import report_suppressed_exception
+
 from .base import BaseTool, ToolResult
 from ..config import get_project_data_dir
 
@@ -92,7 +94,7 @@ if _IS_WINDOWS:
         user32.SendInput.argtypes = (wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int)
         user32.SendInput.restype = wintypes.UINT
     except Exception:
-        pass
+        report_suppressed_exception("configure Windows SendInput signature")
 
 
 _UNSUPPORTED_MESSAGE = "The 'computer_control' tool is only supported on Windows."

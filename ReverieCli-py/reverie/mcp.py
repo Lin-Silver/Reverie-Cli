@@ -18,6 +18,7 @@ from urllib.parse import urljoin
 import requests
 
 from .config import get_app_root
+from .diagnostics import report_suppressed_exception
 from .modes import normalize_mode
 from .security_utils import write_json_secure
 from .version import __version__
@@ -730,15 +731,15 @@ class BaseMCPClient:
                 resources_result = self.request("resources/list", {}, timeout_ms=timeout_ms, expect_response=True)
                 if isinstance(resources_result, dict) and isinstance(resources_result.get("resources"), list):
                     resources = [item for item in resources_result.get("resources", []) if isinstance(item, dict)]
-            except Exception:
-                pass
+            except Exception as exc:
+                errors.append(f"resources/list: {exc}")
 
             try:
                 prompts_result = self.request("prompts/list", {}, timeout_ms=timeout_ms, expect_response=True)
                 if isinstance(prompts_result, dict) and isinstance(prompts_result.get("prompts"), list):
                     prompts = [item for item in prompts_result.get("prompts", []) if isinstance(item, dict)]
-            except Exception:
-                pass
+            except Exception as exc:
+                errors.append(f"prompts/list: {exc}")
 
             self._last_error = " | ".join(str(item) for item in errors if str(item).strip())
             self._catalog_dirty = False
@@ -799,7 +800,7 @@ class StdioMCPClient(BaseMCPClient):
             if process.stdin:
                 process.stdin.close()
         except Exception:
-            pass
+            report_suppressed_exception("close MCP stdio input", logger=logger)
         try:
             if process.poll() is None:
                 process.terminate()
@@ -808,7 +809,7 @@ class StdioMCPClient(BaseMCPClient):
             try:
                 process.kill()
             except Exception:
-                pass
+                report_suppressed_exception("kill MCP stdio process", logger=logger)
 
     def _next_request_id(self) -> int:
         self._request_counter += 1
@@ -997,7 +998,7 @@ class HttpMCPClient(BaseMCPClient):
         try:
             self._session.close()
         except Exception:
-            pass
+            report_suppressed_exception("close MCP HTTP session", logger=logger)
 
     def _next_request_id(self) -> int:
         self._request_counter += 1
@@ -1191,12 +1192,12 @@ class SseMCPClient(BaseMCPClient):
             try:
                 response.close()
             except Exception:
-                pass
+                report_suppressed_exception("close MCP SSE response", logger=logger)
         if close_session:
             try:
                 self._session.close()
             except Exception:
-                pass
+                report_suppressed_exception("close MCP SSE session", logger=logger)
 
     def _handle_stream_payload(self, payload: Dict[str, Any]) -> None:
         if "method" in payload and "id" not in payload:
@@ -1464,7 +1465,7 @@ class MCPRuntime:
                 try:
                     client.close()
                 except Exception:
-                    pass
+                    report_suppressed_exception("close MCP runtime client", logger=logger)
             self._clients = {}
 
     def set_project_root(self, project_root: Optional[Path]) -> None:
@@ -1503,7 +1504,7 @@ class MCPRuntime:
             try:
                 client.close()
             except Exception:
-                pass
+                report_suppressed_exception("close MCP client during configuration refresh", logger=logger)
 
         self._config = normalize_mcp_config(config)
         self._config_signature = signature
@@ -1564,7 +1565,7 @@ class MCPRuntime:
             try:
                 current.close()
             except Exception:
-                pass
+                report_suppressed_exception("close replaced MCP client", logger=logger)
 
         client = self._create_client_locked(server_name, server_cfg)
         self._clients[server_name] = client

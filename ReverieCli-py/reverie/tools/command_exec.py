@@ -16,6 +16,8 @@ import os
 import re
 import shlex
 import subprocess
+
+from ..diagnostics import report_suppressed_exception
 import sys
 import threading
 import time
@@ -415,7 +417,7 @@ Examples:
         try:
             handler(payload)
         except Exception:
-            pass
+            report_suppressed_exception("publish command progress event")
 
     @classmethod
     def _collect_stream_lines(
@@ -440,7 +442,7 @@ Examples:
             try:
                 pipe.close()
             except Exception:
-                pass
+                report_suppressed_exception("close command output pipe")
 
     def _build_invocation(self, command: str, work_dir: Path) -> Dict[str, Any]:
         tokens = self._tokenize(command)

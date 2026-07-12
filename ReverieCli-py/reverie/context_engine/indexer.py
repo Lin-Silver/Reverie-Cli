@@ -33,6 +33,7 @@ from .parsers.gdscript_parser import GDScriptParser
 from .parsers.config_parser import ConfigParser
 from .cache import CacheManager
 from ..config import get_project_data_dir
+from ..diagnostics import report_suppressed_exception
 
 
 @dataclass
@@ -309,7 +310,7 @@ class CodebaseIndexer:
                             if not line.startswith('**/'):
                                 self._ignore_patterns.add(f'**/{line}')
             except Exception:
-                pass
+                report_suppressed_exception("read project gitignore rules")
     
     def _load_reverie_ignore(self) -> None:
         """Load patterns from .reverieignore if it exists"""
@@ -324,7 +325,7 @@ class CodebaseIndexer:
                             if not line.startswith('**/'):
                                 self._ignore_patterns.add(f'**/{line}')
             except Exception:
-                pass
+                report_suppressed_exception("read parent gitignore rules")
 
     def _should_ignore(self, path: Path) -> bool:
         """Check if a path should be ignored"""
@@ -950,7 +951,7 @@ class CodebaseIndexer:
             try:
                 result.total_bytes += f.stat().st_size
             except Exception:
-                pass
+                report_suppressed_exception("read indexed file size")
         logger.info("Total size: %.2f MB", result.total_bytes / (1024 * 1024))
 
         # Build the new index off to the side so the live index only changes on commit.
@@ -1287,7 +1288,7 @@ class CodebaseIndexer:
                     # Modified file
                     changed.append(file_path)
             except Exception:
-                pass
+                report_suppressed_exception("compare indexed file metadata")
         
         # Check for deleted files
         with self._index_lock:
@@ -1516,7 +1517,7 @@ class CodebaseIndexer:
                 if resolved != file_path:
                     symbols = self.symbol_table.get_all_in_file(resolved)
             except Exception:
-                pass
+                report_suppressed_exception("resolve symbol lookup path")
         return symbols
     
     def refresh(self) -> IndexResult:

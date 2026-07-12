@@ -10,6 +10,8 @@ import math
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
+from ..diagnostics import report_suppressed_exception
+
 try:
     import pyglet
     from pyglet import gl
@@ -438,7 +440,7 @@ class RenderingServer:
                 try:
                     resource.release()
                 except Exception:
-                    pass
+                    report_suppressed_exception(f"release render resource {resource_name}")
                 setattr(self, resource_name, None)
 
     def _release_native_resources(self) -> None:
@@ -447,26 +449,26 @@ class RenderingServer:
             try:
                 texture.release()
             except Exception:
-                pass
+                report_suppressed_exception("release cached render texture")
         self._texture_cache.clear()
         for vertex_array, index_buffer, vertex_buffer, _signature in self._gpu_mesh_cache.values():
             for resource in (vertex_array, index_buffer, vertex_buffer):
                 try:
                     resource.release()
                 except Exception:
-                    pass
+                    report_suppressed_exception("release cached mesh resource")
         self._gpu_mesh_cache.clear()
         if self._program is not None:
             try:
                 self._program.release()
             except Exception:
-                pass
+                report_suppressed_exception("release render program")
             self._program = None
         if self.ctx is not None:
             try:
                 self.ctx.release()
             except Exception:
-                pass
+                report_suppressed_exception("release render context")
             self.ctx = None
 
     def begin_frame(self) -> None:

@@ -24,6 +24,7 @@ from .dependency_graph import Dependency, DependencyGraph, DependencyType
 from .indexer import CodebaseIndexer, IndexResult, IndexProgress, FileInfo, IndexConfig
 from .retriever import (
     ContextRetriever,
+    RetrievedContextPackage,
     ContextPackage,
     SymbolContext,
     EditContext,
@@ -71,6 +72,7 @@ __all__ = [
     'FileInfo',
     # Retriever
     'ContextRetriever',
+    'RetrievedContextPackage',
     'ContextPackage',
     'SymbolContext',
     'EditContext',

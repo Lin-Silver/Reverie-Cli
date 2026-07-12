@@ -1,4 +1,4 @@
-﻿"""
+"""
 Main Interface - The primary CLI interface with Dreamscape Theme
 
 Handles:
@@ -16,6 +16,8 @@ import _thread
 import json
 import re
 import concurrent.futures
+
+from ..diagnostics import report_suppressed_exception
 from datetime import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -386,7 +388,7 @@ def _configure_stdio_for_terminal_output() -> None:
         try:
             stream.reconfigure(errors="replace")
         except Exception:
-            pass
+            report_suppressed_exception("run optional CLI integration")
 
 
 def _sanitize_prompt_output_text(output_text: str, thinking_text: str) -> str:
@@ -1064,7 +1066,7 @@ class ReverieInterface:
             if not existing or changed:
                 self.mcp_config_manager.upsert_server(ASHFOX_MCP_SERVER_NAME, updated or desired)
         except Exception:
-            pass
+            report_suppressed_exception("run optional CLI integration")
 
     def _init_workspace_services(self) -> None:
         """Initialize cache/session/rollback services for the active runtime scope."""
@@ -1094,7 +1096,7 @@ class ReverieInterface:
         try:
             self.memory_indexer.auto_learn_from_sessions(max_items=36, max_sessions=40)
         except Exception:
-            pass
+            report_suppressed_exception("run optional CLI integration")
         self.workspace_stats_manager = WorkspaceStatsManager(
             self.project_data_dir,
             project_root=None if runtime_scope == "computer-controller" else self.project_root,
@@ -1195,25 +1197,25 @@ class ReverieInterface:
                     if hasattr(stream, "flush"):
                         stream.flush()
         except Exception:
-            pass
+            report_suppressed_exception("run optional CLI integration")
 
         try:
             self.console.clear()
             return
         except Exception:
-            pass
+            report_suppressed_exception("run optional CLI integration")
 
         try:
             if sys.stdout and hasattr(sys.stdout, "write"):
                 sys.stdout.write(_STRONG_CLEAR_SEQUENCE)
                 sys.stdout.flush()
         except Exception:
-            pass
+            report_suppressed_exception("run optional CLI integration")
 
         try:
             self.console.clear()
         except Exception:
-            pass
+            report_suppressed_exception("run optional CLI integration")
 
     def _show_pending_config_notice(self) -> None:
         """Render any deferred config-load issue inside Reverie's own TUI."""
@@ -1461,7 +1463,7 @@ class ReverieInterface:
             try:
                 elapsed += time.time() - float(current_start)
             except Exception:
-                pass
+                report_suppressed_exception("run optional CLI integration")
         return max(0, int(elapsed))
 
     def _get_status_line(self, current_content_tokens: int = 0):
@@ -1793,14 +1795,14 @@ class ReverieInterface:
                     self._last_footer_render_signature = signature
                 return
             except Exception:
-                pass
+                report_suppressed_exception("run optional CLI integration")
             try:
                 if force or now - self._last_footer_refresh_time >= _STREAM_FOOTER_MIN_REFRESH_INTERVAL:
                     live.refresh()
                     self._last_footer_refresh_time = now
                     self._last_footer_render_signature = signature
             except Exception:
-                pass
+                report_suppressed_exception("run optional CLI integration")
 
     def _should_use_streaming_footer(self) -> bool:
         """Return whether Rich Live can redraw in-place for the active stdout."""
@@ -1893,7 +1895,7 @@ class ReverieInterface:
             if config.show_status_line:
                 renderables.append(self._get_status_line(current_content_tokens=self._current_content_tokens))
         except Exception:
-            pass
+            report_suppressed_exception("run optional CLI integration")
         live_tool_panel = self._get_live_tool_panel()
         if live_tool_panel is not None:
             renderables.append(live_tool_panel)
@@ -2005,7 +2007,7 @@ class ReverieInterface:
                 try:
                     msvcrt.getwch()
                 except OSError:
-                    pass
+                    report_suppressed_exception("consume Windows extended-key sequence")
                 continue
             if key == "\x14":
                 self._toggle_task_drawer_visibility()
@@ -2245,7 +2247,7 @@ class ReverieInterface:
                                 directory = str(Path(file_path).parent).replace("\\", "/").lower()
                             relevant_dirs[directory] = max(relevant_dirs.get(directory, 0.0), 12.0 - index)
             except Exception:
-                pass
+                report_suppressed_exception("run optional CLI integration")
 
         ignored_dirs = {
             ".git",
@@ -2594,7 +2596,7 @@ class ReverieInterface:
         try:
             self.workspace_stats_manager.flush()
         except Exception:
-            pass
+            report_suppressed_exception("run optional CLI integration")
         self.console.print(f"\n[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Session saved. Goodbye! {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]")
     
     def _process_message(self, message: str) -> bool:
@@ -2870,7 +2872,7 @@ class ReverieInterface:
                     try:
                         response_stream.close()
                     except Exception:
-                        pass
+                        report_suppressed_exception("run optional CLI integration")
                 self._stop_stream_input_capture()
                 self._stop_streaming_footer_ticker()
                 self._stream_input_state = None
@@ -2892,7 +2894,7 @@ class ReverieInterface:
                 try:
                     response_stream.close()
                 except Exception:
-                    pass
+                    report_suppressed_exception("run optional CLI integration")
             if current_markdown_text.strip():
                 self._flush_markdown_content(current_markdown_text, final=True)
                 current_markdown_text = ""
@@ -2937,7 +2939,7 @@ class ReverieInterface:
                     self.workspace_stats_manager.record_active_time(elapsed_active)
                     self.total_active_time = self.workspace_stats_manager.get_total_active_seconds()
                 except Exception:
-                    pass
+                    report_suppressed_exception("run optional CLI integration")
                 self.current_task_start = None
             if self.agent:
                 try:
@@ -2956,7 +2958,7 @@ class ReverieInterface:
                             )
                             self.workspace_stats_manager.flush()
                         except Exception:
-                            pass
+                            report_suppressed_exception("run optional CLI integration")
                 except Exception as session_error:
                     self._show_activity_event(
                         "Session",
@@ -2993,7 +2995,7 @@ class ReverieInterface:
                 self.workspace_stats_manager.record_runtime(time.time() - self.start_time, force=True)
                 self.workspace_stats_manager.flush()
         except Exception:
-            pass
+            report_suppressed_exception("run optional CLI integration")
 
     def _flush_markdown_content(self, content: str, *, final: bool = False) -> None:
         """Render assistant markdown with a shared formatter for lower-latency streaming."""
@@ -3936,13 +3938,13 @@ class ReverieInterface:
             try:
                 self.memory_indexer.refresh_session(session.id)
             except Exception:
-                pass
+                report_suppressed_exception("run optional CLI integration")
             return
 
         try:
             self.memory_indexer.refresh_session(session.id)
         except Exception:
-            pass
+            report_suppressed_exception("run optional CLI integration")
 
         memory_text = self.memory_indexer.build_workspace_memory_summary(max_fragments=8, max_chars=3200)
         if not memory_text:
@@ -3976,7 +3978,7 @@ class ReverieInterface:
             )
             self.workspace_stats_manager.flush()
         except Exception:
-            pass
+            report_suppressed_exception("run optional CLI integration")
 
         if self.agent:
             self.agent.set_history(session.messages)

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from .base import BaseTool, ToolResult
+from ..diagnostics import report_suppressed_exception
 from ..engine import (
     BLENDER_EXPORT_FORMATS,
     BLENDER_MODEL_PRESETS,
@@ -141,7 +142,7 @@ class BlenderModelingWorkbenchTool(BaseTool):
                 if blender_path:
                     return blender_path
             except Exception:
-                pass
+                report_suppressed_exception("load Blender path from gamer configuration")
         return ""
 
     def _blender_path(self, kwargs: Dict[str, Any]) -> str:

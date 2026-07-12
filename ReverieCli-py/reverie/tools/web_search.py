@@ -16,6 +16,8 @@ import logging
 import random
 import re
 import threading
+
+from ..diagnostics import report_suppressed_exception
 import time
 import warnings
 from collections import OrderedDict
@@ -126,7 +128,7 @@ class WebSearchTool(BaseTool):
             self._ddg_backend = "ddgs"
             return
         except Exception:
-            pass
+            report_suppressed_exception("load optional web-search provider")
         try:
             with warnings.catch_warnings():
                 warnings.filterwarnings(
@@ -459,7 +461,7 @@ class WebSearchTool(BaseTool):
             try:
                 value = bytes(value, "utf-8").decode("unicode_escape")
             except Exception:
-                pass
+                report_suppressed_exception("decode escaped web-search value")
         return unescape(value).strip()
 
     @classmethod

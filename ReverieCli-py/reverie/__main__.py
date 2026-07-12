@@ -6,6 +6,8 @@ Or: reverie (if installed)
 """
 
 import sys
+
+from .diagnostics import report_suppressed_exception
 import argparse
 import json
 import locale
@@ -98,7 +100,7 @@ def _configure_stdio_for_safe_output() -> None:
         try:
             stream.reconfigure(errors="replace")
         except Exception:
-            pass
+            report_suppressed_exception(f"configure {stream_name} text output")
 
 
 def _safe_output_text(value: str) -> str:
@@ -122,7 +124,7 @@ def _exit_prompt_mode(exit_code: int) -> int:
         try:
             stream.flush()
         except Exception:
-            pass
+            report_suppressed_exception(f"flush {stream_name} before prompt-mode exit")
 
     if bool(getattr(sys, "frozen", False)):
         os._exit(code)
@@ -138,7 +140,7 @@ def _decode_prompt_bytes(data: bytes) -> str:
         try:
             return _normalize_newlines(data.decode("utf-16"))
         except UnicodeError:
-            pass
+            report_suppressed_exception("decode UTF-16 prompt input")
 
     encodings = ["utf-8-sig", "gb18030"]
     preferred = locale.getpreferredencoding(False)

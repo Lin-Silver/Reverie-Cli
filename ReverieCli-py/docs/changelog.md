@@ -1,6 +1,6 @@
 ## Reverie CLI v2.3.5 - Unreleased
 
-* Added the built-in Opencode (`/oc`) source, completed the native ModernGL framebuffer path and backend diagnostics, consolidated duplicate engine/Gamer internals, aligned packaging and release checks, repaired documentation and licensing, and moved all planned work into one maintained roadmap.
+* Added the built-in Opencode (`/oc`) source, completed the native ModernGL framebuffer path and backend diagnostics, implemented the session selector, made recoverable failures observable across the package, introduced domain-specific context/runtime type names with compatibility aliases, added cross-platform CI and complete SDK bridge smoke checks, consolidated duplicate internals, repaired packaging/documentation/licensing, and limited the maintained roadmap to remaining game-development work.
 
 ---
 

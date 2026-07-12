@@ -17,6 +17,8 @@ from pathlib import Path
 import json
 import hashlib
 
+from ..diagnostics import report_suppressed_exception
+
 
 class SymbolKind(Enum):
     """Types of symbols that can be indexed"""
@@ -358,7 +360,7 @@ class SymbolTable:
                 if resolved != lookup_path:
                     qnames = self._file_index.get(resolved, set())
             except Exception:
-                pass
+                report_suppressed_exception("resolve symbol-table file path")
         symbols = [self._symbols[qn] for qn in qnames if qn in self._symbols]
         # Sort by line number
         return sorted(symbols, key=lambda s: s.start_line)

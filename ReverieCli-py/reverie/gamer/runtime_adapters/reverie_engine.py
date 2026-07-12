@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from ...engine import create_project_skeleton, run_project_smoke, supported_game_families, validate_project
-from .base import BaseRuntimeAdapter, RuntimeProfile
+from .base import BaseRuntimeAdapter, RuntimeAdapterProfile
 
 
 class ReverieEngineRuntimeAdapter(BaseRuntimeAdapter):
@@ -33,8 +33,8 @@ class ReverieEngineRuntimeAdapter(BaseRuntimeAdapter):
     )
     template_support = tuple(item["id"] for item in supported_game_families())
 
-    def detect(self, project_root: Path, app_root: Path | None = None) -> RuntimeProfile:
-        return RuntimeProfile(
+    def detect(self, project_root: Path, app_root: Path | None = None) -> RuntimeAdapterProfile:
+        return RuntimeAdapterProfile(
             id=self.runtime_id,
             display_name=self.display_name,
             available=True,

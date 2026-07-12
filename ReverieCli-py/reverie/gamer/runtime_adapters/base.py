@@ -8,7 +8,7 @@ from typing import Any, Dict, List
 
 
 @dataclass
-class RuntimeProfile:
+class RuntimeAdapterProfile:
     """Serializable runtime capability profile."""
 
     id: str
@@ -55,9 +55,8 @@ class BaseRuntimeAdapter:
     capability_tags: tuple[str, ...] = ()
     template_support: tuple[str, ...] = ()
 
-    def detect(self, project_root: Path, app_root: Path | None = None) -> RuntimeProfile:
+    def detect(self, project_root: Path, app_root: Path | None = None) -> RuntimeAdapterProfile:
         raise NotImplementedError
-
     def recommend_template(self, game_request: Dict[str, Any]) -> str:
         return ""
 
@@ -80,3 +79,7 @@ class BaseRuntimeAdapter:
             "notes": ["validation is adapter-defined and may require runtime-native tooling"],
             "project_root": str(Path(output_dir)),
         }
+
+
+# Compatibility alias for integrations written before the domain-specific name.
+RuntimeProfile = RuntimeAdapterProfile

@@ -16,6 +16,8 @@ import shutil
 import socket
 import ssl
 import subprocess
+
+from ..diagnostics import report_suppressed_exception
 import struct
 import sys
 import time
@@ -283,11 +285,11 @@ class _CdpWebSocket:
         try:
             self._send_frame(b"", opcode=0x8)
         except Exception:
-            pass
+            report_suppressed_exception("send browser WebSocket close frame")
         try:
             sock.close()
         except Exception:
-            pass
+            report_suppressed_exception("close browser WebSocket")
 
     def send_json(self, payload: Dict[str, Any]) -> None:
         text = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)

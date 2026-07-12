@@ -87,7 +87,7 @@ When you change user-facing behavior, update the docs in the same change:
 - `docs/CONFIGURATION.md` for config and runtime-storage changes
 - `docs/CLI_COMMANDS.md` for command reference
 - `docs/engine/reverie_engine_user_guide.md` for `/engine` behavior
-- `docs/ROADMAP.md` for planned work and completion gates
+- `docs/ROADMAP.md` for planned game-runtime/Gamer work and completion gates
 - `changelog.md` for release-facing summaries when appropriate
 
 If the change affects command wording, also update `reverie/cli/help_catalog.py`.
@@ -103,4 +103,4 @@ The command catalog in `reverie/cli/help_catalog.py` is the authoritative source
 - Do not document helper scripts unless they are verified and maintained.
 - If a feature depends on optional credentials or local caches, say that clearly in the docs.
 - Keep the English and Chinese README files aligned on installation, quick-start, and storage behavior.
-- Keep roadmap material out of code comments and feature guides; planned work belongs only in `docs/ROADMAP.md`.
+- Keep game-development roadmap material out of code comments and feature guides; planned work belongs only in `docs/ROADMAP.md`.

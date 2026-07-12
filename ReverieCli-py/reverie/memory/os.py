@@ -7,11 +7,12 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+from ..diagnostics import report_suppressed_exception
 from .assembler import ContextAssembler
 from .consolidator import MemoryConsolidator
 from .event_store import EventStore
 from .evolution import EvolutionFeedbackPipeline
-from .models import ContextPackage, EventRecord, MemoryItem, coerce_tags, new_id, utc_now
+from .models import MemoryContextPackage, EventRecord, MemoryItem, coerce_tags, new_id, utc_now
 from .retriever import MemoryRetriever, tokenize
 from .safety import redact_memory_text
 from .store import MemoryStore
@@ -64,7 +65,7 @@ class MemoryOS:
             try:
                 self.consolidator.extract_event(event)
             except Exception:
-                pass
+                report_suppressed_exception("consolidate memory event")
         return event
 
     def remember(
@@ -211,7 +212,7 @@ class MemoryOS:
         session_id: str = "",
         recent_messages: Optional[list[dict[str, Any]]] = None,
         max_tokens: int = 6000,
-    ) -> ContextPackage:
+    ) -> MemoryContextPackage:
         return self.assembler.assemble(
             query,
             code_retriever=code_retriever,

@@ -18,6 +18,8 @@ from rich.prompt import Prompt, Confirm
 from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.text import Text
+
+from ..diagnostics import report_suppressed_exception
 from rich.align import Align
 from rich.columns import Columns
 from rich.padding import Padding
@@ -996,7 +998,7 @@ class CommandHandler:
                 or 128000
             )
         except Exception:
-            pass
+            report_suppressed_exception("resolve command model context limit")
         return {
             "system_tokens": system_tokens,
             "messages_tokens": messages_tokens,
@@ -1866,7 +1868,7 @@ class CommandHandler:
                 if getattr(config, "mode", None):
                     mode = config.mode
             except Exception:
-                pass
+                report_suppressed_exception("resolve active command mode")
         return normalize_mode(mode)
 
     def _execute_tool_catalog(
@@ -2659,7 +2661,7 @@ class CommandHandler:
             try:
                 refresh_prompt()
             except Exception:
-                pass
+                report_suppressed_exception("refresh prompt after MCP configuration update")
         return manager, runtime
 
     def _resolve_mcp_server_name(self, server_name: str, config: Dict[str, Any]) -> str:
@@ -2710,7 +2712,7 @@ class CommandHandler:
             try:
                 refresh_prompt()
             except Exception:
-                pass
+                report_suppressed_exception("refresh prompt after MCP state update")
         return self._load_mcp_ui_state(manager, runtime, force_refresh=force_refresh)
 
     def _get_mcp_ui_items(self, config: Dict[str, Any], rows: List[Dict[str, Any]], manager) -> List[Dict[str, Any]]:
@@ -7677,7 +7679,7 @@ class CommandHandler:
                         f"[{self.theme.TEXT_DIM}]Thinking depth: {get_agnes_thinking_label(saved_cfg.get('thinking_mode'))}[/{self.theme.TEXT_DIM}]"
                     )
             except Exception:
-                pass
+                report_suppressed_exception("render Agnes thinking status")
         return result
 
     def cmd_unlimitedsurf(self, args: str) -> bool:
@@ -11120,7 +11122,7 @@ class CommandHandler:
             try:
                 active_stats_manager.flush()
             except Exception:
-                pass
+                report_suppressed_exception("flush workspace statistics")
 
         if active_stats_manager and Path(getattr(active_stats_manager, "project_data_dir", cache_dir)).resolve() == cache_dir.resolve():
             stats_manager = active_stats_manager
@@ -11980,7 +11982,7 @@ class CommandHandler:
             try:
                 self.app['apply_display_preferences'](config)
             except Exception:
-                pass
+                report_suppressed_exception("apply display preferences")
 
     def _drain_msvcrt_keyboard_buffer(self, msvcrt_module, *, limit: int = 128) -> int:
         """Drop stale keypresses before an interactive TUI starts."""
@@ -12008,7 +12010,7 @@ class CommandHandler:
             try:
                 self.app['apply_display_preferences'](config)
             except Exception:
-                pass
+                report_suppressed_exception("apply display preferences after reset")
         if reinit and self.app.get('reinit_agent'):
             self.app['reinit_agent']()
         self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} {message}[/{self.theme.MINT_VIBRANT}]")
@@ -13333,7 +13335,7 @@ class CommandHandler:
                                 f"({usage.get('percentage', 0):.1f}%)"
                             )
                     except Exception:
-                        pass
+                        report_suppressed_exception("render context usage summary")
 
                     self.console.print(f"[{self.theme.MINT_SOFT}]{escape(str(result.output or 'Context compression completed.'))}[/{self.theme.MINT_SOFT}]")
                 else:

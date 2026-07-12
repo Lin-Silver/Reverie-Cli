@@ -1,6 +1,6 @@
 """Canonical public entry points for Reverie Engine."""
 
-from .app import ReverieEngineApp, RuntimeProfile, run_project, run_project_smoke, runtime_capabilities
+from .app import EngineRuntimeProfile, ReverieEngineApp, RuntimeProfile, run_project, run_project_smoke, runtime_capabilities
 from .config import (
     ENGINE_BRAND,
     ENGINE_NAME,
@@ -315,6 +315,7 @@ __all__ = [
     "ResourceManager",
     "RigidBodyComponent",
     "RuntimeProfile",
+    "EngineRuntimeProfile",
     "RuntimeSettings",
     "SAVE_DATA_VERSION",
     "SaveDataManager",

@@ -14,7 +14,8 @@ import sys
 
 from PIL import Image, ImageDraw, ImageFont
 
-from .app import ReverieEngineApp, RuntimeProfile, load_project_scene
+from ..diagnostics import report_suppressed_exception
+from .app import EngineRuntimeProfile, ReverieEngineApp, load_project_scene
 from .config import load_engine_config
 from .rendering import RenderCommand, RenderFrame, RenderMode
 
@@ -88,7 +89,7 @@ def _iter_ffmpeg_candidates() -> Iterable[Path]:
     try:
         bundle_roots.append(Path(sys.executable).resolve().parent)
     except Exception:
-        pass
+        report_suppressed_exception("resolve executable directory for bundled FFmpeg")
 
     for root in bundle_roots:
         for relative_path in (
@@ -425,7 +426,7 @@ def export_project_video(
 
     app = ReverieEngineApp(
         tree,
-        profile=RuntimeProfile(
+        profile=EngineRuntimeProfile(
             title=title,
             width=width,
             height=height,

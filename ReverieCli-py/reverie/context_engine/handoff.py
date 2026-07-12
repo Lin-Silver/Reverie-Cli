@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
+from ..diagnostics import report_suppressed_exception
 from .compressor import (
     _apply_nvidia_request_payload_defaults,
     _collect_codex_summary_text,
@@ -244,7 +245,7 @@ def _extract_json_object(text: str) -> Dict[str, Any]:
         parsed = json.loads(cleaned)
         return parsed if isinstance(parsed, dict) else {}
     except Exception:
-        pass
+        report_suppressed_exception("parse structured handoff response")
 
     decoder = json.JSONDecoder()
     for match in re.finditer(r"\{", cleaned):

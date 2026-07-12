@@ -17,6 +17,7 @@ import time
 from urllib.parse import unquote, urlparse
 from urllib.request import Request, urlopen
 
+from ..diagnostics import report_suppressed_exception
 from .base import BaseTool, ToolResult
 from ..aihubmix import (
     AIHUBMIX_DEFAULT_API_URL,
@@ -1049,7 +1050,7 @@ Examples:
                     nested.update(loaded_cfg.get("sensenova", {}))
                     cfg["sensenova"] = nested
         except Exception:
-            pass
+            report_suppressed_exception("load text-to-image configuration")
         if not isinstance(cfg.get("aihubmix"), dict):
             cfg["aihubmix"] = dict(default_text_to_image_config().get("aihubmix", {}))
         if not isinstance(cfg.get("pollinations"), dict):

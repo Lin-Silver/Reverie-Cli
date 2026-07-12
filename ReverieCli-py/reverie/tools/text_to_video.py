@@ -11,6 +11,7 @@ from urllib.parse import quote, urlparse
 
 import requests
 
+from ..diagnostics import report_suppressed_exception
 from .base import BaseTool, ToolResult
 from ..agnes import (
     AGNES_DEFAULT_API_URL,
@@ -133,7 +134,7 @@ The tool uses provider profiles from the text-to-video registry:
                     nested.update(loaded_cfg.get("agnes", {}))
                     cfg["agnes"] = nested
         except Exception:
-            pass
+            report_suppressed_exception("load text-to-video configuration")
         if not isinstance(cfg.get("agnes"), dict):
             cfg["agnes"] = dict(default_text_to_video_config().get("agnes", {}))
         cfg["active_source"] = normalize_ttv_source(cfg.get("active_source", "agnes"))

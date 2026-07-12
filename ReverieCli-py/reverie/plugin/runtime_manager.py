@@ -17,6 +17,7 @@ import sys
 import time
 import zipfile
 
+from ..diagnostics import report_suppressed_exception
 from .protocol import (
     RC_PROTOCOL_VERSION,
     RuntimePluginCommandSpec,
@@ -451,7 +452,7 @@ class RuntimePluginManager:
                 if repo_plugins.exists():
                     return repo_plugins
         except Exception:
-            pass
+            report_suppressed_exception("discover repository plugin source")
 
         return app_plugins
 
@@ -480,7 +481,7 @@ class RuntimePluginManager:
             if isinstance(plugins, dict):
                 return {"version": 1, "plugins": dict(plugins)}
         except Exception:
-            pass
+            report_suppressed_exception("load plugin activation state")
         return {"version": 1, "plugins": {}}
 
     def _save_plugin_state(self) -> None:
@@ -616,7 +617,7 @@ class RuntimePluginManager:
                 if isinstance(entries, dict):
                     return {"version": self.PROTOCOL_CACHE_VERSION, "entries": dict(entries)}
         except Exception:
-            pass
+            report_suppressed_exception("load plugin protocol cache")
         return {"version": self.PROTOCOL_CACHE_VERSION, "entries": {}}
 
     def _save_protocol_cache(self) -> None:
@@ -626,7 +627,7 @@ class RuntimePluginManager:
             temp_path.write_text(json.dumps(self._protocol_cache, ensure_ascii=False, indent=2), encoding="utf-8")
             temp_path.replace(self.protocol_cache_path)
         except Exception:
-            pass
+            report_suppressed_exception("persist plugin protocol cache")
 
     @staticmethod
     def _protocol_path_fingerprint(path: Optional[Path]) -> dict[str, Any]:
@@ -1954,7 +1955,7 @@ class RuntimePluginManager:
             payload = json.loads(raw)
             return payload if isinstance(payload, dict) else None
         except Exception:
-            pass
+            report_suppressed_exception("decode plugin JSON response")
 
         start = raw.find("{")
         end = raw.rfind("}")

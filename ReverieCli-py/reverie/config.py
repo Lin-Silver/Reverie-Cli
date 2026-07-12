@@ -18,6 +18,7 @@ import hashlib
 import re
 import logging
 
+from .diagnostics import report_suppressed_exception
 from .security_utils import write_json_secure
 from .storage import (
     ProjectStorageResolver,
@@ -238,14 +239,14 @@ def _resolve_runner_root() -> Path:
             if exec_path.exists() and exec_path.is_file():
                 return exec_path.parent
         except Exception:
-            pass
+            report_suppressed_exception("resolve launcher path from argv")
 
     try:
         source_root = Path(__file__).resolve().parent.parent
         if (source_root / 'reverie').exists():
             return source_root
     except Exception:
-        pass
+        report_suppressed_exception("resolve launcher source root")
 
     return Path.cwd()
 
@@ -757,7 +758,7 @@ def get_app_root() -> Path:
         if is_source_checkout:
             return (repo_root / "dist").resolve()
     except Exception:
-        pass
+        report_suppressed_exception("resolve source-checkout application root")
 
     return launcher_root
 

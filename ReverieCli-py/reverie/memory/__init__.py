@@ -6,6 +6,7 @@ from .event_store import EventStore
 from .evolution import EvolutionFeedbackPipeline
 from .models import (
     ContextPackage,
+    MemoryContextPackage,
     EventRecord,
     LearningProposal,
     MEMORY_CONTEXT_PROMPT_HEADER,
@@ -21,6 +22,7 @@ from .store import MemoryStore
 __all__ = [
     "ContextAssembler",
     "ContextPackage",
+    "MemoryContextPackage",
     "EventRecord",
     "EventStore",
     "EvolutionFeedbackPipeline",

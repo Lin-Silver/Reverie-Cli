@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from ..diagnostics import report_suppressed_exception
+
 
 @dataclass(frozen=True)
 class LSPServerDefinition:
@@ -104,15 +106,15 @@ class LSPClient:
         try:
             self.request("shutdown", None, timeout=2.0)
         except Exception:
-            pass
+            report_suppressed_exception("request language-server shutdown")
         try:
             self.notify("exit", None)
         except Exception:
-            pass
+            report_suppressed_exception("notify language-server exit")
         try:
             self._process.kill()
         except Exception:
-            pass
+            report_suppressed_exception("terminate language-server process")
 
     def _reader_loop(self) -> None:
         stdout = self._process.stdout

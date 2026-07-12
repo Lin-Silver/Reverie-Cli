@@ -16,6 +16,8 @@ import urllib.request
 
 import yaml
 
+from ..diagnostics import report_suppressed_exception
+
 
 ASHFOX_DEFAULT_ENDPOINT = "http://127.0.0.1:8787/mcp"
 ASHFOX_MCP_SERVER_NAME = "ashfox"
@@ -183,9 +185,7 @@ def _probe_ashfox_endpoint(endpoint: str, *, timeout_seconds: float = 1.5) -> Di
                 if isinstance(tools, list):
                     tool_count = len(tools)
     except Exception:
-        # Some MCP servers can stream event payloads; discovery will still happen
-        # through the built-in MCP runtime once the endpoint is reachable.
-        pass
+        report_suppressed_exception("inspect Ashfox MCP tools")
 
     return {
         "available": True,

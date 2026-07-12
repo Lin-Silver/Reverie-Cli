@@ -4,7 +4,7 @@ This is the single source of truth for planned product work. Current behavior be
 
 ## Current Baseline
 
-Reverie CLI provides a multi-provider coding agent, Context Engine retrieval and memory, sessions and rollback, managed SubAgents, desktop control, Writer workflows, runtime plugins, and the work-in-progress Reverie-Gamer production pipeline.
+Reverie CLI provides a multi-provider coding agent, Context Engine retrieval and memory, sessions and rollback, scoped managed SubAgents, explicit handoff and recovery surfaces, desktop control, Writer workflows, runtime plugins, cross-platform CI, and packaged SDK bridge verification.
 
 Reverie Engine supports deterministic headless gameplay execution, scene and component data, physics queries, navigation, input, animation, UI state, localization, save data, telemetry, video export, and a ModernGL off-screen renderer with reusable mesh resources, basic textures, blending, framebuffer readback, and PNG capture.
 
@@ -35,18 +35,9 @@ Completion requires runtime evidence from actual backend devices, not dependency
 
 AAA/3A production and unrestricted 3D open worlds remain outside the supported scope until the runtime and evidence gates above are complete.
 
-## Priority 4: Agent Harness and Isolation
-
-- Add optional isolated worktree-style execution lanes for risky or long-running repository changes.
-- Add explicit context refresh and handoff transitions for long sessions.
-- Turn recovery playbooks for failing tests, partial edits, and tool-schema mismatches into safe, action-ready workflows.
-- Expand end-to-end release checks for packaged desktop control, SubAgents, browser control, plugins, and provider transports.
-
-Completion means recovery and isolation are enforced by runtime behavior and verified workflows rather than prompt guidance alone.
-
 ## Maintenance Rules
 
 - Keep public engine imports consolidated under `reverie.engine`.
-- Add planned work only to this file; do not place project roadmaps in code comments or feature guides.
+- Add planned game/runtime work only to this file; do not place project roadmaps in code comments or feature guides.
 - Remove completed items from this file in the same change that records them under the changelog's unreleased section.
 - Keep capability reports conservative: `implemented`, `available`, and `production-ready` are different states.

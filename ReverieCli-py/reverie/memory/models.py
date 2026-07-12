@@ -231,13 +231,17 @@ class MemorySearchHit:
 
 
 @dataclass
-class ContextPackage:
+class MemoryContextPackage:
     query: str
     content: str
     token_estimate: int
     memory_ids: List[str] = field(default_factory=list)
     event_ids: List[str] = field(default_factory=list)
     sources: List[str] = field(default_factory=list)
+
+
+# Compatibility alias for integrations written before the domain-specific name.
+ContextPackage = MemoryContextPackage
 
 
 @dataclass

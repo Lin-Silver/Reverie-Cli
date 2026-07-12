@@ -242,13 +242,7 @@ jobs:
         shell: pwsh
         run: |
           .\dist\reverie.exe --version
-          $bridgeOutput = '{"action":"shutdown"}' | .\dist\reverie.exe --sdk-bridge
-          if ($LASTEXITCODE -ne 0) {
-            throw "SDK bridge smoke test failed with exit code $LASTEXITCODE"
-          }
-          if (-not (($bridgeOutput -join "`n") -match '"type":\s*"ready"')) {
-            throw "SDK bridge did not emit a ready event."
-          }
+          python .\ReverieCli-py\scripts\smoke_sdk_bridge.py --executable .\dist\reverie.exe
 
           $manifest = Get-Content .\dist\plugins-manifest.json -Raw | ConvertFrom-Json
           if ($manifest.plugins.Count -ne 2) {

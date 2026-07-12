@@ -7,6 +7,7 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+from ..diagnostics import report_suppressed_exception
 from .models import EventRecord, coerce_tags, new_id, utc_now
 
 
@@ -24,7 +25,7 @@ def _json_safe(value: Any) -> Any:
         try:
             return _json_safe(value.to_dict())
         except Exception:
-            pass
+            report_suppressed_exception("serialize memory event payload")
     return str(value)
 
 

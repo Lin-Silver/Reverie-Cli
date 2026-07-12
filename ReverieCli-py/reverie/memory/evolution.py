@@ -8,6 +8,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from ..diagnostics import report_suppressed_exception
 from .event_store import EventStore
 from .models import LearningProposal, MemoryItem, new_id, utc_now
 from .store import MemoryStore
@@ -197,4 +198,4 @@ class EvolutionFeedbackPipeline:
                 try:
                     temp_path.unlink()
                 except OSError:
-                    pass
+                    report_suppressed_exception("remove evolution proposal temporary file")

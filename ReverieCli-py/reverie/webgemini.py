@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, Generator, Iterable, List, Optional, Tuple
 from urllib.parse import urlencode
 
+from .diagnostics import report_suppressed_exception
 from .proxy import resolve_proxy_url_with_source
 
 
@@ -245,7 +246,7 @@ def _load_cookie(cfg: Dict[str, Any]) -> Tuple[str, str]:
             data = json.loads(cookie)
             return str(data.get("cookie", "") or "").strip(), str(data.get("sapisid", "") or "").strip()
         except Exception:
-            pass
+            report_suppressed_exception("decode WebGemini cookie metadata")
     pairs: Dict[str, str] = {}
     for part in cookie.split(";"):
         if "=" not in part:

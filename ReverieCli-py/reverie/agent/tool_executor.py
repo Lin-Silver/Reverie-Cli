@@ -18,6 +18,7 @@ import re
 import time
 
 from ..config import get_project_data_dir
+from ..diagnostics import report_suppressed_exception
 from ..modes import normalize_mode
 from ..tools.base import BaseTool, ToolResult
 from ..tools.mcp_dynamic import MCPDynamicTool
@@ -181,7 +182,7 @@ class ToolExecutor:
             try:
                 session_id = agent._current_session_details("default")[0]
             except Exception:
-                pass
+                report_suppressed_exception("resolve tool execution session", logger=logger)
         try:
             manager.record_operation(
                 category=category,
@@ -777,8 +778,8 @@ class ToolExecutor:
                             parsed = json.loads(stripped)
                             if isinstance(parsed, list):
                                 normalized[key] = parsed
-                        except Exception:
-                            pass
+                        except json.JSONDecodeError:
+                            logger.debug("Tool array coercion kept original non-JSON value for %s", key)
                     else:
                         normalized[key] = [item.strip() for item in stripped.split(",") if item.strip()]
 

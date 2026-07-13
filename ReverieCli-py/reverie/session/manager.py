@@ -563,6 +563,72 @@ class SessionManager:
             self._current_session.messages.append(message)
             self.save_session()
 
+    def fork_current_session(self, message_count: Optional[int] = None, name: Optional[str] = None) -> Session:
+        """Create a new session from a prefix of the current transcript."""
+        source = self._current_session
+        if source is None:
+            raise ValueError("No active session to fork")
+        messages = list(source.messages or [])
+        if message_count is not None:
+            messages = messages[:max(0, min(int(message_count), len(messages)))]
+        forked = self.create_session(name or f"{source.name} (fork)")
+        forked.messages = messages
+        forked.metadata.update({"forked_from": source.id, "forked_message_count": len(messages)})
+        self.save_session(forked)
+        return forked
+
+    def rewind_current_session(self, message_count: int) -> Session:
+        """Truncate the active transcript to an explicit message boundary."""
+        session = self._current_session
+        if session is None:
+            raise ValueError("No active session to rewind")
+        count = max(0, min(int(message_count), len(session.messages or [])))
+        self._archive_current_transcript_before_compaction(replacement_messages=list(session.messages[:count]), reason="user rewind")
+        session.messages = list(session.messages[:count])
+        session.metadata["rewound_at"] = datetime.now().isoformat()
+        self.save_session(session)
+        return session
+
+    def search_sessions(self, query: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """Search message text across workspace sessions."""
+        needle = str(query or "").strip().lower()
+        if not needle:
+            return []
+        results: List[Dict[str, Any]] = []
+        for info in self.list_sessions():
+            path = self.sessions_dir / f"{info.id}.json"
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            for index, message in enumerate(data.get("messages", []) or []):
+                content = message.get("content", "") if isinstance(message, dict) else ""
+                text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
+                if needle in text.lower():
+                    results.append({"session_id": info.id, "session_name": info.name, "message_index": index, "role": message.get("role", ""), "text": text[:500]})
+                    if len(results) >= limit:
+                        return results
+        return results
+
+    def export_current_session(self, output_path: Path, format_name: str = "markdown") -> Path:
+        """Export the active session to Markdown or JSON."""
+        session = self._current_session
+        if session is None:
+            raise ValueError("No active session to export")
+        target = Path(output_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if format_name.lower() == "json":
+            target.write_text(json.dumps(session.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+        else:
+            lines = [f"# {session.name}", ""]
+            for message in session.messages:
+                role = str(message.get("role", "message")).title()
+                content = message.get("content", "")
+                text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False, indent=2)
+                lines.extend([f"## {role}", "", text, ""])
+            target.write_text("\n".join(lines), encoding="utf-8")
+        return target
+
     def check_rotation_needed(
         self,
         current_tokens: int,

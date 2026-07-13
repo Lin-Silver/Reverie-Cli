@@ -9,7 +9,7 @@ Features:
 - Dreamscape themed prompts
 """
 
-from typing import List, Optional, Tuple, Callable, Any
+from typing import Dict, List, Optional, Tuple, Callable, Any
 import sys
 import time
 import unicodedata
@@ -23,10 +23,7 @@ from rich import box
 
 from .help_catalog import build_command_completion_map
 from .theme import THEME, DECO
-
-
-# Available commands with descriptions
-COMMANDS = build_command_completion_map()
+from ..diagnostics import report_suppressed_exception
 
 
 class InputHandler:
@@ -39,6 +36,7 @@ class InputHandler:
         self,
         console: Console,
         attachment_selector: Optional[Callable[[str], Optional[str]]] = None,
+        command_provider: Optional[Callable[[], Dict[str, str]]] = None,
     ):
         self.console = console
         self.history: List[str] = []
@@ -46,6 +44,7 @@ class InputHandler:
         self.theme = THEME
         self.deco = DECO
         self.attachment_selector = attachment_selector
+        self.command_provider = command_provider
 
     def _console_width(self) -> int:
         """Best-effort terminal width."""
@@ -115,6 +114,50 @@ class InputHandler:
     def _move_cursor_right(buffer: str, cursor: int) -> int:
         return min(len(buffer), max(0, cursor) + 1)
 
+    @staticmethod
+    def _move_word_left(buffer: str, cursor: int) -> int:
+        cursor = max(0, min(cursor, len(buffer)))
+        while cursor > 0 and buffer[cursor - 1].isspace():
+            cursor -= 1
+        while cursor > 0 and not buffer[cursor - 1].isspace():
+            cursor -= 1
+        return cursor
+
+    @staticmethod
+    def _move_word_right(buffer: str, cursor: int) -> int:
+        cursor = max(0, min(cursor, len(buffer)))
+        while cursor < len(buffer) and not buffer[cursor].isspace():
+            cursor += 1
+        while cursor < len(buffer) and buffer[cursor].isspace():
+            cursor += 1
+        return cursor
+
+    @classmethod
+    def _delete_word_backward(cls, buffer: str, cursor: int) -> tuple[str, int]:
+        start = cls._move_word_left(buffer, cursor)
+        return f"{buffer[:start]}{buffer[cursor:]}", start
+
+    def _completion_candidates(self, buffer: str) -> List[Tuple[str, str]]:
+        text = str(buffer or "")
+        if "\n" in text or not text.startswith("/"):
+            return []
+        return self.get_command_completions(text.rstrip())
+
+    def _inline_completion_text(self, buffer: str, selected: int = 0) -> str:
+        completions = self._completion_candidates(buffer)
+        if not completions:
+            return ""
+        selected = selected % len(completions)
+        window_size = 6
+        start = max(0, min(selected - window_size // 2, max(0, len(completions) - window_size)))
+        visible = completions[start:start + window_size]
+        labels = []
+        for index, (command, description) in enumerate(visible, start=start):
+            marker = ">" if index == selected else " "
+            labels.append(f"{marker} {command:<24} {description[:70]}")
+        labels.append(f"  {selected + 1}/{len(completions)} · Tab complete · Up/Down scroll")
+        return "\n".join(labels)
+
     def _line_visual_rows(self, prompt_width: int, line: str) -> int:
         terminal_width = max(self._console_width(), 1)
         cells = prompt_width + self._display_width(line)
@@ -178,6 +221,7 @@ class InputHandler:
         buffer: str,
         cursor: int,
         render_state: dict,
+        completion_index: int = 0,
     ) -> None:
         self._clear_rendered_windows_input(render_state)
 
@@ -195,9 +239,14 @@ class InputHandler:
         metrics = self._input_visual_metrics(prompt_text, buffer, cursor)
         if metrics.get("needs_trailing_cursor_row"):
             self._write_terminal("\n")
+        completion_text = self._inline_completion_text(buffer, completion_index)
+        if completion_text:
+            self._write_terminal(f"\n\033[2m{completion_text}\033[0m")
+            metrics["total_rows"] += sum(self._line_visual_rows(0, line) for line in completion_text.splitlines())
         self._update_cursor_position(render_state, metrics)
 
         render_state.update(metrics)
+        render_state["terminal_width"] = self._console_width()
         render_state["rendered_rows"] = metrics["total_rows"]
         render_state["rendered"] = True
 
@@ -335,18 +384,27 @@ class InputHandler:
         render_state = {"rendered": False, "cursor_row": 0, "total_rows": 1}
         skip_next_lf = False
         pending_keys: List[str] = []
-        self._redraw_windows_input(prompt_text, buffer, cursor, render_state)
+        completion_index = 0
+        completion_selection_active = False
+        history_draft = buffer
+        history_search_matches: List[str] = []
+        history_search_index = -1
+        self.history_index = len(self.history)
+        self._redraw_windows_input(prompt_text, buffer, cursor, render_state, completion_index)
 
         while True:
             try:
                 key = pending_keys.pop(0) if pending_keys else msvcrt.getwch()
             except OSError:
                 continue
+            if int(render_state.get("terminal_width", self._console_width())) != self._console_width():
+                self._redraw_windows_input(prompt_text, buffer, cursor, render_state, completion_index)
             if skip_next_lf and key != "\n":
                 skip_next_lf = False
 
             if key in ("\x00", "\xe0"):
                 before = (buffer, cursor)
+                selection_changed = False
                 try:
                     key_code = pending_keys.pop(0) if pending_keys else msvcrt.getwch()
                 except OSError:
@@ -355,6 +413,32 @@ class InputHandler:
                     cursor = self._move_cursor_left(buffer, cursor)
                 elif key_code == "M":
                     cursor = self._move_cursor_right(buffer, cursor)
+                elif key_code == "s":
+                    cursor = self._move_word_left(buffer, cursor)
+                elif key_code in {"t", "T"}:
+                    cursor = self._move_word_right(buffer, cursor)
+                elif key_code == "H":
+                    completions = self._completion_candidates(buffer)
+                    if completions:
+                        completion_index = (completion_index - 1) % len(completions)
+                        completion_selection_active = True
+                        selection_changed = True
+                    elif self.history:
+                        if self.history_index == len(self.history):
+                            history_draft = buffer
+                        self.history_index = max(0, self.history_index - 1)
+                        buffer = self.history[self.history_index]
+                        cursor = len(buffer)
+                elif key_code == "P":
+                    completions = self._completion_candidates(buffer)
+                    if completions:
+                        completion_index = (completion_index + 1) % len(completions)
+                        completion_selection_active = True
+                        selection_changed = True
+                    elif self.history_index < len(self.history):
+                        self.history_index += 1
+                        buffer = history_draft if self.history_index == len(self.history) else self.history[self.history_index]
+                        cursor = len(buffer)
                 elif key_code == "G":
                     cursor = buffer.rfind("\n", 0, cursor) + 1
                 elif key_code == "O":
@@ -362,19 +446,23 @@ class InputHandler:
                     cursor = len(buffer) if next_newline < 0 else next_newline
                 elif key_code == "S":
                     buffer, cursor = self._delete_forward(buffer, cursor)
-                if (buffer, cursor) != before:
-                    self._redraw_windows_input(prompt_text, buffer, cursor, render_state)
+                if selection_changed or (buffer, cursor) != before:
+                    self._redraw_windows_input(prompt_text, buffer, cursor, render_state, completion_index)
                 continue
             if key == "\r":
                 if self._enter_should_insert_newline():
                     buffer, cursor = self._insert_text(buffer, cursor, "\n")
-                    self._redraw_windows_input(prompt_text, buffer, cursor, render_state)
+                    self._redraw_windows_input(prompt_text, buffer, cursor, render_state, completion_index)
                     continue
                 if self._has_buffered_keyboard_input(msvcrt):
                     buffer, cursor = self._insert_text(buffer, cursor, "\n")
                     skip_next_lf = True
-                    self._redraw_windows_input(prompt_text, buffer, cursor, render_state)
+                    self._redraw_windows_input(prompt_text, buffer, cursor, render_state, completion_index)
                     continue
+                completions = self._completion_candidates(buffer)
+                if completion_selection_active and completions:
+                    buffer = completions[completion_index % len(completions)][0]
+                    cursor = len(buffer)
                 self._write_terminal("\n")
                 if record_history and buffer.strip():
                     self.history.append(buffer)
@@ -385,7 +473,7 @@ class InputHandler:
                     skip_next_lf = False
                     continue
                 buffer, cursor = self._insert_text(buffer, cursor, "\n")
-                self._redraw_windows_input(prompt_text, buffer, cursor, render_state)
+                self._redraw_windows_input(prompt_text, buffer, cursor, render_state, completion_index)
                 continue
             if key == "\x03":
                 self._clear_rendered_windows_input(render_state)
@@ -395,19 +483,57 @@ class InputHandler:
                 before = (buffer, cursor)
                 buffer, cursor = self._delete_backward(buffer, cursor)
                 if (buffer, cursor) != before:
-                    self._redraw_windows_input(prompt_text, buffer, cursor, render_state)
+                    completion_index = 0
+                    self._redraw_windows_input(prompt_text, buffer, cursor, render_state, completion_index)
+                continue
+            if key == "\t":
+                completions = self._completion_candidates(buffer)
+                if completions:
+                    selected = completions[completion_index % len(completions)][0]
+                    buffer, cursor = selected, len(selected)
+                    completion_selection_active = False
+                    self._redraw_windows_input(prompt_text, buffer, cursor, render_state, completion_index)
+                continue
+            if key == "\x15":  # Ctrl+U: delete to line start
+                line_start = buffer.rfind("\n", 0, cursor) + 1
+                buffer, cursor = f"{buffer[:line_start]}{buffer[cursor:]}", line_start
+                self._redraw_windows_input(prompt_text, buffer, cursor, render_state, completion_index)
+                continue
+            if key == "\x0b":  # Ctrl+K: delete to line end
+                line_end = buffer.find("\n", cursor)
+                line_end = len(buffer) if line_end < 0 else line_end
+                buffer = f"{buffer[:cursor]}{buffer[line_end:]}"
+                self._redraw_windows_input(prompt_text, buffer, cursor, render_state, completion_index)
+                continue
+            if key == "\x17":  # Ctrl+W: delete previous word
+                buffer, cursor = self._delete_word_backward(buffer, cursor)
+                self._redraw_windows_input(prompt_text, buffer, cursor, render_state, completion_index)
+                continue
+            if key == "\x12":  # Ctrl+R: cycle reverse matches for the current draft
+                if not history_search_matches:
+                    needle = buffer.lower()
+                    history_search_matches = [item for item in reversed(self.history) if needle in item.lower()]
+                if history_search_matches:
+                    history_search_index = (history_search_index + 1) % len(history_search_matches)
+                    buffer = history_search_matches[history_search_index]
+                    cursor = len(buffer)
+                    self._redraw_windows_input(prompt_text, buffer, cursor, render_state, completion_index)
                 continue
             if key == "@" and self._should_open_attachment_selector(buffer[:cursor]):
                 self._write_terminal("\n")
                 insertion = self._attachment_insertion_text()
                 buffer, cursor = self._insert_text(buffer, cursor, insertion)
                 render_state = {"rendered": False, "cursor_row": 0, "total_rows": 1}
-                self._redraw_windows_input(prompt_text, buffer, cursor, render_state)
+                self._redraw_windows_input(prompt_text, buffer, cursor, render_state, completion_index)
                 continue
             if key.isprintable():
                 text = self._collect_buffered_printable_input(msvcrt, key, pending_keys)
                 buffer, cursor = self._insert_text(buffer, cursor, text)
-                self._redraw_windows_input(prompt_text, buffer, cursor, render_state)
+                completion_index = 0
+                completion_selection_active = False
+                history_search_matches = []
+                history_search_index = -1
+                self._redraw_windows_input(prompt_text, buffer, cursor, render_state, completion_index)
 
     def get_input(self, prompt_text: str = "Reverie> ", initial_text: str = "") -> Optional[str]:
         """
@@ -428,6 +554,11 @@ class InputHandler:
 
         if msvcrt is not None:
             return self._get_seeded_single_line_input(prompt_text, str(initial_text or ""))
+
+        try:
+            return self._get_cross_platform_input(prompt_text, str(initial_text or ""))
+        except ImportError:
+            pass
 
         seeded_text = str(initial_text or "")
         if seeded_text:
@@ -518,6 +649,67 @@ class InputHandler:
             self.history_index = len(self.history)
         
         return result
+
+    def _get_cross_platform_input(self, prompt_text: str, initial_text: str = "") -> Optional[str]:
+        """Use prompt_toolkit for resize-aware editing on Linux and macOS."""
+        from prompt_toolkit import PromptSession
+        from prompt_toolkit.completion import Completer, Completion
+        from prompt_toolkit.document import Document
+        from prompt_toolkit.history import InMemoryHistory
+        from prompt_toolkit.key_binding import KeyBindings
+
+        owner = self
+
+        class SlashCompleter(Completer):
+            def get_completions(self, document, complete_event):
+                text = document.text_before_cursor
+                if not text.startswith("/") or "\n" in text:
+                    return
+                for command, description in owner.get_command_completions(text.rstrip()):
+                    yield Completion(command, start_position=-len(text), display_meta=description)
+
+        history = InMemoryHistory()
+        for item in self.history:
+            history.append_string(item)
+        bindings = KeyBindings()
+
+        @bindings.add("escape", "enter")
+        def _submit(event):
+            event.current_buffer.validate_and_handle()
+
+        @bindings.add("c-j")
+        def _newline(event):
+            event.current_buffer.insert_text("\n")
+
+        @bindings.add("@")
+        def _mention(event):
+            before = event.current_buffer.document.text_before_cursor
+            if owner._should_open_attachment_selector(before):
+                insertion = owner._attachment_insertion_text()
+                event.current_buffer.insert_text(insertion)
+            else:
+                event.current_buffer.insert_text("@")
+
+        session = PromptSession(
+            history=history,
+            completer=SlashCompleter(),
+            complete_while_typing=True,
+            enable_history_search=True,
+            key_bindings=bindings,
+            multiline=True,
+            bottom_toolbar=lambda: "Esc+Enter send · Ctrl+J newline · Ctrl+R history · @ files",
+        )
+        try:
+            result = session.prompt(
+                self._plain_prompt_text(prompt_text),
+                default=initial_text,
+            )
+        except (EOFError, KeyboardInterrupt):
+            return None
+        if result.strip():
+            self.history.append(result)
+            self.history_index = len(self.history)
+        return result
     
     def get_command_completions(self, partial: str) -> List[Tuple[str, str]]:
         """
@@ -531,7 +723,13 @@ class InputHandler:
         partial_lower = partial.lower()
         completions = []
         
-        for cmd, desc in COMMANDS.items():
+        commands = build_command_completion_map()
+        if callable(self.command_provider):
+            try:
+                commands.update(self.command_provider() or {})
+            except Exception:
+                report_suppressed_exception("load dynamic command completions")
+        for cmd, desc in commands.items():
             if cmd.lower().startswith(partial_lower):
                 completions.append((cmd, desc))
         

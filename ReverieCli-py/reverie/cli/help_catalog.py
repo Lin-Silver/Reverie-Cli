@@ -161,6 +161,22 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
         ],
         "examples": ["/codex", "/codex model", "/codex model gpt-5.4", "/codex extra high"],
     },
+    "total": {
+        "command": "/total",
+        "section": "Core",
+        "summary": "Show workspace usage, activity, regression, and aggregate runtime statistics.",
+        "detail": "Use this dashboard to review cumulative workspace activity and runtime health signals.",
+        "overview": "workspace totals",
+        "subcommands": [
+            {"usage": "/total", "description": "Show aggregate workspace and runtime statistics."},
+        ],
+        "examples": ["/total"],
+    },
+    "export": {"command": "/export", "section": "Sessions & Recovery", "summary": "Export the active session as Markdown or JSON.", "detail": "Exports remain inside the path you choose.", "overview": "[json] [path]", "subcommands": [{"usage": "/export", "description": "Export Markdown."}, {"usage": "/export json", "description": "Export JSON."}], "examples": ["/export", "/export json artifacts/session.json"]},
+    "copy-last": {"command": "/copy-last", "section": "Sessions & Recovery", "summary": "Copy the last assistant reply to the system clipboard.", "detail": "Copies only the most recent assistant message.", "overview": "clipboard", "subcommands": [{"usage": "/copy-last", "description": "Copy the last reply."}], "examples": ["/copy-last"]},
+    "rewind": {"command": "/rewind", "section": "Sessions & Recovery", "summary": "Rewind the active conversation to a message boundary.", "detail": "The full transcript is archived before truncation and confirmation is required.", "overview": "<message-count>", "subcommands": [{"usage": "/rewind <count>", "description": "Keep the first count messages."}], "examples": ["/rewind 12"]},
+    "fork": {"command": "/fork", "section": "Sessions & Recovery", "summary": "Fork the active conversation at a message boundary.", "detail": "Creates a new active session while preserving the source.", "overview": "[message-count]", "subcommands": [{"usage": "/fork", "description": "Fork at the current end."}, {"usage": "/fork <count>", "description": "Fork after count messages."}], "examples": ["/fork", "/fork 12"]},
+    "session-search": {"command": "/session-search", "section": "Sessions & Recovery", "summary": "Search message content across all workspace sessions.", "detail": "Returns matching session names and message indexes.", "overview": "<query>", "subcommands": [{"usage": "/session-search <query>", "description": "Search all workspace sessions."}], "examples": ["/session-search migration plan"]},
     "opencode": {
         "command": "/opencode",
         "section": "Providers",
@@ -826,7 +842,7 @@ def normalize_help_topic(value: str) -> str:
 
 
 def build_command_completion_map() -> Dict[str, str]:
-    """Build the command-completion descriptions from the shared help catalog."""
+    """Build top-level and literal subcommand completions from help metadata."""
     completions: Dict[str, str] = {}
     for topic in HELP_TOPICS.values():
         command = str(topic.get("command", "")).strip()
@@ -837,4 +853,15 @@ def build_command_completion_map() -> Dict[str, str]:
             alias_text = str(alias).strip()
             if alias_text and alias_text not in completions:
                 completions[alias_text] = f"Alias of {command}"
+        for subcommand in topic.get("subcommands", []) or []:
+            usage = str(subcommand.get("usage", "")).strip()
+            description = str(subcommand.get("description", "")).strip() or summary
+            literal_parts = []
+            for part in usage.split():
+                if any(marker in part for marker in ("<", "[", "{")):
+                    break
+                literal_parts.append(part)
+            literal_usage = " ".join(literal_parts)
+            if literal_usage.startswith("/") and literal_usage not in completions:
+                completions[literal_usage] = description
     return completions

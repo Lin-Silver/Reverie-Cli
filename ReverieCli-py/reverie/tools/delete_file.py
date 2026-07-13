@@ -21,6 +21,7 @@ class DeleteFileTool(BaseTool):
     tool_category = "editing"
     tool_tags = ("delete", "remove", "file", "cleanup")
     destructive = True
+    MAX_DELETE_BYTES = 1024 ** 3
 
     description = """Delete a single file inside the active workspace only.
 
@@ -87,6 +88,16 @@ Example:
         if file_path.is_dir():
             return ToolResult.fail(
                 "Directory deletion is disabled. Use dedicated workspace cleanup flows for folders."
+            )
+
+        try:
+            file_size = file_path.stat().st_size
+        except OSError as exc:
+            return ToolResult.fail(f"Could not inspect file before deletion: {exc}")
+        if file_size > self.MAX_DELETE_BYTES:
+            return ToolResult.fail(
+                "Deletion refused: the target is larger than 1 GiB. Perform an in-depth review and confirm "
+                "that the deletion target is correct before using a separate, user-operated cleanup process."
             )
 
         try:

@@ -20,6 +20,7 @@ import logging
 
 from .diagnostics import report_suppressed_exception
 from .security_utils import write_json_secure
+from .security_policy import normalize_permission_level
 from .storage import (
     ProjectStorageResolver,
     sanitize_project_name,
@@ -93,7 +94,7 @@ MODEL_SOURCE_DISPLAY_NAMES = {
     "webgemini": "WebGemini",
     "opencode": "Opencode",
 }
-SUPPORTED_TOOL_OUTPUT_STYLES = ("compact", "condensed", "full")
+SUPPORTED_TOOL_OUTPUT_STYLES = ("minimal", "compact", "condensed", "full")
 SUPPORTED_THINKING_OUTPUT_STYLES = ("hidden", "compact", "full")
 SUPPORTED_TTI_SOURCES = ("local", "aihubmix", "pollinations", "agnes", "sensenova")
 SUPPORTED_TTV_SOURCES = ("agnes",)
@@ -861,6 +862,7 @@ class Config:
     
     # Workspace isolation settings
     use_workspace_config: bool = False  # If True, config is stored in workspace directory
+    security: Dict[str, Any] = field(default_factory=lambda: {"permission_level": "workspace_write"})
     
     # API call settings for improved stability
     api_max_retries: int = 5
@@ -1036,6 +1038,11 @@ class Config:
             'gamer_mode': normalize_gamer_mode_config(self.gamer_mode),
             'config_version': self.config_version,
             'use_workspace_config': self.use_workspace_config,
+            'security': {
+                'permission_level': normalize_permission_level(
+                    (self.security or {}).get('permission_level') if isinstance(self.security, dict) else None
+                )
+            },
             'api_max_retries': self.api_max_retries,
             'api_initial_backoff': self.api_initial_backoff,
             'api_timeout': self.api_timeout,
@@ -1153,6 +1160,7 @@ class Config:
             gamer_mode=normalize_gamer_mode_config(data.get('gamer_mode', {})),
             config_version=data.get('config_version', CONFIG_VERSION),
             use_workspace_config=data.get('use_workspace_config', False),
+            security=data.get('security', {"permission_level": "workspace_write"}),
             api_max_retries=data.get('api_max_retries', 5),
             api_initial_backoff=data.get('api_initial_backoff', 1.0),
             api_timeout=data.get('api_timeout', 60),

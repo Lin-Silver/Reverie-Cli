@@ -54,6 +54,7 @@ class AgentRegressionHarness:
         self._reset_workspace()
         lifecycle = LifecycleManager(self.project_data_dir, project_root=self.workspace)
         executor = ToolExecutor(project_root=self.workspace)
+        executor.update_context("security", {"permission_level": "developer"})
         executor.update_context("project_data_dir", self.project_data_dir)
         executor.update_context("lifecycle_manager", lifecycle)
 

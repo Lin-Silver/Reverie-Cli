@@ -401,3 +401,84 @@ class DreamBoxes:
 THEME = DreamscapeTheme()
 DECO = DreamDecorators()
 DREAM = DreamText()
+
+_BASE_DECO_VALUES = {
+    name: getattr(DECO, name)
+    for name in (
+        "SPARKLE", "SPARKLE_FILLED", "TWINKLE", "DIAMOND", "DIAMOND_FILLED", "RHOMBUS",
+        "DOT_SMALL", "DOT_MEDIUM", "CHEVRON_RIGHT", "LINE_HORIZONTAL", "LINE_VERTICAL",
+        "CHECK", "CHECK_FANCY", "CROSS", "CROSS_FANCY", "SEARCH", "THOUGHT_BUBBLE",
+    )
+}
+
+_BASE_THEME_VALUES = {
+    name: getattr(THEME, name)
+    for name in (
+        "PINK_SOFT", "PINK_MEDIUM", "PINK_VIBRANT", "PINK_GLOW",
+        "PURPLE_SOFT", "PURPLE_MEDIUM", "PURPLE_VIBRANT", "PURPLE_DEEP", "PURPLE_GLOW",
+        "BLUE_SOFT", "BLUE_MEDIUM", "BLUE_VIBRANT", "BLUE_DEEP", "BLUE_GLOW",
+        "TEXT_PRIMARY", "TEXT_SECONDARY", "TEXT_DIM", "TEXT_MUTED",
+        "BORDER_PRIMARY", "BORDER_SECONDARY", "BORDER_SUBTLE",
+    )
+}
+
+THEME_PRESETS = {
+    "default": {},
+    "dark": {
+        "PINK_SOFT": "#f38ba8", "PURPLE_SOFT": "#cba6f7", "PURPLE_MEDIUM": "#b4befe",
+        "BLUE_SOFT": "#89b4fa", "TEXT_PRIMARY": "#cdd6f4", "TEXT_SECONDARY": "#bac2de",
+        "TEXT_DIM": "#a6adc8", "TEXT_MUTED": "#7f849c", "BORDER_PRIMARY": "#89b4fa",
+        "BORDER_SECONDARY": "#cba6f7", "BORDER_SUBTLE": "#6c7086",
+    },
+    "light": {
+        "PINK_SOFT": "#9d174d", "PURPLE_SOFT": "#6d28d9", "PURPLE_MEDIUM": "#7c3aed",
+        "BLUE_SOFT": "#075985", "TEXT_PRIMARY": "#111827", "TEXT_SECONDARY": "#374151",
+        "TEXT_DIM": "#4b5563", "TEXT_MUTED": "#6b7280", "BORDER_PRIMARY": "#0369a1",
+        "BORDER_SECONDARY": "#7c3aed", "BORDER_SUBTLE": "#64748b",
+    },
+    "ocean": {
+        "PINK_SOFT": "#67e8f9", "PURPLE_SOFT": "#5eead4", "PURPLE_MEDIUM": "#2dd4bf",
+        "BLUE_SOFT": "#38bdf8", "TEXT_PRIMARY": "#ecfeff", "TEXT_SECONDARY": "#cffafe",
+        "TEXT_DIM": "#a5f3fc", "TEXT_MUTED": "#67e8f9", "BORDER_PRIMARY": "#22d3ee",
+        "BORDER_SECONDARY": "#2dd4bf", "BORDER_SUBTLE": "#0e7490",
+    },
+    "high-contrast": {
+        "PINK_SOFT": "#ffff00", "PURPLE_SOFT": "#ffffff", "PURPLE_MEDIUM": "#ffff00",
+        "BLUE_SOFT": "#00ffff", "TEXT_PRIMARY": "#ffffff", "TEXT_SECONDARY": "#ffffff",
+        "TEXT_DIM": "#e5e5e5", "TEXT_MUTED": "#cfcfcf", "BORDER_PRIMARY": "#ffffff",
+        "BORDER_SECONDARY": "#ffff00", "BORDER_SUBTLE": "#cfcfcf",
+    },
+    "minimal": {
+        "PINK_SOFT": "#d0d0d0", "PURPLE_SOFT": "#d0d0d0", "PURPLE_MEDIUM": "#a8a8a8",
+        "BLUE_SOFT": "#d0d0d0", "TEXT_PRIMARY": "#eeeeee", "TEXT_SECONDARY": "#d0d0d0",
+        "TEXT_DIM": "#a8a8a8", "TEXT_MUTED": "#808080", "BORDER_PRIMARY": "#666666",
+        "BORDER_SECONDARY": "#666666", "BORDER_SUBTLE": "#555555",
+    },
+}
+
+
+def apply_theme(name: str) -> str:
+    """Mutate the shared theme object so existing UI components update immediately."""
+    selected = str(name or "default").strip().lower()
+    if selected not in THEME_PRESETS:
+        selected = "default"
+    values = dict(_BASE_THEME_VALUES)
+    values.update(THEME_PRESETS[selected])
+    for key, value in values.items():
+        setattr(THEME, key, value)
+        setattr(DreamText.theme, key, value)
+    for key, value in _BASE_DECO_VALUES.items():
+        setattr(DECO, key, value)
+        setattr(DreamText.deco, key, value)
+    if selected == "minimal":
+        minimal_decorators = {
+            "SPARKLE": "", "SPARKLE_FILLED": "", "TWINKLE": "", "DIAMOND": "-",
+            "DIAMOND_FILLED": ">", "RHOMBUS": "-", "DOT_SMALL": ".", "DOT_MEDIUM": "·",
+            "CHEVRON_RIGHT": ">", "LINE_HORIZONTAL": "-", "LINE_VERTICAL": "|",
+            "CHECK": "OK", "CHECK_FANCY": "OK", "CROSS": "X", "CROSS_FANCY": "X",
+            "SEARCH": "?", "THOUGHT_BUBBLE": "",
+        }
+        for key, value in minimal_decorators.items():
+            setattr(DECO, key, value)
+            setattr(DreamText.deco, key, value)
+    return selected

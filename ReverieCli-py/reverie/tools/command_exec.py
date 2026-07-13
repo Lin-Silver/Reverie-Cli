@@ -188,6 +188,12 @@ Examples:
     )
     INLINE_SCRIPT_FLAGS = {"-c", "-command", "--command", "-e", "--eval", "/c", "/k"}
     OPAQUE_SCRIPT_FLAGS = {"-enc", "-encodedcommand"}
+    CATASTROPHIC_PATTERNS = (
+        (re.compile(r"(?i)\b(?:format(?:\.com)?\s+[a-z]:|mkfs(?:\.[a-z0-9]+)?\s+|diskpart\b|clear-disk\b)"), "disk formatting or partition destruction"),
+        (re.compile(r"(?i)\bdd\b[^\n]*\bof=(?:/dev/|\\\\\.\\physicaldrive)"), "raw disk overwrite"),
+        (re.compile(r"(?i)\b(?:shutdown|restart-computer|stop-computer)\b"), "host shutdown or restart"),
+        (re.compile(r"(?i)\b(?:bcdedit|bootrec)\b"), "boot configuration modification"),
+    )
 
     PYTHON_BLOCK_PATTERNS = (
         (re.compile(r"\bos\.(?:remove|unlink|rename|replace)\s*\(", re.IGNORECASE), "Python os file move/delete API"),
@@ -470,6 +476,12 @@ Examples:
 
     def _validate_command(self, tokens: List[str], command: str, work_dir: Path) -> None:
         executable_lower = self._executable_key(tokens[0])
+
+        for pattern, description in self.CATASTROPHIC_PATTERNS:
+            if pattern.search(command):
+                raise ValueError(
+                    f"Blocked command '{command}': {description} is permanently disabled by software policy."
+                )
 
         if executable_lower in self.DIRECTLY_BLOCKED_EXECUTABLES:
             raise ValueError(

@@ -9,6 +9,7 @@ This reference is aligned with `reverie/cli/help_catalog.py`, which is the sourc
 | `/help` | Open the interactive help browser, or show `/help <command>` / `/help all` |
 | `/status` | Show active model, provider source, session, and runtime health |
 | `/doctor` | Audit the current workspace harness across goals, context, tools, execution, memory, evaluation, and recovery, including a closure gate, recovery playbooks, and run-history trends |
+| `/total` | Show aggregate workspace usage, activity, regression, and runtime statistics |
 | `/clear` | Clear the terminal output without touching session state |
 | `/clean` | Delete the current workspace project cache, checkpoints, and command audit history |
 | `/exit` | Exit Reverie with confirmation |
@@ -162,6 +163,32 @@ Notes:
 | `/redo` | Redo the latest undone rollback |
 | `/checkpoints` | Open the checkpoint selector |
 | `/operations` | Show operation history and rollback stats |
+
+## Prompt editor shortcuts
+
+On Windows, slash commands are suggested while typing. Use Up/Down to select a visible suggestion and Enter to accept it, or press Tab to complete directly. Outside a slash menu, Up/Down recalls prompt history and the recalled text remains editable.
+
+| Shortcut | Action |
+| --- | --- |
+| `Left` / `Right` | Move one character |
+| `Ctrl+Left` / `Ctrl+Right` | Move one word |
+| `Ctrl+W` | Delete the previous word |
+| `Ctrl+U` / `Ctrl+K` | Delete to the start/end of the current line |
+| `Shift+Enter`, `Ctrl+Enter`, or `Ctrl+J` | Insert a newline |
+
+Linux and macOS use the resize-aware prompt editor with live completion, editable history, `Ctrl+R` search, multiline input, and the unified `@` file picker. `Esc+Enter` submits and `Ctrl+J` inserts a newline.
+
+`@` searches every workspace file, not only visual media. Selecting an image or video keeps the existing inline-attachment behavior when the active model supports it; selecting code, text, configuration, or other files inserts a normal workspace mention for retrieval.
+
+## Session workflow commands
+
+| Command | Action |
+| --- | --- |
+| `/export [json] [path]` | Export the active session as Markdown or JSON |
+| `/copy-last` | Copy the last assistant response |
+| `/rewind <message-count>` | Archive and rewind the active transcript |
+| `/fork [message-count]` | Branch the conversation into a new session |
+| `/session-search <query>` | Search message text across workspace sessions |
 
 ## Game Workflow
 

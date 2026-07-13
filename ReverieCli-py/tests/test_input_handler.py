@@ -253,3 +253,53 @@ def test_cursor_boundary_inside_wrapped_text_uses_existing_row() -> None:
     assert metrics["cursor_row"] == 1
     assert metrics["cursor_col"] == 0
     assert metrics["needs_trailing_cursor_row"] is False
+
+
+def test_command_completion_includes_literal_subcommands() -> None:
+    handler = _handler()
+    commands = {command for command, _ in handler.get_command_completions("/browser res")}
+
+    assert "/browser restore" in commands
+
+
+def test_windows_prompt_editor_completes_with_tab(monkeypatch) -> None:
+    import msvcrt
+
+    keys = iter([*list("/tot"), "\t", "\r"])
+    monkeypatch.setattr(msvcrt, "getwch", lambda: next(keys))
+    monkeypatch.setattr(msvcrt, "kbhit", lambda: False)
+
+    assert _handler()._get_seeded_single_line_input("Reverie> ", "") == "/total"
+
+
+def test_windows_prompt_editor_recalls_and_edits_history(monkeypatch) -> None:
+    import msvcrt
+
+    handler = _handler()
+    handler.history = ["first prompt", "second prompt"]
+    keys = iter(["\xe0", "H", "!", "\r"])
+    monkeypatch.setattr(msvcrt, "getwch", lambda: next(keys))
+    monkeypatch.setattr(msvcrt, "kbhit", lambda: False)
+
+    assert handler._get_seeded_single_line_input("Reverie> ", "") == "second prompt!"
+
+
+def test_windows_prompt_editor_supports_word_and_line_deletion(monkeypatch) -> None:
+    import msvcrt
+
+    keys = iter([*list("keep remove"), "\x17", *list("done"), "\x15", *list("final"), "\r"])
+    monkeypatch.setattr(msvcrt, "getwch", lambda: next(keys))
+    monkeypatch.setattr(msvcrt, "kbhit", lambda: False)
+
+    assert _handler()._get_seeded_single_line_input("Reverie> ", "") == "final"
+
+
+def test_slash_input_renders_live_completion_hint() -> None:
+    handler = _handler(width=120)
+    render_state = {"rendered": False, "cursor_row": 0, "total_rows": 1}
+
+    handler._redraw_windows_input("Reverie> ", "/tot", 4, render_state)
+
+    rendered = handler._output_stream().getvalue()
+    assert "/total" in rendered
+    assert "Tab complete" in rendered

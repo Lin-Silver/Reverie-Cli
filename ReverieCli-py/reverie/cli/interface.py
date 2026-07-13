@@ -38,7 +38,7 @@ from .display import DisplayComponents
 from .commands import CommandHandler
 from .input_handler import InputHandler
 from .markdown_formatter import MarkdownFormatter, format_markdown
-from .theme import THEME, DECO, DREAM
+from .theme import THEME, DECO, DREAM, apply_theme
 from ..inline_images import (
     SUPPORTED_INLINE_IMAGE_EXTENSIONS,
     SUPPORTED_INLINE_VIDEO_EXTENSIONS,
@@ -1413,6 +1413,7 @@ class ReverieInterface:
             self._startup_started_monotonic = time.perf_counter()
             self._activity_last_monotonic = self._startup_started_monotonic
             config = self.config_manager.load()
+            apply_theme(getattr(config, "theme", "default"))
             self._fast_clear_terminal()
             self.display.show_welcome()
             self._show_pending_config_notice()
@@ -1983,6 +1984,7 @@ class ReverieInterface:
         try:
             import msvcrt
         except ImportError:
+            self._stream_input_capture_loop_posix(state)
             return
 
         pending_keys: List[str] = []
@@ -2035,6 +2037,52 @@ class ReverieInterface:
             if key.isprintable():
                 state.append(self._collect_buffered_stream_input(msvcrt, key, pending_keys))
                 self._refresh_streaming_footer(force=True)
+
+    def _stream_input_capture_loop_posix(self, state: StreamInputState) -> None:
+        """POSIX counterpart for streaming follow-ups, interruption, and task drawer."""
+        try:
+            import select
+            import termios
+            import tty
+            fd = sys.stdin.fileno()
+            if not sys.stdin.isatty():
+                return
+            original = termios.tcgetattr(fd)
+            tty.setcbreak(fd)
+        except Exception:
+            return
+        try:
+            while state.snapshot().get("active"):
+                if state.snapshot().get("paused"):
+                    time.sleep(0.025)
+                    continue
+                ready, _, _ = select.select([sys.stdin], [], [], 0.025)
+                if not ready:
+                    continue
+                key = sys.stdin.read(1)
+                if key == "\x14":
+                    self._toggle_task_drawer_visibility()
+                elif key in {"\x1b", "\x03"}:
+                    state.request_interrupt()
+                    self._refresh_streaming_footer(force=True)
+                    _thread.interrupt_main()
+                    return
+                elif key in {"\r", "\n"}:
+                    if state.request_submit():
+                        self._refresh_streaming_footer(force=True)
+                        _thread.interrupt_main()
+                        return
+                elif key in {"\x08", "\x7f"}:
+                    state.backspace()
+                    self._refresh_streaming_footer(force=True)
+                elif key.isprintable():
+                    state.append(key)
+                    self._refresh_streaming_footer(force=True)
+        finally:
+            try:
+                termios.tcsetattr(fd, termios.TCSADRAIN, original)
+            except Exception:
+                report_suppressed_exception("restore POSIX stream input mode")
 
     def _start_stream_input_capture(self) -> None:
         """Start background capture for streaming-time follow-up input."""
@@ -2306,6 +2354,30 @@ class ReverieInterface:
         candidates.sort(key=lambda item: (-float(item.get("score", 0.0)), str(item.get("path", "")).lower()))
         return candidates[: max(1, int(limit or 80))]
 
+    def _collect_workspace_mention_candidates(self, query: str = "", limit: int = 500) -> List[Dict[str, Any]]:
+        """Collect any workspace file for the unified @ mention picker."""
+        query_text = str(query or "").strip().lower()
+        ignored = {".git", ".reverie", "__pycache__", ".pytest_cache", ".mypy_cache", "node_modules", "venv", ".venv", "env", "dist", "build", "target"}
+        root = Path(self.project_root).resolve()
+        candidates: List[Dict[str, Any]] = []
+        tokens = [token.lower() for token in re.findall(r"[A-Za-z0-9_.\-\u4e00-\u9fff]+", query_text)]
+        for current_root, dirs, files in os.walk(root):
+            dirs[:] = [name for name in dirs if name not in ignored and not name.endswith(".egg-info")]
+            for name in files:
+                path = Path(current_root) / name
+                try:
+                    rel = path.resolve().relative_to(root).as_posix()
+                    stat = path.stat()
+                except OSError:
+                    continue
+                haystack = rel.lower()
+                if tokens and not all(token in haystack for token in tokens):
+                    continue
+                score = 20.0 if query_text and query_text in haystack else float(sum(token in haystack for token in tokens) * 4)
+                candidates.append({"path": rel, "name": name, "size": stat.st_size, "mtime": stat.st_mtime, "kind": "file", "score": score})
+        candidates.sort(key=lambda item: (-float(item["score"]), str(item["path"]).lower()))
+        return candidates[:max(1, int(limit or 500))]
+
     def _format_attachment_candidate(self, item: Dict[str, Any]) -> str:
         size = int(item.get("size", 0) or 0)
         if size >= 1024 * 1024:
@@ -2401,7 +2473,7 @@ class ReverieInterface:
         except ImportError:
             for index, item in enumerate(candidates[:12], start=1):
                 self.console.print(f"{index}. {escape(self._format_attachment_candidate(item))}")
-            choice = Prompt.ask("Select image number", default="1")
+            choice = Prompt.ask("Select file number", default="1")
             try:
                 selected_index = max(1, min(int(choice), min(len(candidates), 12))) - 1
             except ValueError:
@@ -2414,7 +2486,7 @@ class ReverieInterface:
 
         def render() -> None:
             self.console.print()
-            title = "Select Visual Attachment"
+            title = "Select Workspace File"
             if query:
                 title += f" - {query}"
             if current_dir:
@@ -2432,7 +2504,7 @@ class ReverieInterface:
                 Panel(
                     table,
                     title=f"[bold {self.theme.PURPLE_SOFT}]{escape(title)}[/bold {self.theme.PURPLE_SOFT}]",
-                    subtitle=f"[{self.theme.TEXT_DIM}]↑/↓ select · Enter open/attach · Backspace up · Esc cancel[/{self.theme.TEXT_DIM}]",
+                    subtitle=f"[{self.theme.TEXT_DIM}]Up/Down select · Enter open/select · Backspace up · Esc cancel[/{self.theme.TEXT_DIM}]",
                     border_style=self.theme.BORDER_PRIMARY,
                     box=box.ROUNDED,
                 )
@@ -2508,36 +2580,34 @@ class ReverieInterface:
         )
         return mention
 
-    def _handle_attachment_picker_request(self, user_input: str) -> bool:
-        config = self.config_manager.load()
-        allowed, detail = self._can_attach_inline_images(config)
-        if not allowed:
-            self._show_activity_event(
-                "Attachment",
-                "The current model doesn't support vision input.",
-                status="warning",
-                detail=detail,
-            )
-            return True
-        query = self._attachment_query_from_input(user_input)
-        modalities = self._current_inline_media_modalities(config)
-        candidates = self._collect_inline_image_candidates(query=query, limit=500, modalities=modalities)
+    def _select_workspace_mention_for_prompt(self, query: str = "") -> Optional[str]:
+        """Select any workspace file; visual files are attached by the normal parser later."""
+        candidates = self._collect_workspace_mention_candidates(query=query)
         if not candidates:
-            self._show_activity_event(
-                "Attachment",
-                "No supported visual files found in this workspace.",
-                status="warning",
-                detail=", ".join(sorted(supported_inline_media_extensions(modalities))),
-            )
+            self._show_activity_event("Mention", "No matching workspace files found", status="warning", detail=query or "workspace")
+            return None
+        selected = self._select_inline_image_candidate(candidates, query=query)
+        if not selected:
+            self._show_activity_event("Mention", "File selection cancelled", status="info")
+            return None
+        mention = self._format_inline_image_mention(str(selected.get("path", "")))
+        self._show_activity_event("Mention", "Workspace file selected", status="success", detail=f"Queued {mention} in the prompt.")
+        return mention
+
+    def _handle_attachment_picker_request(self, user_input: str) -> bool:
+        query = self._attachment_query_from_input(user_input)
+        candidates = self._collect_workspace_mention_candidates(query=query)
+        if not candidates:
+            self._show_activity_event("Mention", "No matching workspace files found", status="warning", detail=query or "workspace")
             return True
         selected = self._select_inline_image_candidate(candidates, query=query)
         if not selected:
-            self._show_activity_event("Attachment", "Image attachment cancelled", status="info")
+            self._show_activity_event("Mention", "File selection cancelled", status="info")
             return True
         self._store_pending_input_draft(f"{self._format_inline_image_mention(str(selected['path']))} ")
         self._show_activity_event(
-            "Attachment",
-            "Visual file selected",
+            "Mention",
+            "Workspace file selected",
             status="success",
             detail=f"Queued @{selected['path']} for the next prompt.",
         )
@@ -2564,8 +2634,11 @@ class ReverieInterface:
         """Main interaction loop"""
         self.input_handler = InputHandler(
             self.console,
-            attachment_selector=self._select_inline_image_mention_for_prompt,
+            attachment_selector=self._select_workspace_mention_for_prompt,
+            command_provider=self._dynamic_command_completions,
         )
+        self.input_handler.history = self._restored_prompt_history()
+        self.input_handler.history_index = len(self.input_handler.history)
         
         while True:
             try:
@@ -2598,6 +2671,51 @@ class ReverieInterface:
         except Exception:
             report_suppressed_exception("run optional CLI integration")
         self.console.print(f"\n[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Session saved. Goodbye! {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]")
+
+    def _restored_prompt_history(self, limit: int = 100) -> List[str]:
+        """Return editable user text from the active/restored conversation."""
+        if not self.agent:
+            return []
+        try:
+            messages = list(self.agent.get_history() or [])
+        except Exception:
+            return []
+        prompts: List[str] = []
+        for message in messages:
+            if not isinstance(message, dict) or str(message.get("role", "")).lower() != "user":
+                continue
+            content = message.get("content", "")
+            if isinstance(content, str):
+                text = content.strip()
+            elif isinstance(content, list):
+                text = "\n".join(
+                    str(item.get("text", "")).strip()
+                    for item in content
+                    if isinstance(item, dict) and item.get("type") in {"text", "input_text"}
+                ).strip()
+            else:
+                text = ""
+            if text and (not prompts or prompts[-1] != text):
+                prompts.append(text)
+        return prompts[-max(1, int(limit or 100)):]
+
+    def _dynamic_command_completions(self) -> Dict[str, str]:
+        """Expose the live command registry, including aliases added at runtime."""
+        completions: Dict[str, str] = {}
+        handler = getattr(self, "command_handler", None)
+        for name in (getattr(handler, "commands", {}) or {}):
+            command = f"/{str(name).strip()}"
+            completions[command] = "Live CLI command"
+        manager = getattr(self, "runtime_plugin_manager", None)
+        if manager is not None:
+            try:
+                for record in manager.list_records():
+                    plugin_id = str(getattr(record, "plugin_id", "") or "").strip()
+                    if plugin_id:
+                        completions[f"/plugins info {plugin_id}"] = "Inspect runtime plugin"
+            except Exception:
+                report_suppressed_exception("load runtime plugin command completions")
+        return completions
     
     def _process_message(self, message: str) -> bool:
         """Process message with direct streaming output to avoid truncation"""
@@ -3316,6 +3434,7 @@ class ReverieInterface:
         self.agent.tool_executor.update_context('pause_stream_input_capture', self._pause_stream_input_capture)
         self.agent.tool_executor.update_context('resume_stream_input_capture', self._resume_stream_input_capture)
         self.agent.tool_executor.update_context('ui_event_handler', self._handle_agent_ui_event)
+        self.agent.tool_executor.update_context('tool_approval_handler', self._approve_tool_call)
         self.agent.tool_executor.update_context('subagent_manager', self.subagent_manager)
         self.agent.tool_executor.update_context('is_subagent', False)
         self.agent.tool_executor.update_context('subagent_id', 'main')
@@ -4036,6 +4155,31 @@ class ReverieInterface:
             'operation_history': self.operation_history,
             'rollback_manager': self.rollback_manager
         }
+
+    def _approve_tool_call(self, tool: Any, arguments: Dict[str, Any], denial: str) -> str:
+        """Ask for a narrowly scoped elevation without changing persisted permissions."""
+        if self.headless:
+            return "deny"
+        tool_name = str(getattr(tool, "name", "tool") or "tool")
+        summary = str(getattr(tool, "get_execution_message", lambda **_: tool_name)(**arguments))
+        self.console.print(
+            Panel(
+                Text.from_markup(
+                    f"[bold {self.theme.AMBER_GLOW}]Permission required[/bold {self.theme.AMBER_GLOW}]\n"
+                    f"[{self.theme.TEXT_PRIMARY}]{escape(summary)}[/{self.theme.TEXT_PRIMARY}]\n"
+                    f"[{self.theme.TEXT_DIM}]{escape(denial)}[/{self.theme.TEXT_DIM}]"
+                ),
+                title=f"[{self.theme.PURPLE_SOFT}]Approve {escape(tool_name)}[/{self.theme.PURPLE_SOFT}]",
+                border_style=self.theme.AMBER_GLOW,
+                box=box.ROUNDED,
+            )
+        )
+        choice = Prompt.ask(
+            "Permission",
+            choices=["once", "session", "deny"],
+            default="deny",
+        )
+        return choice.strip().lower()
 
     def run_setup_wizard(self) -> None:
         """Run the first-time setup wizard with dreamy styling"""

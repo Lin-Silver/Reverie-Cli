@@ -19,7 +19,7 @@ Current stable repository version: `v2.3.4`.
 - GitHub Release publishing now builds the Python `reverie.exe`, the official Blender and Game Models plugin executables, and `plugins-manifest.json` directly into the latest Release while deleting retired Godot/O3DE assets.
 - Prompt mode, direct settings commands, plugin refresh, and long transcript handling were optimized for lower host overhead.
 
-For the full release notes, see [docs/changelog.md](docs/changelog.md).
+For the full release notes, see [docs/changelog.md](../docs/changelog.md).
 
 ## Reverie-Gamer Focus
 
@@ -27,7 +27,7 @@ Reverie-Gamer is currently aimed at:
 
 `one prompt -> structured request -> blueprint -> runtime-aware project foundation -> verified playable vertical slice -> iterative expansion`
 
-Current priorities and completion gates live in the project [roadmap](docs/ROADMAP.md).
+Current priorities and completion gates live in the project [roadmap](../docs/ROADMAP.md).
 
 ## Installation
 
@@ -107,7 +107,7 @@ Use `/model` to add presets or `/codex`, `/nvidia`, `/modelscope` for provider-s
 | `/rollback` | Restore earlier checkpoints or interaction states |
 | `/clean` | Clear current-workspace memory, cache, and audit data |
 
-For the full reference, see [docs/CLI_COMMANDS.md](docs/CLI_COMMANDS.md).
+For the full reference, see [docs/CLI_COMMANDS.md](../docs/CLI_COMMANDS.md).
 
 ## Workflow Modes
 
@@ -171,17 +171,17 @@ The packaged `dist/reverie.exe` includes the unified Reverie Engine, work-in-pro
 
 ## Documentation
 
-- [Documentation Index](docs/README.md)
-- [Chinese README / 中文说明](docs/README.zh-CN.md)
-- [Harness Engineering Notes](docs/HARNESS_ENGINEERING.md)
-- [Configuration Guide](docs/CONFIGURATION.md)
-- [CLI Command Reference](docs/CLI_COMMANDS.md)
-- [Context Engine Project Memory](docs/CONTEXT_ENGINE_MEMORY.md)
-- [Development Guide](docs/DEVELOPMENT.md)
-- [Roadmap](docs/ROADMAP.md)
-- [Reverie Engine User Guide](docs/engine/reverie_engine_user_guide.md)
-- [Reverie-Gamer Modeling Guide](docs/engine/reverie_gamer_modeling_pipeline.md)
-- [Changelog](docs/changelog.md)
+- [Documentation Index](../docs/README.md)
+- [Chinese README / 中文说明](../docs/README.zh-CN.md)
+- [Harness Engineering Notes](../docs/HARNESS_ENGINEERING.md)
+- [Configuration Guide](../docs/CONFIGURATION.md)
+- [CLI Command Reference](../docs/CLI_COMMANDS.md)
+- [Context Engine Project Memory](../docs/CONTEXT_ENGINE_MEMORY.md)
+- [Development Guide](../docs/DEVELOPMENT.md)
+- [Roadmap](../docs/ROADMAP.md)
+- [Reverie Engine User Guide](../docs/engine/reverie_engine_user_guide.md)
+- [Reverie-Gamer Modeling Guide](../docs/engine/reverie_gamer_modeling_pipeline.md)
+- [Changelog](../docs/changelog.md)
 
 ## License
 

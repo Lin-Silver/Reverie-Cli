@@ -17,6 +17,7 @@
 | [CLI Command Reference](CLI_COMMANDS.md) | Full command catalog: core, models, providers, tools, settings, sessions, game workflow |
 | [Context Engine Project Memory](CONTEXT_ENGINE_MEMORY.md) | Project-isolated cross-session memory, immediate hybrid retrieval, provenance, conflict/version handling, and AI tool behavior |
 | [Development Guide](DEVELOPMENT.md) | Local setup, testing, packaging, and documentation maintenance rules |
+| [Security Permissions](SECURITY_PERMISSIONS.md) | Permission levels, permanently blocked operations, and trust boundaries |
 | [Roadmap](ROADMAP.md) | Single source of truth for planned game-runtime and Gamer work |
 | [Changelog](changelog.md) | Release history and version notes |
 

@@ -12,7 +12,7 @@
 - **Subagent delegation**: Parallel investigation and implementation tasks
 - **Harness audit**: Prompt-level reporting, verification tracking, playbook recommendations
 - **Specialist runtime plugins**: Ren'Py and Live2D/Cubism Galgame workflows are delivered through plugin-owned `rc_*` tools, skills, and prompt guidance
-- **Roadmap**: Planned game-runtime and Gamer work is maintained in [one roadmap](ReverieCli-py/docs/ROADMAP.md)
+- **Roadmap**: Planned game-runtime and Gamer work is maintained in [one roadmap](docs/ROADMAP.md)
 
 ---
 

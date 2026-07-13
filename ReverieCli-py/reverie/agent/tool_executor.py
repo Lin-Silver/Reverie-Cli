@@ -27,6 +27,7 @@ from ..tools.registry import (
     get_supported_modes_for_tool,
     is_tool_visible_in_mode,
 )
+from ..security_policy import normalize_permission_level, permission_denial
 from ..plugin.dynamic_tool import RuntimePluginDynamicTool
 
 
@@ -83,6 +84,9 @@ class ToolExecutor:
             'git_integration': git_integration,
             'lsp_manager': lsp_manager,
             'memory_indexer': memory_indexer,
+            # Bare executors are an internal/test API. User-facing Agents replace
+            # this with Config.security immediately after construction.
+            'security': {'permission_level': 'full_control'},
         }
 
         # Initialize tools
@@ -93,6 +97,7 @@ class ToolExecutor:
         self._runtime_plugin_tool_names: set[str] = set()
         self._runtime_plugin_generation: int = -1
         self._schema_cache: Dict[tuple[Any, ...], List[Dict[str, Any]]] = {}
+        self._session_approved_tools: set[str] = set()
         self._init_tools()
     
     def _init_tools(self) -> None:
@@ -415,6 +420,8 @@ class ToolExecutor:
         for name, tool in self._tools.items():
             if normalized_mode and not self._tool_is_visible(name, tool, normalized_mode):
                 continue
+            if permission_denial(tool, self._configured_permission_level()) and not callable(self.context.get("tool_approval_handler")):
+                continue
             visible.append(name)
             if include_aliases:
                 visible.extend(tool.get_aliases())
@@ -428,6 +435,8 @@ class ToolExecutor:
 
         for name, tool in self._tools.items():
             if not self._tool_is_visible(name, tool, normalized_mode):
+                continue
+            if permission_denial(tool, self._configured_permission_level()) and not callable(self.context.get("tool_approval_handler")):
                 continue
 
             try:
@@ -456,6 +465,14 @@ class ToolExecutor:
             )
 
         return records
+
+    def _configured_permission_level(self) -> str:
+        agent = self.context.get("agent")
+        config = getattr(agent, "config", None) if agent is not None else None
+        security = getattr(config, "security", {}) if config is not None else self.context.get("security", {})
+        return normalize_permission_level(
+            security.get("permission_level") if isinstance(security, dict) else security
+        )
 
     def _extract_search_terms(self, tool: BaseTool) -> List[str]:
         """Collect discovery terms from one tool."""
@@ -835,6 +852,27 @@ class ToolExecutor:
         
         normalized_arguments = self._normalize_arguments(tool, arguments)
         agent = self.context.get("agent")
+        config = getattr(agent, "config", None) if agent is not None else None
+        security = getattr(config, "security", {}) if config is not None else self.context.get("security", {})
+        permission_level = normalize_permission_level(
+            security.get("permission_level") if isinstance(security, dict) else security
+        )
+        denial = permission_denial(tool, permission_level)
+        if denial:
+            approval_handler = self.context.get("tool_approval_handler")
+            approved = tool.name in self._session_approved_tools
+            if not approved and callable(approval_handler):
+                try:
+                    decision = str(approval_handler(tool, normalized_arguments, denial) or "deny").strip().lower()
+                except Exception:
+                    decision = "deny"
+                if decision == "session":
+                    self._session_approved_tools.add(tool.name)
+                    approved = True
+                elif decision == "once":
+                    approved = True
+            if not approved:
+                return ToolResult.fail(denial)
         active_mode = normalize_mode(getattr(agent, "mode", "reverie")) if agent is not None else "reverie"
         if active_mode == "writer" and tool.name in {"str_replace_editor", "create_file", "delete_file", "file_ops"}:
             raw_path = str(normalized_arguments.get("path", "") or "").strip()
@@ -1048,7 +1086,12 @@ class ToolExecutor:
         """
         normalized_mode = normalize_mode(mode)
         self._sync_dynamic_tools()
-        cache_key = (normalized_mode, self._mcp_generation, self._runtime_plugin_generation)
+        cache_key = (
+            normalized_mode,
+            self._mcp_generation,
+            self._runtime_plugin_generation,
+            self._configured_permission_level(),
+        )
         cached = self._schema_cache.get(cache_key)
         if cached is not None:
             return list(cached)

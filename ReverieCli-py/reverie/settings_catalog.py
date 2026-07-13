@@ -15,12 +15,12 @@ def setting_mode_options() -> List[str]:
 
 def setting_theme_options() -> List[str]:
     """Available persisted theme values."""
-    return ["default", "dark", "light", "ocean"]
+    return ["default", "dark", "light", "ocean", "high-contrast", "minimal"]
 
 
 def setting_tool_output_choices() -> List[str]:
     """Available completed-tool transcript styles."""
-    return ["compact", "condensed", "full"]
+    return ["minimal", "compact", "condensed", "full"]
 
 
 def setting_thinking_output_choices() -> List[str]:

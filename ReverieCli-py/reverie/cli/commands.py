@@ -92,6 +92,11 @@ class CommandHandler:
             'search': self.cmd_search,
             'sessions': self.cmd_sessions,
             'history': self.cmd_history,
+            'export': self.cmd_export,
+            'copy-last': self.cmd_copy_last,
+            'rewind': self.cmd_rewind,
+            'fork': self.cmd_fork,
+            'session-search': self.cmd_session_search,
             'total': self.cmd_total,
             'clear': self.cmd_clear,
             'clean': self.cmd_clean,
@@ -1057,7 +1062,7 @@ class CommandHandler:
             return True
 
         normalized = normalize_help_topic(query)
-        if not normalized or normalized not in HELP_TOPICS:
+        if not normalized or normalized not in HELP_TOPICS or not self._help_topic_visible(HELP_TOPICS.get(normalized, {})):
             self.console.print(
                 f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} No help topic found for: {escape(query)}[/{self.theme.CORAL_SOFT}]"
             )
@@ -1078,8 +1083,16 @@ class CommandHandler:
         return [
             topic
             for topic in HELP_TOPICS.values()
-            if str(topic.get("section", "")).strip() == section
+            if str(topic.get("section", "")).strip() == section and self._help_topic_visible(topic)
         ]
+
+    def _help_topic_visible(self, topic: Dict[str, object]) -> bool:
+        if str(topic.get("section", "")).strip() != "Game":
+            return True
+        manager = self.app.get("config_manager")
+        config = manager.load() if manager else None
+        mode = normalize_mode(getattr(config, "mode", "reverie"))
+        return mode.startswith("reverie-gamer") or mode in {"reverie-atlas"}
 
     def _help_section_accent(self, section: str) -> str:
         """Resolve accent color for help sections."""
@@ -1340,6 +1353,8 @@ class CommandHandler:
             for key, topic in HELP_TOPICS.items():
                 if str(topic.get("section", "")).strip() != section:
                     continue
+                if not self._help_topic_visible(topic):
+                    continue
                 item = dict(topic)
                 item["_topic_key"] = key
                 items.append(item)
@@ -1347,6 +1362,8 @@ class CommandHandler:
 
         for key, topic in HELP_TOPICS.items():
             if key in seen:
+                continue
+            if not self._help_topic_visible(topic):
                 continue
             item = dict(topic)
             item["_topic_key"] = key
@@ -1364,8 +1381,7 @@ class CommandHandler:
 
     def _get_help_topic_items(self) -> List[Dict[str, object]]:
         """Flatten help topics into UI-friendly items while preserving catalog order."""
-        if not self._help_topic_items_cache:
-            self._prime_help_catalog_cache()
+        self._prime_help_catalog_cache()
         return list(self._help_topic_items_cache)
 
     def _build_help_topic_preview(self, topic: Dict[str, object], limit: int = 3) -> str:
@@ -10875,6 +10891,95 @@ class CommandHandler:
         self._show_session_transcript(payload, title="Conversation History")
         return True
 
+    def cmd_export(self, args: str) -> bool:
+        manager = self.app.get("session_manager")
+        if not manager or not manager.get_current_session():
+            self.console.print("No active session to export.")
+            return True
+        tokens = shlex.split(args or "")
+        fmt = "json" if tokens and tokens[0].lower() == "json" else "markdown"
+        suffix = ".json" if fmt == "json" else ".md"
+        raw_path = tokens[1] if len(tokens) > 1 else f"artifacts/session-{manager.get_current_session().id}{suffix}"
+        target = Path(raw_path)
+        if not target.is_absolute():
+            target = Path(self.app.get("project_root") or Path.cwd()) / target
+        project_root = Path(self.app.get("project_root") or Path.cwd()).resolve()
+        target = target.resolve()
+        if target != project_root and project_root not in target.parents:
+            self.console.print("Export path must stay inside the active workspace.")
+            return True
+        exported = manager.export_current_session(target, fmt)
+        self.console.print(f"Exported session to {exported}")
+        return True
+
+    def cmd_copy_last(self, args: str) -> bool:
+        agent = self.app.get("agent")
+        messages = list(agent.get_history() or []) if agent else []
+        text = next((self._message_text(item.get("content")) for item in reversed(messages) if item.get("role") == "assistant"), "")
+        if not text:
+            self.console.print("No assistant reply to copy.")
+            return True
+        try:
+            import tkinter
+            root = tkinter.Tk(); root.withdraw(); root.clipboard_clear(); root.clipboard_append(text); root.update(); root.destroy()
+            self.console.print("Copied the last assistant reply to the clipboard.")
+        except Exception as exc:
+            self.console.print(f"Clipboard unavailable: {exc}")
+        return True
+
+    def _sync_agent_session_messages(self, messages: List[Dict[str, Any]]) -> None:
+        agent = self.app.get("agent")
+        if agent is not None:
+            agent.messages = [dict(item) for item in messages if isinstance(item, dict)]
+
+    def cmd_rewind(self, args: str) -> bool:
+        manager = self.app.get("session_manager")
+        try:
+            count = int(str(args or "").strip())
+        except ValueError:
+            self.console.print("Usage: /rewind <message-count>")
+            return True
+        session = manager.get_current_session() if manager else None
+        if not session:
+            self.console.print("No active session to rewind.")
+            return True
+        if not Confirm.ask(f"Rewind from {len(session.messages)} to {count} messages?", default=False):
+            return True
+        session = manager.rewind_current_session(count)
+        self._sync_agent_session_messages(session.messages)
+        self.console.print(f"Rewound session to {len(session.messages)} messages.")
+        return True
+
+    def cmd_fork(self, args: str) -> bool:
+        manager = self.app.get("session_manager")
+        session = manager.get_current_session() if manager else None
+        if not session:
+            self.console.print("No active session to fork.")
+            return True
+        count = len(session.messages)
+        if str(args or "").strip():
+            try:
+                count = int(str(args).strip())
+            except ValueError:
+                self.console.print("Usage: /fork [message-count]")
+                return True
+        forked = manager.fork_current_session(count)
+        self._sync_agent_session_messages(forked.messages)
+        self.console.print(f"Forked session {forked.id} at {len(forked.messages)} messages.")
+        return True
+
+    def cmd_session_search(self, args: str) -> bool:
+        manager = self.app.get("session_manager")
+        results = manager.search_sessions(args) if manager else []
+        if not results:
+            self.console.print("No session messages matched.")
+            return True
+        table = Table("Session", "#", "Role", "Match", box=box.SIMPLE)
+        for item in results:
+            table.add_row(item["session_name"], str(item["message_index"]), item["role"], self._message_text(item["text"])[:120])
+        self.console.print(table)
+        return True
+
     def _message_text(self, value: Any) -> str:
         """Flatten persisted message content into readable transcript text."""
         if value is None:
@@ -12171,6 +12276,8 @@ class CommandHandler:
             self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid theme: {candidate}[/{self.theme.CORAL_SOFT}]")
             return True
         config.theme = candidate
+        from .theme import apply_theme
+        apply_theme(candidate)
         return self._setting_save_and_reinit(config, f"Theme set to {candidate}.", reinit=False)
 
     def _cmd_setting_tool_output_style(self, value: str) -> bool:

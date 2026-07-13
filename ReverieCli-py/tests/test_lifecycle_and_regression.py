@@ -13,6 +13,7 @@ def test_lifecycle_hooks_audit_and_deny_terminal_delete(tmp_path: Path) -> None:
 
     lifecycle = LifecycleManager(project_data_dir, project_root=project_root)
     executor = ToolExecutor(project_root=project_root)
+    executor.update_context("security", {"permission_level": "developer"})
     executor.update_context("project_data_dir", project_data_dir)
     executor.update_context("lifecycle_manager", lifecycle)
 

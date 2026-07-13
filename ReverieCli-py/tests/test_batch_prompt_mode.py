@@ -1,5 +1,7 @@
 import json
 from pathlib import Path
+import subprocess
+import sys
 from types import SimpleNamespace
 
 from reverie.agent.agent import THINKING_END_MARKER, THINKING_START_MARKER
@@ -13,6 +15,20 @@ from reverie.cli.interface import (
     _split_prompt_error,
 )
 from reverie.config import Config, ModelConfig
+
+
+def test_package_main_supports_pyinstaller_top_level_entry() -> None:
+    package_entry = Path(__file__).resolve().parents[1] / "reverie" / "__main__.py"
+    result = subprocess.run(
+        [sys.executable, str(package_entry), "--help"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Reverie - World-Class Context Engine Coding Assistant" in result.stdout
 
 
 class _FakeToolExecutor:

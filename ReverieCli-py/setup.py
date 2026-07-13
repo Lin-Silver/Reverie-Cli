@@ -45,6 +45,7 @@ setup(
         "rich>=13.0.0",
         "click>=8.0.0",
         "tqdm>=4.65.0",
+        "prompt-toolkit>=3.0.43",
         
         # HTTP and API
         "requests>=2.31.0",

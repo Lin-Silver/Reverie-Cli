@@ -155,16 +155,15 @@ class UserInputTool(BaseTool):
                         f"[{THEME.TEXT_DIM}]{DECO.DOT_MEDIUM} Using default value: {default_value}[/{THEME.TEXT_DIM}]"
                     )
             
-            # Input validation (Requirement 8.5)
-            if not user_input or user_input.strip() == "":
-                # Empty input without default - ask again
+            # Input validation without recursion, so repeated empty submissions
+            # cannot grow the call stack.
+            while not user_input or user_input.strip() == "":
                 console.print(
                     f"[{THEME.AMBER_GLOW}]! Empty input provided. Please provide a response.[/{THEME.AMBER_GLOW}]"
                 )
-                # Restart status live before recursive call
-                if status_live:
-                    status_live.start()
-                return self.execute(question, reason, multiline, default_value, allow_cancel)
+                user_input = self._get_multiline_input(console) if multiline else console.input("")
+                if not str(user_input or "").strip() and default_value:
+                    user_input = default_value
             
             # Success message (Requirement 8.4)
             console.print(
@@ -198,12 +197,11 @@ class UserInputTool(BaseTool):
                 )
             else:
                 console.print(
-                    f"\n[{THEME.AMBER_GLOW}]! Cancellation not allowed. Please provide input.[/{THEME.AMBER_GLOW}]"
+                    f"\n[{THEME.AMBER_GLOW}]! Cancellation is not allowed for this request.[/{THEME.AMBER_GLOW}]"
                 )
-                # Restart status live before recursive call
                 if status_live:
                     status_live.start()
-                return self.execute(question, reason, multiline, default_value, allow_cancel)
+                return ToolResult.fail("User input was interrupted but cancellation is disabled.")
         
         except Exception as e:
             # Handle unexpected errors gracefully (Requirement 8.8)

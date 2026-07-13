@@ -352,6 +352,8 @@ Useful non-provider keys:
 
 - `mode`
 - `theme`
+
+Theme presets are `default`, `dark`, `light`, `ocean`, `high-contrast`, and `minimal`. The `minimal` preset replaces decorative glyphs with plain terminal-safe markers. `tool_output_style` also accepts `minimal` for single-line, border-free tool results.
 - `max_context_tokens`
 - `stream_responses`
 - `auto_index`

@@ -99,7 +99,7 @@ class DisplayComponents:
     def _normalize_tool_output_style(value: Any) -> str:
         """Normalize transcript tool-result style selection."""
         candidate = str(value or "").strip().lower()
-        if candidate in {"compact", "condensed", "full"}:
+        if candidate in {"minimal", "compact", "condensed", "full"}:
             return candidate
         return "compact"
 
@@ -1413,6 +1413,12 @@ class DisplayComponents:
                 agent_id=merged_agent_id,
                 agent_color=merged_agent_color,
             )
+            return
+
+        if output_style == "minimal":
+            marker = "OK" if success else "ERR"
+            message = str(error or output or "completed").strip().splitlines()[0][:160]
+            self.console.print(f"[{marker}] {merged_tool_name}: {message}")
             return
 
         if success:

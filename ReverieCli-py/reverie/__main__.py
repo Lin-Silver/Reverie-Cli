@@ -7,7 +7,6 @@ Or: reverie (if installed)
 
 import sys
 
-from .diagnostics import report_suppressed_exception
 import argparse
 import json
 import locale
@@ -18,6 +17,7 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
 
 try:
+    from .diagnostics import report_suppressed_exception
     from .version import CORE_INTERFACE_VERSION, __version__
     from .tls import configure_tls_ca_bundle
 except ImportError:  # PyInstaller may execute this file as a top-level script.
@@ -25,6 +25,7 @@ except ImportError:  # PyInstaller may execute this file as a top-level script.
     package_root_text = str(package_root)
     if package_root_text not in sys.path:
         sys.path.insert(0, package_root_text)
+    from reverie.diagnostics import report_suppressed_exception
     from reverie.version import CORE_INTERFACE_VERSION, __version__
     from reverie.tls import configure_tls_ca_bundle
 

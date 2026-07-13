@@ -46,6 +46,8 @@ class ReverieSdkBridge:
         interface = self.ensure_interface()
         if self.tool_executor is None:
             self.tool_executor = ToolExecutor(project_root=self.project_root)
+        config = interface.config_manager.load()
+        self.tool_executor.update_context("security", getattr(config, "security", {}))
         self.tool_executor.update_context("runtime_plugin_manager", interface.runtime_plugin_manager)
         self.tool_executor.update_context("workspace_stats_manager", interface.workspace_stats_manager)
         return self.tool_executor

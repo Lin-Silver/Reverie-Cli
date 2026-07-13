@@ -35,7 +35,7 @@ class _FakeToolExecutor:
     def __init__(self) -> None:
         self.context = {}
 
-    def update_context(self, key, value) -> None:
+    def update_context(self, key, value, **_kwargs) -> None:
         self.context[key] = value
 
 

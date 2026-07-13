@@ -1104,8 +1104,8 @@ class ToolExecutor:
         self._schema_cache[cache_key] = list(schemas)
         return schemas
     
-    def update_context(self, key: str, value: Any) -> None:
-        """Update shared context and reinitialize tools"""
+    def update_context(self, key: str, value: Any, *, sync_dynamic: bool = True) -> None:
+        """Update shared context, optionally deferring external tool discovery."""
         self.context[key] = value
         
         # Update all tool contexts
@@ -1113,8 +1113,10 @@ class ToolExecutor:
             tool.context = self.context
         if key == "mcp_runtime":
             self._mcp_generation = -1
-            self._sync_mcp_tools()
+            if sync_dynamic:
+                self._sync_mcp_tools()
         if key == "runtime_plugin_manager":
             self._runtime_plugin_generation = -1
-            self._sync_runtime_plugin_tools()
+            if sync_dynamic:
+                self._sync_runtime_plugin_tools()
         self._invalidate_schema_cache()

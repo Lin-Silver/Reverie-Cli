@@ -3414,8 +3414,15 @@ class ReverieInterface:
         self.agent.config = config
         self.agent.tool_executor.update_context('config_manager', self.config_manager)
         self.agent.tool_executor.update_context('mcp_config_manager', self.mcp_config_manager)
-        self.agent.tool_executor.update_context('mcp_runtime', self.mcp_runtime)
-        self.agent.tool_executor.update_context('runtime_plugin_manager', self.runtime_plugin_manager)
+        # Dynamic catalogs can involve external MCP transports. Keep them off
+        # the startup critical path; ToolExecutor synchronizes them lazily on
+        # the first tool/schema lookup and then tracks catalog generations.
+        self.agent.tool_executor.update_context('mcp_runtime', self.mcp_runtime, sync_dynamic=False)
+        self.agent.tool_executor.update_context(
+            'runtime_plugin_manager',
+            self.runtime_plugin_manager,
+            sync_dynamic=False,
+        )
         self.agent.tool_executor.update_context('skills_manager', self.skills_manager)
         self.agent.tool_executor.update_context('session_manager', self.session_manager)
         self.agent.tool_executor.update_context('project_data_dir', self.project_data_dir)

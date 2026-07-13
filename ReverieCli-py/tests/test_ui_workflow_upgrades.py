@@ -48,6 +48,27 @@ def test_approval_handler_keeps_deny_as_default(tmp_path: Path) -> None:
     assert not result.success
 
 
+def test_dynamic_catalog_binding_can_defer_external_discovery(tmp_path: Path) -> None:
+    class _Runtime:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def get_tool_definitions(self, force_refresh: bool = False):
+            self.calls += 1
+            return []
+
+        def get_generation(self) -> int:
+            return 0
+
+    runtime = _Runtime()
+    executor = ToolExecutor(tmp_path)
+    executor.update_context("mcp_runtime", runtime, sync_dynamic=False)
+
+    assert runtime.calls == 0
+    executor.list_tools()
+    assert runtime.calls == 1
+
+
 def test_session_export_search_fork_and_rewind(tmp_path: Path) -> None:
     manager = SessionManager(tmp_path / "state", project_root=tmp_path)
     source = manager.create_session("Source")

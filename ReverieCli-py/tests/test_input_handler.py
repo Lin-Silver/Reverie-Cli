@@ -180,7 +180,26 @@ def test_windows_prompt_editor_right_at_end_does_not_redraw(monkeypatch) -> None
     monkeypatch.setattr(msvcrt, "kbhit", lambda: False)
 
     assert handler._get_seeded_single_line_input("Reverie> ", initial) == initial
-    assert "\x1b[2K" not in handler._output_stream().getvalue()
+    # Submission clears the transient editor once, even when cursor movement
+    # itself did not require a redraw.
+    assert "\x1b[2K" in handler._output_stream().getvalue()
+
+
+def test_windows_prompt_editor_clears_completion_panel_on_submit(monkeypatch) -> None:
+    import msvcrt
+
+    handler = _handler(width=120)
+    keys = iter(["/", "\xe0", "P", "\r"])
+    monkeypatch.setattr(msvcrt, "getwch", lambda: next(keys))
+    monkeypatch.setattr(msvcrt, "kbhit", lambda: False)
+
+    result = handler._get_seeded_single_line_input("Reverie> ", "")
+    rendered = handler._output_stream().getvalue()
+
+    assert result
+    assert "\x1b[2K" in rendered
+    assert rendered.rstrip().endswith(result)
+    assert rendered.rfind("Tab complete") < rendered.rfind("\x1b[2K")
 
 
 def test_windows_prompt_editor_batches_printable_paste_redraw(monkeypatch) -> None:
@@ -192,7 +211,8 @@ def test_windows_prompt_editor_batches_printable_paste_redraw(monkeypatch) -> No
     monkeypatch.setattr(msvcrt, "kbhit", lambda: bool(keys))
 
     assert handler._get_seeded_single_line_input("Reverie> ", "") == "pasted text"
-    assert handler._output_stream().getvalue().count("\x1b[2K") == 1
+    # One clear for the batched redraw and one final clear before committing.
+    assert handler._output_stream().getvalue().count("\x1b[2K") == 2
 
 
 def test_line_visual_rows_exact_width() -> None:

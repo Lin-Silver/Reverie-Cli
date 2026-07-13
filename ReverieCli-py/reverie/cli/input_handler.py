@@ -272,6 +272,17 @@ class InputHandler:
             self._write_terminal(f"\033[{previous_rows - 1}A")
         self._write_terminal("\r")
         render_state["rendered"] = False
+
+    def _commit_windows_input(self, prompt_text: str, buffer: str, render_state: dict) -> None:
+        """Remove transient completion rows and leave only the submitted input."""
+        self._clear_rendered_windows_input(render_state)
+        for index, line in enumerate(str(buffer or "").split("\n")):
+            if index:
+                self._write_terminal("\n")
+            if index == 0:
+                self._render_prompt(prompt_text, is_continuation=False)
+            self._write_terminal(line)
+        self._write_terminal("\n")
     
     def _render_prompt(self, prompt_text: str, is_continuation: bool = False) -> None:
         """Render the dreamy themed prompt"""
@@ -463,7 +474,7 @@ class InputHandler:
                 if completion_selection_active and completions:
                     buffer = completions[completion_index % len(completions)][0]
                     cursor = len(buffer)
-                self._write_terminal("\n")
+                self._commit_windows_input(prompt_text, buffer, render_state)
                 if record_history and buffer.strip():
                     self.history.append(buffer)
                     self.history_index = len(self.history)
@@ -520,6 +531,7 @@ class InputHandler:
                     self._redraw_windows_input(prompt_text, buffer, cursor, render_state, completion_index)
                 continue
             if key == "@" and self._should_open_attachment_selector(buffer[:cursor]):
+                self._clear_rendered_windows_input(render_state)
                 self._write_terminal("\n")
                 insertion = self._attachment_insertion_text()
                 buffer, cursor = self._insert_text(buffer, cursor, insertion)

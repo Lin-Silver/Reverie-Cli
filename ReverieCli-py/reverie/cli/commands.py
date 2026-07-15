@@ -2672,12 +2672,12 @@ class CommandHandler:
             return None, None
 
         runtime.reload(force=force_reload)
-        refresh_prompt = self.app.get('refresh_agent_prompt_guidance')
-        if callable(refresh_prompt):
+        start_discovery = self.app.get('start_mcp_background_discovery')
+        if callable(start_discovery):
             try:
-                refresh_prompt()
+                start_discovery()
             except Exception:
-                report_suppressed_exception("refresh prompt after MCP configuration update")
+                report_suppressed_exception("start MCP discovery after configuration update")
         return manager, runtime
 
     def _resolve_mcp_server_name(self, server_name: str, config: Dict[str, Any]) -> str:
@@ -2710,7 +2710,19 @@ class CommandHandler:
 
     def _load_mcp_ui_state(self, manager, runtime, *, force_refresh: bool = False) -> tuple[Dict[str, Any], List[Dict[str, Any]]]:
         config = manager.load()
-        rows = runtime.list_server_status(force_refresh=force_refresh)
+        refresh_in_runtime = force_refresh
+        if force_refresh:
+            start_discovery = self.app.get('start_mcp_background_discovery')
+            if callable(start_discovery):
+                try:
+                    try:
+                        start_discovery(force_refresh=True)
+                    except TypeError:
+                        start_discovery()
+                    refresh_in_runtime = False
+                except Exception:
+                    report_suppressed_exception("start MCP discovery from status UI")
+        rows = runtime.list_server_status(force_refresh=refresh_in_runtime)
         return config, rows
 
     def _save_mcp_ui_config(
@@ -2723,12 +2735,12 @@ class CommandHandler:
     ) -> tuple[Dict[str, Any], List[Dict[str, Any]]]:
         manager.save(config)
         runtime.reload(force=True)
-        refresh_prompt = self.app.get('refresh_agent_prompt_guidance')
-        if callable(refresh_prompt):
+        start_discovery = self.app.get('start_mcp_background_discovery')
+        if callable(start_discovery):
             try:
-                refresh_prompt()
+                start_discovery()
             except Exception:
-                report_suppressed_exception("refresh prompt after MCP state update")
+                report_suppressed_exception("start MCP discovery after state update")
         return self._load_mcp_ui_state(manager, runtime, force_refresh=force_refresh)
 
     def _get_mcp_ui_items(self, config: Dict[str, Any], rows: List[Dict[str, Any]], manager) -> List[Dict[str, Any]]:
@@ -3281,7 +3293,7 @@ class CommandHandler:
         return True
 
     def _cmd_mcp_status(self, *, force_refresh: bool = False) -> bool:
-        manager, runtime = self._refresh_mcp_runtime(force_reload=False)
+        manager, runtime = self._refresh_mcp_runtime(force_reload=force_refresh)
         if not manager or not runtime:
             return True
 
@@ -6342,17 +6354,22 @@ class CommandHandler:
             return self._cmd_codex_endpoint("")
         if lowered.startswith("endpoint "):
             return self._cmd_codex_endpoint(raw[9:].strip())
+        if lowered == "auth":
+            return self._cmd_codex_auth("")
+        if lowered.startswith("auth "):
+            return self._cmd_codex_auth(raw[5:].strip())
 
         self.console.print(
-            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /codex [login|model|thinking|endpoint] or /codex [low|medium|high|extra high][/{self.theme.AMBER_GLOW}]"
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /codex [login|model|thinking|endpoint|auth] or /codex [low|medium|high|extra high][/{self.theme.AMBER_GLOW}]"
         )
         return True
 
     def _cmd_codex_activate(self) -> bool:
         """Switch Reverie to Codex using the stored Codex selection."""
         from ..codex import (
-            detect_codex_cli_credentials,
             normalize_codex_config,
+            resolve_codex_credentials,
+            resolve_codex_request_url,
             resolve_codex_selected_model,
         )
 
@@ -6363,18 +6380,19 @@ class CommandHandler:
             )
             return True
 
-        cred = detect_codex_cli_credentials()
+        config = config_manager.load()
+        codex_cfg = normalize_codex_config(getattr(config, "codex", {}))
+        request_url = resolve_codex_request_url(codex_cfg["api_url"], codex_cfg.get("endpoint", ""))
+        cred = resolve_codex_credentials(codex_cfg, request_url=request_url)
         if not cred.get("found"):
             self.console.print(
-                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Codex CLI credentials were not found under ~/.codex.[/{self.theme.CORAL_SOFT}]"
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Codex credentials were not found.[/{self.theme.CORAL_SOFT}]"
             )
             self.console.print(
-                f"[{self.theme.AMBER_GLOW}]Use /codex login to authenticate, then run /codex again.[/{self.theme.AMBER_GLOW}]"
+                f"[{self.theme.AMBER_GLOW}]Use /codex login, or configure reverse-proxy auth_mode and api_key_env.[/{self.theme.AMBER_GLOW}]"
             )
             return True
 
-        config = config_manager.load()
-        codex_cfg = normalize_codex_config(getattr(config, "codex", {}))
         selected = resolve_codex_selected_model(codex_cfg)
         if not selected:
             self.console.print(
@@ -6403,6 +6421,8 @@ class CommandHandler:
             get_codex_reasoning_label,
             get_codex_reasoning_efforts,
             normalize_codex_config,
+            resolve_codex_credentials,
+            resolve_codex_request_url,
             resolve_codex_selected_model,
         )
 
@@ -6410,9 +6430,27 @@ class CommandHandler:
         config = config_manager.load() if config_manager else None
 
         cred = detect_codex_cli_credentials()
+        codex_cfg = normalize_codex_config(getattr(config, "codex", {}) if config else {})
+        request_url = resolve_codex_request_url(codex_cfg["api_url"], codex_cfg.get("endpoint", ""))
+        resolved_cred = resolve_codex_credentials(codex_cfg, request_url=request_url)
         self.console.print()
 
-        if cred.get("found"):
+        if not resolved_cred.get("official_backend"):
+            if resolved_cred.get("found"):
+                self.console.print(
+                    f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Codex reverse proxy is configured.[/{self.theme.MINT_VIBRANT}]"
+                )
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]Proxy auth: {resolved_cred.get('auth_mode', 'auto')} | source: {resolved_cred.get('source', 'none')}[/{self.theme.TEXT_DIM}]"
+                )
+            else:
+                self.console.print(
+                    f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} The Codex reverse proxy requires credentials, but none were found.[/{self.theme.CORAL_SOFT}]"
+                )
+                self.console.print(
+                    f"[{self.theme.AMBER_GLOW}]Set codex.api_key_env/api_key, select auth_mode none, or use local Codex authentication.[/{self.theme.AMBER_GLOW}]"
+                )
+        elif cred.get("found"):
             self.console.print(
                 f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Codex CLI credentials detected.[/{self.theme.MINT_VIBRANT}]"
             )
@@ -6447,7 +6485,6 @@ class CommandHandler:
                 )
 
         if config_manager and config:
-            codex_cfg = normalize_codex_config(getattr(config, "codex", {}))
             selected = resolve_codex_selected_model(codex_cfg)
             if selected:
                 self.console.print(
@@ -6483,6 +6520,9 @@ class CommandHandler:
                 self.console.print(
                     f"[{self.theme.TEXT_DIM}]Endpoint override: {endpoint}[/{self.theme.TEXT_DIM}]"
                 )
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Resolved Responses URL: {request_url}[/{self.theme.TEXT_DIM}]"
+            )
 
         self.console.print()
         return True
@@ -6668,21 +6708,12 @@ class CommandHandler:
     def _cmd_codex_model(self, model_query: str, prompt_reasoning: Optional[bool] = None) -> bool:
         """Select Codex model from dedicated catalog."""
         from ..codex import (
-            detect_codex_cli_credentials,
             get_codex_model_catalog,
             get_codex_reasoning_label,
             normalize_codex_config,
+            resolve_codex_credentials,
+            resolve_codex_request_url,
         )
-
-        cred = detect_codex_cli_credentials()
-        if not cred.get("found"):
-            self.console.print(
-                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Codex CLI credentials were not found under ~/.codex.[/{self.theme.CORAL_SOFT}]"
-            )
-            self.console.print(
-                f"[{self.theme.AMBER_GLOW}]Run /codex first after logging into Codex CLI.[/{self.theme.AMBER_GLOW}]"
-            )
-            return True
 
         config_manager = self.app.get('config_manager')
         if not config_manager:
@@ -6691,21 +6722,49 @@ class CommandHandler:
             )
             return True
 
+        config = config_manager.load()
+        codex_cfg = normalize_codex_config(getattr(config, "codex", {}))
+        request_url = resolve_codex_request_url(codex_cfg["api_url"], codex_cfg.get("endpoint", ""))
+        cred = resolve_codex_credentials(codex_cfg, request_url=request_url)
+        if not cred.get("found"):
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Codex credentials were not found.[/{self.theme.CORAL_SOFT}]"
+            )
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]Authenticate with Codex CLI or configure the reverse proxy credentials first.[/{self.theme.AMBER_GLOW}]"
+            )
+            return True
+
         catalog = get_codex_model_catalog()
-        if not catalog:
+        if not catalog and (cred.get("official_backend") or not str(model_query or "").strip()):
             self.console.print(
                 f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Codex model catalog is empty.[/{self.theme.CORAL_SOFT}]"
             )
             return True
 
-        config = config_manager.load()
-        codex_cfg = normalize_codex_config(getattr(config, "codex", {}))
-        selected_model = self._resolve_catalog_selection(
-            catalog=catalog,
-            current_selected_id=str(codex_cfg.get("selected_model_id", "")),
-            model_query=model_query,
-            provider_label="Codex",
+        selected_model = None
+        normalized_query = str(model_query or "").strip()
+        catalog_has_query = any(
+            normalized_query.lower()
+            in {
+                str(item.get("id", "")).strip().lower(),
+                str(item.get("display_name", "")).strip().lower(),
+            }
+            for item in catalog
         )
+        if normalized_query and not cred.get("official_backend") and not catalog_has_query:
+            selected_model = {
+                "id": normalized_query,
+                "display_name": normalized_query,
+                "description": "Custom reverse-proxy model id",
+            }
+        else:
+            selected_model = self._resolve_catalog_selection(
+                catalog=catalog,
+                current_selected_id=str(codex_cfg.get("selected_model_id", "")),
+                model_query=model_query,
+                provider_label="Codex",
+            )
         if not selected_model:
             return True
 
@@ -8125,6 +8184,59 @@ class CommandHandler:
             provider_label="SenseNova",
             endpoint_value=endpoint_value,
         )
+
+    def _cmd_codex_auth(self, value: str) -> bool:
+        """Configure reverse-proxy authentication without accepting secrets in command history."""
+        from ..codex import normalize_codex_config
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        codex_cfg = normalize_codex_config(getattr(config, "codex", {}))
+        raw = str(value or "").strip()
+        if not raw:
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Codex auth mode: {codex_cfg.get('auth_mode', 'auto')} | API key environment: {codex_cfg.get('api_key_env', 'CODEX_PROXY_API_KEY')}[/{self.theme.TEXT_DIM}]"
+            )
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Usage: /codex auth <auto|codex|api_key|none> [ENV_NAME][/{self.theme.TEXT_DIM}]"
+            )
+            return True
+
+        parts = raw.split()
+        mode = parts[0].lower().replace("-", "_")
+        if mode not in {"auto", "codex", "api_key", "none"}:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Unsupported Codex auth mode: {parts[0]}[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+        if len(parts) > 2:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Usage: /codex auth <auto|codex|api_key|none> [ENV_NAME][/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        codex_cfg["auth_mode"] = mode
+        if len(parts) == 2:
+            codex_cfg["api_key_env"] = parts[1]
+        config.codex = normalize_codex_config(codex_cfg)
+        config_manager.save(config)
+        if str(getattr(config, "active_model_source", "standard")).lower() == "codex" and self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Codex auth mode set to {mode}.[/{self.theme.MINT_VIBRANT}]"
+        )
+        if mode == "api_key":
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]The key is read from {config.codex.get('api_key_env', 'CODEX_PROXY_API_KEY')}; secrets are not accepted in slash-command history.[/{self.theme.TEXT_DIM}]"
+            )
+        return True
 
     def _cmd_sensenova_reasoning(self, value: str) -> bool:
         from ..sensenova import (

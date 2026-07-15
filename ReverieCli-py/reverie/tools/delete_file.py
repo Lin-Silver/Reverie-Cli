@@ -10,6 +10,8 @@ from __future__ import annotations
 from typing import Dict, Optional
 
 from .base import BaseTool, ToolResult
+from ..config import get_project_data_dir
+from ..workspace_guard import ShadowGitManager
 
 
 class DeleteFileTool(BaseTool):
@@ -100,8 +102,15 @@ Example:
                 "that the deletion target is correct before using a separate, user-operated cleanup process."
             )
 
+        guard = self.context.get("shadow_git_manager")
+        if not isinstance(guard, ShadowGitManager):
+            guard = ShadowGitManager(self.get_project_root(), get_project_data_dir(self.get_project_root()))
+
         try:
+            guard.checkpoint("Before delete_file", force_paths=(file_path,))
+            archive_path = guard.archive_for_delete(file_path)
             file_path.unlink()
+            checkpoint = guard.checkpoint(f"Delete {file_path.relative_to(self.get_project_root())}")
         except Exception as exc:
             self.audit_command_event(
                 {
@@ -111,13 +120,18 @@ Example:
                     "reason": str(exc),
                 }
             )
-            return ToolResult.fail(f"Could not delete file: {exc}")
+            return ToolResult.fail(f"Could not archive and delete file: {exc}")
 
         self.audit_command_event(
             {
                 "event": "delete_file_success",
                 "allowed": True,
                 "path": str(file_path),
+                "archive_path": str(archive_path),
+                "checkpoint": checkpoint.commit,
             }
         )
-        return ToolResult.ok(f"Deleted: {file_path}")
+        return ToolResult.ok(
+            f"Deleted: {file_path}\nBackup: {archive_path}\nCheckpoint: {checkpoint.commit}",
+            data={"archive_path": str(archive_path), "checkpoint": checkpoint.commit},
+        )

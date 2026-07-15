@@ -8,12 +8,12 @@ Reverie CLI is a context-engine-powered AI coding assistant for large repositori
 - **Multiple Workflow Modes** - `Reverie`, `Reverie-Atlas`, `Reverie-Gamer` (work in progress), `Reverie-Ant`, `Spec-Driven`, `Spec-Vibe`, `Writer`, `Computer Controller`
 - **Multi-Provider** - standard OpenAI-compatible presets plus built-in `Codex`, `AIHubMix`, `Agnes`, `SenseNova`, `unlimited.surf`, `NVIDIA`, `ModelScope`, and `WebGemini`
 - **Rich TUI** - selectors, streaming output, help browser, status panels, session browsing, checkpoint rollback, command discovery
-- **Workspace Safety** - file-access sandboxing, audited command execution, archive extraction hardening
+- **Workspace Safety** - workspace-only mutation paths, internal shadow-Git checkpoints, delete backups, audited command execution, archive extraction hardening
 - **Game Tooling** - built-in `Reverie Engine` runtime, work-in-progress Reverie-Gamer prompt-to-vertical-slice workflow, Blender plugin-assisted authoring, Godot/O3DE migration patterns inside the unified engine, and a built-in Ashfox MCP bridge for optional Blockbench sessions
 
 ## Latest Update
 
-Current stable repository version: `v2.3.4`.
+Current development version: `v2.3.5` (unreleased). Latest stable release: `v2.3.4`.
 
 - Reverie CLI now exposes a stable terminal core interface for future desktop hosts through direct one-line commands such as `reverie.exe setting status`.
 - GitHub Release publishing now builds the Python `reverie.exe`, the official Blender and Game Models plugin executables, and `plugins-manifest.json` directly into the latest Release while deleting retired Godot/O3DE assets.
@@ -49,7 +49,7 @@ Optional extras:
 ```bash
 pip install -e ".[dev]"          # development tools (pytest, mypy, black)
 pip install -e ".[treesitter]"   # tree-sitter language support
-pip install -r requirements-tti.txt  # text-to-image dependencies
+pip install -r requirements-tti.txt  # optional local TTI stack (Python 3.10 / CUDA 13 profile)
 ```
 
 ## Quick Start
@@ -96,6 +96,7 @@ Use `/model` to add presets or `/codex`, `/nvidia`, `/modelscope` for provider-s
 | `/model` | Manage standard model presets |
 | `/mode` | Show or switch operating modes |
 | `/codex` | Activate Codex and choose model/reasoning |
+| `/codex auth <mode> [ENV_NAME]` | Configure local or reverse-proxy Codex authentication |
 | `/modelscope` | Activate ModelScope and choose Anthropic-SDK-backed models |
 | `/search <query>` | Run a web search |
 | `/index` | Rebuild the workspace index |

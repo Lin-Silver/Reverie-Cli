@@ -744,8 +744,12 @@ def test_command_exec_emits_incremental_ui_progress(tmp_path: Path) -> None:
         }
     )
 
-    command = 'python -u -c "import sys; print(\'alpha\'); print(\'beta\', file=sys.stderr)"'
-    result = tool.execute(command=command)
+    script = tmp_path / "stream_output.py"
+    script.write_text(
+        "import sys\nprint('alpha')\nprint('beta', file=sys.stderr)\n",
+        encoding="utf-8",
+    )
+    result = tool.execute(command="python -u stream_output.py")
 
     assert result.success is True
     assert any(event.get("kind") == "tool_progress" and "alpha" in event.get("text", "") for event in events)

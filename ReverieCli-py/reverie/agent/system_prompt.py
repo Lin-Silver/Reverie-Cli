@@ -146,15 +146,6 @@ def _append_shared_prompt_guidance(additional_rules: str, normalized_mode: str, 
 - After using tools, always return a textual user-facing response instead of stopping at tool output only.
 """.strip())
 
-    shared_sections.append("""
-## MCP
-- Reverie may expose dynamic MCP tools whose names begin with `mcp_`.
-- Writer mode intentionally hides dynamic MCP and runtime-plugin tools; use its native fiction tools instead.
-- Prefer built-in workspace tools for repository-local file edits, reads, and commands.
-- Use MCP tools when the task clearly depends on capabilities provided by configured external servers.
-- Inspect the tool description and required arguments before calling any MCP tool.
-""".strip())
-
     shared_sections.append(
         render_runtime_media_capabilities_digest(
             build_media_capabilities(config=config)

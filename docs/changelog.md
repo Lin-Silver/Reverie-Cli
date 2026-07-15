@@ -1,5 +1,14 @@
 ## Reverie CLI v2.3.5 - Unreleased
 
+* Upgraded Codex reverse-proxy transport with query-safe Responses URL resolution, custom model ids and headers, environment-key/no-auth modes, proxy-safe identity headers, explicit stream failures, strict tool schemas, dynamic cross-platform Codex user agents, and live CLI-cache-first GPT-5.6 model discovery.
+* Added workspace mutation isolation: every AI tool call is wrapped in an executable-root internal shadow-Git checkpoint, only `delete_file` may leave a file deleted, blocked deletions are restored automatically, and approved deletions receive a separate timestamped backup under `.reverie/projects/<project-path-key>/deleted-files/`.
+* Enforced workspace-only path arguments for mutating tools, permanently disabled inline interpreter/shell code in `command_exec`, retained direct terminal deletion/move blocks, and added regression coverage for traversal, ignored files, outside-workspace writes, deletion restoration, and deletion archives.
+* Upgraded the unified `@` picker to consume the Context Engine index and return both files and code symbols, including line-range mentions, with a scrollable cross-platform selector and transient Windows rendering.
+* Exactly pinned maintained Python dependencies and the optional hardware-specific TTI stack, added a dependency-pin/synchronization policy check, expanded test coverage to Linux, Windows, macOS, and Python 3.10/3.12/3.14, and added a dedicated CI security/coverage gate.
+* Marked `2.3.5` as a development version only and gated the rolling GitHub Release behind an explicit manual `publish_release` input; push, pull-request, and scheduled builds now produce workflow artifacts without publishing.
+* Moved Harness/checkpoint prompt enrichment off the interactive Agent critical path and warmed Skills for the active mode during Discovery, reducing the measured source Agent first-paint path from roughly 249 ms to 12 ms with the current `dist` configuration.
+* Made automatic MCP discovery silent and background-only. Pending or failed servers contribute no tools, resource tools, server guidance, prompt content, or tool descriptions to model context; `/mcp` status reads cached health without waiting for network probes.
+* Hardened the Windows packager to build `reverie.exe` in a staging directory before replacing the deployed binary, with bounded retries and an actionable error when another process holds `dist\reverie.exe` open.
 * Added the built-in Opencode (`/oc`) source, completed the native ModernGL framebuffer path and backend diagnostics, implemented the session selector, made recoverable failures observable across the package, introduced domain-specific context/runtime type names with compatibility aliases, added cross-platform CI and complete SDK bridge smoke checks, consolidated duplicate internals, repaired packaging/documentation/licensing, and limited the maintained roadmap to remaining game-development work.
 
 ---

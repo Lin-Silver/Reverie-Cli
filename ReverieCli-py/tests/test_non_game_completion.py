@@ -95,7 +95,11 @@ def test_ci_covers_cross_platform_tests_and_packaged_bridge_contract() -> None:
     build_workflow = (repo_root / ".github" / "workflows" / "build-windows-exe.yml").read_text(encoding="utf-8")
     assert "ubuntu-latest" in test_workflow
     assert "windows-latest" in test_workflow
-    assert 'python-version: ["3.10", "3.12"]' in test_workflow
+    for version in ('python-version: "3.10"', 'python-version: "3.12"', 'python-version: "3.14"'):
+        assert version in test_workflow
+    assert "macos-latest" in test_workflow
     assert "python -m pytest -q" in test_workflow
     assert "scripts/smoke_sdk_bridge.py" in test_workflow
     assert "scripts\\smoke_sdk_bridge.py --executable .\\dist\\reverie.exe" in build_workflow
+    assert "publish_release:" in build_workflow
+    assert "github.event_name == 'workflow_dispatch' && inputs.publish_release" in build_workflow

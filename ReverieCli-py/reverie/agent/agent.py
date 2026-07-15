@@ -3764,6 +3764,10 @@ class ReverieAgent:
 
         if event_type == "finish":
             state.set_finish_reason(event.get("reason"))
+            return
+
+        if event_type == "error":
+            raise RuntimeError(str(event.get("message", "") or "Codex upstream request failed"))
 
     def _iter_openai_sdk_stream_events(self, response: Any) -> Generator[Dict[str, Any], None, None]:
         """Translate OpenAI SDK streaming chunks into normalized events."""
@@ -4079,20 +4083,21 @@ class ReverieAgent:
 
             from ..codex import (
                 build_codex_request_payload,
-                detect_codex_cli_credentials,
                 get_codex_request_headers,
                 normalize_codex_config,
                 parse_codex_sse_event,
+                resolve_codex_credentials,
                 resolve_codex_request_url,
             )
 
             cfg = normalize_codex_config(getattr(self.config, "codex", {}))
-            cred = detect_codex_cli_credentials()
-            if cred.get("found"):
-                self.api_key = str(cred.get("api_key", "")).strip()
-            if not self.api_key:
-                raise ValueError("Codex CLI credentials were not found. Please run /codex login first.")
             request_url = resolve_codex_request_url(self.base_url, self.endpoint or cfg.get("endpoint", ""))
+            cred = resolve_codex_credentials(cfg, request_url=request_url)
+            if not cred.get("found"):
+                raise ValueError(
+                    "Codex credentials were not found. Run /codex login or configure the reverse proxy auth_mode/api_key_env."
+                )
+            self.api_key = str(cred.get("api_key", "")).strip()
             payload = build_codex_request_payload(
                 model_name=self.model,
                 messages=messages,
@@ -4106,6 +4111,7 @@ class ReverieAgent:
                 auth_mode=str(cred.get("auth_mode", "")).strip(),
                 extra_headers=self.custom_headers,
                 stream=True,
+                request_url=request_url,
             )
 
             effective_timeout = self._resolve_provider_timeout()
@@ -6066,6 +6072,11 @@ class ReverieAgent:
         cache_dir = Path(project_data_dir) if project_data_dir else get_project_data_dir(Path(project_root))
         request_messages = self._build_messages()
         client = self._ensure_client() if self.provider in {"openai-chat", "openai-responses", "anthropic"} else None
+        provider_base_url = self.base_url
+        if self.provider == "codex":
+            from ..codex import resolve_codex_request_url
+
+            provider_base_url = resolve_codex_request_url(self.base_url, self.endpoint)
 
         self._auto_context_compaction_active = True
         try:
@@ -6077,7 +6088,7 @@ class ReverieAgent:
                     model=self.model,
                     session_id=session_id,
                     provider=self.provider,
-                    base_url=self.base_url,
+                    base_url=provider_base_url,
                     api_key=self.api_key,
                     custom_headers=self.custom_headers,
                     workspace_stats_manager=self.tool_executor.context.get("workspace_stats_manager"),
@@ -6207,6 +6218,11 @@ class ReverieAgent:
         self._auto_context_rotation_active = True
         try:
             try:
+                provider_base_url = self.base_url
+                if self.provider == "codex":
+                    from ..codex import resolve_codex_request_url
+
+                    provider_base_url = resolve_codex_request_url(self.base_url, self.endpoint)
                 handoff = build_session_handoff_packet(
                     messages=self._build_messages(),
                     client=self._ensure_client() if self.provider in {"openai-chat", "openai-responses", "anthropic"} else None,
@@ -6215,7 +6231,7 @@ class ReverieAgent:
                     session_id=session_id,
                     current_tokens=current_tokens,
                     max_tokens=max_tokens,
-                    base_url=self.base_url,
+                    base_url=provider_base_url,
                     api_key=self.api_key,
                     custom_headers=self.custom_headers,
                     workspace_memory=workspace_memory,

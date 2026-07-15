@@ -61,6 +61,7 @@ SubAgents are enabled in `reverie` and `computer-controller` modes, including NV
 | `/codex thinking <low\|medium\|high\|extra high>` | Set Codex reasoning depth |
 | `/codex low\|medium\|high\|extra high` | Shortcut for reasoning depth |
 | `/codex endpoint <value>` | Set or clear Codex endpoint override |
+| `/codex auth <auto\|codex\|api_key\|none> [ENV_NAME]` | Select official/proxy authentication without putting a secret in command history |
 | `/nvidia` | Show NVIDIA configuration |
 | `/nvidia key` | Save the NVIDIA API key from build.nvidia.com/settings/api-keys |
 | `/nvidia activate` | Switch active source to NVIDIA |
@@ -100,6 +101,8 @@ ModelScope is called through the Anthropic SDK and reads `MODELSCOPE_API_KEY`, `
 | `/tti models` | Open the TTI model selector |
 | `/tti add` | Add a TTI model entry |
 | `/tti <prompt>` | Generate an image using the default TTI model |
+
+MCP discovery runs silently in the background. A server's tools, resource access, prompt guidance, and tool descriptions become visible to the model only after that server passes discovery; pending and failed servers remain excluded. `/mcp status` and its refresh UI read the cached health snapshot without blocking the terminal on network checks.
 
 `/CE` is case-sensitive.
 
@@ -178,7 +181,7 @@ On Windows, slash commands are suggested while typing. Use Up/Down to select a v
 
 Linux and macOS use the resize-aware prompt editor with live completion, editable history, `Ctrl+R` search, multiline input, and the unified `@` file picker. `Esc+Enter` submits and `Ctrl+J` inserts a newline.
 
-`@` searches every workspace file, not only visual media. Selecting an image or video keeps the existing inline-attachment behavior when the active model supports it; selecting code, text, configuration, or other files inserts a normal workspace mention for retrieval.
+`@` searches Context Engine indexed files and code symbols, not only visual media. Symbol selections insert `@path#Lstart-Lend`; image or video selections keep the existing inline-attachment behavior when the active model supports it. Before the index is ready, Reverie falls back to a workspace file scan.
 
 ## Session workflow commands
 

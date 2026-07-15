@@ -29,6 +29,7 @@ from ..tools.registry import (
 )
 from ..security_policy import normalize_permission_level, permission_denial
 from ..plugin.dynamic_tool import RuntimePluginDynamicTool
+from ..workspace_guard import ShadowGitManager, WorkspaceGuardError
 
 
 logger = logging.getLogger(__name__)
@@ -87,6 +88,7 @@ class ToolExecutor:
             # Bare executors are an internal/test API. User-facing Agents replace
             # this with Config.security immediately after construction.
             'security': {'permission_level': 'full_control'},
+            'shadow_git_manager': ShadowGitManager(project_root, get_project_data_dir(project_root)),
         }
 
         # Initialize tools
@@ -282,6 +284,14 @@ class ToolExecutor:
     def _tool_is_visible(self, name: str, tool: BaseTool, mode: object) -> bool:
         """Return whether a tool should be exposed in the supplied mode."""
         normalized_mode = normalize_mode(mode)
+        if name in {"list_mcp_resources", "read_mcp_resource"}:
+            runtime = self.context.get("mcp_runtime")
+            if runtime is not None and hasattr(runtime, "has_healthy_servers"):
+                try:
+                    if not runtime.has_healthy_servers():
+                        return False
+                except Exception:
+                    return False
         if normalized_mode == "writer" and isinstance(tool, (MCPDynamicTool, RuntimePluginDynamicTool)):
             return False
         if isinstance(tool, MCPDynamicTool) and not tool.visible_in_mode(normalized_mode):
@@ -952,6 +962,14 @@ class ToolExecutor:
             )
             self._record_operation_usage(tool, result)
             return result
+
+        shadow_guard = self.context.get("shadow_git_manager")
+        if isinstance(shadow_guard, ShadowGitManager) and not bool(getattr(tool, "read_only", False)):
+            for raw_path in self._path_like_argument_values(normalized_arguments):
+                try:
+                    shadow_guard.ensure_workspace_path(raw_path, purpose=f"run {tool.name}")
+                except WorkspaceGuardError as exc:
+                    return ToolResult.fail(str(exc))
         
         previous_tool_name = self.context.get("active_tool_name")
         previous_tool_args = self.context.get("active_tool_arguments")
@@ -989,9 +1007,31 @@ class ToolExecutor:
                 self._record_operation_usage(tool, result)
                 return result
 
+        before_checkpoint = None
+        if isinstance(shadow_guard, ShadowGitManager):
+            try:
+                before_checkpoint = shadow_guard.checkpoint(
+                    f"Before tool {tool.name}",
+                    force_paths=self._candidate_file_paths(tool.name, normalized_arguments),
+                )
+            except WorkspaceGuardError as exc:
+                return ToolResult.fail(f"Workspace checkpoint unavailable; tool execution refused: {exc}")
+
         started = time.perf_counter()
         try:
             result = tool.execute(**normalized_arguments)
+            if isinstance(shadow_guard, ShadowGitManager) and before_checkpoint is not None:
+                deleted_paths = shadow_guard.deleted_paths_since(before_checkpoint.commit)
+                if deleted_paths and tool.name != "delete_file":
+                    restored = shadow_guard.restore_paths(before_checkpoint.commit, deleted_paths)
+                    result = ToolResult.fail(
+                        "Deletion was blocked because only the delete_file tool may remove files. "
+                        f"Restored {len(restored)} file(s): {', '.join(restored[:8])}"
+                    )
+                after_checkpoint = shadow_guard.checkpoint(f"After tool {tool.name}")
+                refresh_context = self.context.get("refresh_context_after_mutation")
+                if (after_checkpoint.changed or bool(deleted_paths)) and callable(refresh_context):
+                    refresh_context()
             result = self._apply_result_budget(tool, result)
             if lifecycle_manager and hasattr(lifecycle_manager, "after_tool"):
                 try:
@@ -1042,6 +1082,14 @@ class ToolExecutor:
             self._record_operation_usage(tool, result, elapsed_ms)
             return result
         except Exception as e:
+            if isinstance(shadow_guard, ShadowGitManager) and before_checkpoint is not None:
+                try:
+                    deleted_paths = shadow_guard.deleted_paths_since(before_checkpoint.commit)
+                    if deleted_paths:
+                        shadow_guard.restore_paths(before_checkpoint.commit, deleted_paths)
+                    shadow_guard.checkpoint(f"Failed tool {tool.name}")
+                except Exception:
+                    report_suppressed_exception("restore workspace after failed tool", logger=logger)
             result = ToolResult.fail(f"Tool execution error: {str(e)}")
             if lifecycle_manager and hasattr(lifecycle_manager, "after_tool"):
                 try:

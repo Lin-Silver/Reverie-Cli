@@ -32,9 +32,9 @@ def test_approval_handler_supports_once_and_session(tmp_path: Path) -> None:
     calls = []
     executor.update_context("tool_approval_handler", lambda tool, args, denial: calls.append(tool.name) or next(decisions))
 
-    first = executor.execute("command_exec", {"command": "python -c \"print('one')\""})
-    second = executor.execute("command_exec", {"command": "python -c \"print('two')\""})
-    third = executor.execute("command_exec", {"command": "python -c \"print('three')\""})
+    first = executor.execute("command_exec", {"command": "python --version"})
+    second = executor.execute("command_exec", {"command": "python --version"})
+    third = executor.execute("command_exec", {"command": "python --version"})
 
     assert first.success and second.success and third.success
     assert calls == ["command_exec", "command_exec"]
@@ -44,7 +44,7 @@ def test_approval_handler_keeps_deny_as_default(tmp_path: Path) -> None:
     executor = ToolExecutor(tmp_path)
     executor.update_context("agent", _Agent())
     executor.update_context("tool_approval_handler", lambda *args: "deny")
-    result = executor.execute("command_exec", {"command": "python -c \"print('blocked')\""})
+    result = executor.execute("command_exec", {"command": "python --version"})
     assert not result.success
 
 
@@ -98,3 +98,32 @@ def test_workspace_mention_candidates_include_non_visual_files(tmp_path: Path) -
 
     candidates = interface._collect_workspace_mention_candidates("feature")
     assert [item["path"] for item in candidates] == ["src/feature.py"]
+
+
+def test_workspace_mention_candidates_include_indexed_symbols(tmp_path: Path) -> None:
+    class _Symbol:
+        name = "build_feature"
+        qualified_name = "module.build_feature"
+        kind = "function"
+        file_path = "src/feature.py"
+        start_line = 12
+        end_line = 19
+
+    class _Symbols:
+        @staticmethod
+        def search(query: str, limit: int):
+            assert query == "build"
+            return [_Symbol()]
+
+    class _Indexer:
+        _file_info = {"src/feature.py": {"size": 42}}
+        symbol_table = _Symbols()
+
+    interface = object.__new__(ReverieInterface)
+    interface.project_root = tmp_path
+    interface.indexer = _Indexer()
+
+    candidates = interface._collect_workspace_mention_candidates("build")
+
+    symbol = next(item for item in candidates if item["kind"] == "symbol")
+    assert interface._format_workspace_mention(symbol) == "@src/feature.py#L12-L19"

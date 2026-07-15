@@ -1,13 +1,16 @@
 # Reverie CLI
 
+Current development version: **v2.3.5 (unreleased)**. The latest stable release remains **v2.3.4**.
+
 **Reverie** is an open-source, terminal-based agentic coding assistant that wraps large language models to enable natural language interaction with your local codebase. It combines multi-provider LLM access, a powerful Context Engine for codebase intelligence, session management, inline media support, 3D/Game modeling workflows, browser automation, and more — all in a unified terminal interface.
 
+- **Core function**: terminal-based AI coding assistant with local workspace tools, context retrieval, session continuity, and multi-provider LLM access
+- **Optional workflows**: spec-driven development, creative writing, browser automation, computer control, and game/3D asset authoring
 - **Multi-provider LLM** support: NVIDIA, ModelScope, Codex (ChatGPT), SenseNova, unlimited.surf, AIHubMix, Agnes, WebGemini
-- **Multiple modes**: General coding, spec-driven development, game production, creative writing, computer control, and more
 - **Context Engine**: Augment-style codebase retrieval, LSP integration, git history analysis
 - **Session management**: Conversation persistence, rotation, working memory injection, handoff packets
 - **Inline media**: Attach images and video directly in conversations
-- **3D/Game workflows**: Built-in Blender authoring, Blockbench `.bbmodel` validation, legacy Godot/O3DE inspection and migration into Reverie Engine, Ashfox MCP support
+- **Experimental integrations**: Blender, Blockbench, legacy Godot/O3DE migration, Ashfox MCP, image/video generation, and embedded browser automation
 - **Browser automation**: Embedded Chromium runtime for web inspection and interaction
 - **Subagent delegation**: Parallel investigation and implementation tasks
 - **Harness audit**: Prompt-level reporting, verification tracking, playbook recommendations
@@ -45,9 +48,9 @@ Reverie supports a wide range of LLM providers out of the box. Each provider has
 
 | Provider | Description | Key Models |
 |----------|-------------|------------|
-| **NVIDIA** | NVIDIA-hosted catalog via `integrate.api.nvidia.com` | Qwen3.5 397B, DeepSeek V4 Pro/V4 Flash, Kimi K2.6, GLM-5.1/4.7, MiniMax M2.7/M3, Mistral Small 4, Mistral Medium 3.5, Mistral Large 3, Step-3.5/3.7-Flash, GPT-OSS-120B, Nemotron 3 Super, Qwen3.5 122B |
+| **NVIDIA** | NVIDIA-hosted catalog via `integrate.api.nvidia.com` | Qwen3.5 397B, DeepSeek V4 Pro/V4 Flash, Kimi K2.6, GLM-5.2/4.7, MiniMax M2.7/M3, Mistral Small 4, Mistral Medium 3.5, Mistral Large 3, Step-3.5/3.7-Flash, GPT-OSS-120B, Nemotron 3 Super/Ultra, Qwen3.5 122B |
 | **ModelScope** | Anthropic-compatible API on `api-inference.modelscope.cn` — all models supporting the Anthropic SDK can be used | GLM-5.1, GLM-5, DeepSeek V4 Pro, DeepSeek V4 Flash, MiniMax M2.7, Qwen3.5 397B A17B (catalog is statically defined in code) |
-| **Codex** | ChatGPT backend (OpenAI-compatible Responses API) | GPT-5.5 and other ChatGPT/Codex models (auto-detected from local Codex source or CLI cache) |
+| **Codex** | ChatGPT backend or Responses-compatible reverse proxy | GPT-5.6, GPT-5.5, and other models discovered from the live Codex CLI cache |
 | **SenseNova** | SenseTime SenseNova API with model-specific OpenAI/Anthropic transports | DeepSeek V4 Flash (1M context), SenseNova 6.7 Flash Lite (vision) |
 | **unlimited.surf** | Gateway service with request transport | GPT-5 (via `unlimited.surf`), with selectable effort (low/medium/high) |
 | **AIHubMix** | Third-party API gateway (OpenAI-compatible) | GPT-5.5 Free (with/without reasoning), GPT-4o Free, GPT-4.1 Free |
@@ -270,7 +273,7 @@ Reverie uses `config.json` stored in the project's `.reverie/` directory or the 
 
 ```json
 {
-  "config_version": "2.3.4",
+  "config_version": "2.3.5",
   "active_model_source": "standard",
   "models": [
     {
@@ -299,6 +302,10 @@ Reverie uses `config.json` stored in the project's `.reverie/` directory or the 
   "codex": {
     "selected_model_id": "gpt-5.5",
     "api_url": "https://chatgpt.com/backend-api/codex",
+    "endpoint": "",
+    "auth_mode": "auto",
+    "api_key_env": "CODEX_PROXY_API_KEY",
+    "custom_headers": {},
     "reasoning_effort": "medium",
     "timeout": 1200
   },
@@ -453,7 +460,7 @@ Desktop orchestration through an embedded Open Computer Use-compatible desktop r
 
 ### NVIDIA (Recommended for High-Throughput)
 
-NVIDIA's hosted API at `integrate.api.nvidia.com` provides access to 16 models. Key configurations:
+NVIDIA's hosted API at `integrate.api.nvidia.com` provides access to 16 supported models. Key configurations:
 
 **Model catalog (hardcoded in `reverie/nvidia.py`):**
 
@@ -461,7 +468,7 @@ NVIDIA's hosted API at `integrate.api.nvidia.com` provides access to 16 models. 
 |----------|-------------|-----------|--------|----------|---------|
 | `qwen/qwen3.5-397b-a17b` | Qwen3.5 397B A17B | request | ✅ | toggle | 262K |
 | `qwen/qwen3.5-122b-a10b` | Qwen3.5 122B A10B | request | ✅ | toggle | 262K |
-| `z-ai/glm-5.1` | GLM-5.1 | openai-sdk | ❌ | toggle | 131K |
+| `nvidia/nemotron-3-ultra-550b-a55b` | Nemotron 3 Ultra 550B | openai-sdk | ❌ | fixed thinking | 1M |
 | `z-ai/glm4.7` | GLM-4.7 | openai-sdk | ❌ | toggle | 131K |
 | `deepseek-ai/deepseek-v4-pro` | DeepSeek V4 Pro | openai-sdk | ❌ | effort (none/high/max) | 1M |
 | `deepseek-ai/deepseek-v4-flash` | DeepSeek V4 Flash | openai-sdk | ❌ | effort (none/low/med/high) | 1M |
@@ -478,10 +485,10 @@ NVIDIA's hosted API at `integrate.api.nvidia.com` provides access to 16 models. 
 
 **Transport types:**
 - `request` — Direct HTTP POST with chat-template kwargs (for models like Kimi K2.6, MiniMax M3, Qwen3.5, Mistral)
-- `openai-sdk` — OpenAI-compatible SDK transport (for models like DeepSeek V4 Pro, GLM-5.1, GPT-OSS-120B)
+- `openai-sdk` — OpenAI-compatible SDK transport (for models like DeepSeek V4 Pro, Nemotron 3 Ultra, GPT-OSS-120B)
 
 **Thinking control:**
-- `toggle` — Binary on/off (Qwen3.5, GLM-5.1/4.7, Kimi K2.6)
+- `toggle` — Binary on/off (Qwen3.5, GLM-4.7, Kimi K2.6)
 - `effort` — Selectable levels: `none`/`low`/`medium`/`high`/`max` (DeepSeek V4 Pro, Nemotron, Mistral models, GPT-OSS-120B, MiniMax M3)
 - `fixed` — Always-on thinking (Step-3.5-Flash)
 
@@ -508,9 +515,11 @@ ModelScope provides an **Anthropic-compatible** inference API at `https://api-in
 
 Connects to ChatGPT's backend API. Supports:
 - OAuth login via `~/.codex/auth.json` (auto-detected)
+- Responses-compatible reverse proxies with separate `auto`, local Codex, environment-key, or no-auth modes
+- Proxy-safe headers that do not forward ChatGPT account identity to third-party hosts
 - Responses API format with reasoning effort control
 - Vision input support
-- Model catalog loaded from local Codex source or CLI cache
+- Model catalog loaded from the live Codex CLI cache first, with source and built-in fallbacks
 
 ### SenseNova
 
@@ -749,17 +758,17 @@ new_session = manager.rotate_session(
 
 ## Advanced Features
 
-### Inline Images & Video
+### Workspace Mentions and Inline Media
 
-Attach media files directly:
+Type `@` to search indexed workspace files and symbols. Code-symbol selections include a line range; image and video selections retain inline-media behavior.
 
 ```
-# Reference an image in your message
+# Reference code, a symbol, or an image in your message
+"Review @src/auth.py"
+"Update @src/auth.py#L40-L88"
 "Review this screenshot: @./screenshot.png"
 "Here's the design: @./mockup.png and @./diagram.jpg"
 ```
-
-Supported: `.png`, `.jpg`, `.jpeg`, (video extensions configurable).
 
 ### Browser Control
 

@@ -1087,7 +1087,7 @@ def test_local_build_scripts_bundle_embedded_chromium() -> None:
     assert 'add_tree_if_exists(browser_src / "ms-playwright", "reverie_resources/browser/ms-playwright")' in spec
     assert "Missing required bundled resources" in spec
     assert 'playwright_root.rglob("chrome.exe")' in spec
-    assert '"playwright>=1.56.0"' in setup
+    assert '"playwright==1.61.0"' in setup
 
 
 def test_mcp_resource_tools_list_and_read(tmp_path: Path) -> None:

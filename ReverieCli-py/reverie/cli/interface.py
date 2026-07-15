@@ -84,6 +84,7 @@ from ..nvidia import (
     resolve_nvidia_selected_model,
 )
 from ..plugin.runtime_manager import RuntimePluginManager
+from ..workspace_guard import ShadowGitManager
 
 
 _THINKING_MARKDOWN_SUBJECT_RE = re.compile(r"^\s*\*\*(.+?)\*\*\s*$")
@@ -975,9 +976,11 @@ class ReverieInterface:
             project_root=self.project_root,
             runtime_plugin_manager=self.runtime_plugin_manager,
         )
+        self.mcp_runtime.set_discovery_listener(self._handle_mcp_discovery_complete)
         self.rules_manager = RulesManager(project_root)
         self._context_engine_init_lock = threading.RLock()
         self._context_engine_warmup_thread: Optional[threading.Thread] = None
+        self._agent_enrichment_thread: Optional[threading.Thread] = None
         self._init_workspace_services()
         
         self.indexer: Optional[CodebaseIndexer] = None
@@ -1079,6 +1082,7 @@ class ReverieInterface:
             else self.config_manager.project_data_dir
         )
         self.project_data_dir.mkdir(parents=True, exist_ok=True)
+        self.shadow_git_manager = ShadowGitManager(self.project_root, self.project_data_dir)
 
         self.indexer = None
         self.retriever = None
@@ -1357,11 +1361,13 @@ class ReverieInterface:
         timing = f"+{delta_ms:.0f}ms | total {total_ms:.0f}ms"
         return f"{meta_text} | {timing}" if meta_text else timing
 
-    def _warm_startup_discovery(self) -> None:
+    def _warm_startup_discovery(self, config: Optional[Config] = None) -> None:
         """Warm skill and runtime-plugin catalogs after the banner is visible."""
         if self._startup_discovery_ready:
             return
 
+        active_config = config or self._load_active_runtime_config()
+        self.skills_manager.set_active_mode(normalize_mode(getattr(active_config, "mode", "reverie")))
         summaries: List[str] = []
         errors: List[str] = []
 
@@ -1419,9 +1425,10 @@ class ReverieInterface:
             self._show_pending_config_notice()
             self._show_unconfigured_model_notice(config)
             self._show_startup_configuration_log(config)
-            self._warm_startup_discovery()
+            self._warm_startup_discovery(config=config)
             
-            self._init_agent()
+            self._init_agent(defer_runtime_enrichment=True)
+            self._start_background_agent_enrichment()
             self.command_handler = CommandHandler(self.console, self._get_app_context())
             if not self.session_manager.get_current_session():
                 self._init_session()
@@ -2355,12 +2362,59 @@ class ReverieInterface:
         return candidates[: max(1, int(limit or 80))]
 
     def _collect_workspace_mention_candidates(self, query: str = "", limit: int = 500) -> List[Dict[str, Any]]:
-        """Collect any workspace file for the unified @ mention picker."""
+        """Collect indexed files and symbols for the unified @ mention picker."""
         query_text = str(query or "").strip().lower()
         ignored = {".git", ".reverie", "__pycache__", ".pytest_cache", ".mypy_cache", "node_modules", "venv", ".venv", "env", "dist", "build", "target"}
         root = Path(self.project_root).resolve()
         candidates: List[Dict[str, Any]] = []
         tokens = [token.lower() for token in re.findall(r"[A-Za-z0-9_.\-\u4e00-\u9fff]+", query_text)]
+        indexer = getattr(self, "indexer", None)
+        indexed_files = getattr(indexer, "_file_info", {}) if indexer is not None else {}
+        if isinstance(indexed_files, dict) and indexed_files:
+            for raw_path, info in indexed_files.items():
+                path = Path(raw_path)
+                try:
+                    rel = path.resolve().relative_to(root).as_posix() if path.is_absolute() else path.as_posix()
+                except (OSError, ValueError):
+                    continue
+                haystack = rel.lower()
+                if tokens and not all(token in haystack for token in tokens):
+                    continue
+                score = 24.0 if query_text and query_text in haystack else float(sum(token in haystack for token in tokens) * 5)
+                candidates.append(
+                    {
+                        "path": rel,
+                        "name": Path(rel).name,
+                        "size": int(getattr(info, "size", 0) or 0),
+                        "mtime": float(getattr(info, "mtime", 0.0) or 0.0),
+                        "kind": "file",
+                        "score": score,
+                    }
+                )
+            if query_text and getattr(indexer, "symbol_table", None) is not None:
+                for symbol in indexer.symbol_table.search(query_text, limit=max(40, min(limit, 200))):
+                    try:
+                        symbol_path = Path(str(symbol.file_path))
+                        rel = symbol_path.resolve().relative_to(root).as_posix() if symbol_path.is_absolute() else symbol_path.as_posix()
+                    except (OSError, ValueError):
+                        continue
+                    candidates.append(
+                        {
+                            "path": rel,
+                            "name": str(symbol.name),
+                            "kind": "symbol",
+                            "symbol": str(symbol.qualified_name),
+                            "symbol_kind": str(getattr(symbol.kind, "name", symbol.kind)).lower(),
+                            "start_line": int(symbol.start_line),
+                            "end_line": int(symbol.end_line),
+                            "size": 0,
+                            "mtime": 0.0,
+                            "score": 40.0 if str(symbol.name).lower() == query_text else 30.0,
+                        }
+                    )
+            candidates.sort(key=lambda item: (-float(item["score"]), str(item["path"]).lower(), str(item.get("name", "")).lower()))
+            return candidates[:max(1, int(limit or 500))]
+
         for current_root, dirs, files in os.walk(root):
             dirs[:] = [name for name in dirs if name not in ignored and not name.endswith(".egg-info")]
             for name in files:
@@ -2379,6 +2433,10 @@ class ReverieInterface:
         return candidates[:max(1, int(limit or 500))]
 
     def _format_attachment_candidate(self, item: Dict[str, Any]) -> str:
+        if item.get("kind") == "symbol":
+            line = int(item.get("start_line", 0) or 0)
+            kind = str(item.get("symbol_kind", "symbol") or "symbol")
+            return f"[symbol:{kind}] {item.get('symbol') or item.get('name')}  —  {item.get('path')}:{line}"
         size = int(item.get("size", 0) or 0)
         if size >= 1024 * 1024:
             size_text = f"{size / (1024 * 1024):.1f} MB"
@@ -2439,7 +2497,7 @@ class ReverieInterface:
 
             if parent == current:
                 file_entry = dict(item)
-                file_entry["kind"] = "file"
+                file_entry["kind"] = str(item.get("kind", "file") or "file")
                 file_entry["name"] = Path(rel_path).name
                 files.append(file_entry)
 
@@ -2471,21 +2529,34 @@ class ReverieInterface:
         try:
             import msvcrt
         except ImportError:
-            for index, item in enumerate(candidates[:12], start=1):
-                self.console.print(f"{index}. {escape(self._format_attachment_candidate(item))}")
-            choice = Prompt.ask("Select file number", default="1")
             try:
-                selected_index = max(1, min(int(choice), min(len(candidates), 12))) - 1
-            except ValueError:
-                selected_index = 0
-            return candidates[selected_index]
+                from prompt_toolkit.shortcuts import radiolist_dialog
+
+                values = [
+                    (index, self._format_attachment_candidate(item))
+                    for index, item in enumerate(candidates)
+                ]
+                selected_index = radiolist_dialog(
+                    title="Select Workspace File or Symbol",
+                    text="Use arrows to scroll, Enter to select, and Esc to cancel.",
+                    values=values,
+                ).run()
+                return candidates[int(selected_index)] if selected_index is not None else None
+            except ImportError:
+                for index, item in enumerate(candidates[:50], start=1):
+                    self.console.print(f"{index}. {escape(self._format_attachment_candidate(item))}")
+                choice = Prompt.ask("Select file or symbol number", default="1")
+                try:
+                    selected_index = max(1, min(int(choice), min(len(candidates), 50))) - 1
+                except ValueError:
+                    selected_index = 0
+                return candidates[selected_index]
 
         selected = 0
         current_dir = ""
         visible_count = 10
 
-        def render() -> None:
-            self.console.print()
+        def render() -> Panel:
             title = "Select Workspace File"
             if query:
                 title += f" - {query}"
@@ -2500,50 +2571,52 @@ class ReverieInterface:
                 marker = ">" if offset == selected else " "
                 style = f"bold {self.theme.BLUE_SOFT}" if offset == selected else self.theme.TEXT_DIM
                 table.add_row(marker, Text(self._format_attachment_browser_entry(item), style=style))
-            self.console.print(
-                Panel(
-                    table,
-                    title=f"[bold {self.theme.PURPLE_SOFT}]{escape(title)}[/bold {self.theme.PURPLE_SOFT}]",
-                    subtitle=f"[{self.theme.TEXT_DIM}]Up/Down select · Enter open/select · Backspace up · Esc cancel[/{self.theme.TEXT_DIM}]",
-                    border_style=self.theme.BORDER_PRIMARY,
-                    box=box.ROUNDED,
-                )
+            return Panel(
+                table,
+                title=f"[bold {self.theme.PURPLE_SOFT}]{escape(title)}[/bold {self.theme.PURPLE_SOFT}]",
+                subtitle=f"[{self.theme.TEXT_DIM}]Up/Down select · Enter open/select · Backspace up · Esc cancel[/{self.theme.TEXT_DIM}]",
+                border_style=self.theme.BORDER_PRIMARY,
+                box=box.ROUNDED,
             )
 
-        render()
-        while True:
-            entries = self._attachment_browser_entries(candidates, current_dir)
-            if not entries:
-                return None
-            selected = max(0, min(selected, len(entries) - 1))
-            key = msvcrt.getwch()
-            if key in ("\x00", "\xe0"):
-                code = msvcrt.getwch()
-                if code == "H":
-                    selected = max(0, selected - 1)
-                    render()
-                elif code == "P":
-                    selected = min(len(entries) - 1, selected + 1)
-                    render()
-                continue
-            if key in ("\r", "\n"):
-                chosen = entries[selected]
-                if chosen.get("kind") == "dir":
-                    current_dir = str(chosen.get("path") or "").strip("/")
-                    selected = 0
-                    render()
+        live = Live(render(), console=self.console, transient=True, auto_refresh=False, vertical_overflow="crop")
+        live.start(refresh=True)
+        try:
+            while True:
+                entries = self._attachment_browser_entries(candidates, current_dir)
+                if not entries:
+                    return None
+                selected = max(0, min(selected, len(entries) - 1))
+                key = msvcrt.getwch()
+                if key in ("\x00", "\xe0"):
+                    code = msvcrt.getwch()
+                    if code == "H":
+                        selected = max(0, selected - 1)
+                        live.update(render(), refresh=True)
+                    elif code == "P":
+                        selected = min(len(entries) - 1, selected + 1)
+                        live.update(render(), refresh=True)
                     continue
-                return chosen
-            if key == "\x08":
-                if current_dir:
-                    parent = str(Path(current_dir).parent).replace("\\", "/")
-                    current_dir = "" if parent == "." else parent.strip("/")
-                    selected = 0
-                    render()
-                    continue
-                return None
-            if key == "\x1b":
-                return None
+                if key in ("\r", "\n"):
+                    chosen = entries[selected]
+                    if chosen.get("kind") == "dir":
+                        current_dir = str(chosen.get("path") or "").strip("/")
+                        selected = 0
+                        live.update(render(), refresh=True)
+                        continue
+                    return chosen
+                if key == "\x08":
+                    if current_dir:
+                        parent = str(Path(current_dir).parent).replace("\\", "/")
+                        current_dir = "" if parent == "." else parent.strip("/")
+                        selected = 0
+                        live.update(render(), refresh=True)
+                        continue
+                    return None
+                if key == "\x1b":
+                    return None
+        finally:
+            live.stop()
 
     def _select_inline_image_mention_for_prompt(self, query: str = "") -> Optional[str]:
         """Return a ready-to-insert `@path` mention for the interactive input line."""
@@ -2590,8 +2663,17 @@ class ReverieInterface:
         if not selected:
             self._show_activity_event("Mention", "File selection cancelled", status="info")
             return None
-        mention = self._format_inline_image_mention(str(selected.get("path", "")))
+        mention = self._format_workspace_mention(selected)
         self._show_activity_event("Mention", "Workspace file selected", status="success", detail=f"Queued {mention} in the prompt.")
+        return mention
+
+    def _format_workspace_mention(self, selected: Dict[str, Any]) -> str:
+        path = str(selected.get("path", "") or "")
+        mention = self._format_inline_image_mention(path)
+        if selected.get("kind") == "symbol":
+            start = int(selected.get("start_line", 0) or 0)
+            end = int(selected.get("end_line", start) or start)
+            return f"{mention}#L{start}-L{max(start, end)}"
         return mention
 
     def _handle_attachment_picker_request(self, user_input: str) -> bool:
@@ -2604,7 +2686,7 @@ class ReverieInterface:
         if not selected:
             self._show_activity_event("Mention", "File selection cancelled", status="info")
             return True
-        self._store_pending_input_draft(f"{self._format_inline_image_mention(str(selected['path']))} ")
+        self._store_pending_input_draft(f"{self._format_workspace_mention(selected)} ")
         self._show_activity_event(
             "Mention",
             "Workspace file selected",
@@ -3426,11 +3508,13 @@ class ReverieInterface:
         self.agent.tool_executor.update_context('skills_manager', self.skills_manager)
         self.agent.tool_executor.update_context('session_manager', self.session_manager)
         self.agent.tool_executor.update_context('project_data_dir', self.project_data_dir)
+        self.agent.tool_executor.update_context('shadow_git_manager', self.shadow_git_manager)
         self.agent.tool_executor.update_context('memory_indexer', self.memory_indexer)
         self.agent.tool_executor.update_context('memory_os', self.memory_os)
         self.agent.tool_executor.update_context('workspace_stats_manager', self.workspace_stats_manager)
         self.agent.tool_executor.update_context('lifecycle_manager', self.lifecycle_manager)
         self.agent.tool_executor.update_context('ensure_context_engine', self.ensure_context_engine)
+        self.agent.tool_executor.update_context('refresh_context_after_mutation', self._start_context_incremental_background)
         self.agent.tool_executor.update_context('ensure_git_integration', self.ensure_git_integration)
         self.agent.tool_executor.update_context('ensure_lsp_manager', self.ensure_lsp_manager)
         self.agent.tool_executor.update_context('lsp_manager', self.lsp_manager)
@@ -3596,6 +3680,7 @@ class ReverieInterface:
         config_override: Optional[Config] = None,
         *,
         persist_config_changes: bool = True,
+        defer_runtime_enrichment: bool = False,
     ) -> None:
         config = self._clone_config(config_override) if config_override is not None else self._load_active_runtime_config()
         self.mcp_runtime.set_project_root(self.project_root)
@@ -3653,6 +3738,7 @@ class ReverieInterface:
             "additional_rules": self._build_additional_rules_with_tti(
                 config,
                 include_discovery_status=include_discovery_status,
+                include_harness_guidance=not defer_runtime_enrichment,
             ),
             "mode": config.mode or "reverie",
             "provider": getattr(model, 'provider', 'openai-chat'),
@@ -3701,6 +3787,22 @@ class ReverieInterface:
         self._refresh_command_context()
         if scope_changed:
             self._init_session()
+
+    def _start_background_agent_enrichment(self, *, force_refresh: bool = False) -> bool:
+        """Probe MCP and build the full Harness prompt away from startup."""
+        if not self.agent:
+            return False
+
+        started = self.mcp_runtime.start_background_discovery(
+            force_refresh=force_refresh,
+        )
+        self._agent_enrichment_thread = getattr(self.mcp_runtime, "_background_discovery_thread", None)
+        return bool(started)
+
+    def _handle_mcp_discovery_complete(self, _health: Dict[str, Dict[str, Any]]) -> None:
+        """Refresh the current Agent only after background MCP health is known."""
+        if self.agent:
+            self._refresh_agent_prompt_guidance()
 
     def run_prompt_once(
         self,
@@ -3981,6 +4083,7 @@ class ReverieInterface:
         config: Config,
         *,
         include_discovery_status: bool = True,
+        include_harness_guidance: bool = True,
     ) -> str:
         """Append TTI model metadata from config.json into model context."""
         base_rules = (self.rules_manager.get_rules_text() or "").strip()
@@ -4019,29 +4122,35 @@ class ReverieInterface:
                 ),
             )
 
+        harness_guidance = (
+            build_harness_prompt_guidance(
+                self.project_root,
+                project_data_dir=self.project_data_dir,
+                mode=normalized_mode,
+                agent=self.agent,
+                indexer=self.indexer,
+                ensure_context_engine=self.ensure_context_engine,
+                git_integration=self.git_integration,
+                ensure_git_integration=self.ensure_git_integration,
+                lsp_manager=self.lsp_manager,
+                ensure_lsp_manager=self.ensure_lsp_manager,
+                session_manager=self.session_manager,
+                memory_indexer=self.memory_indexer,
+                operation_history=self.operation_history,
+                rollback_manager=self.rollback_manager,
+                runtime_plugin_manager=self.runtime_plugin_manager if include_discovery_status else None,
+                skills_manager=self.skills_manager if include_discovery_status else None,
+                mcp_runtime=self.mcp_runtime,
+            )
+            if include_harness_guidance
+            else ""
+        )
+
         merged_blocks = [
             tti_block
             for tti_block in [
                 "\n".join(lsp_lines),
-                build_harness_prompt_guidance(
-                    self.project_root,
-                    project_data_dir=self.project_data_dir,
-                    mode=normalized_mode,
-                    agent=self.agent,
-                    indexer=self.indexer,
-                    ensure_context_engine=self.ensure_context_engine,
-                    git_integration=self.git_integration,
-                    ensure_git_integration=self.ensure_git_integration,
-                    lsp_manager=self.lsp_manager,
-                    ensure_lsp_manager=self.ensure_lsp_manager,
-                    session_manager=self.session_manager,
-                    memory_indexer=self.memory_indexer,
-                    operation_history=self.operation_history,
-                    rollback_manager=self.rollback_manager,
-                    runtime_plugin_manager=self.runtime_plugin_manager if include_discovery_status else None,
-                    skills_manager=self.skills_manager if include_discovery_status else None,
-                    mcp_runtime=self.mcp_runtime,
-                ),
+                harness_guidance,
                 self.mcp_runtime.describe_for_prompt(),
                 self.runtime_plugin_manager.describe_for_prompt(normalized_mode) if include_discovery_status else "",
                 self.skills_manager.describe_for_prompt(force_refresh=False) if include_discovery_status else "",
@@ -4154,6 +4263,7 @@ class ReverieInterface:
             'reinit_agent': self._init_agent,
             'apply_display_preferences': self._apply_display_preferences,
             'refresh_agent_prompt_guidance': self._refresh_agent_prompt_guidance,
+            'start_mcp_background_discovery': self._start_background_agent_enrichment,
             'ensure_context_engine': self.ensure_context_engine,
             'run_full_index': self._run_context_indexing_with_progress,
             'ensure_git_integration': self.ensure_git_integration,

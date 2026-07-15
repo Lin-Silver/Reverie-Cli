@@ -12,9 +12,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import json
+import os
+import platform
+import re
 import sys
 import time
-import uuid
 from urllib.parse import urlparse
 
 from .diagnostics import report_suppressed_exception
@@ -28,8 +30,7 @@ CODEX_DEFAULT_RESPONSE_ENDPOINT = "/responses"
 CODEX_DEFAULT_MODELS_ENDPOINT = "/models"
 CODEX_TOKEN_URL = "https://auth.openai.com/oauth/token"
 CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
-CODEX_CLIENT_VERSION = "0.137.0"
-CODEX_USER_AGENT = f"codex_cli_rs/{CODEX_CLIENT_VERSION} (Windows NT 10.0; Win64; x64) Reverie/{__version__}"
+CODEX_CLIENT_VERSION = "0.144.2"
 CODEX_DEFAULT_REASONING_EFFORT = "medium"
 CODEX_DEFAULT_MAX_CONTEXT_TOKENS = 272_000
 _CODEX_CHATGPT_HOSTS = {"chatgpt.com", "chat.openai.com"}
@@ -79,6 +80,30 @@ CODEX_REASONING_PRESETS = (
 
 _CODEX_ALLOWED_MODELS = [
     {
+        "id": "gpt-5.6-sol",
+        "display_name": "GPT-5.6 Sol",
+        "description": "Highest-capability Codex model for complex, polished work.",
+        "context_length": 272_000,
+        "reasoning_levels": ["low", "medium", "high", "xhigh"],
+        "visibility": "list",
+    },
+    {
+        "id": "gpt-5.6-terra",
+        "display_name": "GPT-5.6 Terra",
+        "description": "General-purpose Codex workhorse for everyday development.",
+        "context_length": 272_000,
+        "reasoning_levels": ["low", "medium", "high", "xhigh"],
+        "visibility": "list",
+    },
+    {
+        "id": "gpt-5.6-luna",
+        "display_name": "GPT-5.6 Luna",
+        "description": "Codex model optimized for clear, repeatable work.",
+        "context_length": 272_000,
+        "reasoning_levels": ["low", "medium", "high", "xhigh"],
+        "visibility": "list",
+    },
+    {
         "id": "gpt-5.5",
         "display_name": "GPT-5.5",
         "description": "Frontier model for complex coding, research, and real-world work.",
@@ -103,22 +128,6 @@ _CODEX_ALLOWED_MODELS = [
         "visibility": "list",
     },
     {
-        "id": "gpt-5.3-codex",
-        "display_name": "GPT-5.3-Codex",
-        "description": "Coding-optimized model.",
-        "context_length": 272_000,
-        "reasoning_levels": ["low", "medium", "high", "xhigh"],
-        "visibility": "list",
-    },
-    {
-        "id": "gpt-5.2",
-        "display_name": "GPT-5.2",
-        "description": "Optimized for professional work and long-running agents.",
-        "context_length": 272_000,
-        "reasoning_levels": ["low", "medium", "high", "xhigh"],
-        "visibility": "list",
-    },
-    {
         "id": "codex-auto-review",
         "display_name": "Codex Auto Review",
         "description": "Automatic approval review model for Codex.",
@@ -128,7 +137,6 @@ _CODEX_ALLOWED_MODELS = [
     },
 ]
 _CODEX_ALLOWED_MODEL_IDS = tuple(item["id"] for item in _CODEX_ALLOWED_MODELS)
-_CODEX_ALLOWED_MODEL_SET = {item["id"].lower() for item in _CODEX_ALLOWED_MODELS}
 _CODEX_MODEL_METADATA = {item["id"].lower(): dict(item) for item in _CODEX_ALLOWED_MODELS}
 _CODEX_REASONING_PRESET_BY_ID = {
     item["id"]: {k: v for k, v in item.items() if k != "aliases"}
@@ -146,6 +154,38 @@ def _safe_string(value: Any) -> str:
     if value is None:
         return ""
     return str(value).strip()
+
+
+def _normalize_custom_headers(value: Any) -> Dict[str, str]:
+    headers: Dict[str, str] = {}
+    if not isinstance(value, dict):
+        return headers
+    for key, header_value in value.items():
+        normalized_key = _safe_string(key)
+        normalized_value = _safe_string(header_value)
+        if normalized_key and normalized_value:
+            headers[normalized_key] = normalized_value
+    return headers
+
+
+def get_codex_client_version() -> str:
+    """Return the local Codex client version advertised by its model cache."""
+    try:
+        with open(_models_cache_path(), "r", encoding="utf-8") as handle:
+            cached_version = _safe_string(json.load(handle).get("client_version", ""))
+    except (OSError, ValueError, AttributeError):
+        cached_version = ""
+    if re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", cached_version):
+        return cached_version
+    return CODEX_CLIENT_VERSION
+
+
+def get_codex_user_agent() -> str:
+    """Build a Codex-compatible user agent without assuming Windows."""
+    system = platform.system() or "Unknown"
+    release = platform.release() or "Unknown"
+    machine = platform.machine() or "Unknown"
+    return f"codex_cli_rs/{get_codex_client_version()} ({system} {release}; {machine}) Reverie/{__version__}"
 
 
 def _prettify_codex_display_name(model_id: str) -> str:
@@ -340,7 +380,7 @@ def _load_local_codex_source_catalog(errors: List[str]) -> List[Dict[str, Any]]:
 def _merge_source_catalog_with_allowed_models(source_catalog: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Use the Codex source catalog verbatim when it is available."""
     if not source_catalog:
-        source_order = ("gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2")
+        source_order = ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini")
         order = {model_id: index for index, model_id in enumerate(source_order)}
         fallback = [dict(item) for item in _CODEX_ALLOWED_MODELS]
         fallback.sort(
@@ -360,6 +400,10 @@ def default_codex_config() -> Dict[str, Any]:
         "selected_model_display_name": "",
         "api_url": CODEX_DEFAULT_API_URL,
         "endpoint": CODEX_DEFAULT_ENDPOINT,
+        "auth_mode": "auto",
+        "api_key": "",
+        "api_key_env": "CODEX_PROXY_API_KEY",
+        "custom_headers": {},
         "reasoning_effort": CODEX_DEFAULT_REASONING_EFFORT,
         "max_context_tokens": CODEX_DEFAULT_MAX_CONTEXT_TOKENS,
         "timeout": 1200,
@@ -461,7 +505,7 @@ def _normalize_reasoning_effort(value: Any, available_levels: Optional[List[str]
         if normalize_codex_reasoning_choice(level)
     ]
     if not levels:
-        levels = list(_CODEX_MODEL_METADATA["gpt-5.3-codex"]["reasoning_levels"])
+        levels = list(_CODEX_ALLOWED_MODELS[0]["reasoning_levels"])
     if effort in levels:
         return effort
     if CODEX_DEFAULT_REASONING_EFFORT in levels:
@@ -493,7 +537,7 @@ def _parse_codex_model_cache(
     if not isinstance(models, list):
         return []
 
-    normalized_allowed_ids = set(allowed_model_ids) if isinstance(allowed_model_ids, set) else set(_CODEX_ALLOWED_MODEL_SET)
+    normalized_allowed_ids = set(allowed_model_ids) if isinstance(allowed_model_ids, set) else None
     catalog: List[Dict[str, Any]] = []
     seen_ids = set()
     for item in models:
@@ -502,7 +546,7 @@ def _parse_codex_model_cache(
         model_id = _safe_string(item.get("slug", ""))
         if not model_id:
             continue
-        if model_id.lower() not in normalized_allowed_ids:
+        if normalized_allowed_ids is not None and model_id.lower() not in normalized_allowed_ids:
             continue
         if not bool(item.get("supported_in_api", True)):
             continue
@@ -530,8 +574,8 @@ def _parse_codex_model_cache(
         catalog.append(
             {
                 "id": model_id,
-                "display_name": _safe_string(metadata.get("display_name", item.get("display_name", model_id))) or model_id,
-                "description": _safe_string(metadata.get("description", item.get("description", ""))),
+                "display_name": _safe_string(item.get("display_name", metadata.get("display_name", model_id))) or model_id,
+                "description": _safe_string(item.get("description", metadata.get("description", ""))),
                 "context_length": context_length,
                 "visibility": _safe_string(item.get("visibility", metadata.get("visibility", ""))),
                 "reasoning_levels": reasoning_levels,
@@ -541,51 +585,15 @@ def _parse_codex_model_cache(
 
 
 def get_codex_model_catalog() -> List[Dict[str, Any]]:
-    """Return Codex model catalog, preferring downloaded Codex source, then CLI cache."""
+    """Return Codex models, preferring the live CLI cache over source snapshots."""
     errors: List[str] = []
+    cached = _parse_codex_model_cache(errors)
+    if cached:
+        return cached
+
     source_catalog = _load_local_codex_source_catalog(errors)
     base_catalog = _merge_source_catalog_with_allowed_models(source_catalog)
-    allowed_model_ids = {str(item.get("id", "")).strip().lower() for item in base_catalog if str(item.get("id", "")).strip()}
-    cached = _parse_codex_model_cache(errors, allowed_model_ids=allowed_model_ids)
-    cached_by_id = {
-        str(item.get("id", "")).strip().lower(): item
-        for item in cached
-        if str(item.get("id", "")).strip()
-    }
-
-    catalog: List[Dict[str, Any]] = []
-    for item in base_catalog:
-        lower_id = item["id"].lower()
-        cached_item = cached_by_id.get(lower_id, {})
-        metadata_levels = [
-            normalize_codex_reasoning_choice(level)
-            for level in item.get("reasoning_levels", [])
-            if normalize_codex_reasoning_choice(level)
-        ]
-        cached_levels = [
-            normalize_codex_reasoning_choice(level)
-            for level in cached_item.get("reasoning_levels", [])
-            if normalize_codex_reasoning_choice(level)
-        ]
-        merged_levels: List[str] = []
-        for level in metadata_levels + cached_levels:
-            if level and level not in merged_levels:
-                merged_levels.append(level)
-
-        metadata_context_length = int(item.get("context_length", CODEX_DEFAULT_MAX_CONTEXT_TOKENS))
-        cached_context_length = int(cached_item.get("context_length", 0) or 0)
-
-        catalog.append(
-            {
-                "id": item["id"],
-                "display_name": _safe_string(item.get("display_name", cached_item.get("display_name", ""))) or item["id"],
-                "description": _safe_string(item.get("description", cached_item.get("description", ""))),
-                "context_length": metadata_context_length or cached_context_length,
-                "visibility": _safe_string(item.get("visibility", cached_item.get("visibility", ""))),
-                "reasoning_levels": merged_levels or metadata_levels,
-            }
-        )
-    return catalog
+    return base_catalog
 
 
 def get_codex_reasoning_efforts(
@@ -603,7 +611,7 @@ def get_codex_reasoning_efforts(
             if _safe_string(level)
         ]
     if not levels:
-        levels = list(_CODEX_MODEL_METADATA["gpt-5.3-codex"]["reasoning_levels"])
+        levels = list(_CODEX_ALLOWED_MODELS[0]["reasoning_levels"])
     return levels
 
 
@@ -631,6 +639,21 @@ def normalize_codex_config(raw_codex: Any) -> Dict[str, Any]:
         api_url_value = cfg.get("base_url", cfg.get("openai_base_url", CODEX_DEFAULT_API_URL))
     cfg["api_url"] = _normalize_api_url(api_url_value)
     cfg["endpoint"] = _normalize_endpoint(cfg.get("endpoint", ""))
+    raw_auth_mode = _safe_string(cfg.get("auth_mode", "auto")).lower().replace("-", "_")
+    auth_aliases = {
+        "local": "codex",
+        "codex_cli": "codex",
+        "key": "api_key",
+        "bearer": "api_key",
+        "anonymous": "none",
+        "off": "none",
+    }
+    cfg["auth_mode"] = auth_aliases.get(raw_auth_mode, raw_auth_mode)
+    if cfg["auth_mode"] not in {"auto", "codex", "api_key", "none"}:
+        cfg["auth_mode"] = "auto"
+    cfg["api_key"] = _safe_string(cfg.get("api_key", ""))
+    cfg["api_key_env"] = _safe_string(cfg.get("api_key_env", "CODEX_PROXY_API_KEY"))
+    cfg["custom_headers"] = _normalize_custom_headers(cfg.get("custom_headers", {}))
 
     try:
         max_tokens = int(cfg.get("max_context_tokens", CODEX_DEFAULT_MAX_CONTEXT_TOKENS))
@@ -657,8 +680,7 @@ def normalize_codex_config(raw_codex: Any) -> Dict[str, Any]:
         cfg["selected_model_display_name"] = matched["display_name"]
         cfg["max_context_tokens"] = int(matched.get("context_length", cfg["max_context_tokens"]))
     elif cfg["selected_model_id"]:
-        cfg["selected_model_id"] = ""
-        cfg["selected_model_display_name"] = ""
+        cfg["selected_model_display_name"] = cfg["selected_model_display_name"] or cfg["selected_model_id"]
 
     return cfg
 
@@ -725,6 +747,54 @@ def detect_codex_cli_credentials() -> Dict[str, Any]:
     result["auth_mode"] = auth_mode
     if isinstance(tokens, dict):
         result["email"] = _safe_string(tokens.get("email", ""))
+    return result
+
+
+def resolve_codex_credentials(codex_config: Any, request_url: str = "") -> Dict[str, Any]:
+    """Resolve official Codex or reverse-proxy authentication without leaking account metadata."""
+    cfg = normalize_codex_config(codex_config)
+    resolved_url = request_url or resolve_codex_request_url(cfg["api_url"], cfg.get("endpoint", ""))
+    official_backend = _is_chatgpt_codex_host(urlparse(resolved_url))
+    configured_mode = cfg.get("auth_mode", "auto")
+    local = detect_codex_cli_credentials()
+
+    result = {
+        "found": False,
+        "api_key": "",
+        "account_id": "",
+        "auth_mode": configured_mode,
+        "source": "",
+        "official_backend": official_backend,
+        "errors": list(local.get("errors", [])),
+    }
+    if configured_mode == "none":
+        result.update({"found": True, "source": "anonymous"})
+        return result
+
+    env_name = cfg.get("api_key_env", "")
+    proxy_key = cfg.get("api_key", "") or (_safe_string(os.environ.get(env_name, "")) if env_name else "")
+    use_proxy_key = configured_mode == "api_key" or (configured_mode == "auto" and not official_backend and proxy_key)
+    if use_proxy_key:
+        result.update(
+            {
+                "found": bool(proxy_key),
+                "api_key": proxy_key,
+                "auth_mode": "api_key",
+                "source": "config" if cfg.get("api_key") else (f"env:{env_name}" if proxy_key else ""),
+            }
+        )
+        return result
+
+    if local.get("found"):
+        result.update(
+            {
+                "found": True,
+                "api_key": _safe_string(local.get("api_key", "")),
+                "account_id": _safe_string(local.get("account_id", "")) if official_backend else "",
+                "auth_mode": "codex",
+                "source": _safe_string(local.get("source_file", "")) or "codex_cli",
+            }
+        )
     return result
 
 
@@ -831,17 +901,29 @@ def refresh_codex_access_token(refresh_token: str) -> Optional[Dict[str, Any]]:
 
 def resolve_codex_request_url(base_url: str, endpoint: str) -> str:
     """Resolve Codex request URL with optional endpoint override."""
+    base = _normalize_api_url(base_url)
+    parsed = urlparse(base)
     endpoint_value = str(endpoint or "").strip()
     if endpoint_value:
         if endpoint_value.startswith("http://") or endpoint_value.startswith("https://"):
-            return endpoint_value
-        base = _normalize_api_url(base_url)
-        if endpoint_value.startswith("/"):
-            return f"{base}{endpoint_value}"
-        return f"{base}/{endpoint_value}"
+            endpoint_parsed = urlparse(endpoint_value)
+            return endpoint_parsed._replace(path=endpoint_parsed.path.rstrip("/"), fragment="").geturl()
+        endpoint_parsed = urlparse(endpoint_value)
+        base_path = parsed.path.rstrip("/")
+        endpoint_path = endpoint_parsed.path.strip("/")
+        for terminal in (CODEX_DEFAULT_RESPONSE_ENDPOINT, CODEX_DEFAULT_MODELS_ENDPOINT):
+            if base_path.lower().endswith(terminal):
+                base_path = base_path[: -len(terminal)].rstrip("/")
+                break
+        if endpoint_path and not base_path.lower().endswith(f"/{endpoint_path.lower()}"):
+            base_path = f"{base_path}/{endpoint_path}"
+        updated = parsed._replace(
+            path=base_path or "/",
+            query=endpoint_parsed.query or parsed.query,
+            fragment="",
+        )
+        return updated.geturl()
 
-    base = _normalize_api_url(base_url)
-    parsed = urlparse(base)
     base_path = parsed.path.rstrip("/")
     lower_path = base_path.lower()
     if lower_path.endswith(CODEX_DEFAULT_RESPONSE_ENDPOINT):
@@ -854,7 +936,8 @@ def resolve_codex_request_url(base_url: str, endpoint: str) -> str:
     if _is_chatgpt_codex_host(parsed) and lower_path == "/backend-api":
         updated = parsed._replace(path="/backend-api/codex/responses")
         return updated.geturl().rstrip("/")
-    return f"{base}{CODEX_DEFAULT_RESPONSE_ENDPOINT}"
+    updated = parsed._replace(path=f"{base_path}{CODEX_DEFAULT_RESPONSE_ENDPOINT}", fragment="")
+    return updated.geturl()
 
 
 def resolve_codex_models_url(base_url: str) -> str:
@@ -873,7 +956,8 @@ def resolve_codex_models_url(base_url: str) -> str:
     if _is_chatgpt_codex_host(parsed) and lower_path == "/backend-api":
         updated = parsed._replace(path="/backend-api/codex/models")
         return updated.geturl().rstrip("/")
-    return f"{base}{CODEX_DEFAULT_MODELS_ENDPOINT}"
+    updated = parsed._replace(path=f"{base_path}{CODEX_DEFAULT_MODELS_ENDPOINT}", fragment="")
+    return updated.geturl()
 
 
 def get_codex_request_headers(
@@ -882,18 +966,21 @@ def get_codex_request_headers(
     auth_mode: str = "",
     extra_headers: Optional[Dict[str, str]] = None,
     stream: bool = True,
+    request_url: str = "",
 ) -> Dict[str, str]:
-    """Build Codex upstream headers."""
+    """Build official or proxy-safe Codex headers for a Responses request."""
     headers = {
-        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
         "Accept": "text/event-stream" if stream else "application/json",
-        "Connection": "Keep-Alive",
-        "Version": CODEX_CLIENT_VERSION,
-        "Session_id": str(uuid.uuid4()),
-        "User-Agent": CODEX_USER_AGENT,
+        "User-Agent": f"Reverie/{__version__}",
     }
-    if str(auth_mode or "").strip().lower() != "api_key":
+    if _safe_string(api_key):
+        headers["Authorization"] = f"Bearer {_safe_string(api_key)}"
+
+    official_backend = bool(request_url) and _is_chatgpt_codex_host(urlparse(request_url))
+    if official_backend:
+        headers["User-Agent"] = get_codex_user_agent()
+    if official_backend and str(auth_mode or "").strip().lower() not in {"api_key", "none"}:
         headers["Originator"] = "codex_cli_rs"
         if str(account_id or "").strip():
             headers["Chatgpt-Account-Id"] = str(account_id).strip()
@@ -902,6 +989,9 @@ def get_codex_request_headers(
             k = str(key or "").strip()
             v = str(value or "").strip()
             if k and v:
+                for existing_key in list(headers):
+                    if existing_key.lower() == k.lower() and existing_key != k:
+                        headers.pop(existing_key)
                 headers[k] = v
     return headers
 
@@ -913,7 +1003,8 @@ def build_codex_runtime_model_data(codex_config: Any) -> Optional[Dict[str, Any]
     if not selected:
         return None
 
-    cred = detect_codex_cli_credentials()
+    request_url = resolve_codex_request_url(cfg["api_url"], cfg.get("endpoint", ""))
+    cred = resolve_codex_credentials(cfg, request_url=request_url)
     api_key = cred["api_key"] if cred.get("found") else ""
 
     return {
@@ -926,6 +1017,7 @@ def build_codex_runtime_model_data(codex_config: Any) -> Optional[Dict[str, Any]
         "supports_vision": True,
         "thinking_mode": cfg.get("reasoning_effort", CODEX_DEFAULT_REASONING_EFFORT),
         "endpoint": cfg.get("endpoint", ""),
+        "custom_headers": dict(cfg.get("custom_headers", {})),
     }
 
 
@@ -1040,14 +1132,15 @@ def build_codex_request_payload(
             parameters = function_data.get("parameters")
             if not isinstance(parameters, dict):
                 parameters = {"type": "object", "properties": {}}
-            payload["tools"].append(
-                {
-                    "type": "function",
-                    "name": name,
-                    "description": str(function_data.get("description", "")).strip(),
-                    "parameters": parameters,
-                }
-            )
+            translated_tool = {
+                "type": "function",
+                "name": name,
+                "description": str(function_data.get("description", "")).strip(),
+                "parameters": parameters,
+            }
+            if isinstance(function_data.get("strict"), bool):
+                translated_tool["strict"] = function_data["strict"]
+            payload["tools"].append(translated_tool)
 
     return payload
 
@@ -1077,6 +1170,22 @@ def parse_codex_sse_event(data_str: str, state: Optional[Dict[str, Any]] = None)
         state["response_id"] = str(response.get("id", "")).strip()
         state["created_at"] = int(response.get("created_at", 0) or 0)
         state["model"] = str(response.get("model", "")).strip()
+        return events, state
+
+    if event_type in {"error", "response.failed"}:
+        error = payload.get("error") or (payload.get("response") or {}).get("error") or {}
+        if isinstance(error, dict):
+            message = _safe_string(error.get("message") or error.get("code") or error.get("type"))
+        else:
+            message = _safe_string(error)
+        events.append({"type": "error", "message": message or "Codex upstream request failed"})
+        return events, state
+
+    if event_type == "response.incomplete":
+        response = payload.get("response") or {}
+        details = response.get("incomplete_details") or {}
+        reason = _safe_string(details.get("reason") if isinstance(details, dict) else details)
+        events.append({"type": "finish", "reason": reason or "incomplete", "response": response})
         return events, state
 
     response_usage = payload.get("response", {}).get("usage")

@@ -18,7 +18,7 @@ from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeEl
 
 try:
     from .diagnostics import report_suppressed_exception
-    from .version import CORE_INTERFACE_VERSION, __version__
+    from .version import CORE_INTERFACE_VERSION, RELEASE_STATUS, __version__
     from .tls import configure_tls_ca_bundle
 except ImportError:  # PyInstaller may execute this file as a top-level script.
     package_root = Path(__file__).resolve().parent.parent
@@ -26,7 +26,7 @@ except ImportError:  # PyInstaller may execute this file as a top-level script.
     if package_root_text not in sys.path:
         sys.path.insert(0, package_root_text)
     from reverie.diagnostics import report_suppressed_exception
-    from reverie.version import CORE_INTERFACE_VERSION, __version__
+    from reverie.version import CORE_INTERFACE_VERSION, RELEASE_STATUS, __version__
     from reverie.tls import configure_tls_ca_bundle
 
 
@@ -359,6 +359,7 @@ def main(argv: list[str] | None = None):
     
     if args.version:
         print(f"Reverie Cli v{__version__}")
+        print(f"Release status: {RELEASE_STATUS}")
         print(f"Core Interface v{CORE_INTERFACE_VERSION}")
         print("Kernel: python")
         return 0

@@ -19,6 +19,7 @@ set "LOCAL_PIP_CACHE=%LOCAL_BUILD_ROOT%\pip-cache"
 set "PYI_CONFIG_DIR=%LOCAL_BUILD_ROOT%\pyinstaller-config"
 set "PYI_WORK_DIR=%BUILD_DIR%\pyinstaller"
 set "PYI_DIST_DIR=%OUTPUT_DIR%"
+set "PYI_STAGE_DIR=%BUILD_DIR%\pyinstaller-dist"
 set "PYI_SPEC_DIR=%BUILD_DIR%\pyinstaller-spec"
 set "BLENDER_ARCHIVE_NAME=blender-5.1.1-windows-x64.zip"
 set "BLENDER_ARCHIVE_SOURCE="
@@ -128,14 +129,7 @@ if exist "%DEPS_STAMP%" (
 )
 if "%NEED_DEPS%"=="1" (
     echo       Installing or refreshing Python dependencies...
-    python -m pip install --disable-pip-version-check --upgrade pyinstaller pillow
-    if errorlevel 1 (
-        echo [ERROR] Failed to install PyInstaller or Pillow.
-        set "BUILD_EXIT_CODE=1"
-        goto finish
-    )
-
-    python -m pip install --disable-pip-version-check -e .
+    python -m pip install --disable-pip-version-check -e ".[build]"
     if errorlevel 1 (
         echo [ERROR] Failed to install Reverie into the build environment.
         set "BUILD_EXIT_CODE=1"
@@ -282,10 +276,11 @@ if "%FORCE_CLEAN%"=="1" (
     if exist "%PYI_WORK_DIR%" rmdir /s /q "%PYI_WORK_DIR%"
     if exist "%PYI_SPEC_DIR%" rmdir /s /q "%PYI_SPEC_DIR%"
 )
-if exist "%PYI_DIST_DIR%\%EXE_NAME%.exe" del /f /q "%PYI_DIST_DIR%\%EXE_NAME%.exe" >nul 2>&1
+if not exist "%PYI_STAGE_DIR%" mkdir "%PYI_STAGE_DIR%" >nul 2>&1
+if exist "%PYI_STAGE_DIR%\%EXE_NAME%.exe" del /f /q "%PYI_STAGE_DIR%\%EXE_NAME%.exe" >nul 2>&1
 set "PYI_PYTHONWARNINGS=ignore:Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.:UserWarning"
 set "PYTHONWARNINGS=%PYI_PYTHONWARNINGS%"
-PyInstaller --noconfirm %PYI_CLEAN_ARG% --distpath "%PYI_DIST_DIR%" --workpath "%PYI_WORK_DIR%" reverie.spec
+PyInstaller --noconfirm %PYI_CLEAN_ARG% --distpath "%PYI_STAGE_DIR%" --workpath "%PYI_WORK_DIR%" reverie.spec
 set "PYTHONWARNINGS="
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] Build failed.
@@ -293,8 +288,24 @@ if %ERRORLEVEL% neq 0 (
     goto finish
 )
 
-if not exist "%PYI_DIST_DIR%\%EXE_NAME%.exe" (
-    echo [ERROR] Executable not found at %PYI_DIST_DIR%\%EXE_NAME%.exe
+if not exist "%PYI_STAGE_DIR%\%EXE_NAME%.exe" (
+    echo [ERROR] Staged executable not found at %PYI_STAGE_DIR%\%EXE_NAME%.exe
+    set "BUILD_EXIT_CODE=1"
+    goto finish
+)
+
+set "COPY_ATTEMPT=0"
+:copy_staged_executable
+set /a COPY_ATTEMPT+=1
+copy /B /Y "%PYI_STAGE_DIR%\%EXE_NAME%.exe" "%PYI_DIST_DIR%\%EXE_NAME%.exe" >nul 2>&1
+if errorlevel 1 (
+    if !COPY_ATTEMPT! lss 6 (
+        echo       dist\%EXE_NAME%.exe is busy; retrying replacement [attempt !COPY_ATTEMPT! of 5]...
+        ping 127.0.0.1 -n 3 >nul
+        goto copy_staged_executable
+    )
+    echo [ERROR] Unable to replace %PYI_DIST_DIR%\%EXE_NAME%.exe. Close every running Reverie instance and retry.
+    echo         The completed staged executable remains at %PYI_STAGE_DIR%\%EXE_NAME%.exe.
     set "BUILD_EXIT_CODE=1"
     goto finish
 )

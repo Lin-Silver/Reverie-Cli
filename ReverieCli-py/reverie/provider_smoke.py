@@ -13,10 +13,10 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 from .codex import (
     build_codex_request_payload,
     build_codex_runtime_model_data,
-    detect_codex_cli_credentials,
     get_codex_request_headers,
     normalize_codex_config,
     parse_codex_sse_event,
+    resolve_codex_credentials,
     resolve_codex_request_url,
 )
 from .aihubmix import (
@@ -533,7 +533,11 @@ def smoke_codex(config: Config, timeout_seconds: int = 60, model_id: str = "") -
         cfg = normalize_codex_config(cfg)
     runtime = build_codex_runtime_model_data(cfg)
     model = str((runtime or {}).get("model") or cfg.get("selected_model_id") or "")
-    cred = detect_codex_cli_credentials()
+    request_url = resolve_codex_request_url(
+        (runtime or {}).get("base_url", cfg.get("api_url", "")),
+        (runtime or {}).get("endpoint") or cfg.get("endpoint", ""),
+    )
+    cred = resolve_codex_credentials(cfg, request_url=request_url)
     if not runtime or not cred.get("found"):
         return _skipped(provider, model, "missing_credentials")
 
@@ -547,12 +551,14 @@ def smoke_codex(config: Config, timeout_seconds: int = 60, model_id: str = "") -
             stream=True,
         )
         response = _requests_post_stream(
-            resolve_codex_request_url(runtime["base_url"], runtime.get("endpoint") or cfg.get("endpoint", "")),
+            request_url,
             get_codex_request_headers(
                 api_key=str(cred.get("api_key", "") or ""),
                 account_id=str(cred.get("account_id", "") or ""),
                 auth_mode=str(cred.get("auth_mode", "") or ""),
                 stream=True,
+                request_url=request_url,
+                extra_headers=dict(runtime.get("custom_headers") or {}),
             ),
             payload,
             timeout_seconds=timeout_seconds,

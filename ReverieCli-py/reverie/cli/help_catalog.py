@@ -146,7 +146,7 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
         "command": "/codex",
         "section": "Providers",
         "summary": "Switch to Codex, choose a model, and set the matching four-level reasoning depth.",
-        "detail": "Bare `/codex` switches Reverie to the Codex source and uses the stored Codex model. `/codex model` opens the model selector and immediately continues into the reasoning-depth selector. `/codex endpoint` accepts either a proxy root/base URL or a full `/responses` endpoint.",
+        "detail": "Bare `/codex` switches Reverie to the Codex source and uses the stored Codex model. `/codex model` opens the model selector and immediately continues into the reasoning-depth selector. `/codex endpoint` accepts either a proxy root/base URL or a full `/responses` endpoint. `/codex auth` separates local Codex, proxy-key, and anonymous proxy authentication.",
         "overview": "activate, login, model [id], thinking [level], endpoint [value], low|medium|high|extra high",
         "subcommands": [
             {"usage": "/codex", "description": "Switch Reverie to the Codex source and show the active Codex configuration."},
@@ -158,6 +158,7 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
             {"usage": "/codex low|medium|high|extra high", "description": "Direct shortcut for reasoning-depth selection."},
             {"usage": "/codex endpoint", "description": "Show the current endpoint override prompt."},
             {"usage": "/codex endpoint <url|/path|clear>", "description": "Set or clear the reverse-proxy endpoint override."},
+            {"usage": "/codex auth <auto|codex|api_key|none> [ENV_NAME]", "description": "Choose proxy authentication; API keys are read from an environment variable."},
         ],
         "examples": ["/codex", "/codex model", "/codex model gpt-5.4", "/codex extra high"],
     },

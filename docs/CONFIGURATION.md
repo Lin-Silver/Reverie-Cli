@@ -180,6 +180,10 @@ The `codex` section stores:
 - `selected_model_display_name`
 - `api_url`
 - `endpoint`
+- `auth_mode` (`auto`, `codex`, `api_key`, or `none`)
+- `api_key_env` (defaults to `CODEX_PROXY_API_KEY`)
+- `api_key` (supported, but an environment variable is preferred)
+- `custom_headers`
 - `reasoning_effort`
 - `max_context_tokens`
 - `timeout`
@@ -190,6 +194,17 @@ Reverie normalizes ChatGPT and Codex URLs automatically, so these all work:
 - `https://chatgpt.com/backend-api`
 - `https://chatgpt.com/backend-api/codex`
 - A full reverse-proxy `/responses` endpoint
+
+For a reverse proxy, set `api_url` to its root (for example, `https://proxy.example/v1`) or put a full Responses URL in `endpoint`. Reverie preserves query parameters and avoids appending duplicate `/responses` paths. Custom proxy model ids are accepted even when they do not appear in the local Codex catalog; select one with `/codex model vendor/model-id`.
+
+Authentication modes:
+
+- `auto`: use the proxy key when configured; otherwise fall back to local Codex credentials.
+- `codex`: always use `~/.codex/auth.json`.
+- `api_key`: read a proxy Bearer key from `api_key` or `api_key_env`.
+- `none`: send no Authorization header, for trusted local gateways.
+
+Use `/codex auth api_key MY_PROXY_KEY` to select an environment variable without placing the secret in command history. Third-party proxy requests do not receive `ChatGPT-Account-Id`, `Originator`, or other ChatGPT-only identity headers unless you explicitly add equivalent custom headers.
 
 ### WebGemini
 
@@ -214,7 +229,7 @@ Use `/nvidia model` or `/nvidia model <model-id>` to select the model. When the 
 
 NVIDIA request timeouts default to 60 seconds and follow the global `/setting timeout` unless the `nvidia.timeout` value is explicitly set to another value.
 
-NVIDIA GLM catalog entries include `z-ai/glm-5.2`, `z-ai/glm-5.1`, and `z-ai/glm4.7`. The `z-ai/glm5.2` and `z-ai/glm5.1` spellings are accepted as aliases for selection, and `z-ai/glm-4.7` is accepted as an alias for GLM-4.7, but NVIDIA's hosted chat-completions endpoint reports the canonical GLM ids as `z-ai/glm-5.2`, `z-ai/glm-5.1`, and `z-ai/glm4.7`.
+NVIDIA's hosted catalog includes `nvidia/nemotron-3-ultra-550b-a55b`; it uses the OpenAI-compatible SDK transport with fixed thinking enabled and a 16,384-token reasoning budget.
 
 ### ModelScope
 

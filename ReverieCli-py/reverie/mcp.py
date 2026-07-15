@@ -1457,6 +1457,10 @@ class MCPRuntime:
         self._catalog_ready = False
         self._generation = 0
         self._active_mode = "reverie"
+        self._server_health: Dict[str, Dict[str, Any]] = {}
+        self._background_discovery_running = False
+        self._background_discovery_thread: Optional[threading.Thread] = None
+        self._discovery_listener: Any = None
         self._refresh_config_locked(force=True)
 
     def close(self) -> None:
@@ -1492,6 +1496,7 @@ class MCPRuntime:
             self._tool_lookup = {}
             self._catalog_signature = ""
             self._catalog_ready = False
+            self._server_health = {}
             self._generation += 1
 
     def _refresh_config_locked(self, force: bool = False) -> bool:
@@ -1514,6 +1519,7 @@ class MCPRuntime:
         self._catalog_signature = ""
         self._catalog_server_signature = ""
         self._catalog_ready = False
+        self._server_health = {}
         self._generation += 1
         return True
 
@@ -1522,9 +1528,80 @@ class MCPRuntime:
             return self._refresh_config_locked(force=force)
 
     def get_generation(self) -> int:
+        if self._background_discovery_running:
+            return int(self._generation)
         with self._lock:
             self._refresh_config_locked(force=False)
             return self._generation
+
+    def is_background_discovery_running(self) -> bool:
+        return bool(self._background_discovery_running)
+
+    def get_health_snapshot(self) -> Dict[str, Dict[str, Any]]:
+        if self._background_discovery_running:
+            return {name: dict(value) for name, value in self._server_health.items()}
+        with self._lock:
+            return {name: dict(value) for name, value in self._server_health.items()}
+
+    def has_healthy_servers(self) -> bool:
+        return any(
+            str(item.get("state", "")).lower() == "healthy"
+            for item in self.get_health_snapshot().values()
+        )
+
+    def set_discovery_listener(self, listener: Any) -> None:
+        """Register a lightweight completion listener for automatic rediscovery."""
+        self._discovery_listener = listener if callable(listener) else None
+
+    def start_background_discovery(self, on_complete: Any = None, *, force_refresh: bool = False) -> bool:
+        """Probe configured MCP servers without blocking prompt or schema construction."""
+        with self._lock:
+            if self._background_discovery_running:
+                return False
+            self._refresh_config_locked(force=False)
+            effective_servers = self._get_effective_servers_locked()
+            self._background_discovery_running = True
+            if self._tool_catalog:
+                self._tool_catalog = []
+                self._tool_lookup = {}
+                self._catalog_signature = ""
+                self._catalog_ready = False
+                self._generation += 1
+            self._server_health = {
+                name: {
+                    "state": "pending",
+                    "error": "",
+                    "type": str(config.get("type", "stdio") or "stdio"),
+                    "trust": bool(config.get("trust", False)),
+                    "checked_at": 0.0,
+                }
+                for name, config in effective_servers.items()
+            }
+
+        def worker() -> None:
+            try:
+                with self._lock:
+                    self._rebuild_catalog_locked(force_refresh=force_refresh, timeout_ms=None)
+            except Exception:
+                logger.debug("Background MCP discovery failed unexpectedly.", exc_info=True)
+            finally:
+                self._background_discovery_running = False
+                callback = on_complete
+                callbacks = [callback, self._discovery_listener]
+                seen_callbacks: set[int] = set()
+                for current_callback in callbacks:
+                    if not callable(current_callback) or id(current_callback) in seen_callbacks:
+                        continue
+                    seen_callbacks.add(id(current_callback))
+                    try:
+                        current_callback(self.get_health_snapshot())
+                    except Exception:
+                        logger.debug("Background MCP completion callback failed.", exc_info=True)
+
+        thread = threading.Thread(target=worker, name="reverie-mcp-discovery", daemon=True)
+        self._background_discovery_thread = thread
+        thread.start()
+        return True
 
     def _get_effective_servers_locked(self) -> Dict[str, Dict[str, Any]]:
         servers = get_effective_mcp_servers(self._config, mode=self._active_mode)
@@ -1584,14 +1661,35 @@ class MCPRuntime:
         lookup: Dict[str, Dict[str, Any]] = {}
         configured_timeout_ms = int(self._config.get("mcp", {}).get("discovery_timeout_ms", MCP_DEFAULT_DISCOVERY_TIMEOUT_MS))
         discovery_timeout_ms = int(timeout_ms if timeout_ms is not None else configured_timeout_ms)
+        health: Dict[str, Dict[str, Any]] = {}
 
         for server_name, server_cfg in effective_servers.items():
             client = self._get_client_locked(server_name, server_cfg)
             try:
                 discovery = client.discover(force=force_refresh, timeout_ms=discovery_timeout_ms)
+                discovery_error = str(discovery.get("error", "") or "") if isinstance(discovery, dict) else ""
+                if discovery_error:
+                    raise MCPClientError(discovery_error)
             except Exception as exc:
                 logger.debug("MCP discovery failed for %s: %s", server_name, exc, exc_info=True)
+                health[server_name] = {
+                    "state": "failed",
+                    "error": str(exc),
+                    "type": str(server_cfg.get("type", "stdio") or "stdio"),
+                    "trust": bool(server_cfg.get("trust", False)),
+                    "checked_at": time.time(),
+                }
                 continue
+            health[server_name] = {
+                "state": "healthy",
+                "error": "",
+                "type": str(server_cfg.get("type", "stdio") or "stdio"),
+                "trust": bool(server_cfg.get("trust", False)),
+                "checked_at": time.time(),
+                "tools": len(discovery.get("tools", []) or []),
+                "resources": len(discovery.get("resources", []) or []),
+                "prompts": len(discovery.get("prompts", []) or []),
+            }
             raw_tools = discovery.get("tools", []) if isinstance(discovery, dict) else []
             for tool in raw_tools:
                 if not isinstance(tool, dict):
@@ -1624,6 +1722,7 @@ class MCPRuntime:
             self._catalog_signature = new_signature
         self._tool_catalog = catalog
         self._tool_lookup = lookup
+        self._server_health = health
         self._catalog_ready = True
         return [dict(item) for item in catalog]
 
@@ -1632,31 +1731,45 @@ class MCPRuntime:
         force_refresh: bool = False,
         timeout_ms: Optional[int] = MCP_STARTUP_DISCOVERY_TIMEOUT_MS,
     ) -> List[Dict[str, Any]]:
+        if not force_refresh and self._background_discovery_running:
+            return [dict(item) for item in self._tool_catalog]
+        needs_background_refresh = False
         with self._lock:
             if self._catalog_ready and not force_refresh:
                 effective_servers = self._get_effective_servers_locked()
                 server_signature = _stable_json_signature(effective_servers)
                 if server_signature != self._catalog_server_signature:
-                    return self._rebuild_catalog_locked(force_refresh=False, timeout_ms=timeout_ms)
-                any_dirty = False
-                for server_name, server_cfg in effective_servers.items():
-                    client = self._get_client_locked(server_name, server_cfg)
-                    if client.catalog_dirty:
-                        any_dirty = True
-                        break
-                if not any_dirty:
-                    return [dict(item) for item in self._tool_catalog]
-            return self._rebuild_catalog_locked(force_refresh=force_refresh, timeout_ms=timeout_ms)
+                    self._catalog_ready = False
+                    needs_background_refresh = True
+                else:
+                    any_dirty = False
+                    for server_name, server_cfg in effective_servers.items():
+                        client = self._get_client_locked(server_name, server_cfg)
+                        if client.catalog_dirty:
+                            any_dirty = True
+                            break
+                    if not any_dirty:
+                        return [dict(item) for item in self._tool_catalog]
+                    needs_background_refresh = True
+            if force_refresh:
+                return self._rebuild_catalog_locked(force_refresh=True, timeout_ms=timeout_ms)
+        if needs_background_refresh or not self._catalog_ready:
+            self.start_background_discovery(force_refresh=False)
+        return [dict(item) for item in self._tool_catalog]
 
     def resolve_tool(self, synthetic_name: str) -> Optional[Dict[str, Any]]:
         wanted = str(synthetic_name or "").strip()
         if not wanted:
             return None
-        with self._lock:
-            if wanted not in self._tool_lookup:
-                self._rebuild_catalog_locked(force_refresh=False, timeout_ms=MCP_STARTUP_DISCOVERY_TIMEOUT_MS)
+        if self._background_discovery_running:
             found = self._tool_lookup.get(wanted)
             return dict(found) if isinstance(found, dict) else None
+        with self._lock:
+            found = self._tool_lookup.get(wanted)
+        if found is None:
+            self.start_background_discovery(force_refresh=False)
+            return None
+        return dict(found) if isinstance(found, dict) else None
 
     def _resolve_server_name_locked(self, requested_name: str, effective_servers: Dict[str, Dict[str, Any]]) -> str:
         """Resolve a server name case-insensitively against enabled servers."""
@@ -1676,6 +1789,9 @@ class MCPRuntime:
             server_cfg = effective_servers.get(server_name)
             if not isinstance(server_cfg, dict):
                 raise MCPClientError(f"MCP server '{server_name}' is not enabled.")
+            health = self._server_health.get(server_name, {})
+            if str(health.get("state", "")).lower() != "healthy":
+                raise MCPClientError(f"MCP server '{server_name}' has not passed background discovery.")
             client = self._get_client_locked(server_name, server_cfg)
 
         result = client.call_tool(tool_name, arguments or {})
@@ -1692,17 +1808,26 @@ class MCPRuntime:
         with self._lock:
             self._refresh_config_locked(force=False)
             effective_servers = self._get_effective_servers_locked()
+            healthy_names = {
+                name
+                for name, item in self._server_health.items()
+                if str(item.get("state", "")).lower() == "healthy"
+            }
             resolved_name = self._resolve_server_name_locked(server_name, effective_servers)
-            if str(server_name or "").strip() and not resolved_name:
-                available = ", ".join(sorted(effective_servers.keys()))
+            if str(server_name or "").strip() and (not resolved_name or resolved_name not in healthy_names):
+                available = ", ".join(sorted(healthy_names))
                 raise MCPClientError(
-                    f"MCP server '{server_name}' is not enabled. Available servers: {available or '(none)'}."
+                    f"MCP server '{server_name}' has not passed background discovery. "
+                    f"Healthy servers: {available or '(none)'}."
                 )
 
             if resolved_name:
                 server_items = [(resolved_name, effective_servers[resolved_name])]
             else:
-                server_items = sorted(effective_servers.items(), key=lambda item: str(item[0]).lower())
+                server_items = sorted(
+                    ((name, config) for name, config in effective_servers.items() if name in healthy_names),
+                    key=lambda item: str(item[0]).lower(),
+                )
 
             timeout_ms = int(self._config.get("mcp", {}).get("discovery_timeout_ms", MCP_DEFAULT_DISCOVERY_TIMEOUT_MS))
             resources: List[Dict[str, Any]] = []
@@ -1745,10 +1870,18 @@ class MCPRuntime:
             self._refresh_config_locked(force=False)
             effective_servers = self._get_effective_servers_locked()
             resolved_name = self._resolve_server_name_locked(server_name, effective_servers)
-            if not resolved_name:
-                available = ", ".join(sorted(effective_servers.keys()))
+            health = self._server_health.get(resolved_name, {}) if resolved_name else {}
+            if not resolved_name or str(health.get("state", "")).lower() != "healthy":
+                available = ", ".join(
+                    sorted(
+                        name
+                        for name, item in self._server_health.items()
+                        if str(item.get("state", "")).lower() == "healthy"
+                    )
+                )
                 raise MCPClientError(
-                    f"MCP server '{server_name}' is not enabled. Available servers: {available or '(none)'}."
+                    f"MCP server '{server_name}' has not passed background discovery. "
+                    f"Healthy servers: {available or '(none)'}."
                 )
             client = self._get_client_locked(resolved_name, effective_servers[resolved_name])
 
@@ -1756,82 +1889,86 @@ class MCPRuntime:
         return result if isinstance(result, dict) else {"contents": []}
 
     def list_server_status(self, force_refresh: bool = False) -> List[Dict[str, Any]]:
-        with self._lock:
-            self._refresh_config_locked(force=False)
+        """Return configuration and cached health without running network checks inline."""
+        if self._background_discovery_running:
             config = self._config
-            effective_servers = self._get_effective_servers_locked()
-            allowed = {item.lower() for item in config.get("mcp", {}).get("allowed", [])}
-            excluded = {item.lower() for item in config.get("mcp", {}).get("excluded", [])}
-            rows: List[Dict[str, Any]] = []
+            health_snapshot = {name: dict(item) for name, item in self._server_health.items()}
+        else:
+            with self._lock:
+                self._refresh_config_locked(force=False)
+                config = self._config
+                health_snapshot = {name: dict(item) for name, item in self._server_health.items()}
 
-            for server_name, raw_server_cfg in config.get("mcpServers", {}).items():
-                server_cfg = normalize_mcp_server_config(server_name, raw_server_cfg)
-                lowered = server_name.lower()
-                state = "enabled"
-                if not config.get("mcp", {}).get("enabled", True):
-                    state = "globally-disabled"
-                elif not server_cfg.get("enabled", True):
-                    state = "disabled"
-                elif allowed and lowered not in allowed:
-                    state = "not-allowed"
-                elif lowered in excluded:
-                    state = "excluded"
+        allowed = {item.lower() for item in config.get("mcp", {}).get("allowed", [])}
+        excluded = {item.lower() for item in config.get("mcp", {}).get("excluded", [])}
+        rows: List[Dict[str, Any]] = []
 
-                entry = {
-                    "name": server_name,
-                    "type": server_cfg.get("type", "stdio"),
-                    "enabled": bool(server_cfg.get("enabled", True)),
-                    "state": state,
-                    "trust": bool(server_cfg.get("trust", False)),
-                    "tools": None,
-                    "resources": None,
-                    "prompts": None,
-                    "error": "",
-                }
+        for server_name, raw_server_cfg in config.get("mcpServers", {}).items():
+            server_cfg = normalize_mcp_server_config(server_name, raw_server_cfg)
+            lowered = server_name.lower()
+            state = "enabled"
+            if not config.get("mcp", {}).get("enabled", True):
+                state = "globally-disabled"
+            elif not server_cfg.get("enabled", True):
+                state = "disabled"
+            elif allowed and lowered not in allowed:
+                state = "not-allowed"
+            elif lowered in excluded:
+                state = "excluded"
 
-                if state == "enabled":
-                    client = self._get_client_locked(server_name, effective_servers[server_name])
-                    try:
-                        discovery = client.discover(
-                            force=force_refresh,
-                            timeout_ms=config.get("mcp", {}).get("discovery_timeout_ms"),
-                        )
-                        entry["tools"] = len(discovery.get("tools", []) or [])
-                        entry["resources"] = len(discovery.get("resources", []) or [])
-                        entry["prompts"] = len(discovery.get("prompts", []) or [])
-                        entry["error"] = str(discovery.get("error", "") or "")
-                    except Exception as exc:
-                        entry["error"] = str(exc)
-                rows.append(entry)
+            entry = {
+                "name": server_name,
+                "type": server_cfg.get("type", "stdio"),
+                "enabled": bool(server_cfg.get("enabled", True)),
+                "state": state,
+                "trust": bool(server_cfg.get("trust", False)),
+                "tools": None,
+                "resources": None,
+                "prompts": None,
+                "error": "",
+            }
 
-            rows.sort(key=lambda item: str(item.get("name", "")).lower())
-            return rows
+            if state == "enabled":
+                health = health_snapshot.get(server_name, {})
+                health_state = str(health.get("state", "pending") or "pending").lower()
+                entry["health"] = health_state
+                entry["tools"] = health.get("tools")
+                entry["resources"] = health.get("resources")
+                entry["prompts"] = health.get("prompts")
+                entry["error"] = str(health.get("error", "") or "")
+                if health_state == "pending" and not entry["error"]:
+                    entry["error"] = "background discovery pending"
+            rows.append(entry)
+
+        rows.sort(key=lambda item: str(item.get("name", "")).lower())
+        if force_refresh:
+            self.start_background_discovery(force_refresh=True)
+        return rows
 
     def describe_for_prompt(self) -> str:
-        """Return a compact MCP system-prompt addendum without forcing discovery."""
+        """Describe only MCP servers that passed background discovery."""
+        if self._background_discovery_running:
+            return ""
         with self._lock:
             self._refresh_config_locked(force=False)
             config = self._config
             if not config.get("mcp", {}).get("enabled", True):
-                return (
-                    "## MCP Integration\n"
-                    "- MCP support is currently disabled.\n"
-                    "- If MCP tools appear later, use their schemas directly instead of guessing parameters."
-                )
-
-            effective_servers = self._get_effective_servers_locked()
+                return ""
+            healthy = {
+                name: item
+                for name, item in self._server_health.items()
+                if str(item.get("state", "")).lower() == "healthy"
+            }
+            if not healthy:
+                return ""
             lines = [
                 "## MCP Integration",
-                f"- MCP config file: `{self.config_manager.get_config_path()}`",
                 "- Discovered MCP tools are exposed as function names like `mcp_<server>_<tool>`.",
                 "- Prefer built-in workspace-safe tools for repository-local files, commands, and edits.",
-                "- Use MCP tools when you need capabilities provided by configured external servers.",
+                "- Only servers that passed silent background discovery are included below.",
             ]
-            if not effective_servers:
-                lines.append("- Configured MCP servers: (none enabled)")
-            else:
-                lines.append("- Enabled MCP servers:")
-                for server_name, server_cfg in effective_servers.items():
-                    trust_label = "trusted" if server_cfg.get("trust", False) else "confirmation-required"
-                    lines.append(f"  - {server_name} ({server_cfg.get('type', 'stdio')}, {trust_label})")
+            lines.append("- Healthy MCP servers:")
+            for server_name, server_cfg in healthy.items():
+                trust_label = "trusted" if server_cfg.get("trust", False) else "confirmation-required"
+                lines.append(f"  - {server_name} ({server_cfg.get('type', 'stdio')}, {trust_label})")
             return "\n".join(lines)

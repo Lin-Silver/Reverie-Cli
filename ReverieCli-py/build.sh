@@ -96,14 +96,12 @@ fi
 if [ "$NEED_DEPS" = "1" ]; then
     echo "      Installing or refreshing Python dependencies..."
     if [ "$USE_VENV" = "true" ]; then
-        pip install --disable-pip-version-check --upgrade pyinstaller pillow --quiet
-        pip install --disable-pip-version-check -e . --quiet
+        pip install --disable-pip-version-check -e ".[build]" --quiet
     else
-        $PIP_CMD pyinstaller pillow 2>/dev/null || true
-        $PIP_CMD -e . 2>/dev/null || {
+        $PIP_CMD -e ".[build]" 2>/dev/null || {
             # glcontext may fail to build without X11 headers; try installing deps manually
-            $PIP_CMD rich click tqdm requests openai anthropic GitPython ddgs beautifulsoup4 PyYAML tiktoken Pillow pyglet moderngl 2>/dev/null || true
-            $PIP_CMD -e . 2>/dev/null || true
+            $PIP_CMD -r requirements.txt 2>/dev/null || true
+            $PIP_CMD -e ".[build]" 2>/dev/null || true
         }
     fi
     printf '%s\n' "$CURRENT_DEPS_STAMP" > "$DEPS_STAMP"

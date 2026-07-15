@@ -48,13 +48,13 @@ Security rules:
 - Working directory must stay inside the active workspace
 - Custom environment overrides are disabled
 - Terminal move/delete/rename commands are blocked
-- Inline scripts and script files are scanned for file move/delete APIs
+- Inline interpreter code is disabled; workspace script files are audited
 - Use `delete_file` for file deletion instead of terminal commands
 - Every attempt is logged to the current project cache audit log
 
 Examples:
 - Git status: {"command": "git status"}
-- Python inline script: {"command": "python -c \\"print(1); print(2)\\""}
+- Python test: {"command": "python -m pytest -q"}
 - .NET solution creation: {"command": "dotnet new sln -n Demo"}
 - Search text: {"command": "rg TODO reverie"}
 - PowerShell pipeline: {"command": "Get-ChildItem reverie -Recurse | Select-Object -First 20"}
@@ -503,6 +503,12 @@ Examples:
                 )
 
         for token in tokens[1:]:
+            if token.lower() in self.INLINE_SCRIPT_FLAGS:
+                raise ValueError(
+                    f"Blocked command '{command}': inline interpreter and shell code is disabled because "
+                    "it cannot be constrained to workspace-only file operations. Use a reviewed script file "
+                    "inside the active workspace or a dedicated Reverie tool."
+                )
             if token.lower() in self.OPAQUE_SCRIPT_FLAGS:
                 raise ValueError(
                     f"Blocked command '{command}': opaque script flag '{token}' cannot be audited for move/delete safety."

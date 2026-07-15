@@ -788,9 +788,10 @@ class ContextCompressor:
                 )
 
                 cred = detect_codex_cli_credentials()
-                access_token = str(cred.get("api_key", "") or api_key or "").strip()
+                access_token = str(api_key or cred.get("api_key", "") or "").strip()
                 if not access_token:
                     return compact_with_summary(fallback_summary, "Post-compression deterministic fallback")
+                request_url = resolve_codex_request_url(base_url, "")
 
                 payload = build_codex_request_payload(
                     model_name=model,
@@ -802,15 +803,12 @@ class ContextCompressor:
                     api_key=access_token,
                     account_id=str(cred.get("account_id", "")).strip(),
                     auth_mode=str(cred.get("auth_mode", "")).strip(),
+                    extra_headers=custom_headers,
                     stream=True,
+                    request_url=request_url,
                 )
-                for key, value in (custom_headers or {}).items():
-                    normalized_key = str(key or "").strip()
-                    normalized_value = str(value or "").strip()
-                    if normalized_key and normalized_value:
-                        headers[normalized_key] = normalized_value
                 response = requests.post(
-                    resolve_codex_request_url(base_url, ""),
+                    request_url,
                     headers=headers,
                     json=payload,
                     stream=True,

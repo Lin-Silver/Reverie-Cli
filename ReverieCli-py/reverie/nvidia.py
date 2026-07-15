@@ -303,6 +303,16 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         context_length=NVIDIA_NEMOTRON_3_SUPER_CONTEXT_TOKENS,
     ),
     _openai_model(
+        "nvidia/nemotron-3-ultra-550b-a55b",
+        "Nemotron 3 Ultra 550B",
+        "OpenAI SDK transport with NVIDIA chat-template thinking and reasoning_budget.",
+        thinking=True,
+        thinking_control="fixed",
+        context_length=1_000_000,
+        max_output_tokens=16_384,
+        default_max_tokens=16_384,
+    ),
+    _openai_model(
         "minimaxai/minimax-m2.7",
         "MiniMax M2.7",
         "OpenAI SDK transport.",
@@ -340,16 +350,6 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         context_length=NVIDIA_GLM_5_2_CONTEXT_TOKENS,
         max_output_tokens=32_768,
         default_max_tokens=16_384,
-    ),
-    _openai_model(
-        "z-ai/glm-5.1",
-        "GLM-5.1",
-        "OpenAI SDK transport with clear_thinking=False.",
-        thinking=True,
-        thinking_control="toggle",
-        thinking_options=list(NVIDIA_THINKING_TOGGLE_OPTIONS),
-        default_thinking_choice="true",
-        context_length=NVIDIA_GLM_CONTEXT_TOKENS,
     ),
     _openai_model(
         "z-ai/glm4.7",
@@ -434,7 +434,6 @@ _NVIDIA_MODEL_METADATA = {
 }
 _NVIDIA_MODEL_ALIASES = {
     "z-ai/glm5.2": "z-ai/glm-5.2",
-    "z-ai/glm5.1": "z-ai/glm-5.1",
     "z-ai/glm-4.7": "z-ai/glm4.7",
 }
 _NVIDIA_API_HOSTS = ("integrate.api.nvidia.com",)

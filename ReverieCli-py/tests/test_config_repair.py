@@ -1,5 +1,8 @@
 from pathlib import Path
 import json
+import os
+
+import pytest
 
 import reverie.config as config_module
 
@@ -114,6 +117,7 @@ def test_get_app_root_uses_dist_depot_for_source_checkout(tmp_path: Path, monkey
     assert not (source_root / ".reverie").exists()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="validates Windows drive-path normalization")
 def test_project_data_dir_uses_portable_safe_full_path_name_without_hash(tmp_path: Path, monkeypatch) -> None:
     app_root = tmp_path / "app"
     app_root.mkdir(parents=True, exist_ok=True)

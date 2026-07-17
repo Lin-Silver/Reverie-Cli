@@ -147,6 +147,12 @@ jobs:
         working-directory: ReverieCli-ui
         run: npm ci
 
+      - name: Install FFmpeg
+        shell: pwsh
+        run: |
+          choco install ffmpeg --version=8.1.2 --yes --no-progress
+          ffmpeg -version | Select-Object -First 1
+
       - name: Build Electron installer and portable desktop
         shell: pwsh
         run: |

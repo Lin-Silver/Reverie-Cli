@@ -10,6 +10,7 @@ import threading
 import time
 import zipfile
 
+import pytest
 from rich.console import Console
 
 from reverie.cli.commands import CommandHandler
@@ -867,6 +868,7 @@ def test_plugins_sdk_command_renders_depot_surface(tmp_path: Path) -> None:
     assert "www.blender.org/download" in sdk_text
 
 
+@pytest.mark.skipif(platform.system() != "Windows", reason="uses the Windows Blender portable archive")
 def test_runtime_plugin_manager_can_deploy_portable_blender_archive(tmp_path: Path) -> None:
     app_root = tmp_path / "app"
     archive_path = app_root / "blender-5.1.1-windows-x64.zip"
@@ -886,6 +888,7 @@ def test_runtime_plugin_manager_can_deploy_portable_blender_archive(tmp_path: Pa
     assert entry_path.name in {"blender.exe", "blender"}
 
 
+@pytest.mark.skipif(platform.system() != "Windows", reason="uses the Windows Blender portable archive")
 def test_sdk_archive_can_live_inside_installed_plugin_depot(tmp_path: Path) -> None:
     app_root = tmp_path / "app"
     archive_path = app_root / ".reverie" / "plugins" / "blender" / "blender-5.1.1-windows-x64.zip"
@@ -915,6 +918,7 @@ def test_sdk_status_ignores_optional_wrapper_entry_for_runtime_readiness(tmp_pat
     assert status["entry_path"] is None
 
 
+@pytest.mark.skipif(platform.system() != "Windows", reason="uses the Windows Blender portable archive")
 def test_plugins_deploy_command_extracts_portable_blender_archive(tmp_path: Path) -> None:
     app_root = tmp_path / "app"
     archive_path = app_root / "blender-5.1.1-windows-x64.zip"

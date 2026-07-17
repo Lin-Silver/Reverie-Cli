@@ -7,6 +7,8 @@ search-mcp/
 _embedded_tmp/
 add-on/
 references/
+!/ReverieCli-py/reverie/builtin_skills/*/references/
+!/ReverieCli-py/reverie/builtin_skills/*/references/**
 .pytest_cache/
 tests/
 !tests/

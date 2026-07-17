@@ -31,6 +31,18 @@ _SKILL_STOPWORDS = {
 }
 
 
+def _same_path(left: Path, right: Path) -> bool:
+    """Compare paths without assuming that the host filesystem is case-sensitive."""
+    try:
+        if left.exists() and right.exists():
+            return left.samefile(right)
+    except OSError:
+        pass
+    return os.path.normcase(str(left.resolve(strict=False))) == os.path.normcase(
+        str(right.resolve(strict=False))
+    )
+
+
 def _stable_json_signature(payload: Any) -> str:
     """Return a stable signature string for change detection."""
     try:
@@ -248,12 +260,11 @@ class SkillsManager:
         candidates.extend(self._repo_skill_root_candidates())
 
         deduped: list[SkillRoot] = []
-        seen_paths: set[str] = set()
+        seen_paths: list[Path] = []
         for root in candidates:
-            normalized = str(root.path.resolve(strict=False)).lower()
-            if normalized in seen_paths:
+            if any(_same_path(root.path, seen) for seen in seen_paths):
                 continue
-            seen_paths.add(normalized)
+            seen_paths.append(root.path)
             deduped.append(root)
         return tuple(deduped)
 
@@ -295,16 +306,15 @@ class SkillsManager:
         roots = self._build_root_candidates()
         records: list[SkillRecord] = []
         errors: list[SkillError] = []
-        seen_skill_paths: set[str] = set()
+        seen_skill_paths: list[Path] = []
 
         for root in roots:
             if not root.path.is_dir():
                 continue
             for skill_md in self._iter_skill_files(root.path):
-                normalized_path = str(skill_md.resolve(strict=False)).lower()
-                if normalized_path in seen_skill_paths:
+                if any(_same_path(skill_md, seen) for seen in seen_skill_paths):
                     continue
-                seen_skill_paths.add(normalized_path)
+                seen_skill_paths.append(skill_md)
                 record, error = self._load_skill(skill_md, root)
                 if record is not None and self._skill_visible_in_active_mode(record):
                     records.append(record)
@@ -432,7 +442,7 @@ class SkillsManager:
     def _iter_skill_files(self, root_path: Path) -> list[Path]:
         """Return candidate SKILL.md files from one root, recursively."""
         skill_files: list[Path] = []
-        seen: set[str] = set()
+        seen: list[Path] = []
 
         for dirpath, dirnames, filenames in os.walk(root_path):
             dirnames[:] = [name for name in dirnames if name not in _SKILL_SCAN_SKIP_DIRS]
@@ -441,10 +451,9 @@ class SkillsManager:
             candidate = Path(dirpath) / "SKILL.md"
             if not candidate.is_file():
                 continue
-            normalized = str(candidate.resolve(strict=False)).lower()
-            if normalized in seen:
+            if any(_same_path(candidate, discovered) for discovered in seen):
                 continue
-            seen.add(normalized)
+            seen.append(candidate)
             skill_files.append(candidate)
             # A discovered Skill directory is a package boundary. Its nested
             # references must not become separate Skills during discovery.

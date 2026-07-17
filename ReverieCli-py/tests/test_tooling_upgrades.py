@@ -3,9 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 import base64
 import json
+import os
 from types import SimpleNamespace
 import zipfile
 
+import pytest
 from rich.console import Console
 
 from reverie.agent.tool_executor import ToolExecutor
@@ -538,6 +540,7 @@ def test_browser_session_cleanup_preserves_persistent_and_credential_profiles(tm
     assert str(persistent) in result.data["preserved_profiles"]
 
 
+@pytest.mark.skipif(os.name != "nt", reason="validates Windows taskkill process termination")
 def test_browser_session_termination_only_stops_verified_embedded_process(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("REVERIE_APP_ROOT", str(tmp_path / "app"))
     tool = BrowserControlerTool({"project_root": tmp_path})

@@ -121,17 +121,17 @@ if [ ! -f "$SHARED_COMFY_DIR/embedded_comfy.b64" ]; then
     exit 1
 fi
 
-cp -u "$SHARED_COMFY_DIR/generate_image.py" "$BUNDLE_RES_DIR/comfy/generate_image.py"
-cp -u "$SHARED_COMFY_DIR/embedded_comfy.b64" "$BUNDLE_RES_DIR/comfy/embedded_comfy.b64"
+cp -f "$SHARED_COMFY_DIR/generate_image.py" "$BUNDLE_RES_DIR/comfy/generate_image.py"
+cp -f "$SHARED_COMFY_DIR/embedded_comfy.b64" "$BUNDLE_RES_DIR/comfy/embedded_comfy.b64"
 export PLAYWRIGHT_BROWSERS_PATH="$BUNDLE_RES_DIR/browser/ms-playwright"
-CHROMIUM_EXE=$(find "$PLAYWRIGHT_BROWSERS_PATH" -type f \( -name chrome -o -name chrome.exe \) -print -quit 2>/dev/null)
+CHROMIUM_EXE=$(find "$PLAYWRIGHT_BROWSERS_PATH" -type f \( -name chrome -o -name chrome.exe -o -name Chromium -o -name 'Google Chrome for Testing' \) -print -quit 2>/dev/null)
 NEED_BROWSER=0
 if [ "$FORCE_BROWSER" = "1" ] || [ -z "$CHROMIUM_EXE" ]; then
     NEED_BROWSER=1
 fi
 if [ "$NEED_BROWSER" = "1" ]; then
     $PYTHON_CMD -m playwright install chromium --no-shell 2>/dev/null || true
-    CHROMIUM_EXE=$(find "$PLAYWRIGHT_BROWSERS_PATH" -type f \( -name chrome -o -name chrome.exe \) -print -quit 2>/dev/null)
+    CHROMIUM_EXE=$(find "$PLAYWRIGHT_BROWSERS_PATH" -type f \( -name chrome -o -name chrome.exe -o -name Chromium -o -name 'Google Chrome for Testing' \) -print -quit 2>/dev/null)
 else
     echo "      Reusing embedded Chromium."
 fi

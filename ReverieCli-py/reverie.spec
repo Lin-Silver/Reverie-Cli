@@ -85,8 +85,8 @@ missing_bundle_files = [str(path) for path in required_bundle_files if not path.
 playwright_root = browser_src / "ms-playwright"
 embedded_browser_candidates = []
 if playwright_root.is_dir():
-    embedded_browser_candidates.extend(playwright_root.rglob("chrome.exe"))
-    embedded_browser_candidates.extend(playwright_root.rglob("chrome"))
+    for browser_name in ("chrome.exe", "chrome", "Chromium", "Google Chrome for Testing"):
+        embedded_browser_candidates.extend(playwright_root.rglob(browser_name))
 if missing_bundle_files or not embedded_browser_candidates:
     details = missing_bundle_files
     if not embedded_browser_candidates:

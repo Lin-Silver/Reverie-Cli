@@ -128,8 +128,11 @@ def _ensure_bundled_ffmpeg(bundle_roots: Iterable[Path]) -> Optional[Path]:
     except Exception:
         return None
 
-    target = app_root / ".reverie" / "runtime-assets" / "ffmpeg" / "ffmpeg.exe"
+    executable_name = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
+    target = app_root / ".reverie" / "runtime-assets" / "ffmpeg" / executable_name
     if target.is_file():
+        if os.name != "nt":
+            target.chmod(target.stat().st_mode | 0o111)
         return target.resolve()
 
     roots = list(bundle_roots)
@@ -142,9 +145,19 @@ def _ensure_bundled_ffmpeg(bundle_roots: Iterable[Path]) -> Optional[Path]:
     partial = target.with_suffix(".part")
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
-        with zipfile.ZipFile(archive) as packed, packed.open("ffmpeg.exe") as source, partial.open("wb") as destination:
-            shutil.copyfileobj(source, destination)
+        with zipfile.ZipFile(archive) as packed:
+            members = set(packed.namelist())
+            member = executable_name if executable_name in members else next(
+                (name for name in ("ffmpeg.exe", "ffmpeg") if name in members),
+                "",
+            )
+            if not member:
+                return None
+            with packed.open(member) as source, partial.open("wb") as destination:
+                shutil.copyfileobj(source, destination)
         os.replace(partial, target)
+        if os.name != "nt":
+            target.chmod(target.stat().st_mode | 0o111)
         return target.resolve()
     except Exception:
         partial.unlink(missing_ok=True)

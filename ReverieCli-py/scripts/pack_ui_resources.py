@@ -9,6 +9,14 @@ import shutil
 import zipfile
 
 
+BROWSER_EXECUTABLE_NAMES = (
+    "chrome.exe",
+    "chrome",
+    "Chromium",
+    "Google Chrome for Testing",
+)
+
+
 def _write_tree(archive: zipfile.ZipFile, source: Path, prefix: str) -> None:
     for file_path in sorted(path for path in source.rglob("*") if path.is_file()):
         archive.write(file_path, Path(prefix) / file_path.relative_to(source))
@@ -36,7 +44,12 @@ def main() -> int:
     args = parser.parse_args()
 
     browser_root = Path(args.browser).resolve()
-    if not browser_root.is_dir() or not any(browser_root.rglob("chrome.exe")):
+    browser_executables = (
+        candidate
+        for name in BROWSER_EXECUTABLE_NAMES
+        for candidate in browser_root.rglob(name)
+    )
+    if not browser_root.is_dir() or not any(candidate.is_file() for candidate in browser_executables):
         raise SystemExit(f"Bundled Chromium runtime is incomplete: {browser_root}")
 
     ffmpeg = _resolve_ffmpeg(args.ffmpeg)
@@ -48,7 +61,7 @@ def main() -> int:
     with zipfile.ZipFile(browser_archive, "w", zipfile.ZIP_DEFLATED, compresslevel=6, allowZip64=True) as archive:
         _write_tree(archive, browser_root, "ms-playwright")
     with zipfile.ZipFile(ffmpeg_archive, "w", zipfile.ZIP_DEFLATED, compresslevel=6, allowZip64=True) as archive:
-        archive.write(ffmpeg, "ffmpeg.exe")
+        archive.write(ffmpeg, "ffmpeg.exe" if os.name == "nt" else "ffmpeg")
 
     print(f"Browser archive: {browser_archive} ({browser_archive.stat().st_size} bytes)")
     print(f"FFmpeg archive: {ffmpeg_archive} ({ffmpeg_archive.stat().st_size} bytes)")

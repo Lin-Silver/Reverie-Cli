@@ -117,7 +117,7 @@ const trustedKernels = [];
 if (existsSync(externalKernel)) {
   const probe = spawnSync(externalKernel, ["--kernel-info"], {
     encoding: "utf8",
-    timeout: 20_000,
+    timeout: 60_000,
     windowsHide: true,
   });
   if (probe.status !== 0) {

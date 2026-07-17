@@ -648,6 +648,26 @@ def test_browser_controler_extracts_archived_runtime_on_first_use(tmp_path: Path
     assert resolved.read_bytes() == b"archived"
 
 
+def test_browser_controler_detects_macos_chrome_for_testing(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("REVERIE_APP_ROOT", str(tmp_path / "app"))
+    tool = BrowserControlerTool({"project_root": tmp_path})
+    executable = (
+        tmp_path
+        / "runtime"
+        / "ms-playwright"
+        / "chromium-1228"
+        / "chrome-mac-arm64"
+        / "Google Chrome for Testing.app"
+        / "Contents"
+        / "MacOS"
+        / "Google Chrome for Testing"
+    )
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"browser")
+
+    assert executable in tool._embedded_chromium_candidates(tmp_path / "runtime")
+
+
 def test_discover_ffmpeg_extracts_archived_binary_on_first_use(tmp_path: Path, monkeypatch) -> None:
     from reverie.engine import video as video_module
 
@@ -655,14 +675,15 @@ def test_discover_ffmpeg_extracts_archived_binary_on_first_use(tmp_path: Path, m
     bundle_root = tmp_path / "bundle"
     archive = bundle_root / "reverie_resources" / "ffmpeg.zip"
     archive.parent.mkdir(parents=True)
+    executable_name = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
     with zipfile.ZipFile(archive, "w") as packed:
-        packed.writestr("ffmpeg.exe", b"ffmpeg")
+        packed.writestr(executable_name, b"ffmpeg")
     monkeypatch.setenv("REVERIE_APP_ROOT", str(app_root))
     monkeypatch.setattr(video_module.sys, "_MEIPASS", str(bundle_root), raising=False)
 
     resolved = Path(video_module.discover_ffmpeg())
 
-    assert resolved == (app_root / ".reverie" / "runtime-assets" / "ffmpeg" / "ffmpeg.exe").resolve()
+    assert resolved == (app_root / ".reverie" / "runtime-assets" / "ffmpeg" / executable_name).resolve()
     assert resolved.read_bytes() == b"ffmpeg"
 
 
@@ -1222,7 +1243,7 @@ def test_local_build_scripts_bundle_embedded_chromium() -> None:
         assert "browser/ms-playwright" in script.replace("\\", "/")
     assert 'add_tree_if_exists(browser_src / "ms-playwright", "reverie_resources/browser/ms-playwright")' in spec
     assert "Missing required bundled resources" in spec
-    assert 'playwright_root.rglob("chrome.exe")' in spec
+    assert 'for browser_name in ("chrome.exe", "chrome", "Chromium", "Google Chrome for Testing")' in spec
     assert '"playwright==1.61.0"' in setup
 
 

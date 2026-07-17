@@ -159,8 +159,8 @@ if not exist "%SHARED_COMFY_DIR%\embedded_comfy.b64" (
 
 if not exist "%BUNDLE_RES_DIR%\comfy" mkdir "%BUNDLE_RES_DIR%\comfy" >nul 2>&1
 if not exist "%BUNDLE_RES_DIR%\browser\ms-playwright" mkdir "%BUNDLE_RES_DIR%\browser\ms-playwright" >nul 2>&1
-xcopy /D /Y "%SHARED_COMFY_DIR%\generate_image.py" "%BUNDLE_RES_DIR%\comfy\generate_image.py" >nul
-xcopy /D /Y "%SHARED_COMFY_DIR%\embedded_comfy.b64" "%BUNDLE_RES_DIR%\comfy\embedded_comfy.b64" >nul
+copy /B /Y "%SHARED_COMFY_DIR%\generate_image.py" "%BUNDLE_RES_DIR%\comfy\generate_image.py" >nul
+copy /B /Y "%SHARED_COMFY_DIR%\embedded_comfy.b64" "%BUNDLE_RES_DIR%\comfy\embedded_comfy.b64" >nul
 set "PLAYWRIGHT_BROWSERS_PATH=%BUNDLE_RES_DIR%\browser\ms-playwright"
 set "NEED_BROWSER=0"
 if "%FORCE_BROWSER%"=="1" set "NEED_BROWSER=1"

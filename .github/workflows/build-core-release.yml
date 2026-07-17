@@ -93,6 +93,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes ffmpeg libfuse2
 
+      - name: Install macOS FFmpeg
+        if: runner.os == 'macOS'
+        run: command -v ffmpeg >/dev/null || brew install ffmpeg
+
       - name: Build and verify Windows kernel
         if: runner.os == 'Windows'
         shell: cmd

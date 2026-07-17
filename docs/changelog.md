@@ -9,7 +9,8 @@ Released 2026-07-17.
 * Added release aggregation gates for required filenames, non-empty files, protocol metadata, sizes, and SHA-256 hashes. Categorized upload labels retain every real filename and extension.
 * Replaced the cached center sparkle with the versioned `reverie-mark-2.5.png` dream-portal emblem so packaged renderers cannot silently reuse the previous asset.
 * Changed the rolling `latest` Release into an automatically rebuilt prerelease for every `main` push, consolidated four platform JSON records into `reverie-kernels.json`, labeled macOS downloads as Apple Silicon or Intel, and published categorized Windows → Linux → macOS download sections.
-* Added a persistent top-toolbar control that collapses the left project/session sidebar and expands the main workspace into the released space.
+* Added complete Simplified Chinese and English desktop localization with an immediately applied, persisted language selector under General settings, including localized native file-picker titles.
+* Moved the persistent sidebar-collapse control beside the Reverie mark at the top of the project/session sidebar, kept a restore control in the main toolbar while hidden, and expanded the agent workspace into the released space.
 
 ## Reverie CLI v2.4.0 - Desktop, Context Engine, and Release Upgrade
 

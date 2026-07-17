@@ -5,6 +5,7 @@ describe("renderer UI preferences", () => {
   it("keeps technical detail off by default except tool call names", () => {
     const value = normalizeUiPreferences({});
     expect(value.showReasoning).toBe(false);
+    expect(value.language).toBe("zh-CN");
     expect(value.expandReasoning).toBe(true);
     expect(value.showToolCalls).toBe(true);
     expect(value.showToolResults).toBe(false);
@@ -14,6 +15,7 @@ describe("renderer UI preferences", () => {
   it("normalizes persisted values received from Electron", () => {
     const value = normalizeUiPreferences({
       accent: "teal",
+      language: "en-US",
       fontSize: "large",
       messageWidth: "wide",
       backgroundPreset: "aurora-archive",
@@ -22,6 +24,7 @@ describe("renderer UI preferences", () => {
       archivedSessions: { "G:\\Reverie": ["session-1"] },
     });
     expect(value.accent).toBe("teal");
+    expect(value.language).toBe("en-US");
     expect(value.fontSize).toBe("large");
     expect(value.messageWidth).toBe("wide");
     expect(value.backgroundPreset).toBe("aurora-archive");

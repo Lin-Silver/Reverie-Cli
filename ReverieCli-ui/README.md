@@ -52,7 +52,9 @@ The final repository build therefore shares `../dist/.reverie` with the standalo
 
 Conversation history is workspace-scoped. Recent workspaces are shown as project groups, with the active project's sessions nested below it. The desktop UI restores the last active session, keeps unsent drafts per session, and exposes rename, archive, unarchive, fork, rewind, delete, and full-history search actions. Rename and delete are backed directly by the CLI session manager; archive state is a non-destructive desktop preference.
 
-The first top-toolbar button collapses or restores the left project/session sidebar. The layout choice is kept locally across application restarts.
+The button beside the Reverie mark at the top of the project/session sidebar hides it and expands the agent workspace. While hidden, a restore button remains in the main toolbar. The layout choice is kept locally across application restarts.
+
+The complete desktop interface supports Simplified Chinese and English. **Settings → General → Interface language** switches the renderer and native file-picker titles immediately, and the choice is persisted with the other desktop preferences.
 
 Every project row also has a management menu. **Delete project and records** removes the project from the recent list and deletes its Reverie sessions, transcripts, memory, checkpoints, Context Engine cache, security/audit data, and imported attachments. It never deletes ordinary project files, workspace configuration, or project rules. Deleting the active project first selects a valid fallback workspace.
 

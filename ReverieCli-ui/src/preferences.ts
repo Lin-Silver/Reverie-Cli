@@ -1,9 +1,12 @@
+import { normalizeUiLanguage, type UiLanguage } from "./i18n";
+
 export type AccentPreference = "violet" | "blue" | "teal" | "rose" | "amber";
 export type FontSizePreference = "compact" | "comfortable" | "large";
 export type MessageWidthPreference = "focused" | "balanced" | "wide";
 export type BackgroundPreset = "none" | "aurora-archive" | "moss-library" | "ember-manuscript" | "custom";
 
 export interface UiPreferences {
+  language: UiLanguage;
   accent: AccentPreference;
   fontSize: FontSizePreference;
   messageWidth: MessageWidthPreference;
@@ -24,6 +27,7 @@ export interface UiPreferences {
 }
 
 export const DEFAULT_UI_PREFERENCES: UiPreferences = {
+  language: "zh-CN",
   accent: "violet",
   fontSize: "comfortable",
   messageWidth: "balanced",
@@ -65,6 +69,7 @@ export function normalizeUiPreferences(value: unknown): UiPreferences {
     ? source.archivedSessions as Record<string, unknown>
     : {};
   return {
+    language: normalizeUiLanguage(source.language),
     accent: enumValue(source.accent, ["violet", "blue", "teal", "rose", "amber"] as const, DEFAULT_UI_PREFERENCES.accent),
     fontSize: enumValue(source.fontSize, ["compact", "comfortable", "large"] as const, DEFAULT_UI_PREFERENCES.fontSize),
     messageWidth: enumValue(source.messageWidth, ["focused", "balanced", "wide"] as const, DEFAULT_UI_PREFERENCES.messageWidth),
@@ -106,6 +111,7 @@ export function effectiveBackgroundUrl(preferences: UiPreferences): string {
 export function applyUiPreferences(preferences: UiPreferences): void {
   const root = document.documentElement;
   const backgroundUrl = effectiveBackgroundUrl(preferences);
+  root.lang = preferences.language;
   root.dataset.accent = preferences.accent;
   root.dataset.fontSize = preferences.fontSize;
   root.dataset.messageWidth = preferences.messageWidth;

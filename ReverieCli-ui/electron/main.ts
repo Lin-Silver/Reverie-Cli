@@ -406,6 +406,10 @@ if (!launchOptions.tui) {
   });
 }
 
+function localizedUiText(language: StoredUiPreferences["language"], chinese: string, english: string): string {
+  return language === "en-US" ? english : chinese;
+}
+
 async function activateWorkspace(projectRoot: string): Promise<string> {
   if (!bridge) throw new Error("Reverie core bridge is not initialized.");
   const resolved = await activateWorkspaceInPlace(bridge, projectRoot, async (nextProjectRoot) => {
@@ -514,8 +518,9 @@ ipcMain.handle("core:cancel", async () => {
 
 ipcMain.handle("desktop:select-workspace", async () => {
   if (!mainWindow || !bridge) return null;
+  const preferences = normalizeUiPreferences((await readDesktopSettings()).ui);
   const result = await dialog.showOpenDialog(mainWindow, {
-    title: "选择 Reverie 工作区",
+    title: localizedUiText(preferences.language, "选择 Reverie 工作区", "Choose a Reverie workspace"),
     defaultPath: bridge.getProjectRoot(),
     properties: ["openDirectory", "createDirectory"],
   });
@@ -547,14 +552,14 @@ ipcMain.handle("desktop:delete-workspace", async (_event, projectRoot: string) =
 
   if (!nextProjectRoot) {
     const selection = await dialog.showOpenDialog(mainWindow, {
-      title: "删除当前项目后切换到…",
+      title: localizedUiText(preferences.language, "删除当前项目后切换到…", "Choose a workspace after deleting the current project…"),
       defaultPath: path.dirname(target),
       properties: ["openDirectory", "createDirectory"],
     });
     if (selection.canceled || !selection.filePaths[0]) return null;
     nextProjectRoot = path.resolve(selection.filePaths[0]);
     if (samePath(nextProjectRoot, target)) {
-      throw new Error("请选择另一个工作区后再删除当前项目。");
+      throw new Error(localizedUiText(preferences.language, "请选择另一个工作区后再删除当前项目。", "Choose another workspace before deleting the current project."));
     }
   }
 
@@ -587,8 +592,9 @@ ipcMain.handle("desktop:delete-workspace", async (_event, projectRoot: string) =
 ipcMain.handle("desktop:select-attachment", async () => {
   if (!mainWindow || !bridge) return null;
   const projectRoot = path.resolve(bridge.getProjectRoot());
+  const preferences = normalizeUiPreferences((await readDesktopSettings()).ui);
   const result = await dialog.showOpenDialog(mainWindow, {
-    title: "选择要提供给 Reverie 的文件",
+    title: localizedUiText(preferences.language, "选择要提供给 Reverie 的文件", "Choose a file to provide to Reverie"),
     defaultPath: projectRoot,
     properties: ["openFile"],
   });
@@ -608,8 +614,9 @@ ipcMain.handle("desktop:select-attachment", async () => {
 
 ipcMain.handle("desktop:select-core-data", async () => {
   if (!mainWindow || !bridge) return null;
+  const preferences = normalizeUiPreferences((await readDesktopSettings()).ui);
   const result = await dialog.showOpenDialog(mainWindow, {
-    title: "选择 Reverie CLI 数据目录",
+    title: localizedUiText(preferences.language, "选择 Reverie CLI 数据目录", "Choose the Reverie CLI data folder"),
     defaultPath: bridge.getCoreAppRoot(),
     properties: ["openDirectory", "createDirectory"],
   });
@@ -662,8 +669,9 @@ ipcMain.handle("desktop:set-ui-preferences", async (_event, patch: JsonRecord) =
 
 ipcMain.handle("desktop:select-background", async () => {
   if (!mainWindow) return null;
+  const preferences = normalizeUiPreferences((await readDesktopSettings()).ui);
   const result = await dialog.showOpenDialog(mainWindow, {
-    title: "选择 Reverie 背景图片",
+    title: localizedUiText(preferences.language, "选择 Reverie 背景图片", "Choose a Reverie background image"),
     properties: ["openFile"],
     filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "bmp"] }],
   });

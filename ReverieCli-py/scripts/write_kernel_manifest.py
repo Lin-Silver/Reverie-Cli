@@ -27,7 +27,7 @@ def main() -> int:
         capture_output=True,
         text=True,
         encoding="utf-8",
-        timeout=30,
+        timeout=120,
     )
     info = json.loads(completed.stdout)
     if info.get("schema") != "reverie.kernel.v1" or info.get("bridge_protocol") != "sdk-bridge.v1":

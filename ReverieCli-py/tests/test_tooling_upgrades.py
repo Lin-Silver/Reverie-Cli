@@ -646,6 +646,8 @@ def test_browser_controler_extracts_archived_runtime_on_first_use(tmp_path: Path
 
     assert resolved == (tool.runtime_dir / member).resolve()
     assert resolved.read_bytes() == b"archived"
+    if os.name != "nt":
+        assert resolved.stat().st_mode & 0o111
 
 
 def test_browser_controler_detects_macos_chrome_for_testing(tmp_path: Path, monkeypatch) -> None:
@@ -1242,6 +1244,8 @@ def test_local_build_scripts_bundle_embedded_chromium() -> None:
         assert "PLAYWRIGHT_BROWSERS_PATH" in script
         assert "browser/ms-playwright" in script.replace("\\", "/")
     assert 'add_tree_if_exists(browser_src / "ms-playwright", "reverie_resources/browser/ms-playwright")' in spec
+    assert 'if sys.platform == "darwin":' in spec
+    assert "shutil.make_archive(" in spec
     assert "Missing required bundled resources" in spec
     assert 'for browser_name in ("chrome.exe", "chrome", "Chromium", "Google Chrome for Testing")' in spec
     assert '"playwright==1.61.0"' in setup

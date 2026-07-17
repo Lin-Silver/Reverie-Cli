@@ -3,6 +3,7 @@ from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 from pathlib import Path
 import os
 import shutil
+import sys
 
 build_mode = os.environ.get('REVERIE_PYINSTALLER_MODE', 'onefile').strip().lower()
 datas = [('README.md', '.')]
@@ -112,7 +113,17 @@ if resolved_icon is None:
 add_data_if_exists(comfy_src / "generate_image.py", "reverie_resources/comfy")
 add_data_if_exists(comfy_src / "embedded_comfy.b64", "reverie_resources/comfy")
 if build_mode != 'ui-onedir':
-    add_tree_if_exists(browser_src / "ms-playwright", "reverie_resources/browser/ms-playwright")
+    if sys.platform == "darwin":
+        browser_archive = browser_src / "browser.zip"
+        shutil.make_archive(
+            str(browser_archive.with_suffix("")),
+            "zip",
+            root_dir=browser_src,
+            base_dir="ms-playwright",
+        )
+        add_data_if_exists(browser_archive, "reverie_resources")
+    else:
+        add_tree_if_exists(browser_src / "ms-playwright", "reverie_resources/browser/ms-playwright")
 add_data_if_exists(repo_root / "reverie" / "agent" / "tool_manifest.json", "reverie/agent")
 add_data_if_exists(repo_root / "reverie" / "engine" / "vendor" / "live2d" / "live2dcubismcore.min.js", "reverie/engine/vendor/live2d")
 add_tree_if_exists(repo_root / "reverie" / "builtin_skills", "reverie/builtin_skills")

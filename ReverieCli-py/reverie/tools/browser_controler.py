@@ -3611,6 +3611,8 @@ class BrowserControlerTool(BaseTool):
 
     def _ensure_bundled_browser_runtime(self) -> Optional[Path]:
         existing = next((path for path in self._embedded_chromium_candidates(self.runtime_dir) if path.exists() and path.is_file()), None)
+        if existing and os.name != "nt":
+            existing.chmod(existing.stat().st_mode | 0o111)
         source = self._bundled_browser_resource_dir()
         archive = self._bundled_browser_resource_archive()
         if not source and not archive:
@@ -3637,6 +3639,8 @@ class BrowserControlerTool(BaseTool):
         except Exception:
             return existing.resolve() if existing else None
         existing = next((path for path in self._embedded_chromium_candidates(self.runtime_dir) if path.exists() and path.is_file()), None)
+        if existing and os.name != "nt":
+            existing.chmod(existing.stat().st_mode | 0o111)
         return existing.resolve() if existing else None
 
     def _bundled_browser_resource_dir(self) -> Optional[Path]:

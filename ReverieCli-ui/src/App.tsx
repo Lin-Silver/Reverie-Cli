@@ -113,7 +113,7 @@ type CoreResponse = Record<string, unknown>;
 type Toast = { id: number; kind: "success" | "error" | "info"; message: string };
 type ComposerAttachment = { name: string; relativePath: string; size: number };
 
-const REVERIE_MARK_URL = new URL("reverie-mark.png", document.baseURI).href;
+const REVERIE_MARK_URL = new URL("reverie-mark-2.5.png", document.baseURI).href;
 
 const MODES = [
   ["reverie", "Reverie", Code2],

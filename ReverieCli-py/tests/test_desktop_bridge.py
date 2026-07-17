@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 import threading
 from types import SimpleNamespace
@@ -12,6 +13,18 @@ from reverie.desktop_catalog import (
 )
 from reverie.session.manager import SessionManager, session_title_from_prompt
 from reverie.sdk_bridge import _desktop_tool_record
+
+
+def test_kernel_info_contract(capsys) -> None:
+    from reverie.__main__ import main
+
+    assert main(["--kernel-info"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["schema"] == "reverie.kernel.v1"
+    assert payload["version"] == "2.5.0"
+    assert payload["bridge_protocol"] == "sdk-bridge.v1"
+    assert payload["platform"]
+    assert payload["arch"]
 
 
 def _source(payload: dict, source_id: str) -> dict:

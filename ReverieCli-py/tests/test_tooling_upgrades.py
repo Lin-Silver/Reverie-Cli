@@ -1175,33 +1175,36 @@ def test_browser_controler_manifest_mentions_embedded_browser_contract() -> None
 
 def test_github_action_builds_desktop_and_publishes_version_tags() -> None:
     repo_root = Path(__file__).resolve().parents[2]
-    workflow = (repo_root / ".github" / "workflows" / "build-windows-exe.yml").read_text(encoding="utf-8")
+    workflow = (repo_root / ".github" / "workflows" / "build-core-release.yml").read_text(encoding="utf-8")
+    plugin_workflow = (repo_root / ".github" / "workflows" / "build-plugins.yml").read_text(encoding="utf-8")
     desktop_kernel_builder = (repo_root / "ReverieCli-ui" / "scripts" / "build-kernel.mjs").read_text(encoding="utf-8")
+    desktop_main = (repo_root / "ReverieCli-ui" / "electron" / "main.ts").read_text(encoding="utf-8")
+    desktop_package = (repo_root / "ReverieCli-ui" / "package.json").read_text(encoding="utf-8")
 
-    assert "schedule:" in workflow
-    assert "17 18 * * *" in workflow
     assert "actions/upload-artifact@v4" in workflow
-    assert '- "v*"' in workflow
-    assert "gh release upload $releaseTag" in workflow
-    assert "startsWith(github.ref, 'refs/tags/v')" in workflow
+    assert 'tags: ["v*"]' in workflow
+    assert 'gh release upload "$release_tag" release-assets/* --clobber' in workflow
     assert "dist/reverie.exe" in workflow
     assert "Reverie-Setup-$version-x64.exe" in workflow
     assert "Reverie-Portable-$version-x64.exe" in workflow
-    assert "Build Python exe" in workflow
-    assert "Build Electron installer and portable desktop" in workflow
-    assert "REVERIE_BUNDLE_RES_DIR" in workflow
+    assert "Reverie-$version-linux-x64.AppImage" in workflow
+    assert "Reverie-$version-linux-x64.deb" in workflow
+    assert "Reverie-$version-mac-arm64.dmg" in workflow
+    assert "Reverie-$version-mac-x64.dmg" in workflow
+    assert "write_kernel_manifest.py" in workflow
     assert "process.env.REVERIE_BUNDLE_RES_DIR" in desktop_kernel_builder
-    assert "python -m playwright install chromium" in workflow
-    assert "python -m playwright install chromium --no-shell" in workflow
-    assert "PLAYWRIGHT_BROWSERS_PATH" in workflow
+    assert "build/generated/reverie-trusted-kernels.json" in desktop_package
+    assert 'app.getAppPath(), "build", "generated"' in desktop_main
+    assert "plugins-latest" in plugin_workflow
+    assert '"plugins/**"' in plugin_workflow
+    assert "plugins-manifest.json" in plugin_workflow
     assert "embedded Chromium browser-control runtime" in workflow
     assert "Open Computer Use desktop controller" in workflow
-    assert "reverie.exe: primary Windows CLI executable" in workflow
+    assert "reverie.exe is the primary Windows CLI executable" in workflow
     assert "$uploadSpec" not in workflow
     assert "Label =" not in workflow
-    assert "real filename" in workflow
-    assert "Blender runtime plugin" in workflow
-    assert "Official Blender runtime plugin" not in workflow
+    assert "reverie-blender.exe" not in workflow
+    assert "reverie-blender.exe" in plugin_workflow
     assert "reverie-python.exe" not in workflow
     assert "reverie-rust-preview.exe" not in workflow
 

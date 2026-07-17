@@ -7,10 +7,13 @@ import readline from "node:readline";
 import { pathToFileURL } from "node:url";
 import {
   findRepositoryCoreRoot,
+  kernelExecutableName,
   packagedExecutableHome,
   packagedKernelPath,
   packagedRuntimeRoot,
 } from "./runtime-paths";
+import { resolveKernelSelection, TRUSTED_KERNELS_FILENAME } from "./kernel-resolver";
+import { parseDesktopLaunchOptions } from "./launch-options";
 import { normalizeThemePreference, type ThemePreference, windowAppearance } from "./appearance";
 import {
   activateWorkspaceInPlace,
@@ -34,7 +37,12 @@ type DesktopSettings = {
 
 const desktopStartedAt = Date.now();
 const uiRoot = path.resolve(__dirname, "..");
-const executableHome = packagedExecutableHome(process.execPath, process.env.PORTABLE_EXECUTABLE_DIR);
+const launchOptions = parseDesktopLaunchOptions(process.argv);
+const ownsDesktopInstance = launchOptions.tui || app.requestSingleInstanceLock();
+if (!ownsDesktopInstance) app.quit();
+const outerExecutableDirectory = process.env.PORTABLE_EXECUTABLE_DIR
+  || (process.env.APPIMAGE ? path.dirname(process.env.APPIMAGE) : undefined);
+const executableHome = packagedExecutableHome(process.execPath, outerExecutableDirectory);
 const runtimeRoot = app.isPackaged
   ? packagedRuntimeRoot(executableHome)
   : path.join(uiRoot, ".runtime");
@@ -70,14 +78,28 @@ function awaitDirectory(directory: string): void {
   mkdirSync(directory, { recursive: true });
 }
 
-function kernelPath(): string {
+function internalKernelPath(): string {
   return app.isPackaged
     ? packagedKernelPath(process.execPath)
-    : path.resolve(uiRoot, "..", "dist", "reverie.exe");
+    : path.resolve(uiRoot, "..", "dist", kernelExecutableName());
+}
+
+let activeKernelPath = internalKernelPath();
+
+async function selectKernelPath(): Promise<string> {
+  if (!app.isPackaged) return internalKernelPath();
+  const selection = await resolveKernelSelection({
+    internalPath: internalKernelPath(),
+    externalHome: executableHome,
+    manifestPath: path.join(app.getAppPath(), "build", "generated", TRUSTED_KERNELS_FILENAME),
+  });
+  activeKernelPath = selection.path;
+  await log(`Kernel selected (${selection.source}): ${selection.path}; ${selection.reason}`);
+  return selection.path;
 }
 
 function defaultCoreAppRoot(): string {
-  if (!app.isPackaged) return path.dirname(kernelPath());
+  if (!app.isPackaged) return path.dirname(internalKernelPath());
   return executableHome;
 }
 
@@ -198,6 +220,7 @@ class CoreBridge {
   constructor(
     private projectRoot: string,
     private coreAppRoot: string,
+    private readonly executablePath: string,
     private readonly sendEvent: (message: JsonRecord) => void,
   ) {}
 
@@ -222,7 +245,7 @@ class CoreBridge {
     if (this.child && !this.child.killed) return;
 
     this.starting = new Promise<void>((resolve, reject) => {
-      const executable = kernelPath();
+      const executable = this.executablePath;
       if (!existsSync(executable)) {
         reject(new Error(`Reverie core not found: ${executable}`));
         return;
@@ -365,6 +388,24 @@ class CoreBridge {
 let mainWindow: BrowserWindow | null = null;
 let bridge: CoreBridge | null = null;
 
+if (!launchOptions.tui) {
+  app.on("second-instance", (_event, argv, workingDirectory) => {
+    const options = parseDesktopLaunchOptions(argv, workingDirectory);
+    if (options.projectRoot && isWorkspaceDirectory(options.projectRoot)) {
+      if (bridge) {
+        void activateWorkspace(options.projectRoot).catch((error) => {
+          void log(`Second-instance workspace switch failed: ${error instanceof Error ? error.message : String(error)}`);
+        });
+      } else {
+        void updateDesktopSettings({ projectRoot: options.projectRoot });
+      }
+    }
+    if (mainWindow?.isMinimized()) mainWindow.restore();
+    mainWindow?.show();
+    mainWindow?.focus();
+  });
+}
+
 async function activateWorkspace(projectRoot: string): Promise<string> {
   if (!bridge) throw new Error("Reverie core bridge is not initialized.");
   const resolved = await activateWorkspaceInPlace(bridge, projectRoot, async (nextProjectRoot) => {
@@ -379,6 +420,7 @@ async function activateWorkspace(projectRoot: string): Promise<string> {
 }
 
 async function createWindow(): Promise<void> {
+  const executable = await selectKernelPath();
   const settings = await readDesktopSettings();
   nativeTheme.themeSource = normalizeThemePreference(settings.theme);
   const appearance = windowAppearance(nativeTheme.shouldUseDarkColors);
@@ -386,8 +428,9 @@ async function createWindow(): Promise<void> {
   const defaultProjectRoot = app.isPackaged
     ? (repositoryCoreRoot ? path.dirname(repositoryCoreRoot) : executableHome)
     : path.resolve(uiRoot, "..");
-  const projectRoot =
-    settings.projectRoot && isWorkspaceDirectory(settings.projectRoot)
+  const projectRoot = launchOptions.projectRoot && isWorkspaceDirectory(launchOptions.projectRoot)
+    ? path.resolve(launchOptions.projectRoot)
+    : settings.projectRoot && isWorkspaceDirectory(settings.projectRoot)
       ? path.resolve(settings.projectRoot)
       : defaultProjectRoot;
   const coreAppRoot =
@@ -426,7 +469,7 @@ async function createWindow(): Promise<void> {
     },
   });
 
-  bridge = new CoreBridge(projectRoot, coreAppRoot, (message) => {
+  bridge = new CoreBridge(projectRoot, coreAppRoot, executable, (message) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send("core:event", message);
     }
@@ -582,7 +625,7 @@ ipcMain.handle("desktop:select-core-data", async () => {
 
 ipcMain.handle("desktop:paths", () => ({
   projectRoot: bridge?.getProjectRoot() ?? "",
-  kernelPath: kernelPath(),
+  kernelPath: activeKernelPath,
   coreAppRoot: bridge?.getCoreAppRoot() ?? defaultCoreAppRoot(),
   runtimeRoot,
 }));
@@ -676,7 +719,7 @@ ipcMain.handle("desktop:clear-background", async () => {
 ipcMain.handle("desktop:reveal", async (_event, target: string) => {
   if (!bridge) return false;
   const resolved = path.resolve(String(target ?? ""));
-  const allowedRoots = [bridge.getProjectRoot(), bridge.getCoreAppRoot(), runtimeRoot, path.dirname(kernelPath())].map((item) =>
+  const allowedRoots = [bridge.getProjectRoot(), bridge.getCoreAppRoot(), runtimeRoot, path.dirname(activeKernelPath)].map((item) =>
     path.resolve(item),
   );
   if (!allowedRoots.some((root) => pathIsWithin(resolved, root))) return false;
@@ -690,7 +733,37 @@ ipcMain.handle("desktop:open-external", async (_event, url: string) => {
   return true;
 });
 
+async function runTuiFromDesktop(): Promise<void> {
+  const executable = await selectKernelPath();
+  const projectRoot = launchOptions.projectRoot && isWorkspaceDirectory(launchOptions.projectRoot)
+    ? launchOptions.projectRoot
+    : process.cwd();
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(executable, [projectRoot, ...launchOptions.tuiArgs], {
+      cwd: projectRoot,
+      windowsHide: false,
+      stdio: "inherit",
+      env: {
+        ...process.env,
+        REVERIE_APP_ROOT: defaultCoreAppRoot(),
+        PYTHONIOENCODING: "utf-8",
+        PYTHONUTF8: "1",
+      },
+    });
+    child.once("error", reject);
+    child.once("exit", (code) => {
+      app.exit(code ?? 1);
+      resolve();
+    });
+  });
+}
+
 app.whenReady().then(async () => {
+  if (!ownsDesktopInstance) return;
+  if (launchOptions.tui) {
+    await runTuiFromDesktop();
+    return;
+  }
   await createWindow();
   app.on("activate", async () => {
     if (BrowserWindow.getAllWindows().length === 0) await createWindow();

@@ -29,6 +29,8 @@ set "FORCE_CLEAN=0"
 set "FORCE_DEPS=0"
 set "FORCE_BROWSER=0"
 set "FORCE_PLUGINS=0"
+set "SKIP_PLUGINS=0"
+set "NO_PAUSE=0"
 set "USER_FFMPEG_PATH=%REVERIE_FFMPEG_PATH%"
 set "REVERIE_FFMPEG_PATH="
 set "TMP=%LOCAL_TEMP_DIR%"
@@ -47,6 +49,8 @@ if /I "%~1"=="--clean" set "FORCE_CLEAN=1"
 if /I "%~1"=="--reinstall-deps" set "FORCE_DEPS=1"
 if /I "%~1"=="--refresh-browser" set "FORCE_BROWSER=1"
 if /I "%~1"=="--rebuild-plugins" set "FORCE_PLUGINS=1"
+if /I "%~1"=="--skip-plugins" set "SKIP_PLUGINS=1"
+if /I "%~1"=="--no-pause" set "NO_PAUSE=1"
 shift
 goto parse_args
 
@@ -179,7 +183,7 @@ echo       Bundled resources: %REVERIE_BUNDLE_RES_DIR%\comfy, %REVERIE_BUNDLE_RE
 if exist "%REPO_ROOT%\%BLENDER_ARCHIVE_NAME%" set "BLENDER_ARCHIVE_SOURCE=%REPO_ROOT%\%BLENDER_ARCHIVE_NAME%"
 if not defined BLENDER_ARCHIVE_SOURCE if exist "%ROOT_DIR%\%BLENDER_ARCHIVE_NAME%" set "BLENDER_ARCHIVE_SOURCE=%ROOT_DIR%\%BLENDER_ARCHIVE_NAME%"
 if not defined BLENDER_ARCHIVE_SOURCE if exist "%SHARED_PLUGINS_DIR%\blender\%BLENDER_ARCHIVE_NAME%" set "BLENDER_ARCHIVE_SOURCE=%SHARED_PLUGINS_DIR%\blender\%BLENDER_ARCHIVE_NAME%"
-if defined BLENDER_ARCHIVE_SOURCE (
+if "%SKIP_PLUGINS%"=="0" if defined BLENDER_ARCHIVE_SOURCE (
     echo       Blender portable archive build input: %BLENDER_ARCHIVE_SOURCE%
     set "BUILD_BLENDER_PLUGIN=0"
     if "%FORCE_PLUGINS%"=="1" set "BUILD_BLENDER_PLUGIN=1"
@@ -206,7 +210,7 @@ if defined BLENDER_ARCHIVE_SOURCE (
     echo       Blender portable archive not found. Official Blender plugin build skipped.
 )
 
-if exist "%SHARED_PLUGINS_DIR%\game_models\plugin.py" (
+if "%SKIP_PLUGINS%"=="0" if exist "%SHARED_PLUGINS_DIR%\game_models\plugin.py" (
     set "BUILD_GAME_MODELS_PLUGIN=0"
     if "%FORCE_PLUGINS%"=="1" set "BUILD_GAME_MODELS_PLUGIN=1"
     if "%BUILD_GAME_MODELS_PLUGIN%"=="0" python -c "from pathlib import Path; o=Path(r'%SHARED_PLUGINS_DIR%\game_models\dist\reverie-game-models.exe'); i=[Path(r'%SHARED_PLUGINS_DIR%\game_models\plugin.py'),Path(r'%SHARED_PLUGINS_DIR%\game_models\plugin.json')]; raise SystemExit(0 if o.is_file() and all(not p.is_file() or o.stat().st_mtime >= p.stat().st_mtime for p in i) else 1)" >nul 2>&1
@@ -330,5 +334,5 @@ if "%RUN_EXE_TEST%"=="1" (
 )
 
 :finish
-pause
+if "%NO_PAUSE%"=="0" pause
 exit /b %BUILD_EXIT_CODE%

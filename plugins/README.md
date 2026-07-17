@@ -24,6 +24,10 @@ Plugins in Reverie CLI are portable software/runtime bundles, not another user-f
 - `plugins/live2d/`
   Live2D/Cubism plugin for extracting Cubism Core from the user's Cubism SDK zip, checking Live2D project manifests, and guiding interactive dynamic CG workflows.
 
+## Plugin Release
+
+Compiled official plugins are published on the dedicated `plugins-latest` GitHub Release, not the core/desktop Release. Changes under `plugins/` or the shared plugin protocol trigger the plugin workflow, which rebuilds both official Windows x64 executables, validates their `-RC` handshakes, and replaces the release together with `plugins-manifest.json`. Ren'Py and Live2D remain source plugins.
+
 ## Fixed Protocol
 
 Every runnable runtime plugin should support:

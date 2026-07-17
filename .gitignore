@@ -1,5 +1,15 @@
 # Build outputs
 build/
+!/ReverieCli-ui/build/
+!/ReverieCli-ui/build/launchers/
+!/ReverieCli-ui/build/launchers/reverieui
+!/ReverieCli-ui/build/launchers/reverieui.cmd
+!/ReverieCli-ui/build/linux/
+!/ReverieCli-ui/build/linux/after-install.sh
+!/ReverieCli-ui/build/linux/after-remove.sh
+!/ReverieCli-ui/build/windows/
+!/ReverieCli-ui/build/windows/installer.nsh
+!/ReverieCli-ui/build/windows/reverie-path.ps1
 dist/
 **/bin/
 **/obj/
@@ -55,6 +65,7 @@ Reverie UI/artifacts/
 /ReverieCli-ui/.kernel/
 /ReverieCli-ui/.runtime/
 /ReverieCli-ui/.vite-cache/
+/ReverieCli-ui/build/generated/
 /ReverieCli-ui/dist/
 /ReverieCli-ui/dist-electron/
 /ReverieCli-ui/release/

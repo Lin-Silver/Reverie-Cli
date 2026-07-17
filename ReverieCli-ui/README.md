@@ -1,8 +1,8 @@
 # Reverie Desktop
 
-Reverie Desktop is the Electron GUI for the existing Reverie CLI. It does not reimplement providers or tools in JavaScript: the desktop process starts the compiled `../dist/reverie.exe --sdk-bridge` core and communicates with it over a versioned JSONL protocol.
+Reverie Desktop is the Electron GUI for the existing Reverie CLI. It does not reimplement providers or tools in JavaScript: the desktop process starts the platform-native compiled kernel with `--sdk-bridge` and communicates with it over a versioned JSONL protocol.
 
-Current stable version: `v2.4.0` (released 2026-07-16).
+Current stable version: `v2.5.0` (released 2026-07-17).
 
 ## Development
 
@@ -17,14 +17,26 @@ npm run typecheck
 npm run start
 ```
 
-Create an unpacked application or Windows installers:
+Create an unpacked application or platform package:
 
 ```powershell
 npm run pack
 npm run dist:win
+# Linux x64: AppImage + deb
+npm run dist:linux
+# macOS host architecture: DMG
+npm run dist:mac
 ```
 
-`npm run dist:win` builds a fast-starting PyInstaller directory kernel, packages `reverie.exe` beside the internal `ReverieUI.exe` host, and keeps the kernel DLLs in the adjacent `reverie-runtime` directory so Windows cannot load them into Electron by mistake. It writes the completed Reverie portable single-file build directly to the repository-level `../dist` directory. The embedded CLI executable is the same terminal/TUI core and supports one-shot commands such as:
+For complete local builds, use `build.bat` on Windows or `build.sh` on Linux. They build and sanity-check the core first, install locked desktop dependencies, build the GUI packages, and verify the expected filenames.
+
+Every package contains a fast-starting PyInstaller directory kernel. The build also records the SHA-256 of the separately released one-file core inside the ASAR-integrity-protected application package. A portable sibling `reverie.exe`/`reverie` is used only when that protected hash is trusted and its `reverie.kernel.v1` handshake matches; otherwise the desktop logs the reason and uses its internal kernel. The terminal contract is:
+
+- `reverie`: TUI/core in the current directory.
+- `reverieui`: GUI in the current directory.
+- `Reverie-Portable-*.exe --tui`: explicit portable convenience route to the bundled TUI; no double-click heuristic is used.
+
+The embedded CLI supports one-shot commands such as:
 
 ```powershell
 reverie -P "Explain this project" -source codex -model gpt-5.6-sol -reasoning high

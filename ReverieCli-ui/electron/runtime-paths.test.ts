@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   findRepositoryCoreRoot,
+  kernelExecutableName,
   packagedExecutableHome,
   packagedKernelPath,
   packagedRuntimeRoot,
@@ -28,7 +29,7 @@ describe("packaged runtime paths", () => {
   it("keeps the CLI kernel and its DLLs beside the packaged GUI executable", () => {
     const packagedRoot = path.resolve("tmp", "reverie-unpacked");
     expect(packagedKernelPath(path.join(packagedRoot, "ReverieUI.exe")))
-      .toBe(path.join(packagedRoot, "reverie.exe"));
+      .toBe(path.join(packagedRoot, kernelExecutableName()));
   });
 
   it("finds the repository distribution root from release and win-unpacked layouts", () => {
@@ -37,7 +38,7 @@ describe("packaged runtime paths", () => {
     mkdirSync(path.join(repository, ".git"), { recursive: true });
     mkdirSync(path.join(repository, "dist"), { recursive: true });
     mkdirSync(path.join(repository, "ReverieCli-ui", "release", "win-unpacked"), { recursive: true });
-    writeFileSync(path.join(repository, "dist", "reverie.exe"), "test");
+    writeFileSync(path.join(repository, "dist", kernelExecutableName()), "test");
 
     expect(findRepositoryCoreRoot(path.join(repository, "ReverieCli-ui", "release")))
       .toBe(path.join(repository, "dist"));

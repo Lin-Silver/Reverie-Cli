@@ -369,6 +369,12 @@ def main(argv: list[str] | None = None):
         action='store_true',
         help='Run the JSONL settings/plugin bridge on stdin/stdout'
     )
+
+    parser.add_argument(
+        '--kernel-info',
+        action='store_true',
+        help='Print the machine-readable desktop kernel compatibility record and exit'
+    )
     
     args = parser.parse_args(argv)
     
@@ -377,6 +383,26 @@ def main(argv: list[str] | None = None):
         print(f"Release status: {RELEASE_STATUS}")
         print(f"Core Interface v{CORE_INTERFACE_VERSION}")
         print("Kernel: python")
+        return 0
+
+    if args.kernel_info:
+        import platform
+
+        machine = platform.machine().strip().lower()
+        arch = {
+            "amd64": "x64",
+            "x86_64": "x64",
+            "aarch64": "arm64",
+        }.get(machine, machine)
+        print(json.dumps({
+            "schema": "reverie.kernel.v1",
+            "version": __version__,
+            "bridge_protocol": "sdk-bridge.v1",
+            "interface_version": CORE_INTERFACE_VERSION,
+            "platform": sys.platform,
+            "arch": arch,
+            "frozen": bool(getattr(sys, "frozen", False)),
+        }, ensure_ascii=False, separators=(",", ":")))
         return 0
 
     if args.sdk_bridge:

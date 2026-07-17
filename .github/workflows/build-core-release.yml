@@ -1,0 +1,261 @@
+name: Build core and desktop releases
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - ".github/workflows/build-core-release.yml"
+      - "ReverieCli-py/**"
+      - "ReverieCli-ui/**"
+      - "comfy/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/build-core-release.yml"
+      - "ReverieCli-py/**"
+      - "ReverieCli-ui/**"
+      - "comfy/**"
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: Publish the verified artifacts to the rolling latest release
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: core-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Windows x64
+            runner: windows-latest
+            platform: windows
+            arch: x64
+          - label: Linux x64
+            runner: ubuntu-latest
+            platform: linux
+            arch: x64
+          - label: macOS Apple Silicon
+            runner: macos-latest
+            platform: macos
+            arch: arm64
+          - label: macOS Intel
+            runner: macos-15-intel
+            platform: macos
+            arch: x64
+    env:
+      PYTHONUTF8: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            ReverieCli-py/requirements.txt
+            ReverieCli-py/setup.py
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: ReverieCli-ui/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Windows FFmpeg
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install ffmpeg --version=8.1.2 --yes --no-progress
+
+      - name: Install Linux package dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg libfuse2
+
+      - name: Build and verify Windows kernel
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: ReverieCli-py\build.bat --clean --test-exe --skip-plugins --no-pause
+
+      - name: Build and verify Unix kernel
+        if: runner.os != 'Windows'
+        run: |
+          chmod +x ReverieCli-py/build.sh
+          ReverieCli-py/build.sh --clean --test-exe
+
+      - name: Smoke-test compiled SDK bridge
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            python ReverieCli-py/scripts/smoke_sdk_bridge.py --executable dist/reverie.exe
+          else
+            python ReverieCli-py/scripts/smoke_sdk_bridge.py --executable dist/reverie
+          fi
+
+      - name: Install desktop dependencies
+        working-directory: ReverieCli-ui
+        run: npm ci
+
+      - name: Make package hooks executable
+        if: runner.os != 'Windows'
+        run: chmod +x ReverieCli-ui/build/launchers/reverieui ReverieCli-ui/build/linux/*.sh
+
+      - name: Build Windows desktop artifacts
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:REVERIE_EXTERNAL_KERNEL_PATH = Join-Path $env:GITHUB_WORKSPACE "dist\reverie.exe"
+          $env:REVERIE_PYINSTALLER_PATH = (Join-Path $env:GITHUB_WORKSPACE "ReverieCli-py\venv\Scripts\pyinstaller.exe")
+          $env:REVERIE_PYTHON_PATH = (Join-Path $env:GITHUB_WORKSPACE "ReverieCli-py\venv\Scripts\python.exe")
+          Push-Location ReverieCli-ui
+          npm run dist:win
+          Pop-Location
+
+      - name: Build Linux desktop artifacts
+        if: runner.os == 'Linux'
+        run: |
+          export REVERIE_EXTERNAL_KERNEL_PATH="$GITHUB_WORKSPACE/dist/reverie"
+          export REVERIE_PYINSTALLER_PATH="$GITHUB_WORKSPACE/ReverieCli-py/venv/bin/pyinstaller"
+          export REVERIE_PYTHON_PATH="$GITHUB_WORKSPACE/ReverieCli-py/venv/bin/python"
+          cd ReverieCli-ui
+          npm run dist:linux
+
+      - name: Build macOS desktop artifact
+        if: runner.os == 'macOS'
+        run: |
+          export REVERIE_EXTERNAL_KERNEL_PATH="$GITHUB_WORKSPACE/dist/reverie"
+          export REVERIE_PYINSTALLER_PATH="$GITHUB_WORKSPACE/ReverieCli-py/venv/bin/pyinstaller"
+          export REVERIE_PYTHON_PATH="$GITHUB_WORKSPACE/ReverieCli-py/venv/bin/python"
+          cd ReverieCli-ui
+          npm run dist:mac -- --${{ matrix.arch }}
+
+      - name: Stage Windows release assets
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = node -p "require('./ReverieCli-ui/package.json').version"
+          New-Item -ItemType Directory -Force release-assets | Out-Null
+          Copy-Item dist\reverie.exe release-assets\reverie.exe
+          Copy-Item "ReverieCli-ui\release\Reverie-Setup-$version-x64.exe" release-assets
+          Copy-Item "dist\Reverie-Portable-$version-x64.exe" release-assets
+          python ReverieCli-py\scripts\write_kernel_manifest.py --executable dist\reverie.exe --output release-assets\reverie-kernel-windows-x64.json --asset-name reverie.exe
+
+      - name: Stage Unix release assets
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./ReverieCli-ui/package.json').version")
+          mkdir -p release-assets
+          if [[ "${{ matrix.platform }}" == "linux" ]]; then
+            cp dist/reverie release-assets/reverie
+            cp "ReverieCli-ui/release/Reverie-$version-linux-x64.AppImage" release-assets/
+            cp "ReverieCli-ui/release/Reverie-$version-linux-x64.deb" release-assets/
+            python ReverieCli-py/scripts/write_kernel_manifest.py --executable dist/reverie --output release-assets/reverie-kernel-linux-x64.json --asset-name reverie
+          else
+            cp dist/reverie "release-assets/reverie-macos-${{ matrix.arch }}"
+            cp "ReverieCli-ui/release/Reverie-$version-mac-${{ matrix.arch }}.dmg" release-assets/
+            python ReverieCli-py/scripts/write_kernel_manifest.py --executable dist/reverie --output "release-assets/reverie-kernel-macos-${{ matrix.arch }}.json" --asset-name "reverie-macos-${{ matrix.arch }}"
+          fi
+
+      - name: Verify staged names and contents
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          assets = list(Path("release-assets").iterdir())
+          if not assets or any(not item.is_file() or item.stat().st_size == 0 for item in assets):
+              raise SystemExit("Release staging contains a missing or empty artifact")
+          for manifest in Path("release-assets").glob("*.json"):
+              payload = json.loads(manifest.read_text(encoding="utf-8"))
+              if payload.get("schema") != "reverie.kernel.release.v1" or len(payload.get("sha256", "")) != 64:
+                  raise SystemExit(f"Invalid kernel manifest: {manifest}")
+          print("Verified:", ", ".join(sorted(item.name for item in assets)))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reverie-${{ matrix.platform }}-${{ matrix.arch }}-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: release-assets/*
+
+  publish:
+    name: Publish core release
+    needs: build
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: reverie-*-${{ github.sha }}
+          path: release-assets
+          merge-multiple: true
+
+      - name: Verify complete release set
+        run: |
+          version=$(node -p "require('./ReverieCli-ui/package.json').version")
+          for asset in \
+            reverie.exe \
+            "Reverie-Setup-$version-x64.exe" \
+            "Reverie-Portable-$version-x64.exe" \
+            reverie \
+            "Reverie-$version-linux-x64.AppImage" \
+            "Reverie-$version-linux-x64.deb" \
+            "Reverie-$version-mac-arm64.dmg" \
+            "Reverie-$version-mac-x64.dmg"; do
+            test -s "release-assets/$asset" || { echo "Missing $asset"; exit 1; }
+          done
+          test "$(find release-assets -maxdepth 1 -type f -name '*.json' | wc -l)" -eq 4
+
+      - name: Publish verified assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./ReverieCli-ui/package.json').version")
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            release_tag="$GITHUB_REF_NAME"
+            test "$release_tag" = "v$version"
+            release_title="Reverie $release_tag"
+          else
+            release_tag=latest
+            release_title="Reverie CLI Latest"
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -f latest "$GITHUB_SHA"
+            git push origin refs/tags/latest --force
+          fi
+          notes="Verified Windows x64, Linux x64, macOS ARM64, and macOS Intel build from $GITHUB_SHA. reverie.exe is the primary Windows CLI executable. The core contains the embedded Chromium browser-control runtime and Open Computer Use desktop controller. Windows includes portable GUI, installer, and core; Linux includes AppImage, deb, and core; macOS includes native DMGs. JSON assets contain kernel protocol, size, and SHA-256 metadata."
+          if gh release view "$release_tag" >/dev/null 2>&1; then
+            gh release edit "$release_tag" --title "$release_title" --notes "$notes" --latest
+          else
+            gh release create "$release_tag" --title "$release_title" --notes "$notes" --latest
+          fi
+          for old_asset in $(gh release view "$release_tag" --json assets --jq '.assets[].name'); do
+            gh release delete-asset "$release_tag" "$old_asset" --yes
+          done
+          gh release upload "$release_tag" release-assets/* --clobber

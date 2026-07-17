@@ -1,0 +1,121 @@
+name: Build plugin release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/build-plugins.yml"
+      - "plugins/**"
+      - "ReverieCli-py/reverie/plugin/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: plugin-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-publish:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    env:
+      BLENDER_ARCHIVE_NAME: blender-5.1.1-windows-x64.zip
+      BLENDER_ARCHIVE_URL: https://download.blender.org/release/Blender5.1/blender-5.1.1-windows-x64.zip
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Prepare isolated plugin builder
+        shell: pwsh
+        run: |
+          python -m venv ReverieCli-py\venv
+          ReverieCli-py\venv\Scripts\python.exe -m pip install "pip==26.1.2" "pyinstaller==6.19.0"
+          $archive = Join-Path $env:GITHUB_WORKSPACE "plugins\blender\$env:BLENDER_ARCHIVE_NAME"
+          Invoke-WebRequest -Uri $env:BLENDER_ARCHIVE_URL -OutFile $archive
+
+      - name: Build and handshake official plugins
+        shell: pwsh
+        run: |
+          $plugins = @(
+            @{ Id = "blender"; Dir = "plugins\blender"; Asset = "reverie-blender.exe" },
+            @{ Id = "game_models"; Dir = "plugins\game_models"; Asset = "reverie-game-models.exe" }
+          )
+          foreach ($plugin in $plugins) {
+            & "$($plugin.Dir)\build.bat"
+            if ($LASTEXITCODE -ne 0) { throw "Plugin build failed: $($plugin.Id)" }
+            $exe = Join-Path $plugin.Dir "dist\$($plugin.Asset)"
+            $handshake = & $exe -RC | ConvertFrom-Json
+            if ($handshake.plugin_id -ne $plugin.Id) { throw "Plugin handshake mismatch: $($plugin.Id)" }
+          }
+
+      - name: Generate dedicated plugin manifest
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release-assets | Out-Null
+          $entries = @()
+          foreach ($plugin in @(
+            @{ Id = "blender"; Dir = "blender"; Asset = "reverie-blender.exe" },
+            @{ Id = "game_models"; Dir = "game_models"; Asset = "reverie-game-models.exe" }
+          )) {
+            $source = "plugins\$($plugin.Dir)\dist\$($plugin.Asset)"
+            Copy-Item $source release-assets
+            $definition = Get-Content "plugins\$($plugin.Dir)\plugin.json" -Raw | ConvertFrom-Json
+            $entries += [ordered]@{
+              id = $plugin.Id
+              name = $definition.display_name
+              version = $definition.version
+              asset_name = $plugin.Asset
+              download_url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/plugins-latest/$($plugin.Asset)"
+              sha256 = (Get-FileHash -Algorithm SHA256 $source).Hash.ToLowerInvariant()
+              size = (Get-Item $source).Length
+              capabilities = @($definition.capabilities)
+            }
+          }
+          [ordered]@{
+            schema = "reverie.plugins.release.v2"
+            commit = $env:GITHUB_SHA
+            platform = "windows-x64"
+            plugins = $entries
+          } | ConvertTo-Json -Depth 20 | Set-Content release-assets\plugins-manifest.json -Encoding utf8
+          $manifest = Get-Content release-assets\plugins-manifest.json -Raw | ConvertFrom-Json
+          if ($manifest.plugins.Count -ne 2) { throw "Expected two official compiled plugins" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reverie-plugins-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: release-assets/*
+
+      - name: Publish dedicated plugin release
+        if: github.event_name != 'pull_request'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f plugins-latest $env:GITHUB_SHA
+          git push origin refs/tags/plugins-latest --force
+          $notes = "Official Windows x64 plugin executables, isolated from the Reverie core/desktop release. The manifest includes SHA-256, size, version, capabilities, and stable plugins-latest download URLs."
+          gh release view plugins-latest *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release edit plugins-latest --title "Reverie Plugins Latest" --notes $notes
+          } else {
+            gh release create plugins-latest --title "Reverie Plugins Latest" --notes $notes
+          }
+          $existing = gh release view plugins-latest --json assets --jq '.assets[].name'
+          foreach ($asset in $existing) {
+            gh release delete-asset plugins-latest $asset --yes
+          }
+          foreach ($asset in Get-ChildItem -LiteralPath release-assets -File) {
+            gh release upload plugins-latest $asset.FullName --clobber
+          }
+          gh release view latest *> $null
+          if ($LASTEXITCODE -eq 0) { gh release edit latest --latest }

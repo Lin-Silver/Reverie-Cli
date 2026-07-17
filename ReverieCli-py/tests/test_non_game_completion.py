@@ -92,7 +92,7 @@ def test_modules_do_not_silently_swallow_broad_exceptions() -> None:
 def test_ci_covers_cross_platform_tests_and_packaged_bridge_contract() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     test_workflow = (repo_root / ".github" / "workflows" / "test.yml").read_text(encoding="utf-8")
-    build_workflow = (repo_root / ".github" / "workflows" / "build-windows-exe.yml").read_text(encoding="utf-8")
+    build_workflow = (repo_root / ".github" / "workflows" / "build-core-release.yml").read_text(encoding="utf-8")
     assert "ubuntu-latest" in test_workflow
     assert "windows-latest" in test_workflow
     for version in ('python-version: "3.10"', 'python-version: "3.12"', 'python-version: "3.14"'):
@@ -100,6 +100,10 @@ def test_ci_covers_cross_platform_tests_and_packaged_bridge_contract() -> None:
     assert "macos-latest" in test_workflow
     assert "python -m pytest -q" in test_workflow
     assert "scripts/smoke_sdk_bridge.py" in test_workflow
-    assert "scripts\\smoke_sdk_bridge.py --executable .\\dist\\reverie.exe" in build_workflow
+    assert "scripts/smoke_sdk_bridge.py --executable dist/reverie.exe" in build_workflow
+    assert "scripts/smoke_sdk_bridge.py --executable dist/reverie" in build_workflow
+    assert "macos-15-intel" in build_workflow
+    assert "Reverie-$version-linux-x64.AppImage" in build_workflow
+    assert "Reverie-$version-linux-x64.deb" in build_workflow
     assert "publish_release:" in build_workflow
     assert "github.event_name == 'workflow_dispatch' && inputs.publish_release" in build_workflow

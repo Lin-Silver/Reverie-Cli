@@ -1,6 +1,6 @@
 # Reverie CLI
 
-Current stable version: **v2.4.0** (released 2026-07-16).
+Current stable version: **v2.5.0** (released 2026-07-17).
 
 **Reverie** is an open-source, terminal-based agentic coding assistant that wraps large language models to enable natural language interaction with your local codebase. It combines multi-provider LLM access, a powerful Context Engine for codebase intelligence, session management, inline media support, 3D/Game modeling workflows, browser automation, and more — all in a unified terminal interface.
 
@@ -203,6 +203,17 @@ Reverie-Cli/
 - **Windows 10/11** (primary target; Linux/macOS supported with minor adjustments)
 - **PowerShell** (Windows) or Bash (Unix)
 
+### Prebuilt packages
+
+The core/desktop Release is separate from the optional plugin Release:
+
+- Windows x64: `reverie.exe`, the portable GUI executable, and the NSIS installer.
+- Linux x64: `reverie`, AppImage, and Debian package. The Debian installer provides both `reverie` and `reverieui` commands.
+- macOS: native Apple Silicon and Intel DMGs. Command-line tools remain an explicit user-installed symlink from the app bundle.
+- Official compiled plugins: the dedicated `plugins-latest` Release and `plugins-manifest.json`; plugin-only changes do not rebuild the desktop application.
+
+`reverie` starts the TUI/core. `reverieui` starts the GUI in the current directory. Packaged GUIs always contain a compiled fallback kernel. A sibling kernel is selected only when its SHA-256 appears in the build-time allowlist and its `--kernel-info` protocol handshake succeeds.
+
 ### Install from Source (Python)
 
 ```powershell
@@ -276,7 +287,7 @@ Reverie uses `config.json` stored in the project's `.reverie/` directory or the 
 
 ```json
 {
-  "config_version": "2.4.0",
+  "config_version": "2.5.0",
   "active_model_source": "standard",
   "models": [
     {

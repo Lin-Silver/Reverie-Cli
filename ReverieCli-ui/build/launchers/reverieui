@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+launcher_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+gui="$launcher_dir/ReverieUI"
+if [ ! -x "$gui" ]; then
+  gui="$launcher_dir/MacOS/ReverieUI"
+fi
+exec "$gui" --project "$PWD" "$@"

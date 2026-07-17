@@ -1,6 +1,6 @@
 {
   "name": "reverie",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "private": true,
   "description": "Reverie desktop — a native GUI host for the Reverie CLI core",
   "main": "dist-electron/main.js",
@@ -17,7 +17,9 @@
     "start": "npm run build && electron .",
     "test": "vitest run",
     "pack": "npm run build:kernel && npm run build && cross-env ELECTRON_CACHE=.cache/electron ELECTRON_BUILDER_CACHE=.cache/electron-builder electron-builder --dir",
-    "dist:win": "npm run build:kernel && npm run build && cross-env ELECTRON_CACHE=.cache/electron ELECTRON_BUILDER_CACHE=.cache/electron-builder electron-builder --win nsis && node scripts/build-portable.mjs"
+    "dist:win": "npm run build:kernel && npm run build && cross-env ELECTRON_CACHE=.cache/electron ELECTRON_BUILDER_CACHE=.cache/electron-builder electron-builder --win nsis --x64 && node scripts/build-portable.mjs",
+    "dist:linux": "npm run build:kernel && npm run build && cross-env ELECTRON_CACHE=.cache/electron ELECTRON_BUILDER_CACHE=.cache/electron-builder electron-builder --linux AppImage deb --x64",
+    "dist:mac": "npm run build:kernel && npm run build && cross-env ELECTRON_CACHE=.cache/electron ELECTRON_BUILDER_CACHE=.cache/electron-builder electron-builder --mac dmg"
   },
   "dependencies": {
     "@vitejs/plugin-react": "6.0.3",
@@ -52,12 +54,25 @@
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
+      "build/generated/reverie-trusted-kernels.json",
       "package.json"
     ],
     "extraFiles": [
       {
         "from": ".kernel/reverie",
         "to": "."
+      },
+      {
+        "from": "build/launchers/reverieui.cmd",
+        "to": "reverieui.cmd"
+      },
+      {
+        "from": "build/launchers/reverieui",
+        "to": "reverieui"
+      },
+      {
+        "from": "build/windows/reverie-path.ps1",
+        "to": "reverie-path.ps1"
       }
     ],
     "win": {
@@ -68,11 +83,36 @@
     },
     "nsis": {
       "artifactName": "Reverie-Setup-${version}-${arch}.${ext}",
+      "include": "build/windows/installer.nsh",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Reverie"
+    },
+    "linux": {
+      "icon": "../ReverieCli-py/reverie.png",
+      "category": "Development",
+      "synopsis": "Reverie context-engine coding assistant",
+      "executableName": "ReverieUI",
+      "artifactName": "Reverie-${version}-linux-${arch}.${ext}",
+      "target": [
+        "AppImage",
+        "deb"
+      ]
+    },
+    "deb": {
+      "packageCategory": "devel",
+      "priority": "optional",
+      "afterInstall": "build/linux/after-install.sh",
+      "afterRemove": "build/linux/after-remove.sh"
+    },
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "artifactName": "Reverie-${version}-mac-${arch}.${ext}",
+      "target": [
+        "dmg"
+      ]
     }
   },
   "allowScripts": {

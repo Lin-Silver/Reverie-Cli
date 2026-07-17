@@ -54,12 +54,16 @@ black reverie
 
 ## Packaging
 
-Windows packaging is handled by `build.bat`.
+The Python directory provides the platform-native one-file core:
 
 ```bat
 .\build.bat
 .\build.bat --recreate-venv
 .\build.bat --test-exe
+```
+
+```bash
+./build.sh --test-exe
 ```
 
 `build.bat` currently:
@@ -73,6 +77,22 @@ Windows packaging is handled by `build.bat`.
 - Bundles required Comfy assets
 - Bundles `ffmpeg` into the one-file executable when it is available at build time
 - Builds `dist/reverie.exe` with PyInstaller
+
+The desktop directory provides end-to-end platform builds:
+
+```powershell
+cd ..\ReverieCli-ui
+.\build.bat
+```
+
+```bash
+cd ../ReverieCli-ui
+./build.sh
+```
+
+The Windows script produces the core EXE, portable GUI EXE, and installer EXE. The Linux script produces the no-suffix core, AppImage, and deb. CI additionally builds native Apple Silicon and Intel DMGs. `reverie` is the terminal/TUI command and `reverieui` opens the GUI at the caller's current directory.
+
+Core/desktop artifacts publish through `build-core-release.yml`; plugin-only paths publish through `build-plugins.yml` to `plugins-latest`. Each core asset set includes SHA-256 kernel metadata, and the aggregate release job fails unless every required platform artifact exists and is non-empty.
 
 Incremental builds reuse the PyInstaller work directory, embedded Chromium, and up-to-date official plugins. Use `--clean` for a full PyInstaller rebuild, `--reinstall-deps` to refresh packaging dependencies, `--refresh-browser` to reinstall Chromium, or `--rebuild-plugins` to force plugin rebuilds.
 

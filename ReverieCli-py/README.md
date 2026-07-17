@@ -13,10 +13,10 @@ Reverie CLI is a context-engine-powered AI coding assistant for large repositori
 
 ## Latest Update
 
-Current stable version: `v2.4.0` (released 2026-07-16).
+Current stable version: `v2.5.0` (released 2026-07-17).
 
 - Reverie CLI now exposes a stable terminal core interface for future desktop hosts through direct one-line commands such as `reverie.exe setting status`.
-- GitHub Release publishing now builds the Python `reverie.exe`, the official Blender and Game Models plugin executables, and `plugins-manifest.json` directly into the latest Release while deleting retired Godot/O3DE assets.
+- GitHub Release publishing now builds native Windows, Linux, Apple Silicon, and Intel kernels alongside their desktop packages. Official compiled plugins publish independently under `plugins-latest`.
 - Prompt mode, direct settings commands, plugin refresh, and long transcript handling were optimized for lower host overhead.
 
 For the full release notes, see [docs/changelog.md](../docs/changelog.md).

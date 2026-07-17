@@ -836,10 +836,14 @@ def test_sdk_runtime_entries_do_not_require_rc_handshake(tmp_path: Path) -> None
     manager = RuntimePluginManager(app_root)
     result = manager.materialize_sdk_package("blender")
     sdk_dir = Path(result["sdk_dir"])
-    entry_name = "blender.exe" if platform.system() == "Windows" else "blender"
-    entry_path = sdk_dir / entry_name
-    entry_path.write_text("portable blender placeholder\n", encoding="utf-8")
-    if platform.system() != "Windows":
+    if platform.system() == "Darwin":
+        entry_path = sdk_dir / "Blender.app"
+        entry_path.mkdir()
+    else:
+        entry_name = "blender.exe" if platform.system() == "Windows" else "blender"
+        entry_path = sdk_dir / entry_name
+        entry_path.write_text("portable blender placeholder\n", encoding="utf-8")
+    if platform.system() == "Linux":
         entry_path.chmod(entry_path.stat().st_mode | stat.S_IXUSR)
 
     record = manager.get_record("blender", force_refresh=True)

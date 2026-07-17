@@ -11,6 +11,7 @@ import os
 import shutil
 import subprocess
 import sys
+import zipfile
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -101,6 +102,11 @@ def _iter_ffmpeg_candidates() -> Iterable[Path]:
             for candidate in _yield_candidate(root / relative_path):
                 yield candidate
 
+    archived_ffmpeg = _ensure_bundled_ffmpeg(bundle_roots)
+    if archived_ffmpeg:
+        for candidate in _yield_candidate(archived_ffmpeg):
+            yield candidate
+
     which_ffmpeg = shutil.which("ffmpeg")
     if which_ffmpeg:
         for candidate in _yield_candidate(which_ffmpeg):
@@ -112,6 +118,37 @@ def _iter_ffmpeg_candidates() -> Iterable[Path]:
     ):
         for candidate in _yield_candidate(fallback):
             yield candidate
+
+
+def _ensure_bundled_ffmpeg(bundle_roots: Iterable[Path]) -> Optional[Path]:
+    try:
+        from ..config import get_app_root
+
+        app_root = get_app_root()
+    except Exception:
+        return None
+
+    target = app_root / ".reverie" / "runtime-assets" / "ffmpeg" / "ffmpeg.exe"
+    if target.is_file():
+        return target.resolve()
+
+    roots = list(bundle_roots)
+    roots.append(app_root)
+    archives = [root / "reverie_resources" / "ffmpeg.zip" for root in roots]
+    archive = next((candidate for candidate in archives if candidate.is_file()), None)
+    if archive is None:
+        return None
+
+    partial = target.with_suffix(".part")
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(archive) as packed, packed.open("ffmpeg.exe") as source, partial.open("wb") as destination:
+            shutil.copyfileobj(source, destination)
+        os.replace(partial, target)
+        return target.resolve()
+    except Exception:
+        partial.unlink(missing_ok=True)
+        return None
 
 
 def discover_ffmpeg() -> str:

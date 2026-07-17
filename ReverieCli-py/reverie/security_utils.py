@@ -186,14 +186,23 @@ def collect_workspace_cleanup_targets(project_root: Any, project_data_dir: Any) 
 
 def purge_workspace_state(project_root: Any, project_data_dir: Any) -> Dict[str, List[str]]:
     """
-    Delete only the current workspace's cache/memory/audit directories.
+    Delete only the current workspace's session/cache/memory/audit data.
 
     This never walks arbitrary user-provided paths. Targets are derived from the
     active workspace root and the workspace's exact project cache directory.
+    Workspace configuration and rules are intentionally preserved.
     """
     deleted: List[str] = []
     missing: List[str] = []
     errors: List[str] = []
+    preserved: List[str] = []
+    project_data_root = Path(project_data_dir).resolve(strict=False)
+    preserved_project_entries = {
+        "config.json",
+        "config.global.json",
+        "rules.json",
+        "rules.txt",
+    }
 
     for target in collect_workspace_cleanup_targets(project_root, project_data_dir):
         if not target.exists() and not target.is_symlink():
@@ -201,6 +210,17 @@ def purge_workspace_state(project_root: Any, project_data_dir: Any) -> Dict[str,
             continue
 
         try:
+            if target == project_data_root and target.is_dir() and not target.is_symlink():
+                for child in target.iterdir():
+                    if child.name in preserved_project_entries:
+                        preserved.append(str(child))
+                        continue
+                    if child.is_symlink() or child.is_file():
+                        child.unlink()
+                    else:
+                        shutil.rmtree(child)
+                    deleted.append(str(child))
+                continue
             if target.is_symlink() or target.is_file():
                 target.unlink()
             else:
@@ -213,4 +233,5 @@ def purge_workspace_state(project_root: Any, project_data_dir: Any) -> Dict[str,
         "deleted": deleted,
         "missing": missing,
         "errors": errors,
+        "preserved": preserved,
     }

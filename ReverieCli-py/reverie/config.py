@@ -862,7 +862,7 @@ class Config:
     
     # Workspace isolation settings
     use_workspace_config: bool = False  # If True, config is stored in workspace directory
-    security: Dict[str, Any] = field(default_factory=lambda: {"permission_level": "workspace_write"})
+    security: Dict[str, Any] = field(default_factory=lambda: {"permission_level": "full_control"})
     
     # API call settings for improved stability
     api_max_retries: int = 5
@@ -890,6 +890,18 @@ class Config:
 
     # Gamer mode specific settings
     gamer_mode: Dict[str, Any] = field(default_factory=default_gamer_mode_config)
+
+    @property
+    def permission_level(self) -> str:
+        """Expose the persisted security level for shared settings renderers."""
+        security = self.security if isinstance(self.security, dict) else {}
+        return normalize_permission_level(security.get("permission_level"))
+
+    @permission_level.setter
+    def permission_level(self, value: Any) -> None:
+        security = dict(self.security) if isinstance(self.security, dict) else {}
+        security["permission_level"] = normalize_permission_level(value)
+        self.security = security
 
     def _resolved_nvidia_config(self) -> Dict[str, Any]:
         """Return NVIDIA config augmented with fallback credentials from standard models."""
@@ -1160,7 +1172,14 @@ class Config:
             gamer_mode=normalize_gamer_mode_config(data.get('gamer_mode', {})),
             config_version=data.get('config_version', CONFIG_VERSION),
             use_workspace_config=data.get('use_workspace_config', False),
-            security=data.get('security', {"permission_level": "workspace_write"}),
+            security={
+                **(data.get("security") if isinstance(data.get("security"), dict) else {}),
+                "permission_level": normalize_permission_level(
+                    (data.get("security") or {}).get("permission_level")
+                    if isinstance(data.get("security"), dict)
+                    else None
+                ),
+            },
             api_max_retries=data.get('api_max_retries', 5),
             api_initial_backoff=data.get('api_initial_backoff', 1.0),
             api_timeout=data.get('api_timeout', 60),

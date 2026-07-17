@@ -3,8 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 import base64
 import json
+import os
 from types import SimpleNamespace
+import zipfile
 
+import pytest
 from rich.console import Console
 
 from reverie.agent.tool_executor import ToolExecutor
@@ -537,6 +540,7 @@ def test_browser_session_cleanup_preserves_persistent_and_credential_profiles(tm
     assert str(persistent) in result.data["preserved_profiles"]
 
 
+@pytest.mark.skipif(os.name != "nt", reason="validates Windows taskkill process termination")
 def test_browser_session_termination_only_stops_verified_embedded_process(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("REVERIE_APP_ROOT", str(tmp_path / "app"))
     tool = BrowserControlerTool({"project_root": tmp_path})
@@ -626,6 +630,40 @@ def test_browser_controler_updates_embedded_runtime_from_newer_bundle(tmp_path: 
 
     assert resolved == (tool.runtime_dir / "ms-playwright" / "chromium-1223" / "chrome-win64" / "chrome.exe").resolve()
     assert resolved.read_bytes() == b"new"
+
+
+def test_browser_controler_extracts_archived_runtime_on_first_use(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("REVERIE_APP_ROOT", str(tmp_path / "app"))
+    tool = BrowserControlerTool({"project_root": tmp_path})
+    archive = tmp_path / "browser.zip"
+    member = "ms-playwright/chromium-1228/chrome-win64/chrome.exe"
+    with zipfile.ZipFile(archive, "w") as packed:
+        packed.writestr(member, b"archived")
+    monkeypatch.setattr(tool, "_bundled_browser_resource_dir", lambda: None)
+    monkeypatch.setattr(tool, "_bundled_browser_resource_archive", lambda: archive)
+
+    resolved = tool._resolve_browser_executable(browser="chromium", browser_path="")
+
+    assert resolved == (tool.runtime_dir / member).resolve()
+    assert resolved.read_bytes() == b"archived"
+
+
+def test_discover_ffmpeg_extracts_archived_binary_on_first_use(tmp_path: Path, monkeypatch) -> None:
+    from reverie.engine import video as video_module
+
+    app_root = tmp_path / "app"
+    bundle_root = tmp_path / "bundle"
+    archive = bundle_root / "reverie_resources" / "ffmpeg.zip"
+    archive.parent.mkdir(parents=True)
+    with zipfile.ZipFile(archive, "w") as packed:
+        packed.writestr("ffmpeg.exe", b"ffmpeg")
+    monkeypatch.setenv("REVERIE_APP_ROOT", str(app_root))
+    monkeypatch.setattr(video_module.sys, "_MEIPASS", str(bundle_root), raising=False)
+
+    resolved = Path(video_module.discover_ffmpeg())
+
+    assert resolved == (app_root / ".reverie" / "runtime-assets" / "ffmpeg" / "ffmpeg.exe").resolve()
+    assert resolved.read_bytes() == b"ffmpeg"
 
 
 def test_browser_controler_profile_backup_and_status(tmp_path: Path, monkeypatch) -> None:
@@ -991,7 +1029,92 @@ def test_skill_lookup_lists_and_inspects_discovered_skills(tmp_path: Path) -> No
     inspect_result = tool.execute(operation="inspect", skill_name="openai-docs", max_body_chars=40)
     assert inspect_result.success is True
     assert "Skill: openai-docs" in inspect_result.output
-    assert inspect_result.data["truncated"] is True
+    assert inspect_result.data["complete"] is False
+    assert inspect_result.data["next_body_offset"] == 200
+
+
+def test_skills_manager_uses_header_metadata_for_discovery_without_auto_injection(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    project_root = tmp_path / "project"
+    project_root.mkdir(parents=True, exist_ok=True)
+    skill_dir = app_root / ".reverie" / "skills" / "claude-api"
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: claude-api\n"
+        "description: Build apps with the Claude API or Anthropic SDK.\n"
+        "---\n\n"
+        "CLAUDE_SKILL_BODY_MUST_NOT_BE_AUTOMATICALLY_INJECTED\n",
+        encoding="utf-8",
+    )
+
+    manager = SkillsManager(project_root=project_root, app_root=app_root)
+    catalog = manager.describe_for_prompt(force_refresh=True)
+    record = manager.get_record("claude-api")
+
+    assert record is not None
+    assert "claude-api" in catalog
+    assert "Build apps with the Claude API" in catalog
+    assert "CLAUDE_SKILL_BODY_MUST_NOT_BE_AUTOMATICALLY_INJECTED" not in catalog
+    assert manager.resolve_automatic_matches("Call NVIDIA's OpenAI-compatible API") == []
+    explicit_injection = manager.build_explicit_skill_injection([record])
+    assert "CLAUDE_SKILL_BODY_MUST_NOT_BE_AUTOMATICALLY_INJECTED" not in explicit_injection
+    assert "Call skill_lookup(operation='inspect')" in explicit_injection
+    assert "claude-api" in explicit_injection
+
+
+def test_skills_manager_honors_standard_implicit_invocation_policy(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    project_root = tmp_path / "project"
+    project_root.mkdir(parents=True, exist_ok=True)
+    skill_dir = project_root / ".agents" / "skills" / "browser-helper"
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: browser-helper\n"
+        "description: Assist with browser automation.\n"
+        "---\n\n"
+        "BROWSER_HELPER_BODY\n",
+        encoding="utf-8",
+    )
+    metadata_dir = skill_dir / "agents"
+    metadata_dir.mkdir()
+    (metadata_dir / "openai.yaml").write_text(
+        "policy:\n"
+        "  allow_implicit_invocation: false\n",
+        encoding="utf-8",
+    )
+
+    manager = SkillsManager(project_root=project_root, app_root=app_root)
+    record = manager.get_record("browser-helper", force_refresh=True)
+    catalog = manager.describe_for_prompt()
+
+    assert record is not None
+    assert record.allow_implicit_invocation is False
+    assert "browser-helper" not in catalog
+    assert manager.resolve_explicit_mentions("Use $browser-helper")["records"] == [record]
+
+
+def test_skills_manager_stops_at_skill_package_boundaries(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    project_root = tmp_path / "project"
+    skill_dir = project_root / ".agents" / "skills" / "workflow"
+    nested_dir = skill_dir / "references" / "nested"
+    nested_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: workflow\ndescription: Parent workflow.\n---\n\nParent body.\n",
+        encoding="utf-8",
+    )
+    (nested_dir / "SKILL.md").write_text(
+        "---\nname: accidental-nested-skill\ndescription: Reference file.\n---\n\nNested body.\n",
+        encoding="utf-8",
+    )
+
+    manager = SkillsManager(project_root=project_root, app_root=app_root)
+    names = [record.name for record in manager.get_snapshot(force_refresh=True).records]
+
+    assert "workflow" in names
+    assert "accidental-nested-skill" not in names
 
 
 def test_skills_manager_discovers_builtin_browser_controler_skill(tmp_path: Path) -> None:
@@ -1050,16 +1173,24 @@ def test_browser_controler_manifest_mentions_embedded_browser_contract() -> None
     assert any("browser_profile_backup" in example for example in browser_record["examples"])
 
 
-def test_github_action_schedules_latest_windows_exe_build() -> None:
+def test_github_action_builds_desktop_and_publishes_version_tags() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     workflow = (repo_root / ".github" / "workflows" / "build-windows-exe.yml").read_text(encoding="utf-8")
+    desktop_kernel_builder = (repo_root / "ReverieCli-ui" / "scripts" / "build-kernel.mjs").read_text(encoding="utf-8")
 
     assert "schedule:" in workflow
     assert "17 18 * * *" in workflow
     assert "actions/upload-artifact@v4" in workflow
-    assert "gh release upload latest" in workflow
+    assert '- "v*"' in workflow
+    assert "gh release upload $releaseTag" in workflow
+    assert "startsWith(github.ref, 'refs/tags/v')" in workflow
     assert "dist/reverie.exe" in workflow
+    assert "Reverie-Setup-$version-x64.exe" in workflow
+    assert "Reverie-Portable-$version-x64.exe" in workflow
     assert "Build Python exe" in workflow
+    assert "Build Electron installer and portable desktop" in workflow
+    assert "REVERIE_BUNDLE_RES_DIR" in workflow
+    assert "process.env.REVERIE_BUNDLE_RES_DIR" in desktop_kernel_builder
     assert "python -m playwright install chromium" in workflow
     assert "python -m playwright install chromium --no-shell" in workflow
     assert "PLAYWRIGHT_BROWSERS_PATH" in workflow

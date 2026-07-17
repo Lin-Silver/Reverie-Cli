@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 import importlib.util
+import platform
+from shutil import copy2
 
 from reverie.plugin.runtime_manager import RuntimePluginManager
 
@@ -116,7 +118,34 @@ def test_game_models_source_plugin_manifest_validates() -> None:
     assert validation["success"] is True
     assert validation["plugin_id"] == "game_models"
     assert validation["packaging_format"] == "pyinstaller-onefile"
-    assert any("build.bat" in command for command in validation["build_commands"])
+    if platform.system() == "Windows":
+        assert any("build.bat" in command for command in validation["build_commands"])
+    else:
+        assert any("PyInstaller" in command for command in validation["build_commands"])
+
+
+def test_game_models_source_only_install_keeps_python_protocol_fallback(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    clean_source_root = tmp_path / "plugins"
+    clean_plugin_dir = clean_source_root / "game_models"
+    clean_plugin_dir.mkdir(parents=True)
+    for name in ("plugin.json", "plugin.py"):
+        copy2(repo_root / "plugins" / "game_models" / name, clean_plugin_dir / name)
+
+    manager = RuntimePluginManager(tmp_path / "app", source_root=clean_source_root)
+    validation = manager.validate_source_plugin("game_models")
+    assert validation["compiled_entry_path"] is None
+    assert validation["source_entry_path"] == (clean_plugin_dir / "plugin.py").resolve()
+
+    installed = manager.install_source_plugin("game_models")
+    record = manager.get_record("game_models", force_refresh=True)
+
+    assert installed["success"] is True
+    assert installed["install_mode"] == "plugin-directory"
+    assert record is not None
+    assert record.compiled_entry_path is None
+    assert record.source_entry_path is not None
+    assert record.protocol_supported is True
 
 
 def test_game_models_standalone_launcher_uses_plugin_subdirectory(tmp_path: Path, monkeypatch) -> None:

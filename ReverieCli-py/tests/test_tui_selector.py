@@ -1,3 +1,4 @@
+import pytest
 from rich.console import Console
 
 from reverie.cli.tui_selector import SelectorAction, SelectorItem, SubagentSelector, TUISelector
@@ -25,7 +26,7 @@ def test_selector_uses_cropped_live_screen(monkeypatch) -> None:
         def update(self, *args, **kwargs):
             return None
 
-    import msvcrt
+    msvcrt = pytest.importorskip("msvcrt")
     import rich.live
 
     monkeypatch.setattr(rich.live, "Live", FakeLive)

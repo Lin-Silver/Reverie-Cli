@@ -19,6 +19,21 @@ from typing import Any, Dict, List, Optional, Tuple
 from ..diagnostics import report_suppressed_exception
 
 SESSION_INDEX_FILENAME = 'session_index.json'
+GENERATED_SESSION_NAME_PREFIXES = ('Session ', 'Prompt Run ', 'New Conversation')
+
+
+def session_title_from_prompt(prompt: Any, max_length: int = 64) -> str:
+    """Build a compact history title from the first meaningful prompt line."""
+    text = ' '.join(str(prompt or '').split()).strip()
+    if not text:
+        return ''
+    limit = max(12, int(max_length or 64))
+    return text if len(text) <= limit else f"{text[: limit - 1].rstrip()}…"
+
+
+def is_generated_session_name(name: Any) -> bool:
+    candidate = str(name or '').strip()
+    return not candidate or candidate.startswith(GENERATED_SESSION_NAME_PREFIXES)
 
 
 @dataclass
@@ -288,6 +303,44 @@ class SessionManager:
             return
         self._rebuild_session_index()
 
+    def refresh_generated_session_names(self) -> int:
+        """Upgrade timestamp-only legacy names from their first user prompt."""
+        self._ensure_session_index()
+        changed = 0
+        for session_id, entry in list(self._session_index.items()):
+            if not is_generated_session_name(entry.get('name')):
+                continue
+            session_path = self.sessions_dir / f"{session_id}.json"
+            try:
+                data = json.loads(session_path.read_text(encoding='utf-8'))
+            except Exception:
+                continue
+            if not isinstance(data, dict) or not self._belongs_to_workspace(data):
+                continue
+            first_prompt = next(
+                (
+                    message.get('content')
+                    for message in (data.get('messages', []) or [])
+                    if isinstance(message, dict)
+                    and str(message.get('role') or '').lower() == 'user'
+                    and isinstance(message.get('content'), str)
+                    and str(message.get('content') or '').strip()
+                ),
+                '',
+            )
+            title = session_title_from_prompt(first_prompt)
+            if not title or title == str(data.get('name') or ''):
+                continue
+            data['name'] = title
+            self._write_json_atomic(session_path, data)
+            entry['name'] = title
+            changed += 1
+            if self._current_session and self._current_session.id == session_id:
+                self._current_session.name = title
+        if changed:
+            self._save_session_index()
+        return changed
+
     def _write_session(self, session: Session, *, touch_updated_at: bool = True) -> None:
         if touch_updated_at:
             session.updated_at = datetime.now().isoformat()
@@ -438,6 +491,18 @@ class SessionManager:
 
         if self._current_session and self._current_session.id == session.id:
             self._save_state(session.id)
+
+    def rename_current_session_from_prompt(self, prompt: Any) -> bool:
+        """Name a newly-created/default session after its first user prompt."""
+        session = self._current_session
+        if session is None or not is_generated_session_name(session.name):
+            return False
+        title = session_title_from_prompt(prompt)
+        if not title:
+            return False
+        session.name = title
+        self.save_session(session)
+        return True
 
     def load_session(self, session_id: str) -> Optional[Session]:
         """Load a session by ID"""
@@ -596,16 +661,36 @@ class SessionManager:
             return []
         results: List[Dict[str, Any]] = []
         for info in self.list_sessions():
+            if needle in info.name.lower():
+                results.append({
+                    "session_id": info.id,
+                    "session_name": info.name,
+                    "message_index": -1,
+                    "role": "session",
+                    "text": info.name,
+                })
+                if len(results) >= limit:
+                    return results
             path = self.sessions_dir / f"{info.id}.json"
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
             except Exception:
                 continue
             for index, message in enumerate(data.get("messages", []) or []):
-                content = message.get("content", "") if isinstance(message, dict) else ""
-                text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
-                if needle in text.lower():
-                    results.append({"session_id": info.id, "session_name": info.name, "message_index": index, "role": message.get("role", ""), "text": text[:500]})
+                if not isinstance(message, dict):
+                    continue
+                content = message.get("content", "")
+                content_text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
+                reasoning_text = str(message.get("reasoning_content") or "")
+                call_names = " ".join(
+                    str((call.get("function") or {}).get("name") or "")
+                    for call in (message.get("tool_calls") or [])
+                    if isinstance(call, dict)
+                )
+                searchable = "\n".join(part for part in (content_text, reasoning_text, call_names) if part)
+                if needle in searchable.lower():
+                    preview = content_text or reasoning_text or call_names
+                    results.append({"session_id": info.id, "session_name": info.name, "message_index": index, "role": message.get("role", ""), "text": preview[:500]})
                     if len(results) >= limit:
                         return results
         return results

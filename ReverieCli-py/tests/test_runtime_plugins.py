@@ -10,6 +10,7 @@ import threading
 import time
 import zipfile
 
+import pytest
 from rich.console import Console
 
 from reverie.cli.commands import CommandHandler
@@ -835,10 +836,14 @@ def test_sdk_runtime_entries_do_not_require_rc_handshake(tmp_path: Path) -> None
     manager = RuntimePluginManager(app_root)
     result = manager.materialize_sdk_package("blender")
     sdk_dir = Path(result["sdk_dir"])
-    entry_name = "blender.exe" if platform.system() == "Windows" else "blender"
-    entry_path = sdk_dir / entry_name
-    entry_path.write_text("portable blender placeholder\n", encoding="utf-8")
-    if platform.system() != "Windows":
+    if platform.system() == "Darwin":
+        entry_path = sdk_dir / "Blender.app"
+        entry_path.mkdir()
+    else:
+        entry_name = "blender.exe" if platform.system() == "Windows" else "blender"
+        entry_path = sdk_dir / entry_name
+        entry_path.write_text("portable blender placeholder\n", encoding="utf-8")
+    if platform.system() == "Linux":
         entry_path.chmod(entry_path.stat().st_mode | stat.S_IXUSR)
 
     record = manager.get_record("blender", force_refresh=True)
@@ -867,6 +872,7 @@ def test_plugins_sdk_command_renders_depot_surface(tmp_path: Path) -> None:
     assert "www.blender.org/download" in sdk_text
 
 
+@pytest.mark.skipif(platform.system() != "Windows", reason="uses the Windows Blender portable archive")
 def test_runtime_plugin_manager_can_deploy_portable_blender_archive(tmp_path: Path) -> None:
     app_root = tmp_path / "app"
     archive_path = app_root / "blender-5.1.1-windows-x64.zip"
@@ -886,6 +892,7 @@ def test_runtime_plugin_manager_can_deploy_portable_blender_archive(tmp_path: Pa
     assert entry_path.name in {"blender.exe", "blender"}
 
 
+@pytest.mark.skipif(platform.system() != "Windows", reason="uses the Windows Blender portable archive")
 def test_sdk_archive_can_live_inside_installed_plugin_depot(tmp_path: Path) -> None:
     app_root = tmp_path / "app"
     archive_path = app_root / ".reverie" / "plugins" / "blender" / "blender-5.1.1-windows-x64.zip"
@@ -915,6 +922,7 @@ def test_sdk_status_ignores_optional_wrapper_entry_for_runtime_readiness(tmp_pat
     assert status["entry_path"] is None
 
 
+@pytest.mark.skipif(platform.system() != "Windows", reason="uses the Windows Blender portable archive")
 def test_plugins_deploy_command_extracts_portable_blender_archive(tmp_path: Path) -> None:
     app_root = tmp_path / "app"
     archive_path = app_root / "blender-5.1.1-windows-x64.zip"

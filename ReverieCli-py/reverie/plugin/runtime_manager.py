@@ -1321,6 +1321,7 @@ class RuntimePluginManager:
             "error": "",
             "source_dir": source_dir,
             "target_dir": target_dir,
+            "install_mode": "plugin-directory",
             "merged": merge_existing_sdk_depot,
             "validation": validation,
             "record": installed_record,
@@ -2170,14 +2171,36 @@ class RuntimePluginManager:
                 if candidate not in fallback_runtime_candidates:
                     fallback_runtime_candidates.append(candidate)
 
-        compiled_entry = self._resolve_entry_candidates(install_dir, preferred_runtime_candidates)
+        declared_compiled_candidates = list(compiled_candidates)
+        if not declared_compiled_candidates and delivery in {"python-exe", "plugin-exe"}:
+            source_candidate_set = set(fallback_candidates) | set(source_candidates)
+            declared_compiled_candidates = [
+                candidate
+                for candidate in preferred_candidates
+                if candidate not in source_candidate_set
+            ]
+
+        preferred_entry = self._resolve_entry_candidates(install_dir, preferred_runtime_candidates)
+        compiled_entry = self._resolve_entry_candidates(install_dir, declared_compiled_candidates)
         source_entry = self._resolve_entry_candidates(install_dir, fallback_runtime_candidates)
-        selected_entry = compiled_entry
-        selected_mode = "packaged" if compiled_entry is not None else ""
+        selected_entry = preferred_entry
+        selected_mode = ""
         detail = "Entry executable detected."
         warnings: list[str] = []
 
-        if selected_entry is None:
+        if selected_entry is not None:
+            if compiled_entry is not None and selected_entry == compiled_entry:
+                selected_mode = "packaged"
+            elif source_entry is not None and selected_entry == source_entry:
+                selected_mode = "source" if strategy == "direct" else "source-fallback"
+                detail = (
+                    "Manifest entry detected."
+                    if strategy == "direct"
+                    else "Packaged entry missing; using Python/script source fallback."
+                )
+            else:
+                selected_mode = "packaged" if delivery in {"python-exe", "plugin-exe"} else "source"
+        else:
             if source_entry is not None and (allow_source_fallback or strategy != "direct" or not preferred_runtime_candidates):
                 selected_entry = source_entry
                 selected_mode = "source-fallback"
@@ -2186,9 +2209,6 @@ class RuntimePluginManager:
                 selected_entry = source_entry
                 selected_mode = "source"
                 detail = "Manifest entry detected."
-        elif source_entry is not None and selected_entry == source_entry and strategy == "direct":
-            selected_mode = "source"
-            detail = "Manifest entry detected."
 
         build_commands = tuple(_normalize_string_tuple((packaging.get("build") or {}).get(self._platform) if isinstance(packaging.get("build"), dict) else packaging.get("build")))
         if not build_commands and isinstance(packaging.get("build"), dict):
@@ -2274,6 +2294,7 @@ class RuntimePluginManager:
         for placeholder, value in replacements.items():
             content = content.replace(placeholder, value)
         destination.write_text(content, encoding="utf-8")
+        shutil.copymode(source_path, destination)
 
     def _validate_source_plugin_dir(self, source_dir: Path) -> dict[str, Any]:
         resolved_source_dir = Path(source_dir).resolve()

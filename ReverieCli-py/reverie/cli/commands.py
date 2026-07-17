@@ -11032,8 +11032,49 @@ class CommandHandler:
             self.console.print("No assistant reply to copy.")
             return True
         try:
-            import tkinter
-            root = tkinter.Tk(); root.withdraw(); root.clipboard_clear(); root.clipboard_append(text); root.update(); root.destroy()
+            if os.name == "nt":
+                import ctypes
+
+                user32 = ctypes.windll.user32
+                kernel32 = ctypes.windll.kernel32
+                user32.OpenClipboard.argtypes = [ctypes.c_void_p]
+                user32.OpenClipboard.restype = ctypes.c_bool
+                user32.SetClipboardData.argtypes = [ctypes.c_uint, ctypes.c_void_p]
+                user32.SetClipboardData.restype = ctypes.c_void_p
+                kernel32.GlobalAlloc.argtypes = [ctypes.c_uint, ctypes.c_size_t]
+                kernel32.GlobalAlloc.restype = ctypes.c_void_p
+                kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
+                kernel32.GlobalLock.restype = ctypes.c_void_p
+                kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+                kernel32.GlobalFree.argtypes = [ctypes.c_void_p]
+                encoded = (text + "\0").encode("utf-16-le")
+                if not user32.OpenClipboard(None):
+                    raise OSError("OpenClipboard failed")
+                try:
+                    user32.EmptyClipboard()
+                    handle = kernel32.GlobalAlloc(0x0002, len(encoded))
+                    if not handle:
+                        raise MemoryError("GlobalAlloc failed")
+                    pointer = kernel32.GlobalLock(handle)
+                    if not pointer:
+                        kernel32.GlobalFree(handle)
+                        raise MemoryError("GlobalLock failed")
+                    ctypes.memmove(pointer, encoded, len(encoded))
+                    kernel32.GlobalUnlock(handle)
+                    if not user32.SetClipboardData(13, handle):
+                        kernel32.GlobalFree(handle)
+                        raise OSError("SetClipboardData failed")
+                finally:
+                    user32.CloseClipboard()
+            else:
+                import tkinter
+
+                root = tkinter.Tk()
+                root.withdraw()
+                root.clipboard_clear()
+                root.clipboard_append(text)
+                root.update()
+                root.destroy()
             self.console.print("Copied the last assistant reply to the clipboard.")
         except Exception as exc:
             self.console.print(f"Clipboard unavailable: {exc}")

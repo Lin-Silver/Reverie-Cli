@@ -6,6 +6,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from .config import normalize_thinking_output_style, normalize_tool_output_style
 from .modes import list_modes, normalize_mode
+from .security_policy import PERMISSION_LEVELS, normalize_permission_level
 
 
 def setting_mode_options() -> List[str]:
@@ -137,6 +138,14 @@ def get_setting_items(
             "kind": "workspace",
             "description": "Choose whether settings are stored in the current workspace or the global Reverie config.",
             "command": "/setting workspace on|off",
+        },
+        {
+            "name": "Permission Level",
+            "key": "permission_level",
+            "kind": "choice",
+            "choices": list(PERMISSION_LEVELS),
+            "description": "Control which tool classes the software permits. Full Control is the default; dangerous operations remain blocked by hard policy.",
+            "command": "Edit security.permission_level to reduce the software-enforced tool surface.",
         },
         {
             "name": "Rules",
@@ -290,6 +299,13 @@ def apply_setting_value(
         setattr(config, normalized_key, parsed_int)
         return True, f"{item.get('name', normalized_key)} set to {parsed_int}.", False
     if kind == "choice":
+        if normalized_key == "permission_level":
+            level = normalize_permission_level(value)
+            if str(value or "").strip().lower() not in PERMISSION_LEVELS:
+                return False, "Unsupported permission level.", False
+            config.security = dict(getattr(config, "security", {}) or {})
+            config.security["permission_level"] = level
+            return True, f"Permission level set to {level}.", True
         if normalized_key == "mode":
             config.mode = normalize_mode(value)
             return True, f"Mode set to {config.mode}.", True

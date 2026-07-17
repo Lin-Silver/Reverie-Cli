@@ -1,6 +1,7 @@
 from collections import deque
 from io import StringIO
 
+import pytest
 from rich.console import Console
 
 from reverie.cli.input_handler import InputHandler
@@ -101,7 +102,7 @@ def test_prompt_editor_clears_previous_wrapped_rows_before_redraw() -> None:
 
 
 def test_windows_get_input_uses_key_editor_for_empty_input(monkeypatch) -> None:
-    import msvcrt
+    msvcrt = pytest.importorskip("msvcrt")
 
     handler = _handler()
     keys = iter([*list(ZH_FIRST), "\n", *list(ZH_SECOND), "\r"])
@@ -112,7 +113,7 @@ def test_windows_get_input_uses_key_editor_for_empty_input(monkeypatch) -> None:
 
 
 def test_windows_prompt_editor_handles_arrow_insertion(monkeypatch) -> None:
-    import msvcrt
+    msvcrt = pytest.importorskip("msvcrt")
 
     keys = iter([*list(ZH_PROMPT), "\xe0", "K", "\xe0", "K", ZH_DONE, "\r"])
     monkeypatch.setattr(msvcrt, "getwch", lambda: next(keys))
@@ -122,7 +123,7 @@ def test_windows_prompt_editor_handles_arrow_insertion(monkeypatch) -> None:
 
 
 def test_windows_prompt_editor_handles_middle_backspace(monkeypatch) -> None:
-    import msvcrt
+    msvcrt = pytest.importorskip("msvcrt")
 
     keys = iter([*list(ZH_PROMPT), "\xe0", "K", "\xe0", "K", "\x08", "\r"])
     monkeypatch.setattr(msvcrt, "getwch", lambda: next(keys))
@@ -132,7 +133,7 @@ def test_windows_prompt_editor_handles_middle_backspace(monkeypatch) -> None:
 
 
 def test_windows_prompt_editor_clears_rendered_input_on_ctrl_c(monkeypatch) -> None:
-    import msvcrt
+    msvcrt = pytest.importorskip("msvcrt")
 
     handler = _handler(width=30)
     keys = iter([*"x" * 90, "\x03"])
@@ -144,7 +145,7 @@ def test_windows_prompt_editor_clears_rendered_input_on_ctrl_c(monkeypatch) -> N
 
 
 def test_windows_prompt_editor_allows_modified_enter_newline(monkeypatch) -> None:
-    import msvcrt
+    msvcrt = pytest.importorskip("msvcrt")
 
     handler = _handler()
     keys = iter([*list(ZH_FIRST), "\r", *list(ZH_SECOND), "\r"])
@@ -157,7 +158,7 @@ def test_windows_prompt_editor_allows_modified_enter_newline(monkeypatch) -> Non
 
 
 def test_windows_prompt_editor_paste_preserves_single_newline(monkeypatch) -> None:
-    import msvcrt
+    msvcrt = pytest.importorskip("msvcrt")
 
     handler = _handler()
     # Simulate pasting "第一行\r\n第二行" (no trailing newline) then user presses Enter
@@ -170,7 +171,7 @@ def test_windows_prompt_editor_paste_preserves_single_newline(monkeypatch) -> No
 
 
 def test_windows_prompt_editor_right_at_end_does_not_redraw(monkeypatch) -> None:
-    import msvcrt
+    msvcrt = pytest.importorskip("msvcrt")
 
     handler = _handler(width=80)
     prompt_width = handler._display_width(handler._plain_prompt_text("Reverie> "))
@@ -186,7 +187,7 @@ def test_windows_prompt_editor_right_at_end_does_not_redraw(monkeypatch) -> None
 
 
 def test_windows_prompt_editor_clears_completion_panel_on_submit(monkeypatch) -> None:
-    import msvcrt
+    msvcrt = pytest.importorskip("msvcrt")
 
     handler = _handler(width=120)
     keys = iter(["/", "\xe0", "P", "\r"])
@@ -203,7 +204,7 @@ def test_windows_prompt_editor_clears_completion_panel_on_submit(monkeypatch) ->
 
 
 def test_windows_prompt_editor_batches_printable_paste_redraw(monkeypatch) -> None:
-    import msvcrt
+    msvcrt = pytest.importorskip("msvcrt")
 
     handler = _handler()
     keys = deque([*"pasted text", "\r"])
@@ -283,7 +284,7 @@ def test_command_completion_includes_literal_subcommands() -> None:
 
 
 def test_windows_prompt_editor_completes_with_tab(monkeypatch) -> None:
-    import msvcrt
+    msvcrt = pytest.importorskip("msvcrt")
 
     keys = iter([*list("/tot"), "\t", "\r"])
     monkeypatch.setattr(msvcrt, "getwch", lambda: next(keys))
@@ -293,7 +294,7 @@ def test_windows_prompt_editor_completes_with_tab(monkeypatch) -> None:
 
 
 def test_windows_prompt_editor_recalls_and_edits_history(monkeypatch) -> None:
-    import msvcrt
+    msvcrt = pytest.importorskip("msvcrt")
 
     handler = _handler()
     handler.history = ["first prompt", "second prompt"]
@@ -305,7 +306,7 @@ def test_windows_prompt_editor_recalls_and_edits_history(monkeypatch) -> None:
 
 
 def test_windows_prompt_editor_supports_word_and_line_deletion(monkeypatch) -> None:
-    import msvcrt
+    msvcrt = pytest.importorskip("msvcrt")
 
     keys = iter([*list("keep remove"), "\x17", *list("done"), "\x15", *list("final"), "\r"])
     monkeypatch.setattr(msvcrt, "getwch", lambda: next(keys))

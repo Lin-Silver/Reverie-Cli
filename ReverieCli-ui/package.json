@@ -1,0 +1,81 @@
+{
+  "name": "reverie",
+  "version": "2.4.0",
+  "private": true,
+  "description": "Reverie desktop — a native GUI host for the Reverie CLI core",
+  "main": "dist-electron/main.js",
+  "author": "Reverie",
+  "license": "MIT",
+  "scripts": {
+    "clean": "node scripts/clean.mjs",
+    "build:kernel": "node scripts/build-kernel.mjs",
+    "build:main": "tsc -p tsconfig.electron.json",
+    "build:renderer": "vite build",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit",
+    "build": "npm run build:main && npm run build:renderer",
+    "dev": "npm run build:main && concurrently -k -n UI,APP -c cyan,magenta \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
+    "start": "npm run build && electron .",
+    "test": "vitest run",
+    "pack": "npm run build:kernel && npm run build && cross-env ELECTRON_CACHE=.cache/electron ELECTRON_BUILDER_CACHE=.cache/electron-builder electron-builder --dir",
+    "dist:win": "npm run build:kernel && npm run build && cross-env ELECTRON_CACHE=.cache/electron ELECTRON_BUILDER_CACHE=.cache/electron-builder electron-builder --win nsis && node scripts/build-portable.mjs"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "6.0.3",
+    "lucide-react": "1.24.0",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "concurrently": "9.2.1",
+    "cross-env": "10.1.0",
+    "electron": "41.2.1",
+    "electron-builder": "26.15.3",
+    "typescript": "7.0.2",
+    "vite": "8.1.4",
+    "vitest": "4.1.1",
+    "wait-on": "9.0.4"
+  },
+  "build": {
+    "appId": "ai.reverie.desktop",
+    "productName": "Reverie",
+    "executableName": "ReverieUI",
+    "asar": true,
+    "compression": "store",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "extraFiles": [
+      {
+        "from": ".kernel/reverie",
+        "to": "."
+      }
+    ],
+    "win": {
+      "icon": "../ReverieCli-py/reverie.ico",
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "artifactName": "Reverie-Setup-${version}-${arch}.${ext}",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Reverie"
+    }
+  },
+  "allowScripts": {
+    "electron@41.2.1": true
+  }
+}

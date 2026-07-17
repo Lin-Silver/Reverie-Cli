@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+    tags:
+      - "v*"
   pull_request:
     branches:
       - main
@@ -27,7 +29,7 @@ concurrency:
 
 jobs:
   build-windows-exe:
-    name: Build Python Windows exe and plugins
+    name: Build CLI, desktop, and plugins
     runs-on: windows-latest
     timeout-minutes: 150
 
@@ -54,6 +56,13 @@ jobs:
             ReverieCli-py/requirements.txt
             ReverieCli-py/setup.py
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: ReverieCli-ui/package-lock.json
+
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -69,12 +78,11 @@ jobs:
         run: |
           $source = Join-Path $env:REVERIE_PY_ROOT "reverie.png"
           $rootIcon = Join-Path $env:REVERIE_PY_ROOT "reverie.ico"
-          $guiIcon = Join-Path $env:GITHUB_WORKSPACE "Reverie UI\src\Reverie.UI\Assets\reverie.ico"
           if (-not (Test-Path $source)) {
             throw "Missing required icon source: $source"
           }
           $iconScript = Join-Path $env:REVERIE_PY_ROOT "scripts\generate_reverie_icons.py"
-          python $iconScript --source $source $rootIcon $guiIcon
+          python $iconScript --source $source $rootIcon
           "REVERIE_ICON_PATH=$rootIcon" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Prepare bundled resources
@@ -135,6 +143,38 @@ jobs:
           }
           & $pythonExe --version
 
+      - name: Install desktop dependencies
+        working-directory: ReverieCli-ui
+        run: npm ci
+
+      - name: Install FFmpeg
+        shell: pwsh
+        run: |
+          choco install ffmpeg --version=8.1.2 --yes --no-progress
+          ffmpeg -version | Select-Object -First 1
+
+      - name: Build Electron installer and portable desktop
+        shell: pwsh
+        run: |
+          $env:REVERIE_PYINSTALLER_PATH = (Get-Command pyinstaller).Source
+          $env:REVERIE_PYTHON_PATH = (Get-Command python).Source
+          Push-Location (Join-Path $env:GITHUB_WORKSPACE "ReverieCli-ui")
+          try {
+            npm run dist:win
+          }
+          finally {
+            Pop-Location
+          }
+
+          $version = node -p "require('./ReverieCli-ui/package.json').version"
+          $setup = Join-Path $env:GITHUB_WORKSPACE "ReverieCli-ui\release\Reverie-Setup-$version-x64.exe"
+          $portable = Join-Path $env:GITHUB_WORKSPACE "dist\Reverie-Portable-$version-x64.exe"
+          foreach ($artifact in @($setup, $portable)) {
+            if (-not (Test-Path $artifact)) {
+              throw "Desktop build completed without producing $artifact"
+            }
+          }
+
       - name: Prepare Blender plugin archive
         shell: pwsh
         run: |
@@ -188,7 +228,13 @@ jobs:
             return (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()
           }
 
-          $releaseBase = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/latest"
+          $releaseTag = if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME -like "v*") {
+            $env:GITHUB_REF_NAME
+          }
+          else {
+            "latest"
+          }
+          $releaseBase = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$releaseTag"
           $dist = Join-Path $env:GITHUB_WORKSPACE "dist"
           New-Item -ItemType Directory -Force -Path $dist | Out-Null
           $cliPath = Join-Path $env:GITHUB_WORKSPACE "dist\reverie.exe"
@@ -272,26 +318,43 @@ jobs:
           retention-days: 14
           path: |
             dist/reverie.exe
+            dist/Reverie-Portable-*.exe
             dist/plugins-manifest.json
+            ReverieCli-ui/release/Reverie-Setup-*.exe
             plugins/blender/dist/reverie-blender.exe
             plugins/game_models/dist/reverie-game-models.exe
 
-      - name: Publish rolling latest release
-        if: github.event_name == 'workflow_dispatch' && inputs.publish_release
+      - name: Publish verified release
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -f latest $env:GITHUB_SHA
-          git push origin refs/tags/latest --force
+          $version = node -p "require('./ReverieCli-ui/package.json').version"
+          $isVersionTag = $env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME -like "v*"
+          if ($isVersionTag) {
+            $releaseTag = $env:GITHUB_REF_NAME
+            $releaseTitle = "Reverie $releaseTag"
+            if ($releaseTag -ne "v$version") {
+              throw "Release tag $releaseTag does not match package version v$version"
+            }
+          }
+          else {
+            $releaseTag = "latest"
+            $releaseTitle = "Reverie CLI Latest"
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -f latest $env:GITHUB_SHA
+            git push origin refs/tags/latest --force
+          }
 
           $notes = @"
-          Automated Windows release build from main.
+          Automated verified Windows release build for $releaseTitle.
 
           Files:
           - reverie.exe: primary Windows CLI executable. This is the full Python PyInstaller build with bundled Python runtime, built-in skills, tool manifests, the embedded Chromium browser-control runtime, and the built-in Open Computer Use desktop controller/SubAgent orchestration stack.
+          - Reverie-Setup-$version-x64.exe: native Electron desktop installer with the embedded Reverie CLI kernel.
+          - Reverie-Portable-$version-x64.exe: portable desktop executable with a reusable side-by-side runtime cache.
           - plugins-manifest.json: release metadata consumed by Reverie UI/plugin download surfaces, including SHA-256 and file sizes.
           - reverie-blender.exe: Blender runtime plugin executable.
           - reverie-game-models.exe: Game Models runtime plugin executable.
@@ -302,30 +365,34 @@ jobs:
           Event: $env:GITHUB_EVENT_NAME
           Run: https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID
           "@
-          gh release view latest --repo $env:GITHUB_REPOSITORY *> $null
+          gh release view $releaseTag --repo $env:GITHUB_REPOSITORY *> $null
           if ($LASTEXITCODE -eq 0) {
-            gh release edit latest --repo $env:GITHUB_REPOSITORY --title "Reverie CLI Latest" --notes $notes --latest
+            gh release edit $releaseTag --repo $env:GITHUB_REPOSITORY --title $releaseTitle --notes $notes --latest
           }
           else {
-            gh release create latest --repo $env:GITHUB_REPOSITORY --title "Reverie CLI Latest" --notes $notes --latest
+            gh release create $releaseTag --repo $env:GITHUB_REPOSITORY --title $releaseTitle --notes $notes --latest
           }
 
           # Uploading with --clobber does not remove differently named assets from
           # earlier releases. Delete retired runtime plugins explicitly.
           foreach ($retiredAsset in @("reverie-godot.exe", "reverie-o3de.exe")) {
-            gh release delete-asset latest $retiredAsset --repo $env:GITHUB_REPOSITORY --yes 2>$null
+            gh release delete-asset $releaseTag $retiredAsset --repo $env:GITHUB_REPOSITORY --yes 2>$null
             if ($LASTEXITCODE -ne 0) {
               Write-Host "Retired asset already absent: $retiredAsset"
             }
           }
 
+          $setupPath = "ReverieCli-ui\release\Reverie-Setup-$version-x64.exe"
+          $portablePath = "dist\Reverie-Portable-$version-x64.exe"
           $assets = @(
             @{ Path = "dist\reverie.exe"; Label = "Reverie CLI for Windows (Python full build)" },
+            @{ Path = $setupPath; Label = "Reverie Desktop installer for Windows" },
+            @{ Path = $portablePath; Label = "Reverie Desktop portable for Windows" },
             @{ Path = "dist\plugins-manifest.json"; Label = "Release manifest with hashes and plugin metadata" },
             @{ Path = "plugins\blender\dist\reverie-blender.exe"; Label = "Blender runtime plugin" },
             @{ Path = "plugins\game_models\dist\reverie-game-models.exe"; Label = "Game Models runtime plugin" }
           )
           foreach ($asset in $assets) {
             $uploadSpec = "$($asset.Path)#$($asset.Label)"
-            gh release upload latest $uploadSpec --repo $env:GITHUB_REPOSITORY --clobber
+            gh release upload $releaseTag $uploadSpec --repo $env:GITHUB_REPOSITORY --clobber
           }

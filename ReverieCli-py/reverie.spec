@@ -4,6 +4,7 @@ from pathlib import Path
 import os
 import shutil
 
+build_mode = os.environ.get('REVERIE_PYINSTALLER_MODE', 'onefile').strip().lower()
 datas = [('README.md', '.')]
 binaries = []
 hiddenimports = ['rich', 'rich.console', 'rich.panel', 'rich.table', 'rich.syntax', 'rich.markdown', 'rich.progress', 'rich.prompt', 'rich.text', 'click', 'requests', 'openai', 'git', 'ddgs', 'bs4', 'yaml', 'tqdm', 
@@ -110,14 +111,15 @@ if resolved_icon is None:
 
 add_data_if_exists(comfy_src / "generate_image.py", "reverie_resources/comfy")
 add_data_if_exists(comfy_src / "embedded_comfy.b64", "reverie_resources/comfy")
-add_tree_if_exists(browser_src / "ms-playwright", "reverie_resources/browser/ms-playwright")
+if build_mode != 'ui-onedir':
+    add_tree_if_exists(browser_src / "ms-playwright", "reverie_resources/browser/ms-playwright")
 add_data_if_exists(repo_root / "reverie" / "agent" / "tool_manifest.json", "reverie/agent")
 add_data_if_exists(repo_root / "reverie" / "engine" / "vendor" / "live2d" / "live2dcubismcore.min.js", "reverie/engine/vendor/live2d")
 add_tree_if_exists(repo_root / "reverie" / "builtin_skills", "reverie/builtin_skills")
 add_data_if_exists(repo_root / "reverie" / "computer_use" / "ATTRIBUTION.md", "reverie/computer_use")
 
 ffmpeg_binary = resolve_ffmpeg_binary()
-if ffmpeg_binary is not None:
+if ffmpeg_binary is not None and build_mode != 'ui-onedir':
     add_binary_if_exists(ffmpeg_binary, "reverie_resources/ffmpeg")
 
 for package_name in ('rich', 'bs4', 'pyglet', 'moderngl', 'glcontext', 'uiautomation', 'comtypes'):
@@ -136,6 +138,10 @@ except Exception:
     pass
 
 
+excluded_modules = ['tensorboard', 'torch.utils.tensorboard']
+if build_mode == 'ui-onedir':
+    excluded_modules.extend(['tkinter', '_tkinter'])
+
 a = Analysis(
     [str(entry_script)],
     pathex=[str(repo_root)],
@@ -145,18 +151,13 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['tensorboard', 'torch.utils.tensorboard'],
+    excludes=excluded_modules,
     noarchive=False,
     optimize=0,
 )
 pyz = PYZ(a.pure)
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.datas,
-    [],
+common_exe_options = dict(
     name='reverie',
     debug=False,
     bootloader_ignore_signals=False,
@@ -172,3 +173,31 @@ exe = EXE(
     entitlements_file=None,
     icon=[str(resolved_icon)] if resolved_icon else None,
 )
+
+if build_mode in {'onedir', 'ui-onedir'}:
+    exe = EXE(
+        pyz,
+        a.scripts,
+        [],
+        exclude_binaries=True,
+        contents_directory='reverie-runtime' if build_mode == 'ui-onedir' else '.',
+        **common_exe_options,
+    )
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.datas,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        name='reverie',
+    )
+else:
+    exe = EXE(
+        pyz,
+        a.scripts,
+        a.binaries,
+        a.datas,
+        [],
+        **common_exe_options,
+    )

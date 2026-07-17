@@ -20,10 +20,27 @@ def _executor(tmp_path: Path, permission_level: str) -> ToolExecutor:
     return executor
 
 
-def test_permission_levels_default_invalid_values_to_workspace_write() -> None:
-    assert normalize_permission_level(None) == "workspace_write"
-    assert normalize_permission_level("unexpected") == "workspace_write"
-    assert Config().to_dict()["security"]["permission_level"] == "workspace_write"
+def test_permission_levels_default_invalid_values_to_full_control() -> None:
+    assert normalize_permission_level(None) == "full_control"
+    assert normalize_permission_level("unexpected") == "full_control"
+    assert Config().permission_level == "full_control"
+    assert Config().to_dict()["security"]["permission_level"] == "full_control"
+
+
+def test_legacy_config_without_security_uses_full_control() -> None:
+    config = Config.from_dict({})
+
+    assert config.permission_level == "full_control"
+    assert config.security["permission_level"] == "full_control"
+
+
+def test_default_permission_level_exposes_full_tool_surface(tmp_path: Path) -> None:
+    executor = ToolExecutor(tmp_path)
+
+    visible = executor.list_tools(mode="reverie")
+
+    assert "command_exec" in visible
+    assert "browser_controler" in visible
 
 
 def test_workspace_write_hides_and_denies_shell(tmp_path: Path) -> None:

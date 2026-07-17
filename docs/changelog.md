@@ -1,11 +1,31 @@
-## Reverie CLI v2.3.5 - Unreleased
+## Reverie CLI v2.4.0 - Desktop, Context Engine, and Release Upgrade
+
+**Release Date:** 2026-07-16
+
+### Native Desktop
+
+* Added the production Electron desktop host in `ReverieCli-ui`, backed by the same compiled Python SDK bridge, provider catalog, settings, tools, sessions, checkpoints, plugins, and recovery data as the CLI.
+* Rebuilt the desktop visual system around a full-window photographic layer. Bundled and imported backgrounds now replace the application base behind the sidebar, conversation, top toolbar, and inspector, with translucent glass surfaces, configurable strength/blur/dimming, light-theme handling, and responsive layouts.
+* Replaced the top and empty-chat mark with a purpose-generated violet sparkle asset derived from the supplied Reverie reference, while retaining the existing application icon for Windows executables.
+* Separated composer responsibilities: `@` opens Context Engine recommendations ranked from the current draft, recent conversation, symbols, repository index, Git state, and recency; the paperclip opens the native arbitrary-file picker, safely copies the selection into the workspace attachment area, and shows a removable attachment chip.
+* Added project-level management beside every recent workspace. Removing a project deletes all Reverie sessions, transcripts, memory, checkpoints, indexes, audit data, and imported attachments for that project while preserving source files, workspace configuration, and project rules; conversation rename/archive/fork/rewind/delete remain independently available.
+* Kept one long-lived `reverie.exe --sdk-bridge` process while switching projects. Workspace-scoped services are closed and recreated in-process, so opening another project no longer tears down and reconnects the desktop kernel.
+* Fixed clipped top-toolbar reasoning, mode, and theme menus with explicit floating-layer containment and verified the mode, theme, project, mention, and attachment surfaces against a 1509×949 Electron render.
+
+### Context and Runtime
+
+* Warmed the Context Engine automatically after desktop initialization, exposed live readiness/index/file/symbol/progress state, and upgraded `@` retrieval to prefer semantic files and symbols before deterministic indexed or filesystem fallbacks.
+* Increased the code-retrieval share of assembled memory context, expanded automatically selected files and symbols, and scaled the automatic memory package with the active model context window instead of using one fixed budget.
+* Added explicit workspace-service disposal for LSP, MCP, streaming input, timers, and workspace statistics so in-process project transitions do not leak desktop runtime state.
+
+### Core, Safety, and Packaging
 
 * Upgraded Codex reverse-proxy transport with query-safe Responses URL resolution, custom model ids and headers, environment-key/no-auth modes, proxy-safe identity headers, explicit stream failures, strict tool schemas, dynamic cross-platform Codex user agents, and live CLI-cache-first GPT-5.6 model discovery.
 * Added workspace mutation isolation: every AI tool call is wrapped in an executable-root internal shadow-Git checkpoint, only `delete_file` may leave a file deleted, blocked deletions are restored automatically, and approved deletions receive a separate timestamped backup under `.reverie/projects/<project-path-key>/deleted-files/`.
 * Enforced workspace-only path arguments for mutating tools, permanently disabled inline interpreter/shell code in `command_exec`, retained direct terminal deletion/move blocks, and added regression coverage for traversal, ignored files, outside-workspace writes, deletion restoration, and deletion archives.
 * Upgraded the unified `@` picker to consume the Context Engine index and return both files and code symbols, including line-range mentions, with a scrollable cross-platform selector and transient Windows rendering.
 * Exactly pinned maintained Python dependencies and the optional hardware-specific TTI stack, added a dependency-pin/synchronization policy check, expanded test coverage to Linux, Windows, macOS, and Python 3.10/3.12/3.14, and added a dedicated CI security/coverage gate.
-* Marked `2.3.5` as a development version only and gated the rolling GitHub Release behind an explicit manual `publish_release` input; push, pull-request, and scheduled builds now produce workflow artifacts without publishing.
+* Added version-tag release automation and desktop CI so `v2.4.0` builds and publishes the CLI, Electron installer, portable desktop executable, plugin executables, and hash manifest from one verified commit; ordinary pushes and pull requests remain artifact-only.
 * Moved Harness/checkpoint prompt enrichment off the interactive Agent critical path and warmed Skills for the active mode during Discovery, reducing the measured source Agent first-paint path from roughly 249 ms to 12 ms with the current `dist` configuration.
 * Made automatic MCP discovery silent and background-only. Pending or failed servers contribute no tools, resource tools, server guidance, prompt content, or tool descriptions to model context; `/mcp` status reads cached health without waiting for network probes.
 * Hardened the Windows packager to build `reverie.exe` in a staging directory before replacing the deployed binary, with bounded retries and an actionable error when another process holds `dist\reverie.exe` open.

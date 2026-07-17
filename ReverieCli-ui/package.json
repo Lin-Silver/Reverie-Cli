@@ -3,8 +3,13 @@
   "version": "2.5.0",
   "private": true,
   "description": "Reverie desktop — a native GUI host for the Reverie CLI core",
+  "homepage": "https://github.com/Lin-Silver/Reverie-Cli",
+  "desktopName": "Reverie",
   "main": "dist-electron/main.js",
-  "author": "Reverie",
+  "author": {
+    "name": "Lin-Silver",
+    "email": "linsilver54@gmail.com"
+  },
   "license": "MIT",
   "scripts": {
     "clean": "node scripts/clean.mjs",
@@ -95,13 +100,18 @@
       "category": "Development",
       "synopsis": "Reverie context-engine coding assistant",
       "executableName": "ReverieUI",
-      "artifactName": "Reverie-${version}-linux-${arch}.${ext}",
+      "maintainer": "Lin-Silver <linsilver54@gmail.com>",
+      "syncDesktopName": true,
       "target": [
         "AppImage",
         "deb"
       ]
     },
+    "appImage": {
+      "artifactName": "Reverie-${version}-linux-x64.AppImage"
+    },
     "deb": {
+      "artifactName": "Reverie-${version}-linux-x64.deb",
       "packageCategory": "devel",
       "priority": "optional",
       "afterInstall": "build/linux/after-install.sh",

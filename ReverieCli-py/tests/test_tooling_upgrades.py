@@ -1217,6 +1217,10 @@ def test_github_action_builds_desktop_and_publishes_version_tags() -> None:
     assert "write_kernel_manifest.py" in workflow
     assert "process.env.REVERIE_BUNDLE_RES_DIR" in desktop_kernel_builder
     assert "build/generated/reverie-trusted-kernels.json" in desktop_package
+    assert '"artifactName": "Reverie-${version}-linux-x64.AppImage"' in desktop_package
+    assert '"artifactName": "Reverie-${version}-linux-x64.deb"' in desktop_package
+    assert '"syncDesktopName": true' in desktop_package
+    assert '"maintainer": "Lin-Silver <linsilver54@gmail.com>"' in desktop_package
     assert 'app.getAppPath(), "build", "generated"' in desktop_main
     assert "plugins-latest" in plugin_workflow
     assert '"plugins/**"' in plugin_workflow

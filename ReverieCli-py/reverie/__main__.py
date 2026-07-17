@@ -324,7 +324,7 @@ def main(argv: list[str] | None = None):
 
     prompt_group = parser.add_mutually_exclusive_group()
     prompt_group.add_argument(
-        '--prompt', '-p',
+        '--prompt', '-p', '-P',
         help='Run a single prompt non-interactively and exit. Use -p @file or -p - for long input.'
     )
 
@@ -342,6 +342,21 @@ def main(argv: list[str] | None = None):
     parser.add_argument(
         '--mode', '-m',
         help='Temporarily override the active mode for this run'
+    )
+
+    parser.add_argument(
+        '--source', '-source',
+        help='Temporarily select a model source for this run (for example: codex or nvidia)'
+    )
+
+    parser.add_argument(
+        '--model', '-model',
+        help='Temporarily select a model id or unique model name for this run'
+    )
+
+    parser.add_argument(
+        '--reasoning', '--thinking', '-reasoning', '-thinking',
+        help='Temporarily select a model-supported reasoning depth or thinking toggle for this run'
     )
 
     parser.add_argument(
@@ -457,6 +472,9 @@ def main(argv: list[str] | None = None):
             prompt_text,
             mode_override=args.mode,
             no_index=bool(args.no_index),
+            source_override=args.source,
+            model_override=args.model,
+            reasoning_override=args.reasoning,
         )
 
         output_text = str(result.output_text or "").strip()

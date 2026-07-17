@@ -16,6 +16,7 @@ import shutil
 import socket
 import ssl
 import subprocess
+import zipfile
 
 from ..diagnostics import report_suppressed_exception
 import struct
@@ -3611,17 +3612,28 @@ class BrowserControlerTool(BaseTool):
     def _ensure_bundled_browser_runtime(self) -> Optional[Path]:
         existing = next((path for path in self._embedded_chromium_candidates(self.runtime_dir) if path.exists() and path.is_file()), None)
         source = self._bundled_browser_resource_dir()
-        if not source:
+        archive = self._bundled_browser_resource_archive()
+        if not source and not archive:
             return existing.resolve() if existing else None
-        bundled = next((path for path in self._embedded_chromium_candidates(source) if path.exists() and path.is_file()), None)
+        bundled = next((path for path in self._embedded_chromium_candidates(source) if path.exists() and path.is_file()), None) if source else None
+        bundled_revision = self._embedded_chromium_revision(bundled) if bundled else self._bundled_browser_archive_revision(archive)
         if existing and (
-            not bundled
-            or self._embedded_chromium_revision(existing) >= self._embedded_chromium_revision(bundled)
+            bundled_revision < 0
+            or self._embedded_chromium_revision(existing) >= bundled_revision
         ):
             return existing.resolve()
         target = self.runtime_dir / "ms-playwright"
         try:
-            shutil.copytree(source, target, dirs_exist_ok=True)
+            if source:
+                shutil.copytree(source, target, dirs_exist_ok=True)
+            elif archive:
+                runtime_root = self.runtime_dir.resolve()
+                with zipfile.ZipFile(archive) as packed:
+                    for member in packed.infolist():
+                        destination = (runtime_root / member.filename).resolve()
+                        if not destination.is_relative_to(runtime_root):
+                            raise ValueError(f"Unsafe browser archive member: {member.filename}")
+                    packed.extractall(runtime_root)
         except Exception:
             return existing.resolve() if existing else None
         existing = next((path for path in self._embedded_chromium_candidates(self.runtime_dir) if path.exists() and path.is_file()), None)
@@ -3638,6 +3650,33 @@ class BrowserControlerTool(BaseTool):
             if candidate.exists() and candidate.is_dir():
                 return candidate.resolve()
         return None
+
+    def _bundled_browser_resource_archive(self) -> Optional[Path]:
+        candidates: List[Path] = []
+        mei = Path(str(getattr(sys, "_MEIPASS", "") or ""))
+        if mei:
+            candidates.append(mei / "reverie_resources" / "browser.zip")
+        candidates.append(self.app_root / "reverie_resources" / "browser.zip")
+        candidates.append(Path(__file__).resolve().parents[2] / "reverie_resources" / "browser.zip")
+        for candidate in candidates:
+            if candidate.exists() and candidate.is_file():
+                return candidate.resolve()
+        return None
+
+    @staticmethod
+    def _bundled_browser_archive_revision(archive: Optional[Path]) -> int:
+        if not archive:
+            return -1
+        try:
+            with zipfile.ZipFile(archive) as packed:
+                revisions = [
+                    int(match.group(1))
+                    for name in packed.namelist()
+                    if (match := re.search(r"(?:^|/)chromium-(\d+)(?:/|$)", name, flags=re.IGNORECASE))
+                ]
+            return max(revisions, default=-1)
+        except Exception:
+            return -1
 
     def _embedded_chromium_candidates(self, root: Path) -> List[Path]:
         patterns = [

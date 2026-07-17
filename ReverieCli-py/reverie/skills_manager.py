@@ -20,6 +20,8 @@ _FRONTMATTER_RE = re.compile(r"\A---\s*\r?\n(.*?)\r?\n---\s*(?:\r?\n|$)", re.DOT
 _EXPLICIT_SKILL_RE = re.compile(r"(?<![A-Za-z0-9_.-])\$([A-Za-z0-9][A-Za-z0-9._-]*)")
 _TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{1,}")
 _SKILL_SCAN_SKIP_DIRS = {".git", ".hg", ".svn", "__pycache__", "node_modules", ".venv", "venv"}
+_SKILL_METADATA_RELATIVE_PATH = Path("agents") / "openai.yaml"
+_DEFAULT_SKILL_METADATA_CHAR_BUDGET = 8_000
 _SKILL_STOPWORDS = {
     "the", "and", "for", "with", "that", "this", "from", "into", "your", "when", "use", "using",
     "user", "wants", "want", "anything", "files", "file", "skill", "guide", "whenever", "does",
@@ -84,6 +86,26 @@ def _extract_frontmatter(raw_text: str) -> tuple[dict[str, Any], str, Optional[s
     if not isinstance(parsed, dict):
         return {}, body, "frontmatter must deserialize to a mapping"
     return parsed, body, None
+
+
+def _load_optional_skill_metadata(path: Path) -> dict[str, Any]:
+    """Load optional OpenAI Skill metadata without blocking a valid Skill."""
+    if not path.is_file():
+        return {}
+    try:
+        parsed = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _skill_allows_implicit_invocation(metadata: dict[str, Any]) -> bool:
+    """Return the standard `agents/openai.yaml` implicit-invocation policy."""
+    policy = metadata.get("policy") if isinstance(metadata, dict) else None
+    if not isinstance(policy, dict):
+        return True
+    value = policy.get("allow_implicit_invocation")
+    return value is not False and not (isinstance(value, str) and value.strip().lower() == "false")
 
 
 def _extract_fallback_description(body_text: str) -> str:
@@ -151,6 +173,8 @@ class SkillRecord:
     metadata: dict[str, Any]
     lookup_key: str
     match_tokens: frozenset[str]
+    allow_implicit_invocation: bool = True
+    metadata_path: Optional[Path] = None
     source_uri: str = ""
     plugin_id: str = ""
 
@@ -217,9 +241,11 @@ class SkillsManager:
         package_root = Path(__file__).resolve().parent
         candidates = [
             SkillRoot("builtin", "builtin_skills", package_root / "builtin_skills", -10),
-            SkillRoot("app", ".reverie/Skills", self.app_root / ".reverie" / "Skills", 0),
-            SkillRoot("app", ".reverie/skills", self.app_root / ".reverie" / "skills", 1),
+            SkillRoot("user", "~/.agents/skills", Path.home() / ".agents" / "skills", -2),
+            SkillRoot("app", ".reverie/Skills (legacy)", self.app_root / ".reverie" / "Skills", 0),
+            SkillRoot("app", ".reverie/skills (legacy)", self.app_root / ".reverie" / "skills", 1),
         ]
+        candidates.extend(self._repo_skill_root_candidates())
 
         deduped: list[SkillRoot] = []
         seen_paths: set[str] = set()
@@ -230,6 +256,19 @@ class SkillsManager:
             seen_paths.add(normalized)
             deduped.append(root)
         return tuple(deduped)
+
+    def _repo_skill_root_candidates(self) -> list[SkillRoot]:
+        """Discover `.agents/skills` from the project root through the working directory."""
+        ancestors = [self.project_root, *self.project_root.parents]
+        repo_boundary = next((path for path in ancestors if (path / ".git").exists()), None)
+        if repo_boundary is not None:
+            ancestors = ancestors[: ancestors.index(repo_boundary) + 1]
+        candidates: list[SkillRoot] = []
+        for priority, directory in enumerate(reversed(ancestors), start=2):
+            candidates.append(
+                SkillRoot("workspace", ".agents/skills", directory / ".agents" / "skills", priority)
+            )
+        return candidates
 
     def set_runtime_plugin_manager(self, manager: Any) -> None:
         self.runtime_plugin_manager = manager
@@ -383,6 +422,7 @@ class SkillsManager:
                         }
                         | _extract_tokens(description)
                     ),
+                    allow_implicit_invocation=_skill_allows_implicit_invocation(metadata),
                     source_uri=source_uri,
                     plugin_id=plugin_id,
                 )
@@ -406,6 +446,9 @@ class SkillsManager:
                 continue
             seen.add(normalized)
             skill_files.append(candidate)
+            # A discovered Skill directory is a package boundary. Its nested
+            # references must not become separate Skills during discovery.
+            dirnames[:] = []
 
         skill_files.sort(key=lambda path: str(path).lower())
         return skill_files
@@ -424,6 +467,9 @@ class SkillsManager:
         metadata, body_text, parse_error = _extract_frontmatter(raw_text)
         if parse_error:
             return None, SkillError(skill_md, root, f"invalid frontmatter: {parse_error}")
+
+        metadata_path = skill_md.parent / _SKILL_METADATA_RELATIVE_PATH
+        metadata_file = _load_optional_skill_metadata(metadata_path)
 
         name = str(metadata.get("name") or skill_md.parent.name).strip() or skill_md.parent.name
         description = str(metadata.get("description") or "").strip()
@@ -456,6 +502,8 @@ class SkillsManager:
             metadata=metadata,
             lookup_key=normalized_name,
             match_tokens=match_tokens,
+            allow_implicit_invocation=_skill_allows_implicit_invocation(metadata_file),
+            metadata_path=metadata_path if metadata_path.is_file() else None,
         )
         return record, None
 
@@ -561,98 +609,60 @@ class SkillsManager:
         force_refresh: bool = False,
         top_n: int = 2,
     ) -> list[SkillRecord]:
-        """Infer relevant skills from the user request without explicit `$skill` markers."""
-        snapshot = self.get_snapshot(force_refresh=force_refresh)
-        if not snapshot.records:
-            return []
-
-        raw_text = str(text or "")
-        lowered = raw_text.lower()
-        query_tokens = _extract_tokens(raw_text)
-        extension_tokens = {
-            token.lower()
-            for token in re.findall(r"\.([A-Za-z0-9]{2,8})\b", raw_text)
-        }
-        scored: list[tuple[int, SkillRecord]] = []
-
-        for record in snapshot.records:
-            score = 0
-            if record.lookup_key and record.lookup_key in lowered:
-                score += 12
-
-            name_parts = [part for part in re.split(r"[-._/\\]+", record.lookup_key) if part]
-            for part in name_parts:
-                normalized_part = _normalize_token(part)
-                if not normalized_part:
-                    continue
-                if normalized_part in query_tokens:
-                    score += 4 if len(normalized_part) >= 4 else 6
-                if normalized_part in extension_tokens:
-                    score += 8
-
-            overlap = len(record.match_tokens & query_tokens)
-            if overlap >= 4:
-                score += min(overlap * 2, 10)
-            elif overlap >= 2:
-                score += overlap
-
-            if score >= 6:
-                scored.append((score, record))
-
-        scored.sort(key=lambda item: (-item[0], item[1].root.priority, item[1].name.lower()))
-        return [record for _score, record in scored[:max(1, top_n)]]
+        """Deprecated local matcher kept for compatibility; selection belongs to the model."""
+        del text, force_refresh, top_n
+        return []
 
     def build_explicit_skill_injection(self, records: Iterable[SkillRecord]) -> str:
-        """Render active-skill context in a Codex-style skill wrapper block."""
+        """Render explicit Skill names without copying untrusted bodies into user content."""
         normalized_records = [record for record in records if isinstance(record, SkillRecord)]
         if not normalized_records:
             return ""
 
         blocks = [
-            "[SKILL SYSTEM]",
-            "The following skills are active for this turn.",
-            "Treat them as high-priority instructions and follow their guidance before making changes.",
-            "Skills may be activated explicitly with `$skill-name` or selected automatically when they clearly match the request.",
-            "",
+            "[SKILL REQUEST]",
+            "The user explicitly requested the following Skill(s). Call skill_lookup(operation='inspect') for each before taking task actions.",
         ]
         for record in normalized_records:
-            body = record.body.strip() or record.description.strip()
             blocks.extend(
                 [
-                    "<skill>",
-                    f"<name>{record.name}</name>",
-                    f"<path>{record.source_uri or record.path_to_skill_md}</path>",
-                    body,
-                    "</skill>",
-                    "",
+                    f"- {record.name} (file: {record.source_uri or record.path_to_skill_md})",
                 ]
             )
         return "\n".join(blocks).strip()
 
-    def describe_for_prompt(self, *, force_refresh: bool = False, max_items: int = 10) -> str:
-        """Return a compact prompt block describing available skills."""
+    def describe_for_prompt(
+        self,
+        *,
+        force_refresh: bool = False,
+        max_chars: int = _DEFAULT_SKILL_METADATA_CHAR_BUDGET,
+    ) -> str:
+        """Render a budgeted Codex-style metadata list for model-side Skill selection."""
         snapshot = self.get_snapshot(force_refresh=force_refresh)
+        budget = max(512, int(max_chars or _DEFAULT_SKILL_METADATA_CHAR_BUDGET))
         lines = [
             "## Skills",
-            "- Reverie supports Codex/Claude-style skills: directories that contain a `SKILL.md` entrypoint.",
-            "- Skills are loaded from built-in package skills and from the application root under `.reverie/Skills` or `.reverie/skills` beside the executable.",
-            "- Nested repository layouts like `.reverie/skills/<repo>/skills/<skill>/SKILL.md` are supported when they live under that application root.",
-            "- If a listed skill clearly matches the user's request, inspect that skill's `SKILL.md` before implementing the task.",
-            "- Users can explicitly activate a skill for the current turn by writing `$skill-name` in their message.",
-            "- Use `/skills` to inspect available skills, rescan roots, and view exact `SKILL.md` paths.",
+            "A skill is a reusable workflow stored in a `SKILL.md` file. The list below contains only name, description, and path.",
+            "If the user names a skill or the task clearly matches its description, call `skill_lookup` with `operation=inspect` before acting. Read every returned body chunk before using that skill.",
+            "Use `$skill-name` for an explicit request. Do not load a skill body merely because its description shares generic words with the task.",
+            "### Available skills",
         ]
+        used = sum(len(line) + 1 for line in lines)
+        omitted = 0
+        implicit_records = [record for record in snapshot.records if record.allow_implicit_invocation]
+        for record in implicit_records:
+            description = _trim_text(record.description, limit=1024)
+            line = f"- {record.name}: {description} (file: {record.source_uri or record.path_to_skill_md})"
+            if used + len(line) + 1 > budget:
+                omitted += 1
+                continue
+            lines.append(line)
+            used += len(line) + 1
 
-        if not snapshot.records:
+        if not implicit_records:
             lines.append("- No valid skills are currently detected.")
-        else:
-            lines.append("- Available skills:")
-            for record in snapshot.records[:max_items]:
-                lines.append(
-                    f"  - `{record.name}` ({record.scope_label}, {record.root_label}): {record.summary} "
-                    f"(source: {record.source_uri or record.path_to_skill_md})"
-                )
-            if len(snapshot.records) > max_items:
-                lines.append(f"  - Additional skills not shown: {len(snapshot.records) - max_items}")
+        elif omitted:
+            lines.append(f"- {omitted} additional Skill descriptions were omitted to fit the metadata budget.")
 
         if snapshot.errors:
             lines.append(f"- Invalid skills skipped during scan: {len(snapshot.errors)}")

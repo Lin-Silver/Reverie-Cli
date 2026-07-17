@@ -130,7 +130,9 @@ def test_plugin_virtual_skill_respects_mode_and_settings_surface(tmp_path: Path)
     record = skills.get_record("sample-plugin-skill", force_refresh=True)
     assert record is not None
     assert record.source_uri == "plugin://sample/skills/sample-plugin-skill"
-    assert "SAMPLE_PLUGIN_SKILL_MARKER" in skills.build_explicit_skill_injection([record])
+    explicit_request = skills.build_explicit_skill_injection([record])
+    assert "sample-plugin-skill" in explicit_request
+    assert "SAMPLE_PLUGIN_SKILL_MARKER" not in explicit_request
 
     setting_items = get_setting_items(object(), object(), None, manager)
     plugin_item = next(item for item in setting_items if item.get("key") == "plugin_enabled:sample")

@@ -4478,12 +4478,13 @@ class ReverieAgent:
             return None
         try:
             resolved_session_id, _ = self._current_session_details("default")
+            context_budget = max(3500, min(10000, int(self._resolve_max_context_tokens() * 0.06)))
             package = memory_os.assemble_context(
                 query,
                 code_retriever=self.tool_executor.context.get("retriever"),
                 session_id=resolved_session_id,
                 recent_messages=self.messages,
-                max_tokens=6000,
+                max_tokens=context_budget,
             )
         except Exception:
             logger.debug("Failed to assemble Memory OS context package", exc_info=True)

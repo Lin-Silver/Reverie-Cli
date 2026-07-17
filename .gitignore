@@ -45,3 +45,15 @@ plugins/blender/*.zip
 ReverieCli-py/writer-source-smoke-*/
 ReverieCli-py/ui-runtime/appdata/
 Reverie UI/artifacts/
+
+# Reverie Electron desktop local dependencies, output, and runtime state
+/ReverieCli-ui/node_modules/
+/ReverieCli-ui/.npm-cache/
+/ReverieCli-ui/.cache/
+/ReverieCli-ui/.kernel/
+/ReverieCli-ui/.runtime/
+/ReverieCli-ui/.vite-cache/
+/ReverieCli-ui/dist/
+/ReverieCli-ui/dist-electron/
+/ReverieCli-ui/release/
+/.audit/

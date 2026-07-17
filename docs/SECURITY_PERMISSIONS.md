@@ -5,7 +5,7 @@ Reverie applies tool permissions in software, both when tools are advertised to 
 ```json
 {
   "security": {
-    "permission_level": "workspace_write"
+    "permission_level": "full_control"
   }
 }
 ```
@@ -13,11 +13,11 @@ Reverie applies tool permissions in software, both when tools are advertised to 
 | Level | Capabilities |
 | --- | --- |
 | `read_only` | Retrieval, inspection, and other non-mutating local tools |
-| `workspace_write` | Read-only capabilities plus workspace file editing; this is the default |
+| `workspace_write` | Read-only capabilities plus workspace file editing |
 | `developer` | Workspace editing plus audited shell commands, web requests, and media generation |
-| `full_control` | Developer capabilities plus interactive browser, desktop control, runtime plugins, and SubAgents |
+| `full_control` | All registered tool classes, including interactive browser, desktop control, runtime plugins, and SubAgents; this is the default |
 
-Higher levels include lower-level capabilities. Invalid values fall back to `workspace_write`.
+Higher levels include lower-level capabilities. Missing or invalid values fall back to `full_control`, so models receive the complete tool surface by default. Every tool call is still checked by the software policy immediately before execution.
 
 When an interactive CLI session needs a tool above the configured level, Reverie presents a unified approval prompt: `once`, `session`, or `deny`. The default is `deny`. A one-time or session approval does not modify `config.json`; headless and SDK paths deny elevation unless the embedding host supplies an explicit approval handler.
 
@@ -31,4 +31,4 @@ Only `delete_file` may leave an existing workspace file deleted. Before deletion
 
 All explicit path arguments of mutating tools must resolve within the active workspace. `command_exec` also rejects outside working directories, absolute or parent-traversing path arguments, direct delete/move commands, dangerous disk commands, opaque commands, and inline interpreter code. Reviewed workspace script files may still be executed at `developer` level; their known deletion APIs are scanned and any resulting deletion of checkpointed workspace files is restored.
 
-This is capability isolation plus workspace outcome recovery, not an operating-system sandbox. A process allowed at `developer` level still runs under the current user account and can access networks. Software path checks reject explicit outside-workspace targets, but arbitrary third-party executables cannot be proven harmless without an OS sandbox; keep unreviewed command execution disabled. Use `workspace_write` unless command execution is needed, and enable `full_control` only for a reviewed task.
+This is capability isolation plus workspace outcome recovery, not an operating-system sandbox. A process allowed at `developer` level still runs under the current user account and can access networks. Software path checks reject explicit outside-workspace targets, but arbitrary third-party executables cannot be proven harmless without an OS sandbox. Full Control exposes all registered tools, while the software policy continues to block prohibited operations and enforce path, deletion, and approval rules.

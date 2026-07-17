@@ -1,10 +1,11 @@
 # Reverie CLI
 
-Current development version: **v2.3.5 (unreleased)**. The latest stable release remains **v2.3.4**.
+Current stable version: **v2.4.0** (released 2026-07-16).
 
 **Reverie** is an open-source, terminal-based agentic coding assistant that wraps large language models to enable natural language interaction with your local codebase. It combines multi-provider LLM access, a powerful Context Engine for codebase intelligence, session management, inline media support, 3D/Game modeling workflows, browser automation, and more — all in a unified terminal interface.
 
 - **Core function**: terminal-based AI coding assistant with local workspace tools, context retrieval, session continuity, and multi-provider LLM access
+- **Native desktop**: Electron workspace host using the same Python core, with project/session management, full-window backgrounds, Context Engine file recommendations, arbitrary attachments, settings, tools, plugins, and recovery views
 - **Optional workflows**: spec-driven development, creative writing, browser automation, computer control, and game/3D asset authoring
 - **Multi-provider LLM** support: NVIDIA, ModelScope, Codex (ChatGPT), SenseNova, unlimited.surf, AIHubMix, Agnes, WebGemini
 - **Context Engine**: Augment-style codebase retrieval, LSP integration, git history analysis
@@ -263,6 +264,8 @@ Once inside the CLI:
 - Use `/session list` to browse saved sessions
 - Attach files by referencing them in your message (e.g., "review `src/main.py`")
 
+For the native desktop interface, build or run `ReverieCli-ui` as described in [Reverie Desktop](ReverieCli-ui/README.md). The desktop keeps a single CLI bridge alive across project switches; `@` recommends relevant workspace files through Context Engine, while the paperclip selects an arbitrary local file.
+
 ---
 
 ## Configuration
@@ -273,7 +276,7 @@ Reverie uses `config.json` stored in the project's `.reverie/` directory or the 
 
 ```json
 {
-  "config_version": "2.3.5",
+  "config_version": "2.4.0",
   "active_model_source": "standard",
   "models": [
     {

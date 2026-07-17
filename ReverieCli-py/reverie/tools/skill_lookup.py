@@ -42,8 +42,8 @@ class SkillLookupTool(BaseTool):
 
     description = """Search or inspect the SKILL.md files Reverie has discovered.
 
-Use this tool when a skill seems relevant but you need to inspect its exact
-instructions, summary, or file path before acting.
+Use this tool when a skill seems relevant. Inspect its full SKILL.md body before
+acting; if the body is returned in chunks, request every remaining chunk.
 """
 
     parameters = {
@@ -69,8 +69,13 @@ instructions, summary, or file path before acting.
             },
             "max_body_chars": {
                 "type": "integer",
-                "description": "For inspect: maximum number of skill-body characters to include (default: 6000)",
-                "default": 6000,
+                "description": "For inspect: maximum number of skill-body characters in this chunk (default: 12000)",
+                "default": 12000,
+            },
+            "body_offset": {
+                "type": "integer",
+                "description": "For inspect: zero-based character offset for the next Skill body chunk",
+                "default": 0,
             },
             "force_refresh": {
                 "type": "boolean",
@@ -148,16 +153,19 @@ instructions, summary, or file path before acting.
         operation = str(kwargs.get("operation", "") or "").strip().lower()
         force_refresh = bool(kwargs.get("force_refresh", False))
         max_results = kwargs.get("max_results", 8)
-        max_body_chars = kwargs.get("max_body_chars", 6000)
+        max_body_chars = kwargs.get("max_body_chars", 12000)
+        body_offset = kwargs.get("body_offset", 0)
 
         try:
             max_results = int(max_results)
             max_body_chars = int(max_body_chars)
+            body_offset = int(body_offset)
         except (TypeError, ValueError):
-            return ToolResult.fail("max_results and max_body_chars must be integers")
+            return ToolResult.fail("max_results, max_body_chars, and body_offset must be integers")
 
         max_results = max(1, min(max_results, 20))
         max_body_chars = max(200, min(max_body_chars, 20_000))
+        body_offset = max(0, body_offset)
 
         manager = self._skills_manager()
         snapshot = manager.get_snapshot(force_refresh=force_refresh)
@@ -223,11 +231,9 @@ instructions, summary, or file path before acting.
                 )
 
             body = str(record.body or "").strip() or str(record.description or "").strip()
-            body_preview = body
-            was_truncated = False
-            if len(body_preview) > max_body_chars:
-                body_preview = f"{body_preview[: max_body_chars - 3].rstrip()}..."
-                was_truncated = True
+            body_chunk = body[body_offset:body_offset + max_body_chars]
+            next_offset = body_offset + len(body_chunk)
+            complete = next_offset >= len(body)
 
             metadata_keys = sorted(str(key) for key in (record.metadata or {}).keys())
             lines = [
@@ -238,11 +244,11 @@ instructions, summary, or file path before acting.
                 f"Metadata keys: {', '.join(metadata_keys) if metadata_keys else '(none)'}",
                 "",
                 "Skill body:",
-                body_preview or "(empty skill body)",
+                body_chunk or "(empty skill body)",
             ]
-            if was_truncated:
+            if not complete:
                 lines.append("")
-                lines.append(f"[preview truncated to {max_body_chars} characters]")
+                lines.append(f"[more Skill instructions remain; inspect again with body_offset={next_offset}]")
 
             return ToolResult.ok(
                 "\n".join(lines),
@@ -253,8 +259,10 @@ instructions, summary, or file path before acting.
                     "scope": record.scope_label,
                     "root": record.root_label,
                     "metadata": dict(record.metadata or {}),
-                    "body": body_preview,
-                    "truncated": was_truncated,
+                    "body": body_chunk,
+                    "body_offset": body_offset,
+                    "next_body_offset": None if complete else next_offset,
+                    "complete": complete,
                 },
             )
 

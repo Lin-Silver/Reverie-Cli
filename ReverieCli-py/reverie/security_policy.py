@@ -6,6 +6,7 @@ from typing import Any, Optional
 
 
 PERMISSION_LEVELS = ("read_only", "workspace_write", "developer", "full_control")
+DEFAULT_PERMISSION_LEVEL = "full_control"
 _LEVEL_ALIASES = {
     "readonly": "read_only",
     "read-only": "read_only",
@@ -28,9 +29,9 @@ _COMPUTER_USE_PREFIXES = ("computer_", "open_computer", "click", "drag", "scroll
 
 
 def normalize_permission_level(value: Any) -> str:
-    normalized = str(value or "workspace_write").strip().lower().replace(" ", "_")
+    normalized = str(value or DEFAULT_PERMISSION_LEVEL).strip().lower().replace(" ", "_")
     normalized = _LEVEL_ALIASES.get(normalized, normalized)
-    return normalized if normalized in PERMISSION_LEVELS else "workspace_write"
+    return normalized if normalized in PERMISSION_LEVELS else DEFAULT_PERMISSION_LEVEL
 
 
 def required_permission_for_tool(tool: Any) -> str:

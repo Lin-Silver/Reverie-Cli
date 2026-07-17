@@ -227,7 +227,7 @@ def test_first_paint_rules_skip_expensive_harness_enrichment(monkeypatch, tmp_pa
     monkeypatch.setattr(interface_module, "build_harness_prompt_guidance", unexpected_harness_call)
     skills = SimpleNamespace(
         set_active_mode=lambda mode: None,
-        describe_for_prompt=lambda force_refresh=False: "## Skills\n- cached",
+        describe_for_prompt=lambda force_refresh=False, max_chars=None: "## Skills\n- cached",
     )
     runtime_plugins = SimpleNamespace(describe_for_prompt=lambda mode: "## Plugins\n- cached")
     mcp_runtime = SimpleNamespace(describe_for_prompt=lambda: "")

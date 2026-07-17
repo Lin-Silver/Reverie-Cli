@@ -39,8 +39,8 @@ class ContextAssembler:
         if cached:
             return cached
 
-        memory_budget = max(600, int(max_tokens * 0.44))
-        code_budget = max(600, int(max_tokens * 0.36))
+        memory_budget = max(600, int(max_tokens * 0.38))
+        code_budget = max(600, int(max_tokens * 0.42))
         recent_budget = max(200, int(max_tokens * 0.12))
 
         memory_hits = self.memory_retriever.search(
@@ -123,8 +123,8 @@ class ContextAssembler:
             result = code_retriever.retrieve_for_task(
                 query,
                 max_tokens=max(1000, int(token_budget or 1000)),
-                max_files=4,
-                max_symbols=8,
+                max_files=6,
+                max_symbols=12,
                 include_history=True,
                 include_memory=False,
             )

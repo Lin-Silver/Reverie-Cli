@@ -310,7 +310,7 @@ def test_version_output_includes_core_interface(capsys) -> None:
 
     output = capsys.readouterr().out
     assert "Reverie Cli v" in output
-    assert "Release status: unreleased" in output
+    assert "Release status: stable" in output
     assert "Core Interface v1.0" in output
     assert "Kernel: python" in output
 

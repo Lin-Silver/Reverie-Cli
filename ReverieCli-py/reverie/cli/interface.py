@@ -21,7 +21,7 @@ from ..diagnostics import report_suppressed_exception
 from datetime import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Callable
 
 from rich.console import Console, Group
 from rich.prompt import Prompt, Confirm
@@ -1031,6 +1031,29 @@ class ReverieInterface:
     def _clone_config(self, config: Config) -> Config:
         """Return a deep-ish copy of config through the canonical serializer."""
         return Config.from_dict(config.to_dict())
+
+    def close(self) -> None:
+        """Release workspace-scoped background services before switching projects."""
+        self._stop_stream_input_capture()
+        self._stop_streaming_footer_ticker()
+        lsp_manager = getattr(self, "lsp_manager", None)
+        if lsp_manager is not None:
+            try:
+                lsp_manager.shutdown()
+            except Exception:
+                report_suppressed_exception("shut down LSP manager")
+        mcp_runtime = getattr(self, "mcp_runtime", None)
+        if mcp_runtime is not None:
+            try:
+                mcp_runtime.close()
+            except Exception:
+                report_suppressed_exception("close MCP runtime")
+        workspace_stats = getattr(self, "workspace_stats_manager", None)
+        if workspace_stats is not None:
+            try:
+                workspace_stats.flush()
+            except Exception:
+                report_suppressed_exception("flush workspace stats")
 
     def _load_active_runtime_config(self) -> Config:
         """Load the config currently in effect for this runtime."""
@@ -2362,43 +2385,95 @@ class ReverieInterface:
         return candidates[: max(1, int(limit or 80))]
 
     def _collect_workspace_mention_candidates(self, query: str = "", limit: int = 500) -> List[Dict[str, Any]]:
-        """Collect indexed files and symbols for the unified @ mention picker."""
-        query_text = str(query or "").strip().lower()
-        ignored = {".git", ".reverie", "__pycache__", ".pytest_cache", ".mypy_cache", "node_modules", "venv", ".venv", "env", "dist", "build", "target"}
+        """Rank likely @ references with Context Engine evidence, then fill from the workspace."""
         root = Path(self.project_root).resolve()
-        candidates: List[Dict[str, Any]] = []
-        tokens = [token.lower() for token in re.findall(r"[A-Za-z0-9_.\-\u4e00-\u9fff]+", query_text)]
-        indexer = getattr(self, "indexer", None)
-        indexed_files = getattr(indexer, "_file_info", {}) if indexer is not None else {}
-        if isinstance(indexed_files, dict) and indexed_files:
-            for raw_path, info in indexed_files.items():
-                path = Path(raw_path)
-                try:
-                    rel = path.resolve().relative_to(root).as_posix() if path.is_absolute() else path.as_posix()
-                except (OSError, ValueError):
-                    continue
-                haystack = rel.lower()
-                if tokens and not all(token in haystack for token in tokens):
-                    continue
-                score = 24.0 if query_text and query_text in haystack else float(sum(token in haystack for token in tokens) * 5)
-                candidates.append(
-                    {
-                        "path": rel,
-                        "name": Path(rel).name,
-                        "size": int(getattr(info, "size", 0) or 0),
-                        "mtime": float(getattr(info, "mtime", 0.0) or 0.0),
-                        "kind": "file",
-                        "score": score,
-                    }
+        raw_query = str(query or "").strip()
+        recent_parts: List[str] = []
+        session = self.session_manager.get_current_session() if getattr(self, "session_manager", None) else None
+        for message in list(getattr(session, "messages", []) or [])[-8:]:
+            if not isinstance(message, dict) or str(message.get("role", "")).lower() not in {"user", "assistant"}:
+                continue
+            content = message.get("content")
+            if isinstance(content, str):
+                text = content
+            elif isinstance(content, list):
+                text = " ".join(
+                    str(part.get("text", ""))
+                    for part in content
+                    if isinstance(part, dict) and isinstance(part.get("text"), str)
                 )
-            if query_text and getattr(indexer, "symbol_table", None) is not None:
-                for symbol in indexer.symbol_table.search(query_text, limit=max(40, min(limit, 200))):
-                    try:
-                        symbol_path = Path(str(symbol.file_path))
-                        rel = symbol_path.resolve().relative_to(root).as_posix() if symbol_path.is_absolute() else symbol_path.as_posix()
-                    except (OSError, ValueError):
+            else:
+                text = ""
+            if text.strip():
+                recent_parts.append(text.strip())
+        effective_query = raw_query or "\n".join(recent_parts[-4:])
+        if not effective_query:
+            effective_query = "project entry points current implementation configuration tests recently changed files"
+        effective_query = effective_query[-2400:]
+        query_text = raw_query.lower()
+        tokens = [token.lower() for token in re.findall(r"[A-Za-z0-9_.\-\u4e00-\u9fff]+", query_text)]
+        ignored = {".git", ".reverie", "__pycache__", ".pytest_cache", ".mypy_cache", "node_modules", "venv", ".venv", "env", "dist", "build", "target"}
+        candidates: List[Dict[str, Any]] = []
+        seen: set[tuple[str, str, str]] = set()
+
+        def relative_path(value: Any) -> str:
+            path = Path(str(value or ""))
+            try:
+                return path.resolve().relative_to(root).as_posix() if path.is_absolute() else path.as_posix()
+            except (OSError, ValueError):
+                return ""
+
+        def add(item: Dict[str, Any]) -> None:
+            rel = str(item.get("path", "") or "").replace("\\", "/").strip("/")
+            if not rel:
+                return
+            key = (str(item.get("kind", "file")), rel.lower(), str(item.get("name", "")).lower())
+            if key in seen:
+                return
+            seen.add(key)
+            item["path"] = rel
+            candidates.append(item)
+
+        try:
+            self.ensure_context_engine(announce=False, wait_for_index=False)
+            self.ensure_git_integration(announce=False)
+            retriever = getattr(self, "retriever", None)
+            if retriever is not None:
+                result = retriever.retrieve_for_task(
+                    effective_query,
+                    max_tokens=3200,
+                    max_files=max(8, min(16, int(limit or 24))),
+                    max_symbols=max(8, min(20, int(limit or 24))),
+                    include_history=True,
+                    include_memory=True,
+                )
+                for rank, item in enumerate(result.relevant_files):
+                    rel = relative_path(item.file_path)
+                    if not rel:
                         continue
-                    candidates.append(
+                    path = root / rel
+                    try:
+                        stat = path.stat()
+                    except OSError:
+                        stat = None
+                    add(
+                        {
+                            "path": rel,
+                            "name": Path(rel).name,
+                            "size": int(getattr(stat, "st_size", 0) or 0),
+                            "mtime": float(getattr(stat, "st_mtime", 0.0) or 0.0),
+                            "kind": "file",
+                            "score": 200.0 + float(item.score) - rank,
+                            "source": "context-engine",
+                            "reason": str(item.reasons[0] if item.reasons else "task relevance"),
+                            "summary": str(item.summary or ""),
+                        }
+                    )
+                for rank, symbol in enumerate(result.relevant_symbols):
+                    rel = relative_path(symbol.file_path)
+                    if not rel:
+                        continue
+                    add(
                         {
                             "path": rel,
                             "name": str(symbol.name),
@@ -2409,27 +2484,81 @@ class ReverieInterface:
                             "end_line": int(symbol.end_line),
                             "size": 0,
                             "mtime": 0.0,
-                            "score": 40.0 if str(symbol.name).lower() == query_text else 30.0,
+                            "score": 180.0 - rank,
+                            "source": "context-engine",
+                            "reason": "symbol relevance",
                         }
                     )
-            candidates.sort(key=lambda item: (-float(item["score"]), str(item["path"]).lower(), str(item.get("name", "")).lower()))
-            return candidates[:max(1, int(limit or 500))]
+        except Exception:
+            report_suppressed_exception("rank workspace mentions with Context Engine")
 
-        for current_root, dirs, files in os.walk(root):
-            dirs[:] = [name for name in dirs if name not in ignored and not name.endswith(".egg-info")]
-            for name in files:
-                path = Path(current_root) / name
-                try:
-                    rel = path.resolve().relative_to(root).as_posix()
-                    stat = path.stat()
-                except OSError:
+        indexer = getattr(self, "indexer", None)
+        indexed_files = getattr(indexer, "_file_info", {}) if indexer is not None else {}
+        if isinstance(indexed_files, dict) and indexed_files:
+            for raw_path, info in indexed_files.items():
+                rel = relative_path(raw_path)
+                if not rel:
                     continue
                 haystack = rel.lower()
-                if tokens and not all(token in haystack for token in tokens):
+                match_count = sum(token in haystack for token in tokens)
+                if tokens and not match_count:
                     continue
-                score = 20.0 if query_text and query_text in haystack else float(sum(token in haystack for token in tokens) * 4)
-                candidates.append({"path": rel, "name": name, "size": stat.st_size, "mtime": stat.st_mtime, "kind": "file", "score": score})
-        candidates.sort(key=lambda item: (-float(item["score"]), str(item["path"]).lower()))
+                score = 44.0 if query_text and query_text in haystack else float(match_count * 7)
+                mtime = float(getattr(info, "mtime", 0.0) or 0.0)
+                if mtime:
+                    score += max(0.0, 8.0 - ((time.time() - mtime) / 86400.0))
+                add(
+                    {
+                        "path": rel,
+                        "name": Path(rel).name,
+                        "size": int(getattr(info, "size", 0) or 0),
+                        "mtime": mtime,
+                        "kind": "file",
+                        "score": score,
+                        "source": "workspace-index",
+                        "reason": "name match" if tokens else "recently indexed",
+                    }
+                )
+            if raw_query and getattr(indexer, "symbol_table", None) is not None:
+                for symbol in indexer.symbol_table.search(raw_query, limit=max(40, min(limit, 200))):
+                    rel = relative_path(symbol.file_path)
+                    if not rel:
+                        continue
+                    add(
+                        {
+                            "path": rel,
+                            "name": str(symbol.name),
+                            "kind": "symbol",
+                            "symbol": str(symbol.qualified_name),
+                            "symbol_kind": str(getattr(symbol.kind, "name", symbol.kind)).lower(),
+                            "start_line": int(symbol.start_line),
+                            "end_line": int(symbol.end_line),
+                            "size": 0,
+                            "mtime": 0.0,
+                            "score": 120.0 if str(symbol.name).lower() == query_text else 90.0,
+                            "source": "symbol-index",
+                            "reason": "symbol name match",
+                        }
+                    )
+        else:
+            for current_root, dirs, files in os.walk(root):
+                dirs[:] = [name for name in dirs if name not in ignored and not name.endswith(".egg-info")]
+                for name in files:
+                    path = Path(current_root) / name
+                    try:
+                        rel = path.resolve().relative_to(root).as_posix()
+                        stat = path.stat()
+                    except OSError:
+                        continue
+                    haystack = rel.lower()
+                    match_count = sum(token in haystack for token in tokens)
+                    if tokens and not match_count:
+                        continue
+                    score = 34.0 if query_text and query_text in haystack else float(match_count * 6)
+                    score += max(0.0, 8.0 - ((time.time() - stat.st_mtime) / 86400.0))
+                    add({"path": rel, "name": name, "size": stat.st_size, "mtime": stat.st_mtime, "kind": "file", "score": score, "source": "workspace-scan", "reason": "recent or matching file"})
+
+        candidates.sort(key=lambda item: (-float(item.get("score", 0.0)), str(item.get("path", "")).lower(), str(item.get("name", "")).lower()))
         return candidates[:max(1, int(limit or 500))]
 
     def _format_attachment_candidate(self, item: Dict[str, Any]) -> str:
@@ -2840,34 +2969,17 @@ class ReverieInterface:
         outbound_message: Any = message
         transcript_message = str(message or "").strip()
         agent_display_text = transcript_message
-        skill_context_text = ""
-
         skill_mentions = self.skills_manager.resolve_explicit_mentions(clean_message, force_refresh=True)
         resolved_skill_records = list(skill_mentions.get("records", []) or [])
         missing_skill_names = list(skill_mentions.get("missing", []) or [])
-        if not resolved_skill_records:
-            resolved_skill_records = list(
-                self.skills_manager.resolve_automatic_matches(clean_message, force_refresh=True, top_n=2)
-            )
-            if resolved_skill_records:
-                auto_names = ", ".join(record.name for record in resolved_skill_records[:4])
-                if len(resolved_skill_records) > 4:
-                    auto_names = f"{auto_names}, +{len(resolved_skill_records) - 4} more"
-                self._show_activity_event(
-                    "Skills",
-                    "Auto-selected matching skills",
-                    status="info",
-                    detail=auto_names,
-                )
         if resolved_skill_records:
-            skill_context_text = self.skills_manager.build_explicit_skill_injection(resolved_skill_records)
             resolved_names = ", ".join(record.name for record in resolved_skill_records[:4])
             if len(resolved_skill_records) > 4:
                 resolved_names = f"{resolved_names}, +{len(resolved_skill_records) - 4} more"
             self._show_activity_event(
                 "Skills",
-                "Injected skill instructions",
-                status="success",
+                "Explicit skills requested",
+                status="info",
                 detail=resolved_names,
             )
             current_session = self.session_manager.get_current_session()
@@ -2917,12 +3029,6 @@ class ReverieInterface:
             )
         else:
             outbound_message = clean_message or transcript_message
-
-        if skill_context_text:
-            if isinstance(outbound_message, list):
-                outbound_message = [{"type": "text", "text": skill_context_text}] + list(outbound_message)
-            else:
-                outbound_message = f"{skill_context_text}\n\n{str(outbound_message or '').strip()}".strip()
 
         # The interactive shell already shows the typed prompt in-place, so
         # avoid echoing a second transcript block for every user turn.
@@ -3812,6 +3918,11 @@ class ReverieInterface:
         stream: Optional[bool] = None,
         no_index: bool = False,
         fresh_session: bool = True,
+        event_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        approval_callback: Optional[Callable[[Any, Dict[str, Any], str], str]] = None,
+        source_override: Optional[str] = None,
+        model_override: Optional[str] = None,
+        reasoning_override: Optional[str] = None,
     ) -> PromptRunResult:
         """Run one prompt non-interactively and return a structured result."""
         prompt_text = str(message or "").strip()
@@ -3831,6 +3942,15 @@ class ReverieInterface:
             )
 
         base_config = self._clone_config(self.config_manager.load())
+        if source_override or model_override or reasoning_override:
+            from ..desktop_catalog import apply_model_selection
+
+            apply_model_selection(
+                base_config,
+                source_override or getattr(base_config, "active_model_source", "standard"),
+                model_override or "",
+                reasoning_override,
+            )
         if mode_override:
             base_config.mode = normalize_mode(mode_override)
         if stream is not None:
@@ -3841,6 +3961,24 @@ class ReverieInterface:
         previous_override = self._runtime_config_override
         self._runtime_config_override = self._clone_config(base_config)
         ui_events: List[Dict[str, Any]] = []
+
+        def _emit(event: Dict[str, Any]) -> None:
+            if event_callback is None:
+                return
+            try:
+                event_callback(_json_safe_value(dict(event)))
+            except Exception:
+                report_suppressed_exception("emit prompt-mode desktop event")
+
+        _emit(
+            {
+                "type": "run.started",
+                "prompt": prompt_text,
+                "mode": normalize_mode(base_config.mode),
+                "project_root": str(self.project_root),
+                "started_at": started_at.isoformat(),
+            }
+        )
 
         try:
             self._init_agent(config_override=base_config, persist_config_changes=False)
@@ -3873,11 +4011,14 @@ class ReverieInterface:
                 if not isinstance(event, dict):
                     return
                 ui_events.append(dict(event))
+                _emit({"type": "ui.event", "event": dict(event)})
 
             self.agent.tool_executor.update_context('ui_event_handler', _capture_ui_event)
             self.agent.tool_executor.update_context('get_status_live', lambda: None)
             self.agent.tool_executor.update_context('pause_stream_input_capture', lambda: None)
             self.agent.tool_executor.update_context('resume_stream_input_capture', lambda: None)
+            if approval_callback is not None:
+                self.agent.tool_executor.update_context('tool_approval_handler', approval_callback)
 
             if fresh_session:
                 session = self.session_manager.create_session(
@@ -3928,11 +4069,14 @@ class ReverieInterface:
                     decoded_event = decode_stream_event(chunk) if chunk.startswith(STREAM_EVENT_MARKER) else None
                     if decoded_event is not None:
                         ui_events.append(decoded_event)
+                        _emit({"type": "ui.event", "event": decoded_event})
                         continue
                     if in_thinking_mode:
                         thinking_chunks.append(chunk)
+                        _emit({"type": "reasoning.delta", "text": chunk})
                     else:
                         output_chunks.append(chunk)
+                        _emit({"type": "assistant.delta", "text": chunk})
 
                 turn_thinking = "".join(thinking_chunks).strip()
                 streamed_output = "".join(output_chunks).strip()
@@ -3990,6 +4134,13 @@ class ReverieInterface:
                     status="info",
                     detail=f"Auto-followup #{auto_followup_count} was injected to finish the one-shot run.",
                 )
+                _emit(
+                    {
+                        "type": "run.auto_followup",
+                        "count": auto_followup_count,
+                        "message": "Continuing automatically through an approval checkpoint",
+                    }
+                )
                 active_prompt = followup_message
 
             thinking_text = "\n\n".join(part for part in thinking_parts if part).strip()
@@ -4008,6 +4159,7 @@ class ReverieInterface:
 
             try:
                 self.session_manager.update_messages(self.agent.get_history())
+                self.session_manager.rename_current_session_from_prompt(prompt_text)
                 current_session = self.session_manager.get_current_session()
                 if current_session and self.memory_indexer:
                     self.memory_indexer.refresh_session(current_session.id)
@@ -4089,6 +4241,12 @@ class ReverieInterface:
         base_rules = (self.rules_manager.get_rules_text() or "").strip()
         normalized_mode = normalize_mode(getattr(config, "mode", "reverie"))
         self.skills_manager.set_active_mode(normalized_mode)
+        active_model = getattr(config, "active_model", None)
+        context_window = getattr(active_model, "max_context_tokens", None) or getattr(config, "max_context_tokens", None)
+        try:
+            skill_metadata_budget = max(512, int(context_window) * 2 // 100 * 4)
+        except (TypeError, ValueError):
+            skill_metadata_budget = 8_000
 
         memory_title = "Computer Controller History" if normalized_mode == "computer-controller" else "Workspace Global Memory"
         memory_label = "computer-control history archive" if normalized_mode == "computer-controller" else "workspace global memory"
@@ -4153,7 +4311,7 @@ class ReverieInterface:
                 harness_guidance,
                 self.mcp_runtime.describe_for_prompt(),
                 self.runtime_plugin_manager.describe_for_prompt(normalized_mode) if include_discovery_status else "",
-                self.skills_manager.describe_for_prompt(force_refresh=False) if include_discovery_status else "",
+                self.skills_manager.describe_for_prompt(force_refresh=False, max_chars=skill_metadata_budget) if include_discovery_status else "",
                 atlas_block,
                 memory_block,
             ]

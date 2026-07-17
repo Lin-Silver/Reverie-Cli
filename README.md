@@ -209,8 +209,10 @@ The core/desktop Release is separate from the optional plugin Release:
 
 - Windows x64: `reverie.exe`, the portable GUI executable, and the NSIS installer.
 - Linux x64: `reverie`, AppImage, and Debian package. The Debian installer provides both `reverie` and `reverieui` commands.
-- macOS: native Apple Silicon and Intel DMGs. Command-line tools remain an explicit user-installed symlink from the app bundle.
-- Official compiled plugins: the dedicated `plugins-latest` Release and `plugins-manifest.json`; plugin-only changes do not rebuild the desktop application.
+- macOS: explicitly named Apple Silicon (M-series) and Intel DMGs plus matching native CLI cores. Command-line tools remain an explicit user-installed symlink from the app bundle.
+- Official compiled plugins: the dedicated `plugins-latest` Release and `plugins-manifest.json`; plugin paths additionally trigger their isolated plugin build while the rolling desktop prerelease is refreshed by every `main` push.
+
+Every push to `main` rebuilds the rolling `latest` tag as **Reverie CLI Latest (Prerelease)**. Version tags such as `v2.5.0` remain stable Releases. Release notes and upload labels group downloads as Windows, Linux, macOS Apple Silicon, then macOS Intel. `reverie-kernels.json` is the single optional verification file: GitHub already displays a digest for every asset, while this consolidated record additionally maps each kernel to its protocol, interface version, platform, architecture, commit, size, and SHA-256.
 
 `reverie` starts the TUI/core. `reverieui` starts the GUI in the current directory. Packaged GUIs always contain a compiled fallback kernel. A sibling kernel is selected only when its SHA-256 appears in the build-time allowlist and its `--kernel-info` protocol handshake succeeds.
 

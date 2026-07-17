@@ -4,11 +4,6 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
-    paths:
-      - ".github/workflows/build-core-release.yml"
-      - "ReverieCli-py/**"
-      - "ReverieCli-ui/**"
-      - "comfy/**"
   pull_request:
     branches: [main]
     paths:
@@ -178,9 +173,16 @@ jobs:
             cp "ReverieCli-ui/release/Reverie-$version-linux-x64.deb" release-assets/
             python ReverieCli-py/scripts/write_kernel_manifest.py --executable dist/reverie --output release-assets/reverie-kernel-linux-x64.json --asset-name reverie
           else
-            cp dist/reverie "release-assets/reverie-macos-${{ matrix.arch }}"
-            cp "ReverieCli-ui/release/Reverie-$version-mac-${{ matrix.arch }}.dmg" release-assets/
-            python ReverieCli-py/scripts/write_kernel_manifest.py --executable dist/reverie --output "release-assets/reverie-kernel-macos-${{ matrix.arch }}.json" --asset-name "reverie-macos-${{ matrix.arch }}"
+            if [[ "${{ matrix.arch }}" == "arm64" ]]; then
+              mac_variant="Apple-Silicon"
+            else
+              mac_variant="Intel"
+            fi
+            core_asset="Reverie-CLI-macOS-$mac_variant"
+            dmg_asset="Reverie-$version-macOS-$mac_variant.dmg"
+            cp dist/reverie "release-assets/$core_asset"
+            cp "ReverieCli-ui/release/Reverie-$version-mac-${{ matrix.arch }}.dmg" "release-assets/$dmg_asset"
+            python ReverieCli-py/scripts/write_kernel_manifest.py --executable dist/reverie --output "release-assets/reverie-kernel-macos-${{ matrix.arch }}.json" --asset-name "$core_asset"
           fi
 
       - name: Verify staged names and contents
@@ -219,6 +221,15 @@ jobs:
           path: release-assets
           merge-multiple: true
 
+      - name: Consolidate kernel verification metadata
+        run: |
+          python ReverieCli-py/scripts/merge_kernel_manifests.py \
+            release-assets/reverie-kernel-windows-x64.json \
+            release-assets/reverie-kernel-linux-x64.json \
+            release-assets/reverie-kernel-macos-arm64.json \
+            release-assets/reverie-kernel-macos-x64.json \
+            --output release-assets/reverie-kernels.json
+
       - name: Verify complete release set
         run: |
           version=$(node -p "require('./ReverieCli-ui/package.json').version")
@@ -229,11 +240,20 @@ jobs:
             reverie \
             "Reverie-$version-linux-x64.AppImage" \
             "Reverie-$version-linux-x64.deb" \
-            "Reverie-$version-mac-arm64.dmg" \
-            "Reverie-$version-mac-x64.dmg"; do
+            "Reverie-CLI-macOS-Apple-Silicon" \
+            "Reverie-$version-macOS-Apple-Silicon.dmg" \
+            "Reverie-CLI-macOS-Intel" \
+            "Reverie-$version-macOS-Intel.dmg" \
+            reverie-kernels.json; do
             test -s "release-assets/$asset" || { echo "Missing $asset"; exit 1; }
           done
-          test "$(find release-assets -maxdepth 1 -type f -name '*.json' | wc -l)" -eq 4
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          payload = json.loads(Path("release-assets/reverie-kernels.json").read_text(encoding="utf-8"))
+          if payload.get("schema") != "reverie.kernels.release.v1" or len(payload.get("assets", [])) != 4:
+              raise SystemExit("Invalid consolidated kernel manifest")
+          PY
 
       - name: Publish verified assets
         env:
@@ -245,21 +265,68 @@ jobs:
             release_tag="$GITHUB_REF_NAME"
             test "$release_tag" = "v$version"
             release_title="Reverie $release_tag"
+            release_kind="stable"
           else
             release_tag=latest
-            release_title="Reverie CLI Latest"
+            release_title="Reverie CLI Latest (Prerelease)"
+            release_kind="prerelease"
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git tag -f latest "$GITHUB_SHA"
             git push origin refs/tags/latest --force
           fi
-          notes="Verified Windows x64, Linux x64, macOS ARM64, and macOS Intel build from $GITHUB_SHA. reverie.exe is the primary Windows CLI executable. The core contains the embedded Chromium browser-control runtime and Open Computer Use desktop controller. Windows includes portable GUI, installer, and core; Linux includes AppImage, deb, and core; macOS includes native DMGs. JSON assets contain kernel protocol, size, and SHA-256 metadata."
+          base_url="https://github.com/$GITHUB_REPOSITORY/releases/download/$release_tag"
+          notes=$(cat <<EOF
+          Verified Windows x64, Linux x64, macOS Apple Silicon (M-series), and macOS Intel build from \`$GITHUB_SHA\`. Windows \`reverie.exe\` is the primary Windows CLI executable. Desktop packages contain a compiled fallback kernel, the embedded Chromium browser-control runtime, and Open Computer Use desktop controller.
+
+          ## Windows x64
+          - [Installer EXE]($base_url/Reverie-Setup-$version-x64.exe)
+          - [Portable GUI EXE]($base_url/Reverie-Portable-$version-x64.exe)
+          - [CLI core EXE]($base_url/reverie.exe)
+
+          ## Linux x64
+          - [AppImage]($base_url/Reverie-$version-linux-x64.AppImage)
+          - [Debian package]($base_url/Reverie-$version-linux-x64.deb)
+          - [CLI core]($base_url/reverie)
+
+          ## macOS Apple Silicon (M-series)
+          - [DMG]($base_url/Reverie-$version-macOS-Apple-Silicon.dmg)
+          - [CLI core]($base_url/Reverie-CLI-macOS-Apple-Silicon)
+
+          ## macOS Intel
+          - [DMG]($base_url/Reverie-$version-macOS-Intel.dmg)
+          - [CLI core]($base_url/Reverie-CLI-macOS-Intel)
+
+          ## Verification metadata
+          - [Consolidated kernel manifest]($base_url/reverie-kernels.json) — optional protocol, platform, size, commit, and SHA-256 metadata. GitHub also displays its own digest for every asset.
+          EOF
+          )
           if gh release view "$release_tag" >/dev/null 2>&1; then
-            gh release edit "$release_tag" --title "$release_title" --notes "$notes" --latest
+            gh release edit "$release_tag" --title "$release_title" --notes "$notes"
           else
-            gh release create "$release_tag" --title "$release_title" --notes "$notes" --latest
+            if [[ "$release_kind" == "prerelease" ]]; then
+              gh release create "$release_tag" --title "$release_title" --notes "$notes" --prerelease --latest=false
+            else
+              gh release create "$release_tag" --title "$release_title" --notes "$notes" --latest
+            fi
+          fi
+          release_id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$release_tag" --jq .id)
+          if [[ "$release_kind" == "prerelease" ]]; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" -F prerelease=true -f make_latest=false >/dev/null
+          else
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" -F prerelease=false -f make_latest=true >/dev/null
           fi
           for old_asset in $(gh release view "$release_tag" --json assets --jq '.assets[].name'); do
             gh release delete-asset "$release_tag" "$old_asset" --yes
           done
-          gh release upload "$release_tag" release-assets/* --clobber
+          gh release upload "$release_tag" "release-assets/Reverie-Setup-$version-x64.exe#Windows · Reverie-Setup-$version-x64.exe"
+          gh release upload "$release_tag" "release-assets/Reverie-Portable-$version-x64.exe#Windows · Reverie-Portable-$version-x64.exe"
+          gh release upload "$release_tag" "release-assets/reverie.exe#Windows · reverie.exe"
+          gh release upload "$release_tag" "release-assets/Reverie-$version-linux-x64.AppImage#Linux · Reverie-$version-linux-x64.AppImage"
+          gh release upload "$release_tag" "release-assets/Reverie-$version-linux-x64.deb#Linux · Reverie-$version-linux-x64.deb"
+          gh release upload "$release_tag" "release-assets/reverie#Linux · reverie"
+          gh release upload "$release_tag" "release-assets/Reverie-$version-macOS-Apple-Silicon.dmg#macOS Apple Silicon · Reverie-$version-macOS-Apple-Silicon.dmg"
+          gh release upload "$release_tag" "release-assets/Reverie-CLI-macOS-Apple-Silicon#macOS Apple Silicon · Reverie-CLI-macOS-Apple-Silicon"
+          gh release upload "$release_tag" "release-assets/Reverie-$version-macOS-Intel.dmg#macOS Intel · Reverie-$version-macOS-Intel.dmg"
+          gh release upload "$release_tag" "release-assets/Reverie-CLI-macOS-Intel#macOS Intel · Reverie-CLI-macOS-Intel"
+          gh release upload "$release_tag" "release-assets/reverie-kernels.json#Verification · reverie-kernels.json"

@@ -426,9 +426,12 @@ kbd { display: inline-flex; min-width: 18px; height: 18px; align-items: center; 
 
 /* Refined desktop visual system */
 button, input, textarea, select { transition: color .14s ease, background-color .14s ease, border-color .14s ease, box-shadow .14s ease, transform .14s ease; }
-.app-shell { grid-template-columns: 268px minmax(0, 1fr); background: var(--bg); }
+.app-shell { grid-template-columns: 268px minmax(0, 1fr); background: var(--bg); transition: grid-template-columns .18s ease; }
 .app-shell.with-inspector { grid-template-columns: 268px minmax(0, 1fr) 316px; }
-.sidebar { background: var(--sidebar-bg); border-color: var(--border-soft); }
+.app-shell.sidebar-collapsed { grid-template-columns: 0 minmax(0, 1fr); }
+.app-shell.sidebar-collapsed.with-inspector { grid-template-columns: 0 minmax(0, 1fr) 316px; }
+.sidebar { background: var(--sidebar-bg); border-color: var(--border-soft); transition: opacity .16s ease, transform .18s ease, visibility .18s ease; }
+.sidebar-collapsed > .sidebar { opacity: 0; transform: translateX(-14px); visibility: hidden; pointer-events: none; border-right-color: transparent; }
 .sidebar-drag { height: 54px; padding: 0 17px; }
 .brand { gap: 10px; font-size: 14px; font-weight: 680; letter-spacing: -.02em; }
 .brand-mark { width: 29px; height: 29px; border-radius: 9px; color: var(--accent); background: var(--accent-bg); border-color: var(--accent-soft); box-shadow: inset 0 1px rgba(255,255,255,.08), 0 5px 18px rgba(102,74,163,.16); }
@@ -1218,6 +1221,8 @@ input[type="range"] { width: 100%; accent-color: var(--accent-2); }
 @media (max-width: 1250px) {
   .app-shell.with-inspector { grid-template-columns: 230px minmax(0,1fr) 265px; }
   .app-shell { grid-template-columns: 230px minmax(0,1fr); }
+  .app-shell.sidebar-collapsed { grid-template-columns: 0 minmax(0,1fr); }
+  .app-shell.sidebar-collapsed.with-inspector { grid-template-columns: 0 minmax(0,1fr) 265px; }
   .message-column { width: calc(100% - 38px); }
   .topbar { padding-left: 8px; }
   .model-trigger small { display: none; }
@@ -1234,6 +1239,8 @@ input[type="range"] { width: 100%; accent-color: var(--accent-2); }
   .app-shell.with-inspector { grid-template-columns: 220px minmax(0,1fr); }
   .inspector { display: none; }
   .app-shell { grid-template-columns: 220px minmax(0,1fr); }
+  .app-shell.sidebar-collapsed,
+  .app-shell.sidebar-collapsed.with-inspector { grid-template-columns: 0 minmax(0,1fr); }
   .settings-page { grid-template-columns: 165px minmax(0,1fr); }
   .tool-overview { grid-template-columns: 1fr; }
   .range-grid { grid-template-columns: 1fr; }

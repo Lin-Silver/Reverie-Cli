@@ -105,5 +105,10 @@ def test_ci_covers_cross_platform_tests_and_packaged_bridge_contract() -> None:
     assert "macos-15-intel" in build_workflow
     assert "Reverie-$version-linux-x64.AppImage" in build_workflow
     assert "Reverie-$version-linux-x64.deb" in build_workflow
+    assert "Reverie-$version-macOS-Apple-Silicon.dmg" in build_workflow
+    assert "Reverie-$version-macOS-Intel.dmg" in build_workflow
+    assert "merge_kernel_manifests.py" in build_workflow
+    assert "reverie-kernels.json" in build_workflow
+    assert "Reverie CLI Latest (Prerelease)" in build_workflow
     assert "publish_release:" in build_workflow
     assert "github.event_name == 'workflow_dispatch' && inputs.publish_release" in build_workflow

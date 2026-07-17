@@ -30,6 +30,8 @@ npm run dist:mac
 
 For complete local builds, use `build.bat` on Windows or `build.sh` on Linux. They build and sanity-check the core first, install locked desktop dependencies, build the GUI packages, and verify the expected filenames.
 
+The rolling `latest` GitHub Release is rebuilt from every `main` push and is marked as a prerelease. Its downloads are grouped Windows → Linux → macOS Apple Silicon → macOS Intel, and its four platform kernel records are consolidated into `reverie-kernels.json`.
+
 Every package contains a fast-starting PyInstaller directory kernel. The build also records the SHA-256 of the separately released one-file core inside the ASAR-integrity-protected application package. A portable sibling `reverie.exe`/`reverie` is used only when that protected hash is trusted and its `reverie.kernel.v1` handshake matches; otherwise the desktop logs the reason and uses its internal kernel. The terminal contract is:
 
 - `reverie`: TUI/core in the current directory.
@@ -49,6 +51,8 @@ Development state and Chromium caches stay under `ReverieCli-ui/.runtime`. A pac
 The final repository build therefore shares `../dist/.reverie` with the standalone `../dist/reverie.exe`. The active root can be inspected or changed under **Settings → General → CLI data and history**; Reverie always creates the actual configuration folder as `.reverie` below that root.
 
 Conversation history is workspace-scoped. Recent workspaces are shown as project groups, with the active project's sessions nested below it. The desktop UI restores the last active session, keeps unsent drafts per session, and exposes rename, archive, unarchive, fork, rewind, delete, and full-history search actions. Rename and delete are backed directly by the CLI session manager; archive state is a non-destructive desktop preference.
+
+The first top-toolbar button collapses or restores the left project/session sidebar. The layout choice is kept locally across application restarts.
 
 Every project row also has a management menu. **Delete project and records** removes the project from the recent list and deletes its Reverie sessions, transcripts, memory, checkpoints, Context Engine cache, security/audit data, and imported attachments. It never deletes ordinary project files, workspace configuration, or project rules. Deleting the active project first selects a valid fallback workspace.
 

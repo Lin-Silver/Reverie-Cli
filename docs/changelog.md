@@ -5,9 +5,11 @@ Released 2026-07-17.
 * Added a cross-platform kernel compatibility contract (`--kernel-info`) and a desktop resolver that accepts a sibling core only when its SHA-256 is present in the ASAR-integrity-protected build allowlist and its platform, architecture, version, and bridge protocol handshake match. All failures use the compiled internal kernel.
 * Defined stable launch behavior: `reverie` runs the TUI/core, `reverieui` opens the GUI in the current directory, and the portable GUI supports an explicit `--tui` route without guessing whether a launch came from a terminal or double-click.
 * Added `ReverieCli-ui/build.bat` and `build.sh`, Windows installer PATH integration, Linux command symlinks, native Windows x64 installer/portable/core assets, Linux x64 AppImage/deb/core assets, and separate Apple Silicon and Intel DMGs.
-* Split publishing into a core/desktop rolling Release and a dedicated `plugins-latest` Release. Plugin paths trigger isolated builds and `-RC` handshake verification without rebuilding the full desktop stack.
-* Added release aggregation gates for required filenames, non-empty files, protocol metadata, sizes, and SHA-256 hashes. Release uploads use the real filenames without custom labels, preserving extensions on GitHub.
+* Split publishing into a core/desktop rolling Release and a dedicated `plugins-latest` Release. Plugin paths trigger their isolated builds and `-RC` handshake verification in addition to the rolling prerelease built from every `main` push.
+* Added release aggregation gates for required filenames, non-empty files, protocol metadata, sizes, and SHA-256 hashes. Categorized upload labels retain every real filename and extension.
 * Replaced the cached center sparkle with the versioned `reverie-mark-2.5.png` dream-portal emblem so packaged renderers cannot silently reuse the previous asset.
+* Changed the rolling `latest` Release into an automatically rebuilt prerelease for every `main` push, consolidated four platform JSON records into `reverie-kernels.json`, labeled macOS downloads as Apple Silicon or Intel, and published categorized Windows → Linux → macOS download sections.
+* Added a persistent top-toolbar control that collapses the left project/session sidebar and expands the main workspace into the released space.
 
 ## Reverie CLI v2.4.0 - Desktop, Context Engine, and Release Upgrade
 

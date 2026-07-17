@@ -1206,15 +1206,28 @@ def test_github_action_builds_desktop_and_publishes_version_tags() -> None:
 
     assert "actions/upload-artifact@v4" in workflow
     assert 'tags: ["v*"]' in workflow
-    assert 'gh release upload "$release_tag" release-assets/* --clobber' in workflow
+    push_block = workflow.split("  push:", 1)[1].split("  pull_request:", 1)[0]
+    assert "paths:" not in push_block
+    assert "Reverie CLI Latest (Prerelease)" in workflow
+    assert "--prerelease --latest=false" in workflow
     assert "dist/reverie.exe" in workflow
     assert "Reverie-Setup-$version-x64.exe" in workflow
     assert "Reverie-Portable-$version-x64.exe" in workflow
     assert "Reverie-$version-linux-x64.AppImage" in workflow
     assert "Reverie-$version-linux-x64.deb" in workflow
-    assert "Reverie-$version-mac-arm64.dmg" in workflow
-    assert "Reverie-$version-mac-x64.dmg" in workflow
+    assert "Reverie-$version-macOS-Apple-Silicon.dmg" in workflow
+    assert "Reverie-$version-macOS-Intel.dmg" in workflow
+    assert "Reverie-CLI-macOS-Apple-Silicon" in workflow
+    assert "Reverie-CLI-macOS-Intel" in workflow
     assert "write_kernel_manifest.py" in workflow
+    assert "merge_kernel_manifests.py" in workflow
+    assert "reverie-kernels.json" in workflow
+    windows_upload = workflow.index("#Windows · Reverie-Setup-")
+    linux_upload = workflow.index("#Linux · Reverie-")
+    apple_upload = workflow.index("#macOS Apple Silicon · Reverie-")
+    intel_upload = workflow.index("#macOS Intel · Reverie-")
+    manifest_upload = workflow.index("#Verification · reverie-kernels.json")
+    assert windows_upload < linux_upload < apple_upload < intel_upload < manifest_upload
     assert "process.env.REVERIE_BUNDLE_RES_DIR" in desktop_kernel_builder
     assert "build/generated/reverie-trusted-kernels.json" in desktop_package
     assert '"artifactName": "Reverie-${version}-linux-x64.AppImage"' in desktop_package
@@ -1227,11 +1240,12 @@ def test_github_action_builds_desktop_and_publishes_version_tags() -> None:
     assert "plugins-manifest.json" in plugin_workflow
     assert "embedded Chromium browser-control runtime" in workflow
     assert "Open Computer Use desktop controller" in workflow
-    assert "reverie.exe is the primary Windows CLI executable" in workflow
+    assert "is the primary Windows CLI executable" in workflow
     assert "$uploadSpec" not in workflow
     assert "Label =" not in workflow
     assert "reverie-blender.exe" not in workflow
     assert "reverie-blender.exe" in plugin_workflow
+    assert "gh release edit latest --latest" not in plugin_workflow
     assert "reverie-python.exe" not in workflow
     assert "reverie-rust-preview.exe" not in workflow
 

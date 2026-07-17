@@ -33,6 +33,8 @@ import {
   MoreHorizontal,
   Moon,
   Palette,
+  PanelLeftClose,
+  PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
   Paperclip,
@@ -108,6 +110,7 @@ import {
   type MessageWidthPreference,
   type UiPreferences,
 } from "./preferences";
+import { normalizeSidebarCollapsed, SIDEBAR_COLLAPSED_STORAGE_KEY } from "./layout";
 
 type CoreResponse = Record<string, unknown>;
 type Toast = { id: number; kind: "success" | "error" | "info"; message: string };
@@ -667,6 +670,8 @@ function ModelPicker({
 
 function Topbar({
   state,
+  sidebarCollapsed,
+  toggleSidebar,
   openModelPicker,
   selectReasoning,
   setMode,
@@ -677,6 +682,8 @@ function Topbar({
   setTheme,
 }: {
   state: DesktopState;
+  sidebarCollapsed: boolean;
+  toggleSidebar: () => void;
   openModelPicker: () => void;
   selectReasoning: (value: string) => void;
   setMode: (mode: string) => void;
@@ -709,6 +716,9 @@ function Topbar({
   return (
     <header className="topbar">
       <div className="topbar-left">
+        <IconButton label={sidebarCollapsed ? "展开左侧栏" : "收起左侧栏"} onClick={toggleSidebar}>
+          {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+        </IconButton>
         <button type="button" className="model-trigger" onClick={openModelPicker}>
           <span>{state.models.active_model?.display_name || "选择模型"}</span>
           <small>{activeSource?.display_name || state.models.active_source}</small>
@@ -1944,6 +1954,9 @@ export default function App() {
   const [prompt, setPrompt] = useState("");
   const [running, setRunning] = useState(false);
   const [liveTurn, setLiveTurn] = useState<LiveTurn | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
+    normalizeSidebarCollapsed(localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY)),
+  );
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
@@ -1975,6 +1988,10 @@ export default function App() {
   useEffect(() => {
     applyUiPreferences(uiPreferences);
   }, [uiPreferences]);
+
+  useEffect(() => {
+    localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(sidebarCollapsed));
+  }, [sidebarCollapsed]);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
@@ -2670,10 +2687,10 @@ export default function App() {
   if (!state) return <LoadingScreen />;
 
   return (
-    <div className={`app-shell ${inspectorOpen ? "with-inspector" : ""}`}>
+    <div className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${inspectorOpen ? "with-inspector" : ""}`}>
       <Sidebar state={state} view={view} setView={setView} activeSessionId={activeSessionId} openSession={(id) => void openSession(id)} newSession={() => void createSession()} sessionBusy={sessionBusy} selectWorkspace={() => void selectWorkspace()} switchWorkspace={(projectRoot) => void switchWorkspace(projectRoot)} openSearch={() => setSessionSearchOpen(true)} preferences={uiPreferences} renameSession={(target) => setRenameSessionTarget({ id: target.id, name: target.name })} toggleArchive={toggleSessionArchive} deleteSession={deleteSession} deleteArchivedSessions={deleteArchivedSessions} deleteProject={deleteProject} />
       <main className="main-area">
-        <Topbar state={state} openModelPicker={() => setModelPickerOpen(true)} selectReasoning={(value) => void selectReasoning(value)} setMode={(mode) => void updateSetting("mode", mode)} inspectorOpen={inspectorOpen} toggleInspector={() => setInspectorOpen((value) => !value)} openCommands={() => setCommandOpen(true)} theme={theme} setTheme={changeTheme} />
+        <Topbar state={state} sidebarCollapsed={sidebarCollapsed} toggleSidebar={() => setSidebarCollapsed((value) => !value)} openModelPicker={() => setModelPickerOpen(true)} selectReasoning={(value) => void selectReasoning(value)} setMode={(mode) => void updateSetting("mode", mode)} inspectorOpen={inspectorOpen} toggleInspector={() => setInspectorOpen((value) => !value)} openCommands={() => setCommandOpen(true)} theme={theme} setTheme={changeTheme} />
         <div className="content-area">{page}</div>
       </main>
       {inspectorOpen && <Inspector state={state} liveTurn={liveTurn} indexWorkspace={() => void indexWorkspace()} />}

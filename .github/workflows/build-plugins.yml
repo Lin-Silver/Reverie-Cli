@@ -108,7 +108,7 @@ jobs:
           if ($LASTEXITCODE -eq 0) {
             gh release edit plugins-latest --title "Reverie Plugins Latest" --notes $notes
           } else {
-            gh release create plugins-latest --title "Reverie Plugins Latest" --notes $notes
+            gh release create plugins-latest --title "Reverie Plugins Latest" --notes $notes --latest=false
           }
           $existing = gh release view plugins-latest --json assets --jq '.assets[].name'
           foreach ($asset in $existing) {
@@ -117,5 +117,3 @@ jobs:
           foreach ($asset in Get-ChildItem -LiteralPath release-assets -File) {
             gh release upload plugins-latest $asset.FullName --clobber
           }
-          gh release view latest *> $null
-          if ($LASTEXITCODE -eq 0) { gh release edit latest --latest }

@@ -514,6 +514,44 @@ class ReverieSdkBridge:
                 "session": _json_safe(session.to_dict()),
                 "sessions": self.sessions_payload(),
             }
+        if action == "deleteSessions":
+            if not bool(payload.get("confirmed", False)):
+                raise ValueError("Deleting sessions requires confirmed=true.")
+            raw_ids = payload.get("sessionIds")
+            if not isinstance(raw_ids, list):
+                raise ValueError("sessionIds must be a list.")
+            requested_ids = list(dict.fromkeys(
+                str(session_id or "").strip()
+                for session_id in raw_ids
+                if str(session_id or "").strip()
+            ))
+            if not requested_ids:
+                raise ValueError("At least one session id is required.")
+
+            interface = self.ensure_interface()
+            manager = interface.session_manager
+            previous_session = manager.get_current_session() or manager.restore_last_session()
+            deleted_ids = []
+            for session_id in requested_ids:
+                session = manager.load_session(session_id)
+                if session is not None and manager.delete_session(session.id):
+                    deleted_ids.append(session.id)
+
+            deleted_id_set = set(deleted_ids)
+            if previous_session is not None and previous_session.id not in deleted_id_set:
+                session = manager.load_session(previous_session.id)
+            else:
+                remaining = manager.list_sessions()
+                session = manager.load_session(remaining[0].id) if remaining else None
+            if interface.agent is not None:
+                interface.agent.set_history(session.messages if session is not None else [])
+            return {
+                "id": request_id,
+                "type": "sessions.deleted",
+                "deleted_session_ids": deleted_ids,
+                "session": _json_safe(session.to_dict()) if session is not None else None,
+                "sessions": self.sessions_payload(),
+            }
         if action in {"renameSession", "deleteSession", "forkSession", "rewindSession"}:
             interface = self.ensure_interface()
             manager = interface.session_manager

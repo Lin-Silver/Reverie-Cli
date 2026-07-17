@@ -343,6 +343,7 @@ function Sidebar({
   renameSession,
   toggleArchive,
   deleteSession,
+  deleteArchivedSessions,
   deleteProject,
 }: {
   state: DesktopState;
@@ -359,12 +360,14 @@ function Sidebar({
   renameSession: (session: SessionInfo) => void;
   toggleArchive: (session: SessionInfo, archived: boolean) => void;
   deleteSession: (session: SessionInfo) => void;
+  deleteArchivedSessions: (sessions: SessionInfo[]) => void;
   deleteProject: (project: { root: string; name: string; active: boolean }) => void;
 }) {
   const [sessionFilter, setSessionFilter] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
   const [activeProjectOpen, setActiveProjectOpen] = useState(true);
   const [archivedOpen, setArchivedOpen] = useState(false);
+  const [archiveMenuOpen, setArchiveMenuOpen] = useState(false);
   const [sessionMenuId, setSessionMenuId] = useState("");
   const [projectMenuRoot, setProjectMenuRoot] = useState("");
   const archivedIds = useMemo(
@@ -376,6 +379,7 @@ function Sidebar({
   );
   const activeSessions = filteredSessions.filter((session) => !archivedIds.has(session.id));
   const archivedSessions = filteredSessions.filter((session) => archivedIds.has(session.id));
+  const allArchivedSessions = state.sessions.items.filter((session) => archivedIds.has(session.id));
   const recentProjects = preferences.recentProjects.length
     ? preferences.recentProjects
     : [state.workspace.project_root];
@@ -384,6 +388,7 @@ function Sidebar({
     const closeMenu = () => {
       setSessionMenuId("");
       setProjectMenuRoot("");
+      setArchiveMenuOpen(false);
     };
     const keyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") closeMenu();
@@ -530,12 +535,34 @@ function Sidebar({
                   <div className="session-list">
                     {activeSessions.length === 0 && <div className="sidebar-empty">当前项目还没有活跃会话</div>}
                     {activeSessions.map((session) => renderSession(session, false))}
-                    {archivedSessions.length > 0 && (
+                    {allArchivedSessions.length > 0 && (
                       <div className="archived-sessions">
-                        <button type="button" className="archived-heading" onClick={() => setArchivedOpen((value) => !value)}>
-                          {archivedOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                          <Archive size={13} /><span>已归档</span><small>{archivedSessions.length}</small>
-                        </button>
+                        <div className="archived-heading-shell">
+                          <button type="button" className="archived-heading" onClick={() => setArchivedOpen((value) => !value)}>
+                            {archivedOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                            <Archive size={13} /><span>已归档</span><small>{allArchivedSessions.length}</small>
+                          </button>
+                          <button
+                            type="button"
+                            className="archived-more"
+                            aria-label="管理归档会话"
+                            aria-expanded={archiveMenuOpen}
+                            onPointerDown={(event) => event.stopPropagation()}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setArchiveMenuOpen((current) => !current);
+                            }}
+                          >
+                            <MoreHorizontal size={14} />
+                          </button>
+                          {archiveMenuOpen && (
+                            <div className="project-menu archived-menu" onPointerDown={(event) => event.stopPropagation()}>
+                              <button type="button" className="danger" onClick={() => { setArchiveMenuOpen(false); deleteArchivedSessions(allArchivedSessions); }}>
+                                <Trash2 size={14} /><span>清空全部归档会话</span>
+                              </button>
+                            </div>
+                          )}
+                        </div>
                         {archivedOpen && archivedSessions.map((session) => renderSession(session, true))}
                       </div>
                     )}
@@ -1520,6 +1547,11 @@ function ProviderSettings({
   const [patch, setPatch] = useState<Record<string, unknown>>({});
   useEffect(() => setPatch({}), [source.id]);
   const valueFor = (field: ConfigField) => field.key in patch ? patch[field.key] : source.config?.values[field.key];
+  const sourceDescription = source.id === "standard"
+    ? "管理任意 OpenAI、Anthropic、Responses 或请求兼容模型。"
+    : source.id === "agnes" && source.modalities
+      ? `LLM ${source.modalities.llm} · TTI ${source.modalities.tti} · TTV ${source.modalities.ttv}；${source.modalities.live ? "官方实时目录" : "内置回退目录"}。`
+      : `${source.models.length} 个内核原生模型；能力和思考选项来自 CLI 源代码。`;
   return (
     <div className="provider-settings">
       <div className="provider-tabs">
@@ -1527,7 +1559,7 @@ function ProviderSettings({
       </div>
       <div className="provider-content">
         <div className="section-heading">
-          <div><h2>{source.display_name}</h2><p>{source.id === "standard" ? "管理任意 OpenAI、Anthropic、Responses 或请求兼容模型。" : `${source.models.length} 个内核原生模型；能力和思考选项来自 CLI 源代码。`}</p></div>
+          <div><h2>{source.display_name}</h2><p>{sourceDescription}</p></div>
           {source.id === "standard" && <button type="button" className="primary-button small" onClick={addStandard}><Plus size={14} />添加模型</button>}
         </div>
         <div className="settings-model-grid">
@@ -2347,6 +2379,45 @@ export default function App() {
     });
   }, [running, sessionBusy, state, toast, uiPreferences.archivedSessions, updateUiPreferences]);
 
+  const deleteArchivedSessions = useCallback((targets: SessionInfo[]) => {
+    if (running || sessionBusy || !state || targets.length === 0) return;
+    const projectRoot = state.workspace.project_root;
+    const targetIds = [...new Set(targets.map((target) => target.id).filter(Boolean))];
+    if (targetIds.length === 0) return;
+    setConfirmation({
+      title: "清空全部归档会话？",
+      message: `归档文件夹中的 ${targetIds.length} 条对话记录将被永久删除；项目文件不会受到影响。`,
+      label: "清空归档",
+      danger: true,
+      action: () => { void (async () => {
+        setSessionBusy(true);
+        try {
+          const response = await window.reverie.request("deleteSessions", { sessionIds: targetIds, confirmed: true });
+          const deletedIds = Array.isArray(response.deleted_session_ids)
+            ? response.deleted_session_ids.map((value) => String(value))
+            : targetIds;
+          deletedIds.forEach((sessionId) => { delete drafts.current[sessionId]; });
+          const nextSession = (response.session as unknown as SessionState | null) ?? null;
+          setSession(nextSession);
+          setState((current) => current ? { ...current, sessions: response.sessions as unknown as DesktopState["sessions"] } : current);
+          setPrompt(nextSession ? drafts.current[nextSession.id] ?? "" : "");
+          setLiveTurn(null);
+          updateUiPreferences({
+            archivedSessions: {
+              ...uiPreferences.archivedSessions,
+              [projectRoot]: [],
+            },
+          });
+          toast(`已删除 ${deletedIds.length} 条归档会话`, "success");
+        } catch (error) {
+          toast(error instanceof Error ? error.message : String(error), "error");
+        } finally {
+          setSessionBusy(false);
+        }
+      })(); },
+    });
+  }, [running, sessionBusy, state, toast, uiPreferences.archivedSessions, updateUiPreferences]);
+
   const resolveApproval = useCallback(async (decision: "once" | "session" | "deny") => {
     if (!approval) return;
     try {
@@ -2600,7 +2671,7 @@ export default function App() {
 
   return (
     <div className={`app-shell ${inspectorOpen ? "with-inspector" : ""}`}>
-      <Sidebar state={state} view={view} setView={setView} activeSessionId={activeSessionId} openSession={(id) => void openSession(id)} newSession={() => void createSession()} sessionBusy={sessionBusy} selectWorkspace={() => void selectWorkspace()} switchWorkspace={(projectRoot) => void switchWorkspace(projectRoot)} openSearch={() => setSessionSearchOpen(true)} preferences={uiPreferences} renameSession={(target) => setRenameSessionTarget({ id: target.id, name: target.name })} toggleArchive={toggleSessionArchive} deleteSession={deleteSession} deleteProject={deleteProject} />
+      <Sidebar state={state} view={view} setView={setView} activeSessionId={activeSessionId} openSession={(id) => void openSession(id)} newSession={() => void createSession()} sessionBusy={sessionBusy} selectWorkspace={() => void selectWorkspace()} switchWorkspace={(projectRoot) => void switchWorkspace(projectRoot)} openSearch={() => setSessionSearchOpen(true)} preferences={uiPreferences} renameSession={(target) => setRenameSessionTarget({ id: target.id, name: target.name })} toggleArchive={toggleSessionArchive} deleteSession={deleteSession} deleteArchivedSessions={deleteArchivedSessions} deleteProject={deleteProject} />
       <main className="main-area">
         <Topbar state={state} openModelPicker={() => setModelPickerOpen(true)} selectReasoning={(value) => void selectReasoning(value)} setMode={(mode) => void updateSetting("mode", mode)} inspectorOpen={inspectorOpen} toggleInspector={() => setInspectorOpen((value) => !value)} openCommands={() => setCommandOpen(true)} theme={theme} setTheme={changeTheme} />
         <div className="content-area">{page}</div>

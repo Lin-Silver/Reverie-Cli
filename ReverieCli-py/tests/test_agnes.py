@@ -1,7 +1,11 @@
+import json
+
+from reverie import agnes as agnes_module
 from reverie.agnes import (
     AGNES_DEFAULT_API_URL,
     build_agnes_openai_options,
     build_agnes_runtime_model_data,
+    get_agnes_source_catalog,
     get_agnes_thinking_catalog,
     get_agnes_thinking_label,
     get_agnes_model_catalog,
@@ -22,7 +26,7 @@ def test_agnes_catalog_contains_documented_text_models(monkeypatch) -> None:
     catalog = get_agnes_model_catalog({"live_model_list": False})
     ids = {item["id"] for item in catalog}
 
-    assert {"agnes-2.0-flash", "agnes-1.5-flash", "agnes-1.5-pro"} <= ids
+    assert ids == {"agnes-2.0-flash", "agnes-1.5-flash"}
 
 
 def test_agnes_catalog_context_lengths_match_model_docs(monkeypatch) -> None:
@@ -35,8 +39,43 @@ def test_agnes_catalog_context_lengths_match_model_docs(monkeypatch) -> None:
     assert catalog["agnes-1.5-flash"]["context_length"] == 256_000
     assert catalog["agnes-1.5-flash"]["max_output_tokens"] == 65_536
     assert catalog["agnes-1.5-flash"]["thinking"] is False
-    assert catalog["agnes-1.5-pro"]["context_length"] == 256_000
-    assert catalog["agnes-1.5-pro"]["max_output_tokens"] == 256_000
+
+
+def test_agnes_live_source_catalog_classifies_every_supported_modality(monkeypatch) -> None:
+    payload = {
+        "object": "list",
+        "data": [
+            {"id": "agnes-1.5-flash", "object": "model", "owned_by": "custom", "created": 1},
+            {"id": "agnes-video-v2.0", "object": "model", "owned_by": "custom", "created": 1},
+            {"id": "agnes-image-2.1-flash", "object": "model", "owned_by": "custom", "created": 1},
+            {"id": "agnes-2.0-flash", "object": "model", "owned_by": "custom", "created": 1},
+            {"id": "agnes-image-2.0-flash", "object": "model", "owned_by": "custom", "created": 1},
+            {"id": "unrelated-model", "object": "model", "owned_by": "other", "created": 1},
+        ],
+    }
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return json.dumps(payload).encode("utf-8")
+
+    monkeypatch.setattr(agnes_module, "_MODEL_CACHE", {"key": "", "expires_at": 0.0, "models": []})
+    monkeypatch.setattr(agnes_module, "urlopen", lambda request, timeout: _Response())
+
+    catalog = get_agnes_source_catalog({"api_key": "agnes-test", "live_model_list": True})
+
+    assert catalog["live"] is True
+    assert {item["id"] for item in catalog["llm"]} == {"agnes-2.0-flash", "agnes-1.5-flash"}
+    assert {item["id"] for item in catalog["tti"]} == {
+        "agnes-image-2.0-flash",
+        "agnes-image-2.1-flash",
+    }
+    assert {item["id"] for item in catalog["ttv"]} == {"agnes-video-v2.0"}
 
 
 def test_agnes_base_url_normalizes_chat_completion_urls() -> None:

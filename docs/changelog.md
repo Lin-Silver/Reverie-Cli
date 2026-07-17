@@ -2,6 +2,13 @@
 
 **Release Date:** 2026-07-16
 
+### Post-release update (still v2.4.0) — 2026-07-17
+
+* Updated Agnes discovery from the provider's live `/v1/models` inventory, removed the unavailable `agnes-1.5-pro` listing, and unified the current 2 LLM, 2 TTI, and 1 TTV models behind one classified source catalog with an offline fallback.
+* Added an archived-conversation three-dot menu and one-confirmation bulk deletion path that removes every archived record in one kernel request while preserving an unarchived active session.
+* Refined the empty-chat Reverie mark with a new GPT Image-generated violet dream-star asset optimized for the small desktop hero treatment.
+* Kept GitHub Release asset labels equal to their real filenames so `.exe` and `.json` suffixes remain visible, including on the existing v2.4.0 Release.
+
 ### Native Desktop
 
 * Added the production Electron desktop host in `ReverieCli-ui`, backed by the same compiled Python SDK bridge, provider catalog, settings, tools, sessions, checkpoints, plugins, and recovery data as the CLI.

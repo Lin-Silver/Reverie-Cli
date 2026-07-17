@@ -1197,7 +1197,9 @@ def test_github_action_builds_desktop_and_publishes_version_tags() -> None:
     assert "embedded Chromium browser-control runtime" in workflow
     assert "Open Computer Use desktop controller" in workflow
     assert "reverie.exe: primary Windows CLI executable" in workflow
-    assert "Reverie CLI for Windows (Python full build)" in workflow
+    assert "$uploadSpec" not in workflow
+    assert "Label =" not in workflow
+    assert "real filename" in workflow
     assert "Blender runtime plugin" in workflow
     assert "Official Blender runtime plugin" not in workflow
     assert "reverie-python.exe" not in workflow

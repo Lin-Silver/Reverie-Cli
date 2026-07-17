@@ -385,14 +385,15 @@ jobs:
           $setupPath = "ReverieCli-ui\release\Reverie-Setup-$version-x64.exe"
           $portablePath = "dist\Reverie-Portable-$version-x64.exe"
           $assets = @(
-            @{ Path = "dist\reverie.exe"; Label = "Reverie CLI for Windows (Python full build)" },
-            @{ Path = $setupPath; Label = "Reverie Desktop installer for Windows" },
-            @{ Path = $portablePath; Label = "Reverie Desktop portable for Windows" },
-            @{ Path = "dist\plugins-manifest.json"; Label = "Release manifest with hashes and plugin metadata" },
-            @{ Path = "plugins\blender\dist\reverie-blender.exe"; Label = "Blender runtime plugin" },
-            @{ Path = "plugins\game_models\dist\reverie-game-models.exe"; Label = "Game Models runtime plugin" }
+            "dist\reverie.exe",
+            $setupPath,
+            $portablePath,
+            "dist\plugins-manifest.json",
+            "plugins\blender\dist\reverie-blender.exe",
+            "plugins\game_models\dist\reverie-game-models.exe"
           )
           foreach ($asset in $assets) {
-            $uploadSpec = "$($asset.Path)#$($asset.Label)"
-            gh release upload $releaseTag $uploadSpec --repo $env:GITHUB_REPOSITORY --clobber
+            # Keep GitHub's visible label equal to the real filename so the
+            # executable or JSON suffix remains visible on the Release page.
+            gh release upload $releaseTag $asset --repo $env:GITHUB_REPOSITORY --clobber
           }

@@ -559,17 +559,19 @@ Third-party API gateway (OpenAI-compatible) at `https://aihubmix.com/v1`:
 
 ### Agnes
 
-Agnes AI OpenAI-compatible API at `https://apihub.agnes-ai.com/v1`:
+Agnes AI OpenAI-compatible API at `https://apihub.agnes-ai.com/v1`. Reverie classifies the provider's live `/models` response into LLM, text-to-image (TTI), and text-to-video (TTV) catalogs, then exposes only media models that have a local execution profile:
 
-| Model ID | Display Name | Context | Vision | Thinking |
-|----------|-------------|---------|--------|----------|
-| `agnes-2.0-flash` | Agnes 2.0 Flash | 256,000 | ✅ | ✅ (low/med/high) |
-| `agnes-1.5-flash` | Agnes 1.5 Flash | 256,000 | ✅ | ❌ |
-| `agnes-1.5-pro` | Agnes 1.5 Pro (Deprecated) | 256,000 | ❌ | ❌ |
+| Modality | Model ID | Display Name | Key capability |
+|----------|----------|--------------|----------------|
+| LLM | `agnes-2.0-flash` | Agnes 2.0 Flash | 256K context, vision, thinking |
+| LLM | `agnes-1.5-flash` | Agnes 1.5 Flash | 256K context, vision |
+| TTI | `agnes-image-2.1-flash` | Agnes Image 2.1 Flash | text/image input and editing |
+| TTI | `agnes-image-2.0-flash` | Agnes Image 2.0 Flash | text/image input and composition |
+| TTV | `agnes-video-v2.0` | Agnes Video V2.0 | asynchronous video generation |
 
 Thinking budgets: `low` (1024), `medium` (4096), `high` (8192).
 
-Agnes also supports **text-to-image** and **text-to-video** generation through the `text_to_image` and `text_to_video` subsystems.
+If live discovery is unavailable, Reverie falls back to this verified built-in catalog. Agnes image and video generation run through the `text_to_image` and `text_to_video` subsystems.
 
 ### WebGemini
 

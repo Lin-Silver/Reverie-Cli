@@ -50,6 +50,7 @@ def test_desktop_catalog_uses_native_model_reasoning_metadata() -> None:
     agnes = _source(payload, "agnes")
     no_thinking = next(item for item in agnes["models"] if not item["thinking"])
     assert no_thinking["reasoning"] == {"control": "none", "options": [], "value": "none"}
+    assert agnes["modalities"] == {"live": False, "llm": 2, "tti": 2, "ttv": 1}
 
 
 def test_model_selection_updates_model_specific_reasoning() -> None:
@@ -274,6 +275,50 @@ def test_renaming_or_deleting_a_background_session_preserves_the_active_session(
     assert deleted["session"]["id"] == active.id
     assert manager.get_current_session().id == active.id
     assert {item["id"] for item in deleted["sessions"]["items"]} == {active.id}
+
+
+def test_bulk_deleting_archived_sessions_preserves_an_unarchived_active_session(tmp_path: Path) -> None:
+    from reverie.sdk_bridge import ReverieSdkBridge
+
+    manager = SessionManager(tmp_path / "state", project_root=tmp_path)
+    active = manager.create_session("Active")
+    manager.save_session(active)
+    archived_one = manager.create_session("Archived one")
+    manager.save_session(archived_one)
+    archived_two = manager.create_session("Archived two")
+    manager.save_session(archived_two)
+    manager.load_session(active.id)
+
+    class _Agent:
+        history = []
+
+        def set_history(self, messages):
+            self.history = list(messages)
+
+    class _Interface:
+        session_manager = manager
+        agent = _Agent()
+
+    bridge = ReverieSdkBridge()
+    bridge.project_root = tmp_path.resolve()
+    bridge.interface = _Interface()
+
+    deleted = bridge.dispatch(
+        {
+            "id": "delete-archived",
+            "action": "deleteSessions",
+            "payload": {
+                "sessionIds": [archived_one.id, archived_two.id, archived_one.id],
+                "confirmed": True,
+            },
+        }
+    )
+
+    assert deleted["session"]["id"] == active.id
+    assert deleted["deleted_session_ids"] == [archived_one.id, archived_two.id]
+    assert {item["id"] for item in deleted["sessions"]["items"]} == {active.id}
+    assert manager.load_session(archived_one.id) is None
+    assert manager.load_session(archived_two.id) is None
 
 
 def test_session_search_covers_titles_reasoning_and_tool_calls(tmp_path: Path) -> None:

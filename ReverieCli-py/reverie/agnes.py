@@ -15,7 +15,6 @@ AGNES_DEFAULT_MODEL_DISPLAY_NAME = "Agnes 2.0 Flash"
 AGNES_API_KEY_HINT_URL = "https://platform.agnes-ai.com/settings/apiKeys"
 AGNES_DEFAULT_CONTEXT_TOKENS = 256_000
 AGNES_DEFAULT_MAX_TOKENS = 65_536
-AGNES_PRO_MAX_TOKENS = 256_000
 AGNES_DEFAULT_TEMPERATURE = 0.7
 AGNES_DEFAULT_TOP_P = 1.0
 AGNES_DEFAULT_THINKING_MODE = "low"
@@ -85,14 +84,6 @@ _AGNES_STATIC_MODEL_CATALOG: List[Dict[str, Any]] = [
         context_length=256_000,
         max_output_tokens=65_536,
         vision=True,
-    ),
-    _agnes_model(
-        "agnes-1.5-pro",
-        "Agnes 1.5 Pro (Deprecated)",
-        "Agnes OpenAI-compatible text model retained for legacy compatibility.",
-        context_length=256_000,
-        max_output_tokens=AGNES_PRO_MAX_TOKENS,
-        deprecated=True,
     ),
 ]
 
@@ -238,12 +229,25 @@ def _is_text_model_id(model_id: Any) -> bool:
     return model.startswith("agnes-")
 
 
+def _is_agnes_model_id(model_id: Any) -> bool:
+    return str(model_id or "").strip().lower().startswith("agnes-")
+
+
+def _agnes_model_kind(model_id: Any) -> str:
+    model = str(model_id or "").strip().lower()
+    if model.startswith("agnes-image-"):
+        return "tti"
+    if model.startswith("agnes-video-"):
+        return "ttv"
+    return "llm" if _is_text_model_id(model) else ""
+
+
 def _live_cache_key(cfg: Dict[str, Any], api_key: str) -> str:
     return f"{resolve_agnes_sdk_base_url(cfg.get('api_url', AGNES_DEFAULT_API_URL))}|{api_key[:10]}"
 
 
-def fetch_agnes_model_catalog(agnes_config: Any, *, timeout: int = 5) -> List[Dict[str, Any]]:
-    """Fetch Agnes text models from the OpenAI-compatible /models endpoint."""
+def fetch_agnes_provider_model_catalog(agnes_config: Any, *, timeout: int = 5) -> List[Dict[str, Any]]:
+    """Fetch every Agnes model advertised by the provider's /models endpoint."""
     cfg = default_agnes_config()
     if isinstance(agnes_config, dict):
         cfg.update(agnes_config)
@@ -271,19 +275,40 @@ def fetch_agnes_model_catalog(agnes_config: Any, *, timeout: int = 5) -> List[Di
     if not isinstance(data_items, list):
         data_items = []
 
-    static = _static_model_metadata()
     models: List[Dict[str, Any]] = []
     seen: set[str] = set()
     for item in data_items:
         if not isinstance(item, dict):
             continue
         model_id = str(item.get("id", "") or "").strip()
-        if not _is_text_model_id(model_id):
+        if not _is_agnes_model_id(model_id):
             continue
         key = model_id.lower()
         if key in seen:
             continue
         seen.add(key)
+        base = {
+            "id": model_id,
+            "object": str(item.get("object") or "model"),
+            "owned_by": str(item.get("owned_by") or "agnes-ai"),
+            "kind": _agnes_model_kind(model_id),
+        }
+        if item.get("created") is not None:
+            base["created"] = item.get("created")
+        models.append(base)
+
+    _MODEL_CACHE.update({"key": cache_key, "expires_at": now + _MODEL_CACHE_TTL_SECONDS, "models": models})
+    return [dict(item) for item in models]
+
+
+def _text_catalog_from_provider_models(provider_models: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    static = _static_model_metadata()
+    models: List[Dict[str, Any]] = []
+    for item in provider_models:
+        model_id = str(item.get("id", "") or "").strip()
+        if not _is_text_model_id(model_id):
+            continue
+        key = model_id.lower()
         base = static.get(key) or _agnes_model(
             model_id,
             _display_name_from_model_id(model_id) or model_id,
@@ -293,9 +318,14 @@ def fetch_agnes_model_catalog(agnes_config: Any, *, timeout: int = 5) -> List[Di
         if item.get("created") is not None:
             base["created"] = item.get("created")
         models.append(base)
+    return models
 
-    _MODEL_CACHE.update({"key": cache_key, "expires_at": now + _MODEL_CACHE_TTL_SECONDS, "models": models})
-    return [dict(item) for item in models]
+
+def fetch_agnes_model_catalog(agnes_config: Any, *, timeout: int = 5) -> List[Dict[str, Any]]:
+    """Fetch Agnes LLM models from the provider's OpenAI-compatible /models endpoint."""
+    return _text_catalog_from_provider_models(
+        fetch_agnes_provider_model_catalog(agnes_config, timeout=timeout)
+    )
 
 
 def get_agnes_model_catalog(agnes_config: Any = None) -> List[Dict[str, Any]]:
@@ -311,13 +341,49 @@ def get_agnes_model_catalog(agnes_config: Any = None) -> List[Dict[str, Any]]:
         except Exception:
             models = []
 
-    static = _static_model_metadata()
-    seen = {str(item.get("id", "")).lower() for item in models}
-    for key, item in static.items():
-        if key not in seen:
-            models.append(dict(item))
-
     return models or [dict(item) for item in _AGNES_STATIC_MODEL_CATALOG]
+
+
+def get_agnes_source_catalog(agnes_config: Any = None) -> Dict[str, Any]:
+    """Return usable Agnes LLM, TTI, and TTV models from one provider inventory."""
+    from .agnes_tti_profiles.registry import get_agnes_tti_model_catalog
+    from .agnes_ttv_profiles.registry import get_agnes_ttv_model_catalog
+
+    cfg = default_agnes_config()
+    if isinstance(agnes_config, dict):
+        cfg.update(agnes_config)
+
+    provider_models: List[Dict[str, Any]] = []
+    if bool(cfg.get("live_model_list", True)) and resolve_agnes_api_key(cfg):
+        try:
+            provider_models = fetch_agnes_provider_model_catalog(
+                cfg,
+                timeout=min(8, int(cfg.get("timeout", 60) or 60)),
+            )
+        except Exception:
+            provider_models = []
+
+    tti_models = get_agnes_tti_model_catalog()
+    ttv_models = get_agnes_ttv_model_catalog()
+    if not provider_models:
+        return {
+            "live": False,
+            "llm": [dict(item) for item in _AGNES_STATIC_MODEL_CATALOG],
+            "tti": tti_models,
+            "ttv": ttv_models,
+        }
+
+    available_ids = {
+        str(item.get("id", "") or "").strip().lower()
+        for item in provider_models
+        if str(item.get("id", "") or "").strip()
+    }
+    return {
+        "live": True,
+        "llm": _text_catalog_from_provider_models(provider_models),
+        "tti": [item for item in tti_models if str(item.get("id", "")).lower() in available_ids],
+        "ttv": [item for item in ttv_models if str(item.get("id", "")).lower() in available_ids],
+    }
 
 
 def get_agnes_model_metadata(model_id: Any, agnes_config: Any = None) -> Optional[Dict[str, Any]]:

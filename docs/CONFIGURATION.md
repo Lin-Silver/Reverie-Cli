@@ -158,7 +158,7 @@ Reverie reads `AIHUBMIX_API_KEY` or `AIHUBMIX_TOKEN` automatically when present.
 
 The `agnes` section stores the shared Agnes API key, selected chat model id/display name, OpenAI-compatible base URL, timeout, context/output defaults, and selected thinking depth.
 
-The same Agnes credential is also reused by Reverie's Agnes text-to-image and text-to-video tools.
+The same Agnes credential is also reused by Reverie's Agnes text-to-image and text-to-video tools. With `live_model_list` enabled, one authenticated `/models` query supplies the LLM, TTI, and TTV inventory; Reverie filters media entries to locally supported execution profiles and falls back to the verified built-in catalog when discovery is unavailable.
 
 ### SenseNova
 

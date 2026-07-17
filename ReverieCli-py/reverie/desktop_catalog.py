@@ -248,6 +248,16 @@ def build_model_sources_payload(config: Config, *, fetch_live: bool = False) -> 
         }
         if source != "standard":
             source_payload["config"] = _safe_provider_config(source, config)
+        if source == "agnes":
+            from .agnes import get_agnes_source_catalog
+
+            agnes_catalog = get_agnes_source_catalog(provider_config)
+            source_payload["modalities"] = {
+                "live": bool(agnes_catalog.get("live", False)),
+                "llm": len(agnes_catalog.get("llm", [])),
+                "tti": len(agnes_catalog.get("tti", [])),
+                "ttv": len(agnes_catalog.get("ttv", [])),
+            }
         sources.append(source_payload)
 
     active_model = config.active_model

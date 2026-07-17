@@ -26,8 +26,9 @@ describe("packaged runtime paths", () => {
   });
 
   it("keeps the CLI kernel and its DLLs beside the packaged GUI executable", () => {
-    expect(packagedKernelPath("C:\\Temp\\reverie-unpacked\\ReverieUI.exe"))
-      .toBe(path.resolve("C:\\Temp\\reverie-unpacked\\reverie.exe"));
+    const packagedRoot = path.resolve("tmp", "reverie-unpacked");
+    expect(packagedKernelPath(path.join(packagedRoot, "ReverieUI.exe")))
+      .toBe(path.join(packagedRoot, "reverie.exe"));
   });
 
   it("finds the repository distribution root from release and win-unpacked layouts", () => {

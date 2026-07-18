@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from "electron";
+import { assertCoreAction, assertCoreResponse, normalizeCorePayload } from "./core-actions";
 import { ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { appendFile, copyFile, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync, mkdirSync } from "node:fs";
@@ -503,13 +504,15 @@ async function createWindow(): Promise<void> {
   }
 }
 
-ipcMain.handle("core:request", async (_event, action: string, payload?: JsonRecord) => {
+ipcMain.handle("core:request", async (_event, rawAction: unknown, rawPayload?: unknown) => {
   if (!bridge) throw new Error("Reverie core bridge is not initialized.");
-  const response = await bridge.request(action, payload ?? {});
+  const action = assertCoreAction(rawAction);
+  const payload = normalizeCorePayload(rawPayload);
+  const response = await bridge.request(action, payload);
   if (action === "initialize") {
     void log(`Desktop initialized in ${Date.now() - desktopStartedAt} ms`);
   }
-  return response;
+  return assertCoreResponse(action, response);
 });
 
 ipcMain.handle("core:cancel", async () => {

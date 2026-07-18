@@ -93,7 +93,8 @@ class ConfigParser(BaseParser):
         """Parse JSON configuration"""
         try:
             data = json.loads(content)
-            self._extract_from_dict(data, result, prefix="")
+            if isinstance(data, dict):
+                self._extract_from_dict(data, result, prefix="")
         except json.JSONDecodeError as e:
             result.errors.append(f"JSON parse error: {str(e)}")
     

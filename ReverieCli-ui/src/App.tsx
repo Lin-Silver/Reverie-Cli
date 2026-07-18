@@ -80,7 +80,6 @@ import type {
   ModelRecord,
   ModelSource,
   PluginRecord,
-  PromptResult,
   RecoveryState,
   SessionInfo,
   SessionMessage,
@@ -118,7 +117,6 @@ import {
 } from "./layout";
 import { I18nProvider, UI_LANGUAGE_OPTIONS, translate, useI18n } from "./i18n";
 
-type CoreResponse = Record<string, unknown>;
 type Toast = { id: number; kind: "success" | "error" | "info"; message: string };
 type ComposerAttachment = { name: string; relativePath: string; size: number };
 
@@ -623,6 +621,8 @@ function ModelPicker({
   close: () => void;
 }) {
   const { t } = useI18n();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(dialogRef, close);
   const [sourceId, setSourceId] = useState(state.models.active_source);
   const [query, setQuery] = useState("");
   const source = state.models.sources.find((item) => item.id === sourceId) ?? state.models.sources[0];
@@ -631,7 +631,7 @@ function ModelPicker({
   );
   return (
     <div className="popover-backdrop" onMouseDown={close}>
-      <div className="model-picker" onMouseDown={(event) => event.stopPropagation()}>
+      <div ref={dialogRef} className="model-picker" role="dialog" aria-modal="true" aria-label={t("模型来源")} tabIndex={-1} onMouseDown={(event) => event.stopPropagation()}>
         <div className="model-picker-sources">
           <div className="popover-title">{t("模型来源")}</div>
           {state.models.sources.map((item) => (
@@ -1124,6 +1124,7 @@ function Composer({
         )}
         <textarea
           ref={textarea}
+          aria-label={t("composer.placeholder", { model: modelName || "Reverie" })}
           value={value}
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={keyDown}
@@ -1141,7 +1142,7 @@ function Composer({
             {running ? (
               <button type="button" className="stop-button" onClick={cancel}><Square size={12} fill="currentColor" /> {t("停止")}</button>
             ) : (
-              <button type="button" className="send-button" onClick={send} disabled={disabled || !value.trim()}><Send size={15} /></button>
+              <button type="button" className="send-button" aria-label={t("发送")} onClick={send} disabled={disabled || !value.trim()}><Send size={15} /></button>
             )}
           </div>
         </div>
@@ -1881,17 +1882,14 @@ function Inspector({ state, liveTurn, indexWorkspace }: { state: DesktopState; l
 
 function CommandPalette({ commands, close, choose }: { commands: CommandRecord[]; close: () => void; choose: (command: CommandRecord) => void }) {
   const { t } = useI18n();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(dialogRef, close);
   const [query, setQuery] = useState("");
   const filtered = commands.filter((item) => `${item.command} ${item.summary} ${item.section}`.toLowerCase().includes(query.toLowerCase())).slice(0, 30);
-  useEffect(() => {
-    const handler = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") close(); };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [close]);
   return (
     <div className="modal-backdrop" onMouseDown={close}>
-      <div className="command-palette" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="command-search"><Search size={17} /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("搜索命令、工具和功能…")} /><kbd>Esc</kbd></div>
+      <div ref={dialogRef} className="command-palette" role="dialog" aria-modal="true" aria-label={t("命令面板")} tabIndex={-1} onMouseDown={(event) => event.stopPropagation()}>
+        <div className="command-search"><Search size={17} /><input autoFocus aria-label={t("搜索命令、工具和功能…")} value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("搜索命令、工具和功能…")} /><kbd>Esc</kbd></div>
         <div className="command-results">{filtered.map((item) => <button type="button" key={item.id} onClick={() => choose(item)}><div className="command-icon"><Command size={14} /></div><div><strong>{item.command}</strong><span>{t(item.summary)}</span></div><small>{t(item.section)}</small></button>)}</div>
         <div className="command-footer"><span><kbd>↵</kbd> {t("插入命令参考")}</span><span>{t("完整功能可直接通过 GUI 页面或自然语言调用")}</span></div>
       </div>
@@ -1901,6 +1899,8 @@ function CommandPalette({ commands, close, choose }: { commands: CommandRecord[]
 
 function SessionSearch({ close, openSession }: { close: () => void; openSession: (id: string) => void }) {
   const { t } = useI18n();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(dialogRef, close);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Array<Record<string, unknown>>>([]);
   const [searching, setSearching] = useState(false);
@@ -1916,7 +1916,7 @@ function SessionSearch({ close, openSession }: { close: () => void; openSession:
       try {
         const response = await window.reverie.request("searchSessions", { query: normalized });
         if (!cancelled) {
-          setResults((response.results as Array<Record<string, unknown>>) ?? []);
+          setResults(response.results);
           setCompletedQuery(normalized);
         }
       } catch (searchError) {
@@ -1929,8 +1929,8 @@ function SessionSearch({ close, openSession }: { close: () => void; openSession:
   }, [query]);
   return (
     <div className="modal-backdrop" onMouseDown={close}>
-      <div className="command-palette session-search-modal" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="command-search"><Search size={17} /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("搜索所有会话内容…")} /><button type="button" onClick={close}><X size={15} /></button></div>
+      <div ref={dialogRef} className="command-palette session-search-modal" role="dialog" aria-modal="true" aria-label={t("搜索所有会话内容…")} tabIndex={-1} onMouseDown={(event) => event.stopPropagation()}>
+        <div className="command-search"><Search size={17} /><input autoFocus aria-label={t("搜索所有会话内容…")} value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("搜索所有会话内容…")} /><button type="button" aria-label={t("关闭")} onClick={close}><X size={15} /></button></div>
         <div className="session-search-results">
           {searching && <div className="empty-row"><RefreshCw className="spin" size={14} />{t("正在搜索")}</div>}
           {error && <div className="empty-row error"><AlertCircle size={14} />{error}</div>}
@@ -1944,12 +1944,14 @@ function SessionSearch({ close, openSession }: { close: () => void; openSession:
 
 function RenameSessionModal({ session, close, save }: { session: { id: string; name: string }; close: () => void; save: (name: string) => void }) {
   const { t } = useI18n();
+  const dialogRef = useRef<HTMLFormElement>(null);
+  useDialogFocus(dialogRef, close);
   const [name, setName] = useState(session.name);
   const valid = Boolean(name.trim());
   return (
     <div className="modal-backdrop" onMouseDown={close}>
-      <form className="form-modal rename-session-modal" onMouseDown={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); if (valid) save(name.trim()); }}>
-        <div className="form-modal-header"><div><h2>{t("重命名会话")}</h2><p>{t("使用一个容易辨认的标题，历史记录会立即同步更新。")}</p></div><IconButton label={t("关闭")} onClick={close}><X size={16} /></IconButton></div>
+      <form ref={dialogRef} className="form-modal rename-session-modal" role="dialog" aria-modal="true" aria-labelledby="rename-session-title" tabIndex={-1} onMouseDown={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); if (valid) save(name.trim()); }}>
+        <div className="form-modal-header"><div><h2 id="rename-session-title">{t("重命名会话")}</h2><p>{t("使用一个容易辨认的标题，历史记录会立即同步更新。")}</p></div><IconButton label={t("关闭")} onClick={close}><X size={16} /></IconButton></div>
         <div className="form-grid single"><label><span>{t("会话标题")}</span><input autoFocus value={name} maxLength={120} onChange={(event) => setName(event.target.value)} /></label></div>
         <div className="form-modal-footer"><button type="button" className="secondary-button" onClick={close}>{t("取消")}</button><button type="submit" className="primary-button" disabled={!valid}>{t("保存")}</button></div>
       </form>
@@ -1959,13 +1961,15 @@ function RenameSessionModal({ session, close, save }: { session: { id: string; n
 
 function StandardModelModal({ close, save }: { close: () => void; save: (model: Record<string, unknown>) => void }) {
   const { t } = useI18n();
+  const dialogRef = useRef<HTMLFormElement>(null);
+  useDialogFocus(dialogRef, close);
   const [model, setModel] = useState<Record<string, unknown>>({ provider: "openai-chat", supports_vision: false, max_context_tokens: 128000 });
   const update = (key: string, value: unknown) => setModel((current) => ({ ...current, [key]: value }));
   const valid = Boolean(model.model && model.model_display_name && model.base_url);
   return (
     <div className="modal-backdrop" onMouseDown={close}>
-      <form className="form-modal" onMouseDown={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); if (valid) save(model); }}>
-        <div className="form-modal-header"><div><h2>{t("添加标准模型")}</h2><p>{t("该模型会同时出现在 TUI、命令行和 GUI 中。")}</p></div><IconButton label={t("关闭")} onClick={close}><X size={16} /></IconButton></div>
+      <form ref={dialogRef} className="form-modal" role="dialog" aria-modal="true" aria-labelledby="standard-model-title" tabIndex={-1} onMouseDown={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); if (valid) save(model); }}>
+        <div className="form-modal-header"><div><h2 id="standard-model-title">{t("添加标准模型")}</h2><p>{t("该模型会同时出现在 TUI、命令行和 GUI 中。")}</p></div><IconButton label={t("关闭")} onClick={close}><X size={16} /></IconButton></div>
         <div className="form-grid single"><label><span>{t("模型 ID")}</span><input autoFocus value={String(model.model ?? "")} onChange={(event) => update("model", event.target.value)} placeholder={t("例如 gpt-5.4")} /></label><label><span>{t("显示名称")}</span><input value={String(model.model_display_name ?? "")} onChange={(event) => update("model_display_name", event.target.value)} placeholder={t("例如 GPT-5.4")} /></label><label><span>Provider</span><select value={String(model.provider)} onChange={(event) => update("provider", event.target.value)}><option value="openai-chat">OpenAI Chat Completions</option><option value="openai-responses">OpenAI Responses</option><option value="anthropic">Anthropic</option><option value="request">Generic Request</option><option value="curl">cURL</option></select></label><label><span>Base URL</span><input value={String(model.base_url ?? "")} onChange={(event) => update("base_url", event.target.value)} placeholder="https://api.example.com/v1" /></label><label><span>API Key</span><input type="password" value={String(model.api_key ?? "")} onChange={(event) => update("api_key", event.target.value)} /></label><label><span>{t("上下文长度")}</span><input type="number" value={Number(model.max_context_tokens)} onChange={(event) => update("max_context_tokens", Number(event.target.value))} /></label><label className="inline-toggle"><span>{t("支持视觉")}</span><Toggle checked={Boolean(model.supports_vision)} onChange={(value) => update("supports_vision", value)} /></label></div>
         <div className="form-modal-footer"><button type="button" className="secondary-button" onClick={close}>{t("取消")}</button><button type="submit" className="primary-button" disabled={!valid}>{t("添加模型")}</button></div>
       </form>
@@ -1975,17 +1979,30 @@ function StandardModelModal({ close, save }: { close: () => void; save: (model: 
 
 function ConfirmModal({ title, message, confirmLabel, danger = false, close, confirm }: { title: string; message: string; confirmLabel: string; danger?: boolean; close: () => void; confirm: () => void }) {
   const { t } = useI18n();
-  return <div className="modal-backdrop" onMouseDown={close}><div className="confirm-modal" onMouseDown={(event) => event.stopPropagation()}><div className={`confirm-icon ${danger ? "danger" : ""}`}>{danger ? <AlertCircle size={20} /> : <Info size={20} />}</div><h2>{title}</h2><p>{message}</p><div><button type="button" className="secondary-button" onClick={close}>{t("取消")}</button><button type="button" className={danger ? "danger-button" : "primary-button"} onClick={confirm}>{confirmLabel}</button></div></div></div>;
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(dialogRef, close);
+  return (
+    <div className="modal-backdrop" onMouseDown={close}>
+      <div ref={dialogRef} className="confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="confirmation-title" aria-describedby="confirmation-message" tabIndex={-1} onMouseDown={(event) => event.stopPropagation()}>
+        <div className={`confirm-icon ${danger ? "danger" : ""}`}>{danger ? <AlertCircle size={20} /> : <Info size={20} />}</div>
+        <h2 id="confirmation-title">{title}</h2>
+        <p id="confirmation-message">{message}</p>
+        <div><button type="button" className="secondary-button" onClick={close}>{t("取消")}</button><button type="button" className={danger ? "danger-button" : "primary-button"} onClick={confirm}>{confirmLabel}</button></div>
+      </div>
+    </div>
+  );
 }
 
 function ApprovalModal({ approval, resolve }: { approval: Record<string, unknown>; resolve: (decision: "once" | "session" | "deny") => void }) {
   const { t } = useI18n();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(dialogRef);
   return (
     <div className="modal-backdrop">
-      <div className="approval-modal">
-        <div className="approval-header"><div className="confirm-icon"><ShieldCheck size={20} /></div><div><h2>{t("工具请求更高权限")}</h2><p>{t("Reverie 内核暂停执行，等待你的决定。")}</p></div></div>
+      <div ref={dialogRef} className="approval-modal" role="alertdialog" aria-modal="true" aria-labelledby="approval-title" aria-describedby="approval-message" tabIndex={-1}>
+        <div className="approval-header"><div className="confirm-icon"><ShieldCheck size={20} /></div><div><h2 id="approval-title">{t("工具请求更高权限")}</h2><p>{t("Reverie 内核暂停执行，等待你的决定。")}</p></div></div>
         <div className="approval-tool"><Wrench size={15} /><strong>{String(approval.tool ?? "tool")}</strong></div>
-        <p className="approval-message">{t(String(approval.message ?? "此工具超出当前权限级别。"))}</p>
+        <p id="approval-message" className="approval-message">{t(String(approval.message ?? "此工具超出当前权限级别。"))}</p>
         <pre>{JSON.stringify(approval.arguments ?? {}, null, 2)}</pre>
         <div className="approval-actions"><button type="button" className="secondary-button" onClick={() => resolve("deny")}>{t("拒绝")}</button><button type="button" className="secondary-button" onClick={() => resolve("once")}>{t("仅本次允许")}</button><button type="button" className="primary-button" onClick={() => resolve("session")}>{t("本会话允许")}</button></div>
       </div>
@@ -2130,7 +2147,7 @@ export default function App() {
   const updateUiPreferences = useCallback((patch: Partial<UiPreferences>) => {
     const requestSequence = ++uiPreferenceRequestSequence.current;
     setUiPreferences((current) => normalizeUiPreferences({ ...current, ...patch }));
-    void window.reverie.setUiPreferences(patch as unknown as CoreResponse).then((preferences) => {
+    void window.reverie.setUiPreferences(patch).then((preferences) => {
       if (requestSequence !== uiPreferenceRequestSequence.current) return;
       setUiPreferences(normalizeUiPreferences(preferences));
     }).catch((error) => {
@@ -2175,14 +2192,14 @@ export default function App() {
       setUiPreferences(normalizeUiPreferences(preferences));
       const response = await window.reverie.request("initialize", { projectRoot: projectRoot ?? paths.projectRoot });
       if (requestSequence !== initializeSequence.current) return;
-      let nextState = response.state as unknown as DesktopState;
+      let nextState = response.state;
       let nextSession: SessionState | null = null;
       const currentId = nextState.sessions.current_session_id || nextState.sessions.items[0]?.id;
       if (currentId) {
         const sessionResponse = await window.reverie.request("getSession", { sessionId: currentId });
         if (requestSequence !== initializeSequence.current) return;
-        nextSession = sessionResponse.session as unknown as SessionState;
-        nextState = { ...nextState, sessions: sessionResponse.sessions as unknown as DesktopState["sessions"] };
+        nextSession = sessionResponse.session;
+        nextState = { ...nextState, sessions: sessionResponse.sessions };
       }
       setState(nextState);
       setSession(nextSession);
@@ -2201,7 +2218,7 @@ export default function App() {
       try {
         const response = await window.reverie.request("getContextStatus", {});
         if (cancelled) return;
-        const nextContext = response.context_engine as DesktopState["workspace"]["context_engine"];
+        const nextContext = response.context_engine;
         setState((current) => current ? {
           ...current,
           workspace: { ...current.workspace, index_ready: Boolean(nextContext?.ready), context_engine: nextContext },
@@ -2259,9 +2276,9 @@ export default function App() {
     try {
       const response = await window.reverie.request("getSession", { sessionId: id });
       if (requestSequence !== sessionRequestSequence.current) return;
-      const nextSession = response.session as unknown as SessionState;
+      const nextSession = response.session;
       setSession(nextSession);
-      setState((current) => current ? { ...current, sessions: response.sessions as unknown as DesktopState["sessions"] } : current);
+      setState((current) => current ? { ...current, sessions: response.sessions } : current);
       setView("chat");
       setLiveTurn(null);
       setPrompt(drafts.current[nextSession.id] ?? "");
@@ -2286,9 +2303,9 @@ export default function App() {
     try {
       const response = await window.reverie.request("createSession", {});
       if (requestSequence !== sessionRequestSequence.current) return;
-      const nextSession = response.session as unknown as SessionState;
+      const nextSession = response.session;
       setSession(nextSession);
-      setState((current) => current ? { ...current, sessions: response.sessions as unknown as DesktopState["sessions"] } : current);
+      setState((current) => current ? { ...current, sessions: response.sessions } : current);
       setView("chat");
       setLiveTurn(null);
       setPrompt(drafts.current[nextSession.id] ?? "");
@@ -2313,9 +2330,9 @@ export default function App() {
       let activeSession = session;
       if (!activeSession) {
         const created = await window.reverie.request("createSession", {});
-        activeSession = created.session as unknown as SessionState;
+        activeSession = created.session;
         setSession(activeSession);
-        setState((current) => current ? { ...current, sessions: created.sessions as unknown as DesktopState["sessions"] } : current);
+        setState((current) => current ? { ...current, sessions: created.sessions } : current);
       }
       drafts.current[activeSession.id] = "";
       const response = await window.reverie.request("runPrompt", {
@@ -2324,7 +2341,7 @@ export default function App() {
         mode: state.workspace.mode,
         stream: true,
       });
-      const result = response.result as unknown as PromptResult;
+      const result = response.result;
       setLiveTurn((current) => current ? {
         ...current,
         assistantText: result.output_text || current.assistantText,
@@ -2333,12 +2350,12 @@ export default function App() {
       } : current);
       setState((current) => current ? {
         ...current,
-        sessions: response.sessions as unknown as DesktopState["sessions"],
-        recovery: response.recovery as unknown as RecoveryState,
+        sessions: response.sessions,
+        recovery: response.recovery,
       } : current);
       const refreshed = await window.reverie.request("getSession", { sessionId: result.session_id || activeSession.id });
-      setSession(refreshed.session as unknown as SessionState);
-      setState((current) => current ? { ...current, sessions: refreshed.sessions as unknown as DesktopState["sessions"] } : current);
+      setSession(refreshed.session);
+      setState((current) => current ? { ...current, sessions: refreshed.sessions } : current);
       setLiveTurn(null);
       setAttachments([]);
       if (!result.success) toast(result.error || t("请求失败"), "error");
@@ -2357,8 +2374,8 @@ export default function App() {
       await window.reverie.cancel();
       if (session) {
         const refreshed = await window.reverie.request("getSession", { sessionId: session.id });
-        setSession(refreshed.session as unknown as SessionState);
-        setState((current) => current ? { ...current, sessions: refreshed.sessions as unknown as DesktopState["sessions"] } : current);
+        setSession(refreshed.session);
+        setState((current) => current ? { ...current, sessions: refreshed.sessions } : current);
       }
       setPrompt((current) => current || retryText);
       setLiveTurn(null);
@@ -2375,9 +2392,9 @@ export default function App() {
     if (!renameSessionTarget || running || sessionBusy) return;
     try {
       const response = await window.reverie.request("renameSession", { sessionId: renameSessionTarget.id, name });
-      const activeSession = (response.session as unknown as SessionState | null) ?? null;
+      const activeSession = response.session ?? null;
       if (activeSession) setSession(activeSession);
-      setState((current) => current ? { ...current, sessions: response.sessions as unknown as DesktopState["sessions"] } : current);
+      setState((current) => current ? { ...current, sessions: response.sessions } : current);
       setRenameSessionTarget(null);
       toast(t("会话标题已更新"), "success");
     } catch (error) {
@@ -2409,9 +2426,9 @@ export default function App() {
     try {
       const response = await window.reverie.request("forkSession", { sessionId: session.id, messageCount: session.messages.length });
       if (requestSequence !== sessionRequestSequence.current) return;
-      const forked = response.session as unknown as SessionState;
+      const forked = response.session;
       setSession(forked);
-      setState((current) => current ? { ...current, sessions: response.sessions as unknown as DesktopState["sessions"] } : current);
+      setState((current) => current ? { ...current, sessions: response.sessions } : current);
       setPrompt("");
       setLiveTurn(null);
       setView("chat");
@@ -2436,8 +2453,8 @@ export default function App() {
         setSessionBusy(true);
         try {
           const response = await window.reverie.request("rewindSession", { sessionId: session.id, messageCount, confirmed: true });
-          setSession(response.session as unknown as SessionState);
-          setState((current) => current ? { ...current, sessions: response.sessions as unknown as DesktopState["sessions"] } : current);
+          setSession(response.session);
+          setState((current) => current ? { ...current, sessions: response.sessions } : current);
           setLiveTurn(null);
           toast(t("已回退上一轮对话"), "success");
         } catch (error) {
@@ -2461,9 +2478,9 @@ export default function App() {
         try {
           const response = await window.reverie.request("deleteSession", { sessionId: target.id, confirmed: true });
           delete drafts.current[target.id];
-          const nextSession = (response.session as unknown as SessionState | null) ?? null;
+          const nextSession = response.session ?? null;
           setSession(nextSession);
-          setState((current) => current ? { ...current, sessions: response.sessions as unknown as DesktopState["sessions"] } : current);
+          setState((current) => current ? { ...current, sessions: response.sessions } : current);
           setPrompt(nextSession ? drafts.current[nextSession.id] ?? "" : "");
           setLiveTurn(null);
           if (state) {
@@ -2506,9 +2523,9 @@ export default function App() {
             ? response.deleted_session_ids.map((value) => String(value))
             : targetIds;
           deletedIds.forEach((sessionId) => { delete drafts.current[sessionId]; });
-          const nextSession = (response.session as unknown as SessionState | null) ?? null;
+          const nextSession = response.session ?? null;
           setSession(nextSession);
-          setState((current) => current ? { ...current, sessions: response.sessions as unknown as DesktopState["sessions"] } : current);
+          setState((current) => current ? { ...current, sessions: response.sessions } : current);
           setPrompt(nextSession ? drafts.current[nextSession.id] ?? "" : "");
           setLiveTurn(null);
           updateUiPreferences({
@@ -2545,7 +2562,7 @@ export default function App() {
         ? model.reasoning.value
         : model.reasoning.options[0]?.id;
       const response = await window.reverie.request("selectModel", { source: source.id, modelId: model.id, ...(reasoning ? { reasoning } : {}) });
-      setState((current) => current ? { ...current, models: response.models as unknown as DesktopState["models"], workspace: response.workspace as unknown as DesktopState["workspace"] } : current);
+      setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current);
       setModelPickerOpen(false);
       toast(t("model.switched", { name: model.display_name }), "success");
     } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
@@ -2557,7 +2574,7 @@ export default function App() {
     if (!source) return;
     try {
       const response = await window.reverie.request("selectModel", { source: source.id, modelId: source.selected_model_id, reasoning });
-      setState((current) => current ? { ...current, models: response.models as unknown as DesktopState["models"], workspace: response.workspace as unknown as DesktopState["workspace"] } : current);
+      setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current);
       toast(t("思考设置已更新"), "success");
     } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
   }, [state, t, toast]);
@@ -2566,7 +2583,7 @@ export default function App() {
     try {
       const response = await window.reverie.request("setSetting", { key, value });
       if (response.success === false) throw new Error(String(response.message ?? t("设置未保存")));
-      const settings = response.settings as unknown as DesktopState["settings"];
+      const settings = response.settings;
       setState((current) => current ? { ...current, settings, workspace: key === "mode" ? { ...current.workspace, mode: String(value) } : current.workspace } : current);
       toast(t("设置已保存"), "success");
     } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
@@ -2575,7 +2592,7 @@ export default function App() {
   const saveProvider = useCallback(async (source: ModelSource, patch: Record<string, unknown>) => {
     try {
       const response = await window.reverie.request("setProviderConfig", { source: source.id, patch });
-      setState((current) => current ? { ...current, models: response.models as unknown as DesktopState["models"], workspace: response.workspace as unknown as DesktopState["workspace"] } : current);
+      setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current);
       toast(t("provider.saved", { name: source.display_name }), "success");
     } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
   }, [t, toast]);
@@ -2583,21 +2600,23 @@ export default function App() {
   const addStandard = useCallback(async (model: Record<string, unknown>) => {
     try {
       const response = await window.reverie.request("addStandardModel", { model });
-      setState((current) => current ? { ...current, models: response.models as unknown as DesktopState["models"], workspace: response.workspace as unknown as DesktopState["workspace"] } : current);
+      setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current);
       setStandardModelOpen(false);
       toast(t("标准模型已添加"), "success");
     } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
   }, [t, toast]);
 
   const deleteStandard = useCallback((index: number) => {
-    setConfirmation({ title: t("删除标准模型？"), message: t("这会从 Reverie 内核配置中移除该模型，但不会删除任何远端数据。"), label: t("删除模型"), danger: true, action: () => { void (async () => { try { const response = await window.reverie.request("deleteStandardModel", { index }); setState((current) => current ? { ...current, models: response.models as unknown as DesktopState["models"], workspace: response.workspace as unknown as DesktopState["workspace"] } : current); toast(t("模型已删除"), "success"); } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); } })(); } });
+    setConfirmation({ title: t("删除标准模型？"), message: t("这会从 Reverie 内核配置中移除该模型，但不会删除任何远端数据。"), label: t("删除模型"), danger: true, action: () => { void (async () => { try { const response = await window.reverie.request("deleteStandardModel", { index }); setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current); toast(t("模型已删除"), "success"); } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); } })(); } });
   }, [t, toast]);
 
   const updatePlugin = useCallback(async (action: "setPluginEnabled" | "setPluginTrust", plugin: PluginRecord, value: boolean) => {
     try {
-      const response = await window.reverie.request(action, { pluginId: plugin.id, [action === "setPluginEnabled" ? "enabled" : "trusted"]: value });
-      const plugins = response.plugins as unknown as DesktopState["plugins"];
-      setState((current) => current ? { ...current, plugins, settings: (response.settings as unknown as DesktopState["settings"]) ?? current.settings } : current);
+      const response = action === "setPluginEnabled"
+        ? await window.reverie.request("setPluginEnabled", { pluginId: plugin.id, enabled: value })
+        : await window.reverie.request("setPluginTrust", { pluginId: plugin.id, trusted: value });
+      const plugins = response.plugins;
+      setState((current) => current ? { ...current, plugins, settings: response.settings } : current);
       toast(t("plugin.updated", { name: plugin.name }), "success");
     } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
   }, [t, toast]);
@@ -2605,7 +2624,7 @@ export default function App() {
   const refreshPlugins = useCallback(async () => {
     try {
       const response = await window.reverie.request("refreshPlugins", {});
-      setState((current) => current ? { ...current, plugins: response.plugins as unknown as DesktopState["plugins"] } : current);
+      setState((current) => current ? { ...current, plugins: response.plugins } : current);
       toast(t("插件目录已刷新"), "success");
     } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
   }, [t, toast]);
@@ -2614,13 +2633,13 @@ export default function App() {
     toast(t("工作区索引已开始"), "info");
     try {
       const response = await window.reverie.request("indexWorkspace", {});
-      setState((current) => current ? { ...current, workspace: response.workspace as unknown as DesktopState["workspace"] } : current);
+      setState((current) => current ? { ...current, workspace: response.workspace } : current);
       toast(t("工作区索引完成"), "success");
     } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
   }, [t, toast]);
 
   const rollback = useCallback((checkpointId: string) => {
-    setConfirmation({ title: t("恢复到这个检查点？"), message: t("Reverie 将恢复会话消息，并回退该检查点之后被操作历史跟踪的文件。建议先提交当前改动。"), label: t("确认恢复"), danger: true, action: () => { void (async () => { try { const response = await window.reverie.request("rollbackCheckpoint", { checkpointId, confirmed: true }); setState((current) => current ? { ...current, recovery: response.recovery as unknown as RecoveryState } : current); if (session) await openSession(session.id); toast(t("检查点恢复完成"), "success"); } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); } })(); } });
+    setConfirmation({ title: t("恢复到这个检查点？"), message: t("Reverie 将恢复会话消息，并回退该检查点之后被操作历史跟踪的文件。建议先提交当前改动。"), label: t("确认恢复"), danger: true, action: () => { void (async () => { try { const response = await window.reverie.request("rollbackCheckpoint", { checkpointId, confirmed: true }); setState((current) => current ? { ...current, recovery: response.recovery } : current); if (session) await openSession(session.id); toast(t("检查点恢复完成"), "success"); } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); } })(); } });
   }, [openSession, session, t, toast]);
 
   const requestMentions = useCallback(async () => {
@@ -2636,8 +2655,8 @@ export default function App() {
     try {
       const response = await window.reverie.request("workspaceMentions", { query: prompt.trim(), limit: 24 });
       if (requestSequence !== mentionRequestSequence.current) return;
-      setMentionItems((response.items as Array<Record<string, unknown>>) ?? []);
-      const nextContext = response.context_engine as DesktopState["workspace"]["context_engine"];
+      setMentionItems(response.items);
+      const nextContext = response.context_engine;
       setState((current) => current ? {
         ...current,
         workspace: { ...current.workspace, index_ready: Boolean(nextContext?.ready), context_engine: nextContext },
@@ -2802,4 +2821,65 @@ export default function App() {
     </div>
     </I18nProvider>
   );
+}
+
+const DIALOG_FOCUSABLE = [
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "[href]",
+  "[tabindex]:not([tabindex='-1'])",
+].join(",");
+
+function useDialogFocus(
+  dialogRef: { current: HTMLElement | null },
+  close?: () => void,
+): void {
+  const closeRef = useRef(close);
+  closeRef.current = close;
+  const restoreFocus = useRef<HTMLElement | null>(
+    typeof document !== "undefined" && document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null,
+  );
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const focusable = () => Array.from(dialog.querySelectorAll<HTMLElement>(DIALOG_FOCUSABLE))
+      .filter((element) => !element.hidden && element.getAttribute("aria-hidden") !== "true");
+    const initial = dialog.querySelector<HTMLElement>("[autofocus]") ?? focusable()[0] ?? dialog;
+    initial.focus();
+
+    const keyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape" && closeRef.current) {
+        event.preventDefault();
+        event.stopPropagation();
+        closeRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const elements = focusable();
+      if (!elements.length) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+      const first = elements[0];
+      const last = elements[elements.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    dialog.addEventListener("keydown", keyDown);
+    return () => {
+      dialog.removeEventListener("keydown", keyDown);
+      restoreFocus.current?.focus();
+    };
+  }, [dialogRef]);
 }

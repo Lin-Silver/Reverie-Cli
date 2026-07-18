@@ -46,6 +46,7 @@ setup(
         "click==8.4.2",
         "tqdm==4.68.3",
         "prompt-toolkit==3.0.52",
+        "pathspec==1.1.1",
         
         # HTTP and API
         "requests==2.34.2",

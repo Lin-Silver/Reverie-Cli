@@ -17,9 +17,12 @@ import time
 import os
 import fnmatch
 import hashlib
+import math
+import sqlite3
 import threading
 import queue
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathspec import GitIgnoreSpec
 
 from .symbol_table import Symbol, SymbolTable
 from .dependency_graph import DependencyGraph, Dependency
@@ -170,6 +173,10 @@ class CodebaseIndexer:
     DEFAULT_IGNORE_PATTERNS = [
         '.git', '.git/**',
         '.reverie', '.reverie/**',
+        '.kernel', '**/.kernel/**',
+        '.runtime', '**/.runtime/**',
+        '.cache', '**/.cache/**',
+        '.vite-cache', '**/.vite-cache/**',
         '__pycache__', '**/__pycache__/**',
         'node_modules', '**/node_modules/**',
         '.venv', '**/.venv/**',
@@ -178,6 +185,7 @@ class CodebaseIndexer:
         'env', '**/env/**',
         'dist', '**/dist/**',
         'build', '**/build/**',
+        'release', '**/release/**',
         'references', 'references/**', '**/references/**',
         'comfy', 'comfy/**', '**/comfy/**',
         '*.egg-info', '*.egg-info/**', '**/*.egg-info/**',
@@ -263,6 +271,8 @@ class CodebaseIndexer:
         self.cache_dir = cache_dir or (get_project_data_dir(self.project_root) / 'context_cache')
         self.config = config or IndexConfig()
         self._cache_manager = CacheManager(self.cache_dir)
+        self._content_index_connection: Optional[sqlite3.Connection] = None
+        self._content_index_temporary_path: Optional[Path] = None
         
         # Core data structures
         self.symbol_table = SymbolTable()
@@ -272,9 +282,22 @@ class CodebaseIndexer:
         self._file_info: Dict[str, FileInfo] = {}
         
         # File ignore patterns (from .gitignore + defaults)
-        self._ignore_patterns = set(self.DEFAULT_IGNORE_PATTERNS)
+        self._ignore_patterns = list(self.DEFAULT_IGNORE_PATTERNS)
         self._load_gitignore()
         self._load_reverie_ignore()
+        self._negated_ignore_patterns = [
+            line[1:].strip().lstrip('/')
+            for line in self._ignore_patterns
+            if line.lstrip().startswith('!') and not line.lstrip().startswith(r'\!')
+        ]
+        try:
+            self._ignore_spec = GitIgnoreSpec.from_lines(self._ignore_patterns)
+        except Exception:
+            report_suppressed_exception("compile project ignore rules")
+            self._ignore_spec = GitIgnoreSpec.from_lines(self.DEFAULT_IGNORE_PATTERNS)
+        self._ignore_fingerprint = hashlib.sha256(
+            "\n".join(self._ignore_patterns).encode("utf-8", errors="replace")
+        ).hexdigest()
         
         # Initialize parsers
         self._parsers: List[BaseParser] = [
@@ -297,35 +320,20 @@ class CodebaseIndexer:
     
     def _load_gitignore(self) -> None:
         """Load patterns from .gitignore if it exists"""
-        gitignore_path = self.project_root / '.gitignore'
-        if gitignore_path.exists():
-            try:
-                with open(gitignore_path, 'r', encoding='utf-8') as f:
-                    for line in f:
-                        line = line.strip()
-                        # Skip empty lines and comments
-                        if line and not line.startswith('#'):
-                            self._ignore_patterns.add(line)
-                            # Add recursive version
-                            if not line.startswith('**/'):
-                                self._ignore_patterns.add(f'**/{line}')
-            except Exception:
-                report_suppressed_exception("read project gitignore rules")
+        self._load_ignore_file(self.project_root / '.gitignore', "read project gitignore rules")
     
     def _load_reverie_ignore(self) -> None:
         """Load patterns from .reverieignore if it exists"""
-        reverie_ignore = self.project_root / '.reverieignore'
-        if reverie_ignore.exists():
-            try:
-                with open(reverie_ignore, 'r', encoding='utf-8') as f:
-                    for line in f:
-                        line = line.strip()
-                        if line and not line.startswith('#'):
-                            self._ignore_patterns.add(line)
-                            if not line.startswith('**/'):
-                                self._ignore_patterns.add(f'**/{line}')
-            except Exception:
-                report_suppressed_exception("read parent gitignore rules")
+        self._load_ignore_file(self.project_root / '.reverieignore', "read Reverie ignore rules")
+
+    def _load_ignore_file(self, path: Path, operation: str) -> None:
+        """Append an ignore file verbatim so Git wildmatch ordering is preserved."""
+        if not path.exists():
+            return
+        try:
+            self._ignore_patterns.extend(path.read_text(encoding='utf-8').splitlines())
+        except Exception:
+            report_suppressed_exception(operation)
 
     def _should_ignore(self, path: Path) -> bool:
         """Check if a path should be ignored"""
@@ -334,19 +342,36 @@ class CodebaseIndexer:
         except ValueError:
             return True
 
-        for pattern in self._ignore_patterns:
-            # Use pathlib.Path.match which supports ** for recursive matching
-            try:
-                if rel_path.match(pattern):
-                    return True
-            except ValueError:
-                # If pattern is invalid for match, fall back to fnmatch
-                if fnmatch.fnmatch(str(rel_path), pattern):
-                    return True
-                if fnmatch.fnmatch(path.name, pattern):
-                    return True
+        relative = rel_path.as_posix()
+        try:
+            if path.is_dir() and not relative.endswith('/'):
+                relative += '/'
+        except OSError:
+            pass
+        return bool(self._ignore_spec.match_file(relative))
 
+    def _should_descend_ignored_directory(self, path: Path) -> bool:
+        """Keep walking an ignored directory when a later negation may re-include a child."""
+        try:
+            relative = path.relative_to(self.project_root).as_posix().strip('/')
+        except ValueError:
+            return False
+        prefix = f"{relative}/"
+        for pattern in self._negated_ignore_patterns:
+            normalized = pattern.replace('\\', '/').strip('/')
+            fixed_prefix = normalized.split('*', 1)[0].split('?', 1)[0].rstrip('/')
+            if fixed_prefix == relative or fixed_prefix.startswith(prefix):
+                return True
         return False
+
+    def _cache_metadata(self) -> Dict[str, Any]:
+        """Describe inputs that make an on-disk index safe to reuse."""
+        return {
+            'project_root': os.path.normcase(str(self.project_root)),
+            'ignore_fingerprint': self._ignore_fingerprint,
+            'max_file_size_kb': self.config.max_file_size_kb,
+            'max_full_parse_kb': self.config.max_file_size_for_full_parse_kb,
+        }
     
     def _is_supported_file(self, path: Path) -> bool:
         """Check if file extension is supported"""
@@ -553,6 +578,156 @@ class CodebaseIndexer:
         if file_info:
             file_info.symbol_count = parse_result.symbol_count
             file_info_store[file_key] = file_info
+            search_body = getattr(file_info, "_content_search_body", None)
+            if search_body is not None:
+                if self._content_index_connection is not None:
+                    self._upsert_content_index(file_key, search_body)
+                delattr(file_info, "_content_search_body")
+
+    @staticmethod
+    def _initialize_content_index(connection: sqlite3.Connection) -> None:
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS content_documents "
+            "(rowid INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT NOT NULL UNIQUE)"
+        )
+        connection.execute(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS content_search "
+            "USING fts5(body, content='', tokenize='porter unicode61')"
+        )
+
+    def _begin_content_index_rebuild(self) -> None:
+        """Build a contentless full-text index beside the active cache."""
+        temporary_path = self._cache_manager.content_search_path.with_suffix(".sqlite3.tmp")
+        temporary_path.unlink(missing_ok=True)
+        connection = sqlite3.connect(temporary_path)
+        connection.execute("PRAGMA journal_mode=OFF")
+        connection.execute("PRAGMA synchronous=OFF")
+        self._initialize_content_index(connection)
+        connection.execute("BEGIN")
+        self._content_index_connection = connection
+        self._content_index_temporary_path = temporary_path
+
+    def _finish_content_index_rebuild(self) -> bool:
+        connection = self._content_index_connection
+        temporary_path = self._content_index_temporary_path
+        self._content_index_connection = None
+        self._content_index_temporary_path = None
+        if connection is None or temporary_path is None:
+            return False
+        try:
+            connection.commit()
+            connection.close()
+            os.replace(temporary_path, self._cache_manager.content_search_path)
+            return True
+        except Exception:
+            report_suppressed_exception("publish Context Engine content search index")
+            try:
+                connection.close()
+            except Exception:
+                report_suppressed_exception("close failed Context Engine content search index")
+            temporary_path.unlink(missing_ok=True)
+            return False
+
+    def _begin_content_index_update(self) -> None:
+        path = self._cache_manager.content_search_path
+        connection = sqlite3.connect(path)
+        self._initialize_content_index(connection)
+        connection.execute("BEGIN")
+        self._content_index_connection = connection
+
+    def _finish_content_index_update(self) -> None:
+        connection = self._content_index_connection
+        self._content_index_connection = None
+        if connection is None:
+            return
+        try:
+            connection.commit()
+        except Exception:
+            report_suppressed_exception("update Context Engine content search index")
+        finally:
+            connection.close()
+
+    def _upsert_content_index(self, file_path: str, content: str) -> None:
+        connection = self._content_index_connection
+        if connection is None:
+            return
+        connection.execute("DELETE FROM content_documents WHERE path = ?", (str(file_path),))
+        cursor = connection.execute(
+            "INSERT INTO content_documents(path) VALUES (?)",
+            (str(file_path),),
+        )
+        connection.execute(
+            "INSERT INTO content_search(rowid, body) VALUES (?, ?)",
+            (int(cursor.lastrowid), str(content or "")),
+        )
+
+    def _remove_from_content_index(self, file_path: str) -> None:
+        if self._content_index_connection is not None:
+            self._content_index_connection.execute(
+                "DELETE FROM content_documents WHERE path = ?",
+                (str(file_path),),
+            )
+
+    def search_content_terms(
+        self,
+        weighted_terms: List[Tuple[str, float]],
+        *,
+        limit: int = 80,
+    ) -> Optional[List[Dict[str, Any]]]:
+        """Fuse independent weighted full-text matches without rereading workspace files."""
+        path = self._cache_manager.content_search_path
+        term_weights: Dict[str, float] = {}
+        for term, weight in weighted_terms:
+            normalized = str(term or "").strip().lower()
+            if normalized:
+                term_weights[normalized] = max(term_weights.get(normalized, 0.0), float(weight or 0.0))
+        terms = sorted(term_weights.items(), key=lambda item: (-item[1], item[0]))[:16]
+        if not path.is_file() or not terms:
+            return None
+
+        scores: Dict[str, float] = {}
+        contributions: Dict[str, Dict[str, float]] = {}
+        per_term_limit = max(24, min(96, max(1, int(limit or 80)) * 2))
+        try:
+            with sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True) as connection:
+                for term, weight in terms:
+                    query = f'"{term.replace(chr(34), chr(34) * 2)}"'
+                    rows = connection.execute(
+                        "SELECT content_documents.path, bm25(content_search) AS relevance "
+                        "FROM content_search JOIN content_documents "
+                        "ON content_documents.rowid = content_search.rowid "
+                        "WHERE content_search MATCH ? ORDER BY relevance LIMIT ?",
+                        (query, per_term_limit),
+                    ).fetchall()
+                    for rank, (file_path, relevance) in enumerate(rows, start=1):
+                        # FTS5 returns better BM25 matches as larger negative values.
+                        # Log scaling and reciprocal rank keep one repeated term from
+                        # overwhelming agreement across several independent terms.
+                        bm25_strength = math.log1p(max(0.0, -float(relevance or 0.0)))
+                        contribution = float(weight) * bm25_strength / math.sqrt(rank)
+                        if contribution <= 0.0:
+                            continue
+                        file_key = str(file_path)
+                        scores[file_key] = scores.get(file_key, 0.0) + contribution
+                        contributions.setdefault(file_key, {})[term] = contribution
+        except Exception:
+            report_suppressed_exception("query Context Engine content search index")
+            return None
+        ranked = sorted(scores.items(), key=lambda item: (-item[1], item[0].lower()))
+        return [
+            {
+                "file_path": file_path,
+                "score": round(score, 4),
+                "terms": [
+                    term
+                    for term, _ in sorted(
+                        contributions.get(file_path, {}).items(),
+                        key=lambda item: (-item[1], item[0]),
+                    )[:6]
+                ],
+            }
+            for file_path, score in ranked[: max(1, int(limit or 80))]
+        ]
 
     def _swap_index_state(
         self,
@@ -666,7 +841,10 @@ class CodebaseIndexer:
 
     def _infer_file_tags(self, file_path: Path, parse_result: ParseResult) -> List[str]:
         """Infer coarse roles that help task-level retrieval."""
-        path_text = str(file_path).lower().replace("\\", "/")
+        try:
+            path_text = str(file_path.resolve().relative_to(self.project_root)).lower().replace("\\", "/")
+        except (OSError, ValueError):
+            path_text = file_path.name.lower()
         tags: List[str] = []
         tag_rules = {
             'test': ['test', 'tests', 'spec'],
@@ -774,6 +952,8 @@ class CodebaseIndexer:
         file_info.tags = tags
         file_info.dependency_targets = dependency_targets
         file_info.summary = summary[:360]
+        if file_info.size <= 1024 * 1024:
+            setattr(file_info, "_content_search_body", content)
         return file_info
     
     def scan_files(self, progress_callback: Optional[Callable[..., None]] = None) -> List[Path]:
@@ -814,7 +994,14 @@ class CodebaseIndexer:
                 
                 # Filter out ignored directories
                 original_dir_count = len(dirs)
-                dirs[:] = [d for d in dirs if not self._should_ignore(root_path / d)]
+                dirs[:] = [
+                    directory
+                    for directory in dirs
+                    if (
+                        not self._should_ignore(root_path / directory)
+                        or self._should_descend_ignored_directory(root_path / directory)
+                    )
+                ]
                 filtered_count = original_dir_count - len(dirs)
                 
                 if filtered_count > 0:
@@ -986,6 +1173,13 @@ class CodebaseIndexer:
             chunk_total=total_chunks,
         )
 
+        content_index_started = False
+        try:
+            self._begin_content_index_rebuild()
+            content_index_started = True
+        except Exception:
+            report_suppressed_exception("initialize Context Engine content search index")
+
         with ThreadPoolExecutor(max_workers=self.config.max_workers) as executor:
             for chunk_idx in range(0, len(files), chunk_size):
                 chunk = files[chunk_idx:chunk_idx + chunk_size]
@@ -1109,6 +1303,9 @@ class CodebaseIndexer:
                     logger.error("Error processing chunk %d: %s", chunk_num, e)
                     result.errors.append(f"Chunk {chunk_num}: {str(e)}")
 
+        if content_index_started and not self._finish_content_index_rebuild():
+            result.warnings.append("Failed to persist the content search index")
+
         result.parse_time_ms = (time.time() - parse_start) * 1000
         logger.info("Parsing completed in %.0fms", result.parse_time_ms)
 
@@ -1192,9 +1389,17 @@ class CodebaseIndexer:
             files_skipped=0,
         )
 
+        content_index_started = False
+        try:
+            self._begin_content_index_update()
+            content_index_started = True
+        except Exception:
+            report_suppressed_exception("open Context Engine content search update")
+
         for index, file_path in enumerate(changed_files, start=1):
             file_key = str(file_path)
             try:
+                self._remove_from_content_index(file_key)
                 # Remove the previous file state before reparsing so stale symbols
                 # do not survive a parse error.
                 with self._index_lock:
@@ -1244,6 +1449,9 @@ class CodebaseIndexer:
                     files_failed=result.files_failed,
                     files_skipped=result.files_skipped,
                 )
+
+        if content_index_started:
+            self._finish_content_index_update()
 
         result.parse_time_ms = (time.time() - parse_start) * 1000
         result.total_time_ms = (time.time() - start_time) * 1000
@@ -1399,11 +1607,12 @@ class CodebaseIndexer:
             self.symbol_table,
             self.dependency_graph,
             self._file_info,
+            metadata=self._cache_metadata(),
         )
 
     def load_cache(self) -> bool:
         """Load cached index state when available."""
-        cached = self._cache_manager.load()
+        cached = self._cache_manager.load(expected_metadata=self._cache_metadata())
         if not cached:
             return False
         self.symbol_table.replace_with(cached['symbol_table'])

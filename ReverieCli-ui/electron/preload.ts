@@ -1,4 +1,10 @@
 import { contextBridge, ipcRenderer } from "electron";
+import {
+  assertCoreAction,
+  assertCoreResponse,
+  normalizeCorePayload,
+  type CoreActionName,
+} from "./core-actions";
 
 type JsonRecord = Record<string, unknown>;
 type EventListener = (message: JsonRecord) => void;
@@ -11,8 +17,12 @@ type UiPreferencesPayload = JsonRecord & {
 };
 
 contextBridge.exposeInMainWorld("reverie", {
-  request: (action: string, payload: JsonRecord = {}) =>
-    ipcRenderer.invoke("core:request", action, payload) as Promise<JsonRecord>,
+  request: async (action: CoreActionName, payload: JsonRecord = {}) => {
+    const safeAction = assertCoreAction(action);
+    const safePayload = normalizeCorePayload(payload);
+    const response = await ipcRenderer.invoke("core:request", safeAction, safePayload) as unknown;
+    return assertCoreResponse(safeAction, response);
+  },
   cancel: () => ipcRenderer.invoke("core:cancel") as Promise<void>,
   onEvent: (listener: EventListener) => {
     const wrapped = (_event: Electron.IpcRendererEvent, message: JsonRecord) => listener(message);

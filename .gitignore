@@ -70,3 +70,4 @@ Reverie UI/artifacts/
 /ReverieCli-ui/dist-electron/
 /ReverieCli-ui/release/
 /.audit/
+/context-engine-benchmark/

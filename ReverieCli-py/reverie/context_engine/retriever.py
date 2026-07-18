@@ -14,6 +14,7 @@ The retriever:
 from pathlib import Path
 from typing import List, Dict, Optional, Set, Tuple, Any
 from dataclasses import dataclass, field
+from concurrent.futures import ThreadPoolExecutor
 import math
 import os
 import re
@@ -172,10 +173,27 @@ class ContextRetriever:
     }
 
     TASK_QUERY_STOPWORDS = {
-        'and', 'are', 'can', 'for', 'from', 'have', 'into', 'make', 'more', 'that', 'the',
-        'then', 'these', 'this', 'those', 'when', 'where', 'which', 'with', 'without', 'would',
+        'about', 'actual', 'additional', 'all', 'also', 'and', 'any', 'are', 'because', 'been',
+        'being', 'behavior', 'behaviour', 'but', 'can', 'could', 'description', 'does', 'expected',
+        'for', 'from', 'had', 'has', 'have', 'into', 'its', 'make', 'more', 'not', 'one', 'only',
+        'doesn', 'don', 'false', 'file', 'files', 'isn', 'no', 'none', 'null', 'other', 'our',
+        'please', 'problem', 'related', 'results', 'should', 'some', 'steps', 'such',
+        'than', 'that', 'the', 'their', 'then', 'there', 'these', 'they', 'this', 'those', 'through',
+        'true', 'using', 'was', 'were', 'what', 'when', 'where', 'which', 'while', 'will', 'with',
+        'without', 'won', 'work', 'working', 'would', 'yes', 'you', 'your',
     }
     TASK_SHORT_TOKENS = {'ai', 'db', 'ui', 'ux'}
+    TASK_TOKEN_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]{1,}|[\u4e00-\u9fff]{2,}")
+    TASK_CJK_PATTERN = re.compile(r"[\u4e00-\u9fff]+")
+    TASK_CAMEL_BOUNDARY_PATTERN = re.compile(r"([a-z0-9])([A-Z])")
+    TASK_FENCED_BLOCK_PATTERN = re.compile(r"(?:```|~~~)[^\r\n]*\r?\n.*?(?:```|~~~)", re.DOTALL)
+    TASK_FILE_EXTENSIONS = {
+        'c', 'cc', 'conf', 'cpp', 'cs', 'css', 'csv', 'cxx', 'gd', 'go', 'h', 'hh', 'hpp',
+        'htm', 'html', 'ini', 'java', 'js', 'json', 'jsx', 'less', 'lua', 'md', 'mdx', 'mjs',
+        'py', 'pyi', 'pyw', 'rb', 'rs', 'rst', 'sass', 'scss', 'sh', 'sql', 'toml', 'ts',
+        'tsx', 'txt', 'xml', 'yaml', 'yml', 'zig',
+    }
+    TASK_CONTENT_EXTENSIONS = {f'.{extension}' for extension in TASK_FILE_EXTENSIONS}
     TASK_EXCLUDED_PATH_SEGMENTS = {
         '.git', '.kernel', '.pytest_cache', '.reverie', '.runtime', '.venv', '__pycache__',
         'build', 'dist', 'node_modules', 'release', 'target', 'venv',
@@ -218,6 +236,7 @@ class ContextRetriever:
         git_integration: Any = None,
         memory_indexer: Any = None,
         lsp_manager: Any = None,
+        content_searcher: Any = None,
     ):
         self.symbol_table = symbol_table
         self.dependency_graph = dependency_graph
@@ -226,6 +245,7 @@ class ContextRetriever:
         self.git_integration = git_integration
         self.memory_indexer = memory_indexer
         self.lsp_manager = lsp_manager
+        self.content_searcher = content_searcher
         self._activity_files: Dict[str, Dict[str, float]] = {}
         self._activity_symbols: Dict[str, Dict[str, float]] = {}
         self._task_cache: Dict[tuple[Any, ...], tuple[float, TaskContextResult]] = {}
@@ -235,6 +255,7 @@ class ContextRetriever:
         self._lexical_document_frequency: Counter[str] = Counter()
         self._content_cache: Dict[str, tuple[int, int, str]] = {}
         self._path_cache: Dict[str, str] = {}
+        self._generated_path_cache: Dict[str, bool] = {}
 
     def _normalize_file_path(self, file_path: str) -> str:
         """Normalize file paths so workset scoring is stable across callers."""
@@ -288,11 +309,11 @@ class ContextRetriever:
         return max(0.0, float(state.get("score", 0.0)) * (1.0 - age_penalty))
 
     def _tokenize_query(self, text: str) -> List[str]:
-        raw_tokens = re.findall(r"[A-Za-z_][A-Za-z0-9_]{1,}|[\u4e00-\u9fff]{2,}", str(text or ""))
+        raw_tokens = self.TASK_TOKEN_PATTERN.findall(str(text or ""))
         tokens: List[str] = []
         seen: Set[str] = set()
         for raw in raw_tokens:
-            if re.fullmatch(r"[\u4e00-\u9fff]+", raw):
+            if self.TASK_CJK_PATTERN.fullmatch(raw):
                 cjk_terms = [raw]
                 if len(raw) > 4:
                     cjk_terms.extend(raw[index:index + 2] for index in range(len(raw) - 1))
@@ -302,7 +323,19 @@ class ContextRetriever:
                     seen.add(term)
                     tokens.append(term)
                 continue
-            expanded = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", raw).replace("_", " ").split()
+            if raw.islower() and "_" not in raw:
+                if (
+                    (len(raw) >= 3 or raw in self.TASK_SHORT_TOKENS)
+                    and raw not in self.TASK_QUERY_STOPWORDS
+                    and raw not in seen
+                ):
+                    seen.add(raw)
+                    tokens.append(raw)
+                continue
+            expanded_text = raw.replace("_", " ")
+            if not raw.islower():
+                expanded_text = self.TASK_CAMEL_BOUNDARY_PATTERN.sub(r"\1 \2", expanded_text)
+            expanded = expanded_text.split()
             for part in expanded:
                 token = part.lower().strip()
                 if (
@@ -315,10 +348,15 @@ class ContextRetriever:
                 tokens.append(token)
         return tokens
 
+    def _query_prose(self, query: str) -> str:
+        """Keep issue prose while excluding verbose fenced examples and command output."""
+        return self.TASK_FENCED_BLOCK_PATTERN.sub("\n", str(query or ""))
+
     def _build_task_term_weights(self, query: str) -> Dict[str, float]:
         """Expand the user request into weighted retrieval terms."""
+        prose = self._query_prose(query)
         weights: Dict[str, float] = {}
-        for token in self._tokenize_query(query):
+        for token in self._tokenize_query(prose):
             base_weight = 0.35 if re.fullmatch(r"[\u4e00-\u9fff]+", token) else 1.0
             weights[token] = max(weights.get(token, 0.0), base_weight)
             for root, synonyms in self.TASK_QUERY_SYNONYMS.items():
@@ -326,7 +364,7 @@ class ContextRetriever:
                     weights[root] = max(weights.get(root, 0.0), 0.9 if token == root else 0.7)
                     for synonym in synonyms:
                         weights[synonym] = max(weights.get(synonym, 0.0), 0.55)
-        query_lower = str(query or "").lower()
+        query_lower = prose.lower()
         for alias, expanded_terms in self.TASK_QUERY_ALIASES.items():
             if alias not in query_lower:
                 continue
@@ -338,7 +376,76 @@ class ContextRetriever:
                     weights[root] = max(weights.get(root, 0.0), 0.72)
                     for synonym in synonyms:
                         weights[synonym] = max(weights.get(synonym, 0.0), 0.42)
+
+        title = next((line.strip() for line in str(query or "").splitlines() if line.strip()), "")
+        for token in self._tokenize_query(title):
+            weights[token] = max(weights.get(token, 0.0), 1.65)
+        for identifier in self._extract_query_identifiers(prose):
+            normalized = identifier.lower()
+            weights[normalized] = max(weights.get(normalized, 0.0), 2.2)
         return weights
+
+    def _extract_query_identifiers(self, query: str) -> List[str]:
+        """Return code-shaped and explicitly quoted terms without splitting their spelling."""
+        text = str(query or "")
+        candidates = re.findall(
+            r"`([^`\r\n]{2,80})`|'([^'\r\n]{2,80})'|\"([^\"\r\n]{2,80})\"",
+            text,
+        )
+        values = [part for groups in candidates for part in groups if part]
+        explicit_code_terms: Set[str] = set()
+        for left, right in re.findall(
+            r"\b([A-Za-z_][A-Za-z0-9_]*)\s*/\s*([A-Za-z_][A-Za-z0-9_]*)\b",
+            text,
+        ):
+            values.extend((left, right))
+            explicit_code_terms.update((left.lower(), right.lower()))
+        for call_name in re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(", text):
+            values.append(call_name)
+            explicit_code_terms.add(call_name.lower())
+        values.extend(
+            re.findall(
+                r"\b(?:[A-Za-z_][A-Za-z0-9_]*_[A-Za-z0-9_]+|[A-Z][A-Z0-9_]{2,}|"
+                r"[A-Z][a-z0-9]+(?:[A-Z][A-Za-z0-9]*)+|[A-Za-z_][A-Za-z0-9_]*\."
+                r"[A-Za-z_][A-Za-z0-9_]*)\b",
+                text,
+            )
+        )
+
+        identifiers: List[str] = []
+        seen: Set[str] = set()
+        for raw in values:
+            candidate = str(raw or "").strip("`'\".,;:()[]{} ")
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.-]{1,79}", candidate):
+                continue
+            suffix = candidate.rsplit(".", 1)[-1].lower() if "." in candidate else ""
+            if suffix in self.TASK_FILE_EXTENSIONS or re.fullmatch(r"\d+(?:\.\d+)+", candidate):
+                continue
+            for value in (candidate, candidate.rsplit(".", 1)[-1]):
+                normalized = value.replace("-", "_").lower()
+                if (
+                    normalized in seen
+                    or normalized in self.TASK_QUERY_STOPWORDS
+                    and normalized not in explicit_code_terms
+                ):
+                    continue
+                seen.add(normalized)
+                identifiers.append(value.replace("-", "_"))
+        return identifiers[:24]
+
+    def _calibrate_task_term_weights(self, term_weights: Dict[str, float]) -> Dict[str, float]:
+        """Use indexed document frequency to keep issue-template language from dominating."""
+        if not term_weights or not isinstance(self.file_info, dict) or not self.file_info:
+            return term_weights
+        self._ensure_lexical_index()
+        document_count = max(1, len(self._lexical_documents))
+        calibrated: Dict[str, float] = {}
+        for term, weight in term_weights.items():
+            frequency = self._lexical_document_frequency.get(term.lower(), 0)
+            inverse_frequency = math.log(1.0 + (document_count + 1.0) / (frequency + 1.0))
+            calibrated[term] = float(weight) * min(2.4, max(0.22, inverse_frequency / 2.4))
+        ranked = sorted(calibrated.items(), key=lambda item: (-item[1], item[0]))[:36]
+        return dict(ranked)
 
     def _extract_query_anchors(self, query: str) -> Dict[str, List[str]]:
         """Extract high-confidence file and symbol anchors from a free-form task."""
@@ -348,7 +455,12 @@ class ContextRetriever:
         seen_files: Set[str] = set()
         seen_symbols: Set[str] = set()
 
-        for raw in re.findall(r"[\w./\\-]+\.[A-Za-z0-9_]{1,8}(?::\d+)?", text):
+        extension_pattern = "|".join(sorted(self.TASK_FILE_EXTENSIONS, key=len, reverse=True))
+        for raw in re.findall(
+            rf"(?<![\w.])[\w./\\-]+\.(?:{extension_pattern})(?::\d+)?\b",
+            text,
+            flags=re.IGNORECASE,
+        ):
             candidate = raw.strip("`'\".,;()[]{}")
             if not candidate:
                 continue
@@ -359,16 +471,19 @@ class ContextRetriever:
                 seen_files.add(key)
                 file_like.append(candidate)
 
-        for raw in re.findall(r"\b[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+\b|\b[A-Z][A-Za-z0-9_]{2,}\b", text):
+        title = next((line.strip() for line in text.splitlines() if line.strip()), "")
+        symbol_text = title + " " + " ".join(re.findall(r"`([^`\r\n]{2,80})`", text))
+        for raw in re.findall(r"\b[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+\b|\b[A-Z][A-Za-z0-9_]{2,}\b", symbol_text):
             candidate = raw.strip("`'\".,;()[]{}")
-            if not candidate or "." in candidate and candidate.lower().endswith((".py", ".ts", ".js", ".md")):
+            suffix = candidate.rsplit(".", 1)[-1].lower() if "." in candidate else ""
+            if not candidate or suffix in self.TASK_FILE_EXTENSIONS:
                 continue
             if "." not in candidate:
                 symbol_shape = (
                     "_" in candidate
                     or candidate.isupper()
                     or any(character.isupper() for character in candidate[1:])
-                    or text.strip("`'\".,;()[]{} ") == candidate
+                    or title.strip("`'\".,;()[]{} ") == candidate
                 )
                 if not symbol_shape:
                     continue
@@ -379,24 +494,61 @@ class ContextRetriever:
 
         return {"files": file_like[:12], "symbols": symbol_like[:20]}
 
+    @staticmethod
+    def _path_matches_file_anchor(file_path: str, anchor: str) -> bool:
+        path = str(file_path or "").lower().replace("\\", "/").strip("/")
+        expected = str(anchor or "").lower().replace("\\", "/").strip("/")
+        if not path or not expected:
+            return False
+        return path == expected or path.endswith(f"/{expected}") or (
+            "/" not in expected and Path(path).name == expected
+        )
+
+    def _reliable_file_anchor_terms(self, anchors: Set[str]) -> Set[str]:
+        """Discard basename anchors that are ambiguous inside the indexed workspace."""
+        if not anchors or not isinstance(self.file_info, dict):
+            return set(anchors)
+        indexed_paths = [
+            self._normalize_file_path(path).lower().replace("\\", "/")
+            for path in self.file_info
+        ]
+        reliable: Set[str] = set()
+        for anchor in anchors:
+            normalized = str(anchor or "").lower().replace("\\", "/").strip("/")
+            if not normalized:
+                continue
+            matches = [path for path in indexed_paths if self._path_matches_file_anchor(path, normalized)]
+            if len(matches) == 1 or ("/" in normalized and 1 < len(matches) <= 3):
+                reliable.add(normalized)
+        return reliable
+
     def _is_generated_task_path(self, file_path: str) -> bool:
         """Keep generated application bundles and dependency trees out of task recommendations."""
+        cache_key = str(file_path or "")
+        cached = self._generated_path_cache.get(cache_key)
+        if cached is not None:
+            return cached
         try:
             relative = Path(file_path).relative_to(self.project_root)
         except (OSError, ValueError):
             relative = Path(file_path)
-        return any(part.lower() in self.TASK_EXCLUDED_PATH_SEGMENTS for part in relative.parts)
+        generated = any(part.lower() in self.TASK_EXCLUDED_PATH_SEGMENTS for part in relative.parts)
+        self._generated_path_cache[cache_key] = generated
+        return generated
 
     def _query_role_boost(self, file_path: str, tags: List[str], query: str) -> Tuple[float, List[str]]:
         """Bias files toward the role implied by the user's task."""
-        query_lower = str(query or "").lower()
+        query_lower = next(
+            (line.strip().lower() for line in str(query or "").splitlines() if line.strip()),
+            "",
+        )
         path_lower = str(file_path or "").lower().replace("\\", "/")
         tag_set = set(tags or [])
         boost = 0.0
         reasons: List[str] = []
 
         role_rules = [
-            ("test", ("test", "tests", "pytest", "spec", "coverage", "assert"), 1.6),
+            ("test", ("test", "tests", "pytest", "spec", "coverage"), 1.6),
             ("docs", ("doc", "docs", "readme", "documentation", "guide"), 1.6),
             ("config", ("config", "settings", "toml", "yaml", "json", "env"), 1.6),
             ("cli", ("cli", "command", "commands", "terminal", "shell"), 1.6),
@@ -455,6 +607,151 @@ class ContextRetriever:
             if len(reasons) >= 4:
                 break
         return score, reasons
+
+    def _run_targeted_content_search(
+        self,
+        query: str,
+        term_weights: Dict[str, float],
+        *,
+        limit: int = 80,
+    ) -> List[Dict[str, Any]]:
+        """Search indexed text files for a small set of high-signal issue terms."""
+        title = next((line.strip() for line in str(query or "").splitlines() if line.strip()), "")
+        prose = self._query_prose(query)
+        identifiers = {item.lower() for item in self._extract_query_identifiers(prose)}
+        title_identifiers = {item.lower() for item in self._extract_query_identifiers(title)}
+        literal_terms = set(self._tokenize_query(prose))
+        title_terms = set(self._tokenize_query(title))
+        prioritized_terms: List[Tuple[int, str, float]] = []
+        for term, weight in term_weights.items():
+            normalized = str(term or "").lower()
+            if len(normalized) < 3 or normalized not in literal_terms | identifiers:
+                continue
+            if normalized in title_identifiers:
+                boost = 2.4
+                priority = 0
+            elif normalized in title_terms:
+                boost = 1.55
+                priority = 1
+            elif normalized in identifiers:
+                boost = 2.0
+                priority = 2
+            else:
+                boost = 1.0
+                priority = 3
+            prioritized_terms.append((priority, normalized, float(weight) * boost))
+        prioritized_terms.sort(key=lambda item: (item[0], -item[2], item[1]))
+        ranked_terms = [(term, weight) for _, term, weight in prioritized_terms[:16]]
+        if not ranked_terms:
+            return []
+        if callable(self.content_searcher):
+            try:
+                indexed_hits = self.content_searcher(ranked_terms, limit=limit)
+            except Exception:
+                indexed_hits = None
+            if indexed_hits is not None:
+                return list(indexed_hits)
+        encoded_terms = [(term, term.encode("utf-8"), weight) for term, weight in ranked_terms]
+
+        title_lower = title.lower()
+        wants_docs = any(term in title_lower for term in ("doc", "readme", "guide"))
+        wants_tests = any(term in title_lower for term in ("test", "pytest", "coverage", "spec"))
+        candidates: List[Tuple[int, int, Path, str]] = []
+        byte_budget = 48 * 1024 * 1024
+        for raw_path, info in (self.file_info or {}).items():
+            file_path = self._normalize_file_path(raw_path)
+            path = Path(file_path)
+            if self._is_generated_task_path(file_path) or path.suffix.lower() not in self.TASK_CONTENT_EXTENSIONS:
+                continue
+            try:
+                size = int(self._get_file_meta(info, "size", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            if size <= 0 or size > 1024 * 1024:
+                continue
+            normalized = file_path.lower().replace("\\", "/")
+            is_docs = path.suffix.lower() in {".md", ".mdx", ".rst", ".txt"} or "/docs/" in f"/{normalized}"
+            is_test = "/tests/" in f"/{normalized}" or path.name.lower().startswith("test_") or ".test." in path.name.lower()
+            role = 0 if (not is_docs and not is_test) else 1 if (is_docs and wants_docs) or (is_test and wants_tests) else 2
+            candidates.append((role, size, path, file_path))
+        candidates.sort(key=lambda item: (item[0], item[1], item[3].lower()))
+
+        selected: List[Tuple[Path, str]] = []
+        selected_bytes = 0
+        for _, size, path, file_path in candidates:
+            if len(selected) >= 1200 or selected_bytes + size > byte_budget:
+                break
+            selected.append((path, file_path))
+            selected_bytes += size
+        if not selected:
+            return []
+
+        def score_path(item: Tuple[Path, str]) -> Optional[Dict[str, Any]]:
+            path, file_path = item
+            try:
+                content = path.read_bytes().lower()
+            except OSError:
+                return None
+            normalized_path = file_path.lower().replace("\\", "/")
+            path_stem = path.stem.lower()
+            contributions: List[float] = []
+            matched: List[str] = []
+            for term, encoded_term, weight in encoded_terms:
+                count = content.count(encoded_term)
+                path_match = weight >= 4.0 and (
+                    term == path_stem or term in Path(normalized_path).name.lower()
+                )
+                if count <= 0 and not path_match:
+                    continue
+                contribution = weight * (1.0 + min(2.0, math.log2(count + 1.0))) if count > 0 else 0.0
+                if path_match and term == path_stem:
+                    contribution += weight * 10.0
+                elif path_match:
+                    contribution += weight * 3.0
+                contributions.append(contribution)
+                matched.append(term)
+            if not matched:
+                return None
+            contributions.sort(reverse=True)
+            score = sum(
+                contribution * (1.0 if index == 0 else 0.72 if index == 1 else 0.45 if index < 5 else 0.18)
+                for index, contribution in enumerate(contributions)
+            )
+            if len(matched) > 1:
+                score += min(3.5, (len(matched) - 1) * 0.7)
+            return {
+                "file_path": file_path,
+                "score": round(score, 4),
+                "terms": matched[:6],
+            }
+
+        workers = min(8, max(1, os.cpu_count() or 1), len(selected))
+
+        def score_batch(batch: List[Tuple[Path, str]]) -> List[Dict[str, Any]]:
+            return [hit for item in batch if (hit := score_path(item)) is not None]
+
+        batches = [selected[index::workers] for index in range(workers)]
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            hits = [hit for batch in executor.map(score_batch, batches) for hit in batch]
+        hits.sort(key=lambda item: (-float(item["score"]), str(item["file_path"]).lower()))
+        return hits[: max(1, int(limit or 80))]
+
+    @staticmethod
+    def _task_file_role_multiplier(file_path: str, tags: List[str], query: str) -> float:
+        """Prefer implementation files unless the issue title explicitly asks for another role."""
+        title = next((line.strip().lower() for line in str(query or "").splitlines() if line.strip()), "")
+        normalized = str(file_path or "").lower().replace("\\", "/")
+        name = Path(normalized).name
+        tag_set = set(tags or [])
+        is_docs = "docs" in tag_set or "/docs/" in f"/{normalized}" or Path(name).suffix in {".md", ".mdx", ".rst", ".txt"}
+        is_test = "test" in tag_set or "/tests/" in f"/{normalized}" or name.startswith("test_") or ".test." in name
+        if is_docs and not any(term in title for term in ("doc", "readme", "guide")):
+            return 0.72
+        if is_test and not any(term in title for term in ("test", "pytest", "coverage", "spec")):
+            return 0.82
+        if any(part in normalized for part in ("/.github/issue_template/", "/examples/", "/example/")):
+            return 0.80
+        return 1.0
 
     def _workspace_relative_path(self, file_path: str) -> str:
         try:
@@ -654,16 +951,19 @@ class ContextRetriever:
             file_path = self._normalize_file_path(raw_path)
             if self._is_generated_task_path(file_path):
                 continue
-            body = " ".join(
-                [
-                    str(raw_path),
-                    str(self._get_file_meta(info, "summary", "") or ""),
-                    " ".join(str(value) for value in self._get_file_meta(info, "keywords", []) or []),
-                    " ".join(str(value) for value in self._get_file_meta(info, "symbol_names", []) or []),
-                    " ".join(str(value) for value in self._get_file_meta(info, "tags", []) or []),
-                ]
-            )
-            frequencies = Counter(self._tokenize_query(body))
+            document_terms: Set[str] = set()
+            for field in ("keywords", "tags"):
+                for value in self._get_file_meta(info, field, []) or []:
+                    token = str(value or "").lower().strip()
+                    if token and token not in self.TASK_QUERY_STOPWORDS:
+                        document_terms.add(token)
+            for value in (
+                str(raw_path),
+                str(self._get_file_meta(info, "summary", "") or ""),
+                *(str(value) for value in self._get_file_meta(info, "symbol_names", []) or []),
+            ):
+                document_terms.update(self._tokenize_query(value))
+            frequencies = Counter({term: 1 for term in document_terms})
             if not frequencies:
                 continue
             documents[file_path] = frequencies
@@ -1096,9 +1396,19 @@ class ContextRetriever:
         max_tokens = max(1000, int(max_tokens or 12000))
         max_files = max(1, int(max_files or 6))
         max_symbols = max(1, int(max_symbols or 12))
-        term_weights = self._build_task_term_weights(query_text)
+        term_weights = self._calibrate_task_term_weights(self._build_task_term_weights(query_text))
         anchors = self._extract_query_anchors(query_text)
-        anchor_file_terms = {item.lower().replace("\\", "/") for item in anchors.get("files", [])}
+        anchor_file_terms = self._reliable_file_anchor_terms({
+            item.lower().replace("\\", "/") for item in anchors.get("files", [])
+        })
+        anchors = {
+            **anchors,
+            "files": [
+                item
+                for item in anchors.get("files", [])
+                if item.lower().replace("\\", "/").strip("/") in anchor_file_terms
+            ],
+        }
         anchor_symbol_terms = {item.lower() for item in anchors.get("symbols", [])}
 
         cache_key = (
@@ -1148,13 +1458,45 @@ class ContextRetriever:
         for path in normalized_changed_files:
             self._merge_file_evidence(evidence_by_file, path, source="git", reason="uncommitted_change", score=1.9)
 
+        symbol_scores: Dict[str, float] = defaultdict(float)
+        symbol_reasons: Dict[str, Set[str]] = defaultdict(set)
+        symbol_file_boosts: Dict[str, float] = defaultdict(float)
+        symbol_file_reasons: Dict[str, List[str]] = defaultdict(list)
+        for anchor in anchor_symbol_terms:
+            matches = self.symbol_table.search(anchor, limit=max(24, max_symbols * 8))
+            ambiguity = math.sqrt(max(1.0, len(matches) / 3.0))
+            for symbol in matches:
+                name = str(symbol.name or "").lower()
+                if name == anchor:
+                    boost = 42.0
+                elif name.startswith(anchor):
+                    boost = 30.0
+                elif anchor in name:
+                    boost = 16.0
+                else:
+                    boost = 8.0
+                boost /= ambiguity
+                symbol_scores[symbol.qualified_name] += boost
+                symbol_reasons[symbol.qualified_name].add(f"anchor-symbol:{anchor}")
+                if symbol.file_path:
+                    file_path = self._normalize_file_path(symbol.file_path)
+                    symbol_file_boosts[file_path] += boost
+                    symbol_file_reasons[file_path].append(f"anchor-symbol:{anchor}")
+                    self._merge_file_evidence(
+                        evidence_by_file,
+                        file_path,
+                        source="symbol",
+                        reason=f"anchor-symbol:{anchor}",
+                        score=boost,
+                    )
+
         file_candidates: List[TaskContextFile] = []
         seen_file_candidates: Set[str] = set()
         for raw_path, info in list((self.file_info or {}).items()):
             file_path = self._normalize_file_path(raw_path)
             normalized_path = file_path.lower().replace("\\", "/")
             if self._is_generated_task_path(file_path) and not any(
-                anchor in normalized_path for anchor in anchor_file_terms
+                self._path_matches_file_anchor(normalized_path, anchor) for anchor in anchor_file_terms
             ):
                 continue
             candidate = self._score_file_for_task(
@@ -1163,6 +1505,8 @@ class ContextRetriever:
                 term_weights=term_weights,
                 active_files=normalized_active_files,
                 changed_files=normalized_changed_files,
+                base_score=symbol_file_boosts.get(file_path, 0.0),
+                reason_override=(symbol_file_reasons.get(file_path) or [None])[0],
                 query_text=query_text,
                 anchor_file_terms=anchor_file_terms,
                 score_content=False,
@@ -1177,7 +1521,7 @@ class ContextRetriever:
             for raw_path, info in list((self.file_info or {}).items()):
                 file_path = self._normalize_file_path(raw_path)
                 normalized = file_path.lower().replace("\\", "/")
-                if anchor not in normalized and Path(normalized).name != anchor:
+                if not self._path_matches_file_anchor(normalized, anchor):
                     continue
                 if file_path in seen_file_candidates:
                     continue
@@ -1214,6 +1558,49 @@ class ContextRetriever:
                 changed_files=normalized_changed_files,
                 base_score=float(hit.get("score", 0.0)),
                 reason_override="fts:summary_keyword_match",
+                query_text=query_text,
+                anchor_file_terms=anchor_file_terms,
+                score_content=False,
+            )
+            if candidate:
+                file_candidates.append(candidate)
+                seen_file_candidates.add(file_path)
+
+        targeted_started = time.perf_counter()
+        targeted_content_hits = self._run_targeted_content_search(
+            query_text,
+            term_weights,
+            limit=max(40, max_files * 8),
+        )
+        targeted_content_ms = (time.perf_counter() - targeted_started) * 1000.0
+        for hit in targeted_content_hits:
+            file_path = self._normalize_file_path(hit.get("file_path", ""))
+            if not file_path:
+                continue
+            score = float(hit.get("score", 0.0) or 0.0)
+            matched_terms = [str(term) for term in hit.get("terms", []) if str(term)]
+            reason = "targeted-content:" + ",".join(matched_terms[:3])
+            self._merge_file_evidence(
+                evidence_by_file,
+                file_path,
+                source="targeted-content",
+                reason=reason,
+                score=score,
+            )
+            existing = next((candidate for candidate in file_candidates if candidate.file_path == file_path), None)
+            if existing is not None:
+                existing.score += score
+                existing.reasons = list(dict.fromkeys([reason] + existing.reasons))[:8]
+                continue
+            info = self._get_file_info_record(file_path)
+            candidate = self._score_file_for_task(
+                file_path=file_path,
+                info=info,
+                term_weights=term_weights,
+                active_files=normalized_active_files,
+                changed_files=normalized_changed_files,
+                base_score=score,
+                reason_override=reason,
                 query_text=query_text,
                 anchor_file_terms=anchor_file_terms,
                 score_content=False,
@@ -1321,19 +1708,23 @@ class ContextRetriever:
             )
 
         for candidate in file_candidates:
+            candidate.score *= self._task_file_role_multiplier(
+                candidate.file_path,
+                candidate.tags,
+                query_text,
+            )
             self._fuse_task_file_evidence(candidate, evidence_by_file.get(candidate.file_path, []))
         file_candidates.sort(key=lambda item: item.score, reverse=True)
         selected_file_candidates = self._select_task_file_candidates(
             file_candidates,
             term_weights=term_weights,
             limit=max_files,
+            query_text=query_text,
         )
         selected_files: Dict[str, TaskContextFile] = {
             item.file_path: item for item in selected_file_candidates
         }
 
-        symbol_scores: Dict[str, float] = defaultdict(float)
-        symbol_reasons: Dict[str, Set[str]] = defaultdict(set)
         symbol_search_terms = [] if fast else sorted(
             (
                 (term, weight)
@@ -1346,10 +1737,6 @@ class ContextRetriever:
             for symbol in self.symbol_table.search(term, limit=max_symbols * 6):
                 symbol_scores[symbol.qualified_name] += self._score_symbol_for_task(symbol, term, weight)
                 symbol_reasons[symbol.qualified_name].add(f"term:{term}")
-        for anchor in anchor_symbol_terms:
-            for symbol in self.symbol_table.search(anchor, limit=max_symbols * 4):
-                symbol_scores[symbol.qualified_name] += 7.5
-                symbol_reasons[symbol.qualified_name].add(f"anchor-symbol:{anchor}")
 
         for file_candidate in file_candidates[: max_files * 2]:
             file_symbols = self.symbol_table.get_all_in_file(file_candidate.file_path)
@@ -1513,6 +1900,8 @@ class ContextRetriever:
                 ),
                 "fast_context": fast_context_result.to_dict() if fast_context_result else {},
                 "fast_context_skipped": fast_context_skipped,
+                "targeted_content_hits": len(targeted_content_hits),
+                "targeted_content_ms": round(targeted_content_ms, 3),
             },
         )
         self._task_cache[cache_key] = (time.time(), result)
@@ -1540,9 +1929,10 @@ class ContextRetriever:
             return None
 
         summary = str(self._get_file_meta(info, "summary", "") or "")
-        keywords = [str(value).lower() for value in self._get_file_meta(info, "keywords", [])]
-        tags = [str(value).lower() for value in self._get_file_meta(info, "tags", [])]
-        symbol_names = [str(value).lower() for value in self._get_file_meta(info, "symbol_names", [])]
+        keywords = {str(value).lower() for value in self._get_file_meta(info, "keywords", [])}
+        tag_values = [str(value).lower() for value in self._get_file_meta(info, "tags", [])]
+        tags = set(tag_values)
+        symbol_names = tuple(str(value).lower() for value in self._get_file_meta(info, "symbol_names", []))
         imports = self._get_file_meta(info, "imports", []) or []
         import_names = []
         for item in imports:
@@ -1558,7 +1948,7 @@ class ContextRetriever:
             anchor_lower = str(anchor or "").lower().replace("\\", "/")
             if not anchor_lower:
                 continue
-            if anchor_lower in path_lower or Path(path_lower).name == anchor_lower:
+            if self._path_matches_file_anchor(path_lower, anchor_lower):
                 score += 8.0
                 reasons.append(f"anchor-file:{anchor_lower}")
         for term, weight in term_weights.items():
@@ -1621,7 +2011,7 @@ class ContextRetriever:
             summary=summary or f"Relevant file {Path(file_path).name}",
             reasons=unique_reasons[:6],
             top_symbols=list(self._get_file_meta(info, "top_level_symbols", [])[:6]),
-            tags=tags[:6],
+            tags=tag_values[:6],
         )
 
     @staticmethod
@@ -1656,6 +2046,7 @@ class ContextRetriever:
         *,
         term_weights: Dict[str, float],
         limit: int,
+        query_text: str = "",
     ) -> List[TaskContextFile]:
         """Preserve top relevance while covering distinct intents in compound tasks."""
         target = max(1, int(limit or 1))
@@ -1673,10 +2064,14 @@ class ContextRetriever:
             ("docs", {"docs", "documentation", "readme", "guide"}, 1),
             ("config", {"config", "configuration", "settings"}, 1),
         )
+        facet_weights = term_weights
+        if query_text:
+            title = next((line.strip() for line in query_text.splitlines() if line.strip()), "")
+            facet_weights = self._build_task_term_weights(title)
         active_facets = [
             (facet, quota)
             for facet, terms, quota in facet_terms
-            if any(term_weights.get(term, 0.0) >= 0.85 for term in terms)
+            if any(facet_weights.get(term, 0.0) >= 0.85 for term in terms)
         ]
         if not active_facets:
             return list(candidates[:target])

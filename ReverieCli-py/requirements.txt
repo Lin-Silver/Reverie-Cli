@@ -5,6 +5,7 @@ rich==15.0.0
 click==8.4.2
 tqdm==4.68.3
 prompt-toolkit==3.0.52
+pathspec==1.1.1
 
 # LLM and API Integration
 openai==2.44.0

@@ -10,7 +10,8 @@ from reverie.context_engine.compressor import (
 from reverie.context_engine.dependency_graph import DependencyGraph
 from reverie.context_engine.fast_context import FastContextExplorer
 from reverie.context_engine.fragments import make_context_fragment, render_context_fragments
-from reverie.context_engine.indexer import FileInfo
+from reverie.context_engine.indexer import CodebaseIndexer, FileInfo
+from reverie.context_engine.parsers.base import ParseResult
 from reverie.context_engine.parsers.config_parser import ConfigParser
 from reverie.context_engine.retriever import ContextRetriever, TaskContextFile
 from reverie.context_engine.symbol_table import Symbol, SymbolKind, SymbolTable
@@ -192,6 +193,241 @@ def test_task_query_tokens_keep_ui_terms_and_drop_stopwords(tmp_path: Path) -> N
     assert "and" not in tokens
     assert "the" not in tokens
     assert anchors["symbols"] == ["ContextRetriever"]
+
+
+def test_query_anchors_reject_versions_and_dotted_symbols(tmp_path: Path) -> None:
+    retriever = ContextRetriever(SymbolTable(), DependencyGraph(), tmp_path)
+
+    anchors = retriever._extract_query_anchors(
+        "In 4.2, routing.TelemetryCoordinator fails; inspect src/routing/coordinator.ts:42"
+    )
+
+    assert anchors["files"] == ["src/routing/coordinator.ts"]
+    assert "4.2" not in anchors["files"]
+    assert "routing.TelemetryCoordinator" in anchors["symbols"]
+    assert retriever._path_matches_file_anchor("tests/test.py", "test.py") is True
+    assert retriever._path_matches_file_anchor("tests/configuration_test.py", "test.py") is False
+
+
+def test_fast_task_uses_exact_symbol_before_file_cutoff(tmp_path: Path, monkeypatch) -> None:
+    target = tmp_path / "src" / "coordinator.ts"
+    target.parent.mkdir()
+    target.write_text("export class TelemetryCoordinator {}\n", encoding="utf-8")
+    table = SymbolTable()
+    table.add_symbol(
+        Symbol(
+            name="TelemetryCoordinator",
+            qualified_name="src.coordinator.TelemetryCoordinator",
+            kind=SymbolKind.CLASS,
+            file_path=str(target),
+            start_line=1,
+            end_line=2,
+            language="typescript",
+        )
+    )
+    file_info = {
+        str(target): FileInfo(
+            path=str(target), mtime=1, size=target.stat().st_size, content_hash="target", language="typescript"
+        )
+    }
+    for index in range(12):
+        decoy = tmp_path / "docs" / f"telemetry_{index}.md"
+        decoy.parent.mkdir(exist_ok=True)
+        decoy.write_text("telemetry parameter behavior", encoding="utf-8")
+        file_info[str(decoy)] = FileInfo(
+            path=str(decoy),
+            mtime=1,
+            size=decoy.stat().st_size,
+            content_hash=str(index),
+            language="markdown",
+            keywords=["telemetry", "parameter", "behavior"],
+            tags=["docs"],
+            summary="Telemetry parameter behavior documentation",
+        )
+    retriever = ContextRetriever(table, DependencyGraph(), tmp_path, file_info=file_info)
+    monkeypatch.setattr(retriever, "_run_targeted_content_search", lambda *_args, **_kwargs: [])
+
+    result = retriever.retrieve_for_task(
+        "TelemetryCoordinator parameter behavior",
+        max_files=1,
+        max_symbols=1,
+        include_history=False,
+        include_memory=False,
+        fast=True,
+    )
+
+    assert result.relevant_files[0].file_path == str(target)
+    assert "anchor-symbol:telemetrycoordinator" in result.relevant_files[0].reasons
+
+
+def test_targeted_content_search_finds_rare_identifiers_across_languages(tmp_path: Path) -> None:
+    cases = [
+        ("python", "worker.py", "lease_generation_token", "lease renewal failed"),
+        ("typescript", "renderer.ts", "renderEpochFence", "renderer state is stale"),
+        ("rust", "scheduler.rs", "borrow_epoch_guard", "scheduler retries forever"),
+    ]
+    paths = []
+    for language, filename, identifier, _ in cases:
+        target = tmp_path / "src" / filename
+        target.parent.mkdir(exist_ok=True)
+        target.write_text(f"const marker = '{identifier}'\n", encoding="utf-8")
+        paths.append((language, target))
+    decoy = tmp_path / "src" / "common.ts"
+    decoy.write_text("export const marker = 'ordinary_state'\n", encoding="utf-8")
+    paths.append(("typescript", decoy))
+    file_info = {
+        str(path): FileInfo(
+            path=str(path), mtime=1, size=path.stat().st_size, content_hash=path.stem, language=language
+        )
+        for language, path in paths
+    }
+    retriever = ContextRetriever(SymbolTable(), DependencyGraph(), tmp_path, file_info=file_info)
+
+    for _, filename, identifier, title in cases:
+        query = f"{title}\nRuntime evidence mentions `{identifier}`"
+        weights = retriever._calibrate_task_term_weights(retriever._build_task_term_weights(query))
+        hits = retriever._run_targeted_content_search(query, weights, limit=5)
+
+        assert Path(hits[0]["file_path"]).name == filename
+        assert identifier.lower() in hits[0]["terms"]
+
+
+def test_query_weights_ignore_verbose_fenced_output(tmp_path: Path) -> None:
+    retriever = ContextRetriever(SymbolTable(), DependencyGraph(), tmp_path)
+
+    weights = retriever._build_task_term_weights(
+        "Scheduler renewal loses lease state\n"
+        "The inline `LeaseCoordinator` should preserve its generation.\n"
+        "```text\nTransientOutputWidget generated_marker_9281\n```\n"
+    )
+
+    assert "scheduler" in weights
+    assert "leasecoordinator" in weights
+    assert "generated_marker_9281" not in weights
+    assert "transientoutputwidget" not in weights
+
+
+def test_ambiguous_basename_file_anchors_are_not_trusted(tmp_path: Path) -> None:
+    paths = [
+        tmp_path / "src" / "engine.py",
+        tmp_path / "alpha" / "__init__.py",
+        tmp_path / "beta" / "__init__.py",
+    ]
+    for path in paths:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("value = 1\n", encoding="utf-8")
+    file_info = {
+        str(path): FileInfo(
+            path=str(path), mtime=1, size=path.stat().st_size, content_hash=path.parent.name
+        )
+        for path in paths
+    }
+    retriever = ContextRetriever(SymbolTable(), DependencyGraph(), tmp_path, file_info=file_info)
+
+    reliable = retriever._reliable_file_anchor_terms({"engine.py", "__init__.py"})
+
+    assert reliable == {"engine.py"}
+
+
+def test_file_tags_ignore_workspace_parent_directory_names(tmp_path: Path) -> None:
+    project_root = tmp_path / "engine-tools" / "Reverie-Cli" / "project"
+    target = project_root / "src" / "plain.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("value = 1\n", encoding="utf-8")
+    indexer = CodebaseIndexer(project_root, cache_dir=tmp_path / "cache")
+
+    tags = indexer._infer_file_tags(target, ParseResult(file_path=str(target), language="python"))
+
+    assert "engine" not in tags
+    assert "cli" not in tags
+
+
+def test_content_search_index_persists_and_updates_full_file_terms(tmp_path: Path) -> None:
+    target = tmp_path / "src" / "scheduler.py"
+    target.parent.mkdir()
+    target.write_text("def schedule():\n    return 'lease_epoch_guard'\n", encoding="utf-8")
+    cache_dir = tmp_path / "cache"
+    indexer = CodebaseIndexer(tmp_path, cache_dir=cache_dir)
+
+    result = indexer.full_index(show_progress=False)
+    initial_hits = indexer.search_content_terms([("lease_epoch_guard", 1.0)], limit=5)
+
+    assert result.success is True
+    assert initial_hits is not None
+    assert initial_hits[0]["file_path"] == str(target)
+
+    cached_indexer = CodebaseIndexer(tmp_path, cache_dir=cache_dir)
+    assert cached_indexer.load_cache() is True
+    persisted_hits = cached_indexer.search_content_terms([("lease_epoch_guard", 1.0)], limit=5)
+    assert persisted_hits is not None
+    assert persisted_hits[0]["file_path"] == str(target)
+
+    target.write_text("def schedule():\n    return 'renewal_generation_fence'\n", encoding="utf-8")
+    cached_indexer.incremental_index([target.resolve()])
+
+    assert cached_indexer.search_content_terms([("lease_epoch_guard", 1.0)], limit=5) == []
+    updated_hits = cached_indexer.search_content_terms([("renewal_generation_fence", 1.0)], limit=5)
+    assert updated_hits is not None
+    assert updated_hits[0]["file_path"] == str(target.resolve())
+
+
+def test_content_search_fuses_weighted_terms_and_reports_actual_matches(tmp_path: Path) -> None:
+    target = tmp_path / "src" / "coordinator.py"
+    decoy = tmp_path / "src" / "state.py"
+    plural = tmp_path / "src" / "module_loader.py"
+    target.parent.mkdir()
+    target.write_text("marker = 'lease_generation_guard protects shared state'\n", encoding="utf-8")
+    decoy.write_text("marker = 'state state state state state'\n", encoding="utf-8")
+    plural.write_text("def expand_modules():\n    pass\n", encoding="utf-8")
+    indexer = CodebaseIndexer(tmp_path, cache_dir=tmp_path / "cache")
+    assert indexer.full_index(show_progress=False).success is True
+
+    hits = indexer.search_content_terms(
+        [("state", 0.2), ("lease_generation_guard", 4.0)],
+        limit=5,
+    )
+    stemmed_hits = indexer.search_content_terms([("module", 1.0)], limit=5)
+
+    assert hits is not None
+    assert Path(hits[0]["file_path"]).name == "coordinator.py"
+    assert "lease_generation_guard" in hits[0]["terms"]
+    decoy_hit = next(hit for hit in hits if Path(hit["file_path"]).name == "state.py")
+    assert decoy_hit["terms"] == ["state"]
+    assert stemmed_hits is not None
+    assert Path(stemmed_hits[0]["file_path"]).name == "module_loader.py"
+
+
+def test_task_file_roles_follow_explicit_documentation_intent(tmp_path: Path) -> None:
+    implementation = tmp_path / "src" / "migration.py"
+    documentation = tmp_path / "docs" / "migration-guide.md"
+    implementation.parent.mkdir()
+    documentation.parent.mkdir()
+    implementation.write_text("def migrate_schema():\n    return True\n", encoding="utf-8")
+    documentation.write_text("Migration guide and upgrade examples\n", encoding="utf-8")
+    file_info = {
+        str(implementation): FileInfo(
+            path=str(implementation), mtime=1, size=implementation.stat().st_size,
+            content_hash="code", language="python", keywords=["migration", "upgrade"],
+            summary="Schema migration implementation",
+        ),
+        str(documentation): FileInfo(
+            path=str(documentation), mtime=1, size=documentation.stat().st_size,
+            content_hash="docs", language="markdown", keywords=["migration", "guide", "upgrade"],
+            tags=["docs"], summary="Migration guide documentation",
+        ),
+    }
+    retriever = ContextRetriever(SymbolTable(), DependencyGraph(), tmp_path, file_info=file_info)
+
+    result = retriever.retrieve_for_task(
+        "Update the migration guide documentation",
+        max_files=1,
+        max_symbols=1,
+        include_history=False,
+        include_memory=False,
+        fast=True,
+    )
+
+    assert result.relevant_files[0].file_path == str(documentation)
 
 
 def test_fast_task_recommendations_ignore_generated_bundle_copies(tmp_path: Path) -> None:
@@ -427,6 +663,16 @@ def test_config_parser_keeps_github_actions_on_key_as_string(tmp_path: Path) -> 
     assert not result.errors
     assert any(symbol.name == "on" for symbol in result.symbols)
     assert all(isinstance(symbol.name, str) for symbol in result.symbols)
+
+
+def test_config_parser_accepts_top_level_json_array(tmp_path: Path) -> None:
+    configuration = tmp_path / "configuration.json"
+    configuration.write_text('[{"name": "first"}, {"name": "second"}]\n', encoding="utf-8")
+
+    result = ConfigParser(tmp_path).parse_file(configuration)
+
+    assert result.success is True
+    assert result.errors == []
 
 
 def test_compressor_uses_deterministic_fallback_when_provider_fails(tmp_path: Path) -> None:

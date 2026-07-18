@@ -13,9 +13,6 @@ import locale
 import os
 from pathlib import Path
 
-from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
-
 try:
     from .diagnostics import report_suppressed_exception
     from .version import CORE_INTERFACE_VERSION, RELEASE_STATUS, __version__
@@ -423,6 +420,9 @@ def main(argv: list[str] | None = None):
     
     # Index only mode
     if args.index_only:
+        from rich.console import Console
+        from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
+
         from reverie.config import get_project_data_dir
         from reverie.context_engine import CodebaseIndexer
 

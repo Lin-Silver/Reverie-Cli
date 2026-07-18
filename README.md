@@ -214,7 +214,7 @@ The core/desktop Release is separate from the optional plugin Release:
 
 Every push to `main` rebuilds the rolling `latest` tag as **Reverie CLI Latest (Prerelease)**. Version tags such as `v2.5.0` remain stable Releases. Release notes and upload labels group downloads as Windows, Linux, macOS Apple Silicon, then macOS Intel. `reverie-kernels.json` is the single optional verification file: GitHub already displays a digest for every asset, while this consolidated record additionally maps each kernel to its protocol, interface version, platform, architecture, commit, size, and SHA-256.
 
-`reverie` starts the TUI/core. `reverieui` starts the GUI in the current directory. Packaged GUIs always contain a compiled fallback kernel. A sibling kernel is selected only when its SHA-256 appears in the build-time allowlist and its `--kernel-info` protocol handshake succeeds.
+`reverie` starts the TUI/core. `reverieui` starts the GUI in the current directory. Packaged GUIs start with their fast onedir kernel; the explicit portable `--tui` route may select a sibling kernel only when its SHA-256 appears in the build-time allowlist and its `--kernel-info` protocol handshake succeeds.
 
 ### Install from Source (Python)
 

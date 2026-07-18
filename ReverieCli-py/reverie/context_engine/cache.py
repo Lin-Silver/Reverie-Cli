@@ -38,6 +38,7 @@ class CacheManager:
     """
     
     CACHE_VERSION = "1.1.0"
+    COMPRESSION_LEVEL = 3
     
     def __init__(self, cache_dir: Path):
         self.cache_dir = Path(cache_dir)
@@ -111,7 +112,7 @@ class CacheManager:
                     }
             
             with open(self.files_path, 'w', encoding='utf-8') as f:
-                json.dump(files_data, f)
+                json.dump(files_data, f, ensure_ascii=False, separators=(',', ':'))
             
             return True
             
@@ -230,8 +231,8 @@ class CacheManager:
     
     def _save_compressed(self, path: Path, data: Dict) -> None:
         """Save data as compressed JSON"""
-        json_str = json.dumps(data)
-        compressed = gzip.compress(json_str.encode('utf-8'))
+        json_bytes = json.dumps(data, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+        compressed = gzip.compress(json_bytes, compresslevel=self.COMPRESSION_LEVEL, mtime=0)
         
         with open(path, 'wb') as f:
             f.write(compressed)

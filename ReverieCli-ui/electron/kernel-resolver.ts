@@ -29,6 +29,7 @@ type ResolverOptions = {
   manifestPath?: string;
   platform?: string;
   arch?: string;
+  preferExternal?: boolean;
   probe?: (executable: string, expected: TrustedKernel) => Promise<boolean>;
 };
 
@@ -100,6 +101,13 @@ export async function resolveKernelSelection(options: ResolverOptions): Promise<
   const arch = options.arch ?? process.arch;
   const internalPath = path.resolve(options.internalPath);
   if (!existsSync(internalPath)) throw new Error(`Bundled Reverie core not found: ${internalPath}`);
+  if (options.preferExternal === false) {
+    return {
+      path: internalPath,
+      source: "internal",
+      reason: "bundled kernel preferred for fast desktop startup",
+    };
+  }
 
   const externalPath = path.resolve(options.externalHome, kernelExecutableName(platform));
   if (externalPath.toLowerCase() === internalPath.toLowerCase()) {

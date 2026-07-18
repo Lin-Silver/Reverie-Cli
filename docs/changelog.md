@@ -11,6 +11,12 @@ Released 2026-07-17.
 * Changed the rolling `latest` Release into an automatically rebuilt prerelease for every `main` push, consolidated four platform JSON records into `reverie-kernels.json`, labeled macOS downloads as Apple Silicon or Intel, and published categorized Windows → Linux → macOS download sections.
 * Added complete Simplified Chinese and English desktop localization with an immediately applied, persisted language selector under General settings, including localized native file-picker titles.
 * Moved the persistent sidebar-collapse control beside the Reverie mark at the top of the project/session sidebar, kept a restore control in the main toolbar while hidden, and expanded the agent workspace into the released space.
+* Made the project sidebar responsive at compact widths and added `Ctrl/Cmd+B`, while preserving a temporary manual override of automatic collapse.
+* Standardized desktop typography on integer-sized Segoe UI/Microsoft YaHei tokens with an 11 px minimum caption size, removing the 8–10 px and half-pixel text that rendered inconsistently on Windows.
+* Accelerated portable GUI startup by using the bundled onedir kernel directly and skipping repeated full-payload NSIS CRC scans; the trusted sibling one-file kernel remains available to the explicit TUI route.
+* Reworked Context Engine task recommendations around cached BM25-style metadata, Chinese intent expansion, compound-intent coverage, generated-bundle filtering, and an index-only fast path for the desktop mention picker.
+* Accelerated context compression with bounded role-aware transcripts, lazy deterministic fallback generation, compact checkpoint/cache serialization, and faster gzip settings.
+* Made repository-dependent turns proactively select the native `codebase-retrieval` tool once, strengthened its model-facing routing guidance, and kept cached recommendations visible while the desktop refreshes them in the background.
 
 ## Reverie CLI v2.4.0 - Desktop, Context Engine, and Release Upgrade
 

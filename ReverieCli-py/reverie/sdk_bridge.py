@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
@@ -639,12 +640,14 @@ class ReverieSdkBridge:
             query = str(payload.get("query") or "").strip()
             limit = max(1, min(100, int(payload.get("limit", 24) or 24)))
             interface = self.ensure_interface()
+            started = time.perf_counter()
             candidates = interface._collect_workspace_mention_candidates(query, limit=limit)
             return {
                 "id": request_id,
                 "type": "workspace.mentions",
                 "query": query,
                 "items": _json_safe(candidates),
+                "elapsed_ms": int((time.perf_counter() - started) * 1000),
                 "context_engine": self.context_status_payload(),
             }
         if action == "indexWorkspace":

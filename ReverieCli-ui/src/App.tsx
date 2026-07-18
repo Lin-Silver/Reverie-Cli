@@ -110,7 +110,12 @@ import {
   type MessageWidthPreference,
   type UiPreferences,
 } from "./preferences";
-import { normalizeSidebarCollapsed, SIDEBAR_COLLAPSED_STORAGE_KEY } from "./layout";
+import {
+  normalizeSidebarCollapsed,
+  resolveSidebarCollapsed,
+  SIDEBAR_AUTO_COLLAPSE_QUERY,
+  SIDEBAR_COLLAPSED_STORAGE_KEY,
+} from "./layout";
 import { I18nProvider, UI_LANGUAGE_OPTIONS, translate, useI18n } from "./i18n";
 
 type CoreResponse = Record<string, unknown>;
@@ -250,18 +255,21 @@ function IconButton({
   onClick,
   active = false,
   disabled = false,
+  ariaKeyShortcuts,
 }: {
   label: string;
   children: ReactNode;
   onClick?: () => void;
   active?: boolean;
   disabled?: boolean;
+  ariaKeyShortcuts?: string;
 }) {
   return (
     <button
       type="button"
       className={`icon-button ${active ? "active" : ""}`}
       aria-label={label}
+      aria-keyshortcuts={ariaKeyShortcuts}
       title={label}
       onClick={onClick}
       disabled={disabled}
@@ -455,7 +463,7 @@ function Sidebar({
     <aside className="sidebar">
       <div className="sidebar-drag">
         <BrandMark />
-        <button type="button" className="sidebar-collapse-button" aria-label={t("收起左侧栏")} title={t("收起左侧栏")} onClick={toggleSidebar}>
+        <button type="button" className="sidebar-collapse-button" aria-label={t("收起左侧栏")} aria-keyshortcuts="Control+B Meta+B" title={`${t("收起左侧栏")} (Ctrl+B)`} onClick={toggleSidebar}>
           <PanelLeftClose size={16} />
         </button>
       </div>
@@ -729,7 +737,7 @@ function Topbar({
   return (
     <header className="topbar">
       <div className="topbar-left">
-        {sidebarCollapsed && <IconButton label={t("展开左侧栏")} onClick={toggleSidebar}><PanelLeftOpen size={16} /></IconButton>}
+        {sidebarCollapsed && <IconButton label={`${t("展开左侧栏")} (Ctrl+B)`} ariaKeyShortcuts="Control+B Meta+B" onClick={toggleSidebar}><PanelLeftOpen size={16} /></IconButton>}
         <button type="button" className="model-trigger" onClick={openModelPicker}>
           <span>{state.models.active_model?.display_name || t("选择模型")}</span>
           <small>{activeSource?.display_name || state.models.active_source}</small>
@@ -1028,20 +1036,20 @@ function MentionPicker({
   const { t } = useI18n();
   if (!open) return null;
   return (
-    <div className="mention-picker" aria-live="polite">
+    <div className={`mention-picker ${loading ? "is-loading" : ""}`} aria-live="polite" aria-busy={loading}>
       <div className="mention-picker-heading">
-        <span><Sparkles size={13} />{t("Context Engine 推荐")}</span>
+        <span><Sparkles size={13} />{t("Context Engine 推荐")}{loading && items.length > 0 && <RefreshCw className="spin mention-picker-refresh" size={12} />}</span>
         <small>{t("结合当前提示、会话、索引与 Git 变更")}</small>
       </div>
-      {loading && <div className="mention-picker-state"><RefreshCw className="spin" size={14} />{t("正在计算最相关文件…")}</div>}
+      {loading && items.length === 0 && <div className="mention-picker-state"><RefreshCw className="spin" size={14} />{t("正在计算最相关文件…")}</div>}
       {!loading && items.length === 0 && <div className="mention-picker-state">{t("当前工作区没有可推荐的文件")}</div>}
-      {items.slice(0, 12).map((item, index) => {
+      {items.slice(0, 12).map((item) => {
         const pathValue = String(item.path ?? item.file_path ?? "");
         const line = Number(item.line ?? item.start_line ?? 0);
         const value = `${workspaceMention(pathValue)}${line ? `#L${line}` : ""}`;
         const reason = t(String(item.reason ?? item.summary ?? item.source ?? "工作区匹配"));
         return (
-          <button type="button" key={`${value}-${index}`} onClick={() => choose(value)}>
+          <button type="button" key={`${String(item.kind ?? "file")}-${value}`} onClick={() => choose(value)}>
             {String(item.kind ?? "file") === "symbol" ? <Code2 size={14} /> : <FileText size={14} />}
             <div><strong>{String(item.name ?? pathValue.split(/[\\/]/).pop() ?? pathValue)}</strong><span>{pathValue}</span><small>{reason}</small></div>
           </button>
@@ -1999,8 +2007,17 @@ export default function App() {
   const [prompt, setPrompt] = useState("");
   const [running, setRunning] = useState(false);
   const [liveTurn, setLiveTurn] = useState<LiveTurn | null>(null);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
+  const [sidebarPreferenceCollapsed, setSidebarPreferenceCollapsed] = useState(() =>
     normalizeSidebarCollapsed(localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY)),
+  );
+  const [compactViewport, setCompactViewport] = useState(() =>
+    window.matchMedia(SIDEBAR_AUTO_COLLAPSE_QUERY).matches,
+  );
+  const [sidebarViewportOverride, setSidebarViewportOverride] = useState<boolean | null>(null);
+  const sidebarCollapsed = resolveSidebarCollapsed(
+    sidebarPreferenceCollapsed,
+    compactViewport,
+    sidebarViewportOverride,
   );
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
@@ -2024,10 +2041,24 @@ export default function App() {
   );
   const toastId = useRef(0);
   const sessionRequestSequence = useRef(0);
+  const mentionRequestSequence = useRef(0);
   const initializeSequence = useRef(0);
   const themeRequestSequence = useRef(0);
   const uiPreferenceRequestSequence = useRef(0);
   const drafts = useRef<Record<string, string>>({});
+
+  const toggleSidebar = useCallback(() => {
+    if (compactViewport) {
+      setSidebarViewportOverride((current) => !resolveSidebarCollapsed(
+        sidebarPreferenceCollapsed,
+        true,
+        current,
+      ));
+      return;
+    }
+    setSidebarViewportOverride(null);
+    setSidebarPreferenceCollapsed((current) => !current);
+  }, [compactViewport, sidebarPreferenceCollapsed]);
 
   useEffect(() => {
     applyTheme(theme, systemDark);
@@ -2039,8 +2070,18 @@ export default function App() {
   }, [uiPreferences]);
 
   useEffect(() => {
-    localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(sidebarCollapsed));
-  }, [sidebarCollapsed]);
+    localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(sidebarPreferenceCollapsed));
+  }, [sidebarPreferenceCollapsed]);
+
+  useEffect(() => {
+    const media = window.matchMedia(SIDEBAR_AUTO_COLLAPSE_QUERY);
+    const updateCompactViewport = (event: MediaQueryListEvent) => {
+      setCompactViewport(event.matches);
+      setSidebarViewportOverride(null);
+    };
+    media.addEventListener("change", updateCompactViewport);
+    return () => media.removeEventListener("change", updateCompactViewport);
+  }, []);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
@@ -2193,6 +2234,7 @@ export default function App() {
       if (modifier && event.key.toLowerCase() === "k") { event.preventDefault(); setCommandOpen(true); }
       if (modifier && event.key.toLowerCase() === "n") { event.preventDefault(); void createSession(); }
       if (modifier && event.key.toLowerCase() === "f") { event.preventDefault(); setSessionSearchOpen(true); }
+      if (modifier && event.key.toLowerCase() === "b") { event.preventDefault(); toggleSidebar(); }
       if (event.key === "Escape") {
         setModelPickerOpen(false);
         setCommandOpen(false);
@@ -2200,7 +2242,8 @@ export default function App() {
         setStandardModelOpen(false);
         setRenameSessionTarget(null);
         setConfirmation(null);
-        setMentionItems([]);
+        mentionRequestSequence.current += 1;
+        setMentionLoading(false);
         setMentionOpen(false);
       }
     };
@@ -2582,14 +2625,17 @@ export default function App() {
 
   const requestMentions = useCallback(async () => {
     if (mentionOpen) {
+      mentionRequestSequence.current += 1;
       setMentionOpen(false);
+      setMentionLoading(false);
       return;
     }
+    const requestSequence = ++mentionRequestSequence.current;
     setMentionOpen(true);
     setMentionLoading(true);
-    setMentionItems([]);
     try {
       const response = await window.reverie.request("workspaceMentions", { query: prompt.trim(), limit: 24 });
+      if (requestSequence !== mentionRequestSequence.current) return;
       setMentionItems((response.items as Array<Record<string, unknown>>) ?? []);
       const nextContext = response.context_engine as DesktopState["workspace"]["context_engine"];
       setState((current) => current ? {
@@ -2597,10 +2643,11 @@ export default function App() {
         workspace: { ...current.workspace, index_ready: Boolean(nextContext?.ready), context_engine: nextContext },
       } : current);
     } catch (error) {
+      if (requestSequence !== mentionRequestSequence.current) return;
       setMentionOpen(false);
       toast(error instanceof Error ? error.message : String(error), "error");
     } finally {
-      setMentionLoading(false);
+      if (requestSequence === mentionRequestSequence.current) setMentionLoading(false);
     }
   }, [mentionOpen, prompt, toast]);
 
@@ -2729,7 +2776,7 @@ export default function App() {
     if (view === "plugins") return <PluginsView plugins={state.plugins.records} updatePlugin={updatePlugin} refresh={refreshPlugins} />;
     if (view === "recovery") return <RecoveryView recovery={state.recovery} rollback={rollback} />;
     if (view === "settings") return <SettingsView state={state} updateSetting={updateSetting} selectModel={selectModel} saveProvider={saveProvider} addStandard={() => setStandardModelOpen(true)} deleteStandard={deleteStandard} paths={desktopPaths} selectCoreData={() => void selectCoreData()} theme={theme} setTheme={changeTheme} preferences={uiPreferences} updatePreferences={updateUiPreferences} selectBackground={() => void selectBackground()} clearBackground={() => void clearBackground()} />;
-    return <ChatView session={session} liveTurn={liveTurn} running={running} prompt={prompt} setPrompt={setPrompt} send={() => void sendPrompt()} cancel={() => void cancelPrompt()} mentionItems={mentionItems} mentionOpen={mentionOpen} mentionLoading={mentionLoading} requestMentions={() => void requestMentions()} chooseMention={(value) => { setPrompt((current) => `${current}${current && !current.endsWith(" ") ? " " : ""}${value} `); setMentionItems([]); setMentionOpen(false); }} attachments={attachments} selectAttachment={() => void selectAttachment()} removeAttachment={removeAttachment} modelName={state.models.active_model?.display_name ?? "Reverie"} sessionBusy={sessionBusy} renameSession={() => { if (session) setRenameSessionTarget({ id: session.id, name: session.name }); }} forkSession={() => void forkActiveSession()} rewindSession={rewindActiveSession} deleteSession={() => { if (session) deleteSession(session); }} preferences={uiPreferences} updatePreferences={updateUiPreferences} />;
+    return <ChatView session={session} liveTurn={liveTurn} running={running} prompt={prompt} setPrompt={setPrompt} send={() => void sendPrompt()} cancel={() => void cancelPrompt()} mentionItems={mentionItems} mentionOpen={mentionOpen} mentionLoading={mentionLoading} requestMentions={() => void requestMentions()} chooseMention={(value) => { setPrompt((current) => `${current}${current && !current.endsWith(" ") ? " " : ""}${value} `); setMentionOpen(false); }} attachments={attachments} selectAttachment={() => void selectAttachment()} removeAttachment={removeAttachment} modelName={state.models.active_model?.display_name ?? "Reverie"} sessionBusy={sessionBusy} renameSession={() => { if (session) setRenameSessionTarget({ id: session.id, name: session.name }); }} forkSession={() => void forkActiveSession()} rewindSession={rewindActiveSession} deleteSession={() => { if (session) deleteSession(session); }} preferences={uiPreferences} updatePreferences={updateUiPreferences} />;
   }, [state, view, updatePlugin, refreshPlugins, rollback, updateSetting, selectModel, saveProvider, deleteStandard, desktopPaths, selectCoreData, theme, changeTheme, uiPreferences, updateUiPreferences, selectBackground, clearBackground, session, liveTurn, running, prompt, mentionItems, mentionOpen, mentionLoading, attachments, selectAttachment, removeAttachment, sendPrompt, cancelPrompt, requestMentions, sessionBusy, forkActiveSession, rewindActiveSession, deleteSession]);
 
   if (bootError) return <I18nProvider language={uiPreferences.language}><ErrorScreen error={bootError} retry={() => void initialize()} /></I18nProvider>;
@@ -2738,9 +2785,9 @@ export default function App() {
   return (
     <I18nProvider language={uiPreferences.language}>
     <div className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${inspectorOpen ? "with-inspector" : ""}`}>
-      <Sidebar state={state} view={view} setView={setView} activeSessionId={activeSessionId} openSession={(id) => void openSession(id)} newSession={() => void createSession()} sessionBusy={sessionBusy} selectWorkspace={() => void selectWorkspace()} switchWorkspace={(projectRoot) => void switchWorkspace(projectRoot)} openSearch={() => setSessionSearchOpen(true)} preferences={uiPreferences} toggleSidebar={() => setSidebarCollapsed(true)} renameSession={(target) => setRenameSessionTarget({ id: target.id, name: target.name })} toggleArchive={toggleSessionArchive} deleteSession={deleteSession} deleteArchivedSessions={deleteArchivedSessions} deleteProject={deleteProject} />
+      <Sidebar state={state} view={view} setView={setView} activeSessionId={activeSessionId} openSession={(id) => void openSession(id)} newSession={() => void createSession()} sessionBusy={sessionBusy} selectWorkspace={() => void selectWorkspace()} switchWorkspace={(projectRoot) => void switchWorkspace(projectRoot)} openSearch={() => setSessionSearchOpen(true)} preferences={uiPreferences} toggleSidebar={toggleSidebar} renameSession={(target) => setRenameSessionTarget({ id: target.id, name: target.name })} toggleArchive={toggleSessionArchive} deleteSession={deleteSession} deleteArchivedSessions={deleteArchivedSessions} deleteProject={deleteProject} />
       <main className="main-area">
-        <Topbar state={state} sidebarCollapsed={sidebarCollapsed} toggleSidebar={() => setSidebarCollapsed((value) => !value)} openModelPicker={() => setModelPickerOpen(true)} selectReasoning={(value) => void selectReasoning(value)} setMode={(mode) => void updateSetting("mode", mode)} inspectorOpen={inspectorOpen} toggleInspector={() => setInspectorOpen((value) => !value)} openCommands={() => setCommandOpen(true)} theme={theme} setTheme={changeTheme} />
+        <Topbar state={state} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} openModelPicker={() => setModelPickerOpen(true)} selectReasoning={(value) => void selectReasoning(value)} setMode={(mode) => void updateSetting("mode", mode)} inspectorOpen={inspectorOpen} toggleInspector={() => setInspectorOpen((value) => !value)} openCommands={() => setCommandOpen(true)} theme={theme} setTheme={changeTheme} />
         <div className="content-area">{page}</div>
       </main>
       {inspectorOpen && <Inspector state={state} liveTurn={liveTurn} indexWorkspace={() => void indexWorkspace()} />}

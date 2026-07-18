@@ -45,6 +45,25 @@ function writeManifest(internalDirectory: string, contents: string) {
 }
 
 describe("trusted kernel selection", () => {
+  it("uses the unpacked bundled kernel without hashing or probing a sibling for the GUI", async () => {
+    const files = fixture();
+    writeManifest(files.internalDirectory, "official external kernel");
+    let probes = 0;
+    const selected = await resolveKernelSelection({
+      internalPath: files.internalPath,
+      externalHome: files.externalDirectory,
+      preferExternal: false,
+      probe: async () => {
+        probes += 1;
+        return true;
+      },
+    });
+    expect(selected.source).toBe("internal");
+    expect(selected.path).toBe(files.internalPath);
+    expect(selected.reason).toContain("fast desktop startup");
+    expect(probes).toBe(0);
+  });
+
   it("uses a trusted sibling after its compatibility handshake", async () => {
     const files = fixture();
     writeManifest(files.internalDirectory, "official external kernel");

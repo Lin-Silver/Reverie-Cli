@@ -34,9 +34,9 @@ class CodebaseRetrievalTool(BaseTool):
     read_only = True
     concurrency_safe = True
     
-    description = """Augment-style codebase context tool for symbols, files, search, dependencies, and task worksets.
+    description = """Primary Context Engine tool. Call it proactively before repository-dependent answers, plans, or edits.
 
-Use this when repository evidence is needed before edits or architectural claims. Prefer `task` for broad requests because it returns a ranked, compact workset instead of flooding the prompt.
+Prefer `task` for the first lookup on a broad request because it returns a ranked, compact, multi-signal workset instead of flooding the prompt. After that result, use narrower queries only when exact files, symbols, usages, or dependencies remain uncertain.
 
 Query types:
 - symbol: Get detailed info about a specific function, class, or variable
@@ -65,7 +65,7 @@ Examples:
             },
             "query": {
                 "type": "string",
-                "description": "Symbol name, file path, or search pattern"
+                "description": "The active repository task in the user's own words, or an exact symbol, file path, or search pattern for narrower queries"
             },
             "include_source": {
                 "type": "boolean",

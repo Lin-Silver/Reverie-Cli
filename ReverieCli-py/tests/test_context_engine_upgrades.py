@@ -1,13 +1,18 @@
 from pathlib import Path
 import json
 
-from reverie.context_engine.compressor import ContextCompressor, MEMORY_BLOCK_HEADER
+from reverie.context_engine.cache import CacheManager
+from reverie.context_engine.compressor import (
+    ContextCompressor,
+    MEMORY_BLOCK_HEADER,
+    _build_compression_transcript,
+)
 from reverie.context_engine.dependency_graph import DependencyGraph
 from reverie.context_engine.fast_context import FastContextExplorer
 from reverie.context_engine.fragments import make_context_fragment, render_context_fragments
 from reverie.context_engine.indexer import FileInfo
 from reverie.context_engine.parsers.config_parser import ConfigParser
-from reverie.context_engine.retriever import ContextRetriever
+from reverie.context_engine.retriever import ContextRetriever, TaskContextFile
 from reverie.context_engine.symbol_table import Symbol, SymbolKind, SymbolTable
 from reverie.context_engine.workspace import detect_workspace_profile
 from reverie.session.memory_indexer import MemoryIndexer
@@ -128,6 +133,209 @@ def test_task_context_includes_workspace_instructions_and_evidence(tmp_path: Pat
     assert "index" in result.metadata["evidence_sources"]
 
 
+def test_fast_task_recommendations_expand_chinese_intent_without_building_prompt_context(tmp_path: Path) -> None:
+    target = tmp_path / "reverie" / "context_engine" / "compressor.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("def compress_context():\n    return 'compact memory'\n", encoding="utf-8")
+    decoy = tmp_path / "ui" / "panel.py"
+    decoy.parent.mkdir()
+    decoy.write_text("def render_panel():\n    return 'panel'\n", encoding="utf-8")
+    file_info = {
+        str(target): FileInfo(
+            path=str(target),
+            mtime=target.stat().st_mtime,
+            size=target.stat().st_size,
+            content_hash="a",
+            language="python",
+            keywords=["context", "compression", "memory"],
+            tags=["engine"],
+            summary="Context compression and memory compaction",
+        ),
+        str(decoy): FileInfo(
+            path=str(decoy),
+            mtime=decoy.stat().st_mtime,
+            size=decoy.stat().st_size,
+            content_hash="b",
+            language="python",
+            keywords=["ui"],
+            tags=["ui"],
+            summary="Desktop panel rendering",
+        ),
+    }
+    table = SymbolTable()
+    retriever = ContextRetriever(table, DependencyGraph(), tmp_path, file_info=file_info)
+
+    result = retriever.retrieve_for_task(
+        "优化上下文引擎压缩速度和推荐检索",
+        max_files=2,
+        max_symbols=2,
+        include_history=False,
+        include_memory=False,
+        fast=True,
+    )
+
+    assert result.relevant_files[0].file_path == str(target)
+    assert result.context_string == ""
+    assert result.token_estimate == 0
+    assert result.metadata["fast"] is True
+    assert result.metadata["term_weights"]["compression"] > 0
+
+
+def test_task_query_tokens_keep_ui_terms_and_drop_stopwords(tmp_path: Path) -> None:
+    retriever = ContextRetriever(SymbolTable(), DependencyGraph(), tmp_path)
+
+    tokens = retriever._tokenize_query("Improve UI UX and the Context Engine")
+    anchors = retriever._extract_query_anchors("Optimize ContextRetriever in Context Engine")
+
+    assert "ui" in tokens
+    assert "ux" in tokens
+    assert "and" not in tokens
+    assert "the" not in tokens
+    assert anchors["symbols"] == ["ContextRetriever"]
+
+
+def test_fast_task_recommendations_ignore_generated_bundle_copies(tmp_path: Path) -> None:
+    source = tmp_path / "src" / "tool_manifest.json"
+    generated = tmp_path / ".runtime" / "temp" / "tool_manifest.json"
+    source.parent.mkdir(parents=True)
+    generated.parent.mkdir(parents=True)
+    source.write_text('{"tool": "codebase-retrieval"}', encoding="utf-8")
+    generated.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+    file_info = {
+        str(path): FileInfo(
+            path=str(path),
+            mtime=path.stat().st_mtime,
+            size=path.stat().st_size,
+            content_hash=path.parent.name,
+            language="json",
+            keywords=["tool", "context", "retrieval"],
+            tags=["tools"],
+            summary="Context Engine tool manifest",
+        )
+        for path in (source, generated)
+    }
+    retriever = ContextRetriever(SymbolTable(), DependencyGraph(), tmp_path, file_info=file_info)
+
+    result = retriever.retrieve_for_task(
+        "context engine tool manifest",
+        max_files=1,
+        max_symbols=1,
+        include_history=False,
+        include_memory=False,
+        fast=True,
+    )
+
+    assert result.relevant_files[0].file_path == str(source)
+    assert result.metadata["fast_context_skipped"] is True
+
+
+def test_fast_task_recommendations_skip_file_scans_when_index_has_enough_candidates(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    file_info = {}
+    for index in range(4):
+        target = tmp_path / "reverie" / "context_engine" / f"engine_{index}.py"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(f"def optimize_context_{index}():\n    return 'fast retrieval'\n", encoding="utf-8")
+        file_info[str(target)] = FileInfo(
+            path=str(target),
+            mtime=target.stat().st_mtime,
+            size=target.stat().st_size,
+            content_hash=str(index),
+            language="python",
+            keywords=["context", "engine", "retrieval", "performance"],
+            tags=["engine"],
+            summary="Context Engine retrieval performance optimization",
+        )
+
+    table = SymbolTable()
+    retriever = ContextRetriever(table, DependencyGraph(), tmp_path, file_info=file_info)
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("fast indexed recommendations should not scan file contents")
+
+    monkeypatch.setattr(retriever, "_run_fast_context_for_task", fail_if_called)
+    monkeypatch.setattr(retriever, "_score_file_content_for_task", fail_if_called)
+    monkeypatch.setattr(table, "search", fail_if_called)
+
+    result = retriever.retrieve_for_task(
+        "optimize context engine retrieval performance",
+        max_files=4,
+        max_symbols=2,
+        include_history=False,
+        include_memory=False,
+        fast=True,
+    )
+
+    assert len(result.relevant_files) == 4
+    assert result.metadata["fast_context_skipped"] is True
+
+
+def test_workspace_mention_ranking_deduplicates_files_and_diversifies_directories() -> None:
+    from reverie.cli.interface import ReverieInterface
+
+    candidates = [
+        {"path": "src/context/retriever.py", "name": "retriever.py", "kind": "file", "score": 100.0},
+        {"path": "src/context/retriever.py", "name": "retrieve_for_task", "kind": "symbol", "score": 99.0},
+        {"path": "src/context/cache.py", "name": "cache.py", "kind": "file", "score": 98.0},
+        {"path": "tests/test_context.py", "name": "test_context.py", "kind": "file", "score": 97.5},
+    ]
+
+    ranked = ReverieInterface._diversify_workspace_mention_candidates(candidates, limit=3)
+
+    assert [item["path"] for item in ranked] == [
+        "src/context/retriever.py",
+        "tests/test_context.py",
+        "src/context/cache.py",
+    ]
+    assert len({item["path"] for item in ranked}) == len(ranked)
+
+
+def test_compound_task_selection_reserves_results_for_each_active_intent(tmp_path: Path) -> None:
+    retriever = ContextRetriever(SymbolTable(), DependencyGraph(), tmp_path)
+
+    def candidate(path: str, score: float, tags=None) -> TaskContextFile:
+        return TaskContextFile(path, "python", score, path, [], tags=list(tags or []))
+
+    candidates = [
+        candidate("src/core.py", 100.0),
+        candidate("src/irrelevant.py", 90.0),
+        candidate("src/context/retriever.py", 60.0),
+        candidate("src/context/compressor.py", 55.0),
+        candidate("src/tools/codebase.py", 50.0, ["tools"]),
+        candidate("src/agent/system_prompt.py", 45.0),
+        candidate("src/agent/agent.py", 44.0),
+        candidate("desktop/src/styles.css", 40.0, ["ui"]),
+        candidate("desktop/src/App.tsx", 39.0, ["ui"]),
+    ]
+
+    selected = retriever._select_task_file_candidates(
+        candidates,
+        term_weights={
+            "retrieval": 1.0,
+            "compression": 1.0,
+            "tool": 1.0,
+            "llm": 1.0,
+            "ui": 1.0,
+        },
+        limit=8,
+    )
+
+    selected_paths = {item.file_path for item in selected}
+    assert selected[0].file_path == "src/core.py"
+    assert "src/irrelevant.py" not in selected_paths
+    assert {
+        "src/context/retriever.py",
+        "src/context/compressor.py",
+        "src/tools/codebase.py",
+        "src/agent/system_prompt.py",
+        "src/agent/agent.py",
+        "desktop/src/styles.css",
+        "desktop/src/App.tsx",
+    } <= selected_paths
+
+
 def test_fast_context_explorer_returns_line_citations(tmp_path: Path) -> None:
     target = tmp_path / "src" / "settings.py"
     target.parent.mkdir()
@@ -245,6 +453,82 @@ def test_compressor_uses_deterministic_fallback_when_provider_fails(tmp_path: Pa
     assert len(compressed) < len(messages)
     assert compressed[1]["content"].startswith(MEMORY_BLOCK_HEADER)
     assert "reverie/agent/agent.py" in compressed[1]["content"]
+
+
+def test_compression_transcript_is_bounded_and_preserves_oldest_and_newest_work() -> None:
+    messages = [
+        {"role": "user", "content": "oldest architectural decision " + "a" * 30000},
+        *(
+            {"role": "tool", "name": f"tool-{index}", "content": f"middle output {index} " + "b" * 12000}
+            for index in range(18)
+        ),
+        {"role": "assistant", "content": "newest verified result " + "c" * 30000},
+    ]
+
+    transcript = _build_compression_transcript(messages, max_chars=40000)
+
+    assert len(transcript) <= 40000
+    assert "oldest architectural decision" in transcript
+    assert "newest verified result" in transcript
+    assert "omitted for faster compression" in transcript
+
+
+def test_successful_provider_compression_skips_deterministic_fallback(monkeypatch, tmp_path: Path) -> None:
+    class SuccessfulClient:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**kwargs):
+                    class Message:
+                        content = "Current Goal\n- Continue the verified implementation."
+
+                    class Choice:
+                        message = Message()
+
+                    class Response:
+                        choices = [Choice()]
+                        usage = None
+
+                    return Response()
+
+    fallback_calls = 0
+
+    def unexpected_fallback(*args, **kwargs):
+        nonlocal fallback_calls
+        fallback_calls += 1
+        return "fallback"
+
+    monkeypatch.setattr(
+        "reverie.context_engine.compressor._build_deterministic_compression_summary",
+        unexpected_fallback,
+    )
+    messages = [
+        {"role": "system", "content": "system"},
+        *(
+            {"role": "user" if index % 2 == 0 else "assistant", "content": f"message {index}"}
+            for index in range(20)
+        ),
+    ]
+
+    compressed = ContextCompressor(tmp_path).compress(
+        messages,
+        client=SuccessfulClient(),
+        model="test-model",
+        provider="openai-sdk",
+    )
+
+    assert fallback_calls == 0
+    assert compressed[1]["content"].startswith(MEMORY_BLOCK_HEADER)
+
+
+def test_context_cache_uses_fast_compact_gzip_roundtrip(tmp_path: Path) -> None:
+    manager = CacheManager(tmp_path)
+    payload = {"中文": {"symbols": ["ContextRetriever"], "summary": "compression " * 40}}
+
+    manager._save_compressed(manager.symbols_path, payload)
+
+    assert manager.COMPRESSION_LEVEL == 3
+    assert manager._load_compressed(manager.symbols_path) == payload
 
 
 def test_auto_memory_redacts_secrets_and_builds_typed_fragments(tmp_path: Path) -> None:

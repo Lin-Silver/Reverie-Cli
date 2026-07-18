@@ -118,6 +118,8 @@ def _append_shared_prompt_guidance(additional_rules: str, normalized_mode: str, 
 - Treat `codebase-retrieval` as the primary repository-intelligence entrypoint, not as an optional search tool.
 - When a task depends on repository state, start with `codebase-retrieval` before `ReadFile`, `ReadFolder`, direct file tools, edits, plans, or architecture claims.
 - For large repositories, unfamiliar areas, multi-file features, bugs, refactors, migrations, API/config changes, or ambiguous requests, the default first tool call is exactly `codebase-retrieval(query_type="task", query="<the active request>")`.
+- Treat a preloaded memory/context package as an initial hint, not a substitute for a model-visible Context Engine call. For any turn that asks you to inspect, explain, debug, review, or change repository code, proactively issue the task query before making claims or edits.
+- Use this routing test: repository-dependent request and no Context Engine result yet in the current turn -> call `task`; exact symbol/file uncertainty after that -> call the narrower query; current-turn result already answers the question -> proceed without repeating the call.
 - When you need fast project orientation or likely files before a full workset, call `codebase-retrieval(query_type="explore", query="<the active request>")`; it uses FastContext-style parallel READ/GLOB/GREP evidence and returns file/line citations.
 - After the task-level retrieval, drill down with `symbol`, `file`, `dependencies`, `memory`, or `lsp` as needed before editing.
 - Use direct file reads only after Context Engine has produced a workset, or when the user named an exact file and the task is trivial.

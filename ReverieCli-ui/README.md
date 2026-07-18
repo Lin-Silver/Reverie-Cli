@@ -32,7 +32,7 @@ For complete local builds, use `build.bat` on Windows or `build.sh` on Linux. Th
 
 The rolling `latest` GitHub Release is rebuilt from every `main` push and is marked as a prerelease. Its downloads are grouped Windows → Linux → macOS Apple Silicon → macOS Intel, and its four platform kernel records are consolidated into `reverie-kernels.json`.
 
-Every package contains a fast-starting PyInstaller directory kernel. The build also records the SHA-256 of the separately released one-file core inside the ASAR-integrity-protected application package. A portable sibling `reverie.exe`/`reverie` is used only when that protected hash is trusted and its `reverie.kernel.v1` handshake matches; otherwise the desktop logs the reason and uses its internal kernel. The terminal contract is:
+Every package contains a fast-starting PyInstaller directory kernel, which the GUI uses directly so portable startup never hashes, probes, and unpacks the one-file core first. The build also records the SHA-256 of the separately released one-file core inside the ASAR-integrity-protected application package. The explicit portable TUI route may use that sibling only when the protected hash is trusted and its `reverie.kernel.v1` handshake matches. The terminal contract is:
 
 - `reverie`: TUI/core in the current directory.
 - `reverieui`: GUI in the current directory.

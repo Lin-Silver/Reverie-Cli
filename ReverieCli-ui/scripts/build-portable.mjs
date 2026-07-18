@@ -15,7 +15,9 @@ import { fileURLToPath } from "node:url";
 const scriptRoot = path.dirname(fileURLToPath(import.meta.url));
 const uiRoot = path.resolve(scriptRoot, "..");
 const repositoryRoot = path.resolve(uiRoot, "..");
-const unpackedRoot = path.join(uiRoot, "release", "win-unpacked");
+const unpackedRoot = process.env.REVERIE_UNPACKED_ROOT
+  ? path.resolve(process.env.REVERIE_UNPACKED_ROOT)
+  : path.join(uiRoot, "release", "win-unpacked");
 const cacheRoot = path.join(uiRoot, ".cache", "portable-build");
 const outputRoot = path.join(repositoryRoot, "dist");
 const packageJson = JSON.parse(readFileSync(path.join(uiRoot, "package.json"), "utf8"));
@@ -65,7 +67,7 @@ RequestExecutionLevel user
 SilentInstall silent
 AutoCloseWindow true
 WindowIcon off
-CRCCheck on
+CRCCheck off
 SetDatablockOptimize on
 SetCompressor /FINAL zlib
 Name "Reverie"

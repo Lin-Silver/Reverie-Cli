@@ -2412,7 +2412,7 @@ class ReverieInterface:
         effective_query = effective_query[-2400:]
         query_text = raw_query.lower()
         tokens = [token.lower() for token in re.findall(r"[A-Za-z0-9_.\-\u4e00-\u9fff]+", query_text)]
-        ignored = {".git", ".reverie", "__pycache__", ".pytest_cache", ".mypy_cache", "node_modules", "venv", ".venv", "env", "dist", "build", "target"}
+        ignored = {".git", ".reverie", ".runtime", ".kernel", "__pycache__", ".pytest_cache", ".mypy_cache", "node_modules", "venv", ".venv", "env", "dist", "build", "release", "target"}
         candidates: List[Dict[str, Any]] = []
         seen: set[tuple[str, str, str]] = set()
 
@@ -2441,11 +2441,12 @@ class ReverieInterface:
             if retriever is not None:
                 result = retriever.retrieve_for_task(
                     effective_query,
-                    max_tokens=3200,
-                    max_files=max(8, min(16, int(limit or 24))),
-                    max_symbols=max(8, min(20, int(limit or 24))),
-                    include_history=True,
-                    include_memory=True,
+                    max_tokens=1800,
+                    max_files=max(8, min(24, int(limit or 24))),
+                    max_symbols=max(8, min(24, int(limit or 24))),
+                    include_history=False,
+                    include_memory=False,
+                    fast=True,
                 )
                 for rank, item in enumerate(result.relevant_files):
                     rel = relative_path(item.file_path)
@@ -2465,7 +2466,7 @@ class ReverieInterface:
                             "kind": "file",
                             "score": 200.0 + float(item.score) - rank,
                             "source": "context-engine",
-                            "reason": str(item.reasons[0] if item.reasons else "task relevance"),
+                            "reason": str(item.reasons[0] if item.reasons else "multi-signal task relevance"),
                             "summary": str(item.summary or ""),
                         }
                     )
@@ -2484,7 +2485,7 @@ class ReverieInterface:
                             "end_line": int(symbol.end_line),
                             "size": 0,
                             "mtime": 0.0,
-                            "score": 180.0 - rank,
+                            "score": 180.0 - rank + (45.0 if query_text and query_text == str(symbol.name).lower() else 0.0),
                             "source": "context-engine",
                             "reason": "symbol relevance",
                         }
@@ -2498,6 +2499,8 @@ class ReverieInterface:
             for raw_path, info in indexed_files.items():
                 rel = relative_path(raw_path)
                 if not rel:
+                    continue
+                if any(part.lower() in ignored for part in Path(rel).parts):
                     continue
                 haystack = rel.lower()
                 match_count = sum(token in haystack for token in tokens)
@@ -2558,8 +2561,53 @@ class ReverieInterface:
                     score += max(0.0, 8.0 - ((time.time() - stat.st_mtime) / 86400.0))
                     add({"path": rel, "name": name, "size": stat.st_size, "mtime": stat.st_mtime, "kind": "file", "score": score, "source": "workspace-scan", "reason": "recent or matching file"})
 
-        candidates.sort(key=lambda item: (-float(item.get("score", 0.0)), str(item.get("path", "")).lower(), str(item.get("name", "")).lower()))
-        return candidates[:max(1, int(limit or 500))]
+        return ReverieInterface._diversify_workspace_mention_candidates(
+            candidates,
+            limit=max(1, int(limit or 500)),
+        )
+
+    @staticmethod
+    def _diversify_workspace_mention_candidates(
+        candidates: List[Dict[str, Any]],
+        *,
+        limit: int,
+    ) -> List[Dict[str, Any]]:
+        """Return high-relevance mentions without duplicate files or one-folder domination."""
+        remaining = sorted(
+            candidates,
+            key=lambda item: (
+                -float(item.get("score", 0.0)),
+                str(item.get("path", "")).lower(),
+                str(item.get("name", "")).lower(),
+            ),
+        )
+        selected: List[Dict[str, Any]] = []
+        selected_paths: set[str] = set()
+        directory_counts: Dict[str, int] = {}
+        target = max(1, int(limit or 1))
+
+        while remaining and len(selected) < target:
+            best_index = -1
+            best_rank = float("-inf")
+            for index, item in enumerate(remaining):
+                path_key = str(item.get("path", "") or "").replace("\\", "/").lower()
+                if not path_key or path_key in selected_paths:
+                    continue
+                directory = str(Path(path_key).parent).replace("\\", "/")
+                adjusted_score = float(item.get("score", 0.0)) - min(8.0, directory_counts.get(directory, 0) * 1.75)
+                if adjusted_score > best_rank:
+                    best_rank = adjusted_score
+                    best_index = index
+            if best_index < 0:
+                break
+            item = remaining.pop(best_index)
+            path_key = str(item.get("path", "") or "").replace("\\", "/").lower()
+            directory = str(Path(path_key).parent).replace("\\", "/")
+            selected.append(item)
+            selected_paths.add(path_key)
+            directory_counts[directory] = directory_counts.get(directory, 0) + 1
+
+        return selected
 
     def _format_attachment_candidate(self, item: Dict[str, Any]) -> str:
         if item.get("kind") == "symbol":

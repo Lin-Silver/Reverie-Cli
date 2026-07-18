@@ -86,15 +86,16 @@ function internalKernelPath(): string {
 
 let activeKernelPath = internalKernelPath();
 
-async function selectKernelPath(): Promise<string> {
+async function selectKernelPath(preferExternal = true): Promise<string> {
   if (!app.isPackaged) return internalKernelPath();
   const selection = await resolveKernelSelection({
     internalPath: internalKernelPath(),
     externalHome: executableHome,
     manifestPath: path.join(app.getAppPath(), "build", "generated", TRUSTED_KERNELS_FILENAME),
+    preferExternal,
   });
   activeKernelPath = selection.path;
-  await log(`Kernel selected (${selection.source}): ${selection.path}; ${selection.reason}`);
+  void log(`Kernel selected (${selection.source}): ${selection.path}; ${selection.reason}`);
   return selection.path;
 }
 
@@ -424,7 +425,7 @@ async function activateWorkspace(projectRoot: string): Promise<string> {
 }
 
 async function createWindow(): Promise<void> {
-  const executable = await selectKernelPath();
+  const executable = await selectKernelPath(false);
   const settings = await readDesktopSettings();
   nativeTheme.themeSource = normalizeThemePreference(settings.theme);
   const appearance = windowAppearance(nativeTheme.shouldUseDarkColors);
@@ -742,7 +743,7 @@ ipcMain.handle("desktop:open-external", async (_event, url: string) => {
 });
 
 async function runTuiFromDesktop(): Promise<void> {
-  const executable = await selectKernelPath();
+  const executable = await selectKernelPath(true);
   const projectRoot = launchOptions.projectRoot && isWorkspaceDirectory(launchOptions.projectRoot)
     ? launchOptions.projectRoot
     : process.cwd();

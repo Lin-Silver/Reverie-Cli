@@ -788,6 +788,105 @@ def test_nvidia_short_turn_keeps_full_tools_and_reasoning(monkeypatch, tmp_path)
     assert create_kwargs["max_tokens"] > 250000
 
 
+def test_repository_turn_requires_one_context_engine_call_then_returns_to_auto(tmp_path):
+    agent = ReverieAgent(
+        base_url="https://example.test/v1",
+        api_key="x",
+        model="test-model",
+        project_root=tmp_path,
+        provider="openai-sdk",
+        config=_standard_config(),
+    )
+    tool_schema = {
+        "type": "function",
+        "function": {
+            "name": "codebase-retrieval",
+            "description": "Context Engine",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    }
+    agent.messages.append(
+        {"role": "user", "content": "Optimize the Context Engine recommendation code and compression tests."}
+    )
+
+    first = agent._build_openai_chat_completion_kwargs(
+        messages=agent._build_messages(),
+        tools=[tool_schema],
+        stream=True,
+    )
+
+    assert first["tool_choice"] == {
+        "type": "function",
+        "function": {"name": "codebase-retrieval"},
+    }
+
+    agent.messages.append(
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "context-1",
+                    "type": "function",
+                    "function": {
+                        "name": "codebase-retrieval",
+                        "arguments": '{"query_type":"task","query":"optimize context"}',
+                    },
+                }
+            ],
+        }
+    )
+    second = agent._build_openai_chat_completion_kwargs(
+        messages=agent._build_messages(),
+        tools=[tool_schema],
+        stream=True,
+    )
+
+    assert "tool_choice" not in second
+
+
+def test_general_chat_does_not_force_context_engine_tool(tmp_path):
+    agent = ReverieAgent(
+        base_url="https://example.test/v1",
+        api_key="x",
+        model="test-model",
+        project_root=tmp_path,
+        provider="openai-sdk",
+        config=_standard_config(),
+    )
+    tool_schema = {"type": "function", "function": {"name": "codebase-retrieval", "parameters": {"type": "object"}}}
+    agent.messages.append({"role": "user", "content": "Tell me a short joke."})
+
+    kwargs = agent._build_openai_chat_completion_kwargs(
+        messages=agent._build_messages(),
+        tools=[tool_schema],
+        stream=True,
+    )
+
+    assert "tool_choice" not in kwargs
+
+
+def test_general_programming_explanation_does_not_force_repository_tool(tmp_path):
+    agent = ReverieAgent(
+        base_url="https://example.test/v1",
+        api_key="x",
+        model="test-model",
+        project_root=tmp_path,
+        provider="openai-sdk",
+        config=_standard_config(),
+    )
+    tool_schema = {"type": "function", "function": {"name": "codebase-retrieval", "parameters": {"type": "object"}}}
+    agent.messages.append({"role": "user", "content": "Explain how Python classes work."})
+
+    kwargs = agent._build_openai_chat_completion_kwargs(
+        messages=agent._build_messages(),
+        tools=[tool_schema],
+        stream=True,
+    )
+
+    assert "tool_choice" not in kwargs
+
+
 def test_nvidia_request_provider_clamps_output_to_remaining_context(tmp_path):
     config = _nvidia_config()
     config.nvidia = {

@@ -2680,6 +2680,93 @@ class ReverieAgent:
             return None
         return {"type": "function", "function": {"name": "serial_novel"}}
 
+    def _context_engine_native_tool_choice(
+        self,
+        tools: Optional[List[Dict[str, Any]]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Require one Context Engine lookup for high-confidence repository turns."""
+        if normalize_mode(self.mode) in {"writer", "computer-controller"}:
+            return None
+        available_names = {
+            str((schema.get("function", {}) or {}).get("name", "") or "").strip()
+            for schema in (tools or [])
+            if isinstance(schema, dict)
+        }
+        if "codebase-retrieval" not in available_names:
+            return None
+
+        last_user_index, user_text = self._writer_latest_user_turn()
+        if last_user_index < 0 or not user_text:
+            return None
+        if any(
+            phrase in user_text
+            for phrase in (
+                "do not use tools",
+                "don't use tools",
+                "without tools",
+                "不要调用工具",
+                "不要使用工具",
+                "无需查看代码",
+            )
+        ):
+            return None
+
+        context_tool_names = {"codebase-retrieval", "codebase_retrieval", "retrieve_codebase", "repo_context"}
+        for message in self.messages[last_user_index + 1 :]:
+            for tool_call in message.get("tool_calls", []) if isinstance(message.get("tool_calls"), list) else []:
+                function = tool_call.get("function", {}) if isinstance(tool_call, dict) else {}
+                if str(function.get("name", "") or "").strip() in context_tool_names:
+                    return None
+
+        strong_repository_signals = (
+            "codebase", "repository", " repo", "source code", "context engine", "file", "module",
+            "github", "git ", "代码", "仓库", "项目", "文件", "模块", "上下文引擎",
+        )
+        broad_code_signals = (
+            "class", "function", "method", "api", "config", "test", "build", "bug", "frontend",
+            "backend", "electron", "react", "python", "typescript", "函数", "类", "接口", "配置",
+            "测试", "编译", "构建", "前端", "后端",
+        )
+        implementation_signals = (
+            "implement", "fix", "change", "update", "refactor", "optimize", "debug", "review",
+            "add", "remove", "migrate", "修改", "修复", "更新", "重构", "优化", "调试", "审查",
+            "实现", "添加", "删除", "迁移", "强化",
+        )
+        repository_question_signals = implementation_signals + (
+            "inspect", "analyze", "explain", "find", "where", "why",
+            "检查", "分析", "解释", "查找", "哪里", "为什么",
+        )
+        explicit_path = bool(
+            re.search(r"[\w./\\-]+\.(?:py|ts|tsx|js|jsx|css|html|json|yaml|yml|toml|md|rs|go|java|cpp|h)\b", user_text)
+        )
+        strong_repository_turn = any(signal in user_text for signal in strong_repository_signals) and any(
+            signal in user_text for signal in repository_question_signals
+        )
+        implementation_turn = any(signal in user_text for signal in broad_code_signals) and any(
+            signal in user_text for signal in implementation_signals
+        )
+        if not explicit_path and not (strong_repository_turn or implementation_turn):
+            return None
+        return {"type": "function", "function": {"name": "codebase-retrieval"}}
+
+    def _native_tool_choice(
+        self,
+        tools: Optional[List[Dict[str, Any]]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Resolve the single native tool that should lead the current turn."""
+        return self._writer_native_tool_choice() or self._context_engine_native_tool_choice(tools)
+
+    def _anthropic_tool_choice(
+        self,
+        tools: Optional[List[Dict[str, Any]]] = None,
+    ) -> Optional[Dict[str, str]]:
+        """Translate the current native tool choice into Anthropic's schema."""
+        choice = self._native_tool_choice(tools)
+        if not choice:
+            return None
+        name = str((choice.get("function", {}) or {}).get("name", "") or "").strip()
+        return {"type": "tool", "name": name} if name else None
+
     def _writer_latest_user_turn(self) -> tuple[int, str]:
         """Return the latest user-message index plus flattened text for Writer turn analysis."""
         for index in range(len(self.messages) - 1, -1, -1):
@@ -3418,9 +3505,9 @@ class ReverieAgent:
         }
         if tools:
             kwargs["tools"] = tools
-            writer_choice = self._writer_native_tool_choice()
-            if writer_choice:
-                kwargs["tool_choice"] = writer_choice
+            tool_choice = self._native_tool_choice(tools)
+            if tool_choice:
+                kwargs["tool_choice"] = tool_choice
 
         if extra_body is not None:
             kwargs["extra_body"] = extra_body
@@ -4105,6 +4192,11 @@ class ReverieAgent:
                 reasoning_effort=self.thinking_mode or cfg.get("reasoning_effort", "medium"),
                 stream=True,
             )
+            tool_choice = self._native_tool_choice(tools) if tools else None
+            if tool_choice:
+                tool_name = str((tool_choice.get("function", {}) or {}).get("name", "") or "").strip()
+                if tool_name:
+                    payload["tool_choice"] = {"type": "function", "name": tool_name}
             headers = get_codex_request_headers(
                 api_key=self.api_key,
                 account_id=str(cred.get("account_id", "")).strip(),
@@ -4660,10 +4752,11 @@ class ReverieAgent:
         """Build a minimal, provider-neutral OpenAI Responses request."""
         from ..codex import build_codex_request_payload
 
+        tools = self.get_visible_tool_schemas()
         converted = build_codex_request_payload(
             model_name=self.model,
             messages=self._build_messages(resolve_local_images=True),
-            tools=self.get_visible_tool_schemas() or None,
+            tools=tools or None,
             stream=stream,
         )
         payload: Dict[str, Any] = {
@@ -4673,6 +4766,11 @@ class ReverieAgent:
         }
         if converted.get("tools"):
             payload["tools"] = converted["tools"]
+            tool_choice = self._native_tool_choice(tools)
+            if tool_choice:
+                tool_name = str((tool_choice.get("function", {}) or {}).get("name", "") or "").strip()
+                if tool_name:
+                    payload["tool_choice"] = {"type": "function", "name": tool_name}
         return payload
 
     def _iter_openai_responses_sdk_events(self, response: Any) -> Generator[Dict[str, Any], None, None]:
@@ -4825,7 +4923,7 @@ class ReverieAgent:
                 timeout=effective_timeout,
             )
             if extra_body is not None:
-                writer_choice = self._writer_native_tool_choice() if tools else None
+                tool_choice = self._native_tool_choice(tools) if tools else None
                 response = self._create_openai_chat_completion(
                     model=model_for_sdk,
                     messages=messages,
@@ -4833,7 +4931,7 @@ class ReverieAgent:
                     stream=True,
                     timeout=effective_timeout,
                     extra_body=extra_body,
-                    **({"tool_choice": writer_choice} if writer_choice else {}),
+                    **({"tool_choice": tool_choice} if tool_choice else {}),
                     **{
                         key: value
                         for key, value in {
@@ -4846,14 +4944,14 @@ class ReverieAgent:
                     },
                 )
             else:
-                writer_choice = self._writer_native_tool_choice() if tools else None
+                tool_choice = self._native_tool_choice(tools) if tools else None
                 response = self._create_openai_chat_completion(
                     model=model_for_sdk,
                     messages=messages,
                     tools=tools if tools else None,
                     stream=True,
                     timeout=effective_timeout,
-                    **({"tool_choice": writer_choice} if writer_choice else {}),
+                    **({"tool_choice": tool_choice} if tool_choice else {}),
                     **{
                         key: value
                         for key, value in {
@@ -4944,9 +5042,9 @@ class ReverieAgent:
 
                 if tools:
                     payload["tools"] = tools
-                    writer_choice = self._writer_native_tool_choice()
-                    if writer_choice:
-                        payload["tool_choice"] = writer_choice
+                    tool_choice = self._native_tool_choice(tools)
+                    if tool_choice:
+                        payload["tool_choice"] = tool_choice
             payload = self._prepare_request_payload(payload, session_id=session_id)
             # Make request with retry logic.
             # Streaming request-provider calls can take longer for large outputs,
@@ -5042,9 +5140,9 @@ class ReverieAgent:
             
             if anthropic_tools:
                 kwargs["tools"] = anthropic_tools
-                writer_choice = self._writer_anthropic_tool_choice()
-                if writer_choice:
-                    kwargs["tool_choice"] = writer_choice
+                tool_choice = self._anthropic_tool_choice(tools)
+                if tool_choice:
+                    kwargs["tool_choice"] = tool_choice
             kwargs = self._apply_sensenova_anthropic_options(kwargs)
             
             # Make request
@@ -5681,9 +5779,9 @@ class ReverieAgent:
             
             if anthropic_tools:
                 kwargs["tools"] = anthropic_tools
-                writer_choice = self._writer_anthropic_tool_choice()
-                if writer_choice:
-                    kwargs["tool_choice"] = writer_choice
+                tool_choice = self._anthropic_tool_choice(tools)
+                if tool_choice:
+                    kwargs["tool_choice"] = tool_choice
             kwargs = self._apply_sensenova_anthropic_options(kwargs)
             
             # Make request

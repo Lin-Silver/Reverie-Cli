@@ -188,6 +188,81 @@ def _select_recent_messages(messages: List[Dict[str, Any]], keep_last: int) -> L
     return list(messages[start:])
 
 
+def _format_compression_message(message: Dict[str, Any]) -> str:
+    """Render one bounded transcript entry for provider-side compression."""
+    role = str(message.get("role", "unknown") or "unknown").strip().lower()
+    content = _get_message_text(message)
+    tool_names = _tool_call_names(message)
+    if tool_names:
+        tool_line = f"Tool calls: {', '.join(tool_names)}"
+        content = f"{content}\n{tool_line}".strip() if content else tool_line
+    if not content:
+        return ""
+
+    role_label = role.upper()
+    if role == "tool":
+        tool_name = str(
+            message.get("name")
+            or message.get("tool_name")
+            or message.get("tool_call_id")
+            or "tool"
+        ).strip()
+        role_label = f"TOOL[{tool_name}]"
+    content_limit = 6000 if role == "tool" else 10000 if role == "user" else 14000
+    if len(content) > content_limit:
+        head_length = int(content_limit * 0.62)
+        tail_length = content_limit - head_length - 40
+        content = (
+            content[:head_length].rstrip()
+            + "\n...[middle truncated for compression]...\n"
+            + content[-tail_length:].lstrip()
+        )
+    return f"{role_label}: {content}"
+
+
+def _build_compression_transcript(
+    messages: List[Dict[str, Any]],
+    *,
+    max_chars: int = 160000,
+) -> str:
+    """Build a bounded transcript that preserves both early decisions and the newest work."""
+    parts = [part for part in (_format_compression_message(message) for message in messages) if part]
+    if not parts:
+        return ""
+    joined = "\n\n".join(parts)
+    max_chars = max(20000, int(max_chars or 160000))
+    if len(joined) <= max_chars:
+        return joined
+
+    head_budget = max_chars // 5
+    tail_budget = max_chars - head_budget - 120
+    head: List[str] = []
+    head_chars = 0
+    split_index = 0
+    for index, part in enumerate(parts):
+        cost = len(part) + (2 if head else 0)
+        if head and head_chars + cost > head_budget:
+            break
+        head.append(part)
+        head_chars += cost
+        split_index = index + 1
+
+    tail: List[str] = []
+    tail_chars = 0
+    for index in range(len(parts) - 1, split_index - 1, -1):
+        part = parts[index]
+        cost = len(part) + (2 if tail else 0)
+        if tail and tail_chars + cost > tail_budget:
+            break
+        tail.append(part)
+        tail_chars += cost
+    tail.reverse()
+
+    omitted = max(0, len(parts) - len(head) - len(tail))
+    marker = f"[... {omitted} older transcript entries omitted for faster compression ...]"
+    return "\n\n".join(head + [marker] + tail)[:max_chars]
+
+
 def build_memory_digest(messages: List[Dict[str, Any]]) -> str:
     """Build a compact, deterministic digest for session carry-over and anchors."""
     if not messages:
@@ -489,7 +564,7 @@ def make_compression_request_with_retry(
         url: The API endpoint URL
         headers: Request headers
         payload: Request payload
-        max_retries: Ignored; Reverie uses five fixed retry attempts.
+        max_retries: Number of retries after the first request (default: 2).
         
     Returns:
         The response object
@@ -501,7 +576,7 @@ def make_compression_request_with_retry(
     payload = validate_payload_for_compression(payload)
     
     last_error = None
-    attempts = REQUEST_RETRY_ATTEMPTS
+    attempts = max(0, min(int(max_retries or 0), REQUEST_RETRY_ATTEMPTS))
     for attempt in range(attempts + 1):
         try:
             logger.debug(f"Compression request attempt {attempt + 1}/{attempts + 1}")
@@ -560,7 +635,7 @@ class ContextCompressor:
         
         try:
             with open(path, 'w', encoding='utf-8') as f:
-                json.dump(checkpoint_data, f, indent=2, ensure_ascii=False)
+                json.dump(checkpoint_data, f, ensure_ascii=False, separators=(',', ':'))
             self.last_checkpoint = str(path)
             return str(path)
         except Exception as e:
@@ -629,39 +704,22 @@ class ContextCompressor:
         # Save checkpoint before compression (Safety)
         self.save_checkpoint(messages, "Pre-compression auto-save", session_id)
 
-        conversation_parts: List[str] = []
-        for msg in history_to_compress:
-            role = str(msg.get("role", "unknown")).strip().lower() or "unknown"
-            content = _get_message_text(msg)
-            tool_names = _tool_call_names(msg)
-            if tool_names:
-                tool_line = f"Tool calls: {', '.join(tool_names)}"
-                content = f"{content}\n{tool_line}".strip() if content else tool_line
-            if not content:
-                continue
-
-            role_label = role.upper()
-            if role == "tool":
-                tool_name = str(
-                    msg.get("name")
-                    or msg.get("tool_name")
-                    or msg.get("tool_call_id")
-                    or "tool"
-                ).strip()
-                if tool_name:
-                    role_label = f"TOOL[{tool_name}]"
-            conversation_parts.append(f"{role_label}: {content}")
-
-        conversation_text = "\n\n".join(conversation_parts).strip()
+        conversation_text = _build_compression_transcript(history_to_compress)
         if not conversation_text:
             return messages
 
         prior_memory_text = "\n\n".join(memory_blocks[-2:]).strip()
         anchor_digest = build_memory_digest(other_msgs)
-        fallback_summary = _build_deterministic_compression_summary(
-            history_to_compress,
-            memory_blocks,
-        )
+        fallback_summary: Optional[str] = None
+
+        def get_fallback_summary() -> str:
+            nonlocal fallback_summary
+            if fallback_summary is None:
+                fallback_summary = _build_deterministic_compression_summary(
+                    history_to_compress,
+                    memory_blocks,
+                )
+            return fallback_summary
 
         def compact_with_summary(summary_text: str, note: str) -> List[Dict]:
             summary_message = {
@@ -790,7 +848,7 @@ class ContextCompressor:
                 cred = detect_codex_cli_credentials()
                 access_token = str(api_key or cred.get("api_key", "") or "").strip()
                 if not access_token:
-                    return compact_with_summary(fallback_summary, "Post-compression deterministic fallback")
+                    return compact_with_summary(get_fallback_summary(), "Post-compression deterministic fallback")
                 request_url = resolve_codex_request_url(base_url, "")
 
                 payload = build_codex_request_payload(
@@ -820,7 +878,7 @@ class ContextCompressor:
                 raise ValueError(f"Unknown provider: {provider}")
 
             if not str(summary or "").strip():
-                return compact_with_summary(fallback_summary, "Post-compression deterministic fallback")
+                return compact_with_summary(get_fallback_summary(), "Post-compression deterministic fallback")
 
             _record_compression_usage(
                 workspace_stats_manager,
@@ -837,7 +895,7 @@ class ContextCompressor:
             
         except Exception as e:
             logger.warning("Provider compression failed; using deterministic local fallback: %s", e)
-            return compact_with_summary(fallback_summary, "Post-compression deterministic fallback")
+            return compact_with_summary(get_fallback_summary(), "Post-compression deterministic fallback")
 
     def list_checkpoints(self, session_id: Optional[str] = None) -> List[Dict]:
         """List all available checkpoints for a session."""

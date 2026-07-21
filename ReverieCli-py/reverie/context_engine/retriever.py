@@ -458,7 +458,9 @@ class ContextRetriever:
                     if name:
                         tokens.add(name.replace("_", ""))
             except Exception:
-                pass
+                 report_suppressed_exception(
+                    "resolve Context Engine compound name tokens"
+                )
             for raw_path in (self.file_info or {}):
                 stem = Path(str(raw_path)).stem.lower()
                 if stem:

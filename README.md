@@ -47,16 +47,17 @@ Current stable version: **v2.5.0** (released 2026-07-17).
 
 Reverie supports a wide range of LLM providers out of the box. Each provider has its own configuration section in `config.json`:
 
-| Provider | Description | Key Models |
-|----------|-------------|------------|
-| **NVIDIA** | NVIDIA-hosted catalog via `integrate.api.nvidia.com` | Qwen3.5 397B, DeepSeek V4 Pro/V4 Flash, Kimi K2.6, GLM-5.2/4.7, MiniMax M2.7/M3, Mistral Small 4, Mistral Medium 3.5, Mistral Large 3, Step-3.5/3.7-Flash, GPT-OSS-120B, Nemotron 3 Super/Ultra, Qwen3.5 122B |
-| **ModelScope** | Anthropic-compatible API on `api-inference.modelscope.cn` — all models supporting the Anthropic SDK can be used | GLM-5.1, GLM-5, DeepSeek V4 Pro, DeepSeek V4 Flash, MiniMax M2.7, Qwen3.5 397B A17B (catalog is statically defined in code) |
-| **Codex** | ChatGPT backend or Responses-compatible reverse proxy | GPT-5.6, GPT-5.5, and other models discovered from the live Codex CLI cache |
-| **SenseNova** | SenseTime SenseNova API with model-specific OpenAI/Anthropic transports | DeepSeek V4 Flash (1M context), SenseNova 6.7 Flash Lite (vision) |
-| **unlimited.surf** | Gateway service with request transport | GPT-5 (via `unlimited.surf`), with selectable effort (low/medium/high) |
-| **AIHubMix** | Third-party API gateway (OpenAI-compatible) | GPT-5.5 Free (with/without reasoning), GPT-4o Free, GPT-4.1 Free |
-| **Agnes** | Agnes AI OpenAI-compatible API (text, image, video) | Agnes 2.0 Flash (vision + thinking), Agnes 1.5 Flash (vision), image/video generation |
-| **WebGemini** | Anonymous Gemini Web access via `gemini.google.com` | Gemini 3.5 Flash, Gemini 3.5 Flash Thinking, Gemini 3.5 Flash Thinking Lite, Gemini 3.1 Pro, Gemini Auto, Gemini Flash Lite |
+
+| Provider           | Description                                                                                                     | Key Models                                                                                                                                                                                                    |
+| ------------------ | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **NVIDIA**         | NVIDIA-hosted catalog via`integrate.api.nvidia.com`                                                             | Qwen3.5 397B, DeepSeek V4 Pro/V4 Flash, Kimi K2.6, GLM-5.2/4.7, MiniMax M2.7/M3, Mistral Small 4, Mistral Medium 3.5, Mistral Large 3, Step-3.5/3.7-Flash, GPT-OSS-120B, Nemotron 3 Super/Ultra, Qwen3.5 122B |
+| **ModelScope**     | Anthropic-compatible API on`api-inference.modelscope.cn` — all models supporting the Anthropic SDK can be used | GLM-5.1, GLM-5, DeepSeek V4 Pro, DeepSeek V4 Flash, MiniMax M2.7, Qwen3.5 397B A17B (catalog is statically defined in code)                                                                                   |
+| **Codex**          | ChatGPT backend or Responses-compatible reverse proxy                                                           | GPT-5.6, GPT-5.5, and other models discovered from the live Codex CLI cache                                                                                                                                   |
+| **SenseNova**      | SenseTime SenseNova API with model-specific OpenAI/Anthropic transports                                         | DeepSeek V4 Flash (1M context), SenseNova 6.7 Flash Lite (vision)                                                                                                                                             |
+| **unlimited.surf** | Gateway service with request transport                                                                          | GPT-5 (via`unlimited.surf`), with selectable effort (low/medium/high)                                                                                                                                         |
+| **AIHubMix**       | Third-party API gateway (OpenAI-compatible)                                                                     | GPT-5.5 Free (with/without reasoning), GPT-4o Free, GPT-4.1 Free                                                                                                                                              |
+| **Agnes**          | Agnes AI OpenAI-compatible API (text, image, video)                                                             | Agnes 2.0 Flash (vision + thinking), Agnes 1.5 Flash (vision), image/video generation                                                                                                                         |
+| **WebGemini**      | Anonymous Gemini Web access via`gemini.google.com`                                                              | Gemini 3.5 Flash, Gemini 3.5 Flash Thinking, Gemini 3.5 Flash Thinking Lite, Gemini 3.1 Pro, Gemini Auto, Gemini Flash Lite                                                                                   |
 
 All providers support streaming responses where applicable. Reasoning/thinking toggles, temperature, top_p, max_tokens, and other parameters are configurable per provider.
 
@@ -64,15 +65,16 @@ All providers support streaming responses where applicable. Reasoning/thinking t
 
 Reverie ships with specialized modes that change tooling, system prompt rules, and domain focus:
 
-| Mode | Display Name | Description |
-|------|-------------|-------------|
-| `reverie` | Reverie | Default general coding and automation mode. Context Engine retrieval, core workspace tools, Blender/3D modeling. |
-| `reverie-atlas` | Reverie-Atlas | Document-driven spec development. Deep research paired with Context Engine and Atlas delivery artifacts. |
-| `reverie-gamer` | Reverie-Gamer | ⚠️ **Work in Progress** — Full game production pipeline (blueprints, system packets, vertical slices, playtest loops, modeling pipelines). Not yet complete. |
-| `reverie-ant` | Reverie-Ant | Structured long-running execution: planning, checkpoints, verification. |
-| `spec-driven` | Spec-Driven | Spec authoring: requirements, design, implementation task breakdown. |
-| `spec-vibe` | Spec-Vibe | Implementation mode for executing approved specs with a lighter workflow. |
-| `writer` | Writer | Creative writing: persistent long-form fiction planning, serialized drafting, continuity control, and verified completion. |
+
+| Mode                  | Display Name        | Description                                                                                                                                                                                                       |
+| --------------------- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reverie`             | Reverie             | Default general coding and automation mode. Context Engine retrieval, core workspace tools, Blender/3D modeling.                                                                                                  |
+| `reverie-atlas`       | Reverie-Atlas       | Document-driven spec development. Deep research paired with Context Engine and Atlas delivery artifacts.                                                                                                          |
+| `reverie-gamer`       | Reverie-Gamer       | ⚠️**Work in Progress** — Full game production pipeline (blueprints, system packets, vertical slices, playtest loops, modeling pipelines). Not yet complete.                                                    |
+| `reverie-ant`         | Reverie-Ant         | Structured long-running execution: planning, checkpoints, verification.                                                                                                                                           |
+| `spec-driven`         | Spec-Driven         | Spec authoring: requirements, design, implementation task breakdown.                                                                                                                                              |
+| `spec-vibe`           | Spec-Vibe           | Implementation mode for executing approved specs with a lighter workflow.                                                                                                                                         |
+| `writer`              | Writer              | Creative writing: persistent long-form fiction planning, serialized drafting, continuity control, and verified completion.                                                                                        |
 | `computer-controller` | Computer Controller | Pinned NVIDIA desktop orchestrator using an embedded Open Computer Use-compatible desktop runtime and managed Reverie SubAgents. Entered explicitly; it can still hand off to another mode when the task changes. |
 
 ### Context Engine
@@ -403,14 +405,15 @@ Reverie uses `config.json` stored in the project's `.reverie/` directory or the 
 
 ### Configuration Options
 
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `active_model_source` | string | `"standard"` | Active provider: `standard`, `nvidia`, `codex`, `modelscope`, `sensenova`, `unlimitedsurf`, `aihubmix`, `agnes`, `webgemini` |
-| `tool_output_style` | string | `"compact"` | Tool result display: `compact`, `condensed`, `full` |
-| `thinking_output_style` | string | `"full"` | Reasoning display: `hidden`, `compact`, `full` |
-| `nvidia.enable_thinking` | bool | `true` | Enable provider-side thinking for NVIDIA models |
-| `nvidia.reasoning_effort` | string | `"high"` | Reasoning depth: `max`, `high`, `medium`, `low`, `none` |
-| `codex.reasoning_effort` | string | `"medium"` | Codex effort: `minimal`, `low`, `medium`, `high`, `xhigh` |
+
+| Key                       | Type   | Default      | Description                                                                                                                 |
+| ------------------------- | ------ | ------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| `active_model_source`     | string | `"standard"` | Active provider:`standard`, `nvidia`, `codex`, `modelscope`, `sensenova`, `unlimitedsurf`, `aihubmix`, `agnes`, `webgemini` |
+| `tool_output_style`       | string | `"compact"`  | Tool result display:`compact`, `condensed`, `full`                                                                          |
+| `thinking_output_style`   | string | `"full"`     | Reasoning display:`hidden`, `compact`, `full`                                                                               |
+| `nvidia.enable_thinking`  | bool   | `true`       | Enable provider-side thinking for NVIDIA models                                                                             |
+| `nvidia.reasoning_effort` | string | `"high"`     | Reasoning depth:`max`, `high`, `medium`, `low`, `none`                                                                      |
+| `codex.reasoning_effort`  | string | `"medium"`   | Codex effort:`minimal`, `low`, `medium`, `high`, `xhigh`                                                                    |
 
 ---
 
@@ -431,6 +434,7 @@ Document-driven development for complex systems. Produces structured specs, arch
 > ⚠️ **Work in Progress** — This mode is not yet complete.
 
 Full game production pipeline:
+
 - **Game Design Orchestrator**: Plan games from concept to vertical slice
 - **Game Project Scaffolder**: Generate project structures
 - **Game GDD Manager**: Game Design Document management
@@ -445,6 +449,7 @@ Full game production pipeline:
 ### Reverie-Ant
 
 Structured long-running execution with:
+
 - Task boundary management
 - Checkpoint and resume
 - Progress notifications
@@ -461,6 +466,7 @@ Execute approved specs with lighter workflow. Implements the `spec-driven` outpu
 ### Writer
 
 Creative writing mode with:
+
 - `serial_novel` disk-backed project control
 - Chapter control cards, continuity ledgers, and resumable drafting
 - One TXT export per committed chapter plus merged `manuscript.txt`
@@ -480,30 +486,33 @@ NVIDIA's hosted API at `integrate.api.nvidia.com` provides access to 16 supporte
 
 **Model catalog (hardcoded in `reverie/nvidia.py`):**
 
-| Model ID | Display Name | Transport | Vision | Thinking | Context |
-|----------|-------------|-----------|--------|----------|---------|
-| `qwen/qwen3.5-397b-a17b` | Qwen3.5 397B A17B | request | ✅ | toggle | 262K |
-| `qwen/qwen3.5-122b-a10b` | Qwen3.5 122B A10B | request | ✅ | toggle | 262K |
-| `nvidia/nemotron-3-ultra-550b-a55b` | Nemotron 3 Ultra 550B | openai-sdk | ❌ | fixed thinking | 1M |
-| `z-ai/glm4.7` | GLM-4.7 | openai-sdk | ❌ | toggle | 131K |
-| `deepseek-ai/deepseek-v4-pro` | DeepSeek V4 Pro | openai-sdk | ❌ | effort (none/high/max) | 1M |
-| `deepseek-ai/deepseek-v4-flash` | DeepSeek V4 Flash | openai-sdk | ❌ | effort (none/low/med/high) | 1M |
-| `minimaxai/minimax-m2.7` | MiniMax M2.7 | openai-sdk | ❌ | ❌ | 204K |
-| `minimaxai/minimax-m3` | MiniMax M3 | request | ✅ (img+vid) | effort (none/high) | 1M |
-| `mistralai/mistral-small-4-119b-2603` | Mistral Small 4 119B | request | ✅ | effort (none/high) | 262K |
-| `mistralai/mistral-medium-3.5-128b` | Mistral Medium 3.5 128B | request | ✅ | effort (none/high) | 262K |
-| `mistralai/mistral-large-3-675b-instruct-2512` | Mistral Large 3 675B | request | ✅ | ❌ | 262K |
-| `stepfun-ai/step-3.5-flash` | Step-3.5-Flash | openai-sdk | ❌ | fixed (always-on) | 256K |
-| `stepfun-ai/step-3.7-flash` | Step-3.7-Flash | request | ✅ (img) | ❌ | 256K |
-| `moonshotai/kimi-k2.6` | Kimi K2.6 | request | ✅ | toggle | 262K |
-| `openai/gpt-oss-120b` | GPT-OSS-120B | openai-sdk | ❌ | effort (low/med/high) | 128K |
-| `nvidia/nemotron-3-super-120b-a12b` | Nemotron 3 Super 120B | openai-sdk | ❌ | effort (none/low/high) | 1M |
+
+| Model ID                                       | Display Name            | Transport  | Vision       | Thinking                   | Context |
+| ---------------------------------------------- | ----------------------- | ---------- | ------------ | -------------------------- | ------- |
+| `qwen/qwen3.5-397b-a17b`                       | Qwen3.5 397B A17B       | request    | ✅           | toggle                     | 262K    |
+| `qwen/qwen3.5-122b-a10b`                       | Qwen3.5 122B A10B       | request    | ✅           | toggle                     | 262K    |
+| `nvidia/nemotron-3-ultra-550b-a55b`            | Nemotron 3 Ultra 550B   | openai-sdk | ❌           | fixed thinking             | 1M      |
+| `z-ai/glm4.7`                                  | GLM-4.7                 | openai-sdk | ❌           | toggle                     | 131K    |
+| `deepseek-ai/deepseek-v4-pro`                  | DeepSeek V4 Pro         | openai-sdk | ❌           | effort (none/high/max)     | 1M      |
+| `deepseek-ai/deepseek-v4-flash`                | DeepSeek V4 Flash       | openai-sdk | ❌           | effort (none/low/med/high) | 1M      |
+| `minimaxai/minimax-m2.7`                       | MiniMax M2.7            | openai-sdk | ❌           | ❌                         | 204K    |
+| `minimaxai/minimax-m3`                         | MiniMax M3              | request    | ✅ (img+vid) | effort (none/high)         | 1M      |
+| `mistralai/mistral-small-4-119b-2603`          | Mistral Small 4 119B    | request    | ✅           | effort (none/high)         | 262K    |
+| `mistralai/mistral-medium-3.5-128b`            | Mistral Medium 3.5 128B | request    | ✅           | effort (none/high)         | 262K    |
+| `mistralai/mistral-large-3-675b-instruct-2512` | Mistral Large 3 675B    | request    | ✅           | ❌                         | 262K    |
+| `stepfun-ai/step-3.5-flash`                    | Step-3.5-Flash          | openai-sdk | ❌           | fixed (always-on)          | 256K    |
+| `stepfun-ai/step-3.7-flash`                    | Step-3.7-Flash          | request    | ✅ (img)     | ❌                         | 256K    |
+| `moonshotai/kimi-k2.6`                         | Kimi K2.6               | request    | ✅           | toggle                     | 262K    |
+| `openai/gpt-oss-120b`                          | GPT-OSS-120B            | openai-sdk | ❌           | effort (low/med/high)      | 128K    |
+| `nvidia/nemotron-3-super-120b-a12b`            | Nemotron 3 Super 120B   | openai-sdk | ❌           | effort (none/low/high)     | 1M      |
 
 **Transport types:**
+
 - `request` — Direct HTTP POST with chat-template kwargs (for models like Kimi K2.6, MiniMax M3, Qwen3.5, Mistral)
 - `openai-sdk` — OpenAI-compatible SDK transport (for models like DeepSeek V4 Pro, Nemotron 3 Ultra, GPT-OSS-120B)
 
 **Thinking control:**
+
 - `toggle` — Binary on/off (Qwen3.5, GLM-4.7, Kimi K2.6)
 - `effort` — Selectable levels: `none`/`low`/`medium`/`high`/`max` (DeepSeek V4 Pro, Nemotron, Mistral models, GPT-OSS-120B, MiniMax M3)
 - `fixed` — Always-on thinking (Step-3.5-Flash)
@@ -514,14 +523,15 @@ NVIDIA's hosted API at `integrate.api.nvidia.com` provides access to 16 supporte
 
 ModelScope provides an **Anthropic-compatible** inference API at `https://api-inference.modelscope.cn`. Any model on ModelScope that supports the Anthropic SDK can be used — it is not limited to Zhipu models. The built-in catalog in `reverie/modelscope.py` includes:
 
-| Model ID | Display Name | Context | Thinking | Vision |
-|----------|-------------|---------|----------|--------|
-| `ZhipuAI/GLM-5.1` | GLM-5.1 | 202,752 | ✅ | ❌ |
-| `ZhipuAI/GLM-5` | GLM-5 | 202,752 | ✅ | ❌ |
-| `deepseek-ai/DeepSeek-V4-Pro` | DeepSeek V4 Pro | 1,048,576 | ✅ | ❌ |
-| `deepseek-ai/DeepSeek-V4-Flash` | DeepSeek V4 Flash | 1,048,576 | ✅ | ❌ |
-| `MiniMax/MiniMax-M2.7` | MiniMax M2.7 | 204,800 | ✅ | ❌ |
-| `Qwen/Qwen3.5-397B-A17B` | Qwen3.5 397B A17B | 262,144 | ✅ | ✅ |
+
+| Model ID                        | Display Name      | Context   | Thinking | Vision |
+| ------------------------------- | ----------------- | --------- | -------- | ------ |
+| `ZhipuAI/GLM-5.1`               | GLM-5.1           | 202,752   | ✅       | ❌     |
+| `ZhipuAI/GLM-5`                 | GLM-5             | 202,752   | ✅       | ❌     |
+| `deepseek-ai/DeepSeek-V4-Pro`   | DeepSeek V4 Pro   | 1,048,576 | ✅       | ❌     |
+| `deepseek-ai/DeepSeek-V4-Flash` | DeepSeek V4 Flash | 1,048,576 | ✅       | ❌     |
+| `MiniMax/MiniMax-M2.7`          | MiniMax M2.7      | 204,800   | ✅       | ❌     |
+| `Qwen/Qwen3.5-397B-A17B`        | Qwen3.5 397B A17B | 262,144   | ✅       | ✅     |
 
 **API key:** Get a token from `https://www.modelscope.cn/my/access/token`. Environment variables `MODELSCOPE_API_KEY`, `MODELSCOPE_TOKEN`, or `MODELSCOPE_ACCESS_TOKEN` are also read.
 
@@ -530,6 +540,7 @@ ModelScope provides an **Anthropic-compatible** inference API at `https://api-in
 ### Codex (ChatGPT Backend)
 
 Connects to ChatGPT's backend API. Supports:
+
 - OAuth login via `~/.codex/auth.json` (auto-detected)
 - Responses-compatible reverse proxies with separate `auto`, local Codex, environment-key, or no-auth modes
 - Proxy-safe headers that do not forward ChatGPT account identity to third-party hosts
@@ -541,10 +552,11 @@ Connects to ChatGPT's backend API. Supports:
 
 [SenseTime SenseNova](https://www.sensenova.cn/) with model-specific OpenAI/Anthropic-compatible transports at `https://token.sensenova.cn`:
 
-| Model ID | Display Name | Context | Thinking | Vision |
-|----------|-------------|---------|----------|--------|
-| `deepseek-v4-flash` | DeepSeek V4 Flash | 1,000,000 | ✅ (effort) | ❌ |
-| `sensenova-6.7-flash-lite` | SenseNova 6.7 Flash Lite | 262,144 | ❌ | ✅ |
+
+| Model ID                   | Display Name             | Context   | Thinking    | Vision |
+| -------------------------- | ------------------------ | --------- | ----------- | ------ |
+| `deepseek-v4-flash`        | DeepSeek V4 Flash        | 1,000,000 | ✅ (effort) | ❌     |
+| `sensenova-6.7-flash-lite` | SenseNova 6.7 Flash Lite | 262,144   | ❌          | ✅     |
 
 Reasoning effort is selectable: `none`, `low`, `medium`, `high`.
 
@@ -552,9 +564,10 @@ Reasoning effort is selectable: `none`, `low`, `medium`, `high`.
 
 A gateway service at `https://unlimited.surf` with request transport:
 
-| Model ID | Display Name | Provider | Tier |
-|----------|-------------|----------|------|
-| `gateway-gpt-5` | GPT-5 | openai | flagship |
+
+| Model ID        | Display Name | Provider | Tier     |
+| --------------- | ------------ | -------- | -------- |
+| `gateway-gpt-5` | GPT-5        | openai   | flagship |
 
 Effort is selectable: `low`, `medium`, `high`. Note: tool calling is not supported.
 
@@ -562,25 +575,27 @@ Effort is selectable: `low`, `medium`, `high`. Note: tool calling is not support
 
 Third-party API gateway (OpenAI-compatible) at `https://aihubmix.com/v1`:
 
-| Model ID | Display Name | Reasoning Variant |
-|----------|-------------|-------------------|
-| `gpt-5.5-free` | GPT-5.5 Free | none |
-| `gpt-5.5-free-high` | GPT-5.5 Free High | high |
-| `gpt-5.5-free-low` | GPT-5.5 Free Low | low |
-| `gpt-4o-free` | GPT-4o Free | — |
-| `gpt-4.1-free` | GPT-4.1 Free | — |
+
+| Model ID            | Display Name      | Reasoning Variant |
+| ------------------- | ----------------- | ----------------- |
+| `gpt-5.5-free`      | GPT-5.5 Free      | none              |
+| `gpt-5.5-free-high` | GPT-5.5 Free High | high              |
+| `gpt-5.5-free-low`  | GPT-5.5 Free Low  | low               |
+| `gpt-4o-free`       | GPT-4o Free       | —                |
+| `gpt-4.1-free`      | GPT-4.1 Free      | —                |
 
 ### Agnes
 
 Agnes AI OpenAI-compatible API at `https://apihub.agnes-ai.com/v1`. Reverie classifies the provider's live `/models` response into LLM, text-to-image (TTI), and text-to-video (TTV) catalogs, then exposes only media models that have a local execution profile:
 
-| Modality | Model ID | Display Name | Key capability |
-|----------|----------|--------------|----------------|
-| LLM | `agnes-2.0-flash` | Agnes 2.0 Flash | 256K context, vision, thinking |
-| LLM | `agnes-1.5-flash` | Agnes 1.5 Flash | 256K context, vision |
-| TTI | `agnes-image-2.1-flash` | Agnes Image 2.1 Flash | text/image input and editing |
-| TTI | `agnes-image-2.0-flash` | Agnes Image 2.0 Flash | text/image input and composition |
-| TTV | `agnes-video-v2.0` | Agnes Video V2.0 | asynchronous video generation |
+
+| Modality | Model ID                | Display Name          | Key capability                   |
+| -------- | ----------------------- | --------------------- | -------------------------------- |
+| LLM      | `agnes-2.0-flash`       | Agnes 2.0 Flash       | 256K context, vision, thinking   |
+| LLM      | `agnes-1.5-flash`       | Agnes 1.5 Flash       | 256K context, vision             |
+| TTI      | `agnes-image-2.1-flash` | Agnes Image 2.1 Flash | text/image input and editing     |
+| TTI      | `agnes-image-2.0-flash` | Agnes Image 2.0 Flash | text/image input and composition |
+| TTV      | `agnes-video-v2.0`      | Agnes Video V2.0      | asynchronous video generation    |
 
 Thinking budgets: `low` (1024), `medium` (4096), `high` (8192).
 
@@ -590,14 +605,15 @@ If live discovery is unavailable, Reverie falls back to this verified built-in c
 
 Anonymous Gemini Web access via `gemini.google.com`. Models are selected by mode and thinking parameters:
 
-| Model ID | Display Name | Mode | Think | Max Output |
-|----------|-------------|------|-------|-----------|
-| `gemini-3.5-flash` | Gemini 3.5 Flash | 1 | 4 | 12,000 |
-| `gemini-3.5-flash-thinking` | Gemini 3.5 Flash Thinking | 2 | 0 | 20,000 |
-| `gemini-3.5-flash-thinking-lite` | Gemini 3.5 Flash Thinking Lite | 5 | 0 | 15,000 |
-| `gemini-3.1-pro` | Gemini 3.1 Pro | 3 | 4 | 12,000 |
-| `gemini-auto` | Gemini Auto | 4 | 4 | 12,000 |
-| `gemini-flash-lite` | Gemini Flash Lite | 6 | 4 | 10,000 |
+
+| Model ID                         | Display Name                   | Mode | Think | Max Output |
+| -------------------------------- | ------------------------------ | ---- | ----- | ---------- |
+| `gemini-3.5-flash`               | Gemini 3.5 Flash               | 1    | 4     | 12,000     |
+| `gemini-3.5-flash-thinking`      | Gemini 3.5 Flash Thinking      | 2    | 0     | 20,000     |
+| `gemini-3.5-flash-thinking-lite` | Gemini 3.5 Flash Thinking Lite | 5    | 0     | 15,000     |
+| `gemini-3.1-pro`                 | Gemini 3.1 Pro                 | 3    | 4     | 12,000     |
+| `gemini-auto`                    | Gemini Auto                    | 4    | 4     | 12,000     |
+| `gemini-flash-lite`              | Gemini Flash Lite              | 6    | 4     | 10,000     |
 
 > **Note:** `gemini-3.1-pro` requires cookies for proper routing. Default model: `gemini-3.5-flash-thinking`.
 
@@ -628,23 +644,24 @@ Options:
 
 ### Interactive Commands
 
-| Command | Description |
-|---------|-------------|
-| `/help` | Show available commands |
-| `/mode <name>` | Switch operating mode |
-| `/session list` | List available sessions |
-| `/session new [name]` | Create a new session |
-| `/session load <id>` | Load a specific session |
-| `/session delete <id>` | Delete a session |
-| `/tools` | Inspect available tools |
-| `/model <name>` | Switch to a different model |
-| `/provider <name>` | Switch provider |
-| `/clear` | Clear terminal screen |
-| `/save` | Save current session |
-| `/exit` or `/quit` | Exit Reverie |
-| `/thinking on/off` | Toggle thinking display |
-| `/compact` | Trigger context compaction |
-| `/rules` | Manage custom rules |
+
+| Command                | Description                 |
+| ---------------------- | --------------------------- |
+| `/help`                | Show available commands     |
+| `/mode <name>`         | Switch operating mode       |
+| `/session list`        | List available sessions     |
+| `/session new [name]`  | Create a new session        |
+| `/session load <id>`   | Load a specific session     |
+| `/session delete <id>` | Delete a session            |
+| `/tools`               | Inspect available tools     |
+| `/model <name>`        | Switch to a different model |
+| `/provider <name>`     | Switch provider             |
+| `/clear`               | Clear terminal screen       |
+| `/save`                | Save current session        |
+| `/exit` or `/quit`     | Exit Reverie                |
+| `/thinking on/off`     | Toggle thinking display     |
+| `/compact`             | Trigger context compaction  |
+| `/rules`               | Manage custom rules         |
 
 ---
 
@@ -684,16 +701,17 @@ codebase-retrieval(query_type="lsp", query="reverie/agent/agent.py", lsp_action=
 
 ### Query Types
 
-| `query_type` | Use Case |
-|-------------|----------|
-| `task` | Broad requests — returns ranked workset |
-| `file` | Get file structure and contents |
-| `symbol` | Detailed info about a function/class/variable |
-| `search` | Search for symbols matching a pattern |
+
+| `query_type`   | Use Case                                      |
+| -------------- | --------------------------------------------- |
+| `task`         | Broad requests — returns ranked workset      |
+| `file`         | Get file structure and contents               |
+| `symbol`       | Detailed info about a function/class/variable |
+| `search`       | Search for symbols matching a pattern         |
 | `dependencies` | What a symbol depends on / what depends on it |
-| `outline` | File/module structure overview |
-| `memory` | Query workspace-global memory |
-| `lsp` | LSP-powered diagnostics, definitions, symbols |
+| `outline`      | File/module structure overview                |
+| `memory`       | Query workspace-global memory                 |
+| `lsp`          | LSP-powered diagnostics, definitions, symbols |
 
 ### Git Integration
 
@@ -721,6 +739,7 @@ git-commit-retrieval(query_type="uncommitted")
 ### Session Structure
 
 Each session is a JSON file containing:
+
 - `id` — Unique session identifier (timestamp-based)
 - `name` — Human-readable name
 - `created_at` / `updated_at` — ISO timestamps
@@ -730,6 +749,7 @@ Each session is a JSON file containing:
 ### Session Rotation
 
 When a conversation approaches the model's context limit (80% threshold), Reverie:
+
 1. Archives the full transcript to `full_transcripts/`
 2. Compresses the conversation into a working memory summary
 3. Creates a new session with the summary injected as a system message
@@ -963,11 +983,13 @@ profile = get_mode_tool_discovery_profile("reverie-gamer")
 ### Common Issues
 
 **"File not found" errors**
+
 - Ensure you're running from the correct project root
 - Check that `.reverie/` directory exists in your workspace
 - Use `--workspace <PATH>` to explicitly set the project root
 
 **LLM connection errors**
+
 - Verify your API key is set in `config.json`
 - Check network connectivity to the provider endpoint
 - For NVIDIA: verify key at `https://build.nvidia.com/settings/api-keys`
@@ -975,21 +997,25 @@ profile = get_mode_tool_discovery_profile("reverie-gamer")
 - For WebGemini: ensure proxy/cookie settings are correct if needed
 
 **Context Engine not returning results**
+
 - Ensure the project has been indexed (`codebase-retrieval` triggers indexing on first use)
 - Check that LSP server is available for your language (optional)
 - Large repositories may take time to build the initial index
 
 **Session rotation not working**
+
 - Verify `max_context_tokens` matches your model's context window
 - Check that the session directory is writable
 - Rotation threshold defaults to 80% — adjust via `session.rotation_threshold`
 
 **Blender/3D modeling not available**
+
 - Blender is optional — headless `.bbmodel` validation works without it
 - Install Blender and ensure it's on PATH, or use `blender_modeling_workbench` with explicit `blender_path`
 - Blockbench + Ashfox plugin are optional for live editing
 
 **Windows PowerShell execution policy**
+
 ```powershell
 Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
 ```
@@ -1050,4 +1076,4 @@ This project is licensed under the [MIT License](LICENSE).
 
 ---
 
-*Reverie CLI — Open-source agentic coding assistant. Built with Python and modern LLM APIs.*
+*Reverie CLI — Open-source agentic coding assistant. Built with Python and modern LLM APIs.Codex and Claude Code were of great assistance, especially Codex.*

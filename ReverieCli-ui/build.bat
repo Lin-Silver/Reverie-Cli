@@ -30,4 +30,5 @@ if not exist "%REPO_ROOT%\dist\Reverie-Portable-%VERSION%-x64.exe" (
 )
 
 echo [OK] Reverie %VERSION% Windows CLI, installer, and portable GUI are ready.
+pause
 exit /b 0

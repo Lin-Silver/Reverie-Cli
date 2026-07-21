@@ -2,6 +2,10 @@
 
 Released 2026-07-17.
 
+### Post-release update (still v2.5.0) — 2026-07-21
+
+* Filtered corpus-absent Context Engine query expansions: joined prose compounds (`"undefined expression"` → `undefinedexpression`) and reproduction-snippet dotted fragments (`r.limit`, `e.subs`) that name nothing in the index no longer collect the rare-term IDF bonus and displace real query terms. A compound is kept only with non-zero content document frequency or a real symbol/file-name match; a zero-frequency dotted fragment is dropped while its attribute suffix is retained. Held-out profiles improved or held with no regression (e.g. blind Recall@10 0.89 → 1.00, MRR@10 0.62 → 0.77). See `docs/CONTEXT_ENGINE_BENCHMARK.md`.
+
 * Added a cross-platform kernel compatibility contract (`--kernel-info`) and a desktop resolver that accepts a sibling core only when its SHA-256 is present in the ASAR-integrity-protected build allowlist and its platform, architecture, version, and bridge protocol handshake match. All failures use the compiled internal kernel.
 * Defined stable launch behavior: `reverie` runs the TUI/core, `reverieui` opens the GUI in the current directory, and the portable GUI supports an explicit `--tui` route without guessing whether a launch came from a terminal or double-click.
 * Added `ReverieCli-ui/build.bat` and `build.sh`, Windows installer PATH integration, Linux command symlinks, native Windows x64 installer/portable/core assets, Linux x64 AppImage/deb/core assets, and separate Apple Silicon and Intel DMGs.

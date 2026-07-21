@@ -41,7 +41,7 @@ class CacheManager:
     └── files.json          # File tracking info
     """
     
-    CACHE_VERSION = "1.5.0"
+    CACHE_VERSION = "1.10.0"
     COMPRESSION_LEVEL = 3
     
     def __init__(self, cache_dir: Path):

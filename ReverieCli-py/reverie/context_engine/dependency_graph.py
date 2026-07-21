@@ -12,7 +12,7 @@ Optimized for large codebases with efficient graph traversal.
 
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Dict, List, Set, Optional, Tuple
+from typing import Any, Dict, List, Set, Optional, Tuple
 from collections import defaultdict
 import json
 
@@ -110,6 +110,134 @@ class DependencyGraph:
             'total_edges': other._stats.get('total_edges', 0),
             'by_type': dict(other._stats.get('by_type', {}))
         }
+
+    def resolve_targets(self, symbol_table: Any) -> int:
+        """Resolve parser-local dependency names against the completed symbol table.
+
+        Parsers run per file and therefore cannot reliably qualify relative imports,
+        local calls, or ``self.method`` references.  This project-wide pass keeps
+        only confident resolutions and leaves ambiguous targets untouched.
+        """
+        symbols = list(symbol_table.iter_symbols())
+        if not symbols:
+            return 0
+
+        by_qname = {symbol.qualified_name.lower(): symbol for symbol in symbols}
+        by_name: Dict[str, List[Any]] = defaultdict(list)
+        for symbol in symbols:
+            by_name[str(symbol.name or "").lower()].append(symbol)
+
+        common_runtime_names = {
+            "all", "any", "bool", "bytes", "dict", "enumerate", "filter", "float",
+            "getattr", "hasattr", "int", "isinstance", "issubclass", "iter", "len",
+            "list", "map", "max", "min", "next", "object", "open", "print", "property",
+            "range", "repr", "reversed", "set", "setattr", "sorted", "str", "sum",
+            "super", "tuple", "type", "zip",
+        }
+
+        def common_prefix_size(left: str, right: str) -> int:
+            count = 0
+            for left_part, right_part in zip(left.split("."), right.split(".")):
+                if left_part.lower() != right_part.lower():
+                    break
+                count += 1
+            return count
+
+        def resolve(dep: Dependency) -> str:
+            raw_target = str(dep.to_symbol or "").strip().lstrip(".")
+            if not raw_target:
+                return dep.to_symbol
+            target_lower = raw_target.lower()
+            exact = by_qname.get(target_lower)
+            if exact is not None:
+                return exact.qualified_name
+
+            caller = symbol_table.get_symbol(dep.from_symbol)
+            caller_parent = str(getattr(caller, "parent", "") or "")
+            caller_file = str(getattr(caller, "file_path", "") or dep.file_path)
+            target_parts = raw_target.split(".")
+
+            if target_parts[0].lower() in {"self", "cls"} and caller_parent:
+                local_target = f"{caller_parent}.{'.'.join(target_parts[1:])}"
+                exact_local = by_qname.get(local_target.lower())
+                if exact_local is not None:
+                    return exact_local.qualified_name
+
+            simple_name = target_parts[-1].lower()
+            same_file = [] if len(target_parts) > 1 else [
+                symbol
+                for symbol in by_name.get(simple_name, [])
+                if str(symbol.file_path) == caller_file
+            ]
+            if len(same_file) == 1:
+                return same_file[0].qualified_name
+
+            suffix = f".{target_lower}"
+            suffix_matches = [
+                symbol
+                for symbol in by_name.get(simple_name, [])
+                if symbol.qualified_name.lower().endswith(suffix)
+            ]
+            if len(suffix_matches) == 1:
+                return suffix_matches[0].qualified_name
+
+            # A qualified external call such as ``os.path.join`` must not be
+            # rebound to an unrelated project symbol that merely shares its
+            # final component. Relative/project-qualified targets were already
+            # handled by the exact suffix lookup above.
+            if len(target_parts) > 1 and not suffix_matches:
+                return dep.to_symbol
+
+            if simple_name in common_runtime_names:
+                return dep.to_symbol
+
+            name_matches = by_name.get(simple_name, [])
+            candidates = suffix_matches or name_matches
+            if len(candidates) == 1:
+                return candidates[0].qualified_name
+            if not candidates or caller is None:
+                return dep.to_symbol
+
+            scored = sorted(
+                (
+                    (
+                        (12 if str(symbol.file_path) == caller_file else 0)
+                        + common_prefix_size(dep.from_symbol, symbol.qualified_name),
+                        symbol.qualified_name,
+                        symbol,
+                    )
+                    for symbol in candidates
+                ),
+                key=lambda item: (-item[0], item[1]),
+            )
+            if scored[0][0] >= 2 and (len(scored) == 1 or scored[0][0] >= scored[1][0] + 2):
+                return scored[0][2].qualified_name
+            return dep.to_symbol
+
+        rebuilt = DependencyGraph()
+        resolved_count = 0
+        seen: Set[Tuple[str, str, DependencyType, str, int]] = set()
+        for dependencies in self._outgoing.values():
+            for dep in dependencies:
+                target = resolve(dep)
+                key = (dep.from_symbol, target, dep.dep_type, dep.file_path, dep.line)
+                if key in seen:
+                    continue
+                seen.add(key)
+                if target != dep.to_symbol:
+                    resolved_count += 1
+                rebuilt.add_dependency(
+                    Dependency(
+                        from_symbol=dep.from_symbol,
+                        to_symbol=target,
+                        dep_type=dep.dep_type,
+                        file_path=dep.file_path,
+                        line=dep.line,
+                        context=dep.context,
+                    )
+                )
+        self.replace_with(rebuilt)
+        return resolved_count
     
     def add_dependency(self, dep: Dependency) -> None:
         """Add a dependency edge to the graph"""
@@ -304,6 +432,19 @@ class DependencyGraph:
         result = []
         visited = {symbol: 0}
         queue = [(symbol, 0)]
+        relationship_priority = {
+            DependencyType.CALLS: 0,
+            DependencyType.OVERRIDES: 0,
+            DependencyType.INHERITS: 1,
+            DependencyType.IMPLEMENTS: 1,
+            DependencyType.INSTANTIATES: 2,
+            DependencyType.IMPORTS: 3,
+            DependencyType.TYPE_HINTS: 4,
+            DependencyType.DECORATES: 4,
+            DependencyType.USES: 5,
+            DependencyType.REFERENCES: 5,
+            DependencyType.CONTAINS: 6,
+        }
         
         while queue and len(result) < max_results:
             current, dist = queue.pop(0)
@@ -311,19 +452,26 @@ class DependencyGraph:
             if dist >= max_distance:
                 continue
             
-            # Outgoing edges
-            for dep in self._outgoing.get(current, []):
-                if dep.to_symbol not in visited:
-                    visited[dep.to_symbol] = dist + 1
-                    result.append((dep.to_symbol, dist + 1, dep.dep_type))
-                    queue.append((dep.to_symbol, dist + 1))
-            
-            # Incoming edges
-            for dep in self._incoming.get(current, []):
-                if dep.from_symbol not in visited:
-                    visited[dep.from_symbol] = dist + 1
-                    result.append((dep.from_symbol, dist + 1, dep.dep_type))
-                    queue.append((dep.from_symbol, dist + 1))
+            neighbors = [
+                (dep.to_symbol, dep)
+                for dep in self._outgoing.get(current, [])
+            ] + [
+                (dep.from_symbol, dep)
+                for dep in self._incoming.get(current, [])
+            ]
+            neighbors.sort(
+                key=lambda item: (
+                    relationship_priority.get(item[1].dep_type, 5),
+                    item[0],
+                )
+            )
+            for related_symbol, dep in neighbors:
+                if len(result) >= max_results:
+                    break
+                if related_symbol not in visited:
+                    visited[related_symbol] = dist + 1
+                    result.append((related_symbol, dist + 1, dep.dep_type))
+                    queue.append((related_symbol, dist + 1))
         
         return result
     

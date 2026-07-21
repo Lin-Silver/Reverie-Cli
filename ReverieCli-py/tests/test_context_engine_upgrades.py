@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import sqlite3
 
 from reverie.context_engine.cache import CacheManager
 from reverie.context_engine.compressor import (
@@ -7,10 +8,10 @@ from reverie.context_engine.compressor import (
     MEMORY_BLOCK_HEADER,
     _build_compression_transcript,
 )
-from reverie.context_engine.dependency_graph import DependencyGraph
+from reverie.context_engine.dependency_graph import DependencyGraph, DependencyType
 from reverie.context_engine.fast_context import FastContextExplorer
 from reverie.context_engine.fragments import make_context_fragment, render_context_fragments
-from reverie.context_engine.indexer import CodebaseIndexer, FileInfo
+from reverie.context_engine.indexer import CodebaseIndexer, FileInfo, IndexConfig
 from reverie.context_engine.parsers.base import ParseResult
 from reverie.context_engine.parsers.config_parser import ConfigParser
 from reverie.context_engine.retriever import ContextRetriever, TaskContextFile
@@ -195,6 +196,17 @@ def test_task_query_tokens_keep_ui_terms_and_drop_stopwords(tmp_path: Path) -> N
     assert anchors["symbols"] == ["ContextRetriever"]
 
 
+def test_task_query_builds_compound_terms_for_code_filenames(tmp_path: Path) -> None:
+    retriever = ContextRetriever(SymbolTable(), DependencyGraph(), tmp_path)
+
+    weights = retriever._build_task_term_weights(
+        "Duplicate Symbols sections appear for index entries"
+    )
+
+    assert weights["indexentries"] > 1.0
+    assert weights["symbolssections"] > 1.0
+
+
 def test_query_anchors_reject_versions_and_dotted_symbols(tmp_path: Path) -> None:
     retriever = ContextRetriever(SymbolTable(), DependencyGraph(), tmp_path)
 
@@ -329,6 +341,99 @@ def test_ambiguous_basename_file_anchors_are_not_trusted(tmp_path: Path) -> None
     assert reliable == {"engine.py"}
 
 
+def test_stack_trace_file_anchors_resolve_unique_workspace_suffixes(tmp_path: Path) -> None:
+    target = tmp_path / "pylint" / "reporters" / "text.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("class TextReporter:\n    pass\n", encoding="utf-8")
+    file_info = {
+        str(target): FileInfo(
+            path=str(target), mtime=1, size=target.stat().st_size, content_hash="target"
+        )
+    }
+    retriever = ContextRetriever(SymbolTable(), DependencyGraph(), tmp_path, file_info=file_info)
+
+    reliable = retriever._reliable_file_anchor_terms({
+        "/home/user/.venv/lib/python3.12/site-packages/pylint/reporters/text.py"
+    })
+
+    assert reliable == {"pylint/reporters/text.py"}
+
+
+def test_file_scoring_ignores_workspace_parent_names_and_unsafe_short_terms(tmp_path: Path) -> None:
+    project_root = tmp_path / "snapshots" / "os" / "project"
+    target = project_root / "src" / "plain.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("answer = 42\n", encoding="utf-8")
+    info = FileInfo(path=str(target), mtime=1, size=target.stat().st_size, content_hash="plain")
+    retriever = ContextRetriever(
+        SymbolTable(), DependencyGraph(), project_root, file_info={str(target): info}
+    )
+
+    candidate = retriever._score_file_for_task(
+        file_path=str(target),
+        info=info,
+        term_weights={"snapshots": 4.0, "os": 4.0, "t": 4.0},
+        active_files=set(),
+        changed_files=set(),
+    )
+
+    assert candidate is None
+
+
+def test_test_module_neighborhood_recovers_matching_implementation_file(tmp_path: Path) -> None:
+    source = tmp_path / "sympy" / "matrices" / "expressions" / "matexpr.py"
+    test_file = source.parent / "tests" / "test_matexpr.py"
+    source.parent.mkdir(parents=True)
+    test_file.parent.mkdir()
+    source.write_text("class MatrixExpr:\n    pass\n", encoding="utf-8")
+    test_file.write_text("def test_identity_sum():\n    pass\n", encoding="utf-8")
+    file_info = {
+        str(path): FileInfo(
+            path=str(path), mtime=1, size=path.stat().st_size, content_hash=path.stem
+        )
+        for path in (source, test_file)
+    }
+    retriever = ContextRetriever(
+        SymbolTable(), DependencyGraph(), tmp_path, file_info=file_info
+    )
+    seed = TaskContextFile(
+        file_path=str(test_file),
+        language="python",
+        score=10.0,
+        summary="identity matrix behavior",
+        reasons=["chunk-match"],
+    )
+
+    hits = retriever._collect_test_source_hits([seed])
+
+    assert hits[0]["file_path"] == str(source)
+    assert hits[0]["reason"] == "test-source:test_matexpr.py->matexpr.py"
+
+
+def test_test_module_neighborhood_supports_context_prefixed_test_names(tmp_path: Path) -> None:
+    source = tmp_path / "sphinx" / "environment" / "adapters" / "indexentries.py"
+    test_file = tmp_path / "tests" / "test_environment_indexentries.py"
+    source.parent.mkdir(parents=True)
+    test_file.parent.mkdir()
+    source.write_text("def create_index_entries():\n    return []\n", encoding="utf-8")
+    test_file.write_text("def test_duplicate_symbols():\n    pass\n", encoding="utf-8")
+    file_info = {
+        str(path): FileInfo(
+            path=str(path), mtime=1, size=path.stat().st_size, content_hash=path.stem
+        )
+        for path in (source, test_file)
+    }
+    retriever = ContextRetriever(
+        SymbolTable(), DependencyGraph(), tmp_path, file_info=file_info
+    )
+
+    hits = retriever._collect_test_source_hits([
+        TaskContextFile(str(test_file), "python", 10.0, "duplicate symbols", ["chunk-match"])
+    ])
+
+    assert hits[0]["file_path"] == str(source)
+
+
 def test_file_tags_ignore_workspace_parent_directory_names(tmp_path: Path) -> None:
     project_root = tmp_path / "engine-tools" / "Reverie-Cli" / "project"
     target = project_root / "src" / "plain.py"
@@ -395,6 +500,394 @@ def test_content_search_fuses_weighted_terms_and_reports_actual_matches(tmp_path
     assert decoy_hit["terms"] == ["state"]
     assert stemmed_hits is not None
     assert Path(stemmed_hits[0]["file_path"]).name == "module_loader.py"
+
+
+def test_code_chunk_search_returns_relevant_symbol_and_line_range(tmp_path: Path) -> None:
+    target = tmp_path / "src" / "coordinator.py"
+    decoy = tmp_path / "src" / "state.py"
+    target.parent.mkdir()
+    target.write_text(
+        "def renew_lease_generation(owner):\n"
+        "    \"\"\"Protect ownership transfer with a monotonic generation fence.\"\"\"\n"
+        "    return owner.rotate('generation_fence')\n",
+        encoding="utf-8",
+    )
+    decoy.write_text("def update_state(state):\n    return state\n", encoding="utf-8")
+    indexer = CodebaseIndexer(tmp_path, cache_dir=tmp_path / "cache")
+    assert indexer.full_index(show_progress=False).success is True
+
+    hits = indexer.search_code_chunks(
+        [("ownership", 1.0), ("generation_fence", 4.0), ("state", 0.2)],
+        limit=8,
+    )
+
+    assert hits is not None
+    assert Path(hits[0]["file_path"]).name == "coordinator.py"
+    assert hits[0]["symbol"].endswith("renew_lease_generation")
+    assert hits[0]["start_line"] == 1
+    assert hits[0]["end_line"] == 3
+    assert "generation_fence" in hits[0]["terms"]
+
+    cached_indexer = CodebaseIndexer(tmp_path, cache_dir=tmp_path / "cache")
+    assert cached_indexer.load_cache() is True
+    persisted = cached_indexer.search_code_chunks([("generation_fence", 4.0)], limit=4)
+    assert persisted and persisted[0]["symbol"].endswith("renew_lease_generation")
+
+    target.write_text(
+        "def renew_lease_generation(owner):\n"
+        "    return owner.rotate('ownership_epoch')\n",
+        encoding="utf-8",
+    )
+    cached_indexer.incremental_index([target.resolve()])
+    assert cached_indexer.search_code_chunks([("generation_fence", 4.0)], limit=4) == []
+    updated = cached_indexer.search_code_chunks([("ownership_epoch", 4.0)], limit=4)
+    assert updated and updated[0]["symbol"].endswith("renew_lease_generation")
+    with sqlite3.connect(cached_indexer._cache_manager.content_search_path) as connection:
+        assert connection.execute("SELECT count(*) FROM content_search").fetchone()[0] == connection.execute(
+            "SELECT count(*) FROM content_documents"
+        ).fetchone()[0]
+        assert connection.execute("SELECT count(*) FROM chunk_search").fetchone()[0] == connection.execute(
+            "SELECT count(*) FROM chunk_documents"
+        ).fetchone()[0]
+        expected_payloads = connection.execute("SELECT count(*) FROM content_documents").fetchone()[0]
+        expected_payloads += connection.execute("SELECT count(*) FROM chunk_documents").fetchone()[0]
+        assert connection.execute("SELECT count(*) FROM fts_delete_payloads").fetchone()[0] == expected_payloads
+
+
+def test_parallel_index_builds_produce_identical_tied_rankings(tmp_path: Path) -> None:
+    source_root = tmp_path / "workspace"
+    source_root.mkdir()
+    for index in range(24):
+        (source_root / f"module_{index:02d}.py").write_text(
+            f"def handler_{index:02d}():\n    return 'shared_marker'\n",
+            encoding="utf-8",
+        )
+
+    serial = CodebaseIndexer(
+        source_root,
+        cache_dir=tmp_path / "serial-cache",
+        config=IndexConfig(max_workers=1),
+    )
+    parallel = CodebaseIndexer(
+        source_root,
+        cache_dir=tmp_path / "parallel-cache",
+        config=IndexConfig(max_workers=8),
+    )
+    assert serial.full_index(show_progress=False).success is True
+    assert parallel.full_index(show_progress=False).success is True
+
+    weighted_terms = [("shared_marker", 3.0)]
+    serial_content = serial.search_content_terms(weighted_terms, limit=12)
+    parallel_content = parallel.search_content_terms(weighted_terms, limit=12)
+    serial_chunks = serial.search_code_chunks(weighted_terms, limit=12)
+    parallel_chunks = parallel.search_code_chunks(weighted_terms, limit=12)
+
+    assert [item["file_path"] for item in serial_content or []] == [
+        item["file_path"] for item in parallel_content or []
+    ]
+    assert [(item["file_path"], item["symbol"]) for item in serial_chunks or []] == [
+        (item["file_path"], item["symbol"]) for item in parallel_chunks or []
+    ]
+
+    def retrieve(indexer: CodebaseIndexer) -> list[str]:
+        result = ContextRetriever(
+            indexer.symbol_table,
+            indexer.dependency_graph,
+            source_root,
+            file_info=indexer._file_info,
+            content_searcher=indexer.search_content_terms,
+            chunk_searcher=indexer.search_code_chunks,
+        ).retrieve_for_task(
+            "Fix shared_marker handling",
+            max_files=10,
+            max_symbols=4,
+            include_history=False,
+            include_memory=False,
+            fast=True,
+        )
+        return [item.file_path for item in result.relevant_files]
+
+    assert retrieve(serial) == retrieve(parallel)
+
+
+def test_dependency_resolution_qualifies_relative_import_calls(tmp_path: Path) -> None:
+    package = tmp_path / "pkg"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    api = package / "api.py"
+    implementation = package / "impl.py"
+    api.write_text(
+        "from .impl import perform_update\n\n"
+        "def entry():\n"
+        "    return perform_update()\n",
+        encoding="utf-8",
+    )
+    implementation.write_text(
+        "def perform_update():\n"
+        "    return 'updated'\n",
+        encoding="utf-8",
+    )
+    cache_dir = tmp_path / "cache"
+    indexer = CodebaseIndexer(tmp_path, cache_dir=cache_dir)
+    assert indexer.full_index(show_progress=False).success is True
+
+    dependencies = indexer.dependency_graph.get_dependencies("pkg.api.entry")
+    assert any(dep.to_symbol == "pkg.impl.perform_update" for dep in dependencies)
+    module_dependencies = indexer.dependency_graph.get_dependencies("pkg.api")
+    assert any(
+        dep.dep_type == DependencyType.IMPORTS and dep.to_symbol == "pkg.impl.perform_update"
+        for dep in module_dependencies
+    )
+    assert any(
+        dep.dep_type == DependencyType.CONTAINS and dep.to_symbol == "pkg.api.entry"
+        for dep in module_dependencies
+    )
+
+    cached_indexer = CodebaseIndexer(tmp_path, cache_dir=cache_dir)
+    assert cached_indexer.load_cache() is True
+    cached_dependencies = cached_indexer.dependency_graph.get_dependencies("pkg.api.entry")
+    assert any(dep.to_symbol == "pkg.impl.perform_update" for dep in cached_dependencies)
+
+
+def test_dependency_resolution_uses_name_index_for_suffix_candidates() -> None:
+    qualified_name_reads = 0
+
+    class CountingSymbol:
+        def __init__(self, name: str, qualified_name: str) -> None:
+            self.name = name
+            self._qualified_name = qualified_name
+            self.file_path = f"{name}.py"
+            self.parent = None
+
+        @property
+        def qualified_name(self) -> str:
+            nonlocal qualified_name_reads
+            qualified_name_reads += 1
+            return self._qualified_name
+
+    symbols = [CountingSymbol(f"symbol_{index}", f"pkg.symbol_{index}") for index in range(2000)]
+    symbols.append(CountingSymbol("target", "pkg.module.target"))
+
+    class CountingTable:
+        def iter_symbols(self):
+            return symbols
+
+        @staticmethod
+        def get_symbol(_qualified_name):
+            return None
+
+    graph = DependencyGraph()
+    for index in range(1000):
+        graph.add_simple(
+            f"caller_{index}",
+            "module.target",
+            DependencyType.CALLS,
+            file_path=f"caller_{index}.py",
+        )
+
+    assert graph.resolve_targets(CountingTable()) == 1000
+    assert qualified_name_reads < 10000
+
+
+def test_dependency_resolution_does_not_rebind_external_qualified_calls() -> None:
+    table = SymbolTable()
+    caller = Symbol(
+        name="caller",
+        qualified_name="pkg.caller",
+        kind=SymbolKind.FUNCTION,
+        file_path="pkg.py",
+        start_line=1,
+        end_line=1,
+        language="python",
+    )
+    unrelated = Symbol(
+        name="join",
+        qualified_name="pkg.text.join",
+        kind=SymbolKind.FUNCTION,
+        file_path="pkg.py",
+        start_line=1,
+        end_line=1,
+        language="python",
+    )
+    table.add_symbol(caller)
+    table.add_symbol(unrelated)
+    graph = DependencyGraph()
+    graph.add_simple(caller.qualified_name, "os.path.join", DependencyType.CALLS, file_path="pkg.py")
+
+    assert graph.resolve_targets(table) == 0
+    assert graph.get_dependencies(caller.qualified_name)[0].to_symbol == "os.path.join"
+
+
+def test_dependency_graph_respects_related_symbol_result_limit() -> None:
+    graph = DependencyGraph()
+    for index in range(100):
+        graph.add_simple("module", f"module.child_{index}", DependencyType.CONTAINS)
+    graph.add_simple("subclass", "module", DependencyType.INHERITS)
+
+    related = graph.get_related_symbols("module", max_distance=2, max_results=7)
+
+    assert len(related) == 7
+    assert related[0] == ("subclass", 1, DependencyType.INHERITS)
+
+
+def test_graph_evidence_enters_file_candidates_before_cutoff(tmp_path: Path) -> None:
+    facade = tmp_path / "src" / "facade.py"
+    implementation = tmp_path / "src" / "implementation.py"
+    facade.parent.mkdir()
+    facade.write_text("class FacadeEntry:\n    pass\n", encoding="utf-8")
+    implementation.write_text("def execute_transition():\n    return True\n", encoding="utf-8")
+
+    table = SymbolTable()
+    facade_symbol = Symbol(
+        name="FacadeEntry",
+        qualified_name="src.facade.FacadeEntry",
+        kind=SymbolKind.CLASS,
+        file_path=str(facade),
+        start_line=1,
+        end_line=2,
+        source_code=facade.read_text(encoding="utf-8"),
+        language="python",
+    )
+    implementation_symbol = Symbol(
+        name="execute_transition",
+        qualified_name="src.implementation.execute_transition",
+        kind=SymbolKind.FUNCTION,
+        file_path=str(implementation),
+        start_line=1,
+        end_line=2,
+        source_code=implementation.read_text(encoding="utf-8"),
+        language="python",
+    )
+    table.add_symbol(facade_symbol)
+    table.add_symbol(implementation_symbol)
+    graph = DependencyGraph()
+    graph.add_simple(
+        facade_symbol.qualified_name,
+        implementation_symbol.qualified_name,
+        DependencyType.CALLS,
+        file_path=str(facade),
+        line=1,
+    )
+
+    file_info = {}
+    for path in (facade, implementation):
+        file_info[str(path)] = FileInfo(
+            path=str(path), mtime=1, size=path.stat().st_size, content_hash=path.stem,
+            language="python", summary=f"module {path.stem}",
+        )
+    for index in range(8):
+        decoy = tmp_path / "src" / f"delegation_{index}.py"
+        decoy.write_text("def behavior():\n    return None\n", encoding="utf-8")
+        file_info[str(decoy)] = FileInfo(
+            path=str(decoy), mtime=1, size=decoy.stat().st_size, content_hash=str(index),
+            language="python", keywords=["delegation", "behavior"], summary="delegation behavior helper",
+        )
+
+    retriever = ContextRetriever(table, graph, tmp_path, file_info=file_info)
+    result = retriever.retrieve_for_task(
+        "Fix FacadeEntry delegation behavior",
+        max_files=2,
+        max_symbols=4,
+        include_history=False,
+        include_memory=False,
+        fast=True,
+    )
+
+    selected = {item.file_path: item for item in result.relevant_files}
+    assert str(facade) in selected
+    assert str(implementation) in selected
+    assert any(item["source"] == "graph" for item in selected[str(implementation)].evidence)
+
+
+def test_rank_fusion_rewards_agreement_across_independent_sources(tmp_path: Path) -> None:
+    dominant = TaskContextFile("dominant.py", "python", 100.0, "dominant", [])
+    corroborated = TaskContextFile("corroborated.py", "python", 35.0, "corroborated", [])
+    candidates = [dominant, corroborated]
+    evidence = {
+        "dominant.py": [{"source": "index", "score": 100.0}],
+        "corroborated.py": [
+            {"source": "chunk", "score": 4.0},
+            {"source": "graph", "score": 3.0},
+            {"source": "fts", "score": 2.0},
+        ],
+    }
+
+    ContextRetriever._rerank_task_file_candidates(candidates, evidence)
+
+    assert corroborated.score > dominant.score
+    assert corroborated.reasons[0] == "rank-fusion:chunk+fts+graph"
+
+
+def test_symbol_context_respects_source_flag_and_line_limit() -> None:
+    source = "\n".join(f"line_{index}" for index in range(1, 121))
+    symbol = Symbol(
+        name="large_symbol",
+        qualified_name="module.large_symbol",
+        kind=SymbolKind.FUNCTION,
+        file_path="module.py",
+        start_line=1,
+        end_line=120,
+        signature="def large_symbol():",
+        source_code=source,
+        language="python",
+    )
+
+    metadata_only = symbol.get_context_string(include_source=False, max_lines=10)
+    bounded = symbol.get_context_string(include_source=True, max_lines=10)
+
+    assert "line_1" not in metadata_only
+    assert "line_1" in bounded
+    assert "line_120" in bounded
+    assert "line_60" not in bounded
+    assert "lines omitted" in bounded
+
+
+def test_task_context_budget_preserves_multiple_ranked_file_excerpts(tmp_path: Path) -> None:
+    retriever = ContextRetriever(SymbolTable(), DependencyGraph(), tmp_path)
+    files = []
+    for index in range(3):
+        path = tmp_path / "src" / f"module_{index}.py"
+        excerpt = "\n".join(f"line_{index}_{line}: value = {line}" for line in range(240))
+        files.append(
+            TaskContextFile(
+                file_path=str(path),
+                language="python",
+                score=10.0 - index,
+                summary=f"implementation module {index}",
+                reasons=["chunk:implementation", "graph:calls"],
+                excerpt=excerpt,
+            )
+        )
+
+    context, token_estimate = retriever._format_task_context(
+        "Update the implementation flow",
+        files,
+        [],
+        [],
+        [],
+        max_tokens=1000,
+    )
+
+    assert token_estimate <= 1000
+    assert str(tmp_path) not in context
+    assert all(f"module_{index}.py" in context for index in range(3))
+    assert "excerpt truncated to token budget" in context
+
+
+def test_fenced_trace_identifiers_are_recalled_without_dominating_title_terms(tmp_path: Path) -> None:
+    retriever = ContextRetriever(SymbolTable(), DependencyGraph(), tmp_path)
+    query = (
+        "Fix backend selection failure\n"
+        "```text\n"
+        "Traceback: resolve_backend(config) called from internal_dispatch\n"
+        "```\n"
+    )
+
+    weights = retriever._build_task_term_weights(query)
+    ranked_terms = dict(retriever._rank_task_search_terms(query, weights, limit=18))
+
+    assert "resolve_backend" in ranked_terms
+    assert ranked_terms["resolve_backend"] < ranked_terms["backend"]
 
 
 def test_task_file_roles_follow_explicit_documentation_intent(tmp_path: Path) -> None:

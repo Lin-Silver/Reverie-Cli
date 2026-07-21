@@ -183,9 +183,19 @@ class Symbol:
         if self.docstring:
             parts.append(f'\n"""{self.docstring}"""')
         
-        # Source code (full)
-        if self.source_code:
-            parts.append('\n' + self.source_code)
+        if include_source and self.source_code:
+            source_lines = self.source_code.splitlines()
+            line_limit = max(8, int(max_lines or 50))
+            if len(source_lines) > line_limit:
+                head_count = max(5, line_limit * 3 // 4)
+                tail_count = max(3, line_limit - head_count)
+                omitted = len(source_lines) - head_count - tail_count
+                source_lines = (
+                    source_lines[:head_count]
+                    + [f"# ... {omitted} lines omitted ..."]
+                    + source_lines[-tail_count:]
+                )
+            parts.append('\n' + '\n'.join(source_lines))
         
         return '\n'.join(parts)
 
@@ -363,11 +373,15 @@ class SymbolTable:
                 report_suppressed_exception("resolve symbol-table file path")
         symbols = [self._symbols[qn] for qn in qnames if qn in self._symbols]
         # Sort by line number
-        return sorted(symbols, key=lambda s: s.start_line)
+        return sorted(symbols, key=lambda symbol: (symbol.start_line, symbol.qualified_name))
 
     def get_symbols_in_file(self, file_path: str) -> List[Symbol]:
         """Compatibility alias used by some Context Engine components."""
         return self.get_all_in_file(file_path)
+
+    def iter_symbols(self) -> List[Symbol]:
+        """Return a stable snapshot for project-wide resolution and ranking."""
+        return list(self._symbols.values())
     
     def get_children(self, qualified_name: str) -> List[Symbol]:
         """Get all direct children of a symbol"""

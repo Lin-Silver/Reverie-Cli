@@ -94,6 +94,14 @@ class PythonParser(BaseParser):
                     'symbols': None,
                     'line': node.lineno
                 })
+                result.dependencies.append(Dependency(
+                    from_symbol=self._module_name,
+                    to_symbol=alias.name,
+                    dep_type=DependencyType.IMPORTS,
+                    file_path=self._file_path,
+                    line=node.lineno,
+                    context=alias.name,
+                ))
         
         elif isinstance(node, ast.ImportFrom):
             module = node.module or ''
@@ -101,6 +109,14 @@ class PythonParser(BaseParser):
                 name = alias.asname if alias.asname else alias.name
                 full_path = f"{module}.{alias.name}" if module else alias.name
                 self._import_map[name] = full_path
+                result.dependencies.append(Dependency(
+                    from_symbol=self._module_name,
+                    to_symbol=full_path,
+                    dep_type=DependencyType.IMPORTS,
+                    file_path=self._file_path,
+                    line=node.lineno,
+                    context=full_path,
+                ))
             
             result.imports.append({
                 'module': module,

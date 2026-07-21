@@ -11,21 +11,24 @@ Optimized for large codebases (>5MB source code).
 """
 
 from pathlib import Path
-from typing import List, Dict, Optional, Set, Tuple, Callable, Any
+from typing import List, Dict, Optional, Set, Tuple, Callable, Any, Iterable
 from dataclasses import dataclass, field
 import time
 import os
 import fnmatch
 import hashlib
+import json
 import math
+import re
 import sqlite3
 import threading
 import queue
+import zlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathspec import GitIgnoreSpec
 
 from .symbol_table import Symbol, SymbolTable
-from .dependency_graph import DependencyGraph, Dependency
+from .dependency_graph import DependencyGraph, Dependency, DependencyType
 from .parsers.base import BaseParser, ParseResult
 from .parsers.document_parser import DocumentParser
 from .parsers.python_parser import PythonParser
@@ -273,6 +276,8 @@ class CodebaseIndexer:
         self._cache_manager = CacheManager(self.cache_dir)
         self._content_index_connection: Optional[sqlite3.Connection] = None
         self._content_index_temporary_path: Optional[Path] = None
+        self._content_document_total: Optional[int] = None
+        self._content_df_cache: Dict[str, int] = {}
         
         # Core data structures
         self.symbol_table = SymbolTable()
@@ -574,6 +579,17 @@ class CodebaseIndexer:
             symbol_table.add_symbol(symbol)
         for dep in parse_result.dependencies:
             dependency_graph.add_dependency(dep)
+        for symbol in parse_result.symbols:
+            if not symbol.parent or symbol.parent == symbol.qualified_name:
+                continue
+            dependency_graph.add_simple(
+                symbol.parent,
+                symbol.qualified_name,
+                DependencyType.CONTAINS,
+                file_path=file_key,
+                line=max(1, int(symbol.start_line or 1)),
+                context=symbol.name,
+            )
 
         if file_info:
             file_info.symbol_count = parse_result.symbol_count
@@ -581,7 +597,7 @@ class CodebaseIndexer:
             search_body = getattr(file_info, "_content_search_body", None)
             if search_body is not None:
                 if self._content_index_connection is not None:
-                    self._upsert_content_index(file_key, search_body)
+                    self._upsert_content_index(file_key, search_body, parse_result.symbols)
                 delattr(file_info, "_content_search_body")
 
     @staticmethod
@@ -594,9 +610,93 @@ class CodebaseIndexer:
             "CREATE VIRTUAL TABLE IF NOT EXISTS content_search "
             "USING fts5(body, content='', tokenize='porter unicode61')"
         )
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS chunk_documents ("
+            "rowid INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT NOT NULL, "
+            "symbol TEXT NOT NULL, kind TEXT NOT NULL, start_line INTEGER NOT NULL, "
+            "end_line INTEGER NOT NULL)"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS chunk_documents_path_idx ON chunk_documents(path)"
+        )
+        connection.execute(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS chunk_search USING fts5("
+            "name, signature, documentation, body, content='', tokenize='porter unicode61')"
+        )
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS fts_delete_payloads ("
+            "search_table TEXT NOT NULL, rowid INTEGER NOT NULL, delete_payload BLOB NOT NULL, "
+            "PRIMARY KEY(search_table, rowid)) WITHOUT ROWID"
+        )
+
+    # Delete payloads are stored with a one-byte format marker so small rows
+    # (the vast majority: symbol names/signatures) avoid a zlib round trip that
+    # costs more CPU than it saves. Only bodies past this threshold compress.
+    _FTS_PAYLOAD_RAW = 0
+    _FTS_PAYLOAD_ZLIB = 1
+    _FTS_PAYLOAD_COMPRESS_THRESHOLD = 512
+
+    @staticmethod
+    def _pack_fts_delete_payload(fields: Tuple[str, ...]) -> bytes:
+        serialized = json.dumps(fields, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        if len(serialized) >= CodebaseIndexer._FTS_PAYLOAD_COMPRESS_THRESHOLD:
+            return bytes((CodebaseIndexer._FTS_PAYLOAD_ZLIB,)) + zlib.compress(serialized, level=1)
+        return bytes((CodebaseIndexer._FTS_PAYLOAD_RAW,)) + serialized
+
+    @staticmethod
+    def _unpack_fts_delete_payload(payload: Any) -> Tuple[str, ...]:
+        blob = bytes(payload)
+        if not blob:
+            return tuple()
+        marker, body = blob[0], blob[1:]
+        if marker == CodebaseIndexer._FTS_PAYLOAD_ZLIB:
+            serialized = zlib.decompress(body).decode("utf-8")
+        elif marker == CodebaseIndexer._FTS_PAYLOAD_RAW:
+            serialized = body.decode("utf-8")
+        else:
+            # Legacy payloads had no marker and were a bare zlib stream.
+            serialized = zlib.decompress(blob).decode("utf-8")
+        values = json.loads(serialized)
+        return tuple(str(value or "") for value in values)
+
+    @staticmethod
+    def _delete_fts_rows(
+        connection: sqlite3.Connection,
+        mapping_table: str,
+        search_table: str,
+        search_fields: Tuple[str, ...],
+        file_path: str,
+    ) -> None:
+        """Delete live FTS rows before removing their path mappings."""
+        rowids = connection.execute(
+            f"SELECT mapping.rowid, payload.delete_payload FROM {mapping_table} AS mapping "
+            "LEFT JOIN fts_delete_payloads AS payload "
+            "ON payload.search_table = ? AND payload.rowid = mapping.rowid "
+            "WHERE mapping.path = ?",
+            (search_table, str(file_path)),
+        ).fetchall()
+        field_list = ", ".join(search_fields)
+        placeholders = ", ".join("?" for _ in range(len(search_fields) + 2))
+        for rowid, payload in rowids:
+            if payload is None:
+                raise ValueError(f"Missing {search_table} delete payload")
+            fields = CodebaseIndexer._unpack_fts_delete_payload(payload)
+            if len(fields) != len(search_fields):
+                raise ValueError(f"Invalid {search_table} delete payload")
+            connection.execute(
+                f"INSERT INTO {search_table}({search_table}, rowid, {field_list}) "
+                f"VALUES ({placeholders})",
+                ("delete", int(rowid), *fields),
+            )
+        if rowids:
+            connection.executemany(
+                "DELETE FROM fts_delete_payloads WHERE search_table = ? AND rowid = ?",
+                ((search_table, int(rowid)) for rowid, _ in rowids),
+            )
+        connection.execute(f"DELETE FROM {mapping_table} WHERE path = ?", (str(file_path),))
 
     def _begin_content_index_rebuild(self) -> None:
-        """Build a contentless full-text index beside the active cache."""
+        """Build a replaceable full-text index beside the active cache."""
         temporary_path = self._cache_manager.content_search_path.with_suffix(".sqlite3.tmp")
         temporary_path.unlink(missing_ok=True)
         connection = sqlite3.connect(temporary_path)
@@ -618,6 +718,7 @@ class CodebaseIndexer:
             connection.commit()
             connection.close()
             os.replace(temporary_path, self._cache_manager.content_search_path)
+            self._reset_content_frequency_cache()
             return True
         except Exception:
             report_suppressed_exception("publish Context Engine content search index")
@@ -646,26 +747,138 @@ class CodebaseIndexer:
             report_suppressed_exception("update Context Engine content search index")
         finally:
             connection.close()
+            self._reset_content_frequency_cache()
 
-    def _upsert_content_index(self, file_path: str, content: str) -> None:
+    def _reset_content_frequency_cache(self) -> None:
+        """Drop memoized content document-frequency data after the index changes."""
+        self._content_document_total = None
+        self._content_df_cache.clear()
+
+    @staticmethod
+    def _symbol_search_fields(symbol: Symbol) -> Optional[Tuple[str, str, str, str]]:
+        searchable_kinds = {
+            "CLASS", "ENUM", "FUNCTION", "INTERFACE", "MACRO", "METHOD", "MODULE",
+            "NAMESPACE", "PROPERTY", "STRUCT", "TRAIT", "TYPE_ALIAS",
+        }
+        kind = str(getattr(getattr(symbol, "kind", None), "name", "") or "")
+        if kind not in searchable_kinds:
+            return None
+        qualified_name = str(symbol.qualified_name or "")
+        simple_name = str(symbol.name or "")
+        expanded_name = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", simple_name).replace("_", " ")
+        name = " ".join(part for part in (qualified_name, simple_name, expanded_name, kind.lower()) if part)
+        signature = str(symbol.signature or "")[:4096]
+        documentation = str(symbol.docstring or "")[:8192]
+        body = str(symbol.source_code or "")
+        if not any((name, signature, documentation, body)):
+            return None
+        if len(body) > 49152:
+            body = body[:36864] + "\n...\n" + body[-8192:]
+        return name, signature, documentation, body
+
+    def _upsert_content_index(
+        self,
+        file_path: str,
+        content: str,
+        symbols: Optional[List[Symbol]] = None,
+    ) -> None:
         connection = self._content_index_connection
         if connection is None:
             return
-        connection.execute("DELETE FROM content_documents WHERE path = ?", (str(file_path),))
+        self._delete_fts_rows(
+            connection, "content_documents", "content_search", ("body",), str(file_path)
+        )
+        self._delete_fts_rows(
+            connection,
+            "chunk_documents",
+            "chunk_search",
+            ("name", "signature", "documentation", "body"),
+            str(file_path),
+        )
         cursor = connection.execute(
             "INSERT INTO content_documents(path) VALUES (?)",
             (str(file_path),),
         )
+        content_rowid = int(cursor.lastrowid)
         connection.execute(
             "INSERT INTO content_search(rowid, body) VALUES (?, ?)",
-            (int(cursor.lastrowid), str(content or "")),
+            (content_rowid, str(content or "")),
         )
+        connection.execute(
+            "INSERT INTO fts_delete_payloads(search_table, rowid, delete_payload) VALUES (?, ?, ?)",
+            (
+                "content_search",
+                content_rowid,
+                self._pack_fts_delete_payload((str(content or ""),)),
+            ),
+        )
+        # Collect chunk rows and insert them in three bulk executemany calls
+        # instead of three per-symbol executes. Rowids are assigned explicitly
+        # from the current table maximum so chunk_search and its delete payload
+        # can reference them without a per-row lastrowid round-trip. This is safe
+        # because the content index connection is single-threaded within a
+        # transaction, and it turns O(symbols) SQLite round-trips into O(1).
+        document_rows: List[Tuple[int, str, str, str, int, int]] = []
+        search_rows: List[Tuple[int, str, str, str, str]] = []
+        payload_rows: List[Tuple[str, int, bytes]] = []
+        next_rowid: Optional[int] = None
+        for symbol in list(symbols or [])[:512]:
+            fields = self._symbol_search_fields(symbol)
+            if fields is None:
+                continue
+            if next_rowid is None:
+                row = connection.execute(
+                    "SELECT COALESCE(MAX(rowid), 0) FROM chunk_documents"
+                ).fetchone()
+                next_rowid = (int(row[0]) if row else 0) + 1
+            chunk_rowid = next_rowid
+            next_rowid += 1
+            document_rows.append(
+                (
+                    chunk_rowid,
+                    str(file_path),
+                    str(symbol.qualified_name or symbol.name or ""),
+                    str(getattr(getattr(symbol, "kind", None), "name", "") or "UNKNOWN"),
+                    max(1, int(symbol.start_line or 1)),
+                    max(1, int(symbol.end_line or symbol.start_line or 1)),
+                )
+            )
+            search_rows.append((chunk_rowid, *fields))
+            payload_rows.append(
+                ("chunk_search", chunk_rowid, self._pack_fts_delete_payload(fields))
+            )
+        if document_rows:
+            connection.executemany(
+                "INSERT INTO chunk_documents(rowid, path, symbol, kind, start_line, end_line) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                document_rows,
+            )
+            connection.executemany(
+                "INSERT INTO chunk_search(rowid, name, signature, documentation, body) "
+                "VALUES (?, ?, ?, ?, ?)",
+                search_rows,
+            )
+            connection.executemany(
+                "INSERT INTO fts_delete_payloads(search_table, rowid, delete_payload) "
+                "VALUES (?, ?, ?)",
+                payload_rows,
+            )
 
     def _remove_from_content_index(self, file_path: str) -> None:
         if self._content_index_connection is not None:
-            self._content_index_connection.execute(
-                "DELETE FROM content_documents WHERE path = ?",
-                (str(file_path),),
+            self._delete_fts_rows(
+                self._content_index_connection,
+                "content_documents",
+                "content_search",
+                ("body",),
+                str(file_path),
+            )
+            self._delete_fts_rows(
+                self._content_index_connection,
+                "chunk_documents",
+                "chunk_search",
+                ("name", "signature", "documentation", "body"),
+                str(file_path),
             )
 
     def search_content_terms(
@@ -696,7 +909,8 @@ class CodebaseIndexer:
                         "SELECT content_documents.path, bm25(content_search) AS relevance "
                         "FROM content_search JOIN content_documents "
                         "ON content_documents.rowid = content_search.rowid "
-                        "WHERE content_search MATCH ? ORDER BY relevance LIMIT ?",
+                        "WHERE content_search MATCH ? ORDER BY relevance, "
+                        "content_documents.path COLLATE NOCASE, content_documents.rowid LIMIT ?",
                         (query, per_term_limit),
                     ).fetchall()
                     for rank, (file_path, relevance) in enumerate(rows, start=1):
@@ -728,6 +942,162 @@ class CodebaseIndexer:
             }
             for file_path, score in ranked[: max(1, int(limit or 80))]
         ]
+
+    def content_document_frequencies(
+        self,
+        terms: Iterable[str],
+    ) -> Optional[Dict[str, int]]:
+        """Return true content document frequency per term from the FTS index.
+
+        This uses the same porter/unicode61 tokenizer as content search, so it
+        stays consistent with how terms are actually matched at query time and
+        correctly counts underscore identifiers (e.g. ``output_transaction``)
+        that a metadata-only frequency table would miss. Results are memoized
+        per index revision so repeated queries stay cheap.
+        """
+        path = self._cache_manager.content_search_path
+        normalized: List[str] = []
+        seen: Set[str] = set()
+        for term in terms:
+            token = str(term or "").strip().lower()
+            if token and token not in seen:
+                seen.add(token)
+                normalized.append(token)
+        if not normalized:
+            return {}
+        if not path.is_file():
+            return None
+
+        cache = self._content_df_cache
+        result: Dict[str, int] = {}
+        missing = [term for term in normalized if term not in cache]
+        if missing:
+            try:
+                with sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True) as connection:
+                    if self._content_document_total is None:
+                        total_row = connection.execute(
+                            "SELECT COUNT(*) FROM content_documents"
+                        ).fetchone()
+                        self._content_document_total = int(total_row[0]) if total_row else 0
+                    for term in missing:
+                        # FTS5 MATCH needs a quoted phrase so identifiers with
+                        # underscores or punctuation are treated literally.
+                        query = f'"{term.replace(chr(34), chr(34) * 2)}"'
+                        try:
+                            row = connection.execute(
+                                "SELECT COUNT(*) FROM content_search WHERE content_search MATCH ?",
+                                (query,),
+                            ).fetchone()
+                        except sqlite3.OperationalError:
+                            cache[term] = 0
+                            continue
+                        cache[term] = int(row[0]) if row else 0
+            except Exception:
+                report_suppressed_exception("read Context Engine content document frequency")
+                return None
+        for term in normalized:
+            result[term] = cache.get(term, 0)
+        return result
+
+    def content_document_total(self) -> int:
+        """Return the number of documents in the content search index."""
+        if self._content_document_total is not None:
+            return self._content_document_total
+        path = self._cache_manager.content_search_path
+        if not path.is_file():
+            return 0
+        try:
+            with sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True) as connection:
+                row = connection.execute("SELECT COUNT(*) FROM content_documents").fetchone()
+                self._content_document_total = int(row[0]) if row else 0
+        except Exception:
+            report_suppressed_exception("read Context Engine content document total")
+            return 0
+        return self._content_document_total
+
+    def search_code_chunks(
+        self,
+        weighted_terms: List[Tuple[str, float]],
+        *,
+        limit: int = 120,
+    ) -> Optional[List[Dict[str, Any]]]:
+        """Search symbol-sized code and documentation chunks with field-aware BM25."""
+        path = self._cache_manager.content_search_path
+        term_weights: Dict[str, float] = {}
+        for term, weight in weighted_terms:
+            normalized = str(term or "").strip().lower()
+            if normalized:
+                term_weights[normalized] = max(term_weights.get(normalized, 0.0), float(weight or 0.0))
+        terms = sorted(term_weights.items(), key=lambda item: (-item[1], item[0]))[:18]
+        if not path.is_file() or not terms:
+            return None
+
+        scores: Dict[int, float] = {}
+        metadata: Dict[int, Tuple[str, str, str, int, int]] = {}
+        contributions: Dict[int, Dict[str, float]] = {}
+        per_term_limit = max(32, min(120, max(1, int(limit or 120)) * 2))
+        try:
+            with sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True) as connection:
+                for term, weight in terms:
+                    query = f'"{term.replace(chr(34), chr(34) * 2)}"'
+                    rows = connection.execute(
+                        "SELECT chunk_documents.rowid, chunk_documents.path, "
+                        "chunk_documents.symbol, chunk_documents.kind, "
+                        "chunk_documents.start_line, chunk_documents.end_line, "
+                        "bm25(chunk_search, 5.5, 3.0, 1.8, 1.0) AS relevance "
+                        "FROM chunk_search JOIN chunk_documents "
+                        "ON chunk_documents.rowid = chunk_search.rowid "
+                        "WHERE chunk_search MATCH ? ORDER BY relevance, "
+                        "chunk_documents.path COLLATE NOCASE, chunk_documents.start_line, "
+                        "chunk_documents.symbol COLLATE NOCASE, chunk_documents.rowid LIMIT ?",
+                        (query, per_term_limit),
+                    ).fetchall()
+                    for rank, row in enumerate(rows, start=1):
+                        rowid, file_path, symbol, kind, start_line, end_line, relevance = row
+                        strength = math.log1p(max(0.0, -float(relevance or 0.0)))
+                        contribution = float(weight) * strength / math.sqrt(rank)
+                        if term in str(symbol or "").lower():
+                            contribution *= 1.25
+                        if contribution <= 0.0:
+                            continue
+                        key = int(rowid)
+                        scores[key] = scores.get(key, 0.0) + contribution
+                        contributions.setdefault(key, {})[term] = contribution
+                        metadata[key] = (
+                            str(file_path), str(symbol), str(kind), int(start_line), int(end_line)
+                        )
+        except Exception:
+            report_suppressed_exception("query Context Engine code chunk index")
+            return None
+
+        ranked = sorted(
+            scores.items(),
+            key=lambda item: (
+                -item[1] * (1.0 + min(0.36, max(0, len(contributions.get(item[0], {})) - 1) * 0.09)),
+                metadata[item[0]][0].lower(),
+                metadata[item[0]][3],
+            ),
+        )
+        hits: List[Dict[str, Any]] = []
+        for rowid, raw_score in ranked[: max(1, int(limit or 120))]:
+            file_path, symbol, kind, start_line, end_line = metadata[rowid]
+            term_scores = contributions.get(rowid, {})
+            score = raw_score * (1.0 + min(0.36, max(0, len(term_scores) - 1) * 0.09))
+            hits.append(
+                {
+                    "file_path": file_path,
+                    "symbol": symbol,
+                    "kind": kind,
+                    "start_line": start_line,
+                    "end_line": end_line,
+                    "score": round(score, 4),
+                    "terms": [
+                        term
+                        for term, _ in sorted(term_scores.items(), key=lambda item: (-item[1], item[0]))[:8]
+                    ],
+                }
+            )
+        return hits
 
     def _swap_index_state(
         self,
@@ -1306,6 +1676,8 @@ class CodebaseIndexer:
         if content_index_started and not self._finish_content_index_rebuild():
             result.warnings.append("Failed to persist the content search index")
 
+        new_dependency_graph.resolve_targets(new_symbol_table)
+
         result.parse_time_ms = (time.time() - parse_start) * 1000
         logger.info("Parsing completed in %.0fms", result.parse_time_ms)
 
@@ -1452,6 +1824,9 @@ class CodebaseIndexer:
 
         if content_index_started:
             self._finish_content_index_update()
+
+        with self._index_lock:
+            self.dependency_graph.resolve_targets(self.symbol_table)
 
         result.parse_time_ms = (time.time() - parse_start) * 1000
         result.total_time_ms = (time.time() - start_time) * 1000

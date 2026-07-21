@@ -3508,6 +3508,9 @@ class ReverieInterface:
                 memory_indexer=self.memory_indexer,
                 lsp_manager=getattr(self, "lsp_manager", None),
                 content_searcher=getattr(self.indexer, "search_content_terms", None),
+                chunk_searcher=getattr(self.indexer, "search_code_chunks", None),
+                content_frequency=getattr(self.indexer, "content_document_frequencies", None),
+                content_total=getattr(self.indexer, "content_document_total", None),
             )
             self._context_engine_ready = True
             self._refresh_command_context()

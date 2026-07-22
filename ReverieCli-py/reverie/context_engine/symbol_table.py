@@ -252,7 +252,11 @@ class SymbolTable:
         This keeps existing references valid, which is important for retrievers
         and other long-lived objects that hold onto the table instance.
         """
-        self._symbols = dict(other._symbols)
+        # Canonicalize the merged symbol order. During a parallel index build
+        # symbols are inserted in thread-completion order, which varies run to
+        # run; sorting here makes every downstream iteration of `_symbols`
+        # (iter_symbols, search, to_dict) independent of that order.
+        self._symbols = {qn: other._symbols[qn] for qn in sorted(other._symbols)}
         self._file_index = {path: set(qnames) for path, qnames in other._file_index.items()}
         self._kind_index = {kind: set(qnames) for kind, qnames in other._kind_index.items()}
         self._name_index = {name: set(qnames) for name, qnames in other._name_index.items()}
@@ -314,15 +318,25 @@ class SymbolTable:
         return self._symbols.get(qualified_name)
     
     def find_by_name(self, name: str) -> List[Symbol]:
-        """Find all symbols with a given simple name"""
+        """Find all symbols with a given simple name.
+
+        Results are ordered by qualified name so callers that pick the first
+        match (or otherwise depend on order) observe the same result regardless
+        of the thread-completion order in which symbols were merged during a
+        parallel index build.
+        """
         lookup_name = str(name or "")
         qnames = self._name_index.get(lookup_name, set())
-        return [self._symbols[qn] for qn in qnames if qn in self._symbols]
-    
+        return [self._symbols[qn] for qn in sorted(qnames) if qn in self._symbols]
+
     def find_by_pattern(self, pattern: str, limit: int = 999999) -> List[Symbol]:
         """
         Find symbols matching a pattern (supports * wildcard).
         Used for fuzzy search.
+
+        Matches are sorted by qualified name before the limit is applied, so
+        both the ordering and the truncated membership are independent of the
+        underlying dict insertion order.
         """
         import fnmatch
 
@@ -330,34 +344,33 @@ class SymbolTable:
         if not pattern_lower:
             return []
 
-        results = []
-        
-        for qname in self._symbols:
-            if fnmatch.fnmatch(qname.lower(), pattern_lower):
-                results.append(self._symbols[qname])
-                if len(results) >= limit:
-                    break
-        
-        return results
-    
+        matched = [
+            qname for qname in self._symbols
+            if fnmatch.fnmatch(qname.lower(), pattern_lower)
+        ]
+        matched.sort()
+        return [self._symbols[qname] for qname in matched[:limit]]
+
     def find_by_prefix(self, prefix: str, limit: int = 999999) -> List[Symbol]:
-        """Find symbols with qualified names starting with prefix"""
-        results = []
+        """Find symbols with qualified names starting with prefix.
+
+        Sorted before truncation for the same determinism reason as
+        :meth:`find_by_pattern`.
+        """
         prefix_lower = str(prefix or "").strip().lower()
         if not prefix_lower:
-            return results
-        
-        for qname in self._symbols:
-            if qname.lower().startswith(prefix_lower):
-                results.append(self._symbols[qname])
-                if len(results) >= limit:
-                    break
-        
-        return results
-    
+            return []
+
+        matched = [
+            qname for qname in self._symbols
+            if qname.lower().startswith(prefix_lower)
+        ]
+        matched.sort()
+        return [self._symbols[qname] for qname in matched[:limit]]
+
     def get_by_kind(self, kind: SymbolKind, limit: int = 999999) -> List[Symbol]:
-        """Get all symbols of a specific kind"""
-        qnames = list(self._kind_index.get(kind, set()))[:limit]
+        """Get all symbols of a specific kind, in a stable qualified-name order."""
+        qnames = sorted(self._kind_index.get(kind, set()))[:limit]
         return [self._symbols[qn] for qn in qnames if qn in self._symbols]
     
     def get_all_in_file(self, file_path: str) -> List[Symbol]:
@@ -417,9 +430,13 @@ class SymbolTable:
         return self._stats.copy()
     
     def to_dict(self) -> dict:
-        """Serialize entire symbol table to dictionary"""
+        """Serialize entire symbol table to dictionary.
+
+        Symbols are emitted in sorted qualified-name order so the persisted
+        cache is byte-identical across parallel index builds.
+        """
         return {
-            'symbols': {qn: s.to_dict() for qn, s in self._symbols.items()},
+            'symbols': {qn: self._symbols[qn].to_dict() for qn in sorted(self._symbols)},
             'stats': self._stats
         }
     

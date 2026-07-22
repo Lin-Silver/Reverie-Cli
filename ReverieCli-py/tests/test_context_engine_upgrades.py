@@ -1319,3 +1319,136 @@ def test_context_fragment_renderer_is_stable_and_token_bounded() -> None:
 
     assert rendered.splitlines()[1].startswith("- [recent_turn] a")
     assert "..." in rendered
+
+
+def _make_symbol(name: str, qualified_name: str, file_path: str) -> Symbol:
+    return Symbol(
+        name=name,
+        qualified_name=qualified_name,
+        kind=SymbolKind.FUNCTION,
+        file_path=file_path,
+        start_line=1,
+        end_line=2,
+        language="python",
+    )
+
+
+def test_symbol_table_reads_are_independent_of_insertion_order() -> None:
+    """Parallel parsing merges symbols in thread-completion order, which varies
+    run to run. After ``replace_with`` the table must present a canonical order so
+    that lookups, iteration, and serialization are reproducible."""
+    symbols = [
+        _make_symbol("run", "pkg.beta.run", "pkg/beta.py"),
+        _make_symbol("run", "pkg.alpha.run", "pkg/alpha.py"),
+        _make_symbol("run", "pkg.gamma.run", "pkg/gamma.py"),
+        _make_symbol("load", "pkg.delta.load", "pkg/delta.py"),
+        _make_symbol("save", "pkg.delta.save", "pkg/delta.py"),
+    ]
+
+    def build(order: list[Symbol]) -> SymbolTable:
+        source = SymbolTable()
+        for symbol in order:
+            source.add_symbol(symbol)
+        committed = SymbolTable()
+        committed.replace_with(source)  # canonicalizes like a live index swap
+        return committed
+
+    forward = build(symbols)
+    reversed_order = build(list(reversed(symbols)))
+
+    # Same simple name resolves to the same ordered candidates -> the first
+    # match (used as the ranking anchor) is stable regardless of parse order.
+    assert [s.qualified_name for s in forward.find_by_name("run")] == [
+        "pkg.alpha.run",
+        "pkg.beta.run",
+        "pkg.gamma.run",
+    ]
+    assert [s.qualified_name for s in forward.find_by_name("run")] == [
+        s.qualified_name for s in reversed_order.find_by_name("run")
+    ]
+
+    # Iteration, prefix/pattern search, and truncated pattern search all match.
+    assert [s.qualified_name for s in forward.iter_symbols()] == [
+        s.qualified_name for s in reversed_order.iter_symbols()
+    ]
+    assert [s.qualified_name for s in forward.find_by_pattern("pkg.*.run", limit=2)] == [
+        "pkg.alpha.run",
+        "pkg.beta.run",
+    ]
+    assert [s.qualified_name for s in forward.find_by_pattern("pkg.*.run", limit=2)] == [
+        s.qualified_name for s in reversed_order.find_by_pattern("pkg.*.run", limit=2)
+    ]
+
+    # The persisted cache is byte-identical across parse orders.
+    assert forward.to_dict() == reversed_order.to_dict()
+
+
+def test_dependency_graph_edges_are_independent_of_insertion_order() -> None:
+    """Edge adjacency lists are appended in parallel-parse order; after commit
+    they must be canonical so serialization and capped neighbor queries are
+    reproducible."""
+    edges = [
+        ("pkg.a.run", "pkg.b.helper"),
+        ("pkg.a.run", "pkg.c.helper"),
+        ("pkg.a.run", "pkg.b.setup"),
+    ]
+
+    def build(order: list[tuple[str, str]]) -> DependencyGraph:
+        source = DependencyGraph()
+        for src, dst in order:
+            source.add_simple(src, dst, DependencyType.CALLS, file_path="pkg/a.py", line=1)
+        committed = DependencyGraph()
+        committed.replace_with(source)
+        return committed
+
+    forward = build(edges)
+    shuffled = build([edges[2], edges[0], edges[1]])
+
+    assert forward.to_dict() == shuffled.to_dict()
+
+
+def test_parallel_full_index_matches_serial_and_is_reproducible(tmp_path: Path) -> None:
+    """A full index built with many workers must extract exactly the same
+    symbols as a serial build, in the same order, on every run.
+
+    Regression guard for a data-corruption race: parser instances carry
+    per-parse state (current file content/module name), so sharing one set
+    across worker threads dropped and misattributed symbols. Each thread now
+    owns its parser pipeline.
+    """
+    pkg = tmp_path / "src" / "pkg"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("", encoding="utf-8")
+    # Enough distinct modules that an 8-worker pool parses several at once.
+    for i in range(12):
+        (pkg / f"mod_{i:02d}.py").write_text(
+            f"CONST_{i} = {i}\n\n\n"
+            f"def func_{i}(value):\n"
+            f"    return value + {i}\n\n\n"
+            f"class Widget_{i}:\n"
+            f"    def method_a(self):\n        return {i}\n\n"
+            f"    def method_b(self):\n        return {i} * 2\n",
+            encoding="utf-8",
+        )
+
+    project_root = tmp_path / "src"
+
+    def build(workers: int) -> list[str]:
+        # Keep caches outside the indexed tree so a later build never indexes
+        # an earlier build's cache files.
+        cache_dir = tmp_path / "caches" / f"cache_{workers}"
+        indexer = CodebaseIndexer(
+            project_root=project_root,
+            cache_dir=cache_dir,
+            config=IndexConfig(max_workers=workers),
+        )
+        indexer.full_index(show_progress=False)
+        return [s.qualified_name for s in indexer.symbol_table.iter_symbols()]
+
+    serial = build(1)
+    parallel_runs = [build(8) for _ in range(3)]
+
+    # Parallel extraction loses nothing relative to serial...
+    assert parallel_runs[0] == serial
+    # ...and is bit-for-bit reproducible across runs.
+    assert all(run == parallel_runs[0] for run in parallel_runs)

@@ -304,8 +304,24 @@ class CodebaseIndexer:
             "\n".join(self._ignore_patterns).encode("utf-8", errors="replace")
         ).hexdigest()
         
-        # Initialize parsers
-        self._parsers: List[BaseParser] = [
+        # Parser instances hold per-parse mutable state (current file content,
+        # module name, tree-sitter parse caches) and are therefore NOT safe to
+        # share across the worker threads used by full_index. Each thread builds
+        # its own parser set lazily via _get_parser; the factory below is the
+        # single definition of the parser pipeline order.
+        self._thread_local = threading.local()
+
+        # Large file tracking
+        self._large_files: Set[str] = set()
+
+        # Index lock (thread safety)
+        self._index_lock = threading.Lock()
+        self._last_index_result: Optional[IndexResult] = None
+        self._index_progress = IndexProgress()
+
+    def _build_parsers(self) -> List[BaseParser]:
+        """Construct a fresh, independent parser pipeline (one per thread)."""
+        return [
             PythonParser(self.project_root),
             LuaParser(self.project_root),
             GDScriptParser(self.project_root),
@@ -314,15 +330,19 @@ class CodebaseIndexer:
             TreeSitterParser(self.project_root),
             SimpleScriptParser(self.project_root),
         ]
-        
-        # Large file tracking
-        self._large_files: Set[str] = set()
-        
-        # Index lock (thread safety)
-        self._index_lock = threading.Lock()
-        self._last_index_result: Optional[IndexResult] = None
-        self._index_progress = IndexProgress()
-    
+
+    def _thread_parsers(self) -> List[BaseParser]:
+        """Return the calling thread's own parser pipeline, building it once.
+
+        Parsers are stateful per parse, so every worker thread must own its
+        instances. At most ``max_workers`` pipelines are ever created.
+        """
+        parsers = getattr(self._thread_local, "parsers", None)
+        if parsers is None:
+            parsers = self._build_parsers()
+            self._thread_local.parsers = parsers
+        return parsers
+
     def _load_gitignore(self) -> None:
         """Load patterns from .gitignore if it exists"""
         self._load_ignore_file(self.project_root / '.gitignore', "read project gitignore rules")
@@ -469,8 +489,8 @@ class CodebaseIndexer:
             return True
     
     def _get_parser(self, file_path: Path) -> Optional[BaseParser]:
-        """Get appropriate parser for a file"""
-        for parser in self._parsers:
+        """Get appropriate parser for a file (from the calling thread's pipeline)"""
+        for parser in self._thread_parsers():
             if parser.can_parse(file_path):
                 return parser
         return None

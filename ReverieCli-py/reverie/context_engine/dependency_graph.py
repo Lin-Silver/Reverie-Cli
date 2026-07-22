@@ -101,10 +101,36 @@ class DependencyGraph:
             'by_type': {t.name: 0 for t in DependencyType}
         }
 
+    @staticmethod
+    def _sorted_edges(edges: List[Dependency]) -> List[Dependency]:
+        """Order a node's edge list deterministically.
+
+        Edges are appended in thread-completion order during a parallel index
+        build, so serialization and truncation-sensitive consumers (e.g.
+        ``get_related_symbols`` with a ``max_results`` cap) would otherwise vary
+        run to run. The key is fully determined by edge content.
+        """
+        return sorted(
+            edges,
+            key=lambda dep: (
+                dep.from_symbol,
+                dep.to_symbol,
+                dep.dep_type.name,
+                dep.file_path,
+                dep.line,
+            ),
+        )
+
     def replace_with(self, other: 'DependencyGraph') -> None:
         """Replace the graph contents in place."""
-        self._outgoing = defaultdict(list, {key: list(value) for key, value in other._outgoing.items()})
-        self._incoming = defaultdict(list, {key: list(value) for key, value in other._incoming.items()})
+        self._outgoing = defaultdict(
+            list,
+            {key: self._sorted_edges(value) for key, value in sorted(other._outgoing.items())},
+        )
+        self._incoming = defaultdict(
+            list,
+            {key: self._sorted_edges(value) for key, value in sorted(other._incoming.items())},
+        )
         self._file_index = defaultdict(set, {key: set(value) for key, value in other._file_index.items()})
         self._stats = {
             'total_edges': other._stats.get('total_edges', 0),

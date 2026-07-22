@@ -29,3 +29,17 @@ Held-out profiles (indices rebuilt per instance), before → after the filter:
 
 Every profile improved or held with no regression. A separate, pre-existing robustness item remains open: a file that is the top hit in the strongest lexical channel can still jitter in and out of the top ten across parallel index builds, because parallel parsing does not fix symbol ordering and the fusion tie-break depends on it. That is a ranking-stability question rather than a term-quality one and is deferred.
 
+## 2026-07-22 — Deterministic parallel indexing (resolves the deferred stability item)
+
+Investigating the ranking jitter noted above revealed that it was the visible symptom of a deeper, more serious defect: **parallel indexing was not deterministic and, worse, not correct**. Building the same tree three times with `max_workers=8` produced different symbol counts each run (e.g. 1108 / 1109 / 1110), whole modules' symbols appearing and disappearing between runs, while the indexer still reported every file parsed with zero failures. A serial (`max_workers=1`) build was already stable.
+
+Two independent causes were found and fixed:
+
+* **Shared stateful parsers (data corruption).** A single set of parser instances was shared across every worker thread. Parsers keep per-parse state on the instance (`PythonParser` stores the current file's content, line list, and module name; `TreeSitterParser` holds a live parse cache), so two threads parsing different files at once clobbered each other — dropping and misattributing symbols. Each worker thread now builds and reuses its own parser pipeline via a thread-local, so at most `max_workers` pipelines exist and no instance is ever touched by two threads. This restores correctness: a parallel build now extracts *exactly* the same symbols as a serial build.
+
+* **Insertion-order-dependent index state (ordering jitter).** Symbols and dependency edges were merged in thread-completion order, so `SymbolTable._symbols` and the dependency adjacency lists carried a nondeterministic order into lookups. Read paths that pick the first match (`find_by_name`/`find_by_pattern`/`find_by_prefix`/`get_by_kind`) and the serialized cache therefore varied run to run — and the first `find_by_name` result is the ranking *anchor*, the heaviest fusion channel. The index state is now canonicalized by qualified name when it is committed (`SymbolTable.replace_with`, `DependencyGraph.replace_with`), and the lookup methods sort before truncating, so both the ordering and the truncated membership are stable.
+
+After both fixes, five consecutive 8-worker builds of the Context Engine package produced an identical symbol list (1112 symbols), an identical dependency graph, and output byte-identical to the serial build. The retrieval and ranking logic was not touched; this is purely an indexing-layer correctness and determinism fix. Regression tests assert (a) insertion-order independence of the symbol table and dependency graph and (b) that a parallel `full_index` matches a serial one and repeats exactly across runs.
+
+With this in place the ranking-stability item deferred on 2026-07-21 is resolved at its source: the top lexical-channel hit no longer jitters, because the index it is derived from is now reproducible.
+

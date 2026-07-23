@@ -1261,9 +1261,10 @@ def test_local_build_scripts_bundle_embedded_chromium() -> None:
         assert "playwright install chromium --no-shell" in script
         assert "PLAYWRIGHT_BROWSERS_PATH" in script
         assert "browser/ms-playwright" in script.replace("\\", "/")
-    assert 'add_tree_if_exists(browser_src / "ms-playwright", "reverie_resources/browser/ms-playwright")' in spec
-    assert 'if sys.platform == "darwin":' in spec
-    assert "shutil.make_archive(" in spec
+    assert 'add_data_if_exists(packed_resource_src / "browser.zip", "reverie_resources")' in spec
+    assert "REVERIE_PACKED_RES_DIR" in spec
+    assert "pack_ui_resources.py" in build_bat
+    assert "pack_ui_resources.py" in build_sh
     assert "Missing required bundled resources" in spec
     assert 'for browser_name in ("chrome.exe", "chrome", "Chromium", "Google Chrome for Testing")' in spec
     assert '"playwright==1.61.0"' in setup

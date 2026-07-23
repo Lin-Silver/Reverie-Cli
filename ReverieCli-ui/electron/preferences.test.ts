@@ -6,6 +6,7 @@ describe("desktop UI preferences", () => {
     expect(normalizeUiPreferences(null)).toEqual(DEFAULT_UI_PREFERENCES);
     expect(DEFAULT_UI_PREFERENCES.showReasoning).toBe(false);
     expect(DEFAULT_UI_PREFERENCES.language).toBe("zh-CN");
+    expect(DEFAULT_UI_PREFERENCES.startupMode).toBe("gui");
     expect(DEFAULT_UI_PREFERENCES.expandReasoning).toBe(true);
     expect(DEFAULT_UI_PREFERENCES.showToolCalls).toBe(true);
     expect(DEFAULT_UI_PREFERENCES.showToolResults).toBe(false);
@@ -15,6 +16,7 @@ describe("desktop UI preferences", () => {
     const value = normalizeUiPreferences({
       accent: "neon",
       language: "en-US",
+      startupMode: "tui",
       fontSize: "large",
       backgroundPreset: "moss-library",
       backgroundOpacity: 4,
@@ -24,6 +26,7 @@ describe("desktop UI preferences", () => {
     });
     expect(value.accent).toBe("violet");
     expect(value.language).toBe("en-US");
+    expect(value.startupMode).toBe("tui");
     expect(value.fontSize).toBe("large");
     expect(value.backgroundPreset).toBe("moss-library");
     expect(value.backgroundOpacity).toBe(1);

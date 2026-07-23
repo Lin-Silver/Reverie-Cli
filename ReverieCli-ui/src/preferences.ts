@@ -1,12 +1,14 @@
 import { normalizeUiLanguage, type UiLanguage } from "./i18n";
 
 export type AccentPreference = "violet" | "blue" | "teal" | "rose" | "amber";
+export type StartupModePreference = "gui" | "tui";
 export type FontSizePreference = "compact" | "comfortable" | "large";
 export type MessageWidthPreference = "focused" | "balanced" | "wide";
 export type BackgroundPreset = "none" | "aurora-archive" | "moss-library" | "ember-manuscript" | "custom";
 
 export interface UiPreferences {
   language: UiLanguage;
+  startupMode: StartupModePreference;
   accent: AccentPreference;
   fontSize: FontSizePreference;
   messageWidth: MessageWidthPreference;
@@ -28,6 +30,7 @@ export interface UiPreferences {
 
 export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   language: "zh-CN",
+  startupMode: "gui",
   accent: "violet",
   fontSize: "comfortable",
   messageWidth: "balanced",
@@ -70,6 +73,7 @@ export function normalizeUiPreferences(value: unknown): UiPreferences {
     : {};
   return {
     language: normalizeUiLanguage(source.language),
+    startupMode: enumValue(source.startupMode, ["gui", "tui"] as const, DEFAULT_UI_PREFERENCES.startupMode),
     accent: enumValue(source.accent, ["violet", "blue", "teal", "rose", "amber"] as const, DEFAULT_UI_PREFERENCES.accent),
     fontSize: enumValue(source.fontSize, ["compact", "comfortable", "large"] as const, DEFAULT_UI_PREFERENCES.fontSize),
     messageWidth: enumValue(source.messageWidth, ["focused", "balanced", "wide"] as const, DEFAULT_UI_PREFERENCES.messageWidth),

@@ -6,6 +6,7 @@ describe("renderer UI preferences", () => {
     const value = normalizeUiPreferences({});
     expect(value.showReasoning).toBe(false);
     expect(value.language).toBe("zh-CN");
+    expect(value.startupMode).toBe("gui");
     expect(value.expandReasoning).toBe(true);
     expect(value.showToolCalls).toBe(true);
     expect(value.showToolResults).toBe(false);
@@ -16,6 +17,7 @@ describe("renderer UI preferences", () => {
     const value = normalizeUiPreferences({
       accent: "teal",
       language: "en-US",
+      startupMode: "tui",
       fontSize: "large",
       messageWidth: "wide",
       backgroundPreset: "aurora-archive",
@@ -25,6 +27,7 @@ describe("renderer UI preferences", () => {
     });
     expect(value.accent).toBe("teal");
     expect(value.language).toBe("en-US");
+    expect(value.startupMode).toBe("tui");
     expect(value.fontSize).toBe("large");
     expect(value.messageWidth).toBe("wide");
     expect(value.backgroundPreset).toBe("aurora-archive");

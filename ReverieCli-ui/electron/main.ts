@@ -14,7 +14,7 @@ import {
   packagedRuntimeRoot,
 } from "./runtime-paths";
 import { resolveKernelSelection, TRUSTED_KERNELS_FILENAME } from "./kernel-resolver";
-import { parseDesktopLaunchOptions } from "./launch-options";
+import { parseDesktopLaunchOptions, resolveDesktopStartupMode } from "./launch-options";
 import { normalizeThemePreference, type ThemePreference, windowAppearance } from "./appearance";
 import {
   activateWorkspaceInPlace,
@@ -745,11 +745,13 @@ ipcMain.handle("desktop:open-external", async (_event, url: string) => {
   return true;
 });
 
-async function runTuiFromDesktop(): Promise<void> {
-  const executable = await selectKernelPath(true);
+async function runTuiFromDesktop(settings: DesktopSettings): Promise<void> {
+  const executable = await selectKernelPath(false);
   const projectRoot = launchOptions.projectRoot && isWorkspaceDirectory(launchOptions.projectRoot)
     ? launchOptions.projectRoot
-    : process.cwd();
+    : settings.projectRoot && isWorkspaceDirectory(settings.projectRoot)
+      ? settings.projectRoot
+      : process.cwd();
   await new Promise<void>((resolve, reject) => {
     const child = spawn(executable, [projectRoot, ...launchOptions.tuiArgs], {
       cwd: projectRoot,
@@ -757,7 +759,9 @@ async function runTuiFromDesktop(): Promise<void> {
       stdio: "inherit",
       env: {
         ...process.env,
-        REVERIE_APP_ROOT: defaultCoreAppRoot(),
+        REVERIE_APP_ROOT: settings.coreAppRoot && existsSync(settings.coreAppRoot)
+          ? path.resolve(settings.coreAppRoot)
+          : defaultCoreAppRoot(),
         PYTHONIOENCODING: "utf-8",
         PYTHONUTF8: "1",
       },
@@ -772,8 +776,13 @@ async function runTuiFromDesktop(): Promise<void> {
 
 app.whenReady().then(async () => {
   if (!ownsDesktopInstance) return;
-  if (launchOptions.tui) {
-    await runTuiFromDesktop();
+  const settings = await readDesktopSettings();
+  const startupMode = resolveDesktopStartupMode(
+    launchOptions,
+    normalizeUiPreferences(settings.ui).startupMode,
+  );
+  if (startupMode === "tui") {
+    await runTuiFromDesktop(settings);
     return;
   }
   await createWindow();

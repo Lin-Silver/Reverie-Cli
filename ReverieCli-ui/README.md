@@ -32,11 +32,12 @@ For complete local builds, use `build.bat` on Windows or `build.sh` on Linux. Th
 
 The rolling `latest` GitHub Release is rebuilt from every `main` push and is marked as a prerelease. Its downloads are grouped Windows → Linux → macOS Apple Silicon → macOS Intel, and its four platform kernel records are consolidated into `reverie-kernels.json`.
 
-Every package contains a fast-starting PyInstaller directory kernel, which the GUI uses directly so portable startup never hashes, probes, and unpacks the one-file core first. The build also records the SHA-256 of the separately released one-file core inside the ASAR-integrity-protected application package. The explicit portable TUI route may use that sibling only when the protected hash is trusted and its `reverie.kernel.v1` handshake matches. The terminal contract is:
+Every desktop package contains a fast-starting PyInstaller directory kernel, which both the GUI and terminal startup routes use directly so portable startup never hashes, probes, and unpacks the one-file core first. The installer and portable EXE remain unified products: choose the default startup interface under **Settings → General → Default startup mode**, or override it for one launch with `--gui` or `--tui`. The build also records the SHA-256 of the separately released one-file core inside the ASAR-integrity-protected application package. The terminal contract is:
 
 - `reverie`: TUI/core in the current directory.
-- `reverieui`: GUI in the current directory.
-- `Reverie-Portable-*.exe --tui`: explicit portable convenience route to the bundled TUI; no double-click heuristic is used.
+- `reverieui`: the configured desktop interface in the current directory.
+- `Reverie-Portable-*.exe --gui`: open the GUI regardless of the saved default.
+- `Reverie-Portable-*.exe --tui`: open the bundled TUI regardless of the saved default.
 
 The embedded CLI supports one-shot commands such as:
 

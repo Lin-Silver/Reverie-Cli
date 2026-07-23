@@ -30,7 +30,6 @@ NVIDIA_DEFAULT_CONTEXT_TOKENS = 262_144
 NVIDIA_NEMOTRON_3_SUPER_CONTEXT_TOKENS = 1_000_000
 NVIDIA_MINIMAX_CONTEXT_TOKENS = 204_800
 NVIDIA_GLM_5_2_CONTEXT_TOKENS = 1_000_000
-NVIDIA_GLM_CONTEXT_TOKENS = 131_072
 NVIDIA_STEP_FLASH_CONTEXT_TOKENS = 256_000
 NVIDIA_STEP_37_FLASH_MAX_OUTPUT_TOKENS = 16_384
 NVIDIA_GPT_OSS_120B_CONTEXT_TOKENS = 128_000
@@ -281,17 +280,6 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         default_thinking_choice="high",
         context_length=NVIDIA_DEFAULT_CONTEXT_TOKENS,
     ),
-    _request_model(
-        "qwen/qwen3.5-122b-a10b",
-        "Qwen3.5 122B A10B",
-        "Request transport with enable_thinking.",
-        vision=True,
-        thinking=True,
-        thinking_control="toggle",
-        thinking_options=list(NVIDIA_THINKING_TOGGLE_OPTIONS),
-        default_thinking_choice="true",
-        context_length=NVIDIA_DEFAULT_CONTEXT_TOKENS,
-    ),
     _openai_model(
         "nvidia/nemotron-3-super-120b-a12b",
         "Nemotron 3 Super 120B",
@@ -350,16 +338,6 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         context_length=NVIDIA_GLM_5_2_CONTEXT_TOKENS,
         max_output_tokens=32_768,
         default_max_tokens=16_384,
-    ),
-    _openai_model(
-        "z-ai/glm4.7",
-        "GLM-4.7",
-        "OpenAI SDK transport with GLM preserved thinking controls.",
-        thinking=True,
-        thinking_control="toggle",
-        thinking_options=NVIDIA_THINKING_TOGGLE_OPTIONS,
-        default_thinking_choice="true",
-        context_length=NVIDIA_GLM_CONTEXT_TOKENS,
     ),
     _openai_model(
         "stepfun-ai/step-3.5-flash",
@@ -434,7 +412,6 @@ _NVIDIA_MODEL_METADATA = {
 }
 _NVIDIA_MODEL_ALIASES = {
     "z-ai/glm5.2": "z-ai/glm-5.2",
-    "z-ai/glm-4.7": "z-ai/glm4.7",
 }
 _NVIDIA_API_HOSTS = ("integrate.api.nvidia.com",)
 
@@ -754,7 +731,7 @@ def resolve_nvidia_selected_model(nvidia_config: Any, model_id: Optional[str] = 
     matched = get_nvidia_model_metadata(wanted)
     if matched:
         return matched
-    return get_nvidia_model_catalog()[0]
+    return get_nvidia_model_metadata(NVIDIA_DEFAULT_MODEL_ID) or get_nvidia_model_catalog()[0]
 
 
 def resolve_nvidia_thinking_choice(nvidia_config: Any, model_id: Optional[str] = None) -> str:

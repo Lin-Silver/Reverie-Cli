@@ -1699,6 +1699,16 @@ function SettingsView({
                 </div>
               </div>
             </section>
+            <section className="preference-section">
+              <div className="preference-heading"><div><h2>{t("默认启动方式")}</h2><p>{t("选择双击 Reverie 时打开图形界面或终端界面；命令行参数仍可临时覆盖。")}</p></div></div>
+              <div className="preference-row">
+                <div><SquareTerminal size={17} /><span><strong>{t("启动界面")}</strong><small>{t("设置将在下次启动时生效")}</small></span></div>
+                <div className="segmented-control">
+                  <button type="button" className={preferences.startupMode === "gui" ? "active" : ""} aria-pressed={preferences.startupMode === "gui"} onClick={() => updatePreferences({ startupMode: "gui" })}><Monitor size={14} />{t("图形界面")}</button>
+                  <button type="button" className={preferences.startupMode === "tui" ? "active" : ""} aria-pressed={preferences.startupMode === "tui"} onClick={() => updatePreferences({ startupMode: "tui" })}><Terminal size={14} />{t("终端界面")}</button>
+                </div>
+              </div>
+            </section>
             {paths && <div className="core-data-card"><div className="core-data-heading"><Database size={18} /><div><strong>{t("CLI 数据与历史")}</strong><p>{t("GUI 会直接读取此目录中的配置、会话、检查点和插件状态。")}</p></div></div><code>{paths.coreAppRoot}</code><div><button type="button" className="secondary-button" onClick={() => void window.reverie.reveal(paths.coreAppRoot)}><FolderOpen size={14} />{t("显示目录")}</button><button type="button" className="secondary-button" onClick={selectCoreData}><Folder size={14} />{t("切换数据目录")}</button></div></div>}
             <div className="setting-list">
               {items.map((item) => <div className={`setting-row ${item.kind === "rules" ? "stacked" : ""}`} key={item.key}><div><strong>{t(item.name)}</strong><p>{t(item.description)}</p></div><SettingControl item={item} update={updateSetting} /></div>)}

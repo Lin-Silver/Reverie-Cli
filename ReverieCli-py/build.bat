@@ -13,6 +13,7 @@ set "SHARED_COMFY_DIR=%REPO_ROOT%\comfy"
 set "SHARED_PLUGINS_DIR=%REPO_ROOT%\plugins"
 set "EXE_NAME=reverie"
 set "BUNDLE_RES_DIR=%BUILD_DIR%\bundle_resources"
+set "PACKED_RES_DIR=%BUNDLE_RES_DIR%\packed"
 set "LOCAL_BUILD_ROOT=%ROOT_DIR%\build"
 set "LOCAL_TEMP_DIR=%LOCAL_BUILD_ROOT%\temp"
 set "LOCAL_PIP_CACHE=%LOCAL_BUILD_ROOT%\pip-cache"
@@ -248,6 +249,13 @@ if defined REVERIE_FFMPEG_PATH (
 ) else (
     echo       ffmpeg not found. Runtime will use external ffmpeg if needed.
 )
+python "%ROOT_DIR%\scripts\pack_ui_resources.py" --browser "%PLAYWRIGHT_BROWSERS_PATH%" --ffmpeg "%REVERIE_FFMPEG_PATH%" --output "%PACKED_RES_DIR%" --allow-missing-ffmpeg
+if %ERRORLEVEL% neq 0 (
+    echo [ERROR] Failed to prepare lazy runtime resource archives.
+    set "BUILD_EXIT_CODE=1"
+    goto finish
+)
+set "REVERIE_PACKED_RES_DIR=%PACKED_RES_DIR%"
 
 set "ICON_ICO=%ROOT_DIR%\reverie.ico"
 set "ICON_PNG=%ROOT_DIR%\reverie.png"

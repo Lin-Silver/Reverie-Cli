@@ -4,6 +4,7 @@ import type { CoreActionName } from "./core-actions";
 type JsonRecord = Record<string, unknown>;
 type EventListener = (message: JsonRecord) => void;
 type UiPreferencesPayload = JsonRecord & {
+  startupMode: "gui" | "tui";
   accent: "violet" | "blue" | "teal" | "rose" | "amber";
   fontSize: "compact" | "comfortable" | "large";
   messageWidth: "focused" | "balanced" | "wide";

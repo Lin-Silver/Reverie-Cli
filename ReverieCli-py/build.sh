@@ -11,6 +11,7 @@ BUILD_DIR="$SCRIPT_DIR/build"
 SHARED_COMFY_DIR="$REPO_ROOT/comfy"
 SHARED_PLUGINS_DIR="$REPO_ROOT/plugins"
 BUNDLE_RES_DIR="$BUILD_DIR/bundle_resources"
+PACKED_RES_DIR="$BUNDLE_RES_DIR/packed"
 LOCAL_TEMP_DIR="$BUILD_DIR/temp"
 LOCAL_PIP_CACHE="$BUILD_DIR/pip-cache"
 PYI_WORK_DIR="$BUILD_DIR/pyinstaller"
@@ -153,6 +154,12 @@ if [ -n "$FFMPEG_PATH" ]; then
 else
     echo "      ffmpeg not found. Runtime will use external ffmpeg if needed."
 fi
+$PYTHON_CMD "$SCRIPT_DIR/scripts/pack_ui_resources.py" \
+    --browser "$PLAYWRIGHT_BROWSERS_PATH" \
+    --ffmpeg "$FFMPEG_PATH" \
+    --output "$PACKED_RES_DIR" \
+    --allow-missing-ffmpeg
+export REVERIE_PACKED_RES_DIR="$PACKED_RES_DIR"
 
 ICON_PNG="$SCRIPT_DIR/reverie.png"
 if [ -f "$ICON_PNG" ]; then

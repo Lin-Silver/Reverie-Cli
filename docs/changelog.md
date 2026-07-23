@@ -4,6 +4,10 @@ Released 2026-07-17.
 
 ### Post-release update (still v2.5.0) — 2026-07-21
 
+* Synchronized the NVIDIA source with the live hosted-model endpoint, removing retired `qwen/qwen3.5-122b-a10b` and `z-ai/glm4.7` catalog entries and their unused request profiles.
+
+* Reduced core EXE startup extraction work by packaging Chromium and FFmpeg as lazy first-use archives. The Windows installer and portable desktop remain a single product containing both the GUI and fast unpacked kernel; the default GUI or terminal startup can be selected in Settings and temporarily overridden with `--gui` or `--tui`.
+
 * Filtered corpus-absent Context Engine query expansions: joined prose compounds (`"undefined expression"` → `undefinedexpression`) and reproduction-snippet dotted fragments (`r.limit`, `e.subs`) that name nothing in the index no longer collect the rare-term IDF bonus and displace real query terms. A compound is kept only with non-zero content document frequency or a real symbol/file-name match; a zero-frequency dotted fragment is dropped while its attribute suffix is retained. Held-out profiles improved or held with no regression (e.g. blind Recall@10 0.89 → 1.00, MRR@10 0.62 → 0.77). See `docs/CONTEXT_ENGINE_BENCHMARK.md`.
 
 * Made parallel Context Engine indexing correct and deterministic (2026-07-22). Worker threads shared one set of stateful parser instances, so concurrent parses corrupted each other — a full index dropped and misattributed symbols run to run (varying symbol counts with zero reported failures), and the nondeterministic merge order let the top ranking hit jitter in and out of results. Each worker thread now owns its parser pipeline, and the committed symbol table and dependency graph are canonicalized by qualified name. A parallel build now extracts exactly the same symbols as a serial one and is byte-identical across runs. This resolves the ranking-stability item deferred on 2026-07-21. See `docs/CONTEXT_ENGINE_BENCHMARK.md`.

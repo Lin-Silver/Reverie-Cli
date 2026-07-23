@@ -2,8 +2,6 @@
 from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 from pathlib import Path
 import os
-import shutil
-import sys
 
 build_mode = os.environ.get('REVERIE_PYINSTALLER_MODE', 'onefile').strip().lower()
 datas = [('README.md', '.')]
@@ -23,11 +21,6 @@ def add_data_if_exists(source_path: Path, target_dir: str) -> None:
         datas.append((str(source_path), target_dir))
 
 
-def add_binary_if_exists(source_path: Path, target_dir: str) -> None:
-    if source_path.exists() and source_path.is_file():
-        binaries.append((str(source_path), target_dir))
-
-
 def add_tree_if_exists(source_path: Path, target_dir: str) -> None:
     if not source_path.exists() or not source_path.is_dir():
         return
@@ -35,32 +28,6 @@ def add_tree_if_exists(source_path: Path, target_dir: str) -> None:
         if path.is_file():
             relative_parent = path.parent.relative_to(source_path)
             datas.append((str(path), str(Path(target_dir) / relative_parent)))
-
-
-def resolve_ffmpeg_binary() -> Path | None:
-    candidates = []
-    ffmpeg_env = os.environ.get("REVERIE_FFMPEG_PATH", "").strip()
-    if ffmpeg_env:
-        env_path = Path(ffmpeg_env)
-        if env_path.is_dir():
-            candidates.extend([env_path / "ffmpeg.exe", env_path / "ffmpeg"])
-        else:
-            candidates.append(env_path)
-
-    which_ffmpeg = shutil.which("ffmpeg")
-    if which_ffmpeg:
-        candidates.append(Path(which_ffmpeg))
-
-    candidates.extend(
-        [
-            Path("D:/Program Files/Environment/ffmpeg/bin/ffmpeg.exe"),
-            Path("C:/Program Files/ffmpeg/bin/ffmpeg.exe"),
-        ]
-    )
-    for candidate in candidates:
-        if candidate.exists() and candidate.is_file():
-            return candidate.resolve()
-    return None
 
 
 # NOTE:
@@ -74,21 +41,25 @@ resource_root = os.environ.get("REVERIE_BUNDLE_RES_DIR", "").strip()
 if resource_root:
     comfy_src = Path(resource_root) / "comfy"
     browser_src = Path(resource_root) / "browser"
+    packed_resource_src = Path(os.environ.get("REVERIE_PACKED_RES_DIR", "").strip() or Path(resource_root) / "packed")
 else:
     comfy_src = repo_root / "Comfy"
     browser_src = repo_root / "reverie_resources" / "browser"
+    packed_resource_src = repo_root / "reverie_resources"
 
 required_bundle_files = [
     comfy_src / "generate_image.py",
     comfy_src / "embedded_comfy.b64",
 ]
+if build_mode != 'ui-onedir':
+    required_bundle_files.append(packed_resource_src / "browser.zip")
 missing_bundle_files = [str(path) for path in required_bundle_files if not path.is_file()]
 playwright_root = browser_src / "ms-playwright"
 embedded_browser_candidates = []
 if playwright_root.is_dir():
     for browser_name in ("chrome.exe", "chrome", "Chromium", "Google Chrome for Testing"):
         embedded_browser_candidates.extend(playwright_root.rglob(browser_name))
-if missing_bundle_files or not embedded_browser_candidates:
+if missing_bundle_files or (build_mode == 'ui-onedir' and not embedded_browser_candidates):
     details = missing_bundle_files
     if not embedded_browser_candidates:
         details.append(str(playwright_root / "chromium-*" / "chrome-*" / "chrome.exe"))
@@ -113,25 +84,12 @@ if resolved_icon is None:
 add_data_if_exists(comfy_src / "generate_image.py", "reverie_resources/comfy")
 add_data_if_exists(comfy_src / "embedded_comfy.b64", "reverie_resources/comfy")
 if build_mode != 'ui-onedir':
-    if sys.platform == "darwin":
-        browser_archive = browser_src / "browser.zip"
-        shutil.make_archive(
-            str(browser_archive.with_suffix("")),
-            "zip",
-            root_dir=browser_src,
-            base_dir="ms-playwright",
-        )
-        add_data_if_exists(browser_archive, "reverie_resources")
-    else:
-        add_tree_if_exists(browser_src / "ms-playwright", "reverie_resources/browser/ms-playwright")
+    add_data_if_exists(packed_resource_src / "browser.zip", "reverie_resources")
+    add_data_if_exists(packed_resource_src / "ffmpeg.zip", "reverie_resources")
 add_data_if_exists(repo_root / "reverie" / "agent" / "tool_manifest.json", "reverie/agent")
 add_data_if_exists(repo_root / "reverie" / "engine" / "vendor" / "live2d" / "live2dcubismcore.min.js", "reverie/engine/vendor/live2d")
 add_tree_if_exists(repo_root / "reverie" / "builtin_skills", "reverie/builtin_skills")
 add_data_if_exists(repo_root / "reverie" / "computer_use" / "ATTRIBUTION.md", "reverie/computer_use")
-
-ffmpeg_binary = resolve_ffmpeg_binary()
-if ffmpeg_binary is not None and build_mode != 'ui-onedir':
-    add_binary_if_exists(ffmpeg_binary, "reverie_resources/ffmpeg")
 
 for package_name in ('rich', 'bs4', 'pyglet', 'moderngl', 'glcontext', 'uiautomation', 'comtypes'):
     try:

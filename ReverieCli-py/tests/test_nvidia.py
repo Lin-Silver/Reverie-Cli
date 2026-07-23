@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import pytest
 from rich.console import Console
 
 from reverie.cli.commands import CommandHandler
@@ -17,6 +18,7 @@ from reverie.nvidia import (
     get_nvidia_model_metadata,
     get_nvidia_model_vision_modalities,
     get_nvidia_thinking_options,
+    normalize_nvidia_config,
     normalize_nvidia_reasoning_effort,
     resolve_nvidia_model_profile_name,
     resolve_nvidia_thinking_choice,
@@ -134,14 +136,12 @@ def test_nvidia_catalog_context_lengths_match_model_cards():
     expected_context_lengths = {
         "mistralai/mistral-small-4-119b-2603": 262144,
         "mistralai/mistral-medium-3.5-128b": 262144,
-        "qwen/qwen3.5-122b-a10b": 262144,
         "nvidia/nemotron-3-super-120b-a12b": 1000000,
         "minimaxai/minimax-m2.7": 204800,
         "minimaxai/minimax-m3": 1000000,
         "qwen/qwen3.5-397b-a17b": 262144,
         "z-ai/glm-5.2": 1000000,
         "nvidia/nemotron-3-ultra-550b-a55b": 1000000,
-        "z-ai/glm4.7": 131072,
         "stepfun-ai/step-3.5-flash": 256000,
         "stepfun-ai/step-3.7-flash": 256000,
         "deepseek-ai/deepseek-v4-pro": 1000000,
@@ -206,20 +206,6 @@ def test_nvidia_openai_options_for_glm_52_caps_requested_output_tokens():
     assert options["max_tokens"] == 32768
 
 
-def test_nvidia_catalog_contains_glm_47_and_aliases():
-    metadata = get_nvidia_model_metadata("z-ai/glm4.7")
-    alias_metadata = get_nvidia_model_metadata("z-ai/glm-4.7")
-
-    assert metadata is not None
-    assert metadata["id"] == "z-ai/glm4.7"
-    assert metadata["display_name"] == "GLM-4.7"
-    assert metadata["transport"] == "openai-sdk"
-    assert metadata["thinking"] is True
-    assert metadata["thinking_control"] == "toggle"
-    assert alias_metadata is not None
-    assert alias_metadata["id"] == "z-ai/glm4.7"
-
-
 def test_nvidia_catalog_contains_mistral_medium_35_128b():
     metadata = get_nvidia_model_metadata("mistralai/mistral-medium-3.5-128b")
 
@@ -264,35 +250,26 @@ def test_nvidia_openai_options_for_nemotron_3_ultra_match_provider_example():
     }
 
 
-def test_nvidia_openai_options_for_glm_47_match_expected_defaults():
-    options = build_nvidia_openai_options(
-        {"selected_model_id": "z-ai/glm4.7"},
-        "z-ai/glm4.7",
-    )
-
-    assert options == {
-        "temperature": 1.0,
-        "top_p": 1.0,
-        "max_tokens": 131072,
-        "extra_body": {
-            "chat_template_kwargs": {
-                "enable_thinking": True,
-                "clear_thinking": False,
-            }
-        },
-    }
-
-
 def test_nvidia_catalog_contains_kimi_k2_6_and_removed_legacy_models():
     catalog_by_id = {item["id"]: item for item in get_nvidia_model_catalog()}
 
     assert "z-ai/glm5" not in catalog_by_id
+    assert "z-ai/glm4.7" not in catalog_by_id
+    assert "qwen/qwen3.5-122b-a10b" not in catalog_by_id
     assert "minimaxai/minimax-m2.5" not in catalog_by_id
     assert "moonshotai/kimi-k2.5" not in catalog_by_id
     assert "moonshotai/kimi-k2-thinking" not in catalog_by_id
     assert catalog_by_id["moonshotai/kimi-k2.6"]["transport"] == "request"
     assert catalog_by_id["moonshotai/kimi-k2.6"]["vision"] is True
     assert catalog_by_id["moonshotai/kimi-k2.6"]["thinking_control"] == "toggle"
+
+
+@pytest.mark.parametrize("retired_model_id", ["z-ai/glm4.7", "qwen/qwen3.5-122b-a10b"])
+def test_nvidia_retired_model_config_migrates_to_current_default(retired_model_id: str):
+    normalized = normalize_nvidia_config({"selected_model_id": retired_model_id})
+
+    assert normalized["selected_model_id"] == "qwen/qwen3.5-397b-a17b"
+    assert normalized["selected_model_display_name"] == "Qwen3.5 397B A17B"
 
 
 def test_nvidia_request_defaults_for_kimi_k2_6_match_provider_example():
@@ -496,7 +473,6 @@ def test_nvidia_openai_options_for_nemotron_and_gpt_oss_use_model_specific_effor
 def test_nvidia_model_specific_profiles_are_resolved_by_model_id():
     assert resolve_nvidia_model_profile_name("z-ai/glm-5.2") == "glm_5_2"
     assert resolve_nvidia_model_profile_name("nvidia/nemotron-3-ultra-550b-a55b") == "nemotron_3_ultra"
-    assert resolve_nvidia_model_profile_name("z-ai/glm4.7") == "glm_5_1"
     assert resolve_nvidia_model_profile_name("deepseek-ai/deepseek-v4-pro") == "deepseek_v4"
     assert resolve_nvidia_model_profile_name("mistralai/mistral-medium-3.5-128b") == "mistral_medium_35"
     assert resolve_nvidia_model_profile_name("moonshotai/kimi-k2.6") == "kimi_k2_6"

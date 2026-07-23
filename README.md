@@ -50,7 +50,7 @@ Reverie supports a wide range of LLM providers out of the box. Each provider has
 
 | Provider           | Description                                                                                                     | Key Models                                                                                                                                                                                                    |
 | ------------------ | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **NVIDIA**         | NVIDIA-hosted catalog via`integrate.api.nvidia.com`                                                             | Qwen3.5 397B, DeepSeek V4 Pro/V4 Flash, Kimi K2.6, GLM-5.2/4.7, MiniMax M2.7/M3, Mistral Small 4, Mistral Medium 3.5, Mistral Large 3, Step-3.5/3.7-Flash, GPT-OSS-120B, Nemotron 3 Super/Ultra, Qwen3.5 122B |
+| **NVIDIA**         | NVIDIA-hosted catalog via`integrate.api.nvidia.com`                                                             | Qwen3.5 397B, DeepSeek V4 Pro/V4 Flash, Kimi K2.6, GLM-5.2, MiniMax M2.7/M3, Mistral Small 4, Mistral Medium 3.5, Mistral Large 3, Step-3.5/3.7-Flash, GPT-OSS-120B, Nemotron 3 Super/Ultra |
 | **ModelScope**     | Anthropic-compatible API on`api-inference.modelscope.cn` — all models supporting the Anthropic SDK can be used | GLM-5.1, GLM-5, DeepSeek V4 Pro, DeepSeek V4 Flash, MiniMax M2.7, Qwen3.5 397B A17B (catalog is statically defined in code)                                                                                   |
 | **Codex**          | ChatGPT backend or Responses-compatible reverse proxy                                                           | GPT-5.6, GPT-5.5, and other models discovered from the live Codex CLI cache                                                                                                                                   |
 | **SenseNova**      | SenseTime SenseNova API with model-specific OpenAI/Anthropic transports                                         | DeepSeek V4 Flash (1M context), SenseNova 6.7 Flash Lite (vision)                                                                                                                                             |
@@ -482,7 +482,7 @@ Desktop orchestration through an embedded Open Computer Use-compatible desktop r
 
 ### NVIDIA (Recommended for High-Throughput)
 
-NVIDIA's hosted API at `integrate.api.nvidia.com` provides access to 16 supported models. Key configurations:
+NVIDIA's hosted API at `integrate.api.nvidia.com` provides access to 15 supported models. Key configurations:
 
 **Model catalog (hardcoded in `reverie/nvidia.py`):**
 
@@ -490,9 +490,8 @@ NVIDIA's hosted API at `integrate.api.nvidia.com` provides access to 16 supporte
 | Model ID                                       | Display Name            | Transport  | Vision       | Thinking                   | Context |
 | ---------------------------------------------- | ----------------------- | ---------- | ------------ | -------------------------- | ------- |
 | `qwen/qwen3.5-397b-a17b`                       | Qwen3.5 397B A17B       | request    | ✅           | toggle                     | 262K    |
-| `qwen/qwen3.5-122b-a10b`                       | Qwen3.5 122B A10B       | request    | ✅           | toggle                     | 262K    |
 | `nvidia/nemotron-3-ultra-550b-a55b`            | Nemotron 3 Ultra 550B   | openai-sdk | ❌           | fixed thinking             | 1M      |
-| `z-ai/glm4.7`                                  | GLM-4.7                 | openai-sdk | ❌           | toggle                     | 131K    |
+| `z-ai/glm-5.2`                                 | GLM-5.2                 | openai-sdk | ❌           | ❌                         | 1M      |
 | `deepseek-ai/deepseek-v4-pro`                  | DeepSeek V4 Pro         | openai-sdk | ❌           | effort (none/high/max)     | 1M      |
 | `deepseek-ai/deepseek-v4-flash`                | DeepSeek V4 Flash       | openai-sdk | ❌           | effort (none/low/med/high) | 1M      |
 | `minimaxai/minimax-m2.7`                       | MiniMax M2.7            | openai-sdk | ❌           | ❌                         | 204K    |
@@ -513,11 +512,11 @@ NVIDIA's hosted API at `integrate.api.nvidia.com` provides access to 16 supporte
 
 **Thinking control:**
 
-- `toggle` — Binary on/off (Qwen3.5, GLM-4.7, Kimi K2.6)
+- `toggle` — Binary on/off (Qwen3.5 397B, Kimi K2.6)
 - `effort` — Selectable levels: `none`/`low`/`medium`/`high`/`max` (DeepSeek V4 Pro, Nemotron, Mistral models, GPT-OSS-120B, MiniMax M3)
 - `fixed` — Always-on thinking (Step-3.5-Flash)
 
-**Vision models:** MiniMax M3, Mistral Small 4, Mistral Medium 3.5, Mistral Large 3, Qwen3.5 122B/397B, Kimi K2.6, Step-3.7-Flash support image and/or video input.
+**Vision models:** MiniMax M3, Mistral Small 4, Mistral Medium 3.5, Mistral Large 3, Qwen3.5 397B, Kimi K2.6, Step-3.7-Flash support image and/or video input.
 
 ### ModelScope
 

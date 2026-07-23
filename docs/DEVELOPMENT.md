@@ -90,7 +90,7 @@ cd ../ReverieCli-ui
 ./build.sh
 ```
 
-The Windows script produces the core EXE, portable GUI EXE, and installer EXE. The Linux script produces the no-suffix core, AppImage, and deb. CI additionally builds native Apple Silicon and Intel DMGs. `reverie` is the terminal/TUI command and `reverieui` opens the GUI at the caller's current directory.
+The Windows script produces the core EXE, portable desktop EXE, and installer EXE. The desktop packages contain both the Electron GUI and the fast unpacked kernel; choose the default GUI or terminal startup in Desktop settings, or temporarily override it with `ReverieUI.exe --gui` / `ReverieUI.exe --tui`. The Linux script produces the no-suffix core, AppImage, and deb. CI additionally builds native Apple Silicon and Intel DMGs. `reverie` is the terminal/TUI command and `reverieui` opens the configured desktop interface at the caller's current directory.
 
 Core/desktop artifacts publish through `build-core-release.yml`; plugin-only paths publish through `build-plugins.yml` to `plugins-latest`. Each core asset set includes SHA-256 kernel metadata, and the aggregate release job fails unless every required platform artifact exists and is non-empty.
 

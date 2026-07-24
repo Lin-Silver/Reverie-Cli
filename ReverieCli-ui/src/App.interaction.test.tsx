@@ -63,6 +63,37 @@ const desktopState: DesktopState = {
         tool_calling: true,
         thinking: false,
         reasoning: { control: "none", options: [], value: "" },
+      }, {
+        id: "thinking-model",
+        display_name: "Thinking Model",
+        description: "Model with selectable reasoning",
+        vision: false,
+        tool_calling: true,
+        thinking: true,
+        reasoning: {
+          control: "effort",
+          options: [
+            { id: "low", label: "Low", description: "Fast reasoning" },
+            { id: "high", label: "High", description: "Deep reasoning" },
+          ],
+          value: "low",
+        },
+      }],
+      config_fields: [],
+    }, {
+      id: "unlimitedsurf",
+      display_name: "UnlimitedSurf",
+      active: false,
+      selected_model_id: "legacy-model",
+      selected_reasoning: { control: "none", options: [], value: "" },
+      models: [{
+        id: "legacy-model",
+        display_name: "Legacy Model",
+        description: "Retired source model",
+        vision: false,
+        tool_calling: false,
+        thinking: false,
+        reasoning: { control: "none", options: [], value: "" },
       }],
       config_fields: [],
     }],
@@ -108,6 +139,14 @@ function installDesktopApi() {
       };
     }
     if (action === "listTools") return { type: "tools", mode: "reverie", tools: [] };
+    if (action === "selectModel") {
+      return {
+        type: "model.selected",
+        selected: { id: String(payload.modelId) },
+        models: desktopState.models,
+        workspace: desktopState.workspace,
+      };
+    }
     if (action === "runPrompt") {
       promptFinished = true;
       return {
@@ -246,5 +285,26 @@ describe("desktop GUI interactions", () => {
       stream: true,
     }));
     expect(await screen.findByText("Cache inspection complete")).toBeTruthy();
+  });
+
+  it("asks for model reasoning before switching and hides retired sources", async () => {
+    const { request } = installDesktopApi();
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: /Test Model/ }));
+    const dialog = await screen.findByRole("dialog", { name: "模型来源" });
+    expect(within(dialog).queryByText("UnlimitedSurf")).toBeNull();
+
+    await user.click(within(dialog).getByRole("button", { name: /Thinking Model/ }));
+    expect(request).not.toHaveBeenCalledWith("selectModel", expect.anything());
+    expect(within(dialog).getByText("选择思考程度")).toBeTruthy();
+
+    await user.click(within(dialog).getByRole("button", { name: /High/ }));
+    await waitFor(() => expect(request).toHaveBeenCalledWith("selectModel", {
+      source: "test-source",
+      modelId: "thinking-model",
+      reasoning: "high",
+    }));
   });
 });

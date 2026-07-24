@@ -34,6 +34,7 @@ def _source(payload: dict, source_id: str) -> dict:
 def test_desktop_catalog_uses_native_model_reasoning_metadata() -> None:
     config = Config()
     payload = build_model_sources_payload(config)
+    assert "unlimitedsurf" not in {source["id"] for source in payload["sources"]}
 
     assert {item["id"] for item in payload["sources"]} >= {
         "standard",

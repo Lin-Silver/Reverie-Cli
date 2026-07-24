@@ -7,6 +7,7 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Circle,
   Clock3,
@@ -116,8 +117,20 @@ import {
   SIDEBAR_COLLAPSED_STORAGE_KEY,
 } from "./layout";
 import { I18nProvider, UI_LANGUAGE_OPTIONS, translate, useI18n } from "./i18n";
+import {
+  LIVE_STREAM_RENDER_INTERVAL_MS,
+  emptyLiveTurnBatch,
+  mergeLiveTurnBatch,
+  type LiveTurnBatch,
+} from "./live-stream";
 
 type Toast = { id: number; kind: "success" | "error" | "info"; message: string };
+
+const RETIRED_MODEL_SOURCE_IDS = new Set(["unlimitedsurf", "unlimited_surf", "unlimited.surf", "us", "ue"]);
+
+function visibleModelSources(sources: ModelSource[]): ModelSource[] {
+  return sources.filter((source) => !RETIRED_MODEL_SOURCE_IDS.has(source.id.trim().toLowerCase()));
+}
 type ComposerAttachment = { name: string; relativePath: string; size: number };
 
 const REVERIE_MARK_URL = new URL("reverie-mark-2.5.png", document.baseURI).href;
@@ -617,24 +630,32 @@ function ModelPicker({
   close,
 }: {
   state: DesktopState;
-  onSelect: (source: ModelSource, model: ModelRecord) => void;
+  onSelect: (source: ModelSource, model: ModelRecord, reasoning?: string) => void;
   close: () => void;
 }) {
   const { t } = useI18n();
   const dialogRef = useRef<HTMLDivElement>(null);
   useDialogFocus(dialogRef, close);
-  const [sourceId, setSourceId] = useState(state.models.active_source);
+  const sources = visibleModelSources(state.models.sources);
+  const [sourceId, setSourceId] = useState(
+    sources.some((item) => item.id === state.models.active_source)
+      ? state.models.active_source
+      : sources[0]?.id ?? "",
+  );
   const [query, setQuery] = useState("");
-  const source = state.models.sources.find((item) => item.id === sourceId) ?? state.models.sources[0];
+  const [pendingSelection, setPendingSelection] = useState<{ source: ModelSource; model: ModelRecord } | null>(null);
+  const source = sources.find((item) => item.id === sourceId) ?? sources[0];
+  if (!source) return null;
   const models = source.models.filter((model) =>
     `${model.display_name} ${model.id}`.toLowerCase().includes(query.toLowerCase()),
   );
+  const pendingReasoning = pendingSelection?.model.reasoning;
   return (
     <div className="popover-backdrop" onMouseDown={close}>
       <div ref={dialogRef} className="model-picker" role="dialog" aria-modal="true" aria-label={t("模型来源")} tabIndex={-1} onMouseDown={(event) => event.stopPropagation()}>
         <div className="model-picker-sources">
           <div className="popover-title">{t("模型来源")}</div>
-          {state.models.sources.map((item) => (
+          {sources.map((item) => (
             <button
               type="button"
               key={item.id}
@@ -642,6 +663,7 @@ function ModelPicker({
               onClick={() => {
                 setSourceId(item.id);
                 setQuery("");
+                setPendingSelection(null);
               }}
             >
               <span>{item.display_name}</span>
@@ -650,6 +672,37 @@ function ModelPicker({
           ))}
         </div>
         <div className="model-picker-models">
+          {pendingSelection && pendingReasoning && pendingReasoning.options.length > 0 ? (
+            <>
+              <div className="model-picker-header">
+                <div>
+                  <strong>{t("选择思考程度")}</strong>
+                  <span>{pendingSelection.model.display_name}</span>
+                </div>
+                <button type="button" className="ghost-button" onClick={() => setPendingSelection(null)}>
+                  <ChevronLeft size={14} /> {t("返回模型列表")}
+                </button>
+              </div>
+              <div className="model-option-list" aria-label={t("思考程度")}>
+                {pendingReasoning.options.map((option) => (
+                  <button
+                    type="button"
+                    key={option.id}
+                    className={option.id === pendingReasoning.value ? "active" : ""}
+                    onClick={() => onSelect(pendingSelection.source, pendingSelection.model, option.id)}
+                  >
+                    <div className="model-option-icon"><Brain size={15} /></div>
+                    <div>
+                      <strong>{t(option.label)}</strong>
+                      <span>{t(option.description || "")}</span>
+                    </div>
+                    {option.id === pendingReasoning.value && <Check size={16} />}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <>
           <div className="model-picker-header">
             <div>
               <strong>{source.display_name}</strong>
@@ -666,7 +719,13 @@ function ModelPicker({
                 type="button"
                 key={model.id}
                 className={source.active && source.selected_model_id === model.id ? "active" : ""}
-                onClick={() => onSelect(source, model)}
+                onClick={() => {
+                  if (model.reasoning.options.length > 0) {
+                    setPendingSelection({ source, model });
+                    return;
+                  }
+                  onSelect(source, model);
+                }}
               >
                 <div className="model-option-icon">{model.vision ? <Eye size={15} /> : <Brain size={15} />}</div>
                 <div>
@@ -682,6 +741,8 @@ function ModelPicker({
             ))}
             {models.length === 0 && <div className="empty-list">{t("没有匹配的模型")}</div>}
           </div>
+            </>
+          )}
         </div>
       </div>
     </div>
@@ -717,7 +778,7 @@ function Topbar({
   const [reasoningOpen, setReasoningOpen] = useState(false);
   const [modeOpen, setModeOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
-  const activeSource = state.models.sources.find((source) => source.active);
+  const activeSource = visibleModelSources(state.models.sources).find((source) => source.active);
   const reasoning = activeSource?.selected_reasoning;
   const reasoningOptions = reasoning?.options ?? [];
   const selectedReasoning = reasoningOptions.find((item) => item.id === reasoning?.value);
@@ -739,8 +800,8 @@ function Topbar({
       <div className="topbar-left">
         {sidebarCollapsed && <IconButton label={`${t("展开左侧栏")} (Ctrl+B)`} ariaKeyShortcuts="Control+B Meta+B" onClick={toggleSidebar}><PanelLeftOpen size={16} /></IconButton>}
         <button type="button" className="model-trigger" onClick={openModelPicker}>
-          <span>{state.models.active_model?.display_name || t("选择模型")}</span>
-          <small>{activeSource?.display_name || state.models.active_source}</small>
+          <span>{activeSource ? state.models.active_model?.display_name || t("选择模型") : t("选择模型")}</span>
+          <small>{activeSource?.display_name || t("选择模型来源")}</small>
           <ChevronDown size={14} />
         </button>
         {reasoning && reasoning.control !== "none" && (
@@ -975,7 +1036,14 @@ function Message({ message, preferences }: { message: SessionMessage; preference
 
 function LiveMessage({ turn, running, preferences }: { turn: LiveTurn; running: boolean; preferences: UiPreferences }) {
   const { t } = useI18n();
-  const elapsed = Math.max(0, Math.round((Date.now() - (turn.startedAt ?? Date.now())) / 1000));
+  const [clock, setClock] = useState(() => Date.now());
+  useEffect(() => {
+    setClock(Date.now());
+    if (!running) return;
+    const timer = window.setInterval(() => setClock(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [running, turn.startedAt]);
+  const elapsed = Math.max(0, Math.round((clock - (turn.startedAt ?? clock)) / 1000));
   return (
     <>
       <article className="message user">
@@ -1590,9 +1658,11 @@ function ProviderSettings({
 }) {
   const { t } = useI18n();
   const [sourceId, setSourceId] = useState(state.models.active_source);
-  const source = state.models.sources.find((item) => item.id === sourceId) ?? state.models.sources[0];
+  const sources = visibleModelSources(state.models.sources);
+  const source = sources.find((item) => item.id === sourceId) ?? sources[0];
   const [patch, setPatch] = useState<Record<string, unknown>>({});
-  useEffect(() => setPatch({}), [source.id]);
+  useEffect(() => setPatch({}), [source?.id]);
+  if (!source) return null;
   const valueFor = (field: ConfigField) => field.key in patch ? patch[field.key] : source.config?.values[field.key];
   const sourceDescription = source.id === "standard"
     ? t("管理任意 OpenAI、Anthropic、Responses 或请求兼容模型。")
@@ -1602,7 +1672,7 @@ function ProviderSettings({
   return (
     <div className="provider-settings">
       <div className="provider-tabs">
-        {state.models.sources.map((item) => <button type="button" key={item.id} className={item.id === source.id ? "active" : ""} onClick={() => setSourceId(item.id)}>{item.display_name}{item.active && <span />}</button>)}
+        {sources.map((item) => <button type="button" key={item.id} className={item.id === source.id ? "active" : ""} onClick={() => setSourceId(item.id)}>{item.display_name}{item.active && <span />}</button>)}
       </div>
       <div className="provider-content">
         <div className="section-heading">
@@ -1879,7 +1949,7 @@ function Inspector({ state, liveTurn, indexWorkspace }: { state: DesktopState; l
       {tab === "context" ? (
         <div className="inspector-content">
           <section><div className="inspector-heading"><span>{t("工作区")}</span><button type="button" onClick={indexWorkspace} title={t("重新索引")}><RefreshCw className={contextEngine?.indexing ? "spin" : ""} size={13} /></button></div><div className="context-card"><Folder size={15} /><div><strong>{state.workspace.project_name}</strong><span>{state.workspace.project_root}</span></div></div><div className="context-engine-card"><div><span className="context-engine-orbit"><Sparkles size={14} /></span><span><strong>Context Engine</strong><small>{contextLabel}</small></span></div><div className="context-engine-metrics"><span><strong>{contextEngine?.files ?? 0}</strong> {t("文件")}</span><span><strong>{contextEngine?.symbols ?? 0}</strong> {t("符号")}</span></div>{contextEngine?.indexing && <div className="context-progress"><span style={{ width: `${Math.max(3, contextEngine.progress)}%` }} /></div>}</div></section>
-          <section><div className="inspector-heading"><span>{t("运行时")}</span></div><div className="context-line"><span>{t("模型")}</span><strong>{state.models.active_model?.display_name || t("未配置")}</strong></div><div className="context-line"><span>Source</span><strong>{state.models.sources.find((item) => item.active)?.display_name}</strong></div><div className="context-line"><span>{t("模式")}</span><strong>{state.workspace.mode}</strong></div><div className="context-line"><span>{t("权限")}</span><strong>{String(permission ?? "workspace_write")}</strong></div></section>
+          <section><div className="inspector-heading"><span>{t("运行时")}</span></div><div className="context-line"><span>{t("模型")}</span><strong>{state.models.active_model?.display_name || t("未配置")}</strong></div><div className="context-line"><span>Source</span><strong>{visibleModelSources(state.models.sources).find((item) => item.active)?.display_name}</strong></div><div className="context-line"><span>{t("模式")}</span><strong>{state.workspace.mode}</strong></div><div className="context-line"><span>{t("权限")}</span><strong>{String(permission ?? "workspace_write")}</strong></div></section>
           <section><div className="inspector-heading"><span>{t("恢复")}</span></div><div className="context-line"><span>{t("检查点")}</span><strong>{state.recovery.checkpoints.length}</strong></div><div className="context-line"><span>{t("操作")}</span><strong>{String(state.recovery.summary.total_operations ?? state.recovery.operations.length)}</strong></div></section>
           <section><div className="inspector-heading"><span>{t("快捷提示")}</span></div><div className="hint-card"><AtSign size={14} /><span><kbd>@</kbd> {t("会用 Context Engine 推荐当前任务最相关的文件。")}</span></div><div className="hint-card"><Paperclip size={14} /><span>{t("回形针可选择任意文件，并安全复制到工作区附件区。")}</span></div><div className="hint-card"><Command size={14} /><span><kbd>Ctrl K</kbd> {t("打开完整命令目录。")}</span></div></section>
         </div>
@@ -2034,6 +2104,9 @@ export default function App() {
   const [prompt, setPrompt] = useState("");
   const [running, setRunning] = useState(false);
   const [liveTurn, setLiveTurn] = useState<LiveTurn | null>(null);
+  const pendingLiveBatch = useRef<LiveTurnBatch>(emptyLiveTurnBatch());
+  const liveBatchTimer = useRef<number | null>(null);
+  const acceptLiveEvents = useRef(false);
   const [sidebarPreferenceCollapsed, setSidebarPreferenceCollapsed] = useState(() =>
     normalizeSidebarCollapsed(localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY)),
   );
@@ -2240,20 +2313,45 @@ export default function App() {
     return () => { cancelled = true; window.clearTimeout(timer); };
   }, [state]);
 
-  useEffect(() => window.reverie.onEvent((message) => {
-    const event = asRecord(message.event);
-    if (String(event.type ?? "") === "approval.request") setApproval(event);
-    setLiveTurn((current) => {
-      if (!current) return current;
+  const flushLiveBatch = useCallback(() => {
+    liveBatchTimer.current = null;
+    const batch = pendingLiveBatch.current;
+    pendingLiveBatch.current = emptyLiveTurnBatch();
+    if (!batch.assistantText && !batch.reasoningText && batch.events.length === 0) return;
+    setLiveTurn((current) => current ? mergeLiveTurnBatch(current, batch) : current);
+  }, []);
+
+  const resetLiveBatch = useCallback(() => {
+    if (liveBatchTimer.current !== null) {
+      window.clearTimeout(liveBatchTimer.current);
+      liveBatchTimer.current = null;
+    }
+    pendingLiveBatch.current = emptyLiveTurnBatch();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = window.reverie.onEvent((message) => {
+      const event = asRecord(message.event);
       const type = String(event.type ?? "");
-      if (type === "assistant.delta") return { ...current, assistantText: current.assistantText + String(event.text ?? "") };
-      if (type === "reasoning.delta") return { ...current, reasoningText: current.reasoningText + String(event.text ?? "") };
-      if (type === "ui.event") return { ...current, events: [...current.events, asRecord(event.event)] };
-      if (type === "run.auto_followup") return { ...current, events: [...current.events, event] };
-      if (type === "approval.request") return { ...current, events: [...current.events, event] };
-      return current;
+      if (!acceptLiveEvents.current) return;
+      if (type === "approval.request") setApproval(event);
+
+      const batch = pendingLiveBatch.current;
+      if (type === "assistant.delta") batch.assistantText += String(event.text ?? "");
+      else if (type === "reasoning.delta") batch.reasoningText += String(event.text ?? "");
+      else if (type === "ui.event") batch.events.push(asRecord(event.event));
+      else if (type === "run.auto_followup" || type === "approval.request") batch.events.push(event);
+      else return;
+
+      if (liveBatchTimer.current === null) {
+        liveBatchTimer.current = window.setTimeout(flushLiveBatch, LIVE_STREAM_RENDER_INTERVAL_MS);
+      }
     });
-  }), []);
+    return () => {
+      unsubscribe();
+      resetLiveBatch();
+    };
+  }, [flushLiveBatch, resetLiveBatch]);
 
   useEffect(() => {
     const shortcuts = (event: globalThis.KeyboardEvent) => {
@@ -2335,6 +2433,8 @@ export default function App() {
     setMentionItems([]);
     setMentionOpen(false);
     setRunning(true);
+    resetLiveBatch();
+    acceptLiveEvents.current = true;
     setLiveTurn({ userText: text, assistantText: "", reasoningText: "", events: [], error: "", startedAt: Date.now() });
     try {
       let activeSession = session;
@@ -2352,6 +2452,10 @@ export default function App() {
         stream: true,
       });
       const result = response.result;
+      acceptLiveEvents.current = false;
+      // The final result is authoritative and already contains every emitted
+      // delta, so discard an unpainted tail before replacing the live text.
+      resetLiveBatch();
       setLiveTurn((current) => current ? {
         ...current,
         assistantText: result.output_text || current.assistantText,
@@ -2370,16 +2474,18 @@ export default function App() {
       setAttachments([]);
       if (!result.success) toast(result.error || t("请求失败"), "error");
     } catch (error) {
+      acceptLiveEvents.current = false;
       const message = error instanceof Error ? error.message : String(error);
       setLiveTurn((current) => current ? { ...current, error: message } : current);
       if (!message.includes("cancel")) toast(message, "error");
     } finally {
       setRunning(false);
     }
-  }, [prompt, running, session, sessionBusy, state, t, toast]);
+  }, [prompt, resetLiveBatch, running, session, sessionBusy, state, t, toast]);
 
   const cancelPrompt = useCallback(async () => {
     const retryText = liveTurn?.userText ?? "";
+    acceptLiveEvents.current = false;
     try {
       await window.reverie.cancel();
       if (session) {
@@ -2388,6 +2494,7 @@ export default function App() {
         setState((current) => current ? { ...current, sessions: refreshed.sessions } : current);
       }
       setPrompt((current) => current || retryText);
+      resetLiveBatch();
       setLiveTurn(null);
       setApproval(null);
       toast(t("已停止当前任务，提示已保留"), "info");
@@ -2396,7 +2503,7 @@ export default function App() {
     } finally {
       setRunning(false);
     }
-  }, [liveTurn?.userText, session, t, toast]);
+  }, [liveTurn?.userText, resetLiveBatch, session, t, toast]);
 
   const renameSession = useCallback(async (name: string) => {
     if (!renameSessionTarget || running || sessionBusy) return;
@@ -2566,11 +2673,13 @@ export default function App() {
     }
   }, [approval, t, toast]);
 
-  const selectModel = useCallback(async (source: ModelSource, model: ModelRecord) => {
+  const selectModel = useCallback(async (source: ModelSource, model: ModelRecord, selectedReasoning?: string) => {
     try {
-      const reasoning = model.reasoning.options.some((option) => option.id === model.reasoning.value)
-        ? model.reasoning.value
-        : model.reasoning.options[0]?.id;
+      const reasoning = selectedReasoning ?? (
+        model.reasoning.options.some((option) => option.id === model.reasoning.value)
+          ? model.reasoning.value
+          : model.reasoning.options[0]?.id
+      );
       const response = await window.reverie.request("selectModel", { source: source.id, modelId: model.id, ...(reasoning ? { reasoning } : {}) });
       setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current);
       setModelPickerOpen(false);
@@ -2580,7 +2689,7 @@ export default function App() {
 
   const selectReasoning = useCallback(async (reasoning: string) => {
     if (!state) return;
-    const source = state.models.sources.find((item) => item.active);
+    const source = visibleModelSources(state.models.sources).find((item) => item.active);
     if (!source) return;
     try {
       const response = await window.reverie.request("selectModel", { source: source.id, modelId: source.selected_model_id, reasoning });
@@ -2820,7 +2929,7 @@ export default function App() {
         <div className="content-area">{page}</div>
       </main>
       {inspectorOpen && <Inspector state={state} liveTurn={liveTurn} indexWorkspace={() => void indexWorkspace()} />}
-      {modelPickerOpen && <ModelPicker state={state} onSelect={(source, model) => void selectModel(source, model)} close={() => setModelPickerOpen(false)} />}
+      {modelPickerOpen && <ModelPicker state={state} onSelect={(source, model, reasoning) => void selectModel(source, model, reasoning)} close={() => setModelPickerOpen(false)} />}
       {commandOpen && <CommandPalette commands={state.commands.items} close={() => setCommandOpen(false)} choose={chooseCommand} />}
       {sessionSearchOpen && <SessionSearch close={() => setSessionSearchOpen(false)} openSession={(id) => void openSession(id)} />}
       {renameSessionTarget && <RenameSessionModal session={renameSessionTarget} close={() => setRenameSessionTarget(null)} save={(name) => void renameSession(name)} />}

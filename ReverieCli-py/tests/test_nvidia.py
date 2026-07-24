@@ -142,6 +142,8 @@ def test_nvidia_catalog_context_lengths_match_model_cards():
         "qwen/qwen3.5-397b-a17b": 262144,
         "z-ai/glm-5.2": 1000000,
         "nvidia/nemotron-3-ultra-550b-a55b": 1000000,
+        "nvidia/nemotron-3.5-nano-30b-a3b": 1000000,
+        "poolside/laguna-xs-2.1": 262000,
         "stepfun-ai/step-3.5-flash": 256000,
         "stepfun-ai/step-3.7-flash": 256000,
         "deepseek-ai/deepseek-v4-pro": 1000000,
@@ -165,6 +167,18 @@ def test_nvidia_catalog_contains_nemotron_3_ultra():
     assert metadata["transport"] == "openai-sdk"
     assert metadata["thinking_control"] == "fixed"
     assert metadata["context_length"] == 1000000
+
+
+def test_nvidia_catalog_contains_nemotron_35_nano_and_laguna_xs():
+    nemotron = get_nvidia_model_metadata("nvidia/nemotron-3.5-nano-30b-a3b")
+    laguna = get_nvidia_model_metadata("poolside/laguna-xs-2.1")
+
+    assert nemotron is not None
+    assert nemotron["transport"] == "openai-sdk"
+    assert nemotron["thinking_control"] == "fixed"
+    assert build_nvidia_openai_options({}, nemotron["id"])["extra_body"]["reasoning_budget"] == 16_384
+    assert laguna is not None
+    assert laguna["max_output_tokens"] == 8_192
 
 
 def test_nvidia_catalog_contains_glm_52():

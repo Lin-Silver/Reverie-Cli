@@ -7,7 +7,7 @@ Current stable version: **v2.5.0** (released 2026-07-17).
 - **Core function**: terminal-based AI coding assistant with local workspace tools, context retrieval, session continuity, and multi-provider LLM access
 - **Native desktop**: Electron workspace host using the same Python core, with project/session management, full-window backgrounds, Context Engine file recommendations, arbitrary attachments, settings, tools, plugins, and recovery views
 - **Optional workflows**: spec-driven development, creative writing, browser automation, computer control, and game/3D asset authoring
-- **Multi-provider LLM** support: NVIDIA, ModelScope, Codex (ChatGPT), SenseNova, unlimited.surf, AIHubMix, Agnes, WebGemini
+- **Multi-provider LLM** support: NVIDIA, ModelScope, Codex (ChatGPT), SenseNova, AIHubMix, Agnes, WebGemini, Opencode
 - **Context Engine**: Augment-style codebase retrieval, LSP integration, git history analysis
 - **Session management**: Conversation persistence, rotation, working memory injection, handoff packets
 - **Inline media**: Attach images and video directly in conversations
@@ -50,11 +50,10 @@ Reverie supports a wide range of LLM providers out of the box. Each provider has
 
 | Provider           | Description                                                                                                     | Key Models                                                                                                                                                                                  |
 | ------------------ | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **NVIDIA**         | NVIDIA-hosted catalog via`integrate.api.nvidia.com`                                                             | Qwen3.5 397B, DeepSeek V4 Pro/V4 Flash, Kimi K2.6, GLM-5.2, MiniMax M2.7/M3, Mistral Small 4, Mistral Medium 3.5, Mistral Large 3, Step-3.5/3.7-Flash, GPT-OSS-120B, Nemotron 3 Super/Ultra |
+| **NVIDIA**         | NVIDIA-hosted catalog via`integrate.api.nvidia.com`                                                             | Qwen3.5 397B, DeepSeek V4 Pro/V4 Flash, Kimi K2.6, GLM-5.2, MiniMax M2.7/M3, Mistral Small 4, Mistral Medium 3.5, Mistral Large 3, Step-3.5/3.7-Flash, GPT-OSS-120B, Nemotron 3 Super/Ultra and 3.5 Nano, Laguna XS 2.1 |
 | **ModelScope**     | Anthropic-compatible API on`api-inference.modelscope.cn` — all models supporting the Anthropic SDK can be used | GLM-5.1, GLM-5, DeepSeek V4 Pro, DeepSeek V4 Flash, MiniMax M2.7, Qwen3.5 397B A17B (catalog is statically defined in code)                                                                 |
 | **Codex**          | ChatGPT backend or Responses-compatible reverse proxy                                                           | GPT-5.6, GPT-5.5, and other models discovered from the live Codex CLI cache                                                                                                                 |
 | **SenseNova**      | SenseTime SenseNova API with model-specific OpenAI/Anthropic transports                                         | DeepSeek V4 Flash (1M context), SenseNova 6.7 Flash Lite (vision)                                                                                                                           |
-| **unlimited.surf** | Gateway service with request transport                                                                          | GPT-5 (via`unlimited.surf`), with selectable effort (low/medium/high)                                                                                                                       |
 | **AIHubMix**       | Third-party API gateway (OpenAI-compatible)                                                                     | GPT-5.5 Free (with/without reasoning), GPT-4o Free, GPT-4.1 Free                                                                                                                            |
 | **Agnes**          | Agnes AI OpenAI-compatible API (text, image, video)                                                             | Agnes 2.0 Flash (vision + thinking), Agnes 1.5 Flash (vision), image/video generation                                                                                                       |
 | **WebGemini**      | Anonymous Gemini Web access via`gemini.google.com`                                                              | Gemini 3.5 Flash, Gemini 3.5 Flash Thinking, Gemini 3.5 Flash Thinking Lite, Gemini 3.1 Pro, Gemini Auto, Gemini Flash Lite                                                                 |
@@ -177,11 +176,10 @@ Reverie-Cli/
 │   │   │   └── tool_executor.py← Tool execution
 │   │   ├── cli/
 │   │   │   └── interface.py   ← Terminal UI (Rich-based)
-│   │   ├── nvidia.py          ← NVIDIA provider integration (16 models)
+│   │   ├── nvidia.py          ← NVIDIA provider integration (17 models)
 │   │   ├── codex.py           ← Codex/ChatGPT provider integration
 │   │   ├── modelscope.py      ← ModelScope Anthropic-compatible provider
 │   │   ├── sensenova.py       ← SenseNova OpenAI-compatible provider
-│   │   ├── unlimitedsurf.py   ← unlimited.surf gateway provider
 │   │   ├── aihubmix.py        ← AIHubMix OpenAI-compatible provider
 │   │   ├── agnes.py           ← Agnes AI provider (text/image/video)
 │   │   ├── webgemini.py       ← WebGemini anonymous Gemini Web provider
@@ -245,7 +243,7 @@ Download the latest `reverie.exe` from the `dist/` directory and run it directly
 
 On first launch, Reverie guides you through a setup wizard:
 
-1. **Select an LLM provider** — choose from NVIDIA, ModelScope, Codex, SenseNova, unlimited.surf, AIHubMix, Agnes, WebGemini, or Standard
+1. **Select an LLM provider** — choose from NVIDIA, ModelScope, Codex, SenseNova, AIHubMix, Agnes, WebGemini, or Standard
 2. **Configure API keys** — enter your provider API key (stored securely in `config.json`)
 3. **Select a default model** — pick from the provider's catalog
 4. **Choose a workspace** — set your project root directory
@@ -350,18 +348,6 @@ Reverie uses `config.json` stored in the project's `.reverie/` directory or the 
     "top_p": 0.95,
     "reasoning_effort": "medium"
   },
-  "unlimitedsurf": {
-    "enabled": true,
-    "api_key": "",
-    "selected_model_id": "gateway-gpt-5",
-    "selected_model_display_name": "GPT-5",
-    "api_url": "https://unlimited.surf",
-    "endpoint": "/api/chat",
-    "max_context_tokens": 128000,
-    "timeout": 60,
-    "max_tokens": 16384,
-    "effort": "medium"
-  },
   "aihubmix": {
     "enabled": true,
     "api_key": "",
@@ -408,7 +394,7 @@ Reverie uses `config.json` stored in the project's `.reverie/` directory or the 
 
 | Key                       | Type   | Default      | Description                                                                                                                 |
 | ------------------------- | ------ | ------------ | --------------------------------------------------------------------------------------------------------------------------- |
-| `active_model_source`     | string | `"standard"` | Active provider:`standard`, `nvidia`, `codex`, `modelscope`, `sensenova`, `unlimitedsurf`, `aihubmix`, `agnes`, `webgemini` |
+| `active_model_source`     | string | `"standard"` | Active provider:`standard`, `nvidia`, `codex`, `modelscope`, `sensenova`, `aihubmix`, `agnes`, `webgemini`, `opencode` |
 | `tool_output_style`       | string | `"compact"`  | Tool result display:`compact`, `condensed`, `full`                                                                          |
 | `thinking_output_style`   | string | `"full"`     | Reasoning display:`hidden`, `compact`, `full`                                                                               |
 | `nvidia.enable_thinking`  | bool   | `true`       | Enable provider-side thinking for NVIDIA models                                                                             |
@@ -559,17 +545,6 @@ Connects to ChatGPT's backend API. Supports:
 
 Reasoning effort is selectable: `none`, `low`, `medium`, `high`.
 
-### unlimited.surf
-
-A gateway service at `https://unlimited.surf` with request transport:
-
-
-| Model ID        | Display Name | Provider | Tier     |
-| --------------- | ------------ | -------- | -------- |
-| `gateway-gpt-5` | GPT-5        | openai   | flagship |
-
-Effort is selectable: `low`, `medium`, `high`. Note: tool calling is not supported.
-
 ### AIHubMix
 
 Third-party API gateway (OpenAI-compatible) at `https://aihubmix.com/v1`:
@@ -631,7 +606,7 @@ reverie [OPTIONS]
 
 Options:
   --mode <MODE>            Start in a specific mode (reverie, atlas, gamer, etc.)
-  --provider <PROVIDER>    Override active provider (nvidia, codex, modelscope, sensenova, unlimitedsurf, aihubmix, agnes, webgemini...)
+  --provider <PROVIDER>    Override active provider (nvidia, codex, modelscope, sensenova, aihubmix, agnes, webgemini, opencode...)
   --model <MODEL>          Override selected model
   --resume                 Resume last active session
   --session <ID>           Load a specific session by ID
@@ -935,13 +910,6 @@ from reverie.sensenova import (
     get_sensenova_model_catalog,
 )
 
-# unlimited.surf
-from reverie.unlimitedsurf import (
-    build_unlimitedsurf_runtime_model_data,
-    default_unlimitedsurf_config,
-    normalize_unlimitedsurf_config,
-)
-
 # WebGemini
 from reverie.webgemini import (
     build_webgemini_runtime_model_data,
@@ -958,11 +926,11 @@ from reverie.config import EXTERNAL_MODEL_SOURCES, SUPPORTED_ACTIVE_MODEL_SOURCE
 
 # All external (non-standard) model sources
 print(EXTERNAL_MODEL_SOURCES)
-# ("codex", "aihubmix", "agnes", "sensenova", "unlimitedsurf", "nvidia", "modelscope", "webgemini")
+# ("codex", "aihubmix", "agnes", "sensenova", "nvidia", "modelscope", "webgemini", "opencode")
 
 # All supported active model source values (includes "standard")
 print(SUPPORTED_ACTIVE_MODEL_SOURCES)
-# ("standard", "codex", "aihubmix", "agnes", "sensenova", "unlimitedsurf", "nvidia", "modelscope", "webgemini")
+# ("standard", "codex", "aihubmix", "agnes", "sensenova", "nvidia", "modelscope", "webgemini", "opencode")
 ```
 
 ### Mode Normalization

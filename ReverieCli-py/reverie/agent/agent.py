@@ -29,6 +29,7 @@ from ..inline_images import resolve_inline_image_content_for_request
 from ..memory import MEMORY_CONTEXT_PROMPT_HEADER, MemoryOS
 from ..modes import normalize_mode
 from ..config import model_source_display_name, normalize_model_provider
+from ..request_identity import apply_reverie_client_identity
 from ..sse import iter_sse_data_strings as iter_provider_sse_data_strings
 from ..tools.base import ToolResult
 from ..tools.serial_novel import (
@@ -52,7 +53,6 @@ from ..agnes import build_agnes_openai_options
 from ..opencode import build_opencode_openai_options
 from ..sensenova import build_sensenova_openai_options
 from ..modelscope import build_modelscope_anthropic_options
-from ..unlimitedsurf import build_unlimitedsurf_anthropic_options
 from ..webgemini import (
     generate_webgemini_message,
     iter_webgemini_text_deltas,
@@ -2092,8 +2092,7 @@ class ReverieAgent:
                 http_client = self._build_proxied_http_client()
                 if http_client is not None:
                     client_kwargs["http_client"] = http_client
-                if self.custom_headers:
-                    client_kwargs["default_headers"] = dict(self.custom_headers)
+                client_kwargs["default_headers"] = apply_reverie_client_identity(self.custom_headers)
                 optional_kwargs = ("default_headers", "timeout", "http_client")
                 while True:
                     try:
@@ -2125,8 +2124,7 @@ class ReverieAgent:
                     client_kwargs["auth_token"] = self.api_key
                 else:
                     client_kwargs["api_key"] = self.api_key
-                if self.custom_headers:
-                    client_kwargs["default_headers"] = dict(self.custom_headers)
+                client_kwargs["default_headers"] = apply_reverie_client_identity(self.custom_headers)
                 try:
                     self._client = anthropic.Anthropic(**client_kwargs)
                 except TypeError:
@@ -2376,14 +2374,6 @@ class ReverieAgent:
             except Exception:
                 return timeout_value
 
-        if self._is_active_model_source("unlimitedsurf") and self.provider == "anthropic":
-            try:
-                cfg = getattr(config, "unlimitedsurf", {})
-                if isinstance(cfg, dict):
-                    return max(timeout_value, int(cfg.get("timeout", timeout_value)))
-            except Exception:
-                return timeout_value
-
         return timeout_value
 
     def _build_request_headers(self, stream: bool) -> Dict[str, str]:
@@ -2397,7 +2387,7 @@ class ReverieAgent:
             headers.update(self.custom_headers)
         if "Accept" not in headers:
             headers["Accept"] = "text/event-stream" if stream else "application/json"
-        return headers
+        return apply_reverie_client_identity(headers)
 
     def _make_direct_request(self, payload: Dict[str, Any], *, stream: bool) -> Any:
         """Execute a basic JSON POST through requests or the system curl binary."""
@@ -3682,17 +3672,6 @@ class ReverieAgent:
         if self._is_active_model_source("modelscope"):
             try:
                 options = build_modelscope_anthropic_options(getattr(self.config, "modelscope", {}), self.model)
-                candidate = int(options.get("max_tokens", max_tokens))
-                if candidate > 0:
-                    return candidate
-            except Exception:
-                return max_tokens
-        if self._is_active_model_source("unlimitedsurf"):
-            try:
-                options = build_unlimitedsurf_anthropic_options(
-                    getattr(self.config, "unlimitedsurf", {}),
-                    self.model,
-                )
                 candidate = int(options.get("max_tokens", max_tokens))
                 if candidate > 0:
                     return candidate

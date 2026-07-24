@@ -16,6 +16,7 @@ from . import (
     mistral_small_4,
     nemotron_3_super,
     nemotron_3_ultra,
+    nemotron_35_nano,
     qwen_35,
     step_35_flash,
     step_37_flash,
@@ -27,6 +28,7 @@ ProfileBuilder = Callable[[Dict[str, Any]], Dict[str, Any]]
 _OPENAI_PROFILES: Dict[str, ProfileBuilder] = {
     "nvidia/nemotron-3-super-120b-a12b": nemotron_3_super.build_openai_options,
     "nvidia/nemotron-3-ultra-550b-a55b": nemotron_3_ultra.build_openai_options,
+    "nvidia/nemotron-3.5-nano-30b-a3b": nemotron_35_nano.build_openai_options,
     "minimaxai/minimax-m2.7": minimax.build_m27_openai_options,
     "z-ai/glm-5.2": glm_5_2.build_openai_options,
     "stepfun-ai/step-3.5-flash": step_35_flash.build_openai_options,

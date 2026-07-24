@@ -24,6 +24,7 @@ from .aihubmix import (
     build_aihubmix_runtime_model_data,
     normalize_aihubmix_config,
 )
+from .request_identity import apply_reverie_client_identity
 from .opencode import (
     build_opencode_openai_options,
     build_opencode_runtime_model_data,
@@ -52,11 +53,6 @@ from .nvidia import (
     normalize_nvidia_config,
     resolve_nvidia_request_url,
 )
-from .unlimitedsurf import (
-    build_unlimitedsurf_anthropic_options,
-    build_unlimitedsurf_runtime_model_data,
-    normalize_unlimitedsurf_config,
-)
 from .webgemini import (
     build_webgemini_runtime_model_data,
     iter_webgemini_text_deltas,
@@ -72,7 +68,6 @@ BUILTIN_PROVIDER_NAMES = (
     "nvidia",
     "codex",
     "webgemini",
-    "unlimitedsurf",
     "opencode",
 )
 
@@ -212,6 +207,7 @@ def smoke_modelscope(config: Config, timeout_seconds: int = 45, model_id: str = 
             api_key=runtime["api_key"],
             timeout=timeout_seconds,
             max_retries=0,
+            default_headers=apply_reverie_client_identity(),
         )
         options = build_modelscope_anthropic_options(cfg, model_id=model)
         with client.messages.stream(
@@ -249,6 +245,7 @@ def smoke_aihubmix(config: Config, timeout_seconds: int = 45, model_id: str = ""
             api_key=runtime["api_key"],
             timeout=timeout_seconds,
             max_retries=0,
+            default_headers=apply_reverie_client_identity(),
         )
         options = build_aihubmix_openai_options(smoke_cfg, model)
         options["max_tokens"] = min(16, int(options.get("max_tokens") or 16))
@@ -297,6 +294,7 @@ def smoke_opencode(config: Config, timeout_seconds: int = 45, model_id: str = ""
     if str(runtime.get("api_key") or "").strip():
         headers["Authorization"] = f"Bearer {runtime['api_key']}"
 
+    headers = apply_reverie_client_identity(headers)
     start = time.perf_counter()
     response = None
     try:
@@ -337,6 +335,7 @@ def smoke_agnes(config: Config, timeout_seconds: int = 45, model_id: str = "") -
             api_key=runtime["api_key"],
             timeout=timeout_seconds,
             max_retries=0,
+            default_headers=apply_reverie_client_identity(),
         )
         options = build_agnes_openai_options(smoke_cfg, model)
         options["max_tokens"] = min(16, int(options.get("max_tokens") or 16))
@@ -376,6 +375,7 @@ def smoke_sensenova(config: Config, timeout_seconds: int = 45, model_id: str = "
                 api_key=runtime["api_key"],
                 timeout=timeout_seconds,
                 max_retries=0,
+                default_headers=apply_reverie_client_identity(),
             )
             response = client.chat.completions.create(
                 model=model,
@@ -400,6 +400,7 @@ def smoke_sensenova(config: Config, timeout_seconds: int = 45, model_id: str = "
             auth_token=runtime["api_key"],
             timeout=timeout_seconds,
             max_retries=0,
+            default_headers=apply_reverie_client_identity(),
         )
         with client.messages.stream(
             model=model,
@@ -442,6 +443,7 @@ def smoke_nvidia(config: Config, timeout_seconds: int = 45, model_id: str = "") 
                 api_key=runtime["api_key"],
                 timeout=timeout_seconds,
                 max_retries=0,
+                default_headers=apply_reverie_client_identity(),
             )
             options = build_nvidia_openai_options(smoke_cfg, model)
             options["max_tokens"] = min(16, int(options.get("max_tokens") or 16))
@@ -470,11 +472,13 @@ def smoke_nvidia(config: Config, timeout_seconds: int = 45, model_id: str = "") 
         )
         response = _requests_post_stream(
             url,
-            {
-                "Authorization": f"Bearer {runtime['api_key']}",
-                "Content-Type": "application/json",
-                "Accept": "text/event-stream",
-            },
+            apply_reverie_client_identity(
+                {
+                    "Authorization": f"Bearer {runtime['api_key']}",
+                    "Content-Type": "application/json",
+                    "Accept": "text/event-stream",
+                }
+            ),
             payload,
             timeout_seconds=timeout_seconds,
         )
@@ -487,42 +491,6 @@ def smoke_nvidia(config: Config, timeout_seconds: int = 45, model_id: str = "") 
             stream.close()
         if response is not None:
             response.close()
-
-
-def smoke_unlimitedsurf(config: Config, timeout_seconds: int = 45, model_id: str = "") -> ProviderSmokeResult:
-    provider = "unlimitedsurf"
-    cfg = normalize_unlimitedsurf_config(config.unlimitedsurf)
-    if model_id:
-        cfg["selected_model_id"] = str(model_id or "").strip()
-        cfg = normalize_unlimitedsurf_config(cfg)
-    runtime = build_unlimitedsurf_runtime_model_data(cfg)
-    model = str((runtime or {}).get("model") or cfg.get("selected_model_id") or "")
-    if not runtime or not runtime.get("api_key"):
-        return _skipped(provider, model, "missing_credentials")
-
-    start = time.perf_counter()
-    try:
-        from anthropic import Anthropic
-
-        client = Anthropic(
-            base_url=runtime["base_url"],
-            api_key=runtime["api_key"],
-            timeout=timeout_seconds,
-            max_retries=0,
-            default_headers=dict(runtime.get("custom_headers") or {}),
-        )
-        options = build_unlimitedsurf_anthropic_options(cfg, model_id=model)
-        with client.messages.stream(
-            model=model,
-            messages=[{"role": "user", "content": "Reply with OK."}],
-            max_tokens=min(16, int(options.get("max_tokens") or 16)),
-        ) as stream:
-            for text in stream.text_stream:
-                if str(text or "").strip():
-                    break
-        return ProviderSmokeResult(provider=provider, model=model, status="ok", latency_ms=int((time.perf_counter() - start) * 1000))
-    except Exception as exc:
-        return _result_from_error(provider, model, start, exc)
 
 
 def smoke_codex(config: Config, timeout_seconds: int = 60, model_id: str = "") -> ProviderSmokeResult:
@@ -614,7 +582,6 @@ SMOKE_RUNNERS: Dict[str, Callable[[Config, int, str], ProviderSmokeResult]] = {
     "nvidia": smoke_nvidia,
     "codex": smoke_codex,
     "webgemini": smoke_webgemini,
-    "unlimitedsurf": smoke_unlimitedsurf,
 }
 
 

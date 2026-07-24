@@ -18,6 +18,7 @@ from reverie.config import (
     normalize_model_provider,
 )
 from reverie.cli.interface import ReverieInterface
+from reverie.request_identity import REVERIE_CLIENT_HEADER, REVERIE_CLIENT_IDENTITY, apply_reverie_client_identity
 
 
 @pytest.mark.parametrize(
@@ -137,7 +138,6 @@ def test_source_display_table_covers_every_supported_source() -> None:
         ("aihubmix", "build_aihubmix_runtime_model_data"),
         ("agnes", "build_agnes_runtime_model_data"),
         ("sensenova", "build_sensenova_runtime_model_data"),
-        ("unlimitedsurf", "build_unlimitedsurf_runtime_model_data"),
         ("nvidia", "build_nvidia_runtime_model_data"),
         ("modelscope", "build_modelscope_runtime_model_data"),
         ("webgemini", "build_webgemini_runtime_model_data"),
@@ -281,3 +281,25 @@ def test_system_curl_uses_argument_list_without_shell(monkeypatch) -> None:
     assert captured["command"][0] == "curl.exe"
     assert captured["kwargs"]["check"] is False
     assert "shell" not in captured["kwargs"]
+
+
+def test_reverie_client_identity_is_added_and_cannot_be_overridden() -> None:
+    headers = apply_reverie_client_identity(
+        {"Authorization": "Bearer secret", "x-reverie-client": "other-client"}
+    )
+
+    assert headers["Authorization"] == "Bearer secret"
+    assert headers[REVERIE_CLIENT_HEADER] == REVERIE_CLIENT_IDENTITY
+
+
+def test_request_provider_includes_reverie_client_identity(tmp_path) -> None:
+    agent = ReverieAgent(
+        base_url="https://example.test/v1/chat/completions",
+        api_key="secret",
+        model="demo",
+        project_root=tmp_path,
+        provider="request",
+        custom_headers={"X-Reverie-Client": "other-client"},
+    )
+
+    assert agent._build_request_headers(stream=False)[REVERIE_CLIENT_HEADER] == REVERIE_CLIENT_IDENTITY

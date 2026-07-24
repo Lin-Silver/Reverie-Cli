@@ -11,6 +11,7 @@ from reverie.codex import build_codex_request_payload
 from reverie.cli.display import DisplayComponents
 from reverie.cli.help_catalog import HELP_TOPICS
 from reverie.tools.serial_novel import DEFAULT_OUTPUT_DIR, STATE_SCHEMA
+from reverie.request_identity import REVERIE_CLIENT_HEADER, REVERIE_CLIENT_IDENTITY
 
 
 def _nvidia_config() -> SimpleNamespace:
@@ -114,6 +115,7 @@ def test_openai_sdk_client_receives_resolved_provider_timeout_when_needed(monkey
     agent._ensure_client()
 
     assert seen["init_kwargs"]["timeout"] == 23
+    assert seen["init_kwargs"]["default_headers"][REVERIE_CLIENT_HEADER] == REVERIE_CLIENT_IDENTITY
 
 
 def test_openai_sdk_provider_error_retries_once_with_tool_fields_preserved(tmp_path):

@@ -62,11 +62,6 @@ from .sensenova import (
     default_sensenova_config,
     normalize_sensenova_config,
 )
-from .unlimitedsurf import (
-    build_unlimitedsurf_runtime_model_data,
-    default_unlimitedsurf_config,
-    normalize_unlimitedsurf_config,
-)
 from .modelscope import (
     build_modelscope_runtime_model_data,
     default_modelscope_config,
@@ -80,7 +75,7 @@ from .webgemini import (
 from .modes import normalize_mode
 from .version import CONFIG_VERSION, __version__
 
-EXTERNAL_MODEL_SOURCES = ("codex", "aihubmix", "agnes", "sensenova", "unlimitedsurf", "nvidia", "modelscope", "webgemini", "opencode")
+EXTERNAL_MODEL_SOURCES = ("codex", "aihubmix", "agnes", "sensenova", "nvidia", "modelscope", "webgemini", "opencode")
 SUPPORTED_ACTIVE_MODEL_SOURCES = ("standard",) + EXTERNAL_MODEL_SOURCES
 MODEL_SOURCE_DISPLAY_NAMES = {
     "standard": "Custom Provider",
@@ -88,7 +83,6 @@ MODEL_SOURCE_DISPLAY_NAMES = {
     "aihubmix": "AIhubMix",
     "agnes": "Agnes",
     "sensenova": "SenseNova",
-    "unlimitedsurf": "unlimited.surf",
     "nvidia": "NVIDIA",
     "modelscope": "ModelScope",
     "webgemini": "WebGemini",
@@ -143,10 +137,6 @@ def normalize_active_model_source(value: Any, default: str = "standard") -> str:
     """Normalize the persisted chat model source selector."""
     candidate = str(value or "").strip().lower().replace("-", "_")
     aliases = {
-        "us": "unlimitedsurf",
-        "unlimited.surf": "unlimitedsurf",
-        "unlimited_surf": "unlimitedsurf",
-        "unlimitedsurf": "unlimitedsurf",
         "oc": "opencode",
     }
     candidate = aliases.get(candidate, candidate)
@@ -849,7 +839,7 @@ class Config:
     """Main configuration"""
     models: List[ModelConfig] = field(default_factory=list)
     active_model_index: int = 0
-    active_model_source: str = "standard"  # standard | codex | aihubmix | agnes | sensenova | unlimitedsurf | nvidia | modelscope | webgemini | opencode
+    active_model_source: str = "standard"  # standard | codex | aihubmix | agnes | sensenova | nvidia | modelscope | webgemini | opencode
     mode: str = "reverie"
     theme: str = "default"
     max_context_tokens: int = 128000
@@ -877,7 +867,6 @@ class Config:
     aihubmix: Dict[str, Any] = field(default_factory=default_aihubmix_config)
     agnes: Dict[str, Any] = field(default_factory=default_agnes_config)
     sensenova: Dict[str, Any] = field(default_factory=default_sensenova_config)
-    unlimitedsurf: Dict[str, Any] = field(default_factory=default_unlimitedsurf_config)
     nvidia: Dict[str, Any] = field(default_factory=default_nvidia_config)
     modelscope: Dict[str, Any] = field(default_factory=default_modelscope_config)
     webgemini: Dict[str, Any] = field(default_factory=default_webgemini_config)
@@ -945,10 +934,6 @@ class Config:
         if source == "sensenova":
             runtime_sensenova_model = build_sensenova_runtime_model_data(self.sensenova)
             return ModelConfig.from_dict(runtime_sensenova_model) if runtime_sensenova_model else None
-
-        if source == "unlimitedsurf":
-            runtime_unlimitedsurf_model = build_unlimitedsurf_runtime_model_data(self.unlimitedsurf)
-            return ModelConfig.from_dict(runtime_unlimitedsurf_model) if runtime_unlimitedsurf_model else None
 
         if source == "nvidia":
             runtime_nvidia_model = build_nvidia_runtime_model_data(runtime_nvidia_config)
@@ -1025,7 +1010,6 @@ class Config:
         aihubmix = normalize_aihubmix_config(self.aihubmix)
         agnes = normalize_agnes_config(self.agnes)
         sensenova = normalize_sensenova_config(self.sensenova)
-        unlimitedsurf = normalize_unlimitedsurf_config(self.unlimitedsurf)
         nvidia = normalize_nvidia_config(self.nvidia)
         modelscope = normalize_modelscope_config(self.modelscope)
         webgemini = normalize_webgemini_config(self.webgemini)
@@ -1065,7 +1049,6 @@ class Config:
             'aihubmix': aihubmix,
             'agnes': agnes,
             'sensenova': sensenova,
-            'unlimitedsurf': unlimitedsurf,
             'nvidia': nvidia,
             'modelscope': modelscope,
             'webgemini': webgemini,
@@ -1140,8 +1123,6 @@ class Config:
             )
             if legacy_sensenova_model is not None:
                 sensenova["api_key"] = str(legacy_sensenova_model.api_key).strip()
-        raw_unlimitedsurf = data.get('unlimitedsurf', data.get('unlimited_surf', data.get('us', {})))
-        unlimitedsurf = normalize_unlimitedsurf_config(raw_unlimitedsurf)
         raw_nvidia = data.get('nvidia', {})
         nvidia = normalize_nvidia_config(raw_nvidia)
         raw_modelscope = data.get('modelscope', {})
@@ -1190,7 +1171,6 @@ class Config:
             aihubmix=aihubmix,
             agnes=agnes,
             sensenova=sensenova,
-            unlimitedsurf=unlimitedsurf,
             nvidia=nvidia,
             modelscope=modelscope,
             webgemini=webgemini,
@@ -1827,17 +1807,6 @@ class ConfigManager:
                     needs_update = True
                     break
 
-        # Check if unlimitedsurf section is missing
-        if 'unlimitedsurf' not in data:
-            needs_update = True
-        elif not isinstance(data.get('unlimitedsurf'), dict):
-            needs_update = True
-        else:
-            for field_name in default_unlimitedsurf_config().keys():
-                if field_name not in data.get('unlimitedsurf', {}):
-                    needs_update = True
-                    break
-
         # Check if nvidia section is missing
         if 'nvidia' not in data:
             needs_update = True
@@ -2053,8 +2022,6 @@ class ConfigManager:
             return True
         if build_sensenova_runtime_model_data(getattr(config, "sensenova", {})):
             return True
-        if build_unlimitedsurf_runtime_model_data(getattr(config, "unlimitedsurf", {})):
-            return True
         if build_modelscope_runtime_model_data(getattr(config, "modelscope", {})):
             return True
         nvidia = normalize_nvidia_config(getattr(config, "nvidia", {}))
@@ -2093,8 +2060,6 @@ class ConfigManager:
                     config.active_model_source = "agnes"
                 elif build_sensenova_runtime_model_data(getattr(config, "sensenova", {})):
                     config.active_model_source = "sensenova"
-                elif build_unlimitedsurf_runtime_model_data(getattr(config, "unlimitedsurf", {})):
-                    config.active_model_source = "unlimitedsurf"
                 elif build_nvidia_runtime_model_data(getattr(config, "nvidia", {})):
                     config.active_model_source = "nvidia"
                 elif build_modelscope_runtime_model_data(getattr(config, "modelscope", {})):

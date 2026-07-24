@@ -13,6 +13,7 @@ from ..nvidia import (
     is_nvidia_model,
 )
 from ..sse import iter_sse_data_strings
+from ..request_identity import apply_reverie_client_identity
 
 logger = logging.getLogger(__name__)
 
@@ -806,7 +807,9 @@ class ContextCompressor:
                     normalized_value = str(value or "").strip()
                     if normalized_key and normalized_value:
                         headers[normalized_key] = normalized_value
-                response = make_compression_request_with_retry(base_url, headers, payload)
+                response = make_compression_request_with_retry(
+                    base_url, apply_reverie_client_identity(headers), payload
+                )
                 response_data = response.json()
                 summary = response_data["choices"][0]["message"]["content"]
                 usage_info = response_data.get("usage") if isinstance(response_data, dict) else None

@@ -80,9 +80,6 @@ class CommandHandler:
             'ag': self.cmd_agnes,
             'sensenova': self.cmd_sensenova,
             'sense': self.cmd_sensenova,
-            'us': self.cmd_unlimitedsurf,
-            'unlimitedsurf': self.cmd_unlimitedsurf,
-            'unlimited.surf': self.cmd_unlimitedsurf,
             'nvidia': self.cmd_nvidia,
             'modelscope': self.cmd_modelscope,
             'mode': self.cmd_mode,
@@ -244,7 +241,7 @@ class CommandHandler:
 
         accent, status_label, message_color, detail_color = self._resolve_activity_style(status)
         title = Text()
-        title.append("│ ", style=accent)
+        title.append("â”‚ ", style=accent)
         title.append(str(category or "Activity"), style=f"bold {accent}")
         title.append("  |  ", style=self.theme.TEXT_DIM)
         title.append(status_label, style=self.theme.TEXT_DIM)
@@ -264,7 +261,7 @@ class CommandHandler:
 
         if meta_text:
             footer = Text()
-            footer.append("└ ", style=accent)
+            footer.append("â”” ", style=accent)
             footer.append(meta_text, style=self.theme.TEXT_DIM)
             renderables.append(footer)
 
@@ -298,7 +295,7 @@ class CommandHandler:
         body: List[Any] = [eyebrow, title_text]
         if subtitle:
             body.append(Text(subtitle, style=self.theme.TEXT_SECONDARY))
-        divider = Text("─" * min(58 if compact else 78, max(self._console_width() - 14, 12)), style=self.theme.BORDER_SUBTLE)
+        divider = Text("â”€" * min(58 if compact else 78, max(self._console_width() - 14, 12)), style=self.theme.BORDER_SUBTLE)
         body.append(divider)
 
         self.console.print()
@@ -555,9 +552,9 @@ class CommandHandler:
         compact = self._console_width() < 110
         count_text = f"{len(filtered_records)}/{len(records)} skills" if len(filtered_records) != len(records) else f"{len(records)} skills"
         if invalid_count:
-            count_text = f"{count_text} · {invalid_count} invalid"
+            count_text = f"{count_text} Â· {invalid_count} invalid"
         if root_count:
-            count_text = f"{count_text} · {root_count} roots"
+            count_text = f"{count_text} Â· {root_count} roots"
 
         title_grid = Table.grid(expand=True)
         title_grid.add_column(ratio=1)
@@ -572,7 +569,7 @@ class CommandHandler:
 
         search_display = search_query + ("_" if is_searching else "")
         body_lines = [
-            f"[{self.theme.TEXT_DIM}]Focused:[/{self.theme.TEXT_DIM}] [bold {self.theme.BLUE_SOFT}]{escape(name)}[/bold {self.theme.BLUE_SOFT}] [{self.theme.TEXT_DIM}]· {escape(scope)} · {escape(root)}[/{self.theme.TEXT_DIM}]",
+            f"[{self.theme.TEXT_DIM}]Focused:[/{self.theme.TEXT_DIM}] [bold {self.theme.BLUE_SOFT}]{escape(name)}[/bold {self.theme.BLUE_SOFT}] [{self.theme.TEXT_DIM}]Â· {escape(scope)} Â· {escape(root)}[/{self.theme.TEXT_DIM}]",
         ]
         if summary:
             body_lines.append(
@@ -585,7 +582,7 @@ class CommandHandler:
             )
         else:
             body_lines.append(
-                f"[{self.theme.TEXT_DIM}]Use ↑↓ / j k to browse, only a small window of skills is shown at once, and Enter or Esc keeps the focused skill page in the transcript.[/{self.theme.TEXT_DIM}]"
+                f"[{self.theme.TEXT_DIM}]Use â†‘â†“ / j k to browse, only a small window of skills is shown at once, and Enter or Esc keeps the focused skill page in the transcript.[/{self.theme.TEXT_DIM}]"
             )
 
         return Panel(
@@ -634,7 +631,7 @@ class CommandHandler:
         for row_index, record in enumerate(visible_records):
             actual_idx = scroll_offset + row_index
             is_selected = actual_idx == selected_idx
-            indicator = Text("›" if is_selected else "", style=f"bold {self.theme.PINK_SOFT}")
+            indicator = Text("â€º" if is_selected else "", style=f"bold {self.theme.PINK_SOFT}")
             skill_style = f"bold {self.theme.TEXT_PRIMARY} on {self.theme.PURPLE_DEEP}" if is_selected else f"bold {self.theme.BLUE_SOFT}"
             meta_style = self.theme.TEXT_PRIMARY if is_selected else self.theme.TEXT_DIM
             preview_style = self.theme.TEXT_PRIMARY if is_selected else self.theme.TEXT_SECONDARY
@@ -708,7 +705,7 @@ class CommandHandler:
         """Build the navigation footer for the interactive skills browser."""
         footer_text = Text()
         footer_text.append("Navigate ", style=self.theme.TEXT_DIM)
-        footer_text.append("↑↓ / j k", style=self.theme.BLUE_SOFT)
+        footer_text.append("â†‘â†“ / j k", style=self.theme.BLUE_SOFT)
         footer_text.append("  Page ", style=self.theme.TEXT_DIM)
         footer_text.append("PgUp/PgDn", style=self.theme.BLUE_SOFT)
         footer_text.append("  Keep page ", style=self.theme.TEXT_DIM)
@@ -728,7 +725,7 @@ class CommandHandler:
         footer_grid.add_column(justify="right", no_wrap=True)
         footer_grid.add_row(
             footer_text,
-            Text(f"{filtered_count} visible · {status_text}", style=status_color),
+            Text(f"{filtered_count} visible Â· {status_text}", style=status_color),
         )
 
         return Panel(
@@ -1459,7 +1456,7 @@ class CommandHandler:
         search_display = search_query + ("_" if is_searching else "")
         body_lines = [
             f"[{self.theme.TEXT_SECONDARY}]Browse commands, runnable forms, and examples. Press [bold {self.theme.BLUE_SOFT}]Enter[/bold {self.theme.BLUE_SOFT}] or [bold {self.theme.BLUE_SOFT}]Esc[/bold {self.theme.BLUE_SOFT}] to pin the focused page into the transcript.[/{self.theme.TEXT_SECONDARY}]",
-            f"[{self.theme.TEXT_DIM}]Focused:[/{self.theme.TEXT_DIM}] [bold {accent}]{escape(command)}[/bold {accent}] [{self.theme.TEXT_DIM}]· {escape(section)}[/{self.theme.TEXT_DIM}]",
+            f"[{self.theme.TEXT_DIM}]Focused:[/{self.theme.TEXT_DIM}] [bold {accent}]{escape(command)}[/bold {accent}] [{self.theme.TEXT_DIM}]Â· {escape(section)}[/{self.theme.TEXT_DIM}]",
         ]
         if summary:
             body_lines.append(f"[{self.theme.TEXT_PRIMARY}]{escape(summary)}[/{self.theme.TEXT_PRIMARY}]")
@@ -1517,7 +1514,7 @@ class CommandHandler:
         for row_index, topic in enumerate(visible_items):
             actual_idx = scroll_offset + row_index
             is_selected = actual_idx == selected_idx
-            indicator = Text("›" if is_selected else "", style=f"bold {self.theme.PINK_SOFT}")
+            indicator = Text("â€º" if is_selected else "", style=f"bold {self.theme.PINK_SOFT}")
             command_style = f"bold {self.theme.TEXT_PRIMARY} on {self.theme.PURPLE_DEEP}" if is_selected else f"bold {self.theme.BLUE_SOFT}"
             preview_style = self.theme.TEXT_PRIMARY if is_selected else self.theme.TEXT_SECONDARY
             section = str(topic.get("section", "")).strip()
@@ -1552,7 +1549,7 @@ class CommandHandler:
         """Build the navigation footer for the interactive help browser."""
         footer_text = Text()
         footer_text.append("Navigate ", style=self.theme.TEXT_DIM)
-        footer_text.append("↑↓ / j k", style=self.theme.BLUE_SOFT)
+        footer_text.append("â†‘â†“ / j k", style=self.theme.BLUE_SOFT)
         footer_text.append("  Page ", style=self.theme.TEXT_DIM)
         footer_text.append("PgUp/PgDn", style=self.theme.BLUE_SOFT)
         footer_text.append("  Pin ", style=self.theme.TEXT_DIM)
@@ -1572,7 +1569,7 @@ class CommandHandler:
         footer_grid.add_column(justify="right", no_wrap=True)
         footer_grid.add_row(
             footer_text,
-            Text(f"{filtered_count} visible · {status_text}", style=status_color),
+            Text(f"{filtered_count} visible Â· {status_text}", style=status_color),
         )
 
         return Panel(
@@ -2838,10 +2835,10 @@ class CommandHandler:
             tools_label = "-" if tools is None else str(tools)
             state_style = self.theme.MINT_VIBRANT if state == "enabled" else (self.theme.TEXT_DIM if state == "disabled" else self.theme.AMBER_GLOW)
             return (
-                f"[{enabled_style}]{enabled_label}[/{enabled_style}] · "
-                f"[{self.theme.TEXT_PRIMARY}]{escape(transport)}[/{self.theme.TEXT_PRIMARY}] · "
-                f"[{self.theme.PURPLE_SOFT}]{escape(trust_label)}[/{self.theme.PURPLE_SOFT}] · "
-                f"[{self.theme.BLUE_SOFT}]{escape(tools_label)} tools[/{self.theme.BLUE_SOFT}] · "
+                f"[{enabled_style}]{enabled_label}[/{enabled_style}] Â· "
+                f"[{self.theme.TEXT_PRIMARY}]{escape(transport)}[/{self.theme.TEXT_PRIMARY}] Â· "
+                f"[{self.theme.PURPLE_SOFT}]{escape(trust_label)}[/{self.theme.PURPLE_SOFT}] Â· "
+                f"[{self.theme.BLUE_SOFT}]{escape(tools_label)} tools[/{self.theme.BLUE_SOFT}] Â· "
                 f"[{state_style}]{escape(state)}[/{state_style}]"
             )
         return f"[{self.theme.TEXT_DIM}](n/a)[/{self.theme.TEXT_DIM}]"
@@ -2962,8 +2959,8 @@ class CommandHandler:
         footer_grid.add_row(
             Text.from_markup(
                 f"[{self.theme.TEXT_DIM}]"
-                f"{self.deco.DOT_MEDIUM} ↑/↓ or j/k: Navigate  "
-                f"{self.deco.DOT_MEDIUM} ←/→ or h/l: Quick change  "
+                f"{self.deco.DOT_MEDIUM} â†‘/â†“ or j/k: Navigate  "
+                f"{self.deco.DOT_MEDIUM} â†/â†’ or h/l: Quick change  "
                 f"{self.deco.DOT_MEDIUM} t: Trust  "
                 f"{self.deco.DOT_MEDIUM} a: Add  "
                 f"{self.deco.DOT_MEDIUM} r: Refresh  "
@@ -2973,7 +2970,7 @@ class CommandHandler:
                 f"[/{self.theme.TEXT_DIM}]"
             ),
             Text(
-                f"{selected_idx + 1}/{max(1, total_items)} · {'updated' if changed else 'ready'}",
+                f"{selected_idx + 1}/{max(1, total_items)} Â· {'updated' if changed else 'ready'}",
                 style=self.theme.AMBER_GLOW if changed else self.theme.TEXT_DIM,
             ),
         )
@@ -4065,7 +4062,7 @@ class CommandHandler:
             models_data.append({
                 "id": str(i),
                 "name": model["display_name"],
-                "description": f"{model['path']} • {intro_text}",
+                "description": f"{model['path']} â€¢ {intro_text}",
                 "model": model,
             })
             if model["display_name"].lower() == default_display_name.lower():
@@ -7757,246 +7754,6 @@ class CommandHandler:
                 report_suppressed_exception("render Agnes thinking status")
         return result
 
-    def cmd_unlimitedsurf(self, args: str) -> bool:
-        """Manage unlimited.surf source settings."""
-        raw = args.strip()
-        lowered = raw.lower()
-        if not raw or lowered in ("status", "check"):
-            return self._cmd_unlimitedsurf_status()
-        if lowered in ("key", "apikey", "api-key", "login"):
-            return self._cmd_unlimitedsurf_key("")
-        if lowered.startswith(("key ", "apikey ", "api-key ", "login ")):
-            return self._cmd_unlimitedsurf_key(raw.split(None, 1)[1].strip())
-        if lowered in ("activate", "use"):
-            return self._cmd_unlimitedsurf_activate()
-        if lowered == "model":
-            return self._cmd_unlimitedsurf_model("")
-        if lowered.startswith("model "):
-            return self._cmd_unlimitedsurf_model(raw[6:].strip())
-        if lowered in ("endpoint", "url", "base-url", "baseurl"):
-            return self._cmd_unlimitedsurf_endpoint("")
-        if lowered.startswith("endpoint "):
-            return self._cmd_unlimitedsurf_endpoint(raw[9:].strip())
-        if lowered.startswith("url "):
-            return self._cmd_unlimitedsurf_endpoint(raw[4:].strip())
-        if lowered.startswith("base-url "):
-            return self._cmd_unlimitedsurf_endpoint(raw[9:].strip())
-        if lowered.startswith("baseurl "):
-            return self._cmd_unlimitedsurf_endpoint(raw[8:].strip())
-
-        self.console.print(
-            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /us [status|key|activate|model|endpoint][/{self.theme.AMBER_GLOW}]"
-        )
-        return True
-
-    def _ensure_unlimitedsurf_configuration(self, config) -> bool:
-        from ..unlimitedsurf import (
-            UNLIMITEDSURF_API_KEY_HINT_URL,
-            normalize_unlimitedsurf_config,
-            resolve_unlimitedsurf_api_key,
-        )
-
-        us_cfg = normalize_unlimitedsurf_config(getattr(config, "unlimitedsurf", {}))
-        api_key = resolve_unlimitedsurf_api_key(us_cfg)
-        if not api_key:
-            self.console.print()
-            self.console.print(
-                f"[{self.theme.TEXT_DIM}]Get or copy your unlimited.surf API key from {UNLIMITEDSURF_API_KEY_HINT_URL}, then paste it here.[/{self.theme.TEXT_DIM}]"
-            )
-            api_key = Prompt.ask(
-                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] unlimited.surf API Key",
-                password=True,
-            ).strip()
-            if not api_key:
-                self.console.print(
-                    f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} unlimited.surf API key is required to activate this source.[/{self.theme.CORAL_SOFT}]"
-                )
-                return False
-        us_cfg["api_key"] = api_key
-        config.unlimitedsurf = normalize_unlimitedsurf_config(us_cfg)
-        config.active_model_source = "unlimitedsurf"
-        return True
-
-    def _cmd_unlimitedsurf_status(self) -> bool:
-        from ..unlimitedsurf import (
-            UNLIMITEDSURF_API_KEY_HINT_URL,
-            get_unlimitedsurf_model_catalog,
-            mask_secret,
-            normalize_unlimitedsurf_config,
-            resolve_unlimitedsurf_api_key,
-            resolve_unlimitedsurf_messages_url,
-            resolve_unlimitedsurf_models_url,
-            resolve_unlimitedsurf_selected_model,
-        )
-
-        config_manager = self.app.get('config_manager')
-        if not config_manager:
-            self.console.print(
-                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
-            )
-            return True
-
-        config = config_manager.load()
-        us_cfg = normalize_unlimitedsurf_config(getattr(config, "unlimitedsurf", {}))
-        catalog = get_unlimitedsurf_model_catalog(us_cfg.get("api_url"), fetch_live=True, timeout=8)
-        selected = resolve_unlimitedsurf_selected_model(us_cfg, catalog=catalog)
-        effective_api_key = resolve_unlimitedsurf_api_key(us_cfg)
-        key_origin = " (from environment)" if effective_api_key and not str(us_cfg.get("api_key", "") or "").strip() else ""
-        model_source = str(getattr(config, "active_model_source", "standard") or "standard").strip().lower()
-
-        lines = [
-            f"[{self.theme.BLUE_SOFT}]Active model source:[/{self.theme.BLUE_SOFT}] {self._format_model_source_label(model_source)}",
-            f"[{self.theme.BLUE_SOFT}]Configured key:[/{self.theme.BLUE_SOFT}] {mask_secret(effective_api_key)}{key_origin}",
-            f"[{self.theme.BLUE_SOFT}]Messages endpoint:[/{self.theme.BLUE_SOFT}] {escape(resolve_unlimitedsurf_messages_url(us_cfg.get('api_url')))}",
-            f"[{self.theme.BLUE_SOFT}]Models endpoint:[/{self.theme.BLUE_SOFT}] {escape(resolve_unlimitedsurf_models_url(us_cfg.get('api_url')))}",
-            f"[{self.theme.BLUE_SOFT}]Public models loaded:[/{self.theme.BLUE_SOFT}] {len(catalog)}",
-            f"[{self.theme.BLUE_SOFT}]Default max tokens:[/{self.theme.BLUE_SOFT}] {us_cfg.get('max_tokens', 16384)}",
-            f"[{self.theme.BLUE_SOFT}]API key help:[/{self.theme.BLUE_SOFT}] {escape(UNLIMITEDSURF_API_KEY_HINT_URL)}",
-        ]
-        if selected:
-            provider = str(selected.get("provider") or "").strip()
-            tier = str(selected.get("tier") or "").strip()
-            suffix = f" | {provider}" if provider else ""
-            suffix += f" | {tier}" if tier else ""
-            lines.insert(1, f"[{self.theme.BLUE_SOFT}]Selected model:[/{self.theme.BLUE_SOFT}] {escape(selected['display_name'])} ({escape(selected['id'])}){escape(suffix)}")
-            lines.insert(2, f"[{self.theme.BLUE_SOFT}]Transport:[/{self.theme.BLUE_SOFT}] Anthropic SDK")
-            lines.insert(3, f"[{self.theme.BLUE_SOFT}]Context:[/{self.theme.BLUE_SOFT}] {int(selected.get('context_length') or 0):,} tokens")
-
-        self.console.print()
-        self.console.print(
-            Panel(
-                Text.from_markup("\n".join(lines)),
-                title=f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} unlimited.surf Source {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]",
-                border_style=self.theme.BORDER_PRIMARY,
-                box=box.ROUNDED,
-                padding=(1, 2),
-            )
-        )
-        self.console.print()
-        return True
-
-    def _cmd_unlimitedsurf_key(self, api_key_value: str = "") -> bool:
-        from ..unlimitedsurf import (
-            UNLIMITEDSURF_API_KEY_HINT_URL,
-            mask_secret,
-            normalize_unlimitedsurf_config,
-            resolve_unlimitedsurf_api_key,
-        )
-
-        config_manager = self.app.get('config_manager')
-        if not config_manager:
-            self.console.print(
-                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
-            )
-            return True
-
-        config = config_manager.load()
-        us_cfg = normalize_unlimitedsurf_config(getattr(config, "unlimitedsurf", {}))
-        current = resolve_unlimitedsurf_api_key(us_cfg)
-        api_key = str(api_key_value or "").strip()
-        if not api_key:
-            self.console.print(f"[{self.theme.TEXT_DIM}]Get your unlimited.surf API key here: {UNLIMITEDSURF_API_KEY_HINT_URL}[/{self.theme.TEXT_DIM}]")
-            self.console.print(f"[{self.theme.TEXT_DIM}]Current unlimited.surf key: {mask_secret(current)}[/{self.theme.TEXT_DIM}]")
-            api_key = Prompt.ask(
-                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] unlimited.surf API Key",
-                password=True,
-                default="",
-            ).strip()
-        if not api_key:
-            self.console.print(f"[{self.theme.TEXT_DIM}]unlimited.surf key unchanged.[/{self.theme.TEXT_DIM}]")
-            return True
-        us_cfg["api_key"] = api_key
-        config.unlimitedsurf = normalize_unlimitedsurf_config(us_cfg)
-        config_manager.save(config)
-        self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} unlimited.surf API key saved.[/{self.theme.MINT_VIBRANT}]")
-        if self.app.get('reinit_agent'):
-            self.app['reinit_agent']()
-        return True
-
-    def _cmd_unlimitedsurf_activate(self) -> bool:
-        config_manager = self.app.get('config_manager')
-        if not config_manager:
-            self.console.print(
-                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
-            )
-            return True
-        config = config_manager.load()
-        if not self._ensure_unlimitedsurf_configuration(config):
-            return True
-        config_manager.save(config)
-        if self.app.get('reinit_agent'):
-            self.app['reinit_agent']()
-        return self._cmd_unlimitedsurf_status()
-
-    def _cmd_unlimitedsurf_model(self, model_query: str) -> bool:
-        from ..unlimitedsurf import (
-            apply_unlimitedsurf_model_selection,
-            get_unlimitedsurf_model_catalog,
-            normalize_unlimitedsurf_config,
-        )
-
-        config_manager = self.app.get('config_manager')
-        us_cfg = {}
-        if config_manager:
-            config = config_manager.load()
-            if not self._ensure_unlimitedsurf_configuration(config):
-                return True
-            us_cfg = normalize_unlimitedsurf_config(getattr(config, "unlimitedsurf", {}))
-
-        return self._select_external_provider_model(
-            config_attr="unlimitedsurf",
-            normalize_config=normalize_unlimitedsurf_config,
-            catalog=get_unlimitedsurf_model_catalog(us_cfg.get("api_url"), fetch_live=True, timeout=15),
-            provider_label="unlimited.surf",
-            active_source="unlimitedsurf",
-            model_query=model_query,
-            provider_command="us",
-            post_select_config=apply_unlimitedsurf_model_selection,
-        )
-
-    def _cmd_unlimitedsurf_endpoint(self, endpoint_value: str) -> bool:
-        from ..unlimitedsurf import (
-            UNLIMITEDSURF_DEFAULT_BASE_URL,
-            normalize_unlimitedsurf_config,
-            resolve_unlimitedsurf_base_url,
-        )
-
-        config_manager = self.app.get('config_manager')
-        if not config_manager:
-            self.console.print(
-                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
-            )
-            return True
-
-        config = config_manager.load()
-        us_cfg = normalize_unlimitedsurf_config(getattr(config, "unlimitedsurf", {}))
-        candidate = str(endpoint_value or "").strip()
-        if not candidate:
-            current_url = str(us_cfg.get("api_url", UNLIMITEDSURF_DEFAULT_BASE_URL)).strip()
-            self.console.print(
-                f"[{self.theme.TEXT_DIM}]Current unlimited.surf base URL: {current_url}[/{self.theme.TEXT_DIM}]"
-            )
-            self.console.print(
-                f"[{self.theme.TEXT_DIM}]Use 'clear' to restore the default. You may paste the root URL, /v1/messages, or /api/models; Reverie normalizes it to the Anthropic SDK base URL.[/{self.theme.TEXT_DIM}]"
-            )
-            candidate = Prompt.ask(
-                "unlimited.surf base URL",
-                default=current_url,
-            ).strip()
-
-        if candidate.lower() in ("clear", "default", "none", "off"):
-            candidate = UNLIMITEDSURF_DEFAULT_BASE_URL
-
-        us_cfg["api_url"] = resolve_unlimitedsurf_base_url(candidate or UNLIMITEDSURF_DEFAULT_BASE_URL)
-        config.unlimitedsurf = normalize_unlimitedsurf_config(us_cfg)
-        config_manager.save(config)
-        if self.app.get('reinit_agent'):
-            self.app['reinit_agent']()
-        self.console.print(
-            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} unlimited.surf base URL set to: {escape(config.unlimitedsurf.get('api_url', UNLIMITEDSURF_DEFAULT_BASE_URL))}[/{self.theme.MINT_VIBRANT}]"
-        )
-        return True
-
     def cmd_sensenova(self, args: str) -> bool:
         """Manage SenseNova source settings."""
         raw = args.strip()
@@ -8834,7 +8591,7 @@ class CommandHandler:
             models_data.append({
                 'id': str(i),
                 'name': model.model_display_name,
-                'description': f"{model.base_url} • {model.model}",
+                'description': f"{model.base_url} â€¢ {model.model}",
                 'model': model
             })
             if i == config.active_model_index:
@@ -11259,7 +11016,7 @@ class CommandHandler:
                         if not thought_line.strip():
                             continue
                         rendered = Text()
-                        rendered.append("│ ", style=self.theme.THINKING_BORDER)
+                        rendered.append("â”‚ ", style=self.theme.THINKING_BORDER)
                         rendered.append(thought_line.strip(), style=f"italic {self.theme.THINKING_SOFT}")
                         self.console.print(Padding(rendered, (0, 0, 0, 3)))
 
@@ -12179,15 +11936,15 @@ class CommandHandler:
         footer_grid.add_row(
             Text.from_markup(
                 f"[{self.theme.TEXT_DIM}]"
-                f"{self.deco.DOT_MEDIUM} ↑/↓ or j/k: Navigate  "
-                f"{self.deco.DOT_MEDIUM} ←/→ or h/l: Quick change  "
+                f"{self.deco.DOT_MEDIUM} â†‘/â†“ or j/k: Navigate  "
+                f"{self.deco.DOT_MEDIUM} â†/â†’ or h/l: Quick change  "
                 f"{self.deco.DOT_MEDIUM} Enter: Edit & save  "
                 f"{self.deco.DOT_MEDIUM} One focused page at a time  "
                 f"{self.deco.DOT_MEDIUM} Esc: Exit"
                 f"[/{self.theme.TEXT_DIM}]"
             ),
             Text(
-                f"{selected_idx + 1}/{max(1, total_items)} · {'saved' if changed else 'ready'}",
+                f"{selected_idx + 1}/{max(1, total_items)} Â· {'saved' if changed else 'ready'}",
                 style=self.theme.MINT_SOFT if changed else self.theme.TEXT_DIM,
             ),
         )
@@ -13011,13 +12768,13 @@ class CommandHandler:
                 if result.restored_files:
                     self.console.print(f"[{self.theme.TEXT_DIM}]Restored files:[/{self.theme.TEXT_DIM}]")
                     for file_path in result.restored_files:
-                        self.console.print(f"  [{self.theme.MINT_SOFT}]✓[/{self.theme.MINT_SOFT}] {file_path}")
+                        self.console.print(f"  [{self.theme.MINT_SOFT}]âœ“[/{self.theme.MINT_SOFT}] {file_path}")
                 
                 if result.errors:
                     self.console.print()
                     self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Errors:[/{self.theme.AMBER_GLOW}]")
                     for error in result.errors:
-                        self.console.print(f"  [{self.theme.CORAL_SOFT}]✗[/{self.theme.CORAL_SOFT}] {error}")
+                        self.console.print(f"  [{self.theme.CORAL_SOFT}]âœ—[/{self.theme.CORAL_SOFT}] {error}")
                 
                 # Update agent messages if available
                 if result.restored_messages and self.app.get('agent'):
@@ -13037,13 +12794,13 @@ class CommandHandler:
                 if result.restored_files:
                     self.console.print(f"[{self.theme.TEXT_DIM}]Restored files:[/{self.theme.TEXT_DIM}]")
                     for file_path in result.restored_files:
-                        self.console.print(f"  [{self.theme.MINT_SOFT}]✓[/{self.theme.MINT_SOFT}] {file_path}")
+                        self.console.print(f"  [{self.theme.MINT_SOFT}]âœ“[/{self.theme.MINT_SOFT}] {file_path}")
                 
                 if result.errors:
                     self.console.print()
                     self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Errors:[/{self.theme.AMBER_GLOW}]")
                     for error in result.errors:
-                        self.console.print(f"  [{self.theme.CORAL_SOFT}]✗[/{self.theme.CORAL_SOFT}] {error}")
+                        self.console.print(f"  [{self.theme.CORAL_SOFT}]âœ—[/{self.theme.CORAL_SOFT}] {error}")
             else:
                 self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} {result.message}[/{self.theme.CORAL_SOFT}]")
         
@@ -13059,13 +12816,13 @@ class CommandHandler:
                 if result.restored_files:
                     self.console.print(f"[{self.theme.TEXT_DIM}]Restored files:[/{self.theme.TEXT_DIM}]")
                     for file_path in result.restored_files:
-                        self.console.print(f"  [{self.theme.MINT_SOFT}]✓[/{self.theme.MINT_SOFT}] {file_path}")
+                        self.console.print(f"  [{self.theme.MINT_SOFT}]âœ“[/{self.theme.MINT_SOFT}] {file_path}")
                 
                 if result.errors:
                     self.console.print()
                     self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Errors:[/{self.theme.AMBER_GLOW}]")
                     for error in result.errors:
-                        self.console.print(f"  [{self.theme.CORAL_SOFT}]✗[/{self.theme.CORAL_SOFT}] {error}")
+                        self.console.print(f"  [{self.theme.CORAL_SOFT}]âœ—[/{self.theme.CORAL_SOFT}] {error}")
                 
                 # Update agent messages if available
                 if result.restored_messages and self.app.get('agent'):
@@ -13134,7 +12891,7 @@ class CommandHandler:
         checkpoints_data = []
         for cp in checkpoints:
             created_at = cp.created_at[:19].replace('T', ' ')
-            description = f"{cp.description} • {cp.message_count} messages"
+            description = f"{cp.description} â€¢ {cp.message_count} messages"
             
             checkpoints_data.append({
                 'id': cp.id,
@@ -13169,13 +12926,13 @@ class CommandHandler:
                 if rollback_result.restored_files:
                     self.console.print(f"[{self.theme.TEXT_DIM}]Restored files:[/{self.theme.TEXT_DIM}]")
                     for file_path in rollback_result.restored_files:
-                        self.console.print(f"  [{self.theme.MINT_SOFT}]✓[/{self.theme.MINT_SOFT}] {file_path}")
+                        self.console.print(f"  [{self.theme.MINT_SOFT}]âœ“[/{self.theme.MINT_SOFT}] {file_path}")
                 
                 if rollback_result.errors:
                     self.console.print()
                     self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Errors:[/{self.theme.AMBER_GLOW}]")
                     for error in rollback_result.errors:
-                        self.console.print(f"  [{self.theme.CORAL_SOFT}]✗[/{self.theme.CORAL_SOFT}] {error}")
+                        self.console.print(f"  [{self.theme.CORAL_SOFT}]âœ—[/{self.theme.CORAL_SOFT}] {error}")
                 
                 # Update agent messages if available
                 if rollback_result.restored_messages and self.app.get('agent'):

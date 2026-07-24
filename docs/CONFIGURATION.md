@@ -86,7 +86,6 @@ Common top-level keys:
   "aihubmix": {},
   "agnes": {},
   "sensenova": {},
-  "unlimitedsurf": {},
   "nvidia": {},
   "modelscope": {},
   "webgemini": {},
@@ -99,7 +98,7 @@ Common top-level keys:
 
 ## Custom Compatibility Providers
 
-`models` stores manually configured OpenAI-compatible or Anthropic-compatible model presets. This compatibility layer is for user-provided third-party services; built-in Codex, AIHubMix, Agnes, SenseNova, unlimited.surf, NVIDIA, ModelScope, and WebGemini sources use their own first-party runtime paths instead.
+`models` stores manually configured OpenAI-compatible or Anthropic-compatible model presets. This compatibility layer is for user-provided third-party services; built-in Codex, AIHubMix, Agnes, SenseNova, NVIDIA, ModelScope, WebGemini, and Opencode sources use their own first-party runtime paths instead.
 
 - `model`
 - `model_display_name`
@@ -141,7 +140,6 @@ Supported values for `active_model_source`:
 - `aihubmix`
 - `agnes`
 - `sensenova`
-- `unlimitedsurf`
 - `nvidia`
 - `modelscope`
 - `webgemini`
@@ -165,12 +163,6 @@ The same Agnes credential is also reused by Reverie's Agnes text-to-image and te
 The `sensenova` section stores the SenseNova API key, selected model id/display name, OpenAI-compatible base URL, timeout, context/output defaults, and `reasoning_effort` for models that expose it.
 
 SenseNova text routing uses the OpenAI Chat or Anthropic-compatible transport required by the selected model profile. Reverie reads `SENSENOVA_API_KEY` or `SENSE_API_KEY` automatically when present.
-
-### unlimited.surf
-
-The `unlimitedsurf` section stores the unlimited.surf API key, selected model id/display name, Anthropic-compatible base URL, timeout, context/output defaults, and reasoning depth when the selected gateway model supports it.
-
-Reverie calls unlimited.surf through the Anthropic SDK and can refresh the public model catalog through `/us model`.
 
 ### Codex
 

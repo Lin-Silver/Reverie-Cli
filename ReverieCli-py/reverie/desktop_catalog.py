@@ -56,11 +56,6 @@ _PROVIDER_CONFIG_FIELDS: Dict[str, List[Dict[str, Any]]] = {
         {"key": "timeout", "label": "Timeout (seconds)", "kind": "int", "min": 10, "max": 3600},
         {"key": "temperature", "label": "Temperature", "kind": "float", "min": 0, "max": 2},
     ],
-    "unlimitedsurf": [
-        {"key": "api_key", "label": "API key", "kind": "secret", "optional": True},
-        {"key": "api_url", "label": "API URL", "kind": "url"},
-        {"key": "timeout", "label": "Timeout (seconds)", "kind": "int", "min": 10, "max": 3600},
-    ],
     "sensenova": [
         {"key": "api_key", "label": "API key", "kind": "secret"},
         {"key": "api_url", "label": "API URL", "kind": "url"},
@@ -108,11 +103,6 @@ def _external_catalog(source: str, config: Config, *, fetch_live: bool = False) 
         from .agnes import get_agnes_model_catalog
 
         return get_agnes_model_catalog(getattr(config, "agnes", {}))
-    if source == "unlimitedsurf":
-        from .unlimitedsurf import get_unlimitedsurf_model_catalog
-
-        cfg = getattr(config, "unlimitedsurf", {}) or {}
-        return get_unlimitedsurf_model_catalog(cfg.get("api_url"), fetch_live=fetch_live, timeout=8)
     if source == "sensenova":
         from .sensenova import get_sensenova_model_catalog
 
@@ -380,8 +370,6 @@ def apply_model_selection(
             from .opencode import normalize_opencode_config as normalizer
         elif normalized_source == "aihubmix":
             from .aihubmix import normalize_aihubmix_config as normalizer
-        elif normalized_source == "unlimitedsurf":
-            from .unlimitedsurf import normalize_unlimitedsurf_config as normalizer
         elif normalized_source == "modelscope":
             from .modelscope import normalize_modelscope_config as normalizer
         if normalizer:

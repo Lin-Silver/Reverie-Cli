@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 import requests
 
 from ..diagnostics import report_suppressed_exception
+from ..request_identity import apply_reverie_client_identity
 from .compressor import (
     _apply_nvidia_request_payload_defaults,
     _collect_codex_summary_text,
@@ -513,7 +514,9 @@ def _request_handoff_summary_text(
             normalized_value = str(value or "").strip()
             if normalized_key and normalized_value:
                 headers[normalized_key] = normalized_value
-        response = make_compression_request_with_retry(base_url, headers, payload)
+        response = make_compression_request_with_retry(
+            base_url, apply_reverie_client_identity(headers), payload
+        )
         response_data = response.json()
         response_text = str(
             (((response_data.get("choices") or [{}])[0]).get("message") or {}).get("content")

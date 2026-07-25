@@ -97,7 +97,7 @@ Use `/model` to add presets or `/codex`, `/nvidia`, `/modelscope` for provider-s
 | `/mode` | Show or switch operating modes |
 | `/codex` | Activate Codex and choose model/reasoning |
 | `/codex auth <mode> [ENV_NAME]` | Configure local or reverse-proxy Codex authentication |
-| `/modelscope` | Activate ModelScope and choose Anthropic-SDK-backed models |
+| `/modelscope` | Activate ModelScope and choose OpenAI-Chat-backed models |
 | `/search <query>` | Run a web search |
 | `/index` | Rebuild the workspace index |
 | `/tools` | List tools visible to the active model/provider |

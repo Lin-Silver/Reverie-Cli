@@ -12,10 +12,29 @@ OPENCODE_DEFAULT_MODELS_URL = "https://opencode.ai/zen/v1/models"
 OPENCODE_DEFAULT_MODEL_ID = "deepseek-v4-flash-free"
 OPENCODE_DEFAULT_MODEL_DISPLAY_NAME = "DeepSeek V4 Flash Free"
 OPENCODE_API_KEY_HINT_URL = "https://opencode.ai/zen"
-OPENCODE_DEFAULT_CONTEXT_TOKENS = 128_000
+OPENCODE_DEFAULT_CONTEXT_TOKENS = 200_000
 OPENCODE_DEFAULT_MAX_TOKENS = 16_384
 OPENCODE_DEFAULT_TEMPERATURE = 0.7
 OPENCODE_DEFAULT_TOP_P = 1.0
+
+_REASONING_LABELS = {
+    "none": ("Non-think", "Disable reasoning for a faster direct response."),
+    "low": ("Low", "Use a low reasoning effort."),
+    "medium": ("Medium", "Use the provider-recommended balanced reasoning effort."),
+    "high": ("High", "Use a high reasoning effort for complex work."),
+    "max": ("Max", "Use the model's maximum reasoning effort."),
+}
+
+
+def _reasoning_options(*values: str) -> List[Dict[str, str]]:
+    return [
+        {
+            "id": value,
+            "label": _REASONING_LABELS[value][0],
+            "description": _REASONING_LABELS[value][1],
+        }
+        for value in values
+    ]
 
 
 def _opencode_model(
@@ -26,6 +45,11 @@ def _opencode_model(
     context_length: int = OPENCODE_DEFAULT_CONTEXT_TOKENS,
     max_output_tokens: int = OPENCODE_DEFAULT_MAX_TOKENS,
     vision: bool = False,
+    vision_modalities: Optional[List[str]] = None,
+    thinking: bool = True,
+    thinking_control: str = "fixed",
+    thinking_options: Optional[List[Dict[str, str]]] = None,
+    default_thinking_choice: str = "",
 ) -> Dict[str, Any]:
     return {
         "id": str(model_id or "").strip(),
@@ -35,7 +59,11 @@ def _opencode_model(
         "context_length": int(context_length or OPENCODE_DEFAULT_CONTEXT_TOKENS),
         "max_output_tokens": int(max_output_tokens or OPENCODE_DEFAULT_MAX_TOKENS),
         "vision": bool(vision),
-        "thinking": True,
+        "vision_modalities": list(vision_modalities or (["image"] if vision else [])),
+        "thinking": bool(thinking),
+        "thinking_control": str(thinking_control or ("fixed" if thinking else "none")),
+        "thinking_options": list(thinking_options or []),
+        "default_thinking_choice": str(default_thinking_choice or ""),
         "tool_calling": True,
         "free": True,
     }
@@ -46,31 +74,64 @@ _OPENCODE_MODEL_CATALOG: List[Dict[str, Any]] = [
         "big-pickle",
         "Big Pickle",
         "OpenCode Zen stealth free model exposed through chat.completions.",
+        context_length=200_000,
+        max_output_tokens=32_000,
     ),
     _opencode_model(
         "deepseek-v4-flash-free",
         "DeepSeek V4 Flash Free",
-        "OpenCode Zen free DeepSeek V4 Flash chat.completions model.",
+        "OpenCode Zen free DeepSeek V4 Flash model with selectable reasoning effort.",
+        context_length=200_000,
+        max_output_tokens=128_000,
+        thinking_control="effort",
+        thinking_options=_reasoning_options("none", "high", "max"),
+        default_thinking_choice="high",
     ),
     _opencode_model(
         "mimo-v2.5-free",
         "MiMo-V2.5 Free",
-        "OpenCode Zen free MiMo-V2.5 chat.completions model.",
+        "OpenCode Zen free native multimodal MiMo-V2.5 model.",
+        context_length=200_000,
+        max_output_tokens=32_000,
+        vision=True,
+        vision_modalities=["image", "audio", "video"],
     ),
     _opencode_model(
         "north-mini-code-free",
         "North Mini Code Free",
-        "OpenCode Zen free North Mini Code chat.completions model.",
+        "OpenCode Zen free North Mini Code model with selectable reasoning.",
+        context_length=256_000,
+        max_output_tokens=64_000,
+        thinking_control="effort",
+        thinking_options=_reasoning_options("none", "high"),
+        default_thinking_choice="high",
     ),
     _opencode_model(
         "nemotron-3-ultra-free",
         "Nemotron 3 Ultra Free",
         "OpenCode Zen free Nemotron 3 Ultra chat.completions model.",
+        context_length=1_000_000,
+        max_output_tokens=128_000,
     ),
     _opencode_model(
-        "hy3-free",
-        "Hy3 Free",
-        "OpenCode Zen hidden free model id listed by the live /zen/v1/models endpoint.",
+        "ling-3.0-flash-free",
+        "Ling 3.0 Flash Free",
+        "OpenCode Zen free Ling 3.0 Flash model with selectable reasoning effort.",
+        context_length=262_144,
+        max_output_tokens=32_768,
+        thinking_control="effort",
+        thinking_options=_reasoning_options("low", "medium", "high"),
+        default_thinking_choice="medium",
+    ),
+    _opencode_model(
+        "laguna-s-2.1-free",
+        "Laguna S 2.1 Free",
+        "OpenCode Zen free Laguna S 2.1 coding model with selectable reasoning effort.",
+        context_length=256_000,
+        max_output_tokens=32_000,
+        thinking_control="effort",
+        thinking_options=_reasoning_options("low", "medium", "high"),
+        default_thinking_choice="medium",
     ),
 ]
 
@@ -93,6 +154,7 @@ def default_opencode_config() -> Dict[str, Any]:
         "max_tokens": OPENCODE_DEFAULT_MAX_TOKENS,
         "temperature": OPENCODE_DEFAULT_TEMPERATURE,
         "top_p": OPENCODE_DEFAULT_TOP_P,
+        "reasoning_effort": "high",
     }
 
 
@@ -176,7 +238,9 @@ def resolve_opencode_api_key(opencode_config: Any) -> str:
 def normalize_opencode_config(raw_opencode: Any) -> Dict[str, Any]:
     """Normalize OpenCode config for persistence and runtime usage."""
     cfg = default_opencode_config()
+    raw_has_reasoning_effort = False
     if isinstance(raw_opencode, dict):
+        raw_has_reasoning_effort = "reasoning_effort" in raw_opencode
         cfg.update(raw_opencode)
 
     cfg["enabled"] = bool(cfg.get("enabled", True))
@@ -223,8 +287,58 @@ def normalize_opencode_config(raw_opencode: Any) -> Dict[str, Any]:
             cfg["max_context_tokens"] = int(context_length)
         output_limit = int(matched.get("max_output_tokens") or OPENCODE_DEFAULT_MAX_TOKENS)
         cfg["max_tokens"] = min(int(cfg.get("max_tokens") or output_limit), output_limit)
+        raw_choice = cfg.get("reasoning_effort") if raw_has_reasoning_effort else ""
+        cfg["reasoning_effort"] = normalize_opencode_reasoning_choice(matched["id"], raw_choice)
 
     return cfg
+
+
+def normalize_opencode_reasoning_choice(model_id: Any, value: Any) -> str:
+    """Normalize one model-specific OpenCode reasoning selection."""
+    selected = get_opencode_model_metadata(model_id) or {}
+    options = [str(item.get("id") or "") for item in selected.get("thinking_options", [])]
+    default = str(selected.get("default_thinking_choice") or "")
+    candidate = str(value or "").strip().lower().replace("_", "-")
+    candidate = {
+        "off": "none",
+        "false": "none",
+        "no-think": "none",
+        "non-think": "none",
+        "med": "medium",
+        "extra-high": "max",
+        "xhigh": "max",
+    }.get(candidate, candidate)
+    if options:
+        return candidate if candidate in options else (default if default in options else options[0])
+    return "fixed" if bool(selected.get("thinking")) else ""
+
+
+def resolve_opencode_thinking_choice(opencode_config: Any, model_id: Optional[str] = None) -> str:
+    cfg = default_opencode_config()
+    if isinstance(opencode_config, dict):
+        cfg.update(opencode_config)
+    selected = resolve_opencode_selected_model(cfg, model_id=model_id)
+    if not selected:
+        return ""
+    return normalize_opencode_reasoning_choice(selected["id"], cfg.get("reasoning_effort"))
+
+
+def apply_opencode_thinking_choice(opencode_config: Any, model_id: Any, choice: Any) -> Dict[str, Any]:
+    cfg = default_opencode_config()
+    if isinstance(opencode_config, dict):
+        cfg.update(opencode_config)
+    selected = resolve_opencode_selected_model(cfg, model_id=str(model_id or ""))
+    if not selected:
+        return normalize_opencode_config(cfg)
+    normalized = normalize_opencode_reasoning_choice(selected["id"], choice)
+    valid = {str(item.get("id") or "") for item in selected.get("thinking_options", [])}
+    if valid and normalized not in valid:
+        raise ValueError(f"Reasoning level {choice!r} is not supported by {selected['id']}")
+    cfg["selected_model_id"] = str(selected["id"])
+    cfg["selected_model_display_name"] = str(selected["display_name"])
+    if valid:
+        cfg["reasoning_effort"] = normalized
+    return normalize_opencode_config(cfg)
 
 
 def build_opencode_runtime_model_data(opencode_config: Any, model_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
@@ -245,10 +359,11 @@ def build_opencode_runtime_model_data(opencode_config: Any, model_id: Optional[s
         "max_context_tokens": int(selected.get("context_length") or cfg.get("max_context_tokens", OPENCODE_DEFAULT_CONTEXT_TOKENS)),
         "provider": "openai-chat",
         "supports_vision": bool(selected.get("vision", False)),
-        "thinking_mode": None,
+        "thinking_mode": resolve_opencode_thinking_choice(cfg, selected["id"]),
         "endpoint": str(cfg.get("endpoint", OPENCODE_DEFAULT_ENDPOINT) or OPENCODE_DEFAULT_ENDPOINT),
         "custom_headers": {},
         "vision": bool(selected.get("vision", False)),
+        "vision_modalities": list(selected.get("vision_modalities") or (["image"] if selected.get("vision") else [])),
     }
 
 
@@ -263,11 +378,16 @@ def build_opencode_openai_options(opencode_config: Any, model_id: Optional[str] 
         max_tokens = OPENCODE_DEFAULT_MAX_TOKENS
     if max_tokens <= 0:
         max_tokens = OPENCODE_DEFAULT_MAX_TOKENS
-    return {
+    options: Dict[str, Any] = {
         "temperature": float(cfg.get("temperature", OPENCODE_DEFAULT_TEMPERATURE)),
         "top_p": float(cfg.get("top_p", OPENCODE_DEFAULT_TOP_P)),
         "max_tokens": min(max_tokens, output_limit),
     }
+    if selected and str(selected.get("thinking_control") or "") == "effort":
+        options["extra_body"] = {
+            "reasoning_effort": resolve_opencode_thinking_choice(cfg, str(selected["id"])),
+        }
+    return options
 
 
 def mask_secret(secret: str) -> str:

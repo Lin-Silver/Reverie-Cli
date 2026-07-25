@@ -9,7 +9,7 @@ from reverie.config import Config
 
 
 def test_aihubmix_catalog_contains_requested_models() -> None:
-    ids = {item["id"] for item in get_aihubmix_model_catalog()}
+    catalog = {item["id"]: item for item in get_aihubmix_model_catalog()}
 
     assert {
         "gpt-5.5-free",
@@ -17,7 +17,10 @@ def test_aihubmix_catalog_contains_requested_models() -> None:
         "gpt-5.5-free-low",
         "gpt-4o-free",
         "gpt-4.1-free",
-    } <= ids
+    } <= set(catalog)
+    assert all(catalog[model_id]["vision"] for model_id in catalog)
+    assert catalog["gpt-5.5-free"]["thinking"] is True
+    assert catalog["gpt-5.5-free"]["reasoning_variant"] == "medium"
 
 
 def test_aihubmix_base_url_normalizes_chat_completion_urls() -> None:

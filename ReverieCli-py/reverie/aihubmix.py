@@ -45,29 +45,34 @@ _AIHUBMIX_MODEL_CATALOG: List[Dict[str, Any]] = [
         "gpt-5.5-free",
         "GPT-5.5 Free",
         "AIhubMix OpenAI-compatible chat completions model with provider default reasoning depth.",
-        reasoning_variant="none",
+        reasoning_variant="medium",
+        vision=True,
     ),
     _aihubmix_model(
         "gpt-5.5-free-high",
         "GPT-5.5 Free High",
         "AIhubMix GPT-5.5 free high-reasoning variant.",
         reasoning_variant="high",
+        vision=True,
     ),
     _aihubmix_model(
         "gpt-5.5-free-low",
         "GPT-5.5 Free Low",
         "AIhubMix GPT-5.5 free low-reasoning variant.",
         reasoning_variant="low",
+        vision=True,
     ),
     _aihubmix_model(
         "gpt-4o-free",
         "GPT-4o Free",
         "AIhubMix GPT-4o free OpenAI-compatible chat completions model.",
+        vision=True,
     ),
     _aihubmix_model(
         "gpt-4.1-free",
         "GPT-4.1 Free",
         "AIhubMix GPT-4.1 free OpenAI-compatible chat completions model.",
+        vision=True,
     ),
 ]
 

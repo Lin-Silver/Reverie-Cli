@@ -66,6 +66,31 @@ def test_desktop_catalog_uses_native_model_reasoning_metadata() -> None:
     assert no_thinking["reasoning"] == {"control": "none", "options": [], "value": "none"}
     assert agnes["modalities"] == {"live": False, "llm": 2, "tti": 2, "ttv": 1}
 
+    opencode = _source(payload, "opencode")
+    deepseek = next(item for item in opencode["models"] if item["id"] == "deepseek-v4-flash-free")
+    assert deepseek["reasoning"]["control"] == "effort"
+    assert [item["id"] for item in deepseek["reasoning"]["options"]] == ["none", "high", "max"]
+
+    modelscope = _source(payload, "modelscope")
+    step = next(item for item in modelscope["models"] if item["id"] == "stepfun-ai/Step-3.7-Flash")
+    assert step["vision"] is True
+    assert [item["id"] for item in step["reasoning"]["options"]] == ["low", "medium", "high"]
+    modelscope_deepseek = next(
+        item for item in modelscope["models"] if item["id"] == "deepseek-ai/DeepSeek-V4-Flash"
+    )
+    assert modelscope_deepseek["reasoning"]["control"] == "toggle"
+    assert [item["id"] for item in modelscope_deepseek["reasoning"]["options"]] == ["true", "false"]
+
+    for source in payload["sources"]:
+        for model in source["models"]:
+            assert isinstance(model["vision"], bool)
+            assert isinstance(model["thinking"], bool)
+            reasoning = model["reasoning"]
+            assert isinstance(reasoning["options"], list)
+            if reasoning["options"]:
+                assert reasoning["control"] in {"effort", "toggle"}
+                assert reasoning["value"] in {item["id"] for item in reasoning["options"]}
+
 
 def test_model_selection_updates_model_specific_reasoning() -> None:
     config = Config()
@@ -80,6 +105,14 @@ def test_model_selection_updates_model_specific_reasoning() -> None:
     apply_model_selection(config, "nvidia", toggle_model["id"], "false")
     assert config.nvidia["selected_model_id"] == toggle_model["id"]
     assert config.nvidia["enable_thinking"] is False
+
+    apply_model_selection(config, "opencode", "ling-3.0-flash-free", "high")
+    assert config.opencode["selected_model_id"] == "ling-3.0-flash-free"
+    assert config.opencode["reasoning_effort"] == "high"
+
+    apply_model_selection(config, "modelscope", "ZhipuAI/GLM-5.2", "none")
+    assert config.modelscope["selected_model_id"] == "ZhipuAI/GLM-5.2"
+    assert config.modelscope["reasoning_effort"] == "none"
 
 
 def test_standard_model_crud_preserves_secret_when_update_omits_it() -> None:

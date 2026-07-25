@@ -225,25 +225,26 @@ NVIDIA's hosted catalog includes `nvidia/nemotron-3-ultra-550b-a55b`; it uses th
 
 ### ModelScope
 
-The `modelscope` section stores the ModelScope token, selected ModelScope model id, Anthropic SDK base URL, timeout, context limit, and default max output tokens.
+The `modelscope` section stores the ModelScope token, selected ModelScope model id, OpenAI-compatible base URL, timeout, context limit, default max output tokens, and the model-specific reasoning choice.
 
-ModelScope is called through the Anthropic SDK. Keep `api_url` as the provider root, usually `https://api-inference.modelscope.cn`; Reverie normalizes pasted `/v1`, `/v1/messages`, or `/v1/chat/completions` URLs back to the root because the SDK appends the Messages path.
+ModelScope is called through OpenAI Chat Completions. Keep `api_url` at `https://api-inference.modelscope.cn/v1`; Reverie also normalizes pasted `/v1/messages` or `/v1/chat/completions` URLs to that base URL.
 
 Get the token from `https://www.modelscope.cn/my/access/token`.
 Reverie also reads `MODELSCOPE_API_KEY`, `MODELSCOPE_TOKEN`, or `MODELSCOPE_ACCESS_TOKEN` from the environment when present.
 
 Default model:
 
-- `ZhipuAI/GLM-5.1`
+- `stepfun-ai/Step-3.7-Flash`
 
 Built-in ModelScope catalog:
 
-- `ZhipuAI/GLM-5.1` - GLM-5.1, 202,752 token context
-- `deepseek-ai/DeepSeek-V4-Pro` - DeepSeek V4 Pro, 1,048,576 token context
-- `deepseek-ai/DeepSeek-V4-Flash` - DeepSeek V4 Flash, 1,048,576 token context
-- `ZhipuAI/GLM-5` - GLM-5, 202,752 token context
-- `MiniMax/MiniMax-M2.7` - MiniMax M2.7, 204,800 token context
-- `Qwen/Qwen3.5-397B-A17B` - Qwen3.5 397B A17B, 262,144 token context
+- `stepfun-ai/Step-3.7-Flash` - Step 3.7 Flash, 262,144 token context, `low`/`medium`/`high`
+- `stepfun-ai/Step-3.7-Flash` - Step 3.7 Flash, 262,144 token context, vision, `low`/`medium`/`high`
+- `ZhipuAI/GLM-5.2` - GLM-5.2, 1,048,576 token context, `none`/`high`/`max`
+- `deepseek-ai/DeepSeek-V4-Pro` - DeepSeek V4 Pro, 1,048,576 token context, hosted reasoning on/off
+- `deepseek-ai/DeepSeek-V4-Flash` - DeepSeek V4 Flash, 1,048,576 token context, hosted reasoning on/off
+
+The desktop GUI consumes this catalog and its reasoning option values from the core, so source-specific capability changes do not require a duplicated frontend model list.
 
 ## Plugin SDK Depot
 

@@ -52,7 +52,7 @@ from ..aihubmix import build_aihubmix_openai_options
 from ..agnes import build_agnes_openai_options
 from ..opencode import build_opencode_openai_options
 from ..sensenova import build_sensenova_openai_options
-from ..modelscope import build_modelscope_anthropic_options
+from ..modelscope import build_modelscope_openai_options
 from ..webgemini import (
     generate_webgemini_message,
     iter_webgemini_text_deltas,
@@ -3462,6 +3462,10 @@ class ReverieAgent:
             provider_options = build_aihubmix_openai_options(getattr(self.config, "aihubmix", {}), model_for_sdk)
         elif self._is_active_model_source("opencode"):
             provider_options = build_opencode_openai_options(getattr(self.config, "opencode", {}), model_for_sdk)
+            extra_body = provider_options.get("extra_body")
+        elif self._is_active_model_source("modelscope"):
+            provider_options = build_modelscope_openai_options(getattr(self.config, "modelscope", {}), model_for_sdk)
+            extra_body = provider_options.get("extra_body")
         elif self._is_active_model_source("agnes"):
             provider_options = build_agnes_openai_options(getattr(self.config, "agnes", {}), model_for_sdk)
             extra_body = provider_options.get("extra_body")
@@ -3671,7 +3675,7 @@ class ReverieAgent:
         max_tokens = 4096
         if self._is_active_model_source("modelscope"):
             try:
-                options = build_modelscope_anthropic_options(getattr(self.config, "modelscope", {}), self.model)
+                options = build_modelscope_openai_options(getattr(self.config, "modelscope", {}), self.model)
                 candidate = int(options.get("max_tokens", max_tokens))
                 if candidate > 0:
                     return candidate
@@ -4866,7 +4870,13 @@ class ReverieAgent:
                     getattr(self.config, "opencode", {}),
                     model_for_sdk,
                 )
-                extra_body = None
+                extra_body = provider_options.get("extra_body")
+            elif self._is_active_model_source("modelscope"):
+                provider_options = build_modelscope_openai_options(
+                    getattr(self.config, "modelscope", {}),
+                    model_for_sdk,
+                )
+                extra_body = provider_options.get("extra_body")
             elif self._is_active_model_source("agnes"):
                 provider_options = build_agnes_openai_options(
                     getattr(self.config, "agnes", {}),
@@ -5317,7 +5327,13 @@ class ReverieAgent:
                     getattr(self.config, "opencode", {}),
                     model_for_sdk,
                 )
-                extra_body = None
+                extra_body = provider_options.get("extra_body")
+            elif self._is_active_model_source("modelscope"):
+                provider_options = build_modelscope_openai_options(
+                    getattr(self.config, "modelscope", {}),
+                    model_for_sdk,
+                )
+                extra_body = provider_options.get("extra_body")
             elif self._is_active_model_source("agnes"):
                 provider_options = build_agnes_openai_options(
                     getattr(self.config, "agnes", {}),

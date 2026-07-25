@@ -73,11 +73,11 @@ SubAgents are enabled in `reverie` and `computer-controller` modes, including NV
 | `/modelscope key` | Save the ModelScope token from modelscope.cn/my/access/token |
 | `/modelscope activate` | Switch active source to ModelScope |
 | `/modelscope model <model-id>` | Set the ModelScope model id |
-| `/modelscope endpoint <value>` | Set or clear the Anthropic SDK base URL |
+| `/modelscope endpoint <value>` | Set or clear the OpenAI-compatible base URL |
 
 Request-based NVIDIA vision models can also consume inline chat attachments like `@image.png`.
 Reverie also reads `NVIDIA_API_KEY` automatically when it is present, and Computer Controller mode pins the runtime to `qwen/qwen3.5-397b-a17b`.
-ModelScope is called through the Anthropic SDK and reads `MODELSCOPE_API_KEY`, `MODELSCOPE_TOKEN`, or `MODELSCOPE_ACCESS_TOKEN` automatically when present. Its default model is `ZhipuAI/GLM-5.1`.
+ModelScope is called through OpenAI Chat Completions and reads `MODELSCOPE_API_KEY`, `MODELSCOPE_TOKEN`, or `MODELSCOPE_ACCESS_TOKEN` automatically when present. Its live-verified default model is `stepfun-ai/Step-3.7-Flash`. Model and reasoning selectors are generated from the core capability catalog.
 ## Tools and Context
 
 | Command | Description |

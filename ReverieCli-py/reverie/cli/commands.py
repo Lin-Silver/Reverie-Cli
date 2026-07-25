@@ -8115,13 +8115,13 @@ class CommandHandler:
         lines = [
             f"[{self.theme.BLUE_SOFT}]Active model source:[/{self.theme.BLUE_SOFT}] {self._format_model_source_label(model_source)}",
             f"[{self.theme.BLUE_SOFT}]Configured key:[/{self.theme.BLUE_SOFT}] {mask_secret(effective_api_key) if effective_api_key else '(not set)'}{key_origin}",
-            f"[{self.theme.BLUE_SOFT}]Anthropic base URL:[/{self.theme.BLUE_SOFT}] {escape(str(modelscope_cfg.get('api_url', '')))}",
+            f"[{self.theme.BLUE_SOFT}]OpenAI base URL:[/{self.theme.BLUE_SOFT}] {escape(str(modelscope_cfg.get('api_url', '')))}",
             f"[{self.theme.BLUE_SOFT}]Default max tokens:[/{self.theme.BLUE_SOFT}] {modelscope_cfg.get('max_tokens', 16384)}",
             f"[{self.theme.BLUE_SOFT}]API key help:[/{self.theme.BLUE_SOFT}] {escape(MODELSCOPE_API_KEY_HINT_URL)}",
         ]
         if selected:
             lines.insert(1, f"[{self.theme.BLUE_SOFT}]Selected model:[/{self.theme.BLUE_SOFT}] {escape(selected['display_name'])} ({escape(selected['id'])})")
-            lines.insert(2, f"[{self.theme.BLUE_SOFT}]Transport:[/{self.theme.BLUE_SOFT}] Anthropic SDK")
+            lines.insert(2, f"[{self.theme.BLUE_SOFT}]Transport:[/{self.theme.BLUE_SOFT}] OpenAI Chat Completions")
             lines.insert(3, f"[{self.theme.BLUE_SOFT}]Context:[/{self.theme.BLUE_SOFT}] {int(selected.get('context_length') or 0):,} tokens")
             lines.insert(4, f"[{self.theme.BLUE_SOFT}]Vision input:[/{self.theme.BLUE_SOFT}] {'YES' if bool(selected.get('vision')) else 'NO'}")
 
@@ -8211,13 +8211,13 @@ class CommandHandler:
         if not candidate:
             current_url = str(modelscope_cfg.get("api_url", MODELSCOPE_DEFAULT_API_URL)).strip()
             self.console.print(
-                f"[{self.theme.TEXT_DIM}]Current Anthropic base URL: {current_url}[/{self.theme.TEXT_DIM}]"
+                f"[{self.theme.TEXT_DIM}]Current OpenAI base URL: {current_url}[/{self.theme.TEXT_DIM}]"
             )
             self.console.print(
-                f"[{self.theme.TEXT_DIM}]Use 'clear' to restore the default. You may paste /v1/messages; Reverie normalizes it to the provider root.[/{self.theme.TEXT_DIM}]"
+                f"[{self.theme.TEXT_DIM}]Use 'clear' to restore the default. You may paste /v1/chat/completions; Reverie normalizes it to /v1.[/{self.theme.TEXT_DIM}]"
             )
             candidate = Prompt.ask(
-                "ModelScope Anthropic base URL",
+                "ModelScope OpenAI base URL",
                 default=current_url
             ).strip()
 
@@ -8236,7 +8236,7 @@ class CommandHandler:
 
         self.console.print()
         self.console.print(
-            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} ModelScope Anthropic base URL set to: {escape(config.modelscope.get('api_url', MODELSCOPE_DEFAULT_API_URL))}[/{self.theme.MINT_VIBRANT}]"
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} ModelScope OpenAI base URL set to: {escape(config.modelscope.get('api_url', MODELSCOPE_DEFAULT_API_URL))}[/{self.theme.MINT_VIBRANT}]"
         )
         self.console.print()
         return True

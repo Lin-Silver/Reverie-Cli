@@ -182,7 +182,7 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
         "command": "/opencode",
         "section": "Providers",
         "summary": "Configure the Opencode source backed by OpenCode Zen free chat-completions models.",
-        "detail": "Use this to switch Reverie onto OpenCode Zen's free OpenAI chat.completions models. The built-in catalog includes `big-pickle`, `deepseek-v4-flash-free`, `mimo-v2.5-free`, `north-mini-code-free`, `nemotron-3-ultra-free`, and the live-listed hidden `hy3-free`. Free chat models can be called anonymously, but you can still save an optional OpenCode API key for future paid access.",
+        "detail": "Use this to switch Reverie onto OpenCode Zen's current free OpenAI chat.completions models. The core catalog includes `big-pickle`, `deepseek-v4-flash-free`, `mimo-v2.5-free`, `north-mini-code-free`, `nemotron-3-ultra-free`, `ling-3.0-flash-free`, and `laguna-s-2.1-free`, with per-model reasoning and media capabilities exposed to the GUI. Free chat models can be called anonymously, but you can still save an optional OpenCode API key for future paid access.",
         "overview": "status, key [api-key], activate, model [id], endpoint [value]",
         "aliases": ["/oc"],
         "subcommands": [
@@ -190,12 +190,12 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
             {"usage": "/opencode key [api-key]", "description": "Prompt for or directly save an optional OpenCode API key."},
             {"usage": "/opencode activate", "description": "Switch the active model source to Opencode without requiring a key."},
             {"usage": "/opencode model", "description": "Open the Opencode free-model selector."},
-            {"usage": "/opencode model <model-id>", "description": "Switch directly to a supported Opencode model id.", "example": "/opencode model hy3-free"},
+            {"usage": "/opencode model <model-id>", "description": "Switch directly to a supported Opencode model id.", "example": "/opencode model ling-3.0-flash-free"},
             {"usage": "/opencode endpoint", "description": "Show the current OpenCode Zen base URL prompt."},
             {"usage": "/opencode endpoint <url|clear>", "description": "Set or clear the OpenCode Zen base URL. Reverie normalizes `/v1/chat/completions` back to `/v1`."},
             {"usage": "/oc", "description": "Alias of `/opencode`."},
         ],
-        "examples": ["/opencode", "/oc activate", "/opencode model deepseek-v4-flash-free", "/opencode model hy3-free", "/opencode endpoint https://opencode.ai/zen/v1/chat/completions"],
+        "examples": ["/opencode", "/oc activate", "/opencode model deepseek-v4-flash-free", "/opencode model ling-3.0-flash-free", "/opencode endpoint https://opencode.ai/zen/v1/chat/completions"],
     },
     "aihubmix": {
         "command": "/aihubmix",
@@ -296,8 +296,8 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
     "modelscope": {
         "command": "/modelscope",
         "section": "Providers",
-        "summary": "Configure the ModelScope source that calls ModelScope API-Inference through the Anthropic SDK.",
-        "detail": "Use this to save a ModelScope token, activate the source, pick a supported ModelScope model id, or override the Anthropic SDK base URL. Reverie reads `MODELSCOPE_API_KEY`, `MODELSCOPE_TOKEN`, or `MODELSCOPE_ACCESS_TOKEN` automatically when present. The default model is `ZhipuAI/GLM-5.1`.",
+        "summary": "Configure the ModelScope source that calls ModelScope API-Inference through OpenAI Chat Completions.",
+        "detail": "Use this to save a ModelScope token, activate the source, pick a supported ModelScope model id, or override the OpenAI-compatible base URL. The core publishes each model's vision and reasoning controls to the CLI and GUI. Reverie reads `MODELSCOPE_API_KEY`, `MODELSCOPE_TOKEN`, or `MODELSCOPE_ACCESS_TOKEN` automatically when present. The live-verified default model is `stepfun-ai/Step-3.7-Flash`.",
         "overview": "status, key, activate, model [id], endpoint [value]",
         "subcommands": [
             {"usage": "/modelscope", "description": "Show the current ModelScope source configuration."},
@@ -305,10 +305,10 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
             {"usage": "/modelscope activate", "description": "Switch the active model source to ModelScope."},
             {"usage": "/modelscope model", "description": "Open the ModelScope model selector."},
             {"usage": "/modelscope model <model-id>", "description": "Switch directly to a supported ModelScope model id."},
-            {"usage": "/modelscope endpoint", "description": "Show the current Anthropic base URL prompt."},
-            {"usage": "/modelscope endpoint <url|clear>", "description": "Set or clear the Anthropic SDK base URL."},
+            {"usage": "/modelscope endpoint", "description": "Show the current OpenAI-compatible base URL prompt."},
+            {"usage": "/modelscope endpoint <url|clear>", "description": "Set or clear the OpenAI-compatible base URL."},
         ],
-        "examples": ["/modelscope", "/modelscope key", "/modelscope activate", "/modelscope model ZhipuAI/GLM-5.1", "/modelscope endpoint https://api-inference.modelscope.cn"],
+        "examples": ["/modelscope", "/modelscope key", "/modelscope activate", "/modelscope model stepfun-ai/Step-3.7-Flash", "/modelscope endpoint https://api-inference.modelscope.cn/v1"],
     },
     "tools": {
         "command": "/tools",

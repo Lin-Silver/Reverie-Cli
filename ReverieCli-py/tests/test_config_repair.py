@@ -221,7 +221,7 @@ def test_config_manager_creates_default_config_file_for_manual_editing(tmp_path:
     assert config.sensenova["selected_model_id"] == "deepseek-v4-flash"
     assert config.sensenova["max_context_tokens"] == 1_000_000
     assert config.sensenova["reasoning_effort"] == "medium"
-    assert config.modelscope["selected_model_id"] == "ZhipuAI/GLM-5.1"
+    assert config.modelscope["selected_model_id"] == "stepfun-ai/Step-3.7-Flash"
     assert config.opencode["selected_model_id"] == "deepseek-v4-flash-free"
     saved_payload = json.loads(config_path.read_text(encoding="utf-8"))
     assert saved_payload["tool_output_style"] == "compact"
@@ -237,7 +237,7 @@ def test_config_manager_creates_default_config_file_for_manual_editing(tmp_path:
     assert saved_payload["sensenova"]["selected_model_id"] == "deepseek-v4-flash"
     assert saved_payload["sensenova"]["max_context_tokens"] == 1_000_000
     assert saved_payload["sensenova"]["reasoning_effort"] == "medium"
-    assert saved_payload["modelscope"]["selected_model_id"] == "ZhipuAI/GLM-5.1"
+    assert saved_payload["modelscope"]["selected_model_id"] == "stepfun-ai/Step-3.7-Flash"
     assert saved_payload["opencode"]["selected_model_id"] == "deepseek-v4-flash-free"
     assert notice is not None
     assert notice["title"] == "Created default config"
@@ -278,7 +278,7 @@ def test_config_manager_auto_adds_tool_output_style_on_load(tmp_path: Path, monk
     assert repaired_payload["text_to_video"]["agnes"]["default_model"] == "agnes-video-v2.0"
     assert repaired_payload["aihubmix"]["selected_model_id"] == "gpt-5.5-free"
     assert repaired_payload["agnes"]["selected_model_id"] == "agnes-2.0-flash"
-    assert repaired_payload["modelscope"]["selected_model_id"] == "ZhipuAI/GLM-5.1"
+    assert repaired_payload["modelscope"]["selected_model_id"] == "stepfun-ai/Step-3.7-Flash"
     assert repaired_payload["opencode"]["selected_model_id"] == "deepseek-v4-flash-free"
 
 

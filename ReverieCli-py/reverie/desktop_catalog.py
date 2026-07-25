@@ -149,6 +149,9 @@ def _reasoning_metadata(source: str, model: Dict[str, Any], provider_config: Dic
 
         options = get_codex_reasoning_catalog(model_id)
         value = normalize_codex_reasoning_choice(provider_config.get("reasoning_effort"))
+        option_ids = {str(item.get("id") or "") for item in options}
+        if value not in option_ids:
+            value = "medium" if "medium" in option_ids else (str(options[0].get("id") or "") if options else "")
         return {"control": "effort", "options": options, "value": value}
     if source == "nvidia":
         from .nvidia import get_nvidia_thinking_options, resolve_nvidia_thinking_choice
@@ -175,6 +178,22 @@ def _reasoning_metadata(source: str, model: Dict[str, Any], provider_config: Dic
             "control": str(model.get("thinking_control") or "none"),
             "options": list(model.get("thinking_options") or []),
             "value": normalize_sensenova_reasoning_effort(provider_config.get("reasoning_effort")),
+        }
+    if source == "opencode":
+        from .opencode import resolve_opencode_thinking_choice
+
+        return {
+            "control": str(model.get("thinking_control") or "none"),
+            "options": list(model.get("thinking_options") or []),
+            "value": resolve_opencode_thinking_choice(provider_config, model_id),
+        }
+    if source == "modelscope":
+        from .modelscope import resolve_modelscope_thinking_choice
+
+        return {
+            "control": str(model.get("thinking_control") or "none"),
+            "options": list(model.get("thinking_options") or []),
+            "value": resolve_modelscope_thinking_choice(provider_config, model_id),
         }
 
     control = str(model.get("thinking_control") or "")
@@ -362,16 +381,24 @@ def apply_model_selection(
                 raise ValueError(f"Reasoning level {reasoning!r} is not supported by {selected['id']}")
             provider_config["reasoning_effort"] = choice
         provider_config = normalize_sensenova_config(provider_config)
+    elif normalized_source == "opencode":
+        from .opencode import apply_opencode_thinking_choice, normalize_opencode_config
+
+        if reasoning is not None:
+            provider_config = apply_opencode_thinking_choice(provider_config, selected["id"], reasoning)
+        provider_config = normalize_opencode_config(provider_config)
+    elif normalized_source == "modelscope":
+        from .modelscope import apply_modelscope_thinking_choice, normalize_modelscope_config
+
+        if reasoning is not None:
+            provider_config = apply_modelscope_thinking_choice(provider_config, selected["id"], reasoning)
+        provider_config = normalize_modelscope_config(provider_config)
     else:
         normalizer: Optional[Callable[[Any], Dict[str, Any]]] = None
         if normalized_source == "webgemini":
             from .webgemini import normalize_webgemini_config as normalizer
-        elif normalized_source == "opencode":
-            from .opencode import normalize_opencode_config as normalizer
         elif normalized_source == "aihubmix":
             from .aihubmix import normalize_aihubmix_config as normalizer
-        elif normalized_source == "modelscope":
-            from .modelscope import normalize_modelscope_config as normalizer
         if normalizer:
             provider_config = normalizer(provider_config)
 

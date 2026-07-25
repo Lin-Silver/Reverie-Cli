@@ -42,7 +42,7 @@ from .sensenova import (
 )
 from .config import Config, get_app_root
 from .modelscope import (
-    build_modelscope_anthropic_options,
+    build_modelscope_openai_options,
     build_modelscope_runtime_model_data,
     normalize_modelscope_config,
 )
@@ -199,28 +199,35 @@ def smoke_modelscope(config: Config, timeout_seconds: int = 45, model_id: str = 
         return _skipped(provider, model, "missing_credentials")
 
     start = time.perf_counter()
+    stream = None
     try:
-        from anthropic import Anthropic
+        from openai import OpenAI
 
-        client = Anthropic(
+        client = OpenAI(
             base_url=runtime["base_url"],
             api_key=runtime["api_key"],
             timeout=timeout_seconds,
             max_retries=0,
             default_headers=apply_reverie_client_identity(),
         )
-        options = build_modelscope_anthropic_options(cfg, model_id=model)
-        with client.messages.stream(
+        options = build_modelscope_openai_options(cfg, model_id=model)
+        options["max_tokens"] = min(16, int(options.get("max_tokens") or 16))
+        stream = client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": "Reply with OK."}],
-            max_tokens=min(16, int(options.get("max_tokens") or 16)),
-        ) as stream:
-            for text in stream.text_stream:
-                if str(text or "").strip():
-                    break
+            stream=True,
+            **{key: value for key, value in options.items() if value is not None},
+        )
+        for chunk in stream:
+            delta = getattr(getattr(chunk, "choices", [None])[0], "delta", None) if getattr(chunk, "choices", None) else None
+            if getattr(delta, "content", None):
+                break
         return ProviderSmokeResult(provider=provider, model=model, status="ok", latency_ms=int((time.perf_counter() - start) * 1000))
     except Exception as exc:
         return _result_from_error(provider, model, start, exc)
+    finally:
+        if stream is not None and hasattr(stream, "close"):
+            stream.close()
 
 
 def smoke_aihubmix(config: Config, timeout_seconds: int = 45, model_id: str = "") -> ProviderSmokeResult:
@@ -285,6 +292,9 @@ def smoke_opencode(config: Config, timeout_seconds: int = 45, model_id: str = ""
         "stream": True,
     }
     payload.update(build_opencode_openai_options(smoke_cfg, model))
+    extra_body = payload.pop("extra_body", None)
+    if isinstance(extra_body, dict):
+        payload.update(extra_body)
     payload["max_tokens"] = min(16, int(payload.get("max_tokens") or 16))
 
     headers = {

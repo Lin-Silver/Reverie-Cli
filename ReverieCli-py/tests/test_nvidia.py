@@ -189,7 +189,8 @@ def test_nvidia_catalog_contains_glm_52():
     assert metadata["id"] == "z-ai/glm-5.2"
     assert metadata["display_name"] == "GLM-5.2"
     assert metadata["transport"] == "openai-sdk"
-    assert metadata["thinking"] is False
+    assert metadata["thinking"] is True
+    assert metadata["thinking_control"] == "fixed"
     assert metadata["context_length"] == 1000000
     assert alias_metadata is not None
     assert alias_metadata["id"] == "z-ai/glm-5.2"
@@ -358,8 +359,8 @@ def test_nvidia_catalog_contains_deepseek_v4_models_with_effort_control():
         assert metadata["thinking"] is True
         assert metadata["thinking_control"] == "effort"
     assert [item["id"] for item in catalog_by_id["deepseek-ai/deepseek-v4-pro"]["thinking_options"]] == ["high", "max", "none"]
-    assert [item["id"] for item in catalog_by_id["deepseek-ai/deepseek-v4-flash"]["thinking_options"]] == ["none", "low", "medium", "high"]
-    assert catalog_by_id["deepseek-ai/deepseek-v4-flash"]["default_thinking_choice"] == "medium"
+    assert [item["id"] for item in catalog_by_id["deepseek-ai/deepseek-v4-flash"]["thinking_options"]] == ["high", "max", "none"]
+    assert catalog_by_id["deepseek-ai/deepseek-v4-flash"]["default_thinking_choice"] == "high"
 
 
 def test_nvidia_reasoning_effort_defaults_to_high_and_normalizes_aliases():
@@ -391,13 +392,13 @@ def test_nvidia_openai_options_for_deepseek_v4_default_to_high_reasoning():
     }
 
 
-def test_nvidia_openai_options_for_deepseek_v4_flash_uses_four_choice_reasoning():
-    medium = build_nvidia_openai_options(
+def test_nvidia_openai_options_for_deepseek_v4_flash_uses_documented_reasoning_modes():
+    high = build_nvidia_openai_options(
         {"selected_model_id": "deepseek-ai/deepseek-v4-flash"},
         "deepseek-ai/deepseek-v4-flash",
     )
-    low = build_nvidia_openai_options(
-        {"selected_model_id": "deepseek-ai/deepseek-v4-flash", "reasoning_effort": "low"},
+    maximum = build_nvidia_openai_options(
+        {"selected_model_id": "deepseek-ai/deepseek-v4-flash", "reasoning_effort": "max"},
         "deepseek-ai/deepseek-v4-flash",
     )
     off = build_nvidia_openai_options(
@@ -405,16 +406,16 @@ def test_nvidia_openai_options_for_deepseek_v4_flash_uses_four_choice_reasoning(
         "deepseek-ai/deepseek-v4-flash",
     )
 
-    assert medium["extra_body"] == {
+    assert high["extra_body"] == {
         "chat_template_kwargs": {
             "thinking": True,
-            "reasoning_effort": "medium",
+            "reasoning_effort": "high",
         }
     }
-    assert low["extra_body"] == {
+    assert maximum["extra_body"] == {
         "chat_template_kwargs": {
             "thinking": True,
-            "reasoning_effort": "low",
+            "reasoning_effort": "max",
         }
     }
     assert off["extra_body"] == {"chat_template_kwargs": {"thinking": False}}

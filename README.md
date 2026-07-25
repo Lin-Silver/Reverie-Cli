@@ -51,7 +51,7 @@ Reverie supports a wide range of LLM providers out of the box. Each provider has
 | Provider           | Description                                                                                                     | Key Models                                                                                                                                                                                  |
 | ------------------ | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **NVIDIA**         | NVIDIA-hosted catalog via`integrate.api.nvidia.com`                                                             | Qwen3.5 397B, DeepSeek V4 Pro/V4 Flash, Kimi K2.6, GLM-5.2, MiniMax M2.7/M3, Mistral Small 4, Mistral Medium 3.5, Mistral Large 3, Step-3.5/3.7-Flash, GPT-OSS-120B, Nemotron 3 Super/Ultra and 3.5 Nano, Laguna XS 2.1 |
-| **ModelScope**     | Anthropic-compatible API on`api-inference.modelscope.cn` — all models supporting the Anthropic SDK can be used | GLM-5.1, GLM-5, DeepSeek V4 Pro, DeepSeek V4 Flash, MiniMax M2.7, Qwen3.5 397B A17B (catalog is statically defined in code)                                                                 |
+| **ModelScope**     | OpenAI Chat Completions API on `api-inference.modelscope.cn` with core-published model capabilities             | Step 3.7 Flash, GLM-5.2, DeepSeek V4 Pro, DeepSeek V4 Flash                                                                                                                            |
 | **Codex**          | ChatGPT backend or Responses-compatible reverse proxy                                                           | GPT-5.6, GPT-5.5, and other models discovered from the live Codex CLI cache                                                                                                                 |
 | **SenseNova**      | SenseTime SenseNova API with model-specific OpenAI/Anthropic transports                                         | DeepSeek V4 Flash (1M context), SenseNova 6.7 Flash Lite (vision)                                                                                                                           |
 | **AIHubMix**       | Third-party API gateway (OpenAI-compatible)                                                                     | GPT-5.5 Free (with/without reasoning), GPT-4o Free, GPT-4.1 Free                                                                                                                            |
@@ -178,7 +178,7 @@ Reverie-Cli/
 │   │   │   └── interface.py   ← Terminal UI (Rich-based)
 │   │   ├── nvidia.py          ← NVIDIA provider integration (17 models)
 │   │   ├── codex.py           ← Codex/ChatGPT provider integration
-│   │   ├── modelscope.py      ← ModelScope Anthropic-compatible provider
+│   │   ├── modelscope.py      ← ModelScope OpenAI Chat provider and capability catalog
 │   │   ├── sensenova.py       ← SenseNova OpenAI-compatible provider
 │   │   ├── aihubmix.py        ← AIHubMix OpenAI-compatible provider
 │   │   ├── agnes.py           ← Agnes AI provider (text/image/video)
@@ -328,10 +328,10 @@ Reverie uses `config.json` stored in the project's `.reverie/` directory or the 
   "modelscope": {
     "enabled": true,
     "api_key": "",
-    "selected_model_id": "ZhipuAI/GLM-5.1",
-    "selected_model_display_name": "GLM-5.1",
-    "api_url": "https://api-inference.modelscope.cn",
-    "max_context_tokens": 202752,
+    "selected_model_id": "stepfun-ai/Step-3.7-Flash",
+    "selected_model_display_name": "Step-3.7-Flash",
+    "api_url": "https://api-inference.modelscope.cn/v1",
+    "max_context_tokens": 262144,
     "timeout": 300,
     "max_tokens": 16384
   },
@@ -506,21 +506,20 @@ NVIDIA's hosted API at `integrate.api.nvidia.com` provides access to 15 supporte
 
 ### ModelScope
 
-ModelScope provides an **Anthropic-compatible** inference API at `https://api-inference.modelscope.cn`. Any model on ModelScope that supports the Anthropic SDK can be used — it is not limited to Zhipu models. The built-in catalog in `reverie/modelscope.py` includes:
+ModelScope is integrated through its **OpenAI Chat Completions** endpoint at `https://api-inference.modelscope.cn/v1`. The built-in catalog in `reverie/modelscope.py` is the single capability source consumed by both the runtime and desktop GUI:
 
 
-| Model ID                        | Display Name      | Context   | Thinking | Vision |
-| ------------------------------- | ----------------- | --------- | -------- | ------ |
-| `ZhipuAI/GLM-5.1`               | GLM-5.1           | 202,752   | ✅       | ❌     |
-| `ZhipuAI/GLM-5`                 | GLM-5             | 202,752   | ✅       | ❌     |
-| `deepseek-ai/DeepSeek-V4-Pro`   | DeepSeek V4 Pro   | 1,048,576 | ✅       | ❌     |
-| `deepseek-ai/DeepSeek-V4-Flash` | DeepSeek V4 Flash | 1,048,576 | ✅       | ❌     |
-| `MiniMax/MiniMax-M2.7`          | MiniMax M2.7      | 204,800   | ✅       | ❌     |
-| `Qwen/Qwen3.5-397B-A17B`        | Qwen3.5 397B A17B | 262,144   | ✅       | ✅     |
+| Model ID                        | Display Name      | Context   | Reasoning choices      | Vision |
+| ------------------------------- | ----------------- | --------- | ---------------------- | ------ |
+| `Tencent-Hunyuan/Hy3`           | Hy3               | 262,144   | no-think, low, high    | ❌     |
+| `stepfun-ai/Step-3.7-Flash`     | Step 3.7 Flash    | 262,144   | low, medium, high      | ✅     |
+| `ZhipuAI/GLM-5.2`               | GLM-5.2           | 1,048,576 | none, high, max        | ❌     |
+| `deepseek-ai/DeepSeek-V4-Pro`   | DeepSeek V4 Pro   | 1,048,576 | thinking on/off        | ❌     |
+| `deepseek-ai/DeepSeek-V4-Flash` | DeepSeek V4 Flash | 1,048,576 | thinking on/off        | ❌     |
 
 **API key:** Get a token from `https://www.modelscope.cn/my/access/token`. Environment variables `MODELSCOPE_API_KEY`, `MODELSCOPE_TOKEN`, or `MODELSCOPE_ACCESS_TOKEN` are also read.
 
-**Important:** The API URL should be the provider root (e.g., `https://api-inference.modelscope.cn`). Reverie normalizes pasted `/v1`, `/v1/messages`, or `/v1/chat/completions` URLs back to the root because the Anthropic SDK appends the Messages path automatically.
+**Important:** The API URL should be the OpenAI-compatible base (normally `https://api-inference.modelscope.cn/v1`). Reverie normalizes pasted `/v1/messages` and `/v1/chat/completions` URLs to that base automatically.
 
 ### Codex (ChatGPT Backend)
 
@@ -874,7 +873,7 @@ from reverie.modelscope import (
     build_modelscope_runtime_model_data,
     default_modelscope_config,
     normalize_modelscope_config,
-    resolve_modelscope_anthropic_base_url,
+    resolve_modelscope_openai_base_url,
     resolve_modelscope_api_key,
 )
 

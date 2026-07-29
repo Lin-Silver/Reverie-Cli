@@ -30,6 +30,15 @@ from ..memory import MEMORY_CONTEXT_PROMPT_HEADER, MemoryOS
 from ..modes import normalize_mode
 from ..config import model_source_display_name, normalize_model_provider
 from ..request_identity import apply_reverie_client_identity
+from ..prompt_cache import (
+    anthropic_stream_with_prompt_cache_fallback,
+    apply_anthropic_prompt_cache,
+    apply_openai_prompt_cache,
+    call_with_prompt_cache_fallback,
+    has_prompt_cache_hints,
+    is_prompt_cache_rejection,
+    without_prompt_cache,
+)
 from ..sse import iter_sse_data_strings as iter_provider_sse_data_strings
 from ..tools.base import ToolResult
 from ..tools.serial_novel import (
@@ -1636,6 +1645,28 @@ def make_api_request_with_retry(
             status_code = e.response.status_code if e.response is not None else "unknown"
             safe_error_message = _extract_safe_http_error_message(getattr(e, "response", None))
 
+            if has_prompt_cache_hints(sanitized_payload) and is_prompt_cache_rejection(e):
+                compatibility_payload = without_prompt_cache(sanitized_payload)
+                logger.warning("Provider rejected prompt-cache hints; retrying once without them")
+                try:
+                    fallback_response = requests.post(
+                        url,
+                        headers=request_headers,
+                        json=compatibility_payload,
+                        stream=stream,
+                        timeout=request_timeout,
+                    )
+                    fallback_response.raise_for_status()
+                    return fallback_response
+                except requests.exceptions.RequestException as fallback_error:
+                    last_error = fallback_error
+                    sanitized_payload = compatibility_payload
+                    e = fallback_error
+                    status_code = getattr(getattr(fallback_error, "response", None), "status_code", "unknown")
+                    safe_error_message = _extract_safe_http_error_message(
+                        getattr(fallback_error, "response", None)
+                    )
+
             if (
                 _should_retry_without_tooling(status_code)
                 and isinstance(sanitized_payload, dict)
@@ -2433,7 +2464,11 @@ class ReverieAgent:
             )
 
         if self._openai_request_fallback_active:
-            return prepared
+            return apply_openai_prompt_cache(
+                prepared,
+                namespace="agent-chat",
+                include_legacy_cache_prompt=True,
+            )
 
         if self._is_nvidia_request():
             prepared = apply_nvidia_request_defaults(prepared, getattr(self.config, "nvidia", {}))
@@ -2444,7 +2479,11 @@ class ReverieAgent:
                 if nvidia_model_requires_system_message_first(prepared.get("model")):
                     prepared["messages"] = _coalesce_system_messages_to_front(prepared.get("messages", []))
             prepared = self._clamp_nvidia_request_max_tokens(prepared)
-            return prepared
+            return apply_openai_prompt_cache(
+                prepared,
+                namespace="agent-chat",
+                include_legacy_cache_prompt=True,
+            )
 
         # Generic `request` provider: accept model(depth) but only convert to
         # a boolean `thinking` flag (do NOT forward thinking depth). Explicit
@@ -2479,7 +2518,11 @@ class ReverieAgent:
                 prepared["chat_template_kwargs"] = chat_kwargs
                 chat_kwargs["thinking"] = self.thinking_mode.lower() == "true"
         
-        return prepared
+        return apply_openai_prompt_cache(
+            prepared,
+            namespace="agent-chat",
+            include_legacy_cache_prompt=True,
+        )
 
     def _estimate_request_input_tokens(
         self,
@@ -3531,8 +3574,9 @@ class ReverieAgent:
         """Call OpenAI-compatible chat completions with SDK compatibility and transient retries."""
         retries = API_RETRY_ATTEMPTS
         last_error: Optional[Exception] = None
-        call_kwargs = dict(kwargs)
+        call_kwargs = apply_openai_prompt_cache(kwargs, namespace="agent-chat")
         fresh_user_query_retry_used = False
+        prompt_cache_fallback_used = False
 
         for attempt in range(retries + 1):
             try:
@@ -3542,6 +3586,15 @@ class ReverieAgent:
             except Exception as exc:
                 last_error = exc
                 status_code = getattr(exc, "status_code", None)
+                if (
+                    not prompt_cache_fallback_used
+                    and has_prompt_cache_hints(call_kwargs)
+                    and is_prompt_cache_rejection(exc)
+                ):
+                    logger.warning("Provider rejected prompt-cache hints; retrying once without them")
+                    call_kwargs = without_prompt_cache(call_kwargs)
+                    prompt_cache_fallback_used = True
+                    continue
                 if (
                     (
                         self._is_active_model_source("agnes")
@@ -4754,7 +4807,32 @@ class ReverieAgent:
                 tool_name = str((tool_choice.get("function", {}) or {}).get("name", "") or "").strip()
                 if tool_name:
                     payload["tool_choice"] = {"type": "function", "name": tool_name}
-        return payload
+        return apply_openai_prompt_cache(payload, namespace="agent-responses")
+
+    def _create_openai_response(self, payload: Dict[str, Any]) -> Any:
+        """Create an OpenAI Responses call with a cache-hint compatibility fallback."""
+        client = self._ensure_client()
+        return call_with_prompt_cache_fallback(
+            client.responses.create,
+            payload,
+            log=logger,
+        )
+
+    def _response_json_with_prompt_cache_fallback(
+        self,
+        response: Any,
+        payload: Dict[str, Any],
+    ) -> Any:
+        """Read a direct response, retrying a rejected cache hint once."""
+        try:
+            return response.json()
+        except Exception as exc:
+            if not has_prompt_cache_hints(payload) or not is_prompt_cache_rejection(exc):
+                raise
+            self._close_stream_response(response)
+            logger.warning("Provider rejected prompt-cache hints; retrying once without them")
+            fallback = self._make_direct_request(without_prompt_cache(payload), stream=False)
+            return fallback.json()
 
     def _iter_openai_responses_sdk_events(self, response: Any) -> Generator[Dict[str, Any], None, None]:
         """Translate OpenAI SDK Responses events to Reverie's shared event shape."""
@@ -4809,14 +4887,27 @@ class ReverieAgent:
                 response = self._make_direct_request(payload, stream=True)
                 events = self._iter_curl_responses_events(response)
             else:
-                client = self._ensure_client()
-                response = client.responses.create(**payload)
+                response = self._create_openai_response(payload)
                 events = self._iter_openai_responses_sdk_events(response)
 
             state = _StreamingTurnState()
             try:
                 for event in events:
                     yield from self._apply_stream_event(state, event)
+            except Exception as exc:
+                if (
+                    use_curl
+                    and not _stream_state_has_partial_output(state)
+                    and has_prompt_cache_hints(payload)
+                    and is_prompt_cache_rejection(exc)
+                ):
+                    self._close_stream_response(response)
+                    logger.warning("Provider rejected prompt-cache hints; retrying stream once without them")
+                    response = self._make_direct_request(without_prompt_cache(payload), stream=True)
+                    for event in self._iter_curl_responses_events(response):
+                        yield from self._apply_stream_event(state, event)
+                else:
+                    raise
             finally:
                 for chunk in state.flush():
                     yield chunk
@@ -5058,7 +5149,17 @@ class ReverieAgent:
                 for event in self._iter_request_stream_events(response, provider_label):
                     yield from self._apply_stream_event(state, event)
             except Exception as exc:
-                if _should_recover_partial_stream_error(state, exc):
+                if (
+                    not _stream_state_has_partial_output(state)
+                    and has_prompt_cache_hints(payload)
+                    and is_prompt_cache_rejection(exc)
+                ):
+                    self._close_stream_response(response)
+                    logger.warning("Provider rejected prompt-cache hints; retrying stream once without them")
+                    response = self._make_direct_request(without_prompt_cache(payload), stream=True)
+                    for event in self._iter_request_stream_events(response, provider_label):
+                        yield from self._apply_stream_event(state, event)
+                elif _should_recover_partial_stream_error(state, exc):
                     logger.warning("Recovered partial streaming output after %s interruption: %s", provider_label, exc)
                     state.set_finish_reason("interrupted")
                 else:
@@ -5133,10 +5234,15 @@ class ReverieAgent:
                 if tool_choice:
                     kwargs["tool_choice"] = tool_choice
             kwargs = self._apply_sensenova_anthropic_options(kwargs)
+            kwargs = apply_anthropic_prompt_cache(kwargs)
             
             # Make request
             client = self._ensure_client()
-            with client.messages.stream(**kwargs) as stream:
+            with anthropic_stream_with_prompt_cache_fallback(
+                client.messages.stream,
+                kwargs,
+                log=logger,
+            ) as stream:
                 state = _StreamingTurnState()
 
                 for event in stream:
@@ -5271,9 +5377,9 @@ class ReverieAgent:
             payload = self._build_openai_responses_payload(stream=False)
             if use_curl:
                 response = self._make_direct_request(payload, stream=False)
-                result = response.json()
+                result = self._response_json_with_prompt_cache_fallback(response, payload)
             else:
-                result = self._ensure_client().responses.create(**payload)
+                result = self._create_openai_response(payload)
             state, usage = self._responses_result_state(result)
             outcome, content = self._commit_stream_state(
                 state=state,
@@ -5598,7 +5704,7 @@ class ReverieAgent:
                 logger.error(f"API request failed: {e}")
                 raise
             
-            response_data = response.json()
+            response_data = self._response_json_with_prompt_cache_fallback(response, payload)
             provider_label = self._request_provider_label()
             _raise_for_wrapped_api_error(response_data, provider_label=provider_label)
             normalized_response = _unwrap_openai_compatible_payload(response_data) or response_data
@@ -5778,10 +5884,11 @@ class ReverieAgent:
                 if tool_choice:
                     kwargs["tool_choice"] = tool_choice
             kwargs = self._apply_sensenova_anthropic_options(kwargs)
+            kwargs = apply_anthropic_prompt_cache(kwargs)
             
             # Make request
             client = self._ensure_client()
-            response = client.messages.create(**kwargs)
+            response = call_with_prompt_cache_fallback(client.messages.create, kwargs, log=logger)
             
             # Extract content
             content_blocks = response.content

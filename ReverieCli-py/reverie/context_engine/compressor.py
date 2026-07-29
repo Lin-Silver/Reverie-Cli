@@ -14,6 +14,14 @@ from ..nvidia import (
 )
 from ..sse import iter_sse_data_strings
 from ..request_identity import apply_reverie_client_identity
+from ..prompt_cache import (
+    apply_anthropic_prompt_cache,
+    apply_openai_prompt_cache,
+    call_with_prompt_cache_fallback,
+    has_prompt_cache_hints,
+    is_prompt_cache_rejection,
+    without_prompt_cache,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -594,6 +602,20 @@ def make_compression_request_with_retry(
             
         except requests.exceptions.RequestException as e:
             last_error = e
+            if has_prompt_cache_hints(payload) and is_prompt_cache_rejection(e):
+                logger.warning("Provider rejected compression prompt-cache hints; retrying once without them")
+                payload = without_prompt_cache(payload)
+                try:
+                    response = requests.post(
+                        url,
+                        headers=headers,
+                        json=payload,
+                        timeout=120,
+                    )
+                    response.raise_for_status()
+                    return response
+                except requests.exceptions.RequestException as fallback_error:
+                    last_error = fallback_error
             logger.debug(
                 "Compression request attempt %s/%s failed",
                 attempt + 1,
@@ -776,17 +798,30 @@ class ContextCompressor:
                         kwargs[key] = nvidia_options[key]
                 if extra_body is not None:
                     kwargs["extra_body"] = extra_body
-                response = client.chat.completions.create(**kwargs)
+                kwargs = apply_openai_prompt_cache(kwargs, namespace="context-compression")
+                response = call_with_prompt_cache_fallback(
+                    client.chat.completions.create,
+                    kwargs,
+                    log=logger,
+                )
                 summary = response.choices[0].message.content
                 usage_info = getattr(response, "usage", None)
             elif provider == "openai-responses":
                 from ..codex import build_codex_request_payload
 
                 converted = build_codex_request_payload(model, prompt, tools=None, stream=False)
-                response = client.responses.create(
-                    model=model,
-                    input=converted["input"],
-                    stream=False,
+                response_payload = apply_openai_prompt_cache(
+                    {
+                        "model": model,
+                        "input": converted["input"],
+                        "stream": False,
+                    },
+                    namespace="context-compression",
+                )
+                response = call_with_prompt_cache_fallback(
+                    client.responses.create,
+                    response_payload,
+                    log=logger,
                 )
                 summary = str(getattr(response, "output_text", "") or "")
                 usage_info = getattr(response, "usage", None)
@@ -798,6 +833,11 @@ class ContextCompressor:
                     "stream": False
                 }
                 payload = _apply_nvidia_request_payload_defaults(base_url, payload)
+                payload = apply_openai_prompt_cache(
+                    payload,
+                    namespace="context-compression",
+                    include_legacy_cache_prompt=True,
+                )
                 headers = {
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json"
@@ -837,7 +877,12 @@ class ContextCompressor:
                 if system_message:
                     kwargs["system"] = system_message
                 
-                response = client.messages.create(**kwargs)
+                kwargs = apply_anthropic_prompt_cache(kwargs)
+                response = call_with_prompt_cache_fallback(
+                    client.messages.create,
+                    kwargs,
+                    log=logger,
+                )
                 summary = response.content[0].text
                 usage_info = getattr(response, "usage", None)
             elif provider == "codex":

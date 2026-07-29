@@ -227,7 +227,7 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
             {"usage": "/agnes key", "description": "Prompt for and save the Agnes API key."},
             {"usage": "/agnes activate", "description": "Switch the active model source to Agnes."},
             {"usage": "/agnes model", "description": "Open the Agnes text model selector and choose thinking depth for compatible models."},
-            {"usage": "/agnes model <model-id>", "description": "Switch directly to an Agnes text model id.", "example": "/agnes model agnes-2.0-flash"},
+            {"usage": "/agnes model <model-id>", "description": "Switch directly to an Agnes text model id.", "example": "/agnes model agnes-2.5-flash"},
             {"usage": "/agnes thinking", "description": "Choose Agnes thinking depth for the selected model."},
             {"usage": "/agnes thinking <none|low|medium|high>", "description": "Set Agnes thinking depth directly.", "example": "/agnes thinking high"},
             {"usage": "/agnes endpoint", "description": "Show the current OpenAI-compatible base URL prompt."},

@@ -3,12 +3,22 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import threading
 import time
 import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
+
+
+_BACKGROUND_DISPATCH_ACTIONS = frozenset({"runPrompt", "workspaceMentions", "indexWorkspace"})
+
+
+def _interactive_context_worker_limit(cpu_count: Optional[int] = None) -> int:
+    """Leave CPU capacity for desktop IPC and model/provider interactions."""
+    available = max(1, int(cpu_count if cpu_count is not None else (os.cpu_count() or 1)))
+    return max(1, min(2, available - 1 if available > 1 else 1))
 
 
 def _json_safe(value: Any) -> Any:
@@ -76,6 +86,9 @@ class ReverieSdkBridge:
         self.event_writer = event_writer
         self._approval_waiters: Dict[str, Dict[str, Any]] = {}
         self._approval_lock = threading.Lock()
+        self._workspace_index_lock = threading.Lock()
+        self._workspace_index_completed_at = 0.0
+        self._workspace_index_result = None
 
     def _dispose_interface(self) -> None:
         """Release workspace-scoped services without stopping the bridge process."""
@@ -99,6 +112,7 @@ class ReverieSdkBridge:
                 self._dispose_interface()
             self.project_root = root
             self.interface = ReverieInterface(root, headless=True)
+            self.interface._context_worker_limit = _interactive_context_worker_limit()
         return self.interface
 
     def ensure_tool_executor(self):
@@ -190,6 +204,33 @@ class ReverieSdkBridge:
                 config_override=interface.config_manager.load(),
                 persist_config_changes=False,
             )
+
+    def _run_workspace_index(self) -> Any:
+        """Coalesce overlapping desktop reindex requests without blocking bridge IPC."""
+        requested_at = time.monotonic()
+        with self._workspace_index_lock:
+            if (
+                self._workspace_index_result is not None
+                and self._workspace_index_completed_at >= requested_at
+            ):
+                return self._workspace_index_result
+
+            interface = self.ensure_interface()
+            interface.ensure_context_engine(announce=False)
+            if interface.indexer is None:
+                raise RuntimeError("Context Engine indexer is unavailable.")
+
+            if bool(getattr(interface, "_indexing_in_progress", False)):
+                interface._wait_for_context_indexing(announce=False)
+                result = getattr(interface.indexer, "_last_index_result", None)
+            else:
+                result = interface._run_context_indexing_with_progress()
+            if result is None:
+                raise RuntimeError("Context Engine indexing did not produce a result.")
+
+            self._workspace_index_result = result
+            self._workspace_index_completed_at = time.monotonic()
+            return result
 
     def _emit_request_event(self, request_id: Any, event: Dict[str, Any]) -> None:
         if self.event_writer is None:
@@ -651,11 +692,7 @@ class ReverieSdkBridge:
                 "context_engine": self.context_status_payload(),
             }
         if action == "indexWorkspace":
-            interface = self.ensure_interface()
-            interface.ensure_context_engine(announce=False)
-            if interface.indexer is None:
-                raise RuntimeError("Context Engine indexer is unavailable.")
-            result = interface.indexer.full_index()
+            result = self._run_workspace_index()
             return {
                 "id": request_id,
                 "type": "workspace.indexed",
@@ -833,11 +870,12 @@ def main() -> int:
         if not isinstance(message, dict):
             _write_message({"id": None, "type": "error", "error": "Bridge message must be a JSON object."})
             continue
-        if str(message.get("action") or "") == "runPrompt":
+        action = str(message.get("action") or "")
+        if action in _BACKGROUND_DISPATCH_ACTIONS:
             threading.Thread(
                 target=_dispatch_and_write,
                 args=(message,),
-                name="reverie-desktop-prompt",
+                name=f"reverie-desktop-{action.lower()}",
                 daemon=True,
             ).start()
             continue

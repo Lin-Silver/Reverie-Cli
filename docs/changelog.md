@@ -4,6 +4,10 @@ Released 2026-07-17.
 
 ### Post-release update (still v2.5.0) — 2026-07-21
 
+* Added cache-first prompt input across production text-model transports. OpenAI Chat/Responses/native HTTP/curl calls now use stable privacy-preserving cache keys (plus the local-compatible `cache_prompt` hint where applicable), Anthropic calls enable automatic ephemeral caching, and Context Engine compression/session handoff use the same policy. Gateways that explicitly reject cache fields are retried once without only those hints.
+
+* Re-audited Agnes against the official 2.5 Pro Alpha, 2.5 Flash, and 2.0 Flash documentation plus the live `/v1/models` inventory. New configurations now default to `agnes-2.5-flash`; both Flash models expose 512K context, and all three text models expose documented image input. Live discovery remains authoritative when an Agnes API key is configured.
+
 * Synchronized the NVIDIA source with the live hosted-model endpoint, removing retired `qwen/qwen3.5-122b-a10b` and `z-ai/glm4.7` catalog entries and their unused request profiles.
 
 * Reduced core EXE startup extraction work by packaging Chromium and FFmpeg as lazy first-use archives. The Windows installer and portable desktop remain a single product containing both the GUI and fast unpacked kernel; the default GUI or terminal startup can be selected in Settings and temporarily overridden with `--gui` or `--tui`.

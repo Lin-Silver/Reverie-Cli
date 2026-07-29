@@ -73,7 +73,7 @@ from ..agent import (
     decode_stream_event,
 )
 from ..agent.subagents import SubagentManager
-from ..context_engine import CodebaseIndexer, ContextRetriever, GitIntegration
+from ..context_engine import CodebaseIndexer, ContextRetriever, GitIntegration, IndexConfig
 from ..context_engine import LSPManager
 from ..memory import MemoryOS
 from ..modes import get_mode_display_name, normalize_mode
@@ -950,6 +950,7 @@ class ReverieInterface:
     def __init__(self, project_root: Path, *, headless: bool = False):
         self.project_root = project_root
         self.headless = bool(headless)
+        self._context_worker_limit: Optional[int] = None
         _configure_stdio_for_terminal_output()
         self.console = Console(width=None, force_terminal=not self.headless)
         self.display = DisplayComponents(self.console)
@@ -2413,6 +2414,7 @@ class ReverieInterface:
         ignored = {".git", ".reverie", ".runtime", ".kernel", "__pycache__", ".pytest_cache", ".mypy_cache", "node_modules", "venv", ".venv", "env", "dist", "build", "release", "target"}
         candidates: List[Dict[str, Any]] = []
         seen: set[tuple[str, str, str]] = set()
+        target_limit = max(1, int(limit or 500))
 
         def relative_path(value: Any) -> str:
             path = Path(str(value or ""))
@@ -2435,13 +2437,16 @@ class ReverieInterface:
         try:
             self.ensure_context_engine(announce=False, wait_for_index=False)
             self.ensure_git_integration(announce=False)
+            indexer = getattr(self, "indexer", None)
+            indexed_files = getattr(indexer, "_file_info", {}) if indexer is not None else {}
+            cold_indexing = bool(getattr(self, "_indexing_in_progress", False)) and not indexed_files
             retriever = getattr(self, "retriever", None)
-            if retriever is not None:
+            if retriever is not None and not cold_indexing:
                 result = retriever.retrieve_for_task(
                     effective_query,
                     max_tokens=1800,
-                    max_files=max(8, min(24, int(limit or 24))),
-                    max_symbols=max(8, min(24, int(limit or 24))),
+                    max_files=max(8, min(24, target_limit)),
+                    max_symbols=max(8, min(24, target_limit)),
                     include_history=False,
                     include_memory=False,
                     fast=True,
@@ -2493,7 +2498,13 @@ class ReverieInterface:
 
         indexer = getattr(self, "indexer", None)
         indexed_files = getattr(indexer, "_file_info", {}) if indexer is not None else {}
-        if isinstance(indexed_files, dict) and indexed_files:
+        unique_candidate_paths = {
+            str(item.get("path", "") or "").replace("\\", "/").lower()
+            for item in candidates
+            if str(item.get("path", "") or "").strip()
+        }
+        needs_fallback = len(unique_candidate_paths) < target_limit
+        if needs_fallback and isinstance(indexed_files, dict) and indexed_files:
             for raw_path, info in indexed_files.items():
                 rel = relative_path(raw_path)
                 if not rel:
@@ -2541,7 +2552,9 @@ class ReverieInterface:
                             "reason": "symbol name match",
                         }
                     )
-        else:
+        elif needs_fallback:
+            fallback_scan_limit = max(64, target_limit * 8)
+            stop_scan = False
             for current_root, dirs, files in os.walk(root):
                 dirs[:] = [name for name in dirs if name not in ignored and not name.endswith(".egg-info")]
                 for name in files:
@@ -2558,10 +2571,15 @@ class ReverieInterface:
                     score = 34.0 if query_text and query_text in haystack else float(match_count * 6)
                     score += max(0.0, 8.0 - ((time.time() - stat.st_mtime) / 86400.0))
                     add({"path": rel, "name": name, "size": stat.st_size, "mtime": stat.st_mtime, "kind": "file", "score": score, "source": "workspace-scan", "reason": "recent or matching file"})
+                    if not tokens and len(candidates) >= fallback_scan_limit:
+                        stop_scan = True
+                        break
+                if stop_scan:
+                    break
 
         return ReverieInterface._diversify_workspace_mention_candidates(
             candidates,
-            limit=max(1, int(limit or 500)),
+            limit=target_limit,
         )
 
     @staticmethod
@@ -3483,7 +3501,15 @@ class ReverieInterface:
                     status="working",
                     detail="Lazy-loading the core retrieval services for this workspace.",
                 )
-            self.indexer = CodebaseIndexer(project_root=self.project_root, cache_dir=cache_dir)
+            worker_limit = getattr(self, "_context_worker_limit", None)
+            index_options: Dict[str, Any] = {}
+            if worker_limit is not None:
+                index_options["config"] = IndexConfig(max_workers=worker_limit)
+            self.indexer = CodebaseIndexer(
+                project_root=self.project_root,
+                cache_dir=cache_dir,
+                **index_options,
+            )
             config = self._load_active_runtime_config()
             cached = self.indexer.load_cache()
             if not cached and config.auto_index:
@@ -3497,18 +3523,23 @@ class ReverieInterface:
                 self._start_context_indexing_background()
             elif cached and config.auto_index:
                 self._start_context_incremental_background()
+            retriever_options: Dict[str, Any] = {
+                "file_info": self.indexer._file_info,
+                "git_integration": self.git_integration,
+                "memory_indexer": self.memory_indexer,
+                "lsp_manager": getattr(self, "lsp_manager", None),
+                "content_searcher": getattr(self.indexer, "search_content_terms", None),
+                "chunk_searcher": getattr(self.indexer, "search_code_chunks", None),
+                "content_frequency": getattr(self.indexer, "content_document_frequencies", None),
+                "content_total": getattr(self.indexer, "content_document_total", None),
+            }
+            if worker_limit is not None:
+                retriever_options["max_workers"] = worker_limit
             self.retriever = ContextRetriever(
                 self.indexer.symbol_table,
                 self.indexer.dependency_graph,
                 self.project_root,
-                file_info=self.indexer._file_info,
-                git_integration=self.git_integration,
-                memory_indexer=self.memory_indexer,
-                lsp_manager=getattr(self, "lsp_manager", None),
-                content_searcher=getattr(self.indexer, "search_content_terms", None),
-                chunk_searcher=getattr(self.indexer, "search_code_chunks", None),
-                content_frequency=getattr(self.indexer, "content_document_frequencies", None),
-                content_total=getattr(self.indexer, "content_document_total", None),
+                **retriever_options,
             )
             self._context_engine_ready = True
             self._refresh_command_context()

@@ -112,6 +112,12 @@ Common top-level keys:
 
 When `active_model_source` is `standard`, Reverie uses `active_model_index` to choose from this list.
 
+### Prompt Caching
+
+Prompt caching is enabled automatically and does not require a configuration key. Reverie sends stable hashed cache-routing keys through OpenAI Chat Completions and Responses transports, tries `cache_prompt` on raw OpenAI-compatible/local requests, and enables Anthropic's automatic ephemeral cache. The same policy is used for streaming, non-streaming, Context Engine compression, and session-handoff calls.
+
+Third-party compatibility endpoints may not implement their upstream provider's cache fields. Reverie first attempts the cache-enabled request and retries once without only those fields when the endpoint explicitly reports them as unsupported. WebGemini and image/video generation transports are unchanged because they do not expose the same prompt-prefix cache API.
+
 ## Gamer Modeling
 
 `gamer_mode` may include Blender and the built-in Ashfox MCP bridge settings. Useful keys:

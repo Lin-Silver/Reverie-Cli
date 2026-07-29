@@ -62,9 +62,11 @@ def test_desktop_catalog_uses_native_model_reasoning_metadata() -> None:
     assert {item["id"] for item in toggle_model["reasoning"]["options"]} == {"true", "false"}
 
     agnes = _source(payload, "agnes")
-    no_thinking = next(item for item in agnes["models"] if not item["thinking"])
-    assert no_thinking["reasoning"] == {"control": "none", "options": [], "value": "none"}
-    assert agnes["modalities"] == {"live": False, "llm": 2, "tti": 2, "ttv": 1}
+    pro = next(item for item in agnes["models"] if item["id"] == "agnes-2.5-pro-alpha")
+    assert pro["thinking"] is True
+    assert pro["reasoning"]["control"] == "effort"
+    assert [item["id"] for item in pro["reasoning"]["options"]] == ["none", "low", "medium", "high"]
+    assert agnes["modalities"] == {"live": False, "llm": 3, "tti": 2, "ttv": 1}
 
     opencode = _source(payload, "opencode")
     deepseek = next(item for item in opencode["models"] if item["id"] == "deepseek-v4-flash-free")

@@ -240,6 +240,7 @@ class ContextRetriever:
         chunk_searcher: Any = None,
         content_frequency: Any = None,
         content_total: Any = None,
+        max_workers: Optional[int] = None,
     ):
         self.symbol_table = symbol_table
         self.dependency_graph = dependency_graph
@@ -265,6 +266,10 @@ class ContextRetriever:
                         content_total = owner_total
         self.content_frequency = content_frequency
         self.content_total = content_total
+        self.max_workers = max(
+            1,
+            int(max_workers) if max_workers is not None else min(8, os.cpu_count() or 1),
+        )
         self._content_idf_cache: Dict[str, float] = {}
         self._dependency_in_degree: Dict[str, int] = {}
         self._dependency_in_degree_revision: Optional[tuple[int, int]] = None
@@ -1108,7 +1113,7 @@ class ContextRetriever:
                 "terms": matched[:6],
             }
 
-        workers = min(8, max(1, os.cpu_count() or 1), len(selected))
+        workers = min(self.max_workers, len(selected))
 
         def score_batch(batch: List[Tuple[Path, str]]) -> List[Dict[str, Any]]:
             return [hit for item in batch if (hit := score_path(item)) is not None]

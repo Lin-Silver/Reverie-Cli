@@ -26,26 +26,52 @@ def test_agnes_catalog_contains_documented_text_models(monkeypatch) -> None:
     catalog = get_agnes_model_catalog({"live_model_list": False})
     ids = {item["id"] for item in catalog}
 
-    assert ids == {"agnes-2.0-flash", "agnes-1.5-flash"}
+    assert ids == {
+        "agnes-2.5-pro-alpha",
+        "agnes-2.5-flash",
+        "agnes-2.0-flash",
+    }
 
 
 def test_agnes_catalog_context_lengths_match_model_docs(monkeypatch) -> None:
     monkeypatch.delenv("AGNES_API_KEY", raising=False)
     catalog = {item["id"]: item for item in get_agnes_model_catalog({"live_model_list": False})}
 
-    assert catalog["agnes-2.0-flash"]["context_length"] == 256_000
+    assert catalog["agnes-2.5-pro-alpha"]["display_name"] == "Agnes 2.5 Pro Alpha"
+    assert catalog["agnes-2.5-pro-alpha"]["context_length"] == 1_000_000
+    assert catalog["agnes-2.5-pro-alpha"]["max_output_tokens"] == 65_536
+    assert catalog["agnes-2.5-pro-alpha"]["vision"] is True
+    assert catalog["agnes-2.5-pro-alpha"]["thinking"] is True
+    assert catalog["agnes-2.5-flash"]["context_length"] == 512_000
+    assert catalog["agnes-2.5-flash"]["max_output_tokens"] == 65_536
+    assert catalog["agnes-2.5-flash"]["vision"] is True
+    assert catalog["agnes-2.5-flash"]["thinking"] is True
+    assert catalog["agnes-2.0-flash"]["context_length"] == 512_000
     assert catalog["agnes-2.0-flash"]["max_output_tokens"] == 65_536
+    assert catalog["agnes-2.0-flash"]["vision"] is True
     assert catalog["agnes-2.0-flash"]["thinking"] is True
-    assert catalog["agnes-1.5-flash"]["context_length"] == 256_000
-    assert catalog["agnes-1.5-flash"]["max_output_tokens"] == 65_536
-    assert catalog["agnes-1.5-flash"]["thinking"] is False
+
+
+def test_agnes_defaults_to_fully_available_25_flash(monkeypatch) -> None:
+    monkeypatch.setenv("AGNES_API_KEY", "agnes-test")
+    config = normalize_agnes_config({"live_model_list": False})
+    runtime = build_agnes_runtime_model_data(config)
+
+    assert config["selected_model_id"] == "agnes-2.5-flash"
+    assert config["selected_model_display_name"] == "Agnes 2.5 Flash"
+    assert config["max_context_tokens"] == 512_000
+    assert runtime is not None
+    assert runtime["model"] == "agnes-2.5-flash"
+    assert runtime["max_context_tokens"] == 512_000
+    assert runtime["supports_vision"] is True
 
 
 def test_agnes_live_source_catalog_classifies_every_supported_modality(monkeypatch) -> None:
     payload = {
         "object": "list",
         "data": [
-            {"id": "agnes-1.5-flash", "object": "model", "owned_by": "custom", "created": 1},
+            {"id": "agnes-2.5-pro-alpha", "object": "model", "owned_by": "custom", "created": 1},
+            {"id": "agnes-2.5-flash", "object": "model", "owned_by": "custom", "created": 1},
             {"id": "agnes-video-v2.0", "object": "model", "owned_by": "custom", "created": 1},
             {"id": "agnes-image-2.1-flash", "object": "model", "owned_by": "custom", "created": 1},
             {"id": "agnes-2.0-flash", "object": "model", "owned_by": "custom", "created": 1},
@@ -70,7 +96,11 @@ def test_agnes_live_source_catalog_classifies_every_supported_modality(monkeypat
     catalog = get_agnes_source_catalog({"api_key": "agnes-test", "live_model_list": True})
 
     assert catalog["live"] is True
-    assert {item["id"] for item in catalog["llm"]} == {"agnes-2.0-flash", "agnes-1.5-flash"}
+    assert {item["id"] for item in catalog["llm"]} == {
+        "agnes-2.5-pro-alpha",
+        "agnes-2.5-flash",
+        "agnes-2.0-flash",
+    }
     assert {item["id"] for item in catalog["tti"]} == {
         "agnes-image-2.0-flash",
         "agnes-image-2.1-flash",

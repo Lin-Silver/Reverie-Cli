@@ -10,10 +10,10 @@ from urllib.request import Request, urlopen
 
 
 AGNES_DEFAULT_API_URL = "https://apihub.agnes-ai.com/v1"
-AGNES_DEFAULT_MODEL_ID = "agnes-2.0-flash"
-AGNES_DEFAULT_MODEL_DISPLAY_NAME = "Agnes 2.0 Flash"
+AGNES_DEFAULT_MODEL_ID = "agnes-2.5-flash"
+AGNES_DEFAULT_MODEL_DISPLAY_NAME = "Agnes 2.5 Flash"
 AGNES_API_KEY_HINT_URL = "https://platform.agnes-ai.com/settings/apiKeys"
-AGNES_DEFAULT_CONTEXT_TOKENS = 256_000
+AGNES_DEFAULT_CONTEXT_TOKENS = 512_000
 AGNES_DEFAULT_MAX_TOKENS = 65_536
 AGNES_DEFAULT_TEMPERATURE = 0.7
 AGNES_DEFAULT_TOP_P = 1.0
@@ -69,21 +69,31 @@ def _agnes_model(
 
 _AGNES_STATIC_MODEL_CATALOG: List[Dict[str, Any]] = [
     _agnes_model(
-        "agnes-2.0-flash",
-        "Agnes 2.0 Flash",
-        "Agnes OpenAI-compatible text model with vision, reasoning, coding, and tool-calling support.",
-        context_length=256_000,
+        "agnes-2.5-pro-alpha",
+        "Agnes 2.5 Pro Alpha",
+        "Agnes flagship OpenAI-compatible model for advanced reasoning, coding, and agent tasks.",
+        context_length=1_000_000,
         max_output_tokens=65_536,
         vision=True,
         thinking=True,
     ),
     _agnes_model(
-        "agnes-1.5-flash",
-        "Agnes 1.5 Flash",
-        "Agnes OpenAI-compatible fast text model.",
-        context_length=256_000,
+        "agnes-2.5-flash",
+        "Agnes 2.5 Flash",
+        "Agnes fast OpenAI-compatible model for coding, agent tasks, tool use, and image understanding.",
+        context_length=512_000,
         max_output_tokens=65_536,
         vision=True,
+        thinking=True,
+    ),
+    _agnes_model(
+        "agnes-2.0-flash",
+        "Agnes 2.0 Flash",
+        "Agnes OpenAI-compatible text model with vision, reasoning, coding, and tool-calling support.",
+        context_length=512_000,
+        max_output_tokens=65_536,
+        vision=True,
+        thinking=True,
     ),
 ]
 

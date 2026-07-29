@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import io
 import json
 import sys
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import requests
 from rich.console import Console
@@ -851,11 +853,13 @@ def test_context_engine_cold_index_runs_in_background() -> None:
 
 def test_silent_context_engine_init_starts_background_without_activity(monkeypatch) -> None:
     calls: list[str] = []
+    index_configs: list[object] = []
 
     class FakeIndexer:
-        def __init__(self, project_root, cache_dir=None):
+        def __init__(self, project_root, cache_dir=None, config=None):
             self.project_root = project_root
             self.cache_dir = cache_dir
+            index_configs.append(config)
             self.symbol_table = SymbolTable()
             self.dependency_graph = DependencyGraph()
             self._file_info = {}
@@ -875,6 +879,7 @@ def test_silent_context_engine_init_starts_background_without_activity(monkeypat
     interface.indexer = None
     interface.retriever = None
     interface._context_engine_ready = False
+    interface._context_worker_limit = 2
     interface._indexing_thread = None
     interface._indexing_in_progress = False
     interface._context_engine_init_lock = threading.RLock()
@@ -889,6 +894,130 @@ def test_silent_context_engine_init_starts_background_without_activity(monkeypat
     assert "start_background" in calls
     assert "activity" not in calls
     assert interface.retriever is not None
+    assert index_configs[0].max_workers == 2
+    assert interface.retriever.max_workers == 2
+
+
+def test_desktop_context_worker_budget_preserves_interactive_capacity() -> None:
+    from reverie.sdk_bridge import _interactive_context_worker_limit
+
+    assert _interactive_context_worker_limit(1) == 1
+    assert _interactive_context_worker_limit(2) == 1
+    assert _interactive_context_worker_limit(3) == 2
+    assert _interactive_context_worker_limit(64) == 2
+
+
+def test_context_retrieval_does_not_block_following_bridge_requests(monkeypatch) -> None:
+    from reverie import sdk_bridge
+
+    retrieval_started = threading.Event()
+    release_retrieval = threading.Event()
+    model_selected = threading.Event()
+    retrieval_written = threading.Event()
+
+    class FakeBridge:
+        def __init__(self, event_writer=None):
+            self.event_writer = event_writer
+
+        def dispatch(self, message):
+            action = message.get("action")
+            if action == "workspaceMentions":
+                retrieval_started.set()
+                release_retrieval.wait(timeout=2)
+                return {"id": message.get("id"), "type": "workspace.mentions"}
+            if action == "selectModel":
+                model_selected.set()
+                return {"id": message.get("id"), "type": "model.selected"}
+            return {"id": message.get("id"), "type": "ok"}
+
+    class ThreadSafeOutput(io.StringIO):
+        def write(self, value):
+            written = super().write(value)
+            if '"type": "workspace.mentions"' in value:
+                retrieval_written.set()
+            return written
+
+    request_stream = io.StringIO(
+        '\n'.join(
+            [
+                json.dumps({"id": "mentions", "action": "workspaceMentions", "payload": {}}),
+                json.dumps({"id": "model", "action": "selectModel", "payload": {}}),
+            ]
+        )
+        + '\n'
+    )
+    output_stream = ThreadSafeOutput()
+    monkeypatch.setattr(sdk_bridge, "ReverieSdkBridge", FakeBridge)
+    monkeypatch.setattr(sdk_bridge, "_configure_utf8_stdio", lambda: None)
+    monkeypatch.setattr(sdk_bridge.sys, "stdin", request_stream)
+    monkeypatch.setattr(sdk_bridge.sys, "stdout", output_stream)
+
+    server = threading.Thread(target=sdk_bridge.main)
+    server.start()
+    assert retrieval_started.wait(timeout=1)
+    assert model_selected.wait(timeout=1)
+    release_retrieval.set()
+    assert retrieval_written.wait(timeout=1)
+    server.join(timeout=1)
+    assert not server.is_alive()
+
+
+def test_workspace_mentions_skip_full_index_scan_when_retrieval_is_sufficient(tmp_path: Path) -> None:
+    class FailIfScanned(dict):
+        def items(self):
+            raise AssertionError("indexed files should not be scanned after retrieval fills the request")
+
+    relevant_files = [
+        SimpleNamespace(
+            file_path=str(tmp_path / "src" / f"module_{index}.py"),
+            score=100.0 - index,
+            reasons=["task:module"],
+            summary="module",
+        )
+        for index in range(8)
+    ]
+    retriever = SimpleNamespace(
+        retrieve_for_task=lambda *args, **kwargs: SimpleNamespace(
+            relevant_files=relevant_files,
+            relevant_symbols=[],
+        )
+    )
+    interface = SimpleNamespace(
+        project_root=tmp_path,
+        session_manager=SimpleNamespace(get_current_session=lambda: None),
+        retriever=retriever,
+        indexer=SimpleNamespace(_file_info=FailIfScanned({"ready": object()})),
+        _indexing_in_progress=False,
+        ensure_context_engine=lambda **kwargs: False,
+        ensure_git_integration=lambda **kwargs: False,
+    )
+
+    candidates = ReverieInterface._collect_workspace_mention_candidates(interface, "module", limit=8)
+
+    assert len(candidates) == 8
+    assert all(item["source"] == "context-engine" for item in candidates)
+
+
+def test_workspace_mentions_avoid_competing_retrieval_during_cold_index(tmp_path: Path) -> None:
+    for index in range(100):
+        (tmp_path / f"file_{index:03d}.py").write_text("value = 1\n", encoding="utf-8")
+    retrieval_calls: list[str] = []
+    interface = SimpleNamespace(
+        project_root=tmp_path,
+        session_manager=SimpleNamespace(get_current_session=lambda: None),
+        retriever=SimpleNamespace(
+            retrieve_for_task=lambda *args, **kwargs: retrieval_calls.append("retrieve")
+        ),
+        indexer=SimpleNamespace(_file_info={}),
+        _indexing_in_progress=True,
+        ensure_context_engine=lambda **kwargs: False,
+        ensure_git_integration=lambda **kwargs: False,
+    )
+
+    candidates = ReverieInterface._collect_workspace_mention_candidates(interface, "", limit=8)
+
+    assert retrieval_calls == []
+    assert len(candidates) == 8
 
 
 def test_context_engine_warmup_runs_beside_model_turn() -> None:

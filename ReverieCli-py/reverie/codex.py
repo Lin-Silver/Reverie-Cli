@@ -20,6 +20,7 @@ import time
 from urllib.parse import urlparse
 
 from .diagnostics import report_suppressed_exception
+from .prompt_cache import apply_openai_prompt_cache
 from .security_utils import write_json_secure
 from .version import __version__
 
@@ -1142,7 +1143,7 @@ def build_codex_request_payload(
                 translated_tool["strict"] = function_data["strict"]
             payload["tools"].append(translated_tool)
 
-    return payload
+    return apply_openai_prompt_cache(payload, namespace="codex-responses")
 
 
 def parse_codex_sse_event(data_str: str, state: Optional[Dict[str, Any]] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:

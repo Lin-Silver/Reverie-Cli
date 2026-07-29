@@ -55,10 +55,20 @@ Reverie supports a wide range of LLM providers out of the box. Each provider has
 | **Codex**          | ChatGPT backend or Responses-compatible reverse proxy                                                           | GPT-5.6, GPT-5.5, and other models discovered from the live Codex CLI cache                                                                                                                 |
 | **SenseNova**      | SenseTime SenseNova API with model-specific OpenAI/Anthropic transports                                         | DeepSeek V4 Flash (1M context), SenseNova 6.7 Flash Lite (vision)                                                                                                                           |
 | **AIHubMix**       | Third-party API gateway (OpenAI-compatible)                                                                     | GPT-5.5 Free (with/without reasoning), GPT-4o Free, GPT-4.1 Free                                                                                                                            |
-| **Agnes**          | Agnes AI OpenAI-compatible API (text, image, video)                                                             | Agnes 2.0 Flash (vision + thinking), Agnes 1.5 Flash (vision), image/video generation                                                                                                       |
+| **Agnes**          | Agnes AI OpenAI-compatible API (text, image, video)                                                             | Agnes 2.5 Pro Alpha, Agnes 2.5 Flash, Agnes 2.0 Flash, image/video generation                                                                                                                |
 | **WebGemini**      | Anonymous Gemini Web access via`gemini.google.com`                                                              | Gemini 3.5 Flash, Gemini 3.5 Flash Thinking, Gemini 3.5 Flash Thinking Lite, Gemini 3.1 Pro, Gemini Auto, Gemini Flash Lite                                                                 |
 
 All providers support streaming responses where applicable. Reasoning/thinking toggles, temperature, top_p, max_tokens, and other parameters are configurable per provider.
+
+### Prompt Caching
+
+Reverie prefers provider-side prompt-prefix caching for every production text-model call, including streaming and non-streaming chat, Responses, native HTTP/curl compatibility transports, Context Engine compression, and automatic session handoff:
+
+- OpenAI-compatible requests receive a stable privacy-preserving `prompt_cache_key`; raw compatibility requests also try the llama.cpp-compatible `cache_prompt` hint.
+- Anthropic requests use automatic five-minute caching through `cache_control: {"type": "ephemeral"}`.
+- If a compatible gateway explicitly rejects a cache field, Reverie removes only the cache hints and retries the same request once. Other provider errors keep their existing retry and error behavior.
+
+Cache keys contain hashes of the model, stable system prefix, and tool schema rather than prompt text. Actual cache hits still depend on provider/model support and a sufficiently long identical prefix; WebGemini and media-generation calls do not expose a compatible prompt-cache control.
 
 ### Operating Modes
 
@@ -182,6 +192,7 @@ Reverie-Cli/
 │   │   ├── sensenova.py       ← SenseNova OpenAI-compatible provider
 │   │   ├── aihubmix.py        ← AIHubMix OpenAI-compatible provider
 │   │   ├── agnes.py           ← Agnes AI provider (text/image/video)
+│   │   ├── prompt_cache.py    ← prompt-prefix cache hints and compatibility fallback
 │   │   ├── webgemini.py       ← WebGemini anonymous Gemini Web provider
 │   │   ├── builtin_skills/    ← Bundled skills
 │   │   └── ...
@@ -363,10 +374,10 @@ Reverie uses `config.json` stored in the project's `.reverie/` directory or the 
   "agnes": {
     "enabled": true,
     "api_key": "",
-    "selected_model_id": "agnes-2.0-flash",
-    "selected_model_display_name": "Agnes 2.0 Flash",
+    "selected_model_id": "agnes-2.5-flash",
+    "selected_model_display_name": "Agnes 2.5 Flash",
     "api_url": "https://apihub.agnes-ai.com/v1",
-    "max_context_tokens": 256000,
+    "max_context_tokens": 512000,
     "timeout": 60,
     "max_tokens": 65536,
     "temperature": 0.7,
@@ -564,13 +575,16 @@ Agnes AI OpenAI-compatible API at `https://apihub.agnes-ai.com/v1`. Reverie clas
 
 | Modality | Model ID                | Display Name          | Key capability                   |
 | -------- | ----------------------- | --------------------- | -------------------------------- |
-| LLM      | `agnes-2.0-flash`       | Agnes 2.0 Flash       | 256K context, vision, thinking   |
-| LLM      | `agnes-1.5-flash`       | Agnes 1.5 Flash       | 256K context, vision             |
+| LLM      | `agnes-2.5-pro-alpha`   | Agnes 2.5 Pro Alpha   | 1M context, vision, reasoning    |
+| LLM      | `agnes-2.5-flash`       | Agnes 2.5 Flash       | 512K context, vision, thinking   |
+| LLM      | `agnes-2.0-flash`       | Agnes 2.0 Flash       | 512K context, vision, thinking   |
 | TTI      | `agnes-image-2.1-flash` | Agnes Image 2.1 Flash | text/image input and editing     |
 | TTI      | `agnes-image-2.0-flash` | Agnes Image 2.0 Flash | text/image input and composition |
 | TTV      | `agnes-video-v2.0`      | Agnes Video V2.0      | asynchronous video generation    |
 
 Thinking budgets: `low` (1024), `medium` (4096), `high` (8192).
+
+New configurations default to `agnes-2.5-flash`; existing explicit selections such as `agnes-2.0-flash` remain unchanged.
 
 If live discovery is unavailable, Reverie falls back to this verified built-in catalog. Agnes image and video generation run through the `text_to_image` and `text_to_video` subsystems.
 

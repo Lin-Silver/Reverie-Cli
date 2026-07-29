@@ -10,6 +10,11 @@ from typing import Any, Dict, List, Optional
 import requests
 
 from ..diagnostics import report_suppressed_exception
+from ..prompt_cache import (
+    apply_anthropic_prompt_cache,
+    apply_openai_prompt_cache,
+    call_with_prompt_cache_fallback,
+)
 from ..request_identity import apply_reverie_client_identity
 from .compressor import (
     _apply_nvidia_request_payload_defaults,
@@ -466,7 +471,12 @@ def _request_handoff_summary_text(
                 kwargs[key] = nvidia_options[key]
         if extra_body is not None:
             kwargs["extra_body"] = extra_body
-        response = client.chat.completions.create(**kwargs)
+        kwargs = apply_openai_prompt_cache(kwargs, namespace="session-handoff")
+        response = call_with_prompt_cache_fallback(
+            client.chat.completions.create,
+            kwargs,
+            log=logger,
+        )
         response_text = str(response.choices[0].message.content or "").strip()
         _record_handoff_usage(
             workspace_stats_manager,
@@ -484,7 +494,15 @@ def _request_handoff_summary_text(
         from ..codex import build_codex_request_payload
 
         converted = build_codex_request_payload(model, prompt_messages, tools=None, stream=False)
-        response = client.responses.create(model=model, input=converted["input"], stream=False)
+        response_payload = apply_openai_prompt_cache(
+            {"model": model, "input": converted["input"], "stream": False},
+            namespace="session-handoff",
+        )
+        response = call_with_prompt_cache_fallback(
+            client.responses.create,
+            response_payload,
+            log=logger,
+        )
         response_text = str(getattr(response, "output_text", "") or "").strip()
         _record_handoff_usage(
             workspace_stats_manager,
@@ -505,6 +523,11 @@ def _request_handoff_summary_text(
             "stream": False,
         }
         payload = _apply_nvidia_request_payload_defaults(base_url, payload)
+        payload = apply_openai_prompt_cache(
+            payload,
+            namespace="session-handoff",
+            include_legacy_cache_prompt=True,
+        )
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -552,7 +575,12 @@ def _request_handoff_summary_text(
         }
         if system_message:
             kwargs["system"] = system_message
-        response = client.messages.create(**kwargs)
+        kwargs = apply_anthropic_prompt_cache(kwargs)
+        response = call_with_prompt_cache_fallback(
+            client.messages.create,
+            kwargs,
+            log=logger,
+        )
         if not response.content:
             return ""
         response_text = str(getattr(response.content[0], "text", "") or "").strip()

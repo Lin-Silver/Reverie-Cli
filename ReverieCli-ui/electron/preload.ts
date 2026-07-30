@@ -75,6 +75,7 @@ contextBridge.exposeInMainWorld("reverie", {
   reveal: (target: string) => ipcRenderer.invoke("desktop:reveal", target) as Promise<boolean>,
   openExternal: (url: string) =>
     ipcRenderer.invoke("desktop:open-external", url) as Promise<boolean>,
+  selectRatsEngine: () => ipcRenderer.invoke("desktop:select-rats-engine") as Promise<string | null>,
   platform: process.platform,
   versions: process.versions,
 });

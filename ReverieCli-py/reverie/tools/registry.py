@@ -16,6 +16,7 @@ from .command_exec import CommandExecTool
 from .web_search import WebFetchTool, WebSearchTool
 from .browser_controler import BrowserControlerTool
 from .tool_catalog import ToolCatalogTool
+from .rats_catalog import RatsCatalogTool
 from .task_manager import TaskManagerTool
 from .context_management import ContextManagementTool
 from .memory_retrieval import MemoryRetrievalTool
@@ -196,6 +197,7 @@ def _register_builtin_tools() -> None:
     register_tool_class(WebFetchTool)
     register_tool_class(BrowserControlerTool, exclude_modes=no_writer_or_computer)
     register_tool_class(ToolCatalogTool, expose_schema=False)
+    register_tool_class(RatsCatalogTool, exclude_modes=("writer", "computer-controller"))
     register_tool_class(TaskManagerTool, include_modes=("reverie", "reverie-gamer"))
     register_tool_class(SubagentTool, include_modes=("reverie", "computer-controller"))
     register_tool_class(ContextManagementTool, expose_schema=False)

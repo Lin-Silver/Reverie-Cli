@@ -2,6 +2,11 @@ export type JsonRecord = Record<string, unknown>;
 
 export const CORE_RESPONSE_CONTRACT = {
   listTools: { type: "tools", required: ["tools"] },
+  ratsState: { type: "rats.state", required: ["rats"] },
+  ratsAddEngine: { type: "rats.state", required: ["rats"] },
+  ratsRemoveRoot: { type: "rats.state", required: ["rats"] },
+  ratsSetEnabled: { type: "rats.state", required: ["rats"] },
+  ratsDescribe: { type: "rats.definitions", required: ["definitions"] },
   searchSessions: { type: "session.search", required: ["results"] },
   initialize: { type: "state", required: ["state"] },
   getSession: { type: "session", required: ["session", "sessions"] },

@@ -6,6 +6,7 @@ Current stable version: **v2.5.0** (released 2026-07-17).
 
 - **Core function**: terminal-based AI coding assistant with local workspace tools, context retrieval, session continuity, and multi-provider LLM access
 - **Native desktop**: Electron workspace host using the same Python core, with project/session management, full-window backgrounds, Context Engine file recommendations, arbitrary attachments, settings, tools, plugins, and recovery views
+- **RATS / RTP**: opt-in, executable-local Reverie Engine service discovery with Python-core session ownership, exact permissions, compact catalogs, and progressive native tool schemas
 - **Optional workflows**: spec-driven development, creative writing, browser automation, computer control, and game/3D asset authoring
 - **Multi-provider LLM** support: NVIDIA, ModelScope, Codex (ChatGPT), SenseNova, AIHubMix, Agnes, WebGemini, Opencode
 - **Context Engine**: Augment-style codebase retrieval, LSP integration, git history analysis

@@ -38,7 +38,9 @@ def _desktop_tool_record(record: Dict[str, Any]) -> Dict[str, Any]:
     metadata = dict(record.get("metadata", {}) or {})
     module_name = str(getattr(type(tool), "__module__", "") or "").lower()
     class_name = str(getattr(type(tool), "__name__", "") or "").lower()
-    if "mcp" in module_name or class_name == "mcpdynamictool":
+    if "rats" in module_name or class_name in {"ratsdynamictool", "ratscatalogtool"}:
+        kind = "rats"
+    elif "mcp" in module_name or class_name == "mcpdynamictool":
         kind = "mcp"
     elif "plugin" in module_name or "plugin" in class_name or metadata.get("plugin_id"):
         kind = "runtime-plugin"
@@ -80,6 +82,8 @@ class ReverieSdkBridge:
     """Long-lived bridge used by desktop/settings hosts."""
 
     def __init__(self, event_writer: Optional[Callable[[Dict[str, Any]], None]] = None) -> None:
+        from .rats import RatsRuntime
+
         self.project_root = Path.cwd().resolve()
         self.interface = None
         self.tool_executor = None
@@ -89,6 +93,7 @@ class ReverieSdkBridge:
         self._workspace_index_lock = threading.Lock()
         self._workspace_index_completed_at = 0.0
         self._workspace_index_result = None
+        self.rats_runtime = RatsRuntime()
 
     def _dispose_interface(self) -> None:
         """Release workspace-scoped services without stopping the bridge process."""
@@ -113,6 +118,9 @@ class ReverieSdkBridge:
             self.project_root = root
             self.interface = ReverieInterface(root, headless=True)
             self.interface._context_worker_limit = _interactive_context_worker_limit()
+            self.interface.rats_runtime = self.rats_runtime
+        elif self.interface is not None:
+            self.interface.rats_runtime = self.rats_runtime
         return self.interface
 
     def ensure_tool_executor(self):
@@ -125,6 +133,7 @@ class ReverieSdkBridge:
         self.tool_executor.update_context("security", getattr(config, "security", {}))
         self.tool_executor.update_context("runtime_plugin_manager", interface.runtime_plugin_manager)
         self.tool_executor.update_context("workspace_stats_manager", interface.workspace_stats_manager)
+        self.tool_executor.update_context("rats_runtime", self.rats_runtime)
         return self.tool_executor
 
     def _setting_value(self, item: Dict[str, Any], config: Any, interface: Any) -> Any:
@@ -797,6 +806,37 @@ class ReverieSdkBridge:
                 "mode": mode,
                 "tools": _json_safe([_desktop_tool_record(record) for record in records]),
             }
+        if action == "ratsState":
+            return {"id": request_id, "type": "rats.state", "rats": _json_safe(self.rats_runtime.refresh())}
+        if action == "ratsAddEngine":
+            executable = str(payload.get("executable") or "").strip()
+            if not executable:
+                raise ValueError("A Reverie Engine executable is required.")
+            state = self.rats_runtime.add_engine(Path(executable))
+            return {"id": request_id, "type": "rats.state", "rats": _json_safe(state)}
+        if action == "ratsRemoveRoot":
+            root = str(payload.get("root") or "").strip()
+            if not root:
+                raise ValueError("A RATS discovery root is required.")
+            state = self.rats_runtime.remove_discovery_root(Path(root))
+            return {"id": request_id, "type": "rats.state", "rats": _json_safe(state)}
+        if action == "ratsSetEnabled":
+            executable = str(payload.get("executable") or "").strip()
+            enabled = payload.get("enabled")
+            if not executable or not isinstance(enabled, bool):
+                raise ValueError("RATS executable and boolean enabled state are required.")
+            state = self.rats_runtime.set_engine_enabled(executable, enabled, payload.get("permissions"))
+            return {"id": request_id, "type": "rats.state", "rats": _json_safe(state)}
+        if action == "ratsDescribe":
+            service_id = str(payload.get("serviceId") or "").strip()
+            names = payload.get("names") if isinstance(payload.get("names"), list) else []
+            definitions = self.rats_runtime.describe(service_id, names)
+            return {
+                "id": request_id,
+                "type": "rats.definitions",
+                "service_id": service_id,
+                "definitions": _json_safe(definitions),
+            }
         if action == "callPluginTool":
             from .plugin.dynamic_tool import RuntimePluginDynamicTool
 
@@ -821,6 +861,7 @@ class ReverieSdkBridge:
                 "status": str(getattr(result.status, "value", result.status)),
             }
         if action == "shutdown":
+            self.rats_runtime.shutdown()
             return {"id": request_id, "type": "shutdown"}
         raise ValueError(f"Unknown action: {action}")
 
@@ -882,6 +923,7 @@ def main() -> int:
         result = _dispatch_and_write(message)
         if result.get("type") == "shutdown":
             break
+    bridge.rats_runtime.shutdown()
     return 0
 
 

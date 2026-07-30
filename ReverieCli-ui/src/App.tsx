@@ -81,6 +81,9 @@ import type {
   ModelRecord,
   ModelSource,
   PluginRecord,
+  RatsPermission,
+  RatsServiceRecord,
+  RatsState,
   RecoveryState,
   SessionInfo,
   SessionMessage,
@@ -494,6 +497,9 @@ function Sidebar({
         </button>
         <button type="button" className={view === "tools" ? "active" : ""} onClick={() => setView("tools")}>
           <Wrench size={16} /> {t("工具")}
+        </button>
+        <button type="button" className={view === "rats" ? "active" : ""} onClick={() => setView("rats")}>
+          <Database size={16} /> RATS
         </button>
         <button type="button" className={view === "plugins" ? "active" : ""} onClick={() => setView("plugins")}>
           <Plug size={16} /> {t("插件")}
@@ -1484,7 +1490,7 @@ function ToolsView({ mode }: { mode: string }) {
                   <div><strong>{tool.name}</strong><span>{t(tool.description || "该工具未提供说明。")}</span></div>
                   <div className="tag-row">
                     <span>{tool.category}</span>
-                    <span>{t(tool.kind === "built-in" ? "内置" : tool.kind === "mcp" ? "MCP" : "插件")}</span>
+                    <span>{t(tool.kind === "built-in" ? "内置" : tool.kind === "mcp" ? "MCP" : tool.kind === "rats" ? "RATS" : "插件")}</span>
                     {tool.traits.slice(0, 2).map((trait) => <span key={trait}>{trait}</span>)}
                   </div>
                 </div>
@@ -2069,6 +2075,200 @@ function ConfirmModal({ title, message, confirmLabel, danger = false, close, con
         <p id="confirmation-message">{message}</p>
         <div><button type="button" className="secondary-button" onClick={close}>{t("取消")}</button><button type="button" className={danger ? "danger-button" : "primary-button"} onClick={confirm}>{confirmLabel}</button></div>
       </div>
+    </div>
+  );
+}
+
+const RATS_PERMISSION_OPTIONS: RatsPermission[] = ["read", "project", "edit", "asset", "run", "build", "ai"];
+
+function RatsView() {
+  const { t } = useI18n();
+  const [state, setState] = useState<RatsState | null>(null);
+  const [permissionDrafts, setPermissionDrafts] = useState<Record<string, RatsPermission[]>>({});
+  const [definitions, setDefinitions] = useState<Record<string, Record<string, unknown>>>({});
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+
+  const acceptState = useCallback((next: RatsState) => {
+    setState(next);
+    setPermissionDrafts((current) => {
+      const updated = { ...current };
+      for (const service of next.services) {
+        if (!updated[service.executable]) updated[service.executable] = service.permissions;
+      }
+      for (const selection of next.enabledEngines) updated[selection.executable] = selection.permissions;
+      return updated;
+    });
+  }, []);
+
+  const load = useCallback(async (foreground = false) => {
+    if (foreground) setLoading(true);
+    try {
+      const response = await window.reverie.request("ratsState", {});
+      acceptState(response.rats);
+      setError("");
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : String(loadError));
+    } finally {
+      setLoading(false);
+    }
+  }, [acceptState]);
+
+  useEffect(() => {
+    void load(true);
+    const timer = window.setInterval(() => void load(false), 2500);
+    return () => window.clearInterval(timer);
+  }, [load]);
+
+  const addEngine = useCallback(async () => {
+    setBusy("add");
+    try {
+      const executable = await window.reverie.selectRatsEngine();
+      if (executable) {
+        const response = await window.reverie.request("ratsAddEngine", { executable });
+        acceptState(response.rats);
+      }
+      setError("");
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : String(actionError));
+    } finally {
+      setBusy("");
+    }
+  }, [acceptState]);
+
+  const setEnabled = useCallback(async (service: RatsServiceRecord, enabled: boolean, permissions?: RatsPermission[]) => {
+    setBusy(service.serviceId);
+    try {
+      const selected = permissions ?? permissionDrafts[service.executable] ?? ["read"];
+      const response = await window.reverie.request("ratsSetEnabled", {
+        executable: service.executable,
+        enabled,
+        permissions: selected,
+      });
+      acceptState(response.rats);
+      setError("");
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : String(actionError));
+    } finally {
+      setBusy("");
+    }
+  }, [acceptState, permissionDrafts]);
+
+  const togglePermission = useCallback((service: RatsServiceRecord, permission: RatsPermission) => {
+    const current = permissionDrafts[service.executable] ?? service.permissions;
+    let next = current.includes(permission)
+      ? current.filter((item) => item !== permission)
+      : [...current, permission];
+    if (!next.length) next = ["read"];
+    next = [...new Set(next)].sort() as RatsPermission[];
+    setPermissionDrafts((drafts) => ({ ...drafts, [service.executable]: next }));
+    if (service.enabled) void setEnabled(service, true, next);
+  }, [permissionDrafts, setEnabled]);
+
+  const inspectTool = useCallback(async (service: RatsServiceRecord, name: string) => {
+    const key = `${service.serviceId}:${name}`;
+    setBusy(key);
+    try {
+      const response = await window.reverie.request("ratsDescribe", { serviceId: service.serviceId, names: [name] });
+      setDefinitions((current) => ({ ...current, [key]: response.definitions[0] ?? { name, schema_available: false } }));
+      setError("");
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : String(actionError));
+    } finally {
+      setBusy("");
+    }
+  }, []);
+
+  const removeRoot = useCallback(async (root: string) => {
+    setBusy(root);
+    try {
+      const response = await window.reverie.request("ratsRemoveRoot", { root });
+      acceptState(response.rats);
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : String(actionError));
+    } finally {
+      setBusy("");
+    }
+  }, [acceptState]);
+
+  const connected = state?.services.filter((service) => service.connection === "connected").length ?? 0;
+  const available = state?.services.filter((service) => service.connection !== "unreachable").length ?? 0;
+  const toolCount = state?.services.reduce((total, service) => total + service.tools.length, 0) ?? 0;
+  const offlineSelections = state?.enabledEngines.filter((selection) =>
+    !state.services.some((service) => service.executable.toLowerCase() === selection.executable.toLowerCase())) ?? [];
+
+  return (
+    <div className="page-scroll rats-page">
+      <PageHeader
+        icon={<Database size={20} />}
+        title="RATS"
+        description={t("管理本机 Reverie 智能体工具服务；只有显式启用的服务才会建立 RTP 工具会话。")}
+        action={<div className="header-action-row"><button type="button" className="secondary-button" onClick={() => void load(true)} disabled={loading}><RefreshCw className={loading ? "spin" : ""} size={14} />{t("刷新")}</button><button type="button" className="primary-button" onClick={() => void addEngine()} disabled={busy === "add"}><Plus size={14} />{t("添加 Engine")}</button></div>}
+      />
+      <div className="tool-overview rats-overview">
+        <div><Globe size={17} /><span>{t("发现服务")}<strong>{state?.services.length ?? 0}</strong></span></div>
+        <div><ShieldCheck size={17} /><span>{t("已连接会话")}<strong>{connected}</strong></span></div>
+        <div><Wrench size={17} /><span>{t("已公开工具")}<strong>{toolCount}</strong></span></div>
+      </div>
+      <div className="rats-security-note">
+        <ShieldCheck size={18} />
+        <div><strong>{t("本地优先，工具默认关闭")}</strong><span>{t("RATS 只接受 127.0.0.1 端点。控制令牌和 RTP 会话令牌只保留在 Reverie CLI 核心内存中，不会发送到页面或写入设置。")}</span></div>
+      </div>
+      {error && <div className="page-loading error"><AlertCircle size={18} />{error}</div>}
+      {loading && !state ? <div className="page-loading"><RefreshCw className="spin" size={18} />{t("扫描本地 RATS 服务")}</div> : (
+        <>
+          <div className="rats-section-heading"><div><h2>{t("本机服务")}</h2><p>{t("从 Engine 可执行文件旁的 ReverieLocal/RATS/Services 实时读取。")}</p></div><span>{available}/{state?.services.length ?? 0}</span></div>
+          <div className="rats-service-grid">
+            {state?.services.map((service) => {
+              const selectedPermissions = permissionDrafts[service.executable] ?? service.permissions;
+              const statusLabel = service.connection === "connected" ? t("已连接") : service.connection === "available" ? t("可用") : t("不可达");
+              return (
+                <section className={`rats-service-card ${service.connection}`} key={service.serviceId}>
+                  <div className="rats-service-header">
+                    <div className="rats-service-emblem"><Sparkles size={20} /></div>
+                    <div><h3>{service.product}</h3><p>{service.productVersion || service.protocol}</p></div>
+                    <span className={`rats-status ${service.connection}`}><Circle size={8} fill="currentColor" />{statusLabel}</span>
+                    <Toggle checked={service.enabled} disabled={busy === service.serviceId} onChange={(enabled) => void setEnabled(service, enabled)} />
+                  </div>
+                  <div className="rats-service-meta">
+                    <div><span>{t("端点")}</span><code>{service.endpoint}</code></div>
+                    <div><span>{t("进程")}</span><code>PID {service.pid}</code></div>
+                    <div><span>{t("服务 ID")}</span><code>{service.serviceId}</code></div>
+                    <div className="wide"><span>{t("Engine")}</span><code title={service.executable}>{service.executable}</code></div>
+                  </div>
+                  <div className="rats-permissions">
+                    <div><strong>{t("会话权限")}</strong><span>{t("修改已启用服务的权限会立即轮换会话令牌。")}</span></div>
+                    <div className="permission-chips">
+                      {RATS_PERMISSION_OPTIONS.map((permission) => (
+                        <button type="button" key={permission} className={selectedPermissions.includes(permission) ? "active" : ""} onClick={() => togglePermission(service, permission)} disabled={busy === service.serviceId}>{permission}</button>
+                      ))}
+                    </div>
+                  </div>
+                  {service.error && <div className="rats-inline-error"><AlertCircle size={14} />{service.error}</div>}
+                  <div className="rats-catalog-heading"><div><strong>{t("RTP 紧凑目录")}</strong><span>{service.tools.length ? t("按需展开定义，不把全部 schema 注入提示词。") : t(service.enabled ? "正在等待工具目录" : "启用服务后读取工具目录")}</span></div><span>{service.tools.length}/{service.nativeToolCount}</span></div>
+                  {service.tools.length > 0 && <div className="rats-tool-list">
+                    {service.tools.map((tool) => {
+                      const definitionKey = `${service.serviceId}:${tool.name}`;
+                      return <details key={tool.name} className="rats-tool-row">
+                        <summary><div><strong>{tool.name}</strong><span>{tool.summary || t("暂无说明")}</span></div><span>{tool.permission}</span><ChevronDown size={14} /></summary>
+                        <div className="rats-tool-detail">
+                          <div className="tag-row"><span>{tool.category}</span>{tool.flags.map((flag) => <span key={flag}>{flag}</span>)}</div>
+                          <button type="button" className="secondary-button" onClick={() => void inspectTool(service, tool.name)} disabled={busy === definitionKey}>{busy === definitionKey ? <RefreshCw className="spin" size={13} /> : <FileSearch size={13} />}{t("检查完整定义")}</button>
+                          {definitions[definitionKey] && <pre>{JSON.stringify(definitions[definitionKey], null, 2)}</pre>}
+                        </div>
+                      </details>;
+                    })}
+                  </div>}
+                </section>
+              );
+            })}
+            {state?.services.length === 0 && <div className="empty-panel rats-empty"><Database size={28} /><strong>{t("尚未发现正在运行的 RATS 服务")}</strong><span>{t("启动 Reverie Engine，或添加其可执行文件以登记发现目录。")}</span><button type="button" className="primary-button" onClick={() => void addEngine()}><Plus size={14} />{t("添加 Engine")}</button></div>}
+          </div>
+          {offlineSelections.length > 0 && <section className="rats-offline-panel"><div className="rats-section-heading"><div><h2>{t("已保存但离线")}</h2><p>{t("这些 Engine 下次启动时会自动建立已授权会话。")}</p></div></div>{offlineSelections.map((selection) => <div className="rats-offline-row" key={selection.executable}><Database size={15} /><code>{selection.executable}</code><span>{selection.permissions.join(" · ")}</span></div>)}</section>}
+          {state && state.configuredDiscoveryRoots.length > 0 && <section className="rats-roots-panel"><div className="rats-section-heading"><div><h2>{t("已登记发现目录")}</h2><p>{t("设置实时保存在 Reverie CLI 可执行文件旁的 .reverie/rats 目录中。")}</p></div><code title={state.statePath}>{state.statePath}</code></div>{state.configuredDiscoveryRoots.map((root) => <div className="rats-root-row" key={root}><Folder size={15} /><code>{root}</code><button type="button" aria-label={t("移除发现目录")} onClick={() => void removeRoot(root)} disabled={busy === root}><X size={14} /></button></div>)}</section>}
+        </>
+      )}
     </div>
   );
 }
@@ -2899,7 +3099,7 @@ export default function App() {
 
   const chooseCommand = useCallback((command: CommandRecord) => {
     setCommandOpen(false);
-    const navigation: Record<string, ViewId> = { "/model": "settings", "/settings": "settings", "/setting": "settings", "/tools": "tools", "/plugins": "plugins", "/checkpoints": "recovery", "/operations": "recovery", "/rollback": "recovery" };
+    const navigation: Record<string, ViewId> = { "/model": "settings", "/settings": "settings", "/setting": "settings", "/tools": "tools", "/rats": "rats", "/plugins": "plugins", "/checkpoints": "recovery", "/operations": "recovery", "/rollback": "recovery" };
     const target = navigation[command.command];
     if (target) { setView(target); return; }
     setView("chat");
@@ -2911,6 +3111,7 @@ export default function App() {
   const page = useMemo(() => {
     if (!state) return null;
     if (view === "tools") return <ToolsView mode={state.workspace.mode} />;
+    if (view === "rats") return <RatsView />;
     if (view === "plugins") return <PluginsView plugins={state.plugins.records} updatePlugin={updatePlugin} refresh={refreshPlugins} />;
     if (view === "recovery") return <RecoveryView recovery={state.recovery} rollback={rollback} />;
     if (view === "settings") return <SettingsView state={state} updateSetting={updateSetting} selectModel={selectModel} saveProvider={saveProvider} addStandard={() => setStandardModelOpen(true)} deleteStandard={deleteStandard} paths={desktopPaths} selectCoreData={() => void selectCoreData()} theme={theme} setTheme={changeTheme} preferences={uiPreferences} updatePreferences={updateUiPreferences} selectBackground={() => void selectBackground()} clearBackground={() => void clearBackground()} />;

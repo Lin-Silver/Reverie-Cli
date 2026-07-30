@@ -10,6 +10,7 @@ Reverie CLI is a context-engine-powered AI coding assistant for large repositori
 - **Rich TUI** - selectors, streaming output, help browser, status panels, session browsing, checkpoint rollback, command discovery
 - **Workspace Safety** - workspace-only mutation paths, internal shadow-Git checkpoints, delete backups, audited command execution, archive extraction hardening
 - **Game Tooling** - built-in `Reverie Engine` runtime, work-in-progress Reverie-Gamer prompt-to-vertical-slice workflow, Blender plugin-assisted authoring, Godot/O3DE migration patterns inside the unified engine, and a built-in Ashfox MCP bridge for optional Blockbench sessions
+- **RATS / RTP** - executable-local Reverie Engine discovery, opt-in permission sessions, and progressively loaded native Engine tools owned by the Python core
 
 ## Latest Update
 

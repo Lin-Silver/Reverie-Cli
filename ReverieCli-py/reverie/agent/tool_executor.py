@@ -22,6 +22,8 @@ from ..diagnostics import report_suppressed_exception
 from ..modes import normalize_mode
 from ..tools.base import BaseTool, ToolResult
 from ..tools.mcp_dynamic import MCPDynamicTool
+from ..tools.rats_catalog import RatsCatalogTool
+from ..tools.rats_dynamic import RatsDynamicTool
 from ..tools.registry import (
     get_registered_tool_classes,
     get_supported_modes_for_tool,
@@ -98,6 +100,8 @@ class ToolExecutor:
         self._mcp_generation: int = -1
         self._runtime_plugin_tool_names: set[str] = set()
         self._runtime_plugin_generation: int = -1
+        self._rats_tool_names: set[str] = set()
+        self._rats_generation: int = -1
         self._schema_cache: Dict[tuple[Any, ...], List[Dict[str, Any]]] = {}
         self._session_approved_tools: set[str] = set()
         self._init_tools()
@@ -292,7 +296,14 @@ class ToolExecutor:
                         return False
                 except Exception:
                     return False
-        if normalized_mode == "writer" and isinstance(tool, (MCPDynamicTool, RuntimePluginDynamicTool)):
+        if isinstance(tool, RatsCatalogTool):
+            runtime = self.context.get("rats_runtime")
+            try:
+                if runtime is None or not runtime.has_connected_services():
+                    return False
+            except Exception:
+                return False
+        if normalized_mode == "writer" and isinstance(tool, (MCPDynamicTool, RuntimePluginDynamicTool, RatsDynamicTool)):
             return False
         if isinstance(tool, MCPDynamicTool) and not tool.visible_in_mode(normalized_mode):
             return False
@@ -409,10 +420,50 @@ class ToolExecutor:
         self._rebuild_tool_alias_lookup()
         self._invalidate_schema_cache()
 
+    def _sync_rats_tools(self) -> None:
+        """Refresh progressively disclosed native RATS tools."""
+        runtime = self.context.get("rats_runtime")
+        if runtime is None:
+            if self._rats_tool_names:
+                for name in list(self._rats_tool_names):
+                    self._tools.pop(name, None)
+                self._rats_tool_names = set()
+                self._rats_generation = -1
+                self._rebuild_tool_alias_lookup()
+                self._invalidate_schema_cache()
+            return
+        try:
+            definitions = runtime.get_tool_definitions(force_refresh=False)
+            generation = int(runtime.get_generation())
+        except Exception as exc:
+            logger.debug("Failed to sync RATS tools: %s", exc, exc_info=True)
+            return
+        definition_names = {
+            str(item.get("name", "")).strip()
+            for item in definitions
+            if isinstance(item, dict) and str(item.get("name", "")).strip()
+        }
+        if generation == self._rats_generation and definition_names == self._rats_tool_names:
+            return
+        for name in list(self._rats_tool_names):
+            self._tools.pop(name, None)
+        new_names: set[str] = set()
+        for metadata in definitions:
+            if not isinstance(metadata, dict):
+                continue
+            tool = RatsDynamicTool(self.context, metadata)
+            self._register_tool_instance(tool)
+            new_names.add(tool.name)
+        self._rats_tool_names = new_names
+        self._rats_generation = generation
+        self._rebuild_tool_alias_lookup()
+        self._invalidate_schema_cache()
+
     def _sync_dynamic_tools(self) -> None:
         """Refresh all non-built-in dynamic tool surfaces."""
         self._sync_mcp_tools()
         self._sync_runtime_plugin_tools()
+        self._sync_rats_tools()
     
     def get_tool(self, name: str) -> Optional[BaseTool]:
         """Get a tool by name"""
@@ -1138,6 +1189,7 @@ class ToolExecutor:
             normalized_mode,
             self._mcp_generation,
             self._runtime_plugin_generation,
+            self._rats_generation,
             self._configured_permission_level(),
         )
         cached = self._schema_cache.get(cache_key)
@@ -1167,4 +1219,8 @@ class ToolExecutor:
             self._runtime_plugin_generation = -1
             if sync_dynamic:
                 self._sync_runtime_plugin_tools()
+        if key == "rats_runtime":
+            self._rats_generation = -1
+            if sync_dynamic:
+                self._sync_rats_tools()
         self._invalidate_schema_cache()

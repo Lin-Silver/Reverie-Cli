@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
 import { DEFAULT_UI_PREFERENCES } from "./preferences";
-import type { DesktopState, SessionState } from "./types";
+import type { DesktopState, RatsState, SessionState } from "./types";
 
 const baseSession: SessionState = {
   id: "session-1",
@@ -120,6 +120,35 @@ const desktopState: DesktopState = {
 
 function installDesktopApi() {
   let promptFinished = false;
+  let ratsEnabled = false;
+  const ratsState = (): RatsState => ({
+    protocol: "reverie.rtp/1",
+    statePath: "C:/core/.reverie/rats/settings.json",
+    discoveryRoots: ["C:/Engine/ReverieLocal/RATS/Services"],
+    configuredDiscoveryRoots: ["C:/Engine/ReverieLocal/RATS/Services"],
+    enabledEngines: ratsEnabled ? [{ executable: "C:/Engine/reverie.windows.editor.x86_64.exe", permissions: ["read"] }] : [],
+    services: [{
+      serviceId: "rats-4242-testservice",
+      product: "Reverie Engine",
+      productVersion: "0.1.dev.custom_build",
+      executable: "C:/Engine/reverie.windows.editor.x86_64.exe",
+      pid: 4242,
+      endpoint: "http://127.0.0.1:17777/rtp",
+      protocol: "reverie.rtp/1",
+      descriptorPath: "C:/Engine/ReverieLocal/RATS/Services/rats-4242-testservice.json",
+      catalogRevision: "catalog",
+      nativeToolCount: 35,
+      startedUtc: "2026-07-29T12:00:00",
+      enabled: ratsEnabled,
+      connection: ratsEnabled ? "connected" : "available",
+      sessionActive: ratsEnabled,
+      permissions: ["read"],
+      tools: ratsEnabled ? [{ key: "project1", name: "project.status", category: "project", summary: "Read selected project state.", permission: "read", flags: ["main_thread"], schema: "schema" }] : [],
+      loadedToolNames: ratsEnabled ? ["project.status"] : [],
+      error: "",
+    }],
+    updatedAt: "2026-07-29T12:00:00Z",
+  });
   const request = vi.fn(async (action: string, payload: Record<string, unknown>) => {
     if (action === "initialize") return { type: "state", state: desktopState };
     if (action === "getSession") {
@@ -139,6 +168,15 @@ function installDesktopApi() {
       };
     }
     if (action === "listTools") return { type: "tools", mode: "reverie", tools: [] };
+    if (action === "ratsState") return { type: "rats.state", rats: ratsState() };
+    if (action === "ratsAddEngine" || action === "ratsRemoveRoot") return { type: "rats.state", rats: ratsState() };
+    if (action === "ratsSetEnabled") {
+      ratsEnabled = payload.enabled === true;
+      return { type: "rats.state", rats: ratsState() };
+    }
+    if (action === "ratsDescribe") {
+      return { type: "rats.definitions", service_id: String(payload.serviceId), definitions: [{ name: "project.status", request_schema: { type: "object" }, response_schema: { type: "object" } }] };
+    }
     if (action === "selectModel") {
       return {
         type: "model.selected",
@@ -191,6 +229,7 @@ function installDesktopApi() {
     clearBackground: vi.fn(async () => DEFAULT_UI_PREFERENCES),
     reveal: vi.fn(async () => true),
     openExternal: vi.fn(async () => true),
+    selectRatsEngine: vi.fn(async () => "C:/Engine/reverie.windows.editor.x86_64.exe"),
     platform: "win32",
     versions: {},
   };
@@ -306,5 +345,26 @@ describe("desktop GUI interactions", () => {
       modelId: "thinking-model",
       reasoning: "high",
     }));
+  });
+
+  it("opens the RATS page, explicitly enables a service, and inspects one progressive definition", async () => {
+    const { api } = installDesktopApi();
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "RATS" }));
+    expect(await screen.findByText("Reverie Engine")).toBeTruthy();
+    expect(screen.getByText("http://127.0.0.1:17777/rtp")).toBeTruthy();
+
+    await user.click(screen.getByRole("switch"));
+    await waitFor(() => expect(api.request).toHaveBeenCalledWith("ratsSetEnabled", {
+      executable: "C:/Engine/reverie.windows.editor.x86_64.exe",
+      enabled: true,
+      permissions: ["read"],
+    }));
+    await user.click(await screen.findByText("project.status"));
+    await user.click(screen.getByRole("button", { name: "检查完整定义" }));
+    await waitFor(() => expect(api.request).toHaveBeenCalledWith("ratsDescribe", { serviceId: "rats-4242-testservice", names: ["project.status"] }));
+    expect(await screen.findByText(/request_schema/)).toBeTruthy();
   });
 });

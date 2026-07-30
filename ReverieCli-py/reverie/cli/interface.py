@@ -978,6 +978,7 @@ class ReverieInterface:
             runtime_plugin_manager=self.runtime_plugin_manager,
         )
         self.mcp_runtime.set_discovery_listener(self._handle_mcp_discovery_complete)
+        self.rats_runtime = None
         self.rules_manager = RulesManager(project_root)
         self._context_engine_init_lock = threading.RLock()
         self._context_engine_warmup_thread: Optional[threading.Thread] = None
@@ -3687,6 +3688,8 @@ class ReverieInterface:
         # the startup critical path; ToolExecutor synchronizes them lazily on
         # the first tool/schema lookup and then tracks catalog generations.
         self.agent.tool_executor.update_context('mcp_runtime', self.mcp_runtime, sync_dynamic=False)
+        if self.rats_runtime is not None:
+            self.agent.tool_executor.update_context('rats_runtime', self.rats_runtime, sync_dynamic=False)
         self.agent.tool_executor.update_context(
             'runtime_plugin_manager',
             self.runtime_plugin_manager,

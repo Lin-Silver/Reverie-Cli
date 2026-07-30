@@ -2,6 +2,10 @@
 
 Released 2026-07-17.
 
+### Post-release update (still v2.5.0) — 2026-07-29
+
+* Added the first verified Reverie RATS/RTP client slice: the Python core now owns executable-local Engine discovery, explicit permission sessions, token-safe persisted selection, compact catalogs, progressive native schema loading, and direct dynamic Engine tools. Reverie Desktop adds a dedicated RATS status/permission/catalog page while keeping all RTP credentials out of Electron and the renderer. Third-party RATS download/install remains open.
+
 ### Post-release update (still v2.5.0) — 2026-07-21
 
 * Added cache-first prompt input across production text-model transports. OpenAI Chat/Responses/native HTTP/curl calls now use stable privacy-preserving cache keys (plus the local-compatible `cache_prompt` hint where applicable), Anthropic calls enable automatic ephemeral caching, and Context Engine compression/session handoff use the same policy. Gateways that explicitly reject cache fields are retried once without only those hints.

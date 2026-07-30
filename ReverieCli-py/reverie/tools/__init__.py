@@ -30,6 +30,7 @@ from .command_exec import CommandExecTool
 from .web_search import WebFetchTool, WebSearchTool
 from .browser_controler import BrowserControlerTool
 from .tool_catalog import ToolCatalogTool
+from .rats_catalog import RatsCatalogTool
 from .task_manager import TaskManagerTool
 from .subagent import SubagentTool
 from .context_management import ContextManagementTool
@@ -78,6 +79,7 @@ from .open_computer_use import (
     TypeTextTool,
 )
 from .mcp_dynamic import MCPDynamicTool
+from .rats_dynamic import RatsDynamicTool
 from .mcp_resource_tools import ListMcpResourcesTool, ReadMcpResourceTool
 
 __all__ = [
@@ -94,6 +96,7 @@ __all__ = [
     'WebFetchTool',
     "BrowserControlerTool",
     'ToolCatalogTool',
+    "RatsCatalogTool",
     'TaskManagerTool',
     "SubagentTool",
     "ContextManagementTool",
@@ -141,6 +144,7 @@ __all__ = [
     "SetValueTool",
     "TypeTextTool",
     "MCPDynamicTool",
+    "RatsDynamicTool",
     "ListMcpResourcesTool",
     "ReadMcpResourceTool",
 ]

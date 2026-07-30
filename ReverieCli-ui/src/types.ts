@@ -1,4 +1,52 @@
-export type ViewId = "chat" | "tools" | "plugins" | "recovery" | "settings";
+export type ViewId = "chat" | "tools" | "rats" | "plugins" | "recovery" | "settings";
+
+export type RatsPermission = "read" | "project" | "edit" | "asset" | "ai" | "run" | "build";
+
+export interface RatsCompactTool {
+  key: string;
+  name: string;
+  category: string;
+  summary: string;
+  permission: string;
+  flags: string[];
+  schema: string | null;
+}
+
+export interface RatsEngineSelection {
+  executable: string;
+  permissions: RatsPermission[];
+}
+
+export interface RatsServiceRecord {
+  serviceId: string;
+  product: string;
+  productVersion: string;
+  executable: string;
+  pid: number;
+  endpoint: string;
+  protocol: string;
+  descriptorPath: string;
+  catalogRevision: string;
+  nativeToolCount: number;
+  startedUtc: string;
+  enabled: boolean;
+  connection: "connected" | "available" | "unreachable";
+  sessionActive: boolean;
+  permissions: RatsPermission[];
+  tools: RatsCompactTool[];
+  loadedToolNames: string[];
+  error: string;
+}
+
+export interface RatsState {
+  protocol: "reverie.rtp/1";
+  statePath: string;
+  discoveryRoots: string[];
+  configuredDiscoveryRoots: string[];
+  enabledEngines: RatsEngineSelection[];
+  services: RatsServiceRecord[];
+  updatedAt: string;
+}
 
 export interface CoreInfo {
   version: string;

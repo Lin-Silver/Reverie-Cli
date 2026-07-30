@@ -141,6 +141,17 @@ async function updateDesktopSettings(patch: DesktopSettings): Promise<DesktopSet
   return mutateDesktopSettings((settings) => ({ ...settings, ...patch }));
 }
 
+const ratsDiscoveryRoots = String(process.env.REVERIE_RATS_DISCOVERY_ROOTS ?? "")
+  .split(path.delimiter)
+  .map((item) => item.trim())
+  .filter(Boolean);
+ratsDiscoveryRoots.push(
+  path.join(executableHome, "ReverieLocal", "RATS", "Services"),
+  ...(!app.isPackaged
+    ? [path.resolve(uiRoot, "..", "..", "Reverie Engine", "Reverie Engine", "bin", "ReverieLocal", "RATS", "Services")]
+    : []),
+);
+
 function rememberProject(preferences: StoredUiPreferences, projectRoot: string): StoredUiPreferences {
   const resolved = path.resolve(projectRoot);
   const recentProjects = [
@@ -262,6 +273,7 @@ class CoreBridge {
           PYTHONIOENCODING: "utf-8",
           PYTHONUTF8: "1",
           REVERIE_APP_ROOT: this.coreAppRoot,
+          REVERIE_RATS_DISCOVERY_ROOTS: [...new Set(ratsDiscoveryRoots.map((item) => path.resolve(item)))].join(path.delimiter),
           TEMP: runtimePaths.temp,
           TMP: runtimePaths.temp,
         },
@@ -745,6 +757,21 @@ ipcMain.handle("desktop:open-external", async (_event, url: string) => {
   return true;
 });
 
+ipcMain.handle("desktop:select-rats-engine", async () => {
+  if (!mainWindow) return null;
+  const preferences = normalizeUiPreferences((await readDesktopSettings()).ui);
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: localizedUiText(preferences.language, "选择 Reverie Engine 可执行文件", "Choose a Reverie Engine executable"),
+    defaultPath: executableHome,
+    properties: ["openFile"],
+    filters: process.platform === "win32"
+      ? [{ name: "Reverie Engine", extensions: ["exe"] }]
+      : undefined,
+  });
+  if (result.canceled || !result.filePaths[0]) return null;
+  return path.resolve(result.filePaths[0]);
+});
+
 async function runTuiFromDesktop(settings: DesktopSettings): Promise<void> {
   const executable = await selectKernelPath(false);
   const projectRoot = launchOptions.projectRoot && isWorkspaceDirectory(launchOptions.projectRoot)
@@ -802,11 +829,11 @@ app.on("window-all-closed", () => {
 
 let coreStoppedForQuit = false;
 app.on("before-quit", (event) => {
-  if (coreStoppedForQuit || !bridge) return;
+  if (coreStoppedForQuit) return;
   event.preventDefault();
   const activeBridge = bridge;
   bridge = null;
-  void activeBridge.stop("Application is closing.").finally(() => {
+  void activeBridge?.stop("Application is closing.").finally(() => {
     coreStoppedForQuit = true;
     app.quit();
   });

@@ -9,6 +9,7 @@ from ..modes import get_mode_display_name, get_mode_tool_discovery_profile, norm
 from ..plugin.dynamic_tool import RuntimePluginDynamicTool
 from .base import BaseTool, ToolResult
 from .mcp_dynamic import MCPDynamicTool
+from .rats_dynamic import RatsDynamicTool
 
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
@@ -136,6 +137,8 @@ next in the active mode.
     def _classify_tool_kind(self, tool: BaseTool) -> str:
         if isinstance(tool, MCPDynamicTool):
             return "mcp"
+        if isinstance(tool, RatsDynamicTool):
+            return "rats"
         if isinstance(tool, RuntimePluginDynamicTool):
             return "runtime-plugin"
         return "built-in"

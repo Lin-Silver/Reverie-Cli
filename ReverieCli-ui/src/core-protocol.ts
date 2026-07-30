@@ -9,6 +9,7 @@ import type {
   SessionState,
   SettingsState,
   ToolRecord,
+  RatsState,
   WorkspaceState,
 } from "./types";
 
@@ -33,6 +34,11 @@ export interface WorkspaceMention extends Record<string, unknown> {
 
 interface CoreRequestMap {
   listTools: { payload: { mode: string }; response: Envelope<"tools", { mode: string; tools: ToolRecord[] }> };
+  ratsState: { payload: EmptyPayload; response: Envelope<"rats.state", { rats: RatsState }> };
+  ratsAddEngine: { payload: { executable: string }; response: Envelope<"rats.state", { rats: RatsState }> };
+  ratsRemoveRoot: { payload: { root: string }; response: Envelope<"rats.state", { rats: RatsState }> };
+  ratsSetEnabled: { payload: { executable: string; enabled: boolean; permissions: string[] }; response: Envelope<"rats.state", { rats: RatsState }> };
+  ratsDescribe: { payload: { serviceId: string; names: string[] }; response: Envelope<"rats.definitions", { service_id: string; definitions: Record<string, unknown>[] }> };
   searchSessions: { payload: { query: string }; response: Envelope<"session.search", { query: string; results: SessionSearchResult[] }> };
   initialize: { payload: { projectRoot: string }; response: Envelope<"state", { state: DesktopState }> };
   getSession: { payload: { sessionId: string }; response: Envelope<"session", { session: SessionState; sessions: SessionListState }> };

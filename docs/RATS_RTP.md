@@ -1,16 +1,19 @@
 # Reverie RATS / RTP
 
-RATS is the Reverie ecosystem's agentic-tool runtime and service layer. RTP
-(`reverie.rtp/1`) is its versioned tool protocol. Reverie Engine and future
-explicitly supported Reverie/Rilance applications are RATS providers; Reverie
-CLI is the client, management center, and AI scheduling environment. Together
-they form the Reverie Agentic Developer Environment (RADE).
+RATS is the Reverie ecosystem's multi-provider agentic-tool runtime and service
+layer. RTP (`reverie.rtp/1`) is its versioned tool protocol. Explicitly
+supported Reverie/Rilance applications can each be RATS providers; Reverie CLI
+is the client, management center, active-provider selector, and AI scheduling
+environment. Together they form the Reverie Agentic Developer Environment
+(RADE). RATS is not an Engine-only protocol.
 
-The current fixed provider allowlist contains only `reverie.engine`. The Engine
-starts its loopback service with the editor, but Reverie CLI does not show it
-until a registered executable-local descriptor passes a live identity handshake
-and does not enable any native tool until the user explicitly turns that Engine
-on in the desktop RATS page.
+The current production allowlist and user-selectable provider list contain one
+implemented entry: `reverie.engine` (Reverie Engine). This describes present
+product availability, not a protocol limitation or permanent uniqueness rule.
+The Engine starts its loopback service with the editor, but Reverie CLI does not
+show it until a registered executable-local descriptor passes a live identity
+handshake and does not enable any native tool until the user explicitly turns
+that provider on in the desktop RATS page.
 
 ## Local data and trust boundary
 
@@ -102,9 +105,14 @@ desktop-core→RTP E2E passes against exact Engine binary
 `0.1.dev.custom_build.36888aaf3`. The log drawer is interaction-tested but has
 not received a current real-window visual inspection.
 
-Only Reverie Engine is currently supported. Each future Reverie/Rilance
-provider needs a versioned identity/capability contract, an explicit client
-allowlist entry, and real cross-product E2E. Arbitrary third-party package
-discovery/download/installation is outside the current RATS model. Multi-client
+RATS is designed for multiple explicitly supported Reverie/Rilance providers,
+but Reverie Engine is the only provider currently implemented, verified, and
+shown in the active selection list. Each additional provider needs a versioned
+identity/capability contract, an explicit client allowlist entry, and real
+cross-product E2E before it can appear. Arbitrary third-party package discovery,
+download, or installation is outside the current RATS model. Multi-client
 sessions, streamed RTP task events, and remote transports also remain open and
 must not be presented as complete.
+
+The provider-neutral client cleanup task and its acceptance criteria are in
+[`RATS_PROVIDER_GENERALIZATION_HANDOFF.md`](RATS_PROVIDER_GENERALIZATION_HANDOFF.md).

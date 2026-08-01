@@ -19,7 +19,8 @@
 | [Context Engine Retrieval Results](CONTEXT_ENGINE_BENCHMARK.md) | Brief SWE-bench Lite file-localization results and interpretation |
 | [Development Guide](DEVELOPMENT.md) | Local setup, testing, packaging, and documentation maintenance rules |
 | [Security Permissions](SECURITY_PERMISSIONS.md) | Permission levels, permanently blocked operations, and trust boundaries |
-| [RATS / RTP](RATS_RTP.md) | Local Reverie Engine service discovery, permission sessions, desktop management, and progressive native tool loading |
+| [RATS / RTP](RATS_RTP.md) | Allowlisted Reverie/Rilance provider discovery, active selection, permission sessions, desktop management, and progressive native tool loading |
+| [RATS Provider Generalization Handoff](RATS_PROVIDER_GENERALIZATION_HANDOFF.md) | Coding-agent brief for removing Engine-only client assumptions while keeping Engine as the sole current production selection |
 | [Roadmap](ROADMAP.md) | Single source of truth for planned game-runtime and Gamer work |
 | [Changelog](changelog.md) | Release history and version notes |
 

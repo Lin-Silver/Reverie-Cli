@@ -44,6 +44,14 @@ describe("session interaction helpers", () => {
     })).toEqual([{ name: "read_file", arguments: '{\n  "path": "src/App.tsx"\n}' }]);
   });
 
+  it("omits RATS tool arguments from UI activity records", () => {
+    expect(toolCallRecords({
+      role: "assistant",
+      content: null,
+      tool_calls: [{ function: { name: "rats_reverie_engine_ping", arguments: { token: "secret" } } }],
+    })).toEqual([{ name: "rats_reverie_engine_ping", arguments: "" }]);
+  });
+
   it("normalizes provider-specific reasoning fields", () => {
     expect(messageReasoningText({ role: "assistant", content: "", reasoning_content: "native" })).toBe("native");
     expect(messageReasoningText({ role: "assistant", content: "", thinking: [{ text: "provider" }, { text: "trace" }] })).toBe("provider\ntrace");

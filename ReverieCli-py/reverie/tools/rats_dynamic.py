@@ -10,7 +10,7 @@ from ..rats import RatsClientError
 
 
 class RatsDynamicTool(BaseTool):
-    """Expose one progressively loaded Reverie Engine tool to the agent."""
+    """Expose one progressively loaded native RATS provider tool to the agent."""
 
     def __init__(self, context: Optional[Dict[str, Any]], metadata: Dict[str, Any]):
         super().__init__(context=context)
@@ -18,11 +18,11 @@ class RatsDynamicTool(BaseTool):
         self.name = str(self.metadata.get("name", "") or "").strip() or "rats_tool"
         self.search_hint = str(self.metadata.get("qualified_name", "") or "").strip()
         self.tool_category = str(self.metadata.get("category", "") or "rats").strip() or "rats"
-        self.tool_tags = tuple(self.metadata.get("tags", []) or ()) + ("rats", "rtp", "reverie-engine")
+        self.tool_tags = tuple(dict.fromkeys(tuple(self.metadata.get("tags", []) or ()) + ("rats", "rtp")))
         self.read_only = bool(self.metadata.get("read_only", False))
         self.concurrency_safe = bool(self.metadata.get("concurrency_safe", False))
         self.destructive = bool(self.metadata.get("destructive", False))
-        self.description = str(self.metadata.get("description", "") or "").strip() or "Native Reverie Engine tool."
+        self.description = str(self.metadata.get("description", "") or "").strip() or "Native RATS provider tool."
         qualified_name = str(self.metadata.get("qualified_name", "") or "").strip()
         permission = str(self.metadata.get("permission", "") or "none").strip()
         if qualified_name:
@@ -45,8 +45,9 @@ class RatsDynamicTool(BaseTool):
         try:
             response = runtime.call_tool(
                 str(self.metadata.get("service_id", "") or ""),
-                str(self.metadata.get("engine_tool_name", "") or ""),
+                str(self.metadata.get("native_tool_name", "") or ""),
                 kwargs,
+                provider_id=str(self.metadata.get("provider_id", "") or ""),
             )
         except Exception as exc:
             return ToolResult.fail(str(exc))

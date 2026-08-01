@@ -123,7 +123,7 @@ describe.skipIf(!engineBinary)("RATS integration with a real Reverie Engine", ()
 
     try {
       await core.ready();
-      await core.request("ratsAddEngine", { executable: binary });
+      await core.request("ratsRegisterProvider", { providerId: "reverie.engine", executable: binary });
       let rats = (await core.request("ratsState")).rats as {
         services: Array<Record<string, unknown>>;
         statePath: string;
@@ -157,7 +157,7 @@ describe.skipIf(!engineBinary)("RATS integration with a real Reverie Engine", ()
       expect(rats.scanDurationMs).toBeLessThan(1_500);
       expect(rats.diagnostics.some((entry) => entry.event === "rtp.request" && entry.operation === "hello")).toBe(true);
 
-      rats = (await core.request("ratsSetEnabled", { executable: binary, enabled: true, permissions: ["read"] })).rats as typeof rats;
+      rats = (await core.request("ratsSetProviderEnabled", { providerId: "reverie.engine", executable: binary, enabled: true, permissions: ["read"] })).rats as typeof rats;
       const connected = rats.services.find((service) => path.resolve(String(service.executable)) === binary);
       expect(connected).toMatchObject({ connection: "connected", enabled: true, sessionActive: true });
       expect((connected?.tools as Array<Record<string, unknown>>).some((tool) => tool.name === "project.status")).toBe(true);
@@ -175,7 +175,7 @@ describe.skipIf(!engineBinary)("RATS integration with a real Reverie Engine", ()
       })).definitions as Array<Record<string, unknown>>;
       expect(definitions.map((definition) => definition.name)).toEqual(["ping", "project.status"]);
 
-      rats = (await core.request("ratsSetEnabled", { executable: binary, enabled: false, permissions: [] })).rats as typeof rats;
+      rats = (await core.request("ratsSetProviderEnabled", { providerId: "reverie.engine", executable: binary, enabled: false, permissions: [] })).rats as typeof rats;
       expect(rats.services.find((service) => path.resolve(String(service.executable)) === binary))
         .toMatchObject({ connection: "available", enabled: false, sessionActive: false });
       await core.request("shutdown");

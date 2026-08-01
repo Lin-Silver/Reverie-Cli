@@ -3,6 +3,9 @@ export type JsonRecord = Record<string, unknown>;
 export const CORE_RESPONSE_CONTRACT = {
   listTools: { type: "tools", required: ["tools"] },
   ratsState: { type: "rats.state", required: ["rats"] },
+  ratsRegisterProvider: { type: "rats.state", required: ["rats"] },
+  ratsSetProviderEnabled: { type: "rats.state", required: ["rats"] },
+  // Deprecated protocol aliases retained until packaged Desktop clients migrate.
   ratsAddEngine: { type: "rats.state", required: ["rats"] },
   ratsRemoveRoot: { type: "rats.state", required: ["rats"] },
   ratsSetEnabled: { type: "rats.state", required: ["rats"] },

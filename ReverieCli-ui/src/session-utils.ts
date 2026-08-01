@@ -59,12 +59,16 @@ export function toolCallRecords(message: SessionMessage): ToolCallRecord[] {
   return (message.tool_calls ?? []).flatMap((call) => {
     const name = call.function?.name?.trim() ?? "";
     if (!name) return [];
+    const isRatsTool = name.toLowerCase().startsWith("rats_");
     const rawArguments = call.function?.arguments;
-    const argumentsText = typeof rawArguments === "string"
-      ? rawArguments
-      : rawArguments
-        ? JSON.stringify(rawArguments, null, 2)
-        : "";
+    let argumentsText = "";
+    if (!isRatsTool) {
+      argumentsText = typeof rawArguments === "string"
+        ? rawArguments
+        : rawArguments
+          ? JSON.stringify(rawArguments, null, 2)
+          : "";
+    }
     return [{ name, arguments: argumentsText }];
   });
 }

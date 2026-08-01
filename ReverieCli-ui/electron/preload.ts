@@ -75,6 +75,9 @@ contextBridge.exposeInMainWorld("reverie", {
   reveal: (target: string) => ipcRenderer.invoke("desktop:reveal", target) as Promise<boolean>,
   openExternal: (url: string) =>
     ipcRenderer.invoke("desktop:open-external", url) as Promise<boolean>,
+  selectRatsProvider: (providerId: string) =>
+    ipcRenderer.invoke("desktop:select-rats-provider", providerId) as Promise<string | null>,
+  // Deprecated alias retained for packaged renderer compatibility.
   selectRatsEngine: () => ipcRenderer.invoke("desktop:select-rats-engine") as Promise<string | null>,
   platform: process.platform,
   versions: process.versions,

@@ -24,6 +24,8 @@ interface ReverieDesktopApi {
   clearBackground(): Promise<UiPreferences>;
   reveal(target: string): Promise<boolean>;
   openExternal(url: string): Promise<boolean>;
+  selectRatsProvider(providerId: string): Promise<string | null>;
+  /** Deprecated compatibility alias for the original Engine-only picker. */
   selectRatsEngine(): Promise<string | null>;
   platform: string;
   versions: Record<string, string>;

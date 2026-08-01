@@ -9,18 +9,18 @@ from .base import BaseTool, ToolResult
 
 
 class RatsCatalogTool(BaseTool):
-    """Search compact catalogs and progressively load native Engine schemas."""
+    """Search compact catalogs and progressively load native provider schemas."""
 
     name = "rats_catalog"
     aliases = ("rats_tools", "reverie_engine_tools", "rtp_catalog")
-    search_hint = "discover load inspect and call native Reverie Engine tools through RATS RTP"
+    search_hint = "discover load inspect and call native RATS provider tools through RTP"
     tool_category = "orchestration"
-    tool_tags = ("rats", "rtp", "reverie-engine", "discover", "tool")
+    tool_tags = ("rats", "rtp", "discover", "tool")
     read_only = True
     concurrency_safe = False
     always_load = True
     description = (
-        "Search the compact catalogs of enabled Reverie Engine RATS services. "
+        "Search the compact catalogs of enabled RATS provider services. "
         "Search/load progressively reveals only relevant native schemas; those tools become directly callable on the next agent step."
     )
     parameters = {
@@ -33,11 +33,12 @@ class RatsCatalogTool(BaseTool):
             },
             "query": {"type": "string", "description": "Task keywords for search."},
             "service_id": {"type": "string", "description": "Optional exact connected RATS service id."},
+            "provider_id": {"type": "string", "description": "Optional exact allowlisted RATS provider id."},
             "names": {
                 "type": "array",
                 "items": {"type": "string"},
                 "maxItems": 16,
-                "description": "Exact Engine tool names for load.",
+                "description": "Exact native provider tool names for load.",
             },
             "max_results": {"type": "integer", "minimum": 1, "maximum": 16, "default": 5},
         },
@@ -58,6 +59,7 @@ class RatsCatalogTool(BaseTool):
         runtime = self._runtime()
         operation = str(kwargs.get("operation") or "").strip().lower()
         service_id = str(kwargs.get("service_id") or "").strip()
+        provider_id = str(kwargs.get("provider_id") or "").strip()
         try:
             if operation == "list":
                 rows = runtime.compact_catalog()
@@ -68,6 +70,7 @@ class RatsCatalogTool(BaseTool):
                     str(kwargs.get("query") or ""),
                     limit=min(16, max(1, int(kwargs.get("max_results", 5) or 5))),
                     service_id=service_id,
+                    provider_id=provider_id,
                     load=True,
                 )
                 payload = {
@@ -76,7 +79,7 @@ class RatsCatalogTool(BaseTool):
                 }
             elif operation == "load":
                 names = kwargs.get("names") if isinstance(kwargs.get("names"), list) else []
-                definitions = runtime.describe(service_id, names)
+                definitions = runtime.describe(service_id, names, provider_id=provider_id)
                 payload = {
                     "loaded_for_next_step": [str(item.get("name") or "") for item in definitions],
                     "definitions": definitions,

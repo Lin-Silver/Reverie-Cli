@@ -123,11 +123,13 @@ function installDesktopApi() {
   let ratsEnabled = false;
   const ratsState = (): RatsState => ({
     protocol: "reverie.rtp/1",
+    stateVersion: 2,
+    settingsVersion: 2,
     statePath: "C:/core/.reverie/rats/settings.json",
     diagnosticsPath: "C:/core/.reverie/rats/diagnostics.jsonl",
     discoveryRoots: ["C:/Engine/ReverieLocal/RATS/Services"],
     configuredDiscoveryRoots: ["C:/Engine/ReverieLocal/RATS/Services"],
-    enabledEngines: ratsEnabled ? [{ executable: "C:/Engine/reverie.windows.editor.x86_64.exe", permissions: ["read"] }] : [],
+    enabledProviders: ratsEnabled ? [{ providerId: "reverie.engine", executable: "C:/Engine/reverie.windows.editor.x86_64.exe", permissions: ["read"], discoveryRoot: "C:/Engine/ReverieLocal/RATS/Services" }] : [],
     supportedProviders: [{ providerId: "reverie.engine", product: "Reverie Engine", serviceKind: "builtin" }],
     services: [{
       serviceId: "rats-4242-testservice",
@@ -180,8 +182,8 @@ function installDesktopApi() {
     }
     if (action === "listTools") return { type: "tools", mode: "reverie", tools: [] };
     if (action === "ratsState") return { type: "rats.state", rats: ratsState() };
-    if (action === "ratsAddEngine" || action === "ratsRemoveRoot") return { type: "rats.state", rats: ratsState() };
-    if (action === "ratsSetEnabled") {
+    if (action === "ratsRegisterProvider" || action === "ratsRemoveRoot") return { type: "rats.state", rats: ratsState() };
+    if (action === "ratsSetProviderEnabled") {
       ratsEnabled = payload.enabled === true;
       return { type: "rats.state", rats: ratsState() };
     }
@@ -240,6 +242,7 @@ function installDesktopApi() {
     clearBackground: vi.fn(async () => DEFAULT_UI_PREFERENCES),
     reveal: vi.fn(async () => true),
     openExternal: vi.fn(async () => true),
+    selectRatsProvider: vi.fn(async () => "C:/Engine/reverie.windows.editor.x86_64.exe"),
     selectRatsEngine: vi.fn(async () => "C:/Engine/reverie.windows.editor.x86_64.exe"),
     platform: "win32",
     versions: {},
@@ -365,7 +368,14 @@ describe("desktop GUI interactions", () => {
 
     await user.click(await screen.findByRole("button", { name: "RATS" }));
     expect(await screen.findByText("Reverie Engine")).toBeTruthy();
+    expect(screen.getByText("RATS 支持多个经过批准的 Reverie/Rilance 提供者；当前主动选择列表中只有 Reverie Engine 已实现并验证。")).toBeTruthy();
     expect(screen.getByText("http://127.0.0.1:17777/rtp")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "登记提供者应用" }));
+    await waitFor(() => expect(api.request).toHaveBeenCalledWith("ratsRegisterProvider", {
+      providerId: "reverie.engine",
+      executable: "C:/Engine/reverie.windows.editor.x86_64.exe",
+    }));
 
     await user.click(screen.getByRole("button", { name: "RTP 日志" }));
     const logPanel = await screen.findByRole("region", { name: "RTP 检索日志" });
@@ -375,7 +385,8 @@ describe("desktop GUI interactions", () => {
     expect(screen.queryByRole("region", { name: "RTP 检索日志" })).toBeNull();
 
     await user.click(screen.getByRole("switch"));
-    await waitFor(() => expect(api.request).toHaveBeenCalledWith("ratsSetEnabled", {
+    await waitFor(() => expect(api.request).toHaveBeenCalledWith("ratsSetProviderEnabled", {
+      providerId: "reverie.engine",
       executable: "C:/Engine/reverie.windows.editor.x86_64.exe",
       enabled: true,
       permissions: ["read"],

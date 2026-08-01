@@ -12,17 +12,17 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from types import MappingProxyType
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple
 
 from .config import get_app_root
 
 
 RATS_PROTOCOL = "reverie.rtp/1"
 RATS_DISCOVERY_SCHEMA = "reverie.rats.discovery/1"
+RATS_SETTINGS_VERSION = 2
+RATS_STATE_VERSION = 2
 RATS_PERMISSIONS = ("read", "project", "edit", "asset", "ai", "run", "build")
-RATS_SUPPORTED_PROVIDERS = {
-    "reverie.engine": {"product": "Reverie Engine", "service_kind": "builtin"},
-}
 _TOKEN_RE = re.compile(r"^[0-9a-f]{64}$")
 _SERVICE_RE = re.compile(r"^rats-[1-9][0-9]*-[a-z0-9]+$")
 _IDENTIFIER_RE = re.compile(r"[^a-z0-9_-]+")
@@ -71,15 +71,98 @@ def _unique_paths(values: Iterable[Any]) -> List[Path]:
     return output
 
 
-def normalize_rats_permissions(value: Any) -> List[str]:
+def normalize_rats_permissions(value: Any, provider: Optional["RatsProviderSpec"] = None) -> List[str]:
     requested = value if isinstance(value, (list, tuple, set)) else []
-    allowed = set(RATS_PERMISSIONS)
+    allowed = set(provider.permission_classes if provider else RATS_PERMISSIONS)
     normalized = sorted({_text(item) for item in requested if _text(item) in allowed})
     return normalized or ["read"]
 
 
 def rats_discovery_root_for_executable(executable: Path | str) -> Path:
     return Path(executable).expanduser().resolve(strict=False).parent / "ReverieLocal" / "RATS" / "Services"
+
+
+def _existing_executable(executable: Path) -> bool:
+    return executable.is_file()
+
+
+@dataclass(frozen=True)
+class RatsProviderSpec:
+    """Immutable adapter metadata for one explicitly allowlisted RATS provider."""
+
+    provider_id: str
+    product: str
+    service_kinds: Tuple[str, ...]
+    executable_validator: Callable[[Path], bool]
+    discovery_root_resolver: Callable[[Path], Path]
+    permission_classes: Tuple[str, ...]
+    label: str
+    tool_tags: Tuple[str, ...] = ()
+    executable_error: str = "Select an existing executable for this RATS provider."
+
+    @property
+    def service_kind(self) -> str:
+        """Compatibility convenience for providers with one service kind."""
+        return self.service_kinds[0] if len(self.service_kinds) == 1 else ""
+
+    def accepts_service_kind(self, value: str) -> bool:
+        return _text(value) in self.service_kinds
+
+    def validate_executable(self, executable: Path) -> bool:
+        try:
+            return bool(self.executable_validator(executable))
+        except (OSError, ValueError, TypeError):
+            return False
+
+    def discovery_root_for_executable(self, executable: Path | str) -> Path:
+        return Path(self.discovery_root_resolver(Path(executable).expanduser().resolve(strict=False))).resolve(strict=False)
+
+
+@dataclass(frozen=True)
+class RatsProviderRegistry:
+    """Read-only provider registry; tests may inject an additive fixture registry."""
+
+    providers: Mapping[str, RatsProviderSpec]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "providers", MappingProxyType(dict(self.providers)))
+
+    def __getitem__(self, provider_id: str) -> RatsProviderSpec:
+        return self.providers[provider_id]
+
+    def get(self, provider_id: str, default: Optional[RatsProviderSpec] = None) -> Optional[RatsProviderSpec]:
+        return self.providers.get(provider_id, default)
+
+    def items(self):
+        return self.providers.items()
+
+    def values(self):
+        return self.providers.values()
+
+    def __iter__(self):
+        return iter(self.providers)
+
+    def __len__(self) -> int:
+        return len(self.providers)
+
+
+RATS_SUPPORTED_PROVIDERS = RatsProviderRegistry(
+    {
+        "reverie.engine": RatsProviderSpec(
+            provider_id="reverie.engine",
+            product="Reverie Engine",
+            service_kinds=("builtin",),
+            executable_validator=_existing_executable,
+            discovery_root_resolver=rats_discovery_root_for_executable,
+            permission_classes=RATS_PERMISSIONS,
+            label="Reverie Engine",
+            tool_tags=("reverie-engine",),
+            executable_error="Select an existing Reverie Engine executable.",
+        ),
+    }
+)
+# Canonical name for new integrations; the historical constant remains the public compatibility name.
+RATS_PROVIDER_REGISTRY = RATS_SUPPORTED_PROVIDERS
 
 
 def _safe_identifier(value: Any) -> str:
@@ -114,7 +197,11 @@ class _RatsSession:
     definitions: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
 
-def _parse_rats_descriptor(value: Any, descriptor_path: Path | str) -> Tuple[Optional[RatsDescriptor], str]:
+def _parse_rats_descriptor(
+    value: Any,
+    descriptor_path: Path | str,
+    registry: RatsProviderRegistry = RATS_SUPPORTED_PROVIDERS,
+) -> Tuple[Optional[RatsDescriptor], str]:
     source = _record(value)
     try:
         executable = Path(_text(source.get("executable"))).expanduser()
@@ -126,7 +213,7 @@ def _parse_rats_descriptor(value: Any, descriptor_path: Path | str) -> Tuple[Opt
         return None, "invalid_descriptor_fields"
     provider_id = _text(source.get("provider_id"))
     service_kind = _text(source.get("service_kind"))
-    supported = RATS_SUPPORTED_PROVIDERS.get(provider_id)
+    supported = registry.get(provider_id)
     endpoint = _text(source.get("endpoint"))
     control_token = _text(source.get("control_token")).lower()
     if source.get("schema") != RATS_DISCOVERY_SCHEMA:
@@ -135,9 +222,9 @@ def _parse_rats_descriptor(value: Any, descriptor_path: Path | str) -> Tuple[Opt
         return None, "unsupported_protocol"
     if supported is None:
         return None, "unsupported_provider"
-    if service_kind != supported["service_kind"]:
+    if not supported.accepts_service_kind(service_kind):
         return None, "unsupported_service_kind"
-    if _text(source.get("product")) != supported["product"]:
+    if _text(source.get("product")) != supported.product:
         return None, "provider_product_mismatch"
     if _text(source.get("bind_address")) != "127.0.0.1":
         return None, "non_loopback_endpoint"
@@ -145,6 +232,8 @@ def _parse_rats_descriptor(value: Any, descriptor_path: Path | str) -> Tuple[Opt
         return None, "invalid_service_id"
     if not executable.is_absolute():
         return None, "invalid_executable_path"
+    if not supported.validate_executable(executable):
+        return None, "executable_validation_failed"
     if pid <= 0:
         return None, "invalid_process_id"
     if port <= 0 or port > 65535 or endpoint != f"http://127.0.0.1:{port}/rtp":
@@ -153,13 +242,15 @@ def _parse_rats_descriptor(value: Any, descriptor_path: Path | str) -> Tuple[Opt
         return None, "invalid_control_token"
     resolved_executable = executable.resolve(strict=False)
     resolved_descriptor = Path(descriptor_path).resolve(strict=False)
-    if _path_key(resolved_descriptor.parent) != _path_key(rats_discovery_root_for_executable(resolved_executable)):
+    if _path_key(resolved_descriptor.parent) != _path_key(
+        supported.discovery_root_for_executable(resolved_executable)
+    ):
         return None, "descriptor_outside_provider_root"
     return RatsDescriptor(
         service_id=service_id,
         provider_id=provider_id,
         service_kind=service_kind,
-        product=_text(source.get("product")) or "Reverie Engine",
+        product=_text(source.get("product")) or supported.product,
         product_version=_text(source.get("product_version")),
         executable=resolved_executable,
         pid=pid,
@@ -173,14 +264,19 @@ def _parse_rats_descriptor(value: Any, descriptor_path: Path | str) -> Tuple[Opt
     ), ""
 
 
-def parse_rats_descriptor(value: Any, descriptor_path: Path | str) -> Optional[RatsDescriptor]:
-    descriptor, _reason = _parse_rats_descriptor(value, descriptor_path)
+def parse_rats_descriptor(
+    value: Any,
+    descriptor_path: Path | str,
+    registry: RatsProviderRegistry = RATS_SUPPORTED_PROVIDERS,
+) -> Optional[RatsDescriptor]:
+    descriptor, _reason = _parse_rats_descriptor(value, descriptor_path, registry)
     return descriptor
 
 
 def discover_rats_descriptors(
     roots: Iterable[Path | str],
     rejections: Optional[List[Dict[str, str]]] = None,
+    registry: RatsProviderRegistry = RATS_SUPPORTED_PROVIDERS,
 ) -> List[RatsDescriptor]:
     descriptors: Dict[tuple[str, str], RatsDescriptor] = {}
     for root in _unique_paths(roots):
@@ -196,7 +292,11 @@ def discover_rats_descriptors(
                     if rejections is not None:
                         rejections.append({"path": str(candidate), "reason": "descriptor_too_large"})
                     continue
-                descriptor, reason = _parse_rats_descriptor(json.loads(candidate.read_text(encoding="utf-8")), candidate)
+                descriptor, reason = _parse_rats_descriptor(
+                    json.loads(candidate.read_text(encoding="utf-8")),
+                    candidate,
+                    registry,
+                )
             except (OSError, UnicodeError, json.JSONDecodeError):
                 if rejections is not None:
                     rejections.append({"path": str(candidate), "reason": "descriptor_unreadable"})
@@ -240,18 +340,20 @@ class RatsRuntime:
         self,
         app_root: Optional[Path] = None,
         *,
+        provider_registry: RatsProviderRegistry = RATS_SUPPORTED_PROVIDERS,
         request_timeout: float = 1.5,
         probe_timeout: float = 0.35,
         tool_timeout: float = 12.0,
     ) -> None:
         self.app_root = Path(app_root or get_app_root()).resolve(strict=False)
+        self.provider_registry = provider_registry
         self.state_dir = self.app_root / ".reverie" / "rats"
         self.settings_path = self.state_dir / "settings.json"
         self.diagnostics_path = self.state_dir / "diagnostics.jsonl"
         self.request_timeout = min(10.0, max(0.25, float(request_timeout)))
         self.probe_timeout = min(1.0, max(0.1, float(probe_timeout)))
         self.tool_timeout = min(60.0, max(1.0, float(tool_timeout)))
-        self._sessions: Dict[str, _RatsSession] = {}
+        self._sessions: Dict[Tuple[str, str], _RatsSession] = {}
         self._diagnostics: List[Dict[str, Any]] = self._load_diagnostics()
         self._generation = 0
         self._definition_signature = ""
@@ -322,21 +424,65 @@ class RatsRuntime:
             source = _record(json.loads(self.settings_path.read_text(encoding="utf-8")))
         except (OSError, UnicodeError, json.JSONDecodeError):
             source = {}
-        enabled: Dict[str, Dict[str, Any]] = {}
-        for item in source.get("enabledEngines", []) if isinstance(source.get("enabledEngines"), list) else []:
+        raw_roots = source.get("discoveryRoots", [])
+        roots = _unique_paths(raw_roots if isinstance(raw_roots, list) else [])
+        legacy_items = source.get("enabledEngines") if isinstance(source.get("enabledEngines"), list) else []
+        current_items = source.get("enabledProviders") if isinstance(source.get("enabledProviders"), list) else []
+        migrating_legacy = bool(legacy_items) and not current_items
+        source_items = current_items or legacy_items
+        enabled: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        for item in source_items:
             record = _record(item)
             executable = _text(record.get("executable"))
             if not executable:
                 continue
             path = Path(executable).expanduser().resolve(strict=False)
-            enabled[_path_key(path)] = {
+            provider_id = _text(record.get("providerId") or record.get("provider_id"))
+            if migrating_legacy:
+                provider_id = "reverie.engine"
+            provider = self.provider_registry.get(provider_id)
+            if provider is None:
+                self._log_diagnostic(
+                    "settings.rejected",
+                    level="warning",
+                    provider_id=provider_id,
+                    reason="unsupported_provider",
+                )
+                continue
+            discovery_root = _text(record.get("discoveryRoot"))
+            if discovery_root:
+                discovery_path = _unique_paths([discovery_root])
+                discovery_root = str(discovery_path[0]) if discovery_path else ""
+            if not discovery_root:
+                discovery_root = str(provider.discovery_root_for_executable(path))
+            roots = _unique_paths([*roots, discovery_root])
+            selection = {
+                "providerId": provider_id,
                 "executable": str(path),
-                "permissions": normalize_rats_permissions(record.get("permissions")),
+                "permissions": normalize_rats_permissions(record.get("permissions"), provider),
+                "discoveryRoot": discovery_root,
             }
-        return {
-            "discoveryRoots": [str(path) for path in _unique_paths(source.get("discoveryRoots", []))],
-            "enabledEngines": sorted(enabled.values(), key=lambda item: item["executable"].lower()),
+            enabled[(provider_id, _path_key(path))] = selection
+        settings = {
+            "schemaVersion": RATS_SETTINGS_VERSION,
+            "discoveryRoots": [str(path) for path in roots],
+            "enabledProviders": sorted(
+                enabled.values(),
+                key=lambda item: (item["providerId"], item["executable"].lower()),
+            ),
         }
+        if source and (
+            source.get("schemaVersion") != RATS_SETTINGS_VERSION
+            or migrating_legacy
+            or "enabledEngines" in source
+            or source.get("enabledProviders") != settings["enabledProviders"]
+            or source.get("discoveryRoots") != settings["discoveryRoots"]
+        ):
+            try:
+                self._write_settings(settings)
+            except OSError:
+                pass
+        return settings
 
     def _write_settings(self, settings: Dict[str, Any]) -> None:
         self.state_dir.mkdir(parents=True, exist_ok=True)
@@ -450,9 +596,22 @@ class RatsRuntime:
         )
         return _record(payload.get("result"))
 
-    def _selection(self, settings: Dict[str, Any], executable: Path | str) -> Optional[Dict[str, Any]]:
+    def _selection(
+        self,
+        settings: Dict[str, Any],
+        provider_id: str,
+        executable: Path | str,
+    ) -> Optional[Dict[str, Any]]:
         key = _path_key(executable)
-        return next((item for item in settings.get("enabledEngines", []) if _path_key(item.get("executable", "")) == key), None)
+        return next(
+            (
+                item
+                for item in settings.get("enabledProviders", [])
+                if _text(item.get("providerId")) == provider_id
+                and _path_key(item.get("executable", "")) == key
+            ),
+            None,
+        )
 
     def _close_session(self, session: _RatsSession, *, timeout: float = 0.75) -> None:
         try:
@@ -516,7 +675,7 @@ class RatsRuntime:
         try:
             hello = self._request(descriptor, "hello", timeout=self.probe_timeout)
         except RatsClientError:
-            session = self._sessions.pop(descriptor.service_id, None)
+            session = self._sessions.pop((descriptor.provider_id, descriptor.service_id), None)
             if session is not None:
                 self._update_generation()
             return None
@@ -537,13 +696,13 @@ class RatsRuntime:
                 reason=f"hello_{mismatched_field}_mismatch",
                 duration_ms=round((time.perf_counter() - probe_started) * 1000),
             )
-            session = self._sessions.pop(descriptor.service_id, None)
+            session = self._sessions.pop((descriptor.provider_id, descriptor.service_id), None)
             if session is not None:
                 self._update_generation()
             return None
 
         probe_latency_ms = round((time.perf_counter() - probe_started) * 1000)
-        selection = self._selection(settings, descriptor.executable)
+        selection = self._selection(settings, descriptor.provider_id, descriptor.executable)
         base = {
             "serviceId": descriptor.service_id,
             "providerId": descriptor.provider_id,
@@ -568,11 +727,12 @@ class RatsRuntime:
             "error": "",
         }
         try:
-            session = self._sessions.get(descriptor.service_id)
+            session_key = (descriptor.provider_id, descriptor.service_id)
+            session = self._sessions.get(session_key)
             if selection is None:
                 if session is not None:
                     self._close_session(session)
-                    self._sessions.pop(descriptor.service_id, None)
+                    self._sessions.pop(session_key, None)
                     self._update_generation()
                 return base
             permissions = normalize_rats_permissions(selection.get("permissions"))
@@ -582,17 +742,17 @@ class RatsRuntime:
                 or session.descriptor.port != descriptor.port
             ):
                 self._close_session(session)
-                self._sessions.pop(descriptor.service_id, None)
+                self._sessions.pop(session_key, None)
                 session = None
             if session is not None:
                 try:
                     self._request(descriptor, "status", session_token=session.token)
                 except RatsClientError:
-                    self._sessions.pop(descriptor.service_id, None)
+                    self._sessions.pop(session_key, None)
                     session = None
             if session is None:
                 session = self._open_session(descriptor, permissions)
-                self._sessions[descriptor.service_id] = session
+                self._sessions[session_key] = session
                 self._update_generation()
             base.update(
                 {
@@ -604,7 +764,7 @@ class RatsRuntime:
                 }
             )
         except RatsClientError as exc:
-            self._sessions.pop(descriptor.service_id, None)
+            self._sessions.pop((descriptor.provider_id, descriptor.service_id), None)
             base["error"] = str(exc)
             self._update_generation()
         return base
@@ -623,7 +783,7 @@ class RatsRuntime:
                         reason="directory_not_found",
                         path=str(root),
                     )
-            descriptors = discover_rats_descriptors(roots, rejections)
+            descriptors = discover_rats_descriptors(roots, rejections, self.provider_registry)
             for rejection in rejections:
                 self._log_diagnostic(
                     "discovery.rejected",
@@ -636,10 +796,10 @@ class RatsRuntime:
                 service = self._service_record(descriptor, settings)
                 if service is not None:
                     services.append(service)
-            current_ids = {service["serviceId"] for service in services}
-            for service_id in list(self._sessions):
-                if service_id not in current_ids:
-                    self._sessions.pop(service_id, None)
+            current_ids = {(service["providerId"], service["serviceId"]) for service in services}
+            for session_key in list(self._sessions):
+                if session_key not in current_ids:
+                    self._sessions.pop(session_key, None)
             self._has_refreshed = True
             self._update_generation()
             scan_duration_ms = round((time.perf_counter() - started) * 1000)
@@ -650,18 +810,32 @@ class RatsRuntime:
             )
             return {
                 "protocol": RATS_PROTOCOL,
+                "stateVersion": RATS_STATE_VERSION,
+                "settingsVersion": RATS_SETTINGS_VERSION,
                 "statePath": str(self.settings_path),
                 "diagnosticsPath": str(self.diagnostics_path),
                 "discoveryRoots": [str(path) for path in roots],
                 "configuredDiscoveryRoots": list(settings["discoveryRoots"]),
-                "enabledEngines": list(settings["enabledEngines"]),
+                "enabledProviders": list(settings["enabledProviders"]),
+                # Deprecated compatibility view for packaged Desktop clients.
+                "enabledEngines": [
+                    {
+                        "executable": item["executable"],
+                        "permissions": list(item["permissions"]),
+                    }
+                    for item in settings["enabledProviders"]
+                    if item.get("providerId") == "reverie.engine"
+                ],
                 "supportedProviders": [
                     {
                         "providerId": provider_id,
-                        "product": definition["product"],
-                        "serviceKind": definition["service_kind"],
+                        "product": provider.product,
+                        "serviceKind": provider.service_kind,
+                        "label": provider.label,
+                        "permissions": list(provider.permission_classes),
+                        "toolTags": list(provider.tool_tags),
                     }
-                    for provider_id, definition in sorted(RATS_SUPPORTED_PROVIDERS.items())
+                    for provider_id, provider in sorted(self.provider_registry.items())
                 ],
                 "services": services,
                 "scanDurationMs": scan_duration_ms,
@@ -670,18 +844,32 @@ class RatsRuntime:
                 "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             }
 
-    def add_engine(self, executable: Path | str) -> Dict[str, Any]:
+    def _provider(self, provider_id: str) -> RatsProviderSpec:
+        normalized = _text(provider_id)
+        provider = self.provider_registry.get(normalized)
+        if provider is None:
+            raise ValueError(f"Unsupported RATS provider: {normalized or 'unknown'}")
+        return provider
+
+    def register_provider_executable(self, provider_id: str, executable: Path | str) -> Dict[str, Any]:
         with self._lock:
+            provider = self._provider(provider_id)
             path = Path(executable).expanduser().resolve(strict=False)
-            if not path.is_file():
-                raise ValueError("Select an existing Reverie Engine executable.")
+            if not provider.validate_executable(path):
+                raise ValueError(provider.executable_error)
             settings = self._read_settings()
             settings["discoveryRoots"] = [
                 str(item)
-                for item in _unique_paths([*settings["discoveryRoots"], rats_discovery_root_for_executable(path)])
+                for item in _unique_paths(
+                    [*settings["discoveryRoots"], provider.discovery_root_for_executable(path)]
+                )
             ]
             self._write_settings(settings)
             return self.refresh()
+
+    # Compatibility alias: remove after packaged Desktop clients use ratsRegisterProvider.
+    def add_engine(self, executable: Path | str) -> Dict[str, Any]:
+        return self.register_provider_executable("reverie.engine", executable)
 
     def remove_discovery_root(self, root: Path | str) -> Dict[str, Any]:
         with self._lock:
@@ -691,35 +879,98 @@ class RatsRuntime:
             self._write_settings(settings)
             return self.refresh()
 
-    def set_engine_enabled(self, executable: Path | str, enabled: bool, permissions: Any) -> Dict[str, Any]:
+    def set_provider_enabled(
+        self,
+        provider_id: str,
+        executable: Path | str,
+        enabled: bool,
+        permissions: Any,
+    ) -> Dict[str, Any]:
         with self._lock:
+            provider = self._provider(provider_id)
             path = Path(executable).expanduser().resolve(strict=False)
             settings = self._read_settings()
             key = _path_key(path)
-            settings["enabledEngines"] = [
-                item for item in settings["enabledEngines"] if _path_key(item.get("executable", "")) != key
+            settings["enabledProviders"] = [
+                item
+                for item in settings["enabledProviders"]
+                if not (
+                    _text(item.get("providerId")) == provider.provider_id
+                    and _path_key(item.get("executable", "")) == key
+                )
             ]
             if enabled:
-                settings["enabledEngines"].append(
-                    {"executable": str(path), "permissions": normalize_rats_permissions(permissions)}
+                discovery_root = str(provider.discovery_root_for_executable(path))
+                settings["discoveryRoots"] = [
+                    str(item) for item in _unique_paths([*settings["discoveryRoots"], discovery_root])
+                ]
+                settings["enabledProviders"].append(
+                    {
+                        "providerId": provider.provider_id,
+                        "executable": str(path),
+                        "permissions": normalize_rats_permissions(permissions, provider),
+                        "discoveryRoot": discovery_root,
+                    }
                 )
-                settings["enabledEngines"].sort(key=lambda item: item["executable"].lower())
+                settings["enabledProviders"].sort(
+                    key=lambda item: (item["providerId"], item["executable"].lower())
+                )
             self._write_settings(settings)
             return self.refresh()
 
-    def describe(self, service_id: str, names: Iterable[Any]) -> List[Dict[str, Any]]:
+    # Compatibility alias: remove after packaged Desktop clients use ratsSetProviderEnabled.
+    def set_engine_enabled(self, executable: Path | str, enabled: bool, permissions: Any) -> Dict[str, Any]:
+        return self.set_provider_enabled("reverie.engine", executable, enabled, permissions)
+
+    def describe(
+        self,
+        service_id: str,
+        names: Iterable[Any],
+        *,
+        provider_id: str = "",
+    ) -> List[Dict[str, Any]]:
         with self._lock:
-            session = self._sessions.get(_text(service_id))
+            session = self._find_session(service_id, provider_id)
             if session is None:
                 raise ValueError("Enable the RATS service before requesting tool definitions.")
             return self._describe_into_session(session, names)
 
-    def search(self, query: str, *, limit: int = 5, service_id: str = "", load: bool = True) -> List[Dict[str, Any]]:
+    def _find_session(self, service_id: str, provider_id: str = "") -> Optional[_RatsSession]:
+        normalized_service_id = _text(service_id)
+        normalized_provider_id = _text(provider_id)
+        if normalized_provider_id:
+            return self._sessions.get((normalized_provider_id, normalized_service_id))
+        matches = [
+            session
+            for (session_provider_id, session_key), session in self._sessions.items()
+            if session_key == normalized_service_id
+        ]
+        return matches[0] if len(matches) == 1 else None
+
+    def search(
+        self,
+        query: str,
+        *,
+        limit: int = 5,
+        service_id: str = "",
+        provider_id: str = "",
+        load: bool = True,
+    ) -> List[Dict[str, Any]]:
         with self._lock:
             wanted = _text(query)
             if not wanted:
                 raise ValueError("RATS search requires a non-empty query.")
-            sessions = [self._sessions[service_id]] if service_id in self._sessions else list(self._sessions.values())
+            selected = self._find_session(service_id, provider_id) if service_id else None
+            if service_id and selected is None:
+                sessions = []
+            elif provider_id:
+                sessions = [
+                    session
+                    for (session_provider_id, _service_id), session in self._sessions.items()
+                    if session_provider_id == provider_id
+                ]
+            else:
+                sessions = [selected] if selected is not None else list(self._sessions.values())
             matches: List[Dict[str, Any]] = []
             for session in sessions:
                 result = self._request(
@@ -738,14 +989,27 @@ class RatsRuntime:
                     if describable:
                         self._describe_into_session(session, describable)
                 for item in local:
+                    item["providerId"] = session.descriptor.provider_id
                     item["serviceId"] = session.descriptor.service_id
+                    item["nativeToolName"] = _text(item.get("name"))
+                    item["qualifiedName"] = (
+                        f"{session.descriptor.provider_id}.{session.descriptor.service_id}.{_text(item.get('name'))}"
+                    )
                     item["executable"] = str(session.descriptor.executable)
                     matches.append(item)
             return sorted(matches, key=lambda item: (-int(item.get("score", 0) or 0), _text(item.get("name"))))[: max(1, int(limit))]
 
-    def call_tool(self, service_id: str, tool_name: str, arguments: Dict[str, Any], *, dry_run: bool = False) -> Dict[str, Any]:
+    def call_tool(
+        self,
+        service_id: str,
+        tool_name: str,
+        arguments: Dict[str, Any],
+        *,
+        provider_id: str = "",
+        dry_run: bool = False,
+    ) -> Dict[str, Any]:
         with self._lock:
-            session = self._sessions.get(_text(service_id))
+            session = self._find_session(service_id, provider_id)
             if session is None:
                 raise RatsClientError("The selected RATS service is not connected.", code="session_unavailable")
             return self._request(
@@ -764,7 +1028,10 @@ class RatsRuntime:
                     rows.append(
                         {
                             **tool,
+                            "providerId": session.descriptor.provider_id,
                             "serviceId": session.descriptor.service_id,
+                            "nativeToolName": tool.get("name"),
+                            "qualifiedName": f"{session.descriptor.provider_id}.{session.descriptor.service_id}.{tool.get('name')}",
                             "product": session.descriptor.product,
                             "executable": str(session.descriptor.executable),
                             "loaded": tool.get("name") in session.definitions,
@@ -773,14 +1040,18 @@ class RatsRuntime:
             return rows
 
     def _dynamic_name(self, session: _RatsSession, tool_name: str, used: set[str]) -> str:
-        product = _safe_identifier(session.descriptor.product)
-        base = f"rats_{product}_{_safe_identifier(tool_name)}"
+        provider = _safe_identifier(session.descriptor.provider_id)
+        base = f"rats_{provider}_{_safe_identifier(tool_name)}"
         if len(base) > 64:
-            digest = hashlib.sha1(f"{session.descriptor.executable}\0{tool_name}".encode("utf-8")).hexdigest()[:10]
+            digest = hashlib.sha1(
+                f"{session.descriptor.provider_id}\0{session.descriptor.service_id}\0{tool_name}".encode("utf-8")
+            ).hexdigest()[:10]
             base = f"{base[:53].rstrip('_')}_{digest}"
         candidate = base
         if candidate in used:
-            digest = hashlib.sha1(str(session.descriptor.executable).encode("utf-8")).hexdigest()[:8]
+            digest = hashlib.sha1(
+                f"{session.descriptor.provider_id}\0{session.descriptor.service_id}\0{session.descriptor.executable}\0{tool_name}".encode("utf-8")
+            ).hexdigest()[:8]
             candidate = f"{base[:55].rstrip('_')}_{digest}"
         return candidate
 
@@ -795,17 +1066,25 @@ class RatsRuntime:
                     synthetic_name = self._dynamic_name(session, tool_name, used)
                     used.add(synthetic_name)
                     permission = _text(source.get("permission"))
+                    provider = self.provider_registry.get(session.descriptor.provider_id)
+                    provider_tags = list(provider.tool_tags) if provider else []
+                    source_tags = list(source.get("tags", [])) if isinstance(source.get("tags"), list) else []
+                    tags = list(dict.fromkeys([*source_tags, "rats", "rtp", *provider_tags]))
+                    qualified_name = (
+                        f"{session.descriptor.provider_id}.{session.descriptor.service_id}.{tool_name}"
+                    )
                     definitions.append(
                         {
                             "name": synthetic_name,
+                            "provider_id": session.descriptor.provider_id,
                             "service_id": session.descriptor.service_id,
-                            "engine_tool_name": tool_name,
-                            "qualified_name": f"{session.descriptor.product}.{tool_name}",
-                            "description": _text(source.get("summary")) or f"Native Reverie Engine tool {tool_name}.",
+                            "native_tool_name": tool_name,
+                            "qualified_name": qualified_name,
+                            "description": _text(source.get("summary")) or f"Native RATS provider tool {tool_name}.",
                             "parameters": dict(source.get("request_schema", {})),
                             "response_schema": dict(source.get("response_schema", {})),
                             "category": _text(source.get("category")) or "rats",
-                            "tags": list(source.get("tags", [])) if isinstance(source.get("tags"), list) else [],
+                            "tags": tags,
                             "permission": permission,
                             "read_only": permission in {"none", "read"},
                             "concurrency_safe": not bool(source.get("main_thread", False)),
@@ -819,7 +1098,10 @@ class RatsRuntime:
     def _update_generation(self) -> None:
         material = [
             (session.descriptor.service_id, sorted(session.definitions), session.permissions)
-            for session in sorted(self._sessions.values(), key=lambda item: item.descriptor.service_id)
+            for session in sorted(
+                self._sessions.values(),
+                key=lambda item: (item.descriptor.provider_id, item.descriptor.service_id),
+            )
         ]
         signature = json.dumps(material, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         if signature != self._definition_signature:
@@ -846,9 +1128,14 @@ __all__ = [
     "RATS_DISCOVERY_SCHEMA",
     "RATS_PERMISSIONS",
     "RATS_PROTOCOL",
+    "RATS_PROVIDER_REGISTRY",
+    "RATS_SETTINGS_VERSION",
+    "RATS_STATE_VERSION",
     "RATS_SUPPORTED_PROVIDERS",
     "RatsClientError",
     "RatsDescriptor",
+    "RatsProviderRegistry",
+    "RatsProviderSpec",
     "RatsRuntime",
     "discover_rats_descriptors",
     "normalize_rats_permissions",

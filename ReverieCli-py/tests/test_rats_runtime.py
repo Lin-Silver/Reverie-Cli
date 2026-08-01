@@ -10,8 +10,17 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import pytest
+
 from reverie.agent.tool_executor import ToolExecutor
-from reverie.rats import RATS_PROTOCOL, RATS_SUPPORTED_PROVIDERS, RatsRuntime, parse_rats_descriptor
+from reverie.rats import (
+    RATS_PROTOCOL,
+    RATS_SUPPORTED_PROVIDERS,
+    RatsProviderRegistry,
+    RatsProviderSpec,
+    RatsRuntime,
+    parse_rats_descriptor,
+)
 
 
 CONTROL_TOKEN = "a" * 64
@@ -26,8 +35,6 @@ def _test_root(name: str) -> Path:
 
 class _RatsHandler(BaseHTTPRequestHandler):
     events: list[str] = []
-    session_open = False
-    hello_product = "Reverie Engine"
 
     def log_message(self, _format: str, *_args) -> None:
         return
@@ -83,34 +90,34 @@ class _RatsHandler(BaseHTTPRequestHandler):
                 result={
                     "service_id": self.server.service_id,
                     "protocol": RATS_PROTOCOL,
-                    "provider_id": "reverie.engine",
-                    "service_kind": "builtin",
-                    "product": type(self).hello_product,
+                    "provider_id": self.server.provider_id,
+                    "service_kind": self.server.service_kind,
+                    "product": self.server.product,
                 },
             )
             return
         if operation == "session.open":
-            if self.headers.get("X-Reverie-RATS-Control") != CONTROL_TOKEN:
+            if self.headers.get("X-Reverie-RATS-Control") != self.server.control_token:
                 self._reply(401, request_id, code="unauthorized")
                 return
-            type(self).session_open = True
+            self.server.session_open = True
             self._reply(
                 200,
                 request_id,
                 result={
-                    "session_token": SESSION_TOKEN,
+                    "session_token": self.server.session_token,
                     "permissions": args.get("permissions", ["read"]),
                     "tools": ["ping", "version", "get_status", "project.status", "scene.read"],
                 },
             )
             return
-        if self.headers.get("X-Reverie-RTP-Session") != SESSION_TOKEN or not type(self).session_open:
+        if self.headers.get("X-Reverie-RTP-Session") != self.server.session_token or not self.server.session_open:
             self._reply(401, request_id, code="unauthorized")
             return
         if operation == "status":
             self._reply(200, request_id, result={"session_active": True})
         elif operation == "session.close":
-            type(self).session_open = False
+            self.server.session_open = False
             self._reply(200, request_id, result={"closed": True})
         elif operation == "catalog.index":
             names = ["ping", "version", "get_status", "project.status", "scene.read"]
@@ -153,15 +160,63 @@ class _RatsHandler(BaseHTTPRequestHandler):
             self._reply(404, request_id, code="unknown_operation")
 
 
-def _start_server(*, hello_product: str = "Reverie Engine"):
+def _start_server(
+    *,
+    provider_id: str = "reverie.engine",
+    service_kind: str = "builtin",
+    hello_product: str = "Reverie Engine",
+    service_suffix: str = "test",
+    control_token: str = CONTROL_TOKEN,
+    session_token: str = SESSION_TOKEN,
+):
     _RatsHandler.events = []
-    _RatsHandler.session_open = False
-    _RatsHandler.hello_product = hello_product
     server = ThreadingHTTPServer(("127.0.0.1", 0), _RatsHandler)
-    server.service_id = f"rats-{os.getpid()}-test"
+    server.service_id = f"rats-{os.getpid()}-{service_suffix}"
+    server.provider_id = provider_id
+    server.service_kind = service_kind
+    server.product = hello_product
+    server.control_token = control_token
+    server.session_token = session_token
+    server.session_open = False
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return server, thread
+
+
+def _write_descriptor(
+    services: Path,
+    server: ThreadingHTTPServer,
+    executable: Path,
+    *,
+    provider_id: str,
+    service_kind: str,
+    product: str,
+    control_token: str,
+) -> None:
+    services.mkdir(parents=True, exist_ok=True)
+    (services / f"{server.service_id}.json").write_text(
+        json.dumps(
+            {
+                "schema": "reverie.rats.discovery/1",
+                "protocol": RATS_PROTOCOL,
+                "service_id": server.service_id,
+                "provider_id": provider_id,
+                "service_kind": service_kind,
+                "product": product,
+                "product_version": "test",
+                "executable": str(executable.resolve()),
+                "pid": os.getpid(),
+                "port": server.server_port,
+                "endpoint": f"http://127.0.0.1:{server.server_port}/rtp",
+                "bind_address": "127.0.0.1",
+                "catalog_revision": "catalog-test",
+                "native_tool_count": 5,
+                "started_utc": "2026-07-29T00:00:00Z",
+                "control_token": control_token,
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 def test_descriptor_validation_rejects_non_loopback_endpoint() -> None:
@@ -228,10 +283,17 @@ def test_runtime_owns_session_persists_locally_and_progressively_loads_tools() -
         assert service["providerId"] == "reverie.engine"
         assert service["serviceKind"] == "builtin"
         assert service["probeLatencyMs"] >= 0
-        assert state["supportedProviders"] == [
-            {"providerId": "reverie.engine", "product": "Reverie Engine", "serviceKind": "builtin"}
+        assert state["supportedProviders"][0]["providerId"] == "reverie.engine"
+        assert state["supportedProviders"][0]["serviceKind"] == "builtin"
+        assert RATS_SUPPORTED_PROVIDERS["reverie.engine"].service_kind == "builtin"
+        assert state["enabledProviders"] == [
+            {
+                "providerId": "reverie.engine",
+                "executable": str(executable.resolve()),
+                "permissions": ["read"],
+                "discoveryRoot": str(services.resolve()),
+            }
         ]
-        assert RATS_SUPPORTED_PROVIDERS["reverie.engine"]["service_kind"] == "builtin"
         assert state["scanDurationMs"] >= service["probeLatencyMs"]
         assert runtime.settings_path == cli_root / ".reverie" / "rats" / "settings.json"
         assert runtime.settings_path.is_file()
@@ -266,7 +328,7 @@ def test_runtime_owns_session_persists_locally_and_progressively_loads_tools() -
 
         runtime.shutdown()
         assert "session.close" in _RatsHandler.events
-        assert _RatsHandler.session_open is False
+        assert server.session_open is False
     finally:
         server.shutdown()
         server.server_close()
@@ -408,4 +470,185 @@ def test_unreachable_supported_provider_fast_fails_and_remains_hidden() -> None:
             for item in state["diagnostics"]
         )
     finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_legacy_enabled_engines_migrate_losslessly_and_idempotently() -> None:
+    root = _test_root("settings-migration")
+    try:
+        executable = root / "engine" / "reverie.windows.editor.x86_64.exe"
+        executable.parent.mkdir(parents=True, exist_ok=True)
+        executable.write_bytes(b"test")
+        discovery_root = root / "legacy-discovery"
+        cli_root = root / "cli"
+        settings_path = cli_root / ".reverie" / "rats" / "settings.json"
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "discoveryRoots": [str(discovery_root), str(discovery_root)],
+                    "enabledEngines": [{"executable": str(executable), "permissions": ["run", "read"]}],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        runtime = RatsRuntime(cli_root)
+        first = runtime.refresh()
+        persisted = json.loads(settings_path.read_text(encoding="utf-8"))
+        assert persisted["schemaVersion"] == 2
+        assert "enabledEngines" not in persisted
+        assert persisted["discoveryRoots"] == [str(discovery_root.resolve()), str((executable.parent / "ReverieLocal" / "RATS" / "Services").resolve())]
+        assert persisted["enabledProviders"] == [
+            {
+                "providerId": "reverie.engine",
+                "executable": str(executable.resolve()),
+                "permissions": ["read", "run"],
+                "discoveryRoot": str((executable.parent / "ReverieLocal" / "RATS" / "Services").resolve()),
+            }
+        ]
+        assert first["enabledProviders"] == persisted["enabledProviders"]
+
+        second = runtime.refresh()
+        assert json.loads(settings_path.read_text(encoding="utf-8")) == persisted
+        assert second["enabledProviders"] == first["enabledProviders"]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_unknown_provider_selection_is_dropped_and_diagnosed_without_sensitive_data() -> None:
+    root = _test_root("unknown-selection")
+    try:
+        cli_root = root / "cli"
+        settings_path = cli_root / ".reverie" / "rats" / "settings.json"
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 2,
+                    "enabledProviders": [{
+                        "providerId": "unrecognized.provider",
+                        "executable": str(root / "unknown.exe"),
+                        "permissions": ["read"],
+                    }],
+                }
+            ),
+            encoding="utf-8",
+        )
+        runtime = RatsRuntime(cli_root)
+        state = runtime.refresh()
+        assert state["enabledProviders"] == []
+        assert any(
+            item.get("event") == "settings.rejected"
+            and item.get("providerId") == "unrecognized.provider"
+            and item.get("reason") == "unsupported_provider"
+            for item in state["diagnostics"]
+        )
+        persisted = settings_path.read_text(encoding="utf-8")
+        assert "unrecognized.provider" not in persisted
+        assert "control_token" not in persisted
+        assert "session_token" not in persisted
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_test_only_provider_registry_proves_selection_and_catalog_isolation() -> None:
+    root = _test_root("multi-provider")
+    engine_server, engine_thread = _start_server(service_suffix="same")
+    second_control = "c" * 64
+    second_session = "d" * 64
+    second_server, second_thread = _start_server(
+        provider_id="test.provider",
+        service_kind="sandbox",
+        hello_product="Test Provider",
+        service_suffix="same",
+        control_token=second_control,
+        session_token=second_session,
+    )
+    try:
+        second_spec = RatsProviderSpec(
+            provider_id="test.provider",
+            product="Test Provider",
+            service_kinds=("sandbox",),
+            executable_validator=lambda executable: executable.is_file(),
+            discovery_root_resolver=lambda executable: executable.parent / "ProviderLocal" / "Services",
+            permission_classes=("read", "run"),
+            label="Test Provider",
+            tool_tags=("test-provider",),
+        )
+        registry = RatsProviderRegistry({
+            **RATS_SUPPORTED_PROVIDERS.providers,
+            "test.provider": second_spec,
+        })
+        engine_executable = root / "engine" / "reverie.windows.editor.x86_64.exe"
+        second_executable = root / "second" / "test-provider.exe"
+        engine_executable.parent.mkdir(parents=True, exist_ok=True)
+        second_executable.parent.mkdir(parents=True, exist_ok=True)
+        engine_executable.write_bytes(b"engine")
+        second_executable.write_bytes(b"provider")
+        _write_descriptor(
+            root / "engine" / "ReverieLocal" / "RATS" / "Services",
+            engine_server,
+            engine_executable,
+            provider_id="reverie.engine",
+            service_kind="builtin",
+            product="Reverie Engine",
+            control_token=CONTROL_TOKEN,
+        )
+        _write_descriptor(
+            root / "second" / "ProviderLocal" / "Services",
+            second_server,
+            second_executable,
+            provider_id="test.provider",
+            service_kind="sandbox",
+            product="Test Provider",
+            control_token=second_control,
+        )
+
+        runtime = RatsRuntime(root / "cli", provider_registry=registry)
+        assert len(RATS_SUPPORTED_PROVIDERS) == 1
+        runtime.register_provider_executable("reverie.engine", engine_executable)
+        runtime.register_provider_executable("test.provider", second_executable)
+        runtime.set_provider_enabled("reverie.engine", engine_executable, True, ["read"])
+        state = runtime.set_provider_enabled("test.provider", second_executable, True, ["run"])
+
+        assert {item["providerId"] for item in state["enabledProviders"]} == {"reverie.engine", "test.provider"}
+        assert {(item["providerId"], item["serviceId"]) for item in state["services"]} == {
+            ("reverie.engine", engine_server.service_id),
+            ("test.provider", second_server.service_id),
+        }
+        assert all(item["connection"] == "connected" for item in state["services"])
+        assert state["supportedProviders"][-1]["providerId"] == "test.provider"
+
+        definitions = runtime.get_tool_definitions()
+        ping_definitions = [item for item in definitions if item["native_tool_name"] == "ping"]
+        assert len(ping_definitions) == 2
+        assert {item["provider_id"] for item in ping_definitions} == {"reverie.engine", "test.provider"}
+        assert len({item["name"] for item in ping_definitions}) == 2
+        assert all(item["provider_id"] in item["qualified_name"] for item in ping_definitions)
+        assert any("reverie-engine" in item["tags"] for item in ping_definitions if item["provider_id"] == "reverie.engine")
+        assert all("reverie-engine" not in item["tags"] for item in ping_definitions if item["provider_id"] == "test.provider")
+        assert runtime.describe(second_server.service_id, ["ping"], provider_id="test.provider")[0]["name"] == "ping"
+
+        with pytest.raises(ValueError, match="Unsupported RATS provider"):
+            runtime.register_provider_executable("unknown.provider", second_executable)
+
+        offline = root / "offline" / "provider.exe"
+        state = runtime.set_provider_enabled("test.provider", offline, True, ["read"])
+        assert any(item["executable"] == str(offline.resolve()) for item in state["enabledProviders"])
+        assert not any(item["executable"] == str(offline.resolve()) for item in state["services"])
+        persisted = runtime.settings_path.read_text(encoding="utf-8")
+        assert second_control not in persisted
+        assert second_session not in persisted
+        assert "arguments" not in json.dumps(state)
+    finally:
+        runtime = locals().get("runtime")
+        if runtime is not None:
+            runtime.shutdown()
+        engine_server.shutdown()
+        engine_server.server_close()
+        engine_thread.join(timeout=5)
+        second_server.shutdown()
+        second_server.server_close()
+        second_thread.join(timeout=5)
         shutil.rmtree(root, ignore_errors=True)

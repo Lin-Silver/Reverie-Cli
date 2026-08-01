@@ -145,12 +145,18 @@ const ratsDiscoveryRoots = String(process.env.REVERIE_RATS_DISCOVERY_ROOTS ?? ""
   .split(path.delimiter)
   .map((item) => item.trim())
   .filter(Boolean);
-ratsDiscoveryRoots.push(
-  path.join(executableHome, "ReverieLocal", "RATS", "Services"),
-  ...(!app.isPackaged
-    ? [path.resolve(uiRoot, "..", "..", "Reverie Engine", "Reverie Engine", "bin", "ReverieLocal", "RATS", "Services")]
-    : []),
-);
+const RATS_PROVIDER_DISCOVERY_ADAPTERS: Record<string, () => string[]> = {
+  // The production registry currently has only this verified provider adapter.
+  "reverie.engine": () => [
+    path.join(executableHome, "ReverieLocal", "RATS", "Services"),
+    ...(!app.isPackaged
+      ? [path.resolve(uiRoot, "..", "..", "Reverie Engine", "Reverie Engine", "bin", "ReverieLocal", "RATS", "Services")]
+      : []),
+  ],
+};
+for (const resolveRoots of Object.values(RATS_PROVIDER_DISCOVERY_ADAPTERS)) {
+  ratsDiscoveryRoots.push(...resolveRoots());
+}
 
 function rememberProject(preferences: StoredUiPreferences, projectRoot: string): StoredUiPreferences {
   const resolved = path.resolve(projectRoot);
@@ -757,20 +763,38 @@ ipcMain.handle("desktop:open-external", async (_event, url: string) => {
   return true;
 });
 
-ipcMain.handle("desktop:select-rats-engine", async () => {
+const RATS_PROVIDER_PICKERS: Record<string, { chinese: string; english: string; filterName: string }> = {
+  // The registry currently contains only the verified Reverie Engine adapter.
+  "reverie.engine": {
+    chinese: "选择 Reverie Engine 可执行文件",
+    english: "Choose a Reverie Engine executable",
+    filterName: "Reverie Engine",
+  },
+};
+
+async function selectRatsProvider(providerId: string): Promise<string | null> {
   if (!mainWindow) return null;
+  const picker = RATS_PROVIDER_PICKERS[String(providerId ?? "").trim()];
+  if (!picker) throw new Error(`Unsupported RATS provider: ${String(providerId ?? "unknown")}`);
   const preferences = normalizeUiPreferences((await readDesktopSettings()).ui);
   const result = await dialog.showOpenDialog(mainWindow, {
-    title: localizedUiText(preferences.language, "选择 Reverie Engine 可执行文件", "Choose a Reverie Engine executable"),
+    title: localizedUiText(preferences.language, picker.chinese, picker.english),
     defaultPath: executableHome,
     properties: ["openFile"],
     filters: process.platform === "win32"
-      ? [{ name: "Reverie Engine", extensions: ["exe"] }]
+      ? [{ name: picker.filterName, extensions: ["exe"] }]
       : undefined,
   });
   if (result.canceled || !result.filePaths[0]) return null;
   return path.resolve(result.filePaths[0]);
-});
+}
+
+ipcMain.handle("desktop:select-rats-provider", async (_event, providerId: unknown) =>
+  selectRatsProvider(String(providerId ?? "")),
+);
+
+// Deprecated alias retained for packaged renderer compatibility.
+ipcMain.handle("desktop:select-rats-engine", async () => selectRatsProvider("reverie.engine"));
 
 async function runTuiFromDesktop(settings: DesktopSettings): Promise<void> {
   const executable = await selectKernelPath(false);

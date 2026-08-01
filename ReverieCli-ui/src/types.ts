@@ -12,6 +12,14 @@ export interface RatsCompactTool {
   schema: string | null;
 }
 
+export interface RatsProviderSelection {
+  providerId: string;
+  executable: string;
+  permissions: RatsPermission[];
+  discoveryRoot?: string;
+}
+
+/** Deprecated compatibility view for pre-provider-neutral packaged Desktop clients. */
 export interface RatsEngineSelection {
   executable: string;
   permissions: RatsPermission[];
@@ -45,6 +53,9 @@ export interface RatsProviderRecord {
   providerId: string;
   product: string;
   serviceKind: string;
+  label?: string;
+  permissions?: RatsPermission[];
+  toolTags?: string[];
 }
 
 export interface RatsDiagnosticEntry {
@@ -62,11 +73,14 @@ export interface RatsDiagnosticEntry {
 
 export interface RatsState {
   protocol: "reverie.rtp/1";
+  stateVersion?: number;
+  settingsVersion?: number;
   statePath: string;
   diagnosticsPath: string;
   discoveryRoots: string[];
   configuredDiscoveryRoots: string[];
-  enabledEngines: RatsEngineSelection[];
+  enabledProviders: RatsProviderSelection[];
+  enabledEngines?: RatsEngineSelection[];
   supportedProviders: RatsProviderRecord[];
   services: RatsServiceRecord[];
   scanDurationMs: number;

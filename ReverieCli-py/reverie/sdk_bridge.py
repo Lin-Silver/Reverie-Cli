@@ -269,7 +269,6 @@ class ReverieSdkBridge:
                 "type": "approval.request",
                 "approval_id": approval_id,
                 "tool": str(getattr(tool, "name", "tool") or "tool"),
-                "arguments": _json_safe(arguments),
                 "message": str(denial or "This tool requires additional permission."),
             },
         )
@@ -808,11 +807,16 @@ class ReverieSdkBridge:
             }
         if action == "ratsState":
             return {"id": request_id, "type": "rats.state", "rats": _json_safe(self.rats_runtime.refresh())}
-        if action == "ratsAddEngine":
+        if action in {"ratsRegisterProvider", "ratsAddEngine"}:
             executable = str(payload.get("executable") or "").strip()
             if not executable:
-                raise ValueError("A Reverie Engine executable is required.")
-            state = self.rats_runtime.add_engine(Path(executable))
+                raise ValueError("A RATS provider executable is required.")
+            provider_id = str(payload.get("providerId") or "reverie.engine").strip()
+            if action == "ratsAddEngine":
+                # Compatibility alias for packaged Desktop clients; the runtime has one implementation.
+                state = self.rats_runtime.add_engine(Path(executable))
+            else:
+                state = self.rats_runtime.register_provider_executable(provider_id, Path(executable))
             return {"id": request_id, "type": "rats.state", "rats": _json_safe(state)}
         if action == "ratsRemoveRoot":
             root = str(payload.get("root") or "").strip()
@@ -820,20 +824,32 @@ class ReverieSdkBridge:
                 raise ValueError("A RATS discovery root is required.")
             state = self.rats_runtime.remove_discovery_root(Path(root))
             return {"id": request_id, "type": "rats.state", "rats": _json_safe(state)}
-        if action == "ratsSetEnabled":
+        if action in {"ratsSetProviderEnabled", "ratsSetEnabled"}:
             executable = str(payload.get("executable") or "").strip()
             enabled = payload.get("enabled")
             if not executable or not isinstance(enabled, bool):
                 raise ValueError("RATS executable and boolean enabled state are required.")
-            state = self.rats_runtime.set_engine_enabled(executable, enabled, payload.get("permissions"))
+            provider_id = str(payload.get("providerId") or "reverie.engine").strip()
+            if action == "ratsSetEnabled":
+                # Compatibility alias for packaged Desktop clients; the runtime has one implementation.
+                state = self.rats_runtime.set_engine_enabled(executable, enabled, payload.get("permissions"))
+            else:
+                state = self.rats_runtime.set_provider_enabled(
+                    provider_id,
+                    executable,
+                    enabled,
+                    payload.get("permissions"),
+                )
             return {"id": request_id, "type": "rats.state", "rats": _json_safe(state)}
         if action == "ratsDescribe":
             service_id = str(payload.get("serviceId") or "").strip()
+            provider_id = str(payload.get("providerId") or "").strip()
             names = payload.get("names") if isinstance(payload.get("names"), list) else []
-            definitions = self.rats_runtime.describe(service_id, names)
+            definitions = self.rats_runtime.describe(service_id, names, provider_id=provider_id)
             return {
                 "id": request_id,
                 "type": "rats.definitions",
+                "provider_id": provider_id,
                 "service_id": service_id,
                 "definitions": _json_safe(definitions),
             }

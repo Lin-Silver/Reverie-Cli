@@ -1,10 +1,16 @@
 # Reverie RATS / RTP
 
-RATS is Reverie's local agentic-tool service layer. RTP (`reverie.rtp/1`) is
-the versioned wire protocol used between Reverie CLI and a running Reverie
-Engine. The Engine starts its loopback service with the editor; Reverie CLI
-does not enable any native tool until the user explicitly enables that Engine
-in the desktop RATS page.
+RATS is the Reverie ecosystem's agentic-tool runtime and service layer. RTP
+(`reverie.rtp/1`) is its versioned tool protocol. Reverie Engine and future
+explicitly supported Reverie/Rilance applications are RATS providers; Reverie
+CLI is the client, management center, and AI scheduling environment. Together
+they form the Reverie Agentic Developer Environment (RADE).
+
+The current fixed provider allowlist contains only `reverie.engine`. The Engine
+starts its loopback service with the editor, but Reverie CLI does not show it
+until a registered executable-local descriptor passes a live identity handshake
+and does not enable any native tool until the user explicitly turns that Engine
+on in the desktop RATS page.
 
 ## Local data and trust boundary
 
@@ -14,29 +20,43 @@ Both products keep their state beside their own executable:
 <engine-exe-root>/ReverieLocal/RATS/Services/*.json
 <engine-exe-root>/ReverieLocal/RATS/Audit/*.jsonl
 <cli-exe-root>/.reverie/rats/settings.json
+<cli-exe-root>/.reverie/rats/diagnostics.jsonl
 ```
 
 The CLI accepts only discovery descriptors that declare the exact
-`reverie.rats.discovery/1` schema, `reverie.rtp/1`, an absolute Engine path, a
-valid service id and token, and an endpoint exactly matching
-`http://127.0.0.1:<port>/rtp`. Control and session tokens remain only in the
-Python core process. Renderer responses and settings contain neither token.
+`reverie.rats.discovery/1` schema, `reverie.rtp/1`, allowlisted
+`reverie.engine`/`builtin` identity, an absolute Engine path, a valid service id
+and token, an endpoint exactly matching `http://127.0.0.1:<port>/rtp`, and a
+descriptor parent matching that executable's fixed service directory. It then
+requires live `hello` values to match the descriptor. Unknown, mismatched, or
+offline entries are omitted from the service list. Control and session tokens
+remain only in the Python core process. Renderer responses, settings, and
+diagnostics contain neither token nor tool arguments.
 
 `REVERIE_RATS_DISCOVERY_ROOTS` can add local discovery directories for a
 development/test process. Its value is not copied into the settings file. The
 desktop file picker registers an Engine by deriving
 `ReverieLocal/RATS/Services` from the selected executable.
+There is no port scan, network broadcast, or arbitrary local-server catalog.
+
+Anonymous presence probes have a 350 ms deadline, normal session/catalog
+requests use 1.5 seconds, and native tool calls use a separate 12-second bound.
+The diagnostic log is capped and rotated locally; the GUI drawer shows recent
+discovery, rejection, handshake, timeout, operation, and timing records so a
+missing or unexpected provider can be audited without waiting for MCP-style
+configuration timeouts.
 
 ## Desktop workflow
 
 1. Start Reverie Engine. Its RATS service publishes an executable-local
    descriptor while the process is alive.
-2. Open **RATS** in Reverie Desktop and add the Engine executable if its
+2. Open **RATS** in Reverie Desktop and register the Engine executable if its
    discovery directory is not already known.
 3. Select the exact permission set and enable the service. This opens one RTP
    session owned by the Python core.
-4. Inspect the compact catalog, connection state, PID, endpoint, permission
-   policy, and individual full definitions.
+4. Inspect the compact catalog, provider identity, handshake latency, PID,
+   endpoint, permission policy, and individual full definitions. Toggle
+   **RTP log** to audit discovery and request timing.
 5. Disable the service to close the session and immediately remove its native
    tools from the model-facing catalog.
 
@@ -67,15 +87,24 @@ until the Engine publishes a versioned schema.
 
 ## Verified scope and remaining work
 
-The implemented slice covers local discovery, descriptor validation, persisted
-selection, permission-controlled session open/rotation/close, live status,
-compact catalog display, progressive definition loading, dynamic native tool
-calls, desktop integration, and graceful shutdown. Unit tests use only
-repository-local test directories. The real end-to-end test places its project,
+Local commit `b41f6df` covers fixed-provider discovery, descriptor/root and live
+identity validation, fast-fail deadlines, bounded sanitized diagnostics,
+persisted selection, permission-controlled session open/rotation/close, live
+status, compact catalog display, progressive definition loading, dynamic native
+tool calls, the toggleable desktop log drawer, and graceful shutdown. Unit tests
+use only repository-local test directories. The real end-to-end test places its project,
 CLI state, logs, and temporary files under the selected Engine executable's
 `ReverieLocal` directory.
 
-Third-party RATS package discovery, signature/trust metadata, download/update,
-and installation are not implemented by this slice. Multi-client sessions,
-streamed RTP events, and remote transports also remain open. They must not be
-presented as complete in the UI or roadmap.
+Focused provider tests pass 5/5. The Python suite passes 827/827; the desktop
+suite passes 53/53 with TypeScript typecheck and production build; and real
+desktop-core→RTP E2E passes against exact Engine binary
+`0.1.dev.custom_build.36888aaf3`. The log drawer is interaction-tested but has
+not received a current real-window visual inspection.
+
+Only Reverie Engine is currently supported. Each future Reverie/Rilance
+provider needs a versioned identity/capability contract, an explicit client
+allowlist entry, and real cross-product E2E. Arbitrary third-party package
+discovery/download/installation is outside the current RATS model. Multi-client
+sessions, streamed RTP task events, and remote transports also remain open and
+must not be presented as complete.

@@ -2,9 +2,13 @@
 
 Released 2026-07-17.
 
+### Post-release update (still v2.5.0) — 2026-08-01
+
+* Hardened RATS as RADE's fixed-provider runtime layer: Reverie CLI now accepts only allowlisted executable-local providers whose live RTP identity matches their descriptor, omits unknown/offline/mismatched services, uses a 350 ms presence probe with separate normal/tool deadlines, and stores bounded token/argument-free diagnostics beside the CLI executable. The desktop RATS page adds provider/handshake metadata and a toggleable RTP discovery log while retaining explicit user enablement before any native tool enters the AI catalog. Only Reverie Engine is currently supported; arbitrary third-party discovery/install is not part of the current model.
+
 ### Post-release update (still v2.5.0) — 2026-07-29
 
-* Added the first verified Reverie RATS/RTP client slice: the Python core now owns executable-local Engine discovery, explicit permission sessions, token-safe persisted selection, compact catalogs, progressive native schema loading, and direct dynamic Engine tools. Reverie Desktop adds a dedicated RATS status/permission/catalog page while keeping all RTP credentials out of Electron and the renderer. Third-party RATS download/install remains open.
+* Added the first verified Reverie RATS/RTP client slice: the Python core now owns executable-local Engine discovery, explicit permission sessions, token-safe persisted selection, compact catalogs, progressive native schema loading, and direct dynamic Engine tools. Reverie Desktop adds a dedicated RATS status/permission/catalog page while keeping all RTP credentials out of Electron and the renderer. Additional supported-provider onboarding remained open.
 
 ### Post-release update (still v2.5.0) — 2026-07-21
 

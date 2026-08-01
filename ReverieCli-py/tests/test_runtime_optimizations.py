@@ -918,6 +918,7 @@ def test_context_retrieval_does_not_block_following_bridge_requests(monkeypatch)
     class FakeBridge:
         def __init__(self, event_writer=None):
             self.event_writer = event_writer
+            self.rats_runtime = type("FakeRatsRuntime", (), {"shutdown": lambda self: None})()
 
         def dispatch(self, message):
             action = message.get("action")

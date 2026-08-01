@@ -815,6 +815,28 @@ kbd { border-color: var(--border-strong); border-bottom-color: var(--border); ba
 .rats-security-note div { display: flex; flex-direction: column; gap: 4px; }
 .rats-security-note strong { color: var(--text); font-size: var(--font-small); }
 .rats-security-note span { color: var(--muted); font-size: var(--font-caption); line-height: 1.55; }
+.rats-log-panel { margin-bottom: 22px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border)); border-radius: 13px; background: var(--panel); box-shadow: 0 16px 44px rgba(0,0,0,.14); }
+.rats-log-header { padding: 13px 14px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--border-soft); background: linear-gradient(120deg, color-mix(in srgb, var(--accent) 10%, transparent), transparent 54%); }
+.rats-log-header h2 { margin: 0 0 3px; font-size: var(--font-heading-sm); }
+.rats-log-header p { margin: 0; color: var(--muted); font-size: var(--font-caption); line-height: 1.45; }
+.rats-log-header button { width: 28px; height: 28px; flex: 0 0 auto; display: grid; place-items: center; border: 0; border-radius: 7px; background: transparent; color: var(--dim); cursor: pointer; }
+.rats-log-header button:hover { background: var(--hover); color: var(--text); }
+.rats-log-summary { padding: 10px 14px; display: grid; grid-template-columns: auto auto minmax(0,1fr); align-items: center; gap: 16px; border-bottom: 1px solid var(--border-soft); }
+.rats-log-summary > div { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+.rats-log-summary span { color: var(--dim); font-size: var(--font-caption); }
+.rats-log-summary strong { font: 600 var(--font-caption) var(--font-mono); }
+.rats-log-summary > code { overflow: hidden; color: var(--muted); font-size: var(--font-caption); text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.rats-log-list { max-height: 310px; overflow: auto; }
+.rats-log-row { min-height: 46px; padding: 8px 14px; display: grid; grid-template-columns: 158px minmax(0,1fr) 62px; align-items: center; gap: 12px; border-bottom: 1px solid var(--border-soft); box-shadow: inset 2px 0 0 transparent; }
+.rats-log-row:last-child { border-bottom: 0; }
+.rats-log-row.warning { box-shadow: inset 2px 0 0 #e9c978; }
+.rats-log-row.error { box-shadow: inset 2px 0 0 #ef8293; }
+.rats-log-row time, .rats-log-row > code { color: var(--dim); font: var(--font-caption) var(--font-mono); white-space: nowrap; }
+.rats-log-row > code { text-align: right; }
+.rats-log-row > div { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.rats-log-row strong { font: 600 var(--font-caption) var(--font-mono); }
+.rats-log-row span { overflow: hidden; color: var(--muted); font-size: var(--font-caption); text-overflow: ellipsis; white-space: nowrap; }
+.rats-log-empty { padding: 28px 14px; color: var(--muted); font-size: var(--font-small); text-align: center; }
 .rats-section-heading { margin: 22px 0 10px; display: flex; align-items: end; justify-content: space-between; gap: 16px; }
 .rats-section-heading h2 { margin: 0 0 3px; font-size: var(--font-heading-sm); font-weight: 600; }
 .rats-section-heading p { margin: 0; color: var(--muted); font-size: var(--font-caption); }
@@ -1313,6 +1335,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent-2); }
 .has-workspace-background .provider-settings,
 .has-workspace-background .tool-catalog-card,
 .has-workspace-background .plugin-card,
+.has-workspace-background .rats-log-panel,
 .has-workspace-background .rats-service-card,
 .has-workspace-background .rats-offline-row,
 .has-workspace-background .rats-root-row,
@@ -1361,6 +1384,9 @@ input[type="range"] { width: 100%; accent-color: var(--accent-2); }
   .app-shell.sidebar-collapsed.with-inspector { grid-template-columns: 0 minmax(0,1fr); }
   .settings-page { grid-template-columns: 165px minmax(0,1fr); }
   .tool-overview { grid-template-columns: 1fr; }
+  .rats-log-summary { grid-template-columns: auto auto; }
+  .rats-log-summary > code { grid-column: 1 / -1; text-align: left; }
+  .rats-log-row { grid-template-columns: 134px minmax(0,1fr) 54px; }
   .rats-service-meta { grid-template-columns: 1fr 1fr; }
   .rats-service-meta > div.wide { grid-column: 1 / -1; }
   .rats-permissions { grid-template-columns: 1fr; }

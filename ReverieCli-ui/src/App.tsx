@@ -2089,6 +2089,7 @@ function RatsView() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const [logsOpen, setLogsOpen] = useState(false);
 
   const acceptState = useCallback((next: RatsState) => {
     setState(next);
@@ -2195,6 +2196,7 @@ function RatsView() {
   const connected = state?.services.filter((service) => service.connection === "connected").length ?? 0;
   const available = state?.services.filter((service) => service.connection !== "unreachable").length ?? 0;
   const toolCount = state?.services.reduce((total, service) => total + service.tools.length, 0) ?? 0;
+  const diagnostics = state ? [...state.diagnostics].reverse() : [];
   const offlineSelections = state?.enabledEngines.filter((selection) =>
     !state.services.some((service) => service.executable.toLowerCase() === selection.executable.toLowerCase())) ?? [];
 
@@ -2204,7 +2206,7 @@ function RatsView() {
         icon={<Database size={20} />}
         title="RATS"
         description={t("管理本机 Reverie 智能体工具服务；只有显式启用的服务才会建立 RTP 工具会话。")}
-        action={<div className="header-action-row"><button type="button" className="secondary-button" onClick={() => void load(true)} disabled={loading}><RefreshCw className={loading ? "spin" : ""} size={14} />{t("刷新")}</button><button type="button" className="primary-button" onClick={() => void addEngine()} disabled={busy === "add"}><Plus size={14} />{t("添加 Engine")}</button></div>}
+        action={<div className="header-action-row"><button type="button" className="secondary-button" aria-expanded={logsOpen} aria-controls="rats-diagnostic-panel" onClick={() => setLogsOpen((open) => !open)}><FileText size={14} />{t("RTP 日志")}</button><button type="button" className="secondary-button" onClick={() => void load(true)} disabled={loading}><RefreshCw className={loading ? "spin" : ""} size={14} />{t("刷新")}</button><button type="button" className="primary-button" onClick={() => void addEngine()} disabled={busy === "add"}><Plus size={14} />{t("登记 Engine")}</button></div>}
       />
       <div className="tool-overview rats-overview">
         <div><Globe size={17} /><span>{t("发现服务")}<strong>{state?.services.length ?? 0}</strong></span></div>
@@ -2213,8 +2215,27 @@ function RatsView() {
       </div>
       <div className="rats-security-note">
         <ShieldCheck size={18} />
-        <div><strong>{t("本地优先，工具默认关闭")}</strong><span>{t("RATS 只接受 127.0.0.1 端点。控制令牌和 RTP 会话令牌只保留在 Reverie CLI 核心内存中，不会发送到页面或写入设置。")}</span></div>
+        <div><strong>{t("受支持提供者，工具默认关闭")}</strong><span>{t("只显示已登记、正在运行并通过身份握手的 Reverie 提供者；未知或离线条目仅写入本地诊断日志。控制令牌和 RTP 会话令牌不会发送到页面或写入设置。")}</span></div>
       </div>
+      {logsOpen && <section id="rats-diagnostic-panel" className="rats-log-panel" aria-labelledby="rats-log-title">
+        <div className="rats-log-header"><div><h2 id="rats-log-title">{t("RTP 检索日志")}</h2><p>{t("记录发现、拒绝、握手、超时与目录请求；不记录令牌或工具参数。")}</p></div><button type="button" aria-label={t("关闭 RTP 日志")} onClick={() => setLogsOpen(false)}><X size={15} /></button></div>
+        <div className="rats-log-summary">
+          <div><span>{t("最近扫描")}</span><strong>{state?.scanDurationMs ?? 0} ms</strong></div>
+          <div><span>{t("已拒绝条目")}</span><strong>{state?.rejectedDescriptorCount ?? 0}</strong></div>
+          <code title={state?.diagnosticsPath}>{state?.diagnosticsPath || t("等待日志路径")}</code>
+        </div>
+        <div className="rats-log-list">
+          {diagnostics.map((entry, index) => {
+            const context = [entry.providerId, entry.serviceId, entry.operation, entry.reason, entry.path].filter(Boolean).join(" · ");
+            return <div className={`rats-log-row ${entry.level}`} key={`${entry.timestampUtc}:${entry.event}:${index}`}>
+              <time>{entry.timestampUtc.replace("T", " ").replace("Z", " UTC")}</time>
+              <div><strong>{entry.event}</strong>{context && <span title={context}>{context}</span>}</div>
+              <code>{entry.durationMs === undefined ? "—" : `${entry.durationMs} ms`}</code>
+            </div>;
+          })}
+          {diagnostics.length === 0 && <div className="rats-log-empty">{t("刷新后将在这里显示 RATS 检索与 RTP 请求记录。")}</div>}
+        </div>
+      </section>}
       {error && <div className="page-loading error"><AlertCircle size={18} />{error}</div>}
       {loading && !state ? <div className="page-loading"><RefreshCw className="spin" size={18} />{t("扫描本地 RATS 服务")}</div> : (
         <>
@@ -2232,9 +2253,11 @@ function RatsView() {
                     <Toggle checked={service.enabled} disabled={busy === service.serviceId} onChange={(enabled) => void setEnabled(service, enabled)} />
                   </div>
                   <div className="rats-service-meta">
+                    <div><span>{t("提供者")}</span><code>{service.providerId}</code></div>
                     <div><span>{t("端点")}</span><code>{service.endpoint}</code></div>
                     <div><span>{t("进程")}</span><code>PID {service.pid}</code></div>
                     <div><span>{t("服务 ID")}</span><code>{service.serviceId}</code></div>
+                    <div><span>{t("身份握手")}</span><code>{service.probeLatencyMs} ms</code></div>
                     <div className="wide"><span>{t("Engine")}</span><code title={service.executable}>{service.executable}</code></div>
                   </div>
                   <div className="rats-permissions">
@@ -2263,7 +2286,7 @@ function RatsView() {
                 </section>
               );
             })}
-            {state?.services.length === 0 && <div className="empty-panel rats-empty"><Database size={28} /><strong>{t("尚未发现正在运行的 RATS 服务")}</strong><span>{t("启动 Reverie Engine，或添加其可执行文件以登记发现目录。")}</span><button type="button" className="primary-button" onClick={() => void addEngine()}><Plus size={14} />{t("添加 Engine")}</button></div>}
+            {state?.services.length === 0 && <div className="empty-panel rats-empty"><Database size={28} /><strong>{t("尚未发现正在运行的 RATS 服务")}</strong><span>{t("启动 Reverie Engine，或登记其可执行文件以检查固定的本地服务目录；拒绝原因可在 RTP 日志中审查。")}</span><button type="button" className="primary-button" onClick={() => void addEngine()}><Plus size={14} />{t("登记 Engine")}</button></div>}
           </div>
           {offlineSelections.length > 0 && <section className="rats-offline-panel"><div className="rats-section-heading"><div><h2>{t("已保存但离线")}</h2><p>{t("这些 Engine 下次启动时会自动建立已授权会话。")}</p></div></div>{offlineSelections.map((selection) => <div className="rats-offline-row" key={selection.executable}><Database size={15} /><code>{selection.executable}</code><span>{selection.permissions.join(" · ")}</span></div>)}</section>}
           {state && state.configuredDiscoveryRoots.length > 0 && <section className="rats-roots-panel"><div className="rats-section-heading"><div><h2>{t("已登记发现目录")}</h2><p>{t("设置实时保存在 Reverie CLI 可执行文件旁的 .reverie/rats 目录中。")}</p></div><code title={state.statePath}>{state.statePath}</code></div>{state.configuredDiscoveryRoots.map((root) => <div className="rats-root-row" key={root}><Folder size={15} /><code>{root}</code><button type="button" aria-label={t("移除发现目录")} onClick={() => void removeRoot(root)} disabled={busy === root}><X size={14} /></button></div>)}</section>}

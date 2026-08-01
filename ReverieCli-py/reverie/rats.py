@@ -12,7 +12,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from .config import get_app_root
 
@@ -20,11 +20,16 @@ from .config import get_app_root
 RATS_PROTOCOL = "reverie.rtp/1"
 RATS_DISCOVERY_SCHEMA = "reverie.rats.discovery/1"
 RATS_PERMISSIONS = ("read", "project", "edit", "asset", "ai", "run", "build")
+RATS_SUPPORTED_PROVIDERS = {
+    "reverie.engine": {"product": "Reverie Engine", "service_kind": "builtin"},
+}
 _TOKEN_RE = re.compile(r"^[0-9a-f]{64}$")
 _SERVICE_RE = re.compile(r"^rats-[1-9][0-9]*-[a-z0-9]+$")
 _IDENTIFIER_RE = re.compile(r"[^a-z0-9_-]+")
 _MAX_DESCRIPTOR_BYTES = 128 * 1024
 _MAX_RESPONSE_BYTES = 1024 * 1024
+_MAX_DIAGNOSTIC_BYTES = 2 * 1024 * 1024
+_MAX_DIAGNOSTIC_ENTRIES = 240
 _DEFAULT_LOADED_TOOLS = ("ping", "version", "get_status", "project.status")
 
 
@@ -85,6 +90,8 @@ def _safe_identifier(value: Any) -> str:
 @dataclass(frozen=True)
 class RatsDescriptor:
     service_id: str
+    provider_id: str
+    service_kind: str
     product: str
     product_version: str
     executable: Path
@@ -107,47 +114,74 @@ class _RatsSession:
     definitions: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
 
-def parse_rats_descriptor(value: Any, descriptor_path: Path | str) -> Optional[RatsDescriptor]:
+def _parse_rats_descriptor(value: Any, descriptor_path: Path | str) -> Tuple[Optional[RatsDescriptor], str]:
     source = _record(value)
     try:
         executable = Path(_text(source.get("executable"))).expanduser()
         service_id = _text(source.get("service_id"))
         pid = int(source.get("pid", 0))
         port = int(source.get("port", 0))
+        native_tool_count = max(0, int(source.get("native_tool_count", 0) or 0))
     except (TypeError, ValueError, OSError):
-        return None
+        return None, "invalid_descriptor_fields"
+    provider_id = _text(source.get("provider_id"))
+    service_kind = _text(source.get("service_kind"))
+    supported = RATS_SUPPORTED_PROVIDERS.get(provider_id)
     endpoint = _text(source.get("endpoint"))
     control_token = _text(source.get("control_token")).lower()
-    if (
-        source.get("schema") != RATS_DISCOVERY_SCHEMA
-        or source.get("protocol") != RATS_PROTOCOL
-        or _text(source.get("bind_address")) != "127.0.0.1"
-        or not _SERVICE_RE.fullmatch(service_id)
-        or not executable.is_absolute()
-        or pid <= 0
-        or port <= 0
-        or port > 65535
-        or endpoint != f"http://127.0.0.1:{port}/rtp"
-        or not _TOKEN_RE.fullmatch(control_token)
-    ):
-        return None
+    if source.get("schema") != RATS_DISCOVERY_SCHEMA:
+        return None, "unsupported_discovery_schema"
+    if source.get("protocol") != RATS_PROTOCOL:
+        return None, "unsupported_protocol"
+    if supported is None:
+        return None, "unsupported_provider"
+    if service_kind != supported["service_kind"]:
+        return None, "unsupported_service_kind"
+    if _text(source.get("product")) != supported["product"]:
+        return None, "provider_product_mismatch"
+    if _text(source.get("bind_address")) != "127.0.0.1":
+        return None, "non_loopback_endpoint"
+    if not _SERVICE_RE.fullmatch(service_id):
+        return None, "invalid_service_id"
+    if not executable.is_absolute():
+        return None, "invalid_executable_path"
+    if pid <= 0:
+        return None, "invalid_process_id"
+    if port <= 0 or port > 65535 or endpoint != f"http://127.0.0.1:{port}/rtp":
+        return None, "invalid_endpoint"
+    if not _TOKEN_RE.fullmatch(control_token):
+        return None, "invalid_control_token"
+    resolved_executable = executable.resolve(strict=False)
+    resolved_descriptor = Path(descriptor_path).resolve(strict=False)
+    if _path_key(resolved_descriptor.parent) != _path_key(rats_discovery_root_for_executable(resolved_executable)):
+        return None, "descriptor_outside_provider_root"
     return RatsDescriptor(
         service_id=service_id,
+        provider_id=provider_id,
+        service_kind=service_kind,
         product=_text(source.get("product")) or "Reverie Engine",
         product_version=_text(source.get("product_version")),
-        executable=executable.resolve(strict=False),
+        executable=resolved_executable,
         pid=pid,
         port=port,
         endpoint=endpoint,
-        descriptor_path=Path(descriptor_path).resolve(strict=False),
+        descriptor_path=resolved_descriptor,
         catalog_revision=_text(source.get("catalog_revision")),
-        native_tool_count=max(0, int(source.get("native_tool_count", 0) or 0)),
+        native_tool_count=native_tool_count,
         started_utc=_text(source.get("started_utc")),
         control_token=control_token,
-    )
+    ), ""
 
 
-def discover_rats_descriptors(roots: Iterable[Path | str]) -> List[RatsDescriptor]:
+def parse_rats_descriptor(value: Any, descriptor_path: Path | str) -> Optional[RatsDescriptor]:
+    descriptor, _reason = _parse_rats_descriptor(value, descriptor_path)
+    return descriptor
+
+
+def discover_rats_descriptors(
+    roots: Iterable[Path | str],
+    rejections: Optional[List[Dict[str, str]]] = None,
+) -> List[RatsDescriptor]:
     descriptors: Dict[tuple[str, str], RatsDescriptor] = {}
     for root in _unique_paths(roots):
         try:
@@ -156,13 +190,21 @@ def discover_rats_descriptors(roots: Iterable[Path | str]) -> List[RatsDescripto
             continue
         for candidate in candidates:
             try:
-                if not candidate.is_file() or candidate.stat().st_size > _MAX_DESCRIPTOR_BYTES:
+                if not candidate.is_file():
                     continue
-                descriptor = parse_rats_descriptor(json.loads(candidate.read_text(encoding="utf-8")), candidate)
+                if candidate.stat().st_size > _MAX_DESCRIPTOR_BYTES:
+                    if rejections is not None:
+                        rejections.append({"path": str(candidate), "reason": "descriptor_too_large"})
+                    continue
+                descriptor, reason = _parse_rats_descriptor(json.loads(candidate.read_text(encoding="utf-8")), candidate)
             except (OSError, UnicodeError, json.JSONDecodeError):
+                if rejections is not None:
+                    rejections.append({"path": str(candidate), "reason": "descriptor_unreadable"})
                 continue
             if descriptor is not None:
                 descriptors[(descriptor.service_id, _path_key(descriptor.descriptor_path))] = descriptor
+            elif rejections is not None:
+                rejections.append({"path": str(candidate), "reason": reason or "descriptor_rejected"})
     return sorted(descriptors.values(), key=lambda item: item.service_id)
 
 
@@ -194,16 +236,86 @@ def _compact_tools(value: Any) -> List[Dict[str, Any]]:
 class RatsRuntime:
     """Own all RATS sessions for one long-lived Reverie CLI process."""
 
-    def __init__(self, app_root: Optional[Path] = None, *, request_timeout: float = 3.0) -> None:
+    def __init__(
+        self,
+        app_root: Optional[Path] = None,
+        *,
+        request_timeout: float = 1.5,
+        probe_timeout: float = 0.35,
+        tool_timeout: float = 12.0,
+    ) -> None:
         self.app_root = Path(app_root or get_app_root()).resolve(strict=False)
         self.state_dir = self.app_root / ".reverie" / "rats"
         self.settings_path = self.state_dir / "settings.json"
+        self.diagnostics_path = self.state_dir / "diagnostics.jsonl"
         self.request_timeout = min(10.0, max(0.25, float(request_timeout)))
+        self.probe_timeout = min(1.0, max(0.1, float(probe_timeout)))
+        self.tool_timeout = min(60.0, max(1.0, float(tool_timeout)))
         self._sessions: Dict[str, _RatsSession] = {}
+        self._diagnostics: List[Dict[str, Any]] = self._load_diagnostics()
         self._generation = 0
         self._definition_signature = ""
         self._has_refreshed = False
         self._lock = threading.RLock()
+
+    def _load_diagnostics(self) -> List[Dict[str, Any]]:
+        try:
+            lines = self.diagnostics_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            return []
+        entries: List[Dict[str, Any]] = []
+        for line in lines[-_MAX_DIAGNOSTIC_ENTRIES:]:
+            try:
+                value = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(value, dict):
+                entries.append(dict(value))
+        return entries
+
+    def _log_diagnostic(
+        self,
+        event: str,
+        *,
+        level: str = "info",
+        service_id: str = "",
+        provider_id: str = "",
+        operation: str = "",
+        reason: str = "",
+        path: str = "",
+        duration_ms: Optional[int] = None,
+        count: Optional[int] = None,
+    ) -> None:
+        entry: Dict[str, Any] = {
+            "timestampUtc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "level": level if level in {"info", "warning", "error"} else "info",
+            "event": _text(event),
+        }
+        optional = {
+            "serviceId": _text(service_id),
+            "providerId": _text(provider_id),
+            "operation": _text(operation),
+            "reason": _text(reason),
+            "path": _text(path),
+        }
+        entry.update({key: value for key, value in optional.items() if value})
+        if duration_ms is not None:
+            entry["durationMs"] = max(0, int(duration_ms))
+        if count is not None:
+            entry["count"] = max(0, int(count))
+        self._diagnostics.append(entry)
+        self._diagnostics = self._diagnostics[-_MAX_DIAGNOSTIC_ENTRIES:]
+        try:
+            self.state_dir.mkdir(parents=True, exist_ok=True)
+            if self.diagnostics_path.is_file() and self.diagnostics_path.stat().st_size > _MAX_DIAGNOSTIC_BYTES:
+                retained = self.diagnostics_path.read_text(encoding="utf-8", errors="replace").splitlines()[-800:]
+                temporary = self.diagnostics_path.with_suffix(f".tmp-{uuid.uuid4().hex}")
+                temporary.write_text("\n".join(retained) + "\n", encoding="utf-8")
+                os.replace(temporary, self.diagnostics_path)
+            with self.diagnostics_path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(entry, ensure_ascii=False, separators=(",", ":")) + "\n")
+        except OSError:
+            pass
 
     def _read_settings(self) -> Dict[str, Any]:
         try:
@@ -247,6 +359,8 @@ class RatsRuntime:
         session_token: str = "",
         timeout: Optional[float] = None,
     ) -> Dict[str, Any]:
+        started = time.perf_counter()
+        effective_timeout = float(timeout) if timeout is not None else self.request_timeout
         body = json.dumps(
             {"id": f"reverie-cli-{uuid.uuid4().hex}", "protocol": RATS_PROTOCOL, "op": operation, "args": args or {}},
             ensure_ascii=False,
@@ -257,30 +371,83 @@ class RatsRuntime:
             headers["X-Reverie-RATS-Control"] = control_token
         if session_token:
             headers["X-Reverie-RTP-Session"] = session_token
-        connection = http.client.HTTPConnection("127.0.0.1", descriptor.port, timeout=timeout or self.request_timeout)
+        connection = http.client.HTTPConnection("127.0.0.1", descriptor.port, timeout=effective_timeout)
         try:
             connection.request("POST", "/rtp", body=body, headers=headers)
             response = connection.getresponse()
             raw = response.read(_MAX_RESPONSE_BYTES + 1)
         except (OSError, TimeoutError, http.client.HTTPException) as exc:
+            self._log_diagnostic(
+                "rtp.request",
+                level="warning",
+                service_id=descriptor.service_id,
+                provider_id=descriptor.provider_id,
+                operation=operation,
+                reason="transport_error",
+                duration_ms=round((time.perf_counter() - started) * 1000),
+            )
             raise RatsClientError(f"RATS {operation} failed: {exc}", code="transport_error") from exc
         finally:
             connection.close()
         if len(raw) > _MAX_RESPONSE_BYTES:
+            self._log_diagnostic(
+                "rtp.request",
+                level="error",
+                service_id=descriptor.service_id,
+                provider_id=descriptor.provider_id,
+                operation=operation,
+                reason="response_too_large",
+                duration_ms=round((time.perf_counter() - started) * 1000),
+            )
             raise RatsClientError("RATS response exceeded the 1 MiB client limit.", code="response_too_large")
         try:
             payload = _record(json.loads(raw.decode("utf-8")))
         except (UnicodeError, json.JSONDecodeError) as exc:
+            self._log_diagnostic(
+                "rtp.request",
+                level="error",
+                service_id=descriptor.service_id,
+                provider_id=descriptor.provider_id,
+                operation=operation,
+                reason="malformed_response",
+                duration_ms=round((time.perf_counter() - started) * 1000),
+            )
             raise RatsClientError("RATS returned malformed JSON.", status=response.status, code="malformed_response") from exc
         if payload.get("protocol") != RATS_PROTOCOL:
+            self._log_diagnostic(
+                "rtp.request",
+                level="error",
+                service_id=descriptor.service_id,
+                provider_id=descriptor.provider_id,
+                operation=operation,
+                reason="protocol_mismatch",
+                duration_ms=round((time.perf_counter() - started) * 1000),
+            )
             raise RatsClientError("RATS protocol response did not match reverie.rtp/1.", status=response.status, code="protocol_mismatch")
         if response.status >= 400 or payload.get("ok") is not True:
             error = _record(payload.get("error"))
+            error_code = _text(error.get("code")) or "request_failed"
+            self._log_diagnostic(
+                "rtp.request",
+                level="warning",
+                service_id=descriptor.service_id,
+                provider_id=descriptor.provider_id,
+                operation=operation,
+                reason=error_code,
+                duration_ms=round((time.perf_counter() - started) * 1000),
+            )
             raise RatsClientError(
                 _text(error.get("message")) or f"RATS request failed with HTTP {response.status}.",
                 status=response.status,
-                code=_text(error.get("code")) or "request_failed",
+                code=error_code,
             )
+        self._log_diagnostic(
+            "rtp.request",
+            service_id=descriptor.service_id,
+            provider_id=descriptor.provider_id,
+            operation=operation,
+            duration_ms=round((time.perf_counter() - started) * 1000),
+        )
         return _record(payload.get("result"))
 
     def _selection(self, settings: Dict[str, Any], executable: Path | str) -> Optional[Dict[str, Any]]:
@@ -344,10 +511,43 @@ class RatsRuntime:
         self,
         descriptor: RatsDescriptor,
         settings: Dict[str, Any],
-    ) -> Dict[str, Any]:
+    ) -> Optional[Dict[str, Any]]:
+        probe_started = time.perf_counter()
+        try:
+            hello = self._request(descriptor, "hello", timeout=self.probe_timeout)
+        except RatsClientError:
+            session = self._sessions.pop(descriptor.service_id, None)
+            if session is not None:
+                self._update_generation()
+            return None
+        expected_hello = {
+            "service_id": descriptor.service_id,
+            "protocol": RATS_PROTOCOL,
+            "provider_id": descriptor.provider_id,
+            "service_kind": descriptor.service_kind,
+            "product": descriptor.product,
+        }
+        mismatched_field = next((key for key, value in expected_hello.items() if hello.get(key) != value), "")
+        if mismatched_field:
+            self._log_diagnostic(
+                "provider.rejected",
+                level="warning",
+                service_id=descriptor.service_id,
+                provider_id=descriptor.provider_id,
+                reason=f"hello_{mismatched_field}_mismatch",
+                duration_ms=round((time.perf_counter() - probe_started) * 1000),
+            )
+            session = self._sessions.pop(descriptor.service_id, None)
+            if session is not None:
+                self._update_generation()
+            return None
+
+        probe_latency_ms = round((time.perf_counter() - probe_started) * 1000)
         selection = self._selection(settings, descriptor.executable)
         base = {
             "serviceId": descriptor.service_id,
+            "providerId": descriptor.provider_id,
+            "serviceKind": descriptor.service_kind,
             "product": descriptor.product,
             "productVersion": descriptor.product_version,
             "executable": str(descriptor.executable),
@@ -358,8 +558,9 @@ class RatsRuntime:
             "catalogRevision": descriptor.catalog_revision,
             "nativeToolCount": descriptor.native_tool_count,
             "startedUtc": descriptor.started_utc,
+            "probeLatencyMs": probe_latency_ms,
             "enabled": selection is not None,
-            "connection": "unreachable",
+            "connection": "available",
             "sessionActive": False,
             "permissions": normalize_rats_permissions(selection.get("permissions")) if selection else ["read"],
             "tools": [],
@@ -367,10 +568,6 @@ class RatsRuntime:
             "error": "",
         }
         try:
-            hello = self._request(descriptor, "hello")
-            if hello.get("service_id") != descriptor.service_id or hello.get("protocol") != RATS_PROTOCOL:
-                raise RatsClientError("RATS hello did not match its executable-local descriptor.", code="descriptor_mismatch")
-            base["connection"] = "available"
             session = self._sessions.get(descriptor.service_id)
             if selection is None:
                 if session is not None:
@@ -414,23 +611,62 @@ class RatsRuntime:
 
     def refresh(self) -> Dict[str, Any]:
         with self._lock:
+            started = time.perf_counter()
             settings = self._read_settings()
             roots = self._roots(settings)
-            descriptors = discover_rats_descriptors(roots)
-            current_ids = {descriptor.service_id for descriptor in descriptors}
+            rejections: List[Dict[str, str]] = []
+            for root in roots:
+                if not root.is_dir():
+                    self._log_diagnostic(
+                        "discovery.root_missing",
+                        level="warning",
+                        reason="directory_not_found",
+                        path=str(root),
+                    )
+            descriptors = discover_rats_descriptors(roots, rejections)
+            for rejection in rejections:
+                self._log_diagnostic(
+                    "discovery.rejected",
+                    level="warning",
+                    reason=rejection.get("reason", "descriptor_rejected"),
+                    path=rejection.get("path", ""),
+                )
+            services = []
+            for descriptor in descriptors:
+                service = self._service_record(descriptor, settings)
+                if service is not None:
+                    services.append(service)
+            current_ids = {service["serviceId"] for service in services}
             for service_id in list(self._sessions):
                 if service_id not in current_ids:
                     self._sessions.pop(service_id, None)
-            services = [self._service_record(descriptor, settings) for descriptor in descriptors]
             self._has_refreshed = True
             self._update_generation()
+            scan_duration_ms = round((time.perf_counter() - started) * 1000)
+            self._log_diagnostic(
+                "discovery.complete",
+                duration_ms=scan_duration_ms,
+                count=len(services),
+            )
             return {
                 "protocol": RATS_PROTOCOL,
                 "statePath": str(self.settings_path),
+                "diagnosticsPath": str(self.diagnostics_path),
                 "discoveryRoots": [str(path) for path in roots],
                 "configuredDiscoveryRoots": list(settings["discoveryRoots"]),
                 "enabledEngines": list(settings["enabledEngines"]),
+                "supportedProviders": [
+                    {
+                        "providerId": provider_id,
+                        "product": definition["product"],
+                        "serviceKind": definition["service_kind"],
+                    }
+                    for provider_id, definition in sorted(RATS_SUPPORTED_PROVIDERS.items())
+                ],
                 "services": services,
+                "scanDurationMs": scan_duration_ms,
+                "rejectedDescriptorCount": len(rejections),
+                "diagnostics": list(self._diagnostics[-160:]),
                 "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             }
 
@@ -517,6 +753,7 @@ class RatsRuntime:
                 "tool.call",
                 {"name": _text(tool_name), "arguments": _record(arguments), "dry_run": bool(dry_run)},
                 session_token=session.token,
+                timeout=self.tool_timeout,
             )
 
     def compact_catalog(self) -> List[Dict[str, Any]]:
@@ -609,6 +846,7 @@ __all__ = [
     "RATS_DISCOVERY_SCHEMA",
     "RATS_PERMISSIONS",
     "RATS_PROTOCOL",
+    "RATS_SUPPORTED_PROVIDERS",
     "RatsClientError",
     "RatsDescriptor",
     "RatsRuntime",

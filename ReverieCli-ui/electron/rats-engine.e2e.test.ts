@@ -18,6 +18,14 @@ async function waitForExit(child: ReturnType<typeof spawn>, timeoutMs: number): 
   });
 }
 
+function removeTestDirectory(target: string): void {
+  try {
+    rmSync(target, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EPERM") throw error;
+  }
+}
+
 class CoreClient {
   private sequence = 0;
   private readonly pending = new Map<string, { resolve: (value: Record<string, unknown>) => void; reject: (error: Error) => void }>();
@@ -61,7 +69,10 @@ class CoreClient {
 
 describe.skipIf(!engineBinary)("RATS integration with a real Reverie Engine", () => {
   it("keeps the RTP session in the Python core and exposes progressive native tools to the desktop", async () => {
-    const binary = path.resolve(engineBinary);
+    const selectedBinary = path.resolve(engineBinary);
+    const binary = selectedBinary.toLowerCase().endsWith(".console.exe")
+      ? selectedBinary.slice(0, -".console.exe".length) + ".exe"
+      : selectedBinary;
     const binaryRoot = path.dirname(binary);
     const localRoot = path.join(binaryRoot, "ReverieLocal");
     const projectRoot = path.join(localRoot, "Projects", "RatsCliDesktopE2E");
@@ -113,17 +124,38 @@ describe.skipIf(!engineBinary)("RATS integration with a real Reverie Engine", ()
     try {
       await core.ready();
       await core.request("ratsAddEngine", { executable: binary });
-      let rats = (await core.request("ratsState")).rats as { services: Array<Record<string, unknown>>; statePath: string };
+      let rats = (await core.request("ratsState")).rats as {
+        services: Array<Record<string, unknown>>;
+        statePath: string;
+        diagnosticsPath: string;
+        diagnostics: Array<Record<string, unknown>>;
+        scanDurationMs: number;
+      };
       const deadline = Date.now() + 60_000;
       while (!rats.services.some((service) => path.resolve(String(service.executable)) === binary) && Date.now() < deadline) {
-        if (engine.exitCode !== null) throw new Error(`Reverie Engine exited before RATS discovery (code ${engine.exitCode}).`);
+        if (rats.services.length > 0) {
+          throw new Error(`RATS exposed an unexpected executable identity: expected=${binary} services=${JSON.stringify(rats.services)}`);
+        }
+        if (engine.exitCode !== null) {
+          throw new Error(`Reverie Engine exited before RATS discovery (code ${engine.exitCode}): services=${JSON.stringify(rats.services)} diagnostics=${JSON.stringify(rats.diagnostics.slice(-12))}`);
+        }
         await new Promise((resolve) => setTimeout(resolve, 100));
         rats = (await core.request("ratsState")).rats as typeof rats;
       }
       expect(path.resolve(rats.statePath)).toBe(path.resolve(cliStateRoot, ".reverie", "rats", "settings.json"));
+      expect(path.resolve(rats.diagnosticsPath)).toBe(path.resolve(cliStateRoot, ".reverie", "rats", "diagnostics.jsonl"));
       const available = rats.services.find((service) => path.resolve(String(service.executable)) === binary);
-      expect(available).toMatchObject({ protocol: "reverie.rtp/1", connection: "available", enabled: false });
+      expect(available).toMatchObject({
+        protocol: "reverie.rtp/1",
+        providerId: "reverie.engine",
+        serviceKind: "builtin",
+        connection: "available",
+        enabled: false,
+      });
       expect(Number(available?.nativeToolCount)).toBeGreaterThanOrEqual(35);
+      expect(Number(available?.probeLatencyMs)).toBeGreaterThanOrEqual(0);
+      expect(rats.scanDurationMs).toBeLessThan(1_500);
+      expect(rats.diagnostics.some((entry) => entry.event === "rtp.request" && entry.operation === "hello")).toBe(true);
 
       rats = (await core.request("ratsSetEnabled", { executable: binary, enabled: true, permissions: ["read"] })).rats as typeof rats;
       const connected = rats.services.find((service) => path.resolve(String(service.executable)) === binary);
@@ -160,8 +192,8 @@ describe.skipIf(!engineBinary)("RATS integration with a real Reverie Engine", ()
         await waitForExit(engine, 10_000);
       }
       closeSync(log);
-      rmSync(projectRoot, { recursive: true, force: true });
-      rmSync(cliStateRoot, { recursive: true, force: true });
+      removeTestDirectory(projectRoot);
+      removeTestDirectory(cliStateRoot);
     }
   }, 90_000);
 });

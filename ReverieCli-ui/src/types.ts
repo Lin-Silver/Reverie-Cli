@@ -19,6 +19,8 @@ export interface RatsEngineSelection {
 
 export interface RatsServiceRecord {
   serviceId: string;
+  providerId: string;
+  serviceKind: string;
   product: string;
   productVersion: string;
   executable: string;
@@ -29,6 +31,7 @@ export interface RatsServiceRecord {
   catalogRevision: string;
   nativeToolCount: number;
   startedUtc: string;
+  probeLatencyMs: number;
   enabled: boolean;
   connection: "connected" | "available" | "unreachable";
   sessionActive: boolean;
@@ -38,13 +41,37 @@ export interface RatsServiceRecord {
   error: string;
 }
 
+export interface RatsProviderRecord {
+  providerId: string;
+  product: string;
+  serviceKind: string;
+}
+
+export interface RatsDiagnosticEntry {
+  timestampUtc: string;
+  level: "info" | "warning" | "error";
+  event: string;
+  serviceId?: string;
+  providerId?: string;
+  operation?: string;
+  reason?: string;
+  path?: string;
+  durationMs?: number;
+  count?: number;
+}
+
 export interface RatsState {
   protocol: "reverie.rtp/1";
   statePath: string;
+  diagnosticsPath: string;
   discoveryRoots: string[];
   configuredDiscoveryRoots: string[];
   enabledEngines: RatsEngineSelection[];
+  supportedProviders: RatsProviderRecord[];
   services: RatsServiceRecord[];
+  scanDurationMs: number;
+  rejectedDescriptorCount: number;
+  diagnostics: RatsDiagnosticEntry[];
   updatedAt: string;
 }
 

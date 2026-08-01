@@ -124,11 +124,15 @@ function installDesktopApi() {
   const ratsState = (): RatsState => ({
     protocol: "reverie.rtp/1",
     statePath: "C:/core/.reverie/rats/settings.json",
+    diagnosticsPath: "C:/core/.reverie/rats/diagnostics.jsonl",
     discoveryRoots: ["C:/Engine/ReverieLocal/RATS/Services"],
     configuredDiscoveryRoots: ["C:/Engine/ReverieLocal/RATS/Services"],
     enabledEngines: ratsEnabled ? [{ executable: "C:/Engine/reverie.windows.editor.x86_64.exe", permissions: ["read"] }] : [],
+    supportedProviders: [{ providerId: "reverie.engine", product: "Reverie Engine", serviceKind: "builtin" }],
     services: [{
       serviceId: "rats-4242-testservice",
+      providerId: "reverie.engine",
+      serviceKind: "builtin",
       product: "Reverie Engine",
       productVersion: "0.1.dev.custom_build",
       executable: "C:/Engine/reverie.windows.editor.x86_64.exe",
@@ -139,6 +143,7 @@ function installDesktopApi() {
       catalogRevision: "catalog",
       nativeToolCount: 35,
       startedUtc: "2026-07-29T12:00:00",
+      probeLatencyMs: 7,
       enabled: ratsEnabled,
       connection: ratsEnabled ? "connected" : "available",
       sessionActive: ratsEnabled,
@@ -147,6 +152,12 @@ function installDesktopApi() {
       loadedToolNames: ratsEnabled ? ["project.status"] : [],
       error: "",
     }],
+    scanDurationMs: 12,
+    rejectedDescriptorCount: 1,
+    diagnostics: [
+      { timestampUtc: "2026-07-29T12:00:00Z", level: "warning", event: "discovery.rejected", reason: "unsupported_provider", path: "C:/Engine/ReverieLocal/RATS/Services/rats-unknown.json" },
+      { timestampUtc: "2026-07-29T12:00:01Z", level: "info", event: "rtp.request", providerId: "reverie.engine", serviceId: "rats-4242-testservice", operation: "hello", durationMs: 7 },
+    ],
     updatedAt: "2026-07-29T12:00:00Z",
   });
   const request = vi.fn(async (action: string, payload: Record<string, unknown>) => {
@@ -355,6 +366,13 @@ describe("desktop GUI interactions", () => {
     await user.click(await screen.findByRole("button", { name: "RATS" }));
     expect(await screen.findByText("Reverie Engine")).toBeTruthy();
     expect(screen.getByText("http://127.0.0.1:17777/rtp")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "RTP 日志" }));
+    const logPanel = await screen.findByRole("region", { name: "RTP 检索日志" });
+    expect(within(logPanel).getByText(/unsupported_provider/)).toBeTruthy();
+    expect(within(logPanel).getByText("7 ms")).toBeTruthy();
+    await user.click(within(logPanel).getByRole("button", { name: "关闭 RTP 日志" }));
+    expect(screen.queryByRole("region", { name: "RTP 检索日志" })).toBeNull();
 
     await user.click(screen.getByRole("switch"));
     await waitFor(() => expect(api.request).toHaveBeenCalledWith("ratsSetEnabled", {

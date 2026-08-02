@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import shutil
 import socket
@@ -16,6 +17,7 @@ from reverie.agent.tool_executor import ToolExecutor
 from reverie.rats import (
     RATS_PROTOCOL,
     RATS_SUPPORTED_PROVIDERS,
+    RatsClientError,
     RatsProviderRegistry,
     RatsProviderSpec,
     RatsRuntime,
@@ -42,9 +44,15 @@ class _RatsHandler(BaseHTTPRequestHandler):
     def _reply(self, status: int, request_id: str, *, result=None, code="", message="") -> None:
         payload = {"id": request_id, "protocol": RATS_PROTOCOL, "ok": status < 400}
         if status < 400:
-            payload["result"] = result or {}
+            response_value = result or {}
+            payload["result"] = response_value
         else:
-            payload["error"] = {"code": code or "request_failed", "message": message or "failed"}
+            response_value = {"code": code or "request_failed", "message": message or "failed"}
+            payload["error"] = response_value
+        payload["audit_id"] = f"audit-{uuid.uuid4().hex[:24]}"
+        payload["result_sha256"] = hashlib.sha256(
+            json.dumps(response_value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
         body = json.dumps(payload).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -76,6 +84,7 @@ class _RatsHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))).decode("utf-8"))
+        self.server.requests.append(body)
         request_id = str(body.get("id") or "")
         operation = str(body.get("op") or "")
         args = body.get("args") if isinstance(body.get("args"), dict) else {}
@@ -107,7 +116,17 @@ class _RatsHandler(BaseHTTPRequestHandler):
                 result={
                     "session_token": self.server.session_token,
                     "permissions": args.get("permissions", ["read"]),
-                    "tools": ["ping", "version", "get_status", "project.status", "scene.read"],
+                    "tools": [
+                        "ping",
+                        "version",
+                        "get_status",
+                        "project.status",
+                        "scene.read",
+                        "run.play",
+                        "run.status",
+                        "run.stop",
+                        "logs.read",
+                    ],
                 },
             )
             return
@@ -120,7 +139,7 @@ class _RatsHandler(BaseHTTPRequestHandler):
             self.server.session_open = False
             self._reply(200, request_id, result={"closed": True})
         elif operation == "catalog.index":
-            names = ["ping", "version", "get_status", "project.status", "scene.read"]
+            names = ["ping", "version", "get_status", "project.status", "scene.read", "run.play", "run.status", "run.stop", "logs.read"]
             self._reply(
                 200,
                 request_id,
@@ -151,10 +170,94 @@ class _RatsHandler(BaseHTTPRequestHandler):
                 result={"matches": [{"name": "scene.read", "summary": "Read scene", "category": "scene", "score": 500}]},
             )
         elif operation == "tool.call":
+            tool_name = args.get("name")
+            idempotency_key = str(body.get("idempotency_key") or "")
+            request_material = dict(body)
+            request_material.pop("id", None)
+            if idempotency_key and idempotency_key in self.server.idempotency:
+                previous_material, previous_result = self.server.idempotency[idempotency_key]
+                if previous_material != request_material:
+                    self._reply(400, request_id, code="idempotency_conflict", message="different request")
+                    return
+                replay = dict(previous_result)
+                replay["idempotent_replay"] = True
+                self._reply(200, request_id, result=replay)
+                return
+            if tool_name == "run.play":
+                self.server.task = {
+                    "task_id": "run-test-task-1",
+                    "tool": "run.play",
+                    "status_operation": "run.status",
+                    "cancel_operation": "run.stop",
+                    "deadline_msec": 0,
+                    "first_event_sequence": 1,
+                    "next_event_sequence": 2,
+                }
+                self.server.task_state = {"task_id": "run-test-task-1", "state": "running", "running": True, "progress": 0.0}
+                result = {"tool": tool_name, "dry_run": False, "output": self.server.task_state, "task": self.server.task, "idempotent_replay": False}
+                self._reply(200, request_id, result=result)
+            elif tool_name == "logs.read":
+                arguments = args.get("arguments", {})
+                result = {
+                        "tool": tool_name,
+                        "dry_run": False,
+                        "output": {
+                            "task_id": arguments.get("task_id"),
+                            "state": "running",
+                            "running": True,
+                            "text": "run-test-task-1 started\n",
+                            "cursor_start": int(arguments.get("cursor", 0) or 0),
+                            "cursor_end": 24,
+                            "next_cursor": 24,
+                            "truncated": False,
+                            "has_more": False,
+                        },
+                    }
+                self._reply(200, request_id, result=result)
+            else:
+                result = {"tool": tool_name, "dry_run": args.get("dry_run", False), "output": {"pong": True, "echo": args.get("arguments", {}).get("message")}, "idempotent_replay": False}
+                self._reply(200, request_id, result=result)
+            if idempotency_key:
+                self.server.idempotency[idempotency_key] = (request_material, result)
+        elif operation == "task.status":
             self._reply(
                 200,
                 request_id,
-                result={"tool": args.get("name"), "dry_run": args.get("dry_run", False), "output": {"pong": True, "echo": args.get("arguments", {}).get("message")}},
+                result={
+                    **self.server.task,
+                    "state": self.server.task_state["state"],
+                    "running": self.server.task_state["running"],
+                    "progress": self.server.task_state["progress"],
+                    "output": self.server.task_state,
+                    "next_cursor": 2,
+                },
+            )
+        elif operation == "task.events":
+            events = [
+                {"schema": "reverie.rtp.task/1", "task_id": "run-test-task-1", "sequence": 1, "type": "task.started", "payload": self.server.task_state},
+                {"schema": "reverie.rtp.task/1", "task_id": "run-test-task-1", "sequence": 2, "type": "task.progress", "payload": {**self.server.task_state, "progress": 0.25}},
+            ]
+            cursor = int(args.get("cursor", 0) or 0)
+            selected = [event for event in events if int(event["sequence"]) > cursor]
+            self._reply(
+                200,
+                request_id,
+                result={
+                    "schema": "reverie.rtp.task/1",
+                    "task_id": "run-test-task-1",
+                    "cursor": cursor,
+                    "next_cursor": int(selected[-1]["sequence"]) if selected else cursor,
+                    "has_more": False,
+                    "truncated": False,
+                    "events": selected[: int(args.get("limit", 32) or 32)],
+                },
+            )
+        elif operation == "task.cancel":
+            self.server.task_state = {**self.server.task_state, "state": "stopped", "running": False, "progress": 1.0}
+            self._reply(
+                200,
+                request_id,
+                result={**self.server.task, "cancelled": True, "output": self.server.task_state},
             )
         else:
             self._reply(404, request_id, code="unknown_operation")
@@ -178,6 +281,10 @@ def _start_server(
     server.control_token = control_token
     server.session_token = session_token
     server.session_open = False
+    server.task = {}
+    server.task_state = {}
+    server.requests = []
+    server.idempotency = {}
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return server, thread
@@ -329,6 +436,88 @@ def test_runtime_owns_session_persists_locally_and_progressively_loads_tools() -
         runtime.shutdown()
         assert "session.close" in _RatsHandler.events
         assert server.session_open is False
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_runtime_tracks_rtp_task_events_deadlines_cancellation_logs_and_idempotency() -> None:
+    root = _test_root("task-lifecycle")
+    server, thread = _start_server(service_suffix="task")
+    try:
+        executable = root / "engine" / "reverie.windows.editor.x86_64.exe"
+        executable.parent.mkdir(parents=True, exist_ok=True)
+        executable.write_bytes(b"test")
+        services = executable.parent / "ReverieLocal" / "RATS" / "Services"
+        _write_descriptor(
+            services,
+            server,
+            executable,
+            provider_id="reverie.engine",
+            service_kind="builtin",
+            product="Reverie Engine",
+            control_token=CONTROL_TOKEN,
+        )
+
+        runtime = RatsRuntime(root / "cli")
+        runtime.add_engine(executable)
+        state = runtime.set_engine_enabled(executable, True, ["read", "run"])
+        service_id = state["services"][0]["serviceId"]
+
+        started = runtime.call_tool(
+            service_id,
+            "run.play",
+            {"mode": "headless"},
+            deadline_ms=30_000,
+            idempotency_key="cli-task-start-1",
+        )
+        task = started["task"]
+        task_id = task["task_id"]
+        assert started["output"]["running"] is True
+        request = next(item for item in server.requests if item.get("op") == "tool.call")
+        assert request["deadline_ms"] == 30_000
+        assert request["idempotency_key"] == "cli-task-start-1"
+
+        replay = runtime.call_tool(
+            service_id,
+            "run.play",
+            {"mode": "headless"},
+            deadline_ms=30_000,
+            idempotency_key="cli-task-start-1",
+        )
+        assert replay["idempotent_replay"] is True
+        with pytest.raises(RatsClientError) as conflict:
+            runtime.call_tool(
+                service_id,
+                "run.play",
+                {"mode": "windowed"},
+                idempotency_key="cli-task-start-1",
+            )
+        assert getattr(conflict.value, "code", "") == "idempotency_conflict"
+        with pytest.raises(ValueError):
+            runtime.call_tool(service_id, "run.play", {}, deadline_ms=120_001)
+
+        events = runtime.task_events(service_id, task_id)
+        assert events["schema"] == "reverie.rtp.task/1"
+        assert [event["type"] for event in events["events"]] == ["task.started", "task.progress"]
+        status = runtime.task_status(service_id, task_id)
+        assert status["running"] is True and status["next_cursor"] == 2
+        cancelled = runtime.cancel_task(service_id, task_id)
+        assert cancelled["cancelled"] is True and cancelled["output"]["running"] is False
+        logs = runtime.task_logs(service_id, task_id)
+        assert logs["task_id"] == task_id and "started" in logs["text"]
+        synced = runtime.sync_tasks(service_id=service_id)
+        assert synced[0]["task_id"] == task_id and synced[0]["status"]["running"] is False
+        assert synced[0]["events"]
+
+        diagnostics = json.loads(runtime.diagnostics_path.read_text(encoding="utf-8").splitlines()[-1])
+        assert diagnostics["event"] == "rtp.request"
+        assert diagnostics["auditId"].startswith("audit-")
+        assert diagnostics["resultSha256"]
+        assert diagnostics["taskId"] == task_id
+        runtime.shutdown()
     finally:
         server.shutdown()
         server.server_close()

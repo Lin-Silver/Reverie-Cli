@@ -42,6 +42,11 @@ interface CoreRequestMap {
   ratsRemoveRoot: { payload: { root: string }; response: Envelope<"rats.state", { rats: RatsState }> };
   ratsSetEnabled: { payload: { executable: string; enabled: boolean; permissions: string[] }; response: Envelope<"rats.state", { rats: RatsState }> };
   ratsDescribe: { payload: { providerId?: string; serviceId: string; names: string[] }; response: Envelope<"rats.definitions", { provider_id?: string; service_id: string; definitions: Record<string, unknown>[] }> };
+  ratsTasks: { payload: { providerId?: string; serviceId?: string }; response: Envelope<"rats.tasks", { provider_id?: string; service_id?: string; tasks: Record<string, unknown>[] }> };
+  ratsTaskStatus: { payload: { providerId?: string; serviceId: string; taskId: string; deadlineMs?: number }; response: Envelope<"rats.task.status", { service_id: string; task_id: string; result: Record<string, unknown> }> };
+  ratsTaskEvents: { payload: { providerId?: string; serviceId: string; taskId: string; cursor?: number; limit?: number; deadlineMs?: number }; response: Envelope<"rats.task.events", { service_id: string; task_id: string; result: Record<string, unknown> }> };
+  ratsTaskCancel: { payload: { providerId?: string; serviceId: string; taskId: string; deadlineMs?: number }; response: Envelope<"rats.task.cancelled", { service_id: string; task_id: string; result: Record<string, unknown> }> };
+  ratsTaskLogs: { payload: { providerId?: string; serviceId: string; taskId: string; cursor?: number; limit?: number; deadlineMs?: number }; response: Envelope<"rats.task.logs", { service_id: string; task_id: string; result: Record<string, unknown> }> };
   searchSessions: { payload: { query: string }; response: Envelope<"session.search", { query: string; results: SessionSearchResult[] }> };
   initialize: { payload: { projectRoot: string }; response: Envelope<"state", { state: DesktopState }> };
   getSession: { payload: { sessionId: string }; response: Envelope<"session", { session: SessionState; sessions: SessionListState }> };

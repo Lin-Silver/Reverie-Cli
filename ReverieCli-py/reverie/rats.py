@@ -36,10 +36,22 @@ _DEFAULT_LOADED_TOOLS = ("ping", "version", "get_status", "project.status")
 class RatsClientError(RuntimeError):
     """Structured failure returned by or detected around an RTP service."""
 
-    def __init__(self, message: str, *, status: int = 0, code: str = "request_failed") -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        status: int = 0,
+        code: str = "request_failed",
+        audit_id: str = "",
+        result_sha256: str = "",
+        retryable: bool = False,
+    ) -> None:
         super().__init__(message)
         self.status = int(status)
         self.code = str(code or "request_failed")
+        self.audit_id = str(audit_id or "")
+        self.result_sha256 = str(result_sha256 or "")
+        self.retryable = bool(retryable)
 
 
 def _record(value: Any) -> Dict[str, Any]:
@@ -358,7 +370,23 @@ class RatsRuntime:
         self._generation = 0
         self._definition_signature = ""
         self._has_refreshed = False
+        self._tasks: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
         self._lock = threading.RLock()
+
+    @staticmethod
+    def _validate_deadline(deadline_ms: Optional[int]) -> Optional[int]:
+        if deadline_ms is None:
+            return None
+        if isinstance(deadline_ms, bool) or not isinstance(deadline_ms, int) or deadline_ms < 0 or deadline_ms > 120_000:
+            raise ValueError("RTP deadline_ms must be an integer between 0 and 120000.")
+        return int(deadline_ms)
+
+    @staticmethod
+    def _validate_idempotency_key(value: str) -> str:
+        key = _text(value)
+        if len(key) > 128 or "\n" in key or "\r" in key:
+            raise ValueError("RTP idempotency_key must be at most 128 characters and contain no line breaks.")
+        return key
 
     def _load_diagnostics(self) -> List[Dict[str, Any]]:
         try:
@@ -387,6 +415,12 @@ class RatsRuntime:
         path: str = "",
         duration_ms: Optional[int] = None,
         count: Optional[int] = None,
+        audit_id: str = "",
+        result_sha256: str = "",
+        task_id: str = "",
+        cursor: Optional[int] = None,
+        task_state: str = "",
+        progress: Optional[float] = None,
     ) -> None:
         entry: Dict[str, Any] = {
             "timestampUtc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -405,6 +439,18 @@ class RatsRuntime:
             entry["durationMs"] = max(0, int(duration_ms))
         if count is not None:
             entry["count"] = max(0, int(count))
+        if _text(audit_id):
+            entry["auditId"] = _text(audit_id)
+        if _text(result_sha256):
+            entry["resultSha256"] = _text(result_sha256)
+        if _text(task_id):
+            entry["taskId"] = _text(task_id)
+        if cursor is not None:
+            entry["cursor"] = max(0, int(cursor))
+        if _text(task_state):
+            entry["taskState"] = _text(task_state)
+        if progress is not None:
+            entry["progress"] = max(0.0, min(1.0, float(progress)))
         self._diagnostics.append(entry)
         self._diagnostics = self._diagnostics[-_MAX_DIAGNOSTIC_ENTRIES:]
         try:
@@ -504,11 +550,25 @@ class RatsRuntime:
         control_token: str = "",
         session_token: str = "",
         timeout: Optional[float] = None,
+        deadline_ms: Optional[int] = None,
+        idempotency_key: str = "",
     ) -> Dict[str, Any]:
         started = time.perf_counter()
         effective_timeout = float(timeout) if timeout is not None else self.request_timeout
+        validated_deadline = self._validate_deadline(deadline_ms)
+        validated_idempotency_key = self._validate_idempotency_key(idempotency_key)
+        request_object: Dict[str, Any] = {
+            "id": f"reverie-cli-{uuid.uuid4().hex}",
+            "protocol": RATS_PROTOCOL,
+            "op": operation,
+            "args": args or {},
+        }
+        if validated_deadline is not None:
+            request_object["deadline_ms"] = validated_deadline
+        if validated_idempotency_key:
+            request_object["idempotency_key"] = validated_idempotency_key
         body = json.dumps(
-            {"id": f"reverie-cli-{uuid.uuid4().hex}", "protocol": RATS_PROTOCOL, "op": operation, "args": args or {}},
+            request_object,
             ensure_ascii=False,
             separators=(",", ":"),
         ).encode("utf-8")
@@ -531,6 +591,7 @@ class RatsRuntime:
                 operation=operation,
                 reason="transport_error",
                 duration_ms=round((time.perf_counter() - started) * 1000),
+                task_id=_text((args or {}).get("task_id")) if isinstance(args, dict) else "",
             )
             raise RatsClientError(f"RATS {operation} failed: {exc}", code="transport_error") from exc
         finally:
@@ -573,6 +634,9 @@ class RatsRuntime:
         if response.status >= 400 or payload.get("ok") is not True:
             error = _record(payload.get("error"))
             error_code = _text(error.get("code")) or "request_failed"
+            audit_id = _text(payload.get("audit_id"))
+            result_sha256 = _text(payload.get("result_sha256"))
+            task_id = _text((args or {}).get("task_id")) if isinstance(args, dict) else ""
             self._log_diagnostic(
                 "rtp.request",
                 level="warning",
@@ -581,20 +645,37 @@ class RatsRuntime:
                 operation=operation,
                 reason=error_code,
                 duration_ms=round((time.perf_counter() - started) * 1000),
+                audit_id=audit_id,
+                result_sha256=result_sha256,
+                task_id=task_id,
             )
             raise RatsClientError(
                 _text(error.get("message")) or f"RATS request failed with HTTP {response.status}.",
                 status=response.status,
                 code=error_code,
+                audit_id=audit_id,
+                result_sha256=result_sha256,
+                retryable=bool(error.get("retryable", False)),
             )
+        result = _record(payload.get("result"))
+        task = _record(result.get("task"))
+        request_task_id = _text((args or {}).get("task_id")) if isinstance(args, dict) else ""
+        task_id = _text(task.get("task_id")) or request_task_id
+        next_cursor = result.get("next_cursor")
         self._log_diagnostic(
             "rtp.request",
             service_id=descriptor.service_id,
             provider_id=descriptor.provider_id,
             operation=operation,
             duration_ms=round((time.perf_counter() - started) * 1000),
+            audit_id=_text(payload.get("audit_id")),
+            result_sha256=_text(payload.get("result_sha256")),
+            task_id=task_id,
+            cursor=int(next_cursor) if isinstance(next_cursor, int) and not isinstance(next_cursor, bool) else None,
+            task_state=_text(result.get("state")),
+            progress=float(result.get("progress")) if isinstance(result.get("progress"), (int, float)) else None,
         )
-        return _record(payload.get("result"))
+        return result
 
     def _selection(
         self,
@@ -677,6 +758,7 @@ class RatsRuntime:
         except RatsClientError:
             session = self._sessions.pop((descriptor.provider_id, descriptor.service_id), None)
             if session is not None:
+                self._drop_tasks_for_session(session)
                 self._update_generation()
             return None
         expected_hello = {
@@ -698,6 +780,7 @@ class RatsRuntime:
             )
             session = self._sessions.pop((descriptor.provider_id, descriptor.service_id), None)
             if session is not None:
+                self._drop_tasks_for_session(session)
                 self._update_generation()
             return None
 
@@ -732,6 +815,7 @@ class RatsRuntime:
             if selection is None:
                 if session is not None:
                     self._close_session(session)
+                    self._drop_tasks_for_session(session)
                     self._sessions.pop(session_key, None)
                     self._update_generation()
                 return base
@@ -742,12 +826,14 @@ class RatsRuntime:
                 or session.descriptor.port != descriptor.port
             ):
                 self._close_session(session)
+                self._drop_tasks_for_session(session)
                 self._sessions.pop(session_key, None)
                 session = None
             if session is not None:
                 try:
                     self._request(descriptor, "status", session_token=session.token)
                 except RatsClientError:
+                    self._drop_tasks_for_session(session)
                     self._sessions.pop(session_key, None)
                     session = None
             if session is None:
@@ -764,7 +850,11 @@ class RatsRuntime:
                 }
             )
         except RatsClientError as exc:
-            self._sessions.pop((descriptor.provider_id, descriptor.service_id), None)
+            session = self._sessions.pop((descriptor.provider_id, descriptor.service_id), None)
+            if session is not None:
+                self._drop_tasks_for_session(session)
+            else:
+                self._drop_tasks_for_key(descriptor.provider_id, descriptor.service_id)
             base["error"] = str(exc)
             self._update_generation()
         return base
@@ -799,7 +889,11 @@ class RatsRuntime:
             current_ids = {(service["providerId"], service["serviceId"]) for service in services}
             for session_key in list(self._sessions):
                 if session_key not in current_ids:
-                    self._sessions.pop(session_key, None)
+                    session = self._sessions.pop(session_key, None)
+                    if session is not None:
+                        self._drop_tasks_for_session(session)
+                    else:
+                        self._drop_tasks_for_key(*session_key)
             self._has_refreshed = True
             self._update_generation()
             scan_duration_ms = round((time.perf_counter() - started) * 1000)
@@ -1007,18 +1101,226 @@ class RatsRuntime:
         *,
         provider_id: str = "",
         dry_run: bool = False,
+        deadline_ms: Optional[int] = None,
+        idempotency_key: str = "",
     ) -> Dict[str, Any]:
         with self._lock:
             session = self._find_session(service_id, provider_id)
             if session is None:
                 raise RatsClientError("The selected RATS service is not connected.", code="session_unavailable")
-            return self._request(
+            result = self._request(
                 session.descriptor,
                 "tool.call",
                 {"name": _text(tool_name), "arguments": _record(arguments), "dry_run": bool(dry_run)},
                 session_token=session.token,
                 timeout=self.tool_timeout,
+                deadline_ms=deadline_ms,
+                idempotency_key=idempotency_key,
             )
+            task = _record(result.get("task"))
+            if task:
+                self._remember_task(session, task, result=result)
+            return result
+
+    def _task_key(self, session: _RatsSession, task_id: str) -> Tuple[str, str, str]:
+        return session.descriptor.provider_id, session.descriptor.service_id, _text(task_id)
+
+    def _remember_task(
+        self,
+        session: _RatsSession,
+        task: Dict[str, Any],
+        *,
+        result: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        task_id = _text(task.get("task_id"))
+        if not task_id:
+            raise RatsClientError("RTP returned a task without task_id.", code="invalid_task")
+        key = self._task_key(session, task_id)
+        current = self._tasks.get(key, {})
+        current.update(
+            {
+                "provider_id": session.descriptor.provider_id,
+                "service_id": session.descriptor.service_id,
+                "task_id": task_id,
+                "tool": _text(task.get("tool")) or _text(current.get("tool")),
+                "status_operation": _text(task.get("status_operation")) or _text(current.get("status_operation")),
+                "cancel_operation": _text(task.get("cancel_operation")) or _text(current.get("cancel_operation")),
+                "deadline_msec": int(task.get("deadline_msec", current.get("deadline_msec", 0)) or 0),
+                "first_event_sequence": int(task.get("first_event_sequence", current.get("first_event_sequence", 0)) or 0),
+                "next_event_sequence": int(task.get("next_event_sequence", current.get("next_event_sequence", 0)) or 0),
+                "cursor": int(current.get("cursor", 0) or 0),
+                "log_cursor": int(current.get("log_cursor", 0) or 0),
+                "events": list(current.get("events", [])) if isinstance(current.get("events"), list) else [],
+                "error": "",
+            }
+        )
+        if result is not None:
+            current["start_result"] = dict(result)
+        self._tasks[key] = current
+        return dict(current)
+
+    def _find_task(self, service_id: str, task_id: str, provider_id: str = "") -> Tuple[_RatsSession, Dict[str, Any], Tuple[str, str, str]]:
+        session = self._find_session(service_id, provider_id)
+        if session is None:
+            raise RatsClientError("The selected RATS service is not connected.", code="session_unavailable")
+        key = self._task_key(session, task_id)
+        task = self._tasks.get(key)
+        if task is None:
+            raise RatsClientError("The task is not registered in this CLI session.", code="task_unavailable")
+        return session, task, key
+
+    def _drop_tasks_for_session(self, session: _RatsSession) -> None:
+        provider_id = session.descriptor.provider_id
+        service_id = session.descriptor.service_id
+        for key in list(self._tasks):
+            if key[0] == provider_id and key[1] == service_id:
+                self._tasks.pop(key, None)
+
+    def _drop_tasks_for_key(self, provider_id: str, service_id: str) -> None:
+        for key in list(self._tasks):
+            if key[0] == provider_id and key[1] == service_id:
+                self._tasks.pop(key, None)
+
+    def task_status(
+        self,
+        service_id: str,
+        task_id: str,
+        *,
+        provider_id: str = "",
+        deadline_ms: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        with self._lock:
+            session, task, key = self._find_task(service_id, task_id, provider_id)
+            result = self._request(
+                session.descriptor,
+                "task.status",
+                {"task_id": _text(task_id)},
+                session_token=session.token,
+                timeout=self.tool_timeout,
+                deadline_ms=deadline_ms,
+            )
+            task.update({"status": dict(result), "cursor": int(result.get("next_cursor", task.get("cursor", 0)) or 0), "error": ""})
+            self._tasks[key] = task
+            return result
+
+    def task_events(
+        self,
+        service_id: str,
+        task_id: str,
+        *,
+        provider_id: str = "",
+        cursor: Optional[int] = None,
+        limit: int = 32,
+        deadline_ms: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        with self._lock:
+            session, task, key = self._find_task(service_id, task_id, provider_id)
+            if cursor is None:
+                cursor = int(task.get("cursor", 0) or 0)
+            if isinstance(cursor, bool) or not isinstance(cursor, int) or cursor < 0:
+                raise ValueError("RTP task cursor must be a non-negative integer.")
+            if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1 or limit > 64:
+                raise ValueError("RTP task event limit must be an integer between 1 and 64.")
+            result = self._request(
+                session.descriptor,
+                "task.events",
+                {"task_id": _text(task_id), "cursor": cursor, "limit": limit},
+                session_token=session.token,
+                timeout=self.tool_timeout,
+                deadline_ms=deadline_ms,
+            )
+            events = result.get("events") if isinstance(result.get("events"), list) else []
+            task["events"] = [*task.get("events", []), *events][-128:]
+            task["cursor"] = int(result.get("next_cursor", cursor) or cursor)
+            task["next_event_sequence"] = max(int(task.get("next_event_sequence", 0) or 0), task["cursor"] + 1)
+            task["truncated"] = bool(result.get("truncated", False))
+            task["error"] = ""
+            self._tasks[key] = task
+            return result
+
+    def cancel_task(
+        self,
+        service_id: str,
+        task_id: str,
+        *,
+        provider_id: str = "",
+        deadline_ms: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        with self._lock:
+            session, task, key = self._find_task(service_id, task_id, provider_id)
+            result = self._request(
+                session.descriptor,
+                "task.cancel",
+                {"task_id": _text(task_id)},
+                session_token=session.token,
+                timeout=self.tool_timeout,
+                deadline_ms=deadline_ms,
+            )
+            task["status"] = dict(result.get("output", {}))
+            task["cancelled"] = bool(result.get("cancelled", False))
+            task["error"] = ""
+            self._tasks[key] = task
+            return result
+
+    def task_logs(
+        self,
+        service_id: str,
+        task_id: str,
+        *,
+        provider_id: str = "",
+        cursor: Optional[int] = None,
+        limit: int = 65_536,
+        deadline_ms: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        with self._lock:
+            session, task, key = self._find_task(service_id, task_id, provider_id)
+            if cursor is None:
+                cursor = int(task.get("log_cursor", 0) or 0)
+            if isinstance(cursor, bool) or not isinstance(cursor, int) or cursor < 0:
+                raise ValueError("RTP task log cursor must be a non-negative integer.")
+            if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1 or limit > 65_536:
+                raise ValueError("RTP task log limit must be an integer between 1 and 65536.")
+            result = self.call_tool(
+                service_id,
+                "logs.read",
+                {"task_id": _text(task_id), "cursor": cursor, "limit": limit},
+                provider_id=provider_id,
+                deadline_ms=deadline_ms,
+            )
+            output = _record(result.get("output"))
+            task["log_cursor"] = int(output.get("next_cursor", cursor) or cursor)
+            task["logs"] = output
+            task["error"] = ""
+            self._tasks[key] = task
+            return output
+
+    def get_tasks(self, *, service_id: str = "", provider_id: str = "") -> List[Dict[str, Any]]:
+        with self._lock:
+            tasks = [
+                task
+                for (task_provider, task_service, _task_id), task in self._tasks.items()
+                if (not service_id or task_service == _text(service_id))
+                and (not provider_id or task_provider == _text(provider_id))
+            ]
+            return json.loads(json.dumps(tasks, ensure_ascii=False))
+
+    def sync_tasks(self, *, service_id: str = "", provider_id: str = "") -> List[Dict[str, Any]]:
+        with self._lock:
+            selected = [
+                (task["service_id"], task["task_id"], task["provider_id"])
+                for task in self._tasks.values()
+                if (not service_id or task.get("service_id") == _text(service_id))
+                and (not provider_id or task.get("provider_id") == _text(provider_id))
+            ]
+            for task_service_id, task_id, task_provider_id in selected:
+                try:
+                    self.task_status(task_service_id, task_id, provider_id=task_provider_id)
+                    self.task_events(task_service_id, task_id, provider_id=task_provider_id)
+                except (RatsClientError, ValueError) as exc:
+                    task = self._tasks.get((task_provider_id, task_service_id, task_id))
+                    if task is not None:
+                        task["error"] = str(exc)
+            return self.get_tasks(service_id=service_id, provider_id=provider_id)
 
     def compact_catalog(self) -> List[Dict[str, Any]]:
         with self._lock:
@@ -1121,6 +1423,7 @@ class RatsRuntime:
             for session in list(self._sessions.values()):
                 self._close_session(session)
             self._sessions.clear()
+            self._tasks.clear()
             self._update_generation()
 
 

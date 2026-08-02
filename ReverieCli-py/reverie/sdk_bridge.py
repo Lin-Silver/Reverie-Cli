@@ -841,6 +841,74 @@ class ReverieSdkBridge:
                     payload.get("permissions"),
                 )
             return {"id": request_id, "type": "rats.state", "rats": _json_safe(state)}
+        if action == "ratsTasks":
+            service_id = str(payload.get("serviceId") or "").strip()
+            provider_id = str(payload.get("providerId") or "").strip()
+            tasks = self.rats_runtime.sync_tasks(service_id=service_id, provider_id=provider_id)
+            return {
+                "id": request_id,
+                "type": "rats.tasks",
+                "service_id": service_id,
+                "provider_id": provider_id,
+                "tasks": _json_safe(tasks),
+            }
+        if action == "ratsTaskStatus":
+            service_id = str(payload.get("serviceId") or "").strip()
+            task_id = str(payload.get("taskId") or "").strip()
+            provider_id = str(payload.get("providerId") or "").strip()
+            if not service_id or not task_id:
+                raise ValueError("RATS task status requires serviceId and taskId.")
+            result = self.rats_runtime.task_status(
+                service_id,
+                task_id,
+                provider_id=provider_id,
+                deadline_ms=payload.get("deadlineMs"),
+            )
+            return {"id": request_id, "type": "rats.task.status", "service_id": service_id, "task_id": task_id, "result": _json_safe(result)}
+        if action == "ratsTaskEvents":
+            service_id = str(payload.get("serviceId") or "").strip()
+            task_id = str(payload.get("taskId") or "").strip()
+            provider_id = str(payload.get("providerId") or "").strip()
+            if not service_id or not task_id:
+                raise ValueError("RATS task events requires serviceId and taskId.")
+            cursor = payload.get("cursor")
+            result = self.rats_runtime.task_events(
+                service_id,
+                task_id,
+                provider_id=provider_id,
+                cursor=cursor,
+                limit=payload.get("limit", 32),
+                deadline_ms=payload.get("deadlineMs"),
+            )
+            return {"id": request_id, "type": "rats.task.events", "service_id": service_id, "task_id": task_id, "result": _json_safe(result)}
+        if action == "ratsTaskCancel":
+            service_id = str(payload.get("serviceId") or "").strip()
+            task_id = str(payload.get("taskId") or "").strip()
+            provider_id = str(payload.get("providerId") or "").strip()
+            if not service_id or not task_id:
+                raise ValueError("RATS task cancellation requires serviceId and taskId.")
+            result = self.rats_runtime.cancel_task(
+                service_id,
+                task_id,
+                provider_id=provider_id,
+                deadline_ms=payload.get("deadlineMs"),
+            )
+            return {"id": request_id, "type": "rats.task.cancelled", "service_id": service_id, "task_id": task_id, "result": _json_safe(result)}
+        if action == "ratsTaskLogs":
+            service_id = str(payload.get("serviceId") or "").strip()
+            task_id = str(payload.get("taskId") or "").strip()
+            provider_id = str(payload.get("providerId") or "").strip()
+            if not service_id or not task_id:
+                raise ValueError("RATS task logs requires serviceId and taskId.")
+            result = self.rats_runtime.task_logs(
+                service_id,
+                task_id,
+                provider_id=provider_id,
+                cursor=payload.get("cursor"),
+                limit=payload.get("limit", 65_536),
+                deadline_ms=payload.get("deadlineMs"),
+            )
+            return {"id": request_id, "type": "rats.task.logs", "service_id": service_id, "task_id": task_id, "result": _json_safe(result)}
         if action == "ratsDescribe":
             service_id = str(payload.get("serviceId") or "").strip()
             provider_id = str(payload.get("providerId") or "").strip()

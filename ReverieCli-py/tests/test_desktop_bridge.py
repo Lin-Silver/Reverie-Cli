@@ -216,6 +216,39 @@ def test_desktop_approval_request_can_be_resolved_while_prompt_waits() -> None:
     assert result["decision"] == "once"
 
 
+def test_sdk_bridge_exposes_rats_task_status_events_cancel_and_logs_actions() -> None:
+    from reverie.sdk_bridge import ReverieSdkBridge
+
+    class FakeRatsRuntime:
+        def sync_tasks(self, **kwargs):
+            return [{"service_id": kwargs.get("service_id", ""), "task_id": "run-1", "status": {"running": True}}]
+
+        def task_status(self, service_id, task_id, **kwargs):
+            return {"task_id": task_id, "running": True}
+
+        def task_events(self, service_id, task_id, **kwargs):
+            return {"schema": "reverie.rtp.task/1", "task_id": task_id, "events": []}
+
+        def cancel_task(self, service_id, task_id, **kwargs):
+            return {"task_id": task_id, "cancelled": True}
+
+        def task_logs(self, service_id, task_id, **kwargs):
+            return {"task_id": task_id, "text": "hello"}
+
+    bridge = ReverieSdkBridge()
+    bridge.rats_runtime = FakeRatsRuntime()
+    tasks = bridge.dispatch({"id": "tasks", "action": "ratsTasks", "payload": {"serviceId": "rats-1-test"}})
+    assert tasks["type"] == "rats.tasks" and tasks["tasks"][0]["task_id"] == "run-1"
+    status = bridge.dispatch({"id": "status", "action": "ratsTaskStatus", "payload": {"serviceId": "rats-1-test", "taskId": "run-1"}})
+    assert status["type"] == "rats.task.status" and status["result"]["running"] is True
+    events = bridge.dispatch({"id": "events", "action": "ratsTaskEvents", "payload": {"serviceId": "rats-1-test", "taskId": "run-1"}})
+    assert events["type"] == "rats.task.events" and events["result"]["schema"] == "reverie.rtp.task/1"
+    cancelled = bridge.dispatch({"id": "cancel", "action": "ratsTaskCancel", "payload": {"serviceId": "rats-1-test", "taskId": "run-1"}})
+    assert cancelled["type"] == "rats.task.cancelled" and cancelled["result"]["cancelled"] is True
+    logs = bridge.dispatch({"id": "logs", "action": "ratsTaskLogs", "payload": {"serviceId": "rats-1-test", "taskId": "run-1"}})
+    assert logs["type"] == "rats.task.logs" and logs["result"]["text"] == "hello"
+
+
 def test_session_titles_are_compact_and_legacy_names_are_upgraded(tmp_path: Path) -> None:
     manager = SessionManager(tmp_path / "state", project_root=tmp_path)
     session = manager.create_session("Prompt Run 2026-07-15 10:00:00")

@@ -892,6 +892,57 @@ kbd { border-color: var(--border-strong); border-bottom-color: var(--border); ba
 .rats-offline-row span { color: var(--dim); font-size: var(--font-caption); }
 .rats-root-row button { width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 7px; background: transparent; color: var(--dim); cursor: pointer; }
 .rats-root-row button:hover { background: var(--hover); color: var(--text); }
+.rats-tasks-page > * { width: min(1180px, 100%); }
+.rats-task-overview { margin-bottom: 20px; }
+.rats-task-layout { display: grid; grid-template-columns: minmax(260px, .72fr) minmax(0, 1.28fr); gap: 12px; align-items: start; }
+.rats-task-list-panel, .rats-task-detail { min-width: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: var(--panel); box-shadow: 0 16px 50px rgba(0,0,0,.12); }
+.rats-task-panel-heading, .rats-task-detail-header { padding: 15px 16px; display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; border-bottom: 1px solid var(--border-soft); background: linear-gradient(120deg, color-mix(in srgb, var(--accent) 8%, transparent), transparent 54%); }
+.rats-task-panel-heading h2, .rats-task-detail-header h2 { margin: 0 0 4px; font-size: var(--font-heading-sm); }
+.rats-task-panel-heading p, .rats-task-detail-header p { margin: 0; color: var(--muted); font-size: var(--font-caption); }
+.rats-task-panel-heading > span, .rats-task-subheading > span { color: var(--dim); font: var(--font-caption) var(--font-mono); }
+.rats-task-list { max-height: 620px; overflow-y: auto; }
+.rats-task-row { width: 100%; min-height: 65px; padding: 10px 12px; display: grid; grid-template-columns: 10px minmax(0,1fr) auto; align-items: center; gap: 10px; border: 0; border-bottom: 1px solid var(--border-soft); background: transparent; color: var(--text-2); text-align: left; cursor: pointer; }
+.rats-task-row:last-child { border-bottom: 0; }
+.rats-task-row:hover, .rats-task-row.active { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.rats-task-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 10%, transparent); }
+.rats-task-dot.running { color: var(--accent); background: currentColor; box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 14%, transparent); }
+.rats-task-dot.done { color: var(--green); background: currentColor; }
+.rats-task-row-main { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.rats-task-row-main strong { overflow: hidden; font: 600 var(--font-small) var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.rats-task-row-main code { overflow: hidden; color: var(--dim); font-size: var(--font-caption); text-overflow: ellipsis; white-space: nowrap; }
+.rats-task-row .rats-status { white-space: nowrap; }
+.rats-task-list-empty, .rats-task-detail-empty { min-height: 180px; padding: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; color: var(--dim); text-align: center; }
+.rats-task-list-empty span, .rats-task-detail-empty strong { color: var(--text-2); font-size: var(--font-small); }
+.rats-task-list-empty small { color: var(--muted); font-size: var(--font-caption); }
+.rats-task-detail-header { align-items: center; }
+.rats-task-detail-actions { display: flex; align-items: center; gap: 8px; }
+.rats-task-detail-actions .danger-button { min-height: 30px; padding: 0 9px; display: inline-flex; align-items: center; gap: 6px; }
+.rats-task-meta { padding: 12px 16px; display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 10px 14px; border-bottom: 1px solid var(--border-soft); }
+.rats-task-meta > div { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.rats-task-meta span, .rats-task-progress span { color: var(--dim); font-size: var(--font-caption); }
+.rats-task-meta code { overflow: hidden; color: var(--text-2); font-size: var(--font-caption); text-overflow: ellipsis; white-space: nowrap; }
+.rats-task-progress { padding: 12px 16px; border-bottom: 1px solid var(--border-soft); }
+.rats-task-progress > div:first-child { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.rats-task-progress strong { font: 600 var(--font-caption) var(--font-mono); color: var(--accent); }
+.rats-task-progress-track { height: 6px; margin-top: 8px; overflow: hidden; border-radius: 99px; background: var(--panel-2); }
+.rats-task-progress-track span { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width .2s ease; }
+.rats-task-detail-grid { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 1px; background: var(--border-soft); }
+.rats-task-stream { min-width: 0; background: var(--panel); }
+.rats-task-subheading { min-height: 52px; padding: 11px 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border-soft); }
+.rats-task-subheading > div { display: flex; flex-direction: column; gap: 3px; }
+.rats-task-subheading h3 { margin: 0; font-size: var(--font-small); }
+.rats-task-subheading span, .rats-task-subheading code { color: var(--dim); font-size: var(--font-caption); }
+.rats-task-events { max-height: 430px; overflow-y: auto; }
+.rats-task-event { padding: 10px 14px; border-bottom: 1px solid var(--border-soft); }
+.rats-task-event:last-child { border-bottom: 0; }
+.rats-task-event > div { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.rats-task-event strong { font: 600 var(--font-caption) var(--font-mono); color: var(--text-2); }
+.rats-task-event span { color: var(--dim); font-size: 11px; }
+.rats-task-event > code { display: block; margin-top: 3px; color: var(--accent); font: var(--font-caption) var(--font-mono); }
+.rats-task-event pre { max-height: 110px; margin: 7px 0 0; padding: 8px; overflow: auto; border: 1px solid var(--border-soft); border-radius: 7px; background: var(--bg); color: var(--muted); font-size: 11px; line-height: 1.45; }
+.rats-task-empty-inline { padding: 28px 14px; color: var(--muted); font-size: var(--font-caption); text-align: center; }
+.rats-task-log-output { min-height: 240px; max-height: 430px; margin: 0; padding: 13px 14px; overflow: auto; color: var(--text-2); font: 11px/1.55 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.rats-task-empty { min-height: 220px; }
 
 .preference-section { max-width: 900px; margin: 0 auto 13px; padding: 19px; border: 1px solid var(--border); border-radius: 13px; background: var(--panel); box-shadow: 0 2px 12px rgba(0,0,0,.04); }
 .preference-heading { min-height: 42px; display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
@@ -1391,6 +1442,10 @@ input[type="range"] { width: 100%; accent-color: var(--accent-2); }
   .rats-service-meta > div.wide { grid-column: 1 / -1; }
   .rats-permissions { grid-template-columns: 1fr; }
   .permission-chips { justify-content: flex-start; }
+  .rats-task-layout { grid-template-columns: 1fr; }
+  .rats-task-list { max-height: 280px; }
+  .rats-task-meta { grid-template-columns: 1fr 1fr; }
+  .rats-task-detail-grid { grid-template-columns: 1fr; }
   .range-grid { grid-template-columns: 1fr; }
   .reasoning-block summary { grid-template-columns: 30px 100px minmax(60px,1fr) auto 14px; }
 }

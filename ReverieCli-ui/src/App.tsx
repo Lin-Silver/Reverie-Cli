@@ -1,4 +1,5 @@
 import {
+  Activity,
   AlertCircle,
   Archive,
   ArchiveRestore,
@@ -84,6 +85,7 @@ import type {
   RatsPermission,
   RatsServiceRecord,
   RatsState,
+  RatsTaskRecord,
   RecoveryState,
   SessionInfo,
   SessionMessage,
@@ -500,6 +502,9 @@ function Sidebar({
         </button>
         <button type="button" className={view === "rats" ? "active" : ""} onClick={() => setView("rats")}>
           <Database size={16} /> RATS
+        </button>
+        <button type="button" className={view === "tasks" ? "active" : ""} onClick={() => setView("tasks")}>
+          <Clock3 size={16} /> {t("RTP 任务")}
         </button>
         <button type="button" className={view === "plugins" ? "active" : ""} onClick={() => setView("plugins")}>
           <Plug size={16} /> {t("插件")}
@@ -2081,6 +2086,19 @@ function ConfirmModal({ title, message, confirmLabel, danger = false, close, con
 
 const RATS_PERMISSION_OPTIONS: RatsPermission[] = ["read", "project", "edit", "asset", "run", "build", "ai"];
 
+function normalizeRatsState(next: RatsState): RatsState {
+  if (Array.isArray(next.enabledProviders)) return next;
+  const legacy = Array.isArray(next.enabledEngines) ? next.enabledEngines : [];
+  return {
+    ...next,
+    enabledProviders: legacy.map((selection) => ({
+      providerId: "reverie.engine",
+      executable: selection.executable,
+      permissions: selection.permissions,
+    })),
+  };
+}
+
 function RatsView() {
   const { t } = useI18n();
   const [state, setState] = useState<RatsState | null>(null);
@@ -2092,13 +2110,14 @@ function RatsView() {
   const [logsOpen, setLogsOpen] = useState(false);
 
   const acceptState = useCallback((next: RatsState) => {
-    setState(next);
+    const normalized = normalizeRatsState(next);
+    setState(normalized);
     setPermissionDrafts((current) => {
       const updated = { ...current };
-      for (const service of next.services) {
+      for (const service of normalized.services) {
         if (!updated[service.executable]) updated[service.executable] = service.permissions;
       }
-      for (const selection of next.enabledProviders) updated[selection.executable] = selection.permissions;
+      for (const selection of normalized.enabledProviders ?? []) updated[selection.executable] = selection.permissions;
       return updated;
     });
   }, []);
@@ -2200,7 +2219,7 @@ function RatsView() {
   const available = state?.services.filter((service) => service.connection !== "unreachable").length ?? 0;
   const toolCount = state?.services.reduce((total, service) => total + service.tools.length, 0) ?? 0;
   const diagnostics = state ? [...state.diagnostics].reverse() : [];
-  const offlineSelections = state?.enabledProviders.filter((selection) =>
+  const offlineSelections = state?.enabledProviders?.filter((selection) =>
     !state.services.some((service) =>
       service.providerId.toLowerCase() === selection.providerId.toLowerCase()
       && service.executable.toLowerCase() === selection.executable.toLowerCase()
@@ -2297,6 +2316,197 @@ function RatsView() {
           {offlineSelections.length > 0 && <section className="rats-offline-panel"><div className="rats-section-heading"><div><h2>{t("已保存但离线")}</h2><p>{t("这些提供者下次启动时会自动建立已授权会话。")}</p></div></div>{offlineSelections.map((selection) => <div className="rats-offline-row" key={`${selection.providerId}:${selection.executable}`}><Database size={15} /><div><strong>{selection.providerId}</strong><code>{selection.executable}</code></div><span>{selection.permissions.join(" · ")}</span></div>)}</section>}
           {state && state.configuredDiscoveryRoots.length > 0 && <section className="rats-roots-panel"><div className="rats-section-heading"><div><h2>{t("已登记发现目录")}</h2><p>{t("设置实时保存在 Reverie CLI 可执行文件旁的 .reverie/rats 目录中。")}</p></div><code title={state.statePath}>{state.statePath}</code></div>{state.configuredDiscoveryRoots.map((root) => <div className="rats-root-row" key={root}><Folder size={15} /><code>{root}</code><button type="button" aria-label={t("移除发现目录")} onClick={() => void removeRoot(root)} disabled={busy === root}><X size={14} /></button></div>)}</section>}
         </>
+      )}
+    </div>
+  );
+}
+
+function taskKey(task: RatsTaskRecord): string {
+  return `${task.provider_id}:${task.service_id}:${task.task_id}`;
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function taskRunning(task: RatsTaskRecord, status: Record<string, unknown>): boolean {
+  const output = recordValue(status.output);
+  if (typeof status.running === "boolean") return status.running;
+  if (typeof output.running === "boolean") return output.running;
+  return Boolean(recordValue(task.status).running);
+}
+
+function taskStatusLabel(task: RatsTaskRecord, status: Record<string, unknown>, t: (key: string) => string): string {
+  if (taskRunning(task, status)) return t("运行中");
+  if (Boolean(status.cancelled ?? task.cancelled)) return t("已取消");
+  if (status.error || task.error) return t("失败");
+  return t("已完成");
+}
+
+function RtpTasksView() {
+  const { t } = useI18n();
+  const [state, setState] = useState<RatsState | null>(null);
+  const [tasks, setTasks] = useState<RatsTaskRecord[]>([]);
+  const [selectedKey, setSelectedKey] = useState("");
+  const [detail, setDetail] = useState<{ status: Record<string, unknown>; events: Array<Record<string, unknown>>; logs: string; logCursor: number } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const requestSequence = useRef(0);
+  const eventHistory = useRef<Record<string, Array<Record<string, unknown>>>>({});
+  const logHistory = useRef<Record<string, string>>({});
+  const logCursors = useRef<Record<string, number>>({});
+  const cancelledTasks = useRef(new Set<string>());
+
+  const load = useCallback(async (foreground = false) => {
+    const sequence = ++requestSequence.current;
+    if (foreground) setLoading(true);
+    try {
+      const stateResponse = await window.reverie.request("ratsState", {});
+      const nextState = stateResponse.rats;
+      if (sequence !== requestSequence.current) return;
+      setState(nextState);
+      const service = nextState.services.find((item) => item.connection === "connected" && item.sessionActive);
+      if (!service) {
+        setTasks([]);
+        setSelectedKey("");
+        setDetail(null);
+        setError("");
+        return;
+      }
+      const tasksResponse = await window.reverie.request("ratsTasks", {
+        providerId: service.providerId,
+        serviceId: service.serviceId,
+      });
+      const nextTasks = ((Array.isArray(tasksResponse.tasks) ? tasksResponse.tasks : []) as RatsTaskRecord[]).map((task) =>
+        cancelledTasks.current.has(taskKey(task)) ? { ...task, cancelled: true } : task,
+      );
+      if (sequence !== requestSequence.current) return;
+      setTasks(nextTasks);
+      const nextKey = selectedKey && nextTasks.some((task) => taskKey(task) === selectedKey)
+        ? selectedKey
+        : taskKey(nextTasks[0] ?? ({ provider_id: "", service_id: "", task_id: "" } as RatsTaskRecord));
+      setSelectedKey(nextKey);
+      if (!nextKey || !nextTasks.some((task) => taskKey(task) === nextKey)) {
+        setDetail(null);
+        setError("");
+        return;
+      }
+      const task = nextTasks.find((item) => taskKey(item) === nextKey) as RatsTaskRecord;
+      const eventCursor = Number(recordValue(task.status).next_cursor ?? task.cursor ?? 0) || 0;
+      const logCursor = logCursors.current[nextKey] ?? 0;
+      const [statusResponse, eventsResponse, logsResponse] = await Promise.all([
+        window.reverie.request("ratsTaskStatus", { providerId: service.providerId, serviceId: service.serviceId, taskId: task.task_id, deadlineMs: 5_000 }).catch(() => null),
+        window.reverie.request("ratsTaskEvents", { providerId: service.providerId, serviceId: service.serviceId, taskId: task.task_id, cursor: eventCursor, limit: 32, deadlineMs: 5_000 }).catch(() => null),
+        window.reverie.request("ratsTaskLogs", { providerId: service.providerId, serviceId: service.serviceId, taskId: task.task_id, cursor: logCursor, limit: 8_192, deadlineMs: 5_000 }).catch(() => null),
+      ]);
+      if (sequence !== requestSequence.current) return;
+      const status = statusResponse?.result ?? recordValue(task.status);
+      const eventResult = eventsResponse?.result ?? {};
+      const incomingEvents = Array.isArray(eventResult.events) ? eventResult.events as Array<Record<string, unknown>> : [];
+      const previousEvents = [
+        ...(eventHistory.current[nextKey] ?? []),
+        ...(Array.isArray(task.events) ? task.events : []),
+      ];
+      const mergedEvents = [...previousEvents, ...incomingEvents].filter((event, index, all) => {
+        const identity = `${String(event.sequence ?? "")}:${String(event.type ?? "")}:${String(event.timestamp_utc ?? "")}`;
+        return all.findIndex((candidate) => `${String(candidate.sequence ?? "")}:${String(candidate.type ?? "")}:${String(candidate.timestamp_utc ?? "")}` === identity) === index;
+      }).slice(-128);
+      eventHistory.current[nextKey] = mergedEvents;
+      const logResult = logsResponse?.result ?? {};
+      const logText = String(logResult.text ?? "");
+      if (logText) logHistory.current[nextKey] = `${logHistory.current[nextKey] ?? ""}${logText}`;
+      const nextLogCursor = Number(logResult.next_cursor ?? logCursor) || logCursor;
+      logCursors.current[nextKey] = nextLogCursor;
+      setDetail({ status: recordValue(status), events: mergedEvents, logs: logHistory.current[nextKey] ?? "", logCursor: nextLogCursor });
+      setError("");
+    } catch (loadError) {
+      if (sequence === requestSequence.current) setError(loadError instanceof Error ? loadError.message : String(loadError));
+    } finally {
+      if (sequence === requestSequence.current) setLoading(false);
+    }
+  }, [selectedKey]);
+
+  useEffect(() => {
+    void load(true);
+    const timer = window.setInterval(() => void load(false), 1500);
+    return () => window.clearInterval(timer);
+  }, [load]);
+
+  const selectedTask = tasks.find((task) => taskKey(task) === selectedKey) ?? null;
+  const selectedService = selectedTask
+    ? state?.services.find((service) => service.providerId === selectedTask.provider_id && service.serviceId === selectedTask.service_id)
+    : state?.services.find((service) => service.connection === "connected" && service.sessionActive);
+  const status = detail?.status ?? recordValue(selectedTask?.status);
+  const output = recordValue(status.output);
+  const progress = typeof status.progress === "number" ? status.progress : typeof output.progress === "number" ? output.progress : null;
+  const connected = state?.services.filter((service) => service.connection === "connected" && service.sessionActive).length ?? 0;
+
+  const cancel = useCallback(async () => {
+    if (!selectedTask || !selectedService) return;
+    const key = taskKey(selectedTask);
+    setBusy(key);
+    try {
+      await window.reverie.request("ratsTaskCancel", {
+        providerId: selectedTask.provider_id,
+        serviceId: selectedTask.service_id,
+        taskId: selectedTask.task_id,
+        deadlineMs: 5_000,
+      });
+      cancelledTasks.current.add(key);
+      await load(true);
+    } catch (cancelError) {
+      setError(cancelError instanceof Error ? cancelError.message : String(cancelError));
+    } finally {
+      setBusy("");
+    }
+  }, [load, selectedService, selectedTask]);
+
+  return (
+    <div className="page-scroll rats-tasks-page">
+      <PageHeader
+        icon={<Clock3 size={20} />}
+        title={t("RTP 任务")}
+        description={t("实时查看已授权 Reverie Engine 任务的状态、事件游标、日志和取消结果。")}
+        action={<button type="button" className="secondary-button" onClick={() => void load(true)} disabled={loading}><RefreshCw className={loading ? "spin" : ""} size={14} />{t("刷新")}</button>}
+      />
+      <div className="tool-overview rats-task-overview">
+        <div><Activity size={17} /><span>{t("已连接服务")}<strong>{connected}</strong></span></div>
+        <div><Clock3 size={17} /><span>{t("活动任务")}<strong>{tasks.filter((task) => taskRunning(task, recordValue(task.status))).length}</strong></span></div>
+        <div><FileText size={17} /><span>{t("事件记录")}<strong>{detail?.events.length ?? 0}</strong></span></div>
+      </div>
+      {error && <div className="page-loading error"><AlertCircle size={18} />{error}</div>}
+      {!selectedService && !loading ? (
+        <div className="empty-panel rats-task-empty"><ShieldCheck size={28} /><strong>{t("尚未启用 RTP 服务")}</strong><span>{t("先在 RATS 页面显式启用 Reverie Engine，运行中的任务会在这里自动出现。")}</span></div>
+      ) : (
+        <div className="rats-task-layout">
+          <section className="rats-task-list-panel" aria-labelledby="rats-task-list-title">
+            <div className="rats-task-panel-heading"><div><h2 id="rats-task-list-title">{t("任务列表")}</h2><p>{t("每 1.5 秒从已连接服务同步状态")}</p></div><span>{tasks.length}</span></div>
+            <div className="rats-task-list">
+              {tasks.map((task) => {
+                const itemStatus = recordValue(task.status);
+                const itemKey = taskKey(task);
+                return <button type="button" className={`rats-task-row ${itemKey === selectedKey ? "active" : ""}`} key={itemKey} onClick={() => setSelectedKey(itemKey)}>
+                  <span className={`rats-task-dot ${taskRunning(task, itemStatus) ? "running" : "done"}`} />
+                  <span className="rats-task-row-main"><strong>{task.tool || t("原生任务")}</strong><code>{task.task_id}</code></span>
+                  <span className={`rats-status ${taskRunning(task, itemStatus) ? "connected" : "available"}`}>{taskStatusLabel(task, itemStatus, t)}</span>
+                </button>;
+              })}
+              {!tasks.length && <div className="rats-task-list-empty"><Clock3 size={20} /><span>{t("暂无活动任务")}</span><small>{t("由 AI 或工具调用启动的长任务会自动同步到这里。")}</small></div>}
+            </div>
+          </section>
+          <section className="rats-task-detail" aria-labelledby="rats-task-detail-title">
+            {!selectedTask ? <div className="rats-task-detail-empty"><Clock3 size={24} /><strong>{t("选择一个任务查看详情")}</strong></div> : <>
+              <div className="rats-task-detail-header"><div><p>{t("RTP 任务详情")}</p><h2 id="rats-task-detail-title">{selectedTask.tool || t("原生任务")}</h2></div><div className="rats-task-detail-actions"><span className={`rats-status ${taskRunning(selectedTask, status) ? "connected" : "available"}`}>{taskStatusLabel(selectedTask, status, t)}</span>{taskRunning(selectedTask, status) && <button type="button" className="danger-button" onClick={() => void cancel()} disabled={busy === taskKey(selectedTask)}><Square size={13} />{t("取消任务")}</button>}</div></div>
+              <div className="rats-task-meta"><div><span>{t("任务 ID")}</span><code>{selectedTask.task_id}</code></div><div><span>{t("提供者")}</span><code>{selectedTask.provider_id}</code></div><div><span>{t("事件游标")}</span><code>{String(status.next_cursor ?? selectedTask.cursor ?? 0)}</code></div><div><span>{t("截止时间")}</span><code>{String(selectedTask.deadline_msec ?? 0)} ms</code></div></div>
+              {progress !== null && <div className="rats-task-progress"><div><span>{t("进度")}</span><strong>{Math.round(Math.max(0, Math.min(100, progress)))}%</strong></div><div className="rats-task-progress-track"><span style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} /></div></div>}
+              <div className="rats-task-detail-grid">
+                <section className="rats-task-stream" aria-labelledby="rats-task-events-title"><div className="rats-task-subheading"><div><h3 id="rats-task-events-title">{t("版本化事件")}</h3><span>reverie.rtp.task/1</span></div><span>{detail?.events.length ?? 0}</span></div><div className="rats-task-events">{detail?.events.map((event, index) => <div className="rats-task-event" key={`${String(event.sequence ?? "")}:${String(event.type ?? "")}:${index}`}><div><strong>{String(event.type ?? t("事件"))}</strong><span>{String(event.timestamp_utc ?? event.timestamp ?? "")}</span></div><code>{event.sequence === undefined ? "—" : `#${String(event.sequence)}`}</code><pre>{JSON.stringify(event.payload ?? event.output ?? {}, null, 2)}</pre></div>)}{!detail?.events.length && <div className="rats-task-empty-inline">{t("等待事件")}</div>}</div></section>
+                <section className="rats-task-stream" aria-labelledby="rats-task-logs-title"><div className="rats-task-subheading"><div><h3 id="rats-task-logs-title">{t("任务日志")}</h3><span>{t("实时增量读取")}</span></div><code>{detail?.logCursor ?? 0}</code></div><pre className="rats-task-log-output">{detail?.logs || t("等待日志")}</pre></section>
+              </div>
+            </>}
+          </section>
+        </div>
       )}
     </div>
   );
@@ -3127,7 +3337,7 @@ export default function App() {
 
   const chooseCommand = useCallback((command: CommandRecord) => {
     setCommandOpen(false);
-    const navigation: Record<string, ViewId> = { "/model": "settings", "/settings": "settings", "/setting": "settings", "/tools": "tools", "/rats": "rats", "/plugins": "plugins", "/checkpoints": "recovery", "/operations": "recovery", "/rollback": "recovery" };
+    const navigation: Record<string, ViewId> = { "/model": "settings", "/settings": "settings", "/setting": "settings", "/tools": "tools", "/rats": "rats", "/tasks": "tasks", "/operations": "tasks", "/plugins": "plugins", "/checkpoints": "recovery", "/rollback": "recovery" };
     const target = navigation[command.command];
     if (target) { setView(target); return; }
     setView("chat");
@@ -3140,6 +3350,7 @@ export default function App() {
     if (!state) return null;
     if (view === "tools") return <ToolsView mode={state.workspace.mode} />;
     if (view === "rats") return <RatsView />;
+    if (view === "tasks") return <RtpTasksView />;
     if (view === "plugins") return <PluginsView plugins={state.plugins.records} updatePlugin={updatePlugin} refresh={refreshPlugins} />;
     if (view === "recovery") return <RecoveryView recovery={state.recovery} rollback={rollback} />;
     if (view === "settings") return <SettingsView state={state} updateSetting={updateSetting} selectModel={selectModel} saveProvider={saveProvider} addStandard={() => setStandardModelOpen(true)} deleteStandard={deleteStandard} paths={desktopPaths} selectCoreData={() => void selectCoreData()} theme={theme} setTheme={changeTheme} preferences={uiPreferences} updatePreferences={updateUiPreferences} selectBackground={() => void selectBackground()} clearBackground={() => void clearBackground()} />;

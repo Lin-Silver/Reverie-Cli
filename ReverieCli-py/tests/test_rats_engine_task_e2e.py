@@ -15,6 +15,18 @@ from reverie.rats import RatsRuntime
 ENGINE_BIN = str(os.environ.get("REVERIE_RATS_ENGINE_BIN", "")).strip()
 
 
+def _remove_test_directory(path: Path) -> None:
+    deadline = time.monotonic() + 15.0
+    while path.exists():
+        try:
+            shutil.rmtree(path)
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.25)
+
+
 @pytest.mark.skipif(not ENGINE_BIN, reason="Set REVERIE_RATS_ENGINE_BIN to run the real Engine/Cli RTP E2E.")
 def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
     launch_binary = Path(ENGINE_BIN).resolve()
@@ -124,4 +136,4 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
                 process.wait(timeout=15)
         log.close()
         if project_root.exists():
-            shutil.rmtree(project_root)
+            _remove_test_directory(project_root)

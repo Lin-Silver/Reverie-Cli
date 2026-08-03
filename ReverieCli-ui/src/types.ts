@@ -1,4 +1,4 @@
-export type ViewId = "chat" | "tools" | "rats" | "plugins" | "recovery" | "settings";
+export type ViewId = "chat" | "tools" | "rats" | "tasks" | "plugins" | "recovery" | "settings";
 
 export type RatsPermission = "read" | "project" | "edit" | "asset" | "ai" | "run" | "build";
 
@@ -71,6 +71,15 @@ export interface RatsDiagnosticEntry {
   count?: number;
 }
 
+export interface RatsTaskRecord extends Record<string, unknown> {
+  provider_id: string;
+  service_id: string;
+  task_id: string;
+  tool: string;
+  status?: Record<string, unknown>;
+  events?: Array<Record<string, unknown>>;
+}
+
 export interface RatsState {
   protocol: "reverie.rtp/1";
   stateVersion?: number;
@@ -79,7 +88,8 @@ export interface RatsState {
   diagnosticsPath: string;
   discoveryRoots: string[];
   configuredDiscoveryRoots: string[];
-  enabledProviders: RatsProviderSelection[];
+  /** Optional while older packaged cores still expose only enabledEngines. */
+  enabledProviders?: RatsProviderSelection[];
   enabledEngines?: RatsEngineSelection[];
   supportedProviders: RatsProviderRecord[];
   services: RatsServiceRecord[];

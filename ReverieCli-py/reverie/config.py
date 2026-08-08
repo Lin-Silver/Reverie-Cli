@@ -20,7 +20,13 @@ import logging
 
 from .diagnostics import report_suppressed_exception
 from .security_utils import write_json_secure
-from .security_policy import normalize_permission_level
+from .security_policy import (
+    default_security_config,
+    normalize_permission_level,
+    normalize_permission_mode,
+    normalize_review_config,
+    normalize_security_config,
+)
 from .storage import (
     ProjectStorageResolver,
     sanitize_project_name,
@@ -852,7 +858,7 @@ class Config:
     
     # Workspace isolation settings
     use_workspace_config: bool = False  # If True, config is stored in workspace directory
-    security: Dict[str, Any] = field(default_factory=lambda: {"permission_level": "full_control"})
+    security: Dict[str, Any] = field(default_factory=default_security_config)
     
     # API call settings for improved stability
     api_max_retries: int = 5
@@ -891,6 +897,33 @@ class Config:
         security = dict(self.security) if isinstance(self.security, dict) else {}
         security["permission_level"] = normalize_permission_level(value)
         self.security = security
+
+    @property
+    def permission_mode(self) -> str:
+        """Approval mode layered on top of the hard permission level."""
+        security = self.security if isinstance(self.security, dict) else {}
+        return normalize_permission_mode(security.get("permission_mode"))
+
+    @permission_mode.setter
+    def permission_mode(self, value: Any) -> None:
+        security = dict(self.security) if isinstance(self.security, dict) else {}
+        security["permission_mode"] = normalize_permission_mode(value)
+        self.security = security
+
+    @property
+    def permission_review(self) -> Dict[str, Any]:
+        """Auto Check reviewer configuration."""
+        security = self.security if isinstance(self.security, dict) else {}
+        return normalize_review_config(security.get("review"))
+
+    def update_permission_review(self, **changes: Any) -> Dict[str, Any]:
+        """Merge changes into the reviewer configuration and persist them in-memory."""
+        review = self.permission_review
+        review.update({key: value for key, value in changes.items() if value is not None})
+        security = dict(self.security) if isinstance(self.security, dict) else {}
+        security["review"] = normalize_review_config(review)
+        self.security = security
+        return security["review"]
 
     def _resolved_nvidia_config(self) -> Dict[str, Any]:
         """Return NVIDIA config augmented with fallback credentials from standard models."""
@@ -1034,11 +1067,7 @@ class Config:
             'gamer_mode': normalize_gamer_mode_config(self.gamer_mode),
             'config_version': self.config_version,
             'use_workspace_config': self.use_workspace_config,
-            'security': {
-                'permission_level': normalize_permission_level(
-                    (self.security or {}).get('permission_level') if isinstance(self.security, dict) else None
-                )
-            },
+            'security': normalize_security_config(self.security),
             'api_max_retries': self.api_max_retries,
             'api_initial_backoff': self.api_initial_backoff,
             'api_timeout': self.api_timeout,
@@ -1153,14 +1182,7 @@ class Config:
             gamer_mode=normalize_gamer_mode_config(data.get('gamer_mode', {})),
             config_version=data.get('config_version', CONFIG_VERSION),
             use_workspace_config=data.get('use_workspace_config', False),
-            security={
-                **(data.get("security") if isinstance(data.get("security"), dict) else {}),
-                "permission_level": normalize_permission_level(
-                    (data.get("security") or {}).get("permission_level")
-                    if isinstance(data.get("security"), dict)
-                    else None
-                ),
-            },
+            security=normalize_security_config(data.get("security")),
             api_max_retries=data.get('api_max_retries', 5),
             api_initial_backoff=data.get('api_initial_backoff', 1.0),
             api_timeout=data.get('api_timeout', 60),

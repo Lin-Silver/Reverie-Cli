@@ -96,6 +96,7 @@ def test_get_app_root_uses_launcher_root_for_packaged_windows(tmp_path: Path, mo
     launcher_root = tmp_path / "Program Files" / "Reverie"
     launcher_root.mkdir(parents=True, exist_ok=True)
 
+    monkeypatch.delenv("REVERIE_APP_ROOT", raising=False)
     monkeypatch.setattr(config_module, "get_launcher_root", lambda: launcher_root)
     monkeypatch.setattr(config_module.sys, "frozen", True, raising=False)
 

@@ -334,6 +334,7 @@ const ENGLISH_TRANSLATIONS: Record<string, string> = {
   "活动": "Activity",
   "工作区": "Workspace",
   "重新索引": "Reindex",
+  "压缩上下文": "Compact context",
   "文件": "files",
   "符号": "symbols",
   "运行时": "Runtime",

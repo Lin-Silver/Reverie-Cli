@@ -21,8 +21,15 @@ import threading
 
 from rich.markup import escape as rich_escape
 
+from .permission_review import describe_call
 from .system_prompt import build_system_prompt
 from .tool_executor import ToolExecutor
+from ..security_policy import (
+    normalize_permission_level,
+    normalize_permission_mode,
+    resolve_review_config,
+    risk_requires_approval,
+)
 from ..diagnostics import report_suppressed_exception
 from ..context_engine.handoff import build_session_handoff_packet
 from ..inline_images import resolve_inline_image_content_for_request
@@ -4070,6 +4077,89 @@ class ReverieAgent:
 
         return "empty", clean_content
 
+    def _prepare_tool_call_review(
+        self,
+        tool_calls: List[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """Run the Auto Check pass over one response's tool calls.
+
+        Returns a summary payload for the UI, or None when the mode is not
+        Auto Check or there is nothing worth reviewing.
+        """
+        executor = getattr(self, "tool_executor", None)
+        if executor is None or not tool_calls:
+            return None
+
+        security = getattr(self.config, "security", {}) if getattr(self, "config", None) is not None else {}
+        if not isinstance(security, dict):
+            return None
+        if normalize_permission_mode(security.get("permission_mode")) != "auto_check":
+            executor.clear_review_verdicts()
+            return None
+
+        review = resolve_review_config(security)
+        batch: List[Dict[str, Any]] = []
+        for tool_call in tool_calls:
+            function = tool_call.get("function") or {}
+            tool_name = str(function.get("name", "")).strip()
+            tool = executor.get_tool(tool_name)
+            if tool is None:
+                continue
+            if bool(getattr(tool, "read_only", False)) and not review.get("review_read_only"):
+                continue
+            call_id = str(tool_call.get("id", "")).strip()
+            arguments = parse_tool_arguments(function.get("arguments", ""))
+            batch.append(describe_call(tool, arguments, call_id or f"{tool_name}-{len(batch)}"))
+
+        executor.clear_review_verdicts()
+        if not batch:
+            return None
+
+        try:
+            from .permission_reviewer import review_tool_calls
+
+            outcome = review_tool_calls(
+                batch,
+                agent=self,
+                config=getattr(self, "config", None),
+                review=review,
+                workspace_root=str(getattr(self, "project_root", "") or ""),
+                permission_level=normalize_permission_level(security.get("permission_level")),
+            )
+        except Exception:
+            logger.debug("Auto Check batch review failed", exc_info=True)
+            return None
+
+        if not outcome.ok and review.get("fail_open"):
+            return {
+                "reviewed": len(batch),
+                "flagged": 0,
+                "batch_risk": "none",
+                "ok": False,
+                "error": outcome.error,
+                "model": outcome.model_display_name,
+                "elapsed_ms": outcome.elapsed_ms,
+                "verdicts": [],
+            }
+
+        executor.set_review_verdicts(outcome.verdicts)
+        threshold = review.get("approve_risk_at")
+        flagged = [
+            verdict.to_dict()
+            for verdict in outcome.verdicts.values()
+            if risk_requires_approval(verdict.risk, threshold)
+        ]
+        return {
+            "reviewed": len(batch),
+            "flagged": len(flagged),
+            "batch_risk": outcome.batch_risk,
+            "ok": outcome.ok,
+            "error": outcome.error,
+            "model": outcome.model_display_name,
+            "elapsed_ms": outcome.elapsed_ms,
+            "verdicts": flagged,
+        }
+
     def _execute_streamed_tool_calls(
         self,
         tool_calls: List[Dict[str, Any]],
@@ -4077,12 +4167,25 @@ class ReverieAgent:
         session_id: str,
     ) -> Generator[str, None, None]:
         """Execute collected tool calls using the shared stream event surface."""
-        for tool_call in tool_calls:
-            yield from self._stream_execute_tool_call(
-                tool_call,
-                messages,
-                session_id=session_id,
+        review_summary = self._prepare_tool_call_review(tool_calls)
+        if review_summary:
+            yield encode_stream_event(
+                "tool_review",
+                agent_id=self.agent_id,
+                agent_color=self.agent_color,
+                **review_summary,
             )
+        try:
+            for tool_call in tool_calls:
+                yield from self._stream_execute_tool_call(
+                    tool_call,
+                    messages,
+                    session_id=session_id,
+                )
+        finally:
+            executor = getattr(self, "tool_executor", None)
+            if executor is not None:
+                executor.clear_review_verdicts()
 
     def _stream_execute_tool_call(
         self,

@@ -11,6 +11,7 @@ Current stable version: **v2.5.0** (released 2026-07-17).
 - **Multi-provider LLM** support: NVIDIA, ModelScope, Codex (ChatGPT), SenseNova, AIHubMix, Agnes, WebGemini, Opencode
 - **Context Engine**: Augment-style codebase retrieval, LSP integration, git history analysis
 - **Session management**: Conversation persistence, rotation, working memory injection, handoff packets
+- **Approval policy**: Three tool-call approval modes — Default (software policy only), Auto Check (a stateless model review rates each call's risk and pauses only on risky ones), and Strict (every call waits for you); answer allow, deny, or reply in your own words to redirect the model. See [SECURITY_PERMISSIONS.md](docs/SECURITY_PERMISSIONS.md)
 - **Inline media**: Attach images and video directly in conversations
 - **Experimental integrations**: Blender, Blockbench, legacy Godot/O3DE migration, Ashfox MCP, image/video generation, and embedded browser automation
 - **Browser automation**: Embedded Chromium runtime for web inspection and interaction
@@ -648,7 +649,7 @@ Options:
 | `/save`                | Save current session        |
 | `/exit` or `/quit`     | Exit Reverie                |
 | `/thinking on/off`     | Toggle thinking display     |
-| `/compact`             | Trigger context compaction  |
+| `/compact [focus]`     | Compact context now, with optional retention guidance |
 | `/rules`               | Manage custom rules         |
 
 ---
@@ -734,14 +735,19 @@ Each session is a JSON file containing:
 - `messages` — Full conversation history
 - `metadata` — Workspace ID, rotation info, handoff paths
 
-### Session Rotation
+### Context Compaction and Session Rotation
 
-When a conversation approaches the model's context limit (80% threshold), Reverie:
+Reverie first attempts in-place context compaction near 70% of the active model's context window. If the compacted context still reaches the rotation threshold near 82%, it creates a structured handoff and rotates the session. Users can trigger the same compaction core at any time with `/compact`; `/compact <focus>` gives extra retention priority to details such as failed tests, provider quirks, or uncommitted files.
 
-1. Archives the full transcript to `full_transcripts/`
-2. Compresses the conversation into a working memory summary
-3. Creates a new session with the summary injected as a system message
-4. Optionally persists a handoff packet for structured continuity
+Compaction:
+
+1. Saves a full pre-compaction checkpoint and lets session persistence archive the replaced transcript.
+2. Preserves the recent interaction window verbatim.
+3. Consolidates older turns and prior memory into a numbered continuation summary covering intent, technical decisions, files, pitfalls, verification, explicit constraints, pending work, current work, and the immediate next step.
+4. Keeps planned, implemented, tested, committed, pushed, visually verified, and end-to-end verified states distinct.
+5. Persists the compacted summary into project memory when that memory layer is active.
+
+If rotation is still required, Reverie creates a new session with a structured handoff injected as working memory and retains the archived transcript and handoff packet for recovery.
 
 ### Session Commands (Python API)
 

@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from rich.console import Console
@@ -81,7 +82,13 @@ def test_session_export_search_fork_and_rewind(tmp_path: Path) -> None:
 
     assert manager.search_sessions("beta")[0]["message_index"] == 1
     exported = manager.export_current_session(tmp_path / "session.md")
-    assert "## Assistant" in exported.read_text(encoding="utf-8")
+    exported_markdown = exported.read_text(encoding="utf-8")
+    assert "## Reverie" in exported_markdown
+    assert "## Assistant" not in exported_markdown
+
+    saved = json.loads((tmp_path / "state" / "sessions" / f"{source.id}.json").read_text(encoding="utf-8"))
+    assert [message["role"] for message in saved["messages"]] == ["user", "Reverie", "user"]
+    assert manager.get_current_session().messages[1]["role"] == "assistant"
 
     forked = manager.fork_current_session(2)
     assert len(forked.messages) == 2

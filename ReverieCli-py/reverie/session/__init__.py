@@ -12,6 +12,13 @@ Session management for conversation persistence:
 """
 
 from .manager import SessionManager, Session, SessionInfo
+from .roles import (
+    STORED_ASSISTANT_ROLE,
+    from_stored_messages,
+    from_stored_role,
+    to_stored_messages,
+    to_stored_role,
+)
 from .checkpoint import CheckpointManager, Checkpoint, FileCheckpoint
 from .archive import ArchiveManager, Archive
 from .operation_history import OperationHistory, Operation, OperationType
@@ -23,6 +30,11 @@ __all__ = [
     'SessionManager',
     'Session',
     'SessionInfo',
+    'STORED_ASSISTANT_ROLE',
+    'from_stored_messages',
+    'from_stored_role',
+    'to_stored_messages',
+    'to_stored_role',
     'CheckpointManager',
     'Checkpoint',
     'FileCheckpoint',

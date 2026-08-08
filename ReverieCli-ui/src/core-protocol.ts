@@ -16,6 +16,9 @@ import type {
 type EmptyPayload = Record<never, never>;
 type Envelope<Type extends string, Body extends object> = { id?: string | number | null; type: Type } & Body;
 
+/** Decisions the approval prompt can return. `message` carries a free-form reply to the model. */
+export type ApprovalDecision = "once" | "session" | "deny" | "message";
+
 export interface SessionSearchResult extends Record<string, unknown> {
   session_id: string;
   session_name: string;
@@ -56,12 +59,16 @@ interface CoreRequestMap {
     payload: { prompt: string; sessionId: string; mode: string; stream: boolean; projectRoot?: string; noIndex?: boolean; freshSession?: boolean; source?: string; model?: string; reasoning?: string };
     response: Envelope<"prompt.result", { result: PromptResult; sessions: SessionListState; recovery: RecoveryState }>;
   };
+  compactContext: {
+    payload: { sessionId: string; focus?: string; projectRoot?: string };
+    response: Envelope<"context.compacted", { success: boolean; message: string; session: SessionState; sessions: SessionListState; recovery: RecoveryState; context_engine: NonNullable<WorkspaceState["context_engine"]> }>;
+  };
   renameSession: { payload: { sessionId: string; name: string }; response: Envelope<"session.updated", { session: SessionState | null; updated_session?: SessionState | null; sessions: SessionListState }> };
   forkSession: { payload: { sessionId: string; messageCount: number; name?: string }; response: Envelope<"session.updated", { session: SessionState; sessions: SessionListState }> };
   rewindSession: { payload: { sessionId: string; messageCount: number; confirmed: true }; response: Envelope<"session.updated", { session: SessionState; sessions: SessionListState }> };
   deleteSession: { payload: { sessionId: string; confirmed: true }; response: Envelope<"session.updated", { session: SessionState | null; sessions: SessionListState }> };
   deleteSessions: { payload: { sessionIds: string[]; confirmed: true }; response: Envelope<"sessions.deleted", { deleted_session_ids: string[]; session: SessionState | null; sessions: SessionListState }> };
-  resolveApproval: { payload: { approvalId: unknown; decision: "once" | "session" | "deny" }; response: Envelope<"approval.resolved", { approval_id: string; decision: "once" | "session" | "deny" }> };
+  resolveApproval: { payload: { approvalId: unknown; decision: ApprovalDecision; message?: string }; response: Envelope<"approval.resolved", { approval_id: string; decision: ApprovalDecision }> };
   selectModel: { payload: { source: string; modelId: string; reasoning?: string }; response: Envelope<"model.selected", { selected: Record<string, unknown>; models: ModelSourcesState; workspace: WorkspaceState }> };
   setSetting: { payload: { key: string; value: unknown }; response: Envelope<"setting.updated", { success: boolean; message: string; settings: SettingsState }> };
   setProviderConfig: { payload: { source: string; patch: Record<string, unknown>; clearFields?: string[] }; response: Envelope<"provider.updated", { models: ModelSourcesState; workspace: WorkspaceState }> };

@@ -113,15 +113,22 @@ const desktopState: DesktopState = {
   plugins: { summary: {}, records: [] },
   commands: {
     sections: ["Workspace"],
-    items: [{ id: "tools", command: "/tools", section: "Workspace", summary: "Open tools", detail: "", overview: "" }],
+    items: [
+      { id: "tools", command: "/tools", section: "Workspace", summary: "Open tools", detail: "", overview: "" },
+      { id: "compact", command: "/compact", section: "Workspace", summary: "Compact context", detail: "", overview: "", examples: ["/compact"] },
+    ],
   },
   recovery: { summary: {}, checkpoints: [], operations: [] },
 };
 
-function installDesktopApi(options: { legacyRats?: boolean } = {}) {
+function installDesktopApi(options: { legacyRats?: boolean; approvalRequest?: Record<string, unknown> } = {}) {
   let promptFinished = false;
   let ratsEnabled = false;
   let ratsTaskCancelled = false;
+  const eventListeners: Array<(message: { event: unknown }) => void> = [];
+  const emitCoreEvent = (event: Record<string, unknown>) => {
+    for (const listener of [...eventListeners]) listener({ event });
+  };
   const ratsState = (): RatsState => {
     const state: RatsState = ({
     protocol: "reverie.rtp/1",
@@ -228,6 +235,7 @@ function installDesktopApi(options: { legacyRats?: boolean } = {}) {
     }
     if (action === "runPrompt") {
       promptFinished = true;
+      if (options.approvalRequest) emitCoreEvent(options.approvalRequest);
       return {
         type: "prompt.result",
         result: {
@@ -249,12 +257,38 @@ function installDesktopApi(options: { legacyRats?: boolean } = {}) {
         recovery: desktopState.recovery,
       };
     }
+    if (action === "resolveApproval") {
+      return {
+        type: "approval.resolved",
+        approval_id: String(payload.approvalId),
+        decision: payload.decision as "once" | "session" | "deny" | "message",
+      };
+    }
+    if (action === "compactContext") {
+      return {
+        type: "context.compacted",
+        success: true,
+        message: "Context compressed: 1,200 -> 500 tokens",
+        session: {
+          ...baseSession,
+          messages: [{ role: "system", content: "# Continuation Summary\n## Current objective\nKeep GUI parity." }],
+        },
+        sessions: desktopState.sessions,
+        recovery: desktopState.recovery,
+        context_engine: desktopState.workspace.context_engine,
+      };
+    }
     throw new Error(`Unexpected action: ${action}`);
   });
   const api = {
     request,
     cancel: vi.fn(async () => undefined),
-    onEvent: vi.fn(() => () => undefined),
+    onEvent: vi.fn((listener: (message: { event: unknown }) => void) => {
+      eventListeners.push(listener);
+      return () => {
+        eventListeners.splice(eventListeners.indexOf(listener), 1);
+      };
+    }),
     selectWorkspace: vi.fn(async () => null),
     switchWorkspace: vi.fn(async () => null),
     deleteWorkspace: vi.fn(async () => null),
@@ -276,7 +310,7 @@ function installDesktopApi(options: { legacyRats?: boolean } = {}) {
     versions: {},
   };
   Object.defineProperty(window, "reverie", { configurable: true, value: api });
-  return { api, request };
+  return { api, request, emitCoreEvent };
 }
 
 beforeEach(() => {
@@ -366,6 +400,109 @@ describe("desktop GUI interactions", () => {
       stream: true,
     }));
     expect(await screen.findByText("Cache inspection complete")).toBeTruthy();
+  });
+
+  it("sends a personalized approval reply back to the model through the typed bridge", async () => {
+    const { request } = installDesktopApi({
+      approvalRequest: {
+        type: "approval.request",
+        approval_id: "approval-1",
+        tool: "bash",
+        message: "Auto Check rated this call 'high'.",
+        risk: "high",
+        permission_mode: "auto_check",
+        concerns: ["deletes-files"],
+        review_source: "reviewer",
+        read_only: false,
+      },
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
+
+    await user.type(composer, "Inspect the cache{Enter}");
+
+    const dialog = await screen.findByRole("alertdialog", { name: "工具请求更高权限" });
+    expect(within(dialog).getByText("high")).toBeTruthy();
+    expect(within(dialog).getByText("deletes-files")).toBeTruthy();
+
+    await user.click(within(dialog).getByRole("button", { name: "个性化回复" }));
+    await user.type(within(dialog).getByRole("textbox"), "先解释清楚再执行");
+    await user.click(within(dialog).getByRole("button", { name: "发送给模型" }));
+
+    await waitFor(() => expect(request).toHaveBeenCalledWith("resolveApproval", {
+      approvalId: "approval-1",
+      decision: "message",
+      message: "先解释清楚再执行",
+    }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  });
+
+  it("denies a strict-mode approval without sending a message", async () => {
+    const { request } = installDesktopApi({
+      approvalRequest: {
+        type: "approval.request",
+        approval_id: "approval-2",
+        tool: "write_file",
+        message: "Strict mode: every tool call needs your explicit approval.",
+        risk: "medium",
+        permission_mode: "strict",
+        concerns: [],
+        review_source: "policy",
+        read_only: false,
+      },
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
+
+    await user.type(composer, "Inspect the cache{Enter}");
+
+    const dialog = await screen.findByRole("alertdialog", { name: "工具请求更高权限" });
+    expect(within(dialog).getByText("Strict 模式：每次工具调用都需要你的批准。")).toBeTruthy();
+    expect(within(dialog).queryByText(/审查/)).toBeNull();
+
+    await user.click(within(dialog).getByRole("button", { name: "拒绝" }));
+
+    await waitFor(() => expect(request).toHaveBeenCalledWith("resolveApproval", {
+      approvalId: "approval-2",
+      decision: "deny",
+    }));
+  });
+
+  it("routes /compact with focus through the dedicated context action", async () => {
+    const { request } = installDesktopApi();
+    const user = userEvent.setup();
+    render(<App />);
+    const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
+
+    expect(await screen.findByTitle("压缩上下文")).toBeTruthy();
+    await user.type(composer, "/compact preserve provider failures{Enter}");
+
+    await waitFor(() => expect(request).toHaveBeenCalledWith("compactContext", {
+      sessionId: baseSession.id,
+      focus: "preserve provider failures",
+      projectRoot: "C:/workspace",
+    }));
+    expect(request).not.toHaveBeenCalledWith("runPrompt", expect.objectContaining({ prompt: expect.stringContaining("/compact") }));
+    expect(await screen.findByText("Context compressed: 1,200 -> 500 tokens")).toBeTruthy();
+  });
+
+  it("compacts from the inspector without discarding the current draft", async () => {
+    const { request } = installDesktopApi();
+    const user = userEvent.setup();
+    render(<App />);
+    const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
+    await user.type(composer, "unfinished draft");
+
+    await user.click(await screen.findByRole("button", { name: "压缩上下文" }));
+
+    await waitFor(() => expect(request).toHaveBeenCalledWith("compactContext", {
+      sessionId: baseSession.id,
+      focus: undefined,
+      projectRoot: "C:/workspace",
+    }));
+    expect((composer as HTMLTextAreaElement).value).toBe("unfinished draft");
   });
 
   it("asks for model reasoning before switching and hides retired sources", async () => {

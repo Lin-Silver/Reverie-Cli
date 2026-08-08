@@ -21,6 +21,7 @@ export const CORE_RESPONSE_CONTRACT = {
   getContextStatus: { type: "context.status", required: ["context_engine"] },
   createSession: { type: "session.created", required: ["session", "sessions"] },
   runPrompt: { type: "prompt.result", required: ["result", "sessions", "recovery"] },
+  compactContext: { type: "context.compacted", required: ["success", "message", "session", "sessions", "recovery", "context_engine"] },
   renameSession: { type: "session.updated", required: ["session", "sessions"] },
   forkSession: { type: "session.updated", required: ["session", "sessions"] },
   rewindSession: { type: "session.updated", required: ["session", "sessions"] },

@@ -128,6 +128,7 @@ import {
   mergeLiveTurnBatch,
   type LiveTurnBatch,
 } from "./live-stream";
+import type { ApprovalDecision } from "./core-protocol";
 
 type Toast = { id: number; kind: "success" | "error" | "info"; message: string };
 
@@ -1599,9 +1600,13 @@ function SettingControl({ item, update }: { item: SettingItem; update: (key: str
     return <Toggle checked={Boolean(item.value)} onChange={(value) => update(item.key, value)} />;
   }
   if (item.kind === "choice") {
+    const labels = item.labels ?? {};
     return (
       <select value={String(item.value ?? "")} onChange={(event) => update(item.key, event.target.value)}>
-        {(item.choices ?? []).map((choice) => <option key={String(choice)} value={String(choice)}>{t(String(choice))}</option>)}
+        {(item.choices ?? []).map((choice) => {
+          const raw = String(choice);
+          return <option key={raw} value={raw}>{t(labels[raw] ?? raw)}</option>;
+        })}
       </select>
     );
   }
@@ -1792,7 +1797,19 @@ function SettingsView({
             </section>
             {paths && <div className="core-data-card"><div className="core-data-heading"><Database size={18} /><div><strong>{t("CLI 数据与历史")}</strong><p>{t("GUI 会直接读取此目录中的配置、会话、检查点和插件状态。")}</p></div></div><code>{paths.coreAppRoot}</code><div><button type="button" className="secondary-button" onClick={() => void window.reverie.reveal(paths.coreAppRoot)}><FolderOpen size={14} />{t("显示目录")}</button><button type="button" className="secondary-button" onClick={selectCoreData}><Folder size={14} />{t("切换数据目录")}</button></div></div>}
             <div className="setting-list">
-              {items.map((item) => <div className={`setting-row ${item.kind === "rules" ? "stacked" : ""}`} key={item.key}><div><strong>{t(item.name)}</strong><p>{t(item.description)}</p></div><SettingControl item={item} update={updateSetting} /></div>)}
+              {items.map((item) => {
+                const hint = item.descriptions?.[String(item.value ?? "")] ?? "";
+                return (
+                  <div className={`setting-row ${item.kind === "rules" ? "stacked" : ""}`} key={item.key}>
+                    <div>
+                      <strong>{t(item.name)}</strong>
+                      <p>{t(item.description)}</p>
+                      {hint && <p className="setting-hint">{t(hint)}</p>}
+                    </div>
+                    <SettingControl item={item} update={updateSetting} />
+                  </div>
+                );
+              })}
             </div>
           </>
         )}
@@ -1943,7 +1960,19 @@ function SettingsView({
   );
 }
 
-function Inspector({ state, liveTurn, indexWorkspace }: { state: DesktopState; liveTurn: LiveTurn | null; indexWorkspace: () => void }) {
+function Inspector({
+  state,
+  liveTurn,
+  indexWorkspace,
+  compactContext,
+  compactDisabled,
+}: {
+  state: DesktopState;
+  liveTurn: LiveTurn | null;
+  indexWorkspace: () => void;
+  compactContext: () => void;
+  compactDisabled: boolean;
+}) {
   const { t } = useI18n();
   const [tab, setTab] = useState<"context" | "activity">("context");
   const permission = state.settings.items.find((item) => item.key === "permission_level")?.value;
@@ -1959,7 +1988,7 @@ function Inspector({ state, liveTurn, indexWorkspace }: { state: DesktopState; l
       <div className="inspector-tabs"><button type="button" className={tab === "context" ? "active" : ""} onClick={() => setTab("context")}>{t("上下文")}</button><button type="button" className={tab === "activity" ? "active" : ""} onClick={() => setTab("activity")}>{t("活动")} {events.length > 0 && <span>{events.length}</span>}</button></div>
       {tab === "context" ? (
         <div className="inspector-content">
-          <section><div className="inspector-heading"><span>{t("工作区")}</span><button type="button" onClick={indexWorkspace} title={t("重新索引")}><RefreshCw className={contextEngine?.indexing ? "spin" : ""} size={13} /></button></div><div className="context-card"><Folder size={15} /><div><strong>{state.workspace.project_name}</strong><span>{state.workspace.project_root}</span></div></div><div className="context-engine-card"><div><span className="context-engine-orbit"><Sparkles size={14} /></span><span><strong>Context Engine</strong><small>{contextLabel}</small></span></div><div className="context-engine-metrics"><span><strong>{contextEngine?.files ?? 0}</strong> {t("文件")}</span><span><strong>{contextEngine?.symbols ?? 0}</strong> {t("符号")}</span></div>{contextEngine?.indexing && <div className="context-progress"><span style={{ width: `${Math.max(3, contextEngine.progress)}%` }} /></div>}</div></section>
+          <section><div className="inspector-heading"><span>{t("工作区")}</span><div className="inspector-actions"><button type="button" onClick={compactContext} disabled={compactDisabled} aria-label={t("压缩上下文")} title={t("压缩上下文")}><Archive size={13} /></button><button type="button" onClick={indexWorkspace} title={t("重新索引")}><RefreshCw className={contextEngine?.indexing ? "spin" : ""} size={13} /></button></div></div><div className="context-card"><Folder size={15} /><div><strong>{state.workspace.project_name}</strong><span>{state.workspace.project_root}</span></div></div><div className="context-engine-card"><div><span className="context-engine-orbit"><Sparkles size={14} /></span><span><strong>Context Engine</strong><small>{contextLabel}</small></span></div><div className="context-engine-metrics"><span><strong>{contextEngine?.files ?? 0}</strong> {t("文件")}</span><span><strong>{contextEngine?.symbols ?? 0}</strong> {t("符号")}</span></div>{contextEngine?.indexing && <div className="context-progress"><span style={{ width: `${Math.max(3, contextEngine.progress)}%` }} /></div>}</div></section>
           <section><div className="inspector-heading"><span>{t("运行时")}</span></div><div className="context-line"><span>{t("模型")}</span><strong>{state.models.active_model?.display_name || t("未配置")}</strong></div><div className="context-line"><span>Source</span><strong>{visibleModelSources(state.models.sources).find((item) => item.active)?.display_name}</strong></div><div className="context-line"><span>{t("模式")}</span><strong>{state.workspace.mode}</strong></div><div className="context-line"><span>{t("权限")}</span><strong>{String(permission ?? "workspace_write")}</strong></div></section>
           <section><div className="inspector-heading"><span>{t("恢复")}</span></div><div className="context-line"><span>{t("检查点")}</span><strong>{state.recovery.checkpoints.length}</strong></div><div className="context-line"><span>{t("操作")}</span><strong>{String(state.recovery.summary.total_operations ?? state.recovery.operations.length)}</strong></div></section>
           <section><div className="inspector-heading"><span>{t("快捷提示")}</span></div><div className="hint-card"><AtSign size={14} /><span><kbd>@</kbd> {t("会用 Context Engine 推荐当前任务最相关的文件。")}</span></div><div className="hint-card"><Paperclip size={14} /><span>{t("回形针可选择任意文件，并安全复制到工作区附件区。")}</span></div><div className="hint-card"><Command size={14} /><span><kbd>Ctrl K</kbd> {t("打开完整命令目录。")}</span></div></section>
@@ -2512,17 +2541,47 @@ function RtpTasksView() {
   );
 }
 
-function ApprovalModal({ approval, resolve }: { approval: Record<string, unknown>; resolve: (decision: "once" | "session" | "deny") => void }) {
+function ApprovalModal({ approval, resolve }: { approval: Record<string, unknown>; resolve: (decision: ApprovalDecision, message?: string) => void }) {
   const { t } = useI18n();
   const dialogRef = useRef<HTMLDivElement>(null);
+  const [message, setMessage] = useState("");
+  const [showReply, setShowReply] = useState(false);
   useDialogFocus(dialogRef);
+  const risk = String(approval.risk ?? "").trim();
+  const concerns = Array.isArray(approval.concerns) ? approval.concerns.map(String) : [];
+  const reviewer = String(approval.review_source ?? "").trim();
+  const riskLabel = risk ? risk : "";
+  const riskClass = riskLabel ? `risk-badge risk-${riskLabel}` : "risk-badge";
   return (
     <div className="modal-backdrop">
       <div ref={dialogRef} className="approval-modal" role="alertdialog" aria-modal="true" aria-labelledby="approval-title" aria-describedby="approval-message" tabIndex={-1}>
-        <div className="approval-header"><div className="confirm-icon"><ShieldCheck size={20} /></div><div><h2 id="approval-title">{t("工具请求更高权限")}</h2><p>{t("Reverie 内核暂停执行，等待你的决定。")}</p></div></div>
-        <div className="approval-tool"><Wrench size={15} /><strong>{String(approval.tool ?? "tool")}</strong></div>
+        <div className="approval-header">
+          <div className="confirm-icon"><ShieldCheck size={20} /></div>
+          <div>
+            <h2 id="approval-title">{t("工具请求更高权限")}</h2>
+            <p>{t(String(approval.permission_mode === "strict" ? "Strict 模式：每次工具调用都需要你的批准。" : "Reverie 内核暂停执行，等待你的决定。"))}</p>
+          </div>
+        </div>
+        <div className="approval-tool"><Wrench size={15} /><strong>{String(approval.tool ?? "tool")}</strong>{riskLabel && <span className={riskClass}>{riskLabel}</span>}</div>
         <p id="approval-message" className="approval-message">{t(String(approval.message ?? "此工具超出当前权限级别。"))}</p>
-        <div className="approval-actions"><button type="button" className="secondary-button" onClick={() => resolve("deny")}>{t("拒绝")}</button><button type="button" className="secondary-button" onClick={() => resolve("once")}>{t("仅本次允许")}</button><button type="button" className="primary-button" onClick={() => resolve("session")}>{t("本会话允许")}</button></div>
+        {concerns.length > 0 && <div className="approval-concerns">{concerns.map((tag) => <span key={tag} className="concern-tag">{tag}</span>)}</div>}
+        {reviewer && reviewer !== "policy" && <div className="approval-reviewer"><Sparkles size={12} />{t("审查")}: {reviewer}</div>}
+        {showReply ? (
+          <div className="approval-reply">
+            <textarea autoFocus rows={2} value={message} onChange={(e) => setMessage(e.target.value)} placeholder={t("给模型写一条消息，例如：先解释清楚再执行……")} />
+            <div className="approval-actions">
+              <button type="button" className="secondary-button" onClick={() => setShowReply(false)}>{t("返回")}</button>
+              <button type="button" className="primary-button" disabled={!message.trim()} onClick={() => resolve("message", message.trim())}>{t("发送给模型")}</button>
+            </div>
+          </div>
+        ) : (
+          <div className="approval-actions">
+            <button type="button" className="danger-button" onClick={() => resolve("deny")}>{t("拒绝")}</button>
+            <button type="button" className="secondary-button" onClick={() => setShowReply(true)}>{t("个性化回复")}</button>
+            <button type="button" className="secondary-button" onClick={() => resolve("once")}>{t("仅本次允许")}</button>
+            <button type="button" className="primary-button" onClick={() => resolve("session")}>{t("本会话允许")}</button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -2864,9 +2923,53 @@ export default function App() {
     }
   }, [prompt, running, session, sessionBusy, toast]);
 
+  const compactContext = useCallback(async (focus = "") => {
+    if (running || sessionBusy || !state) return;
+    const requestSequence = ++sessionRequestSequence.current;
+    setSessionBusy(true);
+    try {
+      let activeSession = session;
+      if (!activeSession) {
+        const created = await window.reverie.request("createSession", {});
+        if (requestSequence !== sessionRequestSequence.current) return;
+        activeSession = created.session;
+        setSession(activeSession);
+        setState((current) => current ? { ...current, sessions: created.sessions } : current);
+      }
+      const response = await window.reverie.request("compactContext", {
+        sessionId: activeSession.id,
+        focus: focus || undefined,
+        projectRoot: state.workspace.project_root,
+      });
+      if (requestSequence !== sessionRequestSequence.current) return;
+      setSession(response.session);
+      setState((current) => current ? {
+        ...current,
+        sessions: response.sessions,
+        recovery: response.recovery,
+        workspace: { ...current.workspace, context_engine: response.context_engine },
+      } : current);
+      setMentionItems([]);
+      setMentionOpen(false);
+      toast(response.message, "success");
+    } catch (error) {
+      if (requestSequence === sessionRequestSequence.current) toast(error instanceof Error ? error.message : String(error), "error");
+    } finally {
+      if (requestSequence === sessionRequestSequence.current) setSessionBusy(false);
+    }
+  }, [running, session, sessionBusy, state, toast]);
+
   const sendPrompt = useCallback(async () => {
     const text = prompt.trim();
     if (!text || running || sessionBusy || !state) return;
+    const compactMatch = /^\/compact(?:\s+([\s\S]*))?$/i.exec(text);
+    if (compactMatch) {
+      setPrompt("");
+      setMentionItems([]);
+      setMentionOpen(false);
+      await compactContext((compactMatch[1] || "").trim());
+      return;
+    }
     setPrompt("");
     setMentionItems([]);
     setMentionOpen(false);
@@ -2919,7 +3022,7 @@ export default function App() {
     } finally {
       setRunning(false);
     }
-  }, [prompt, resetLiveBatch, running, session, sessionBusy, state, t, toast]);
+  }, [compactContext, prompt, resetLiveBatch, running, session, sessionBusy, state, t, toast]);
 
   const cancelPrompt = useCallback(async () => {
     const retryText = liveTurn?.userText ?? "";
@@ -3099,12 +3202,19 @@ export default function App() {
     });
   }, [running, sessionBusy, state, t, toast, uiPreferences.archivedSessions, updateUiPreferences]);
 
-  const resolveApproval = useCallback(async (decision: "once" | "session" | "deny") => {
+  const resolveApproval = useCallback(async (decision: ApprovalDecision, message?: string) => {
     if (!approval) return;
     try {
-      await window.reverie.request("resolveApproval", { approvalId: approval.approval_id, decision });
+      await window.reverie.request("resolveApproval", {
+        approvalId: approval.approval_id,
+        decision,
+        ...(decision === "message" && message ? { message } : {}),
+      });
       setApproval(null);
-      toast(t(decision === "deny" ? "已拒绝工具执行" : "权限已授予"), decision === "deny" ? "info" : "success");
+      toast(
+        t(decision === "deny" ? "已拒绝工具执行" : decision === "message" ? "已发送个性化回复给模型" : "权限已授予"),
+        decision === "deny" ? "info" : "success"
+      );
     } catch (error) {
       setApproval(null);
       toast(error instanceof Error ? error.message : String(error), "error");
@@ -3368,13 +3478,13 @@ export default function App() {
         <Topbar state={state} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} openModelPicker={() => setModelPickerOpen(true)} selectReasoning={(value) => void selectReasoning(value)} setMode={(mode) => void updateSetting("mode", mode)} inspectorOpen={inspectorOpen} toggleInspector={() => setInspectorOpen((value) => !value)} openCommands={() => setCommandOpen(true)} theme={theme} setTheme={changeTheme} />
         <div className="content-area">{page}</div>
       </main>
-      {inspectorOpen && <Inspector state={state} liveTurn={liveTurn} indexWorkspace={() => void indexWorkspace()} />}
+      {inspectorOpen && <Inspector state={state} liveTurn={liveTurn} indexWorkspace={() => void indexWorkspace()} compactContext={() => void compactContext()} compactDisabled={running || sessionBusy} />}
       {modelPickerOpen && <ModelPicker state={state} onSelect={(source, model, reasoning) => void selectModel(source, model, reasoning)} close={() => setModelPickerOpen(false)} />}
       {commandOpen && <CommandPalette commands={state.commands.items} close={() => setCommandOpen(false)} choose={chooseCommand} />}
       {sessionSearchOpen && <SessionSearch close={() => setSessionSearchOpen(false)} openSession={(id) => void openSession(id)} />}
       {renameSessionTarget && <RenameSessionModal session={renameSessionTarget} close={() => setRenameSessionTarget(null)} save={(name) => void renameSession(name)} />}
       {standardModelOpen && <StandardModelModal close={() => setStandardModelOpen(false)} save={(model) => void addStandard(model)} />}
-      {approval && <ApprovalModal approval={approval} resolve={(decision) => void resolveApproval(decision)} />}
+      {approval && <ApprovalModal approval={approval} resolve={(decision, message) => void resolveApproval(decision, message)} />}
       {confirmation && <ConfirmModal title={confirmation.title} message={confirmation.message} confirmLabel={confirmation.label} danger={confirmation.danger} close={() => setConfirmation(null)} confirm={() => { const action = confirmation.action; setConfirmation(null); action(); }} />}
       <Toasts items={toasts} />
     </div>

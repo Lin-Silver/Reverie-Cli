@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 
-_BACKGROUND_DISPATCH_ACTIONS = frozenset({"runPrompt", "workspaceMentions", "indexWorkspace"})
+_BACKGROUND_DISPATCH_ACTIONS = frozenset({"runPrompt", "compactContext", "workspaceMentions", "indexWorkspace"})
 
 
 def _interactive_context_worker_limit(cpu_count: Optional[int] = None) -> int:
@@ -147,6 +147,10 @@ class ReverieSdkBridge:
             return "\n".join(interface.rules_manager.get_rules())
         if key == "permission_level":
             return str((getattr(config, "security", {}) or {}).get("permission_level", "full_control"))
+        if key in {"permission_mode", "strict_allow_read_only", "review_approve_risk_at", "review_model"}:
+            from .settings_catalog import security_setting_value
+
+            return security_setting_value(key, config)
         return getattr(config, key, None)
 
     def settings_payload(self) -> Dict[str, Any]:
@@ -258,9 +262,11 @@ class ReverieSdkBridge:
         tool: Any,
         arguments: Dict[str, Any],
         denial: str,
-    ) -> str:
+        details: Optional[Dict[str, Any]] = None,
+    ) -> Any:
+        info = details if isinstance(details, dict) else {}
         approval_id = uuid.uuid4().hex
-        waiter = {"event": threading.Event(), "decision": "deny"}
+        waiter = {"event": threading.Event(), "decision": "deny", "message": ""}
         with self._approval_lock:
             self._approval_waiters[approval_id] = waiter
         self._emit_request_event(
@@ -269,13 +275,25 @@ class ReverieSdkBridge:
                 "type": "approval.request",
                 "approval_id": approval_id,
                 "tool": str(getattr(tool, "name", "tool") or "tool"),
-                "message": str(denial or "This tool requires additional permission."),
+                "message": str(
+                    denial
+                    or str(info.get("reason") or "")
+                    or "This tool requires additional permission."
+                ),
+                "risk": str(info.get("risk") or ""),
+                "permission_mode": str(info.get("permission_mode") or ""),
+                "concerns": list(info.get("concerns") or []),
+                "review_source": str(info.get("review_source") or ""),
+                "read_only": bool(info.get("read_only", False)),
             },
         )
         waiter["event"].wait(timeout=300)
         with self._approval_lock:
             resolved = self._approval_waiters.pop(approval_id, waiter)
         decision = str(resolved.get("decision") or "deny").strip().lower()
+        message = str(resolved.get("message") or "").strip()
+        if message:
+            return {"decision": "message", "message": message}
         return decision if decision in {"once", "session", "deny"} else "deny"
 
     def model_sources_payload(self, *, fetch_live: bool = False) -> Dict[str, Any]:
@@ -310,7 +328,7 @@ class ReverieSdkBridge:
             return None
         if self.interface.agent is not None:
             self.interface.agent.set_history(session.messages)
-        return _json_safe(session.to_dict())
+        return _json_safe(session.to_wire_dict())
 
     @staticmethod
     def commands_payload() -> Dict[str, Any]:
@@ -432,13 +450,17 @@ class ReverieSdkBridge:
         if action == "resolveApproval":
             approval_id = str(payload.get("approvalId") or payload.get("id") or "").strip()
             decision = str(payload.get("decision") or "deny").strip().lower()
-            if decision not in {"once", "session", "deny"}:
-                raise ValueError("Approval decision must be once, session, or deny.")
+            message = str(payload.get("message") or "").strip()[:2000]
+            if decision not in {"once", "session", "deny", "message"}:
+                raise ValueError("Approval decision must be once, session, deny, or message.")
+            if decision == "message" and not message:
+                raise ValueError("A 'message' decision requires message text for the model.")
             with self._approval_lock:
                 waiter = self._approval_waiters.get(approval_id)
                 if waiter is None:
                     raise ValueError(f"Approval request is no longer active: {approval_id}")
                 waiter["decision"] = decision
+                waiter["message"] = message if decision == "message" else ""
                 waiter["event"].set()
             return {"id": request_id, "type": "approval.resolved", "approval_id": approval_id, "decision": decision}
         if action == "runPrompt":
@@ -456,11 +478,12 @@ class ReverieSdkBridge:
                 no_index=bool(payload.get("noIndex", False)),
                 fresh_session=bool(payload.get("freshSession", False)),
                 event_callback=lambda event: self._emit_request_event(request_id, event),
-                approval_callback=lambda tool, arguments, denial: self._request_tool_approval(
+                approval_callback=lambda tool, arguments, denial, details=None: self._request_tool_approval(
                     request_id,
                     tool,
                     arguments,
                     denial,
+                    details,
                 ),
                 source_override=str(payload.get("source") or "").strip() or None,
                 model_override=str(payload.get("model") or "").strip() or None,
@@ -472,6 +495,52 @@ class ReverieSdkBridge:
                 "result": _json_safe(result.to_dict()),
                 "sessions": self.sessions_payload(),
                 "recovery": self.recovery_payload(),
+            }
+        if action == "compactContext":
+            from .tools.context_management import ContextManagementTool
+
+            interface = self.ensure_interface(
+                Path(str(payload.get("projectRoot") or self.project_root))
+            )
+            session_id = str(payload.get("sessionId") or "").strip()
+            session = interface.session_manager.load_session(session_id) if session_id else None
+            if session is None:
+                raise ValueError(f"Session not found: {session_id}")
+
+            interface._init_agent(
+                persist_config_changes=False,
+                defer_runtime_enrichment=True,
+            )
+            if interface.agent is None:
+                raise RuntimeError("Context compression requires an active model.")
+
+            # Agent initialization can refresh runtime scope, so make the requested
+            # Desktop session authoritative immediately before compression.
+            session = interface.session_manager.load_session(session_id)
+            if session is None:
+                raise ValueError(f"Session not found: {session_id}")
+            interface.agent.set_history(session.messages)
+
+            result = ContextManagementTool(interface._get_app_context()).execute(
+                action="compress",
+                keep_last_messages=8,
+                focus=str(payload.get("focus") or "").strip(),
+            )
+            if not result.success:
+                raise RuntimeError(result.error or result.output or "Context compression failed.")
+
+            session = interface.session_manager.get_current_session()
+            if session is None:
+                raise RuntimeError("Context compression completed without an active session.")
+            return {
+                "id": request_id,
+                "type": "context.compacted",
+                "success": True,
+                "message": result.output,
+                "session": _json_safe(session.to_wire_dict()),
+                "sessions": self.sessions_payload(),
+                "recovery": self.recovery_payload(),
+                "context_engine": self.context_status_payload(),
             }
         if action in {"getModelSources", "refreshModelSources"}:
             return {
@@ -561,7 +630,7 @@ class ReverieSdkBridge:
             return {
                 "id": request_id,
                 "type": "session.created",
-                "session": _json_safe(session.to_dict()),
+                "session": _json_safe(session.to_wire_dict()),
                 "sessions": self.sessions_payload(),
             }
         if action == "deleteSessions":
@@ -599,7 +668,7 @@ class ReverieSdkBridge:
                 "id": request_id,
                 "type": "sessions.deleted",
                 "deleted_session_ids": deleted_ids,
-                "session": _json_safe(session.to_dict()) if session is not None else None,
+                "session": _json_safe(session.to_wire_dict()) if session is not None else None,
                 "sessions": self.sessions_payload(),
             }
         if action in {"renameSession", "deleteSession", "forkSession", "rewindSession"}:
@@ -644,8 +713,8 @@ class ReverieSdkBridge:
             return {
                 "id": request_id,
                 "type": "session.updated",
-                "session": _json_safe(session.to_dict()) if session is not None else None,
-                "updated_session": _json_safe(updated_session.to_dict()) if updated_session is not None else None,
+                "session": _json_safe(session.to_wire_dict()) if session is not None else None,
+                "updated_session": _json_safe(updated_session.to_wire_dict()) if updated_session is not None else None,
                 "sessions": self.sessions_payload(),
             }
         if action == "searchSessions":

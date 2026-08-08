@@ -4,6 +4,7 @@ import sqlite3
 
 from reverie.context_engine.cache import CacheManager
 from reverie.context_engine.compressor import (
+    COMPACTION_SECTION_TITLES,
     ContextCompressor,
     MEMORY_BLOCK_HEADER,
     _build_compression_transcript,
@@ -1192,6 +1193,9 @@ def test_compressor_uses_deterministic_fallback_when_provider_fails(tmp_path: Pa
     assert len(compressed) < len(messages)
     assert compressed[1]["content"].startswith(MEMORY_BLOCK_HEADER)
     assert "reverie/agent/agent.py" in compressed[1]["content"]
+    for section_title in COMPACTION_SECTION_TITLES:
+        assert section_title in compressed[1]["content"]
+    assert "without asking the user to restate context" in compressed[1]["content"]
 
 
 def test_compression_transcript_is_bounded_and_preserves_oldest_and_newest_work() -> None:
@@ -1258,6 +1262,55 @@ def test_successful_provider_compression_skips_deterministic_fallback(monkeypatc
 
     assert fallback_calls == 0
     assert compressed[1]["content"].startswith(MEMORY_BLOCK_HEADER)
+
+
+def test_compressor_prompt_requires_continuation_schema_and_forwards_user_focus(tmp_path: Path) -> None:
+    captured = {}
+
+    class SuccessfulClient:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**kwargs):
+                    captured.update(kwargs)
+
+                    class Message:
+                        content = "Summary:\n\n" + "\n\n".join(
+                            f"{title}\n- preserved" for title in COMPACTION_SECTION_TITLES
+                        )
+
+                    class Choice:
+                        message = Message()
+
+                    class Response:
+                        choices = [Choice()]
+                        usage = None
+
+                    return Response()
+
+    messages = [
+        {"role": "user" if index % 2 == 0 else "assistant", "content": f"message {index}"}
+        for index in range(20)
+    ]
+    compressed = ContextCompressor(tmp_path).compress(
+        messages,
+        client=SuccessfulClient(),
+        model="test-model",
+        provider="openai-sdk",
+        keep_last_messages=4,
+        focus="Preserve the exact failed test and uncommitted files.",
+    )
+
+    system_prompt = captured["messages"][0]["content"]
+    user_prompt = captured["messages"][1]["content"]
+    for section_title in COMPACTION_SECTION_TITLES:
+        assert section_title in system_prompt
+    assert "implemented, tested, committed, pushed" in system_prompt
+    assert "visually verified" in system_prompt
+    assert "Preserve the exact failed test and uncommitted files." in user_prompt
+    assert "User-supplied compaction focus" in user_prompt
+    assert "Full pre-compaction transcript checkpoint" in compressed[0]["content"]
+    assert len([message for message in compressed if message["role"] != "system"]) >= 4
 
 
 def test_context_cache_uses_fast_compact_gzip_roundtrip(tmp_path: Path) -> None:

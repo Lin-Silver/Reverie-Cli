@@ -255,6 +255,50 @@ class DisplayComponents:
             renderables.append(bottom)
         self.console.print(Group(*renderables))
 
+    def show_tool_review_event(self, event: Dict[str, Any]) -> None:
+        """Render the Auto Check summary for one response's tool calls."""
+        reviewed = max(0, int(event.get("reviewed", 0) or 0))
+        flagged = max(0, int(event.get("flagged", 0) or 0))
+        batch_risk = str(event.get("batch_risk", "") or "none").strip().lower()
+        error = str(event.get("error", "") or "").strip()
+        model = str(event.get("model", "") or "").strip()
+        elapsed_ms = max(0, int(event.get("elapsed_ms", 0) or 0))
+
+        if not bool(event.get("ok", True)) or flagged:
+            status = "warning"
+        else:
+            status = "success"
+
+        plural = "call" if reviewed == 1 else "calls"
+        message = f"Auto Check reviewed {reviewed} tool {plural}"
+        message += f", {flagged} need your approval" if flagged else ", none need approval"
+
+        verdicts = [item for item in (event.get("verdicts") or []) if isinstance(item, dict)]
+        detail_lines: List[str] = []
+        for verdict in verdicts[:6]:
+            tool_name = str(verdict.get("tool") or verdict.get("tool_name") or "tool").strip()
+            risk = str(verdict.get("risk", "") or "").strip()
+            reason = self._truncate_text(str(verdict.get("reason", "") or "").strip(), 96)
+            detail_lines.append(f"{tool_name} [{risk}] {reason}".strip())
+        if len(verdicts) > 6:
+            detail_lines.append(f"...and {len(verdicts) - 6} more")
+        if error:
+            detail_lines.append(error)
+
+        meta_parts = [f"risk {batch_risk}"]
+        if model:
+            meta_parts.append(model)
+        if elapsed_ms:
+            meta_parts.append(f"{elapsed_ms} ms")
+
+        self.show_activity_event(
+            category="Auto Check",
+            message=message,
+            status=status,
+            detail="\n".join(detail_lines),
+            meta="  ".join(meta_parts),
+        )
+
     def show_activity_event(
         self,
         category: str,
@@ -1465,6 +1509,9 @@ class DisplayComponents:
         if event_type == "model_request":
             # Internal bookkeeping event only. Rendering this before every tool
             # result makes NVIDIA/OpenAI-compatible streams noisy while waiting.
+            return True
+        if event_type == "tool_review":
+            self.show_tool_review_event(event)
             return True
         if event_type == "tool_start":
             self.show_tool_invocation(

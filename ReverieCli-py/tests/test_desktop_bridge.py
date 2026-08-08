@@ -319,6 +319,95 @@ def test_desktop_session_actions_keep_a_valid_active_session(tmp_path: Path) -> 
     assert {item["id"] for item in deleted["sessions"]["items"]} == {first.id, second.id}
 
 
+def test_sdk_bridge_compacts_the_requested_desktop_session_with_shared_context_tool(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from reverie.sdk_bridge import ReverieSdkBridge, _BACKGROUND_DISPATCH_ACTIONS
+    from reverie.tools.base import ToolResult
+    from reverie.tools.context_management import ContextManagementTool
+
+    manager = SessionManager(tmp_path / "state", project_root=tmp_path)
+    session = manager.create_session("Long session")
+    session.messages = [
+        {"role": "user" if index % 2 == 0 else "assistant", "content": f"message {index}"}
+        for index in range(12)
+    ]
+    manager.save_session(session)
+
+    class _Agent:
+        def __init__(self):
+            self.history = []
+
+        def get_history(self):
+            return list(self.history)
+
+        def set_history(self, messages):
+            self.history = list(messages)
+
+    captured = {}
+    agent = _Agent()
+
+    class _Interface:
+        session_manager = manager
+
+        def __init__(self):
+            self.agent = agent
+
+        def _init_agent(self, **kwargs):
+            captured["init"] = kwargs
+
+        def _get_app_context(self):
+            return {"agent": self.agent, "session_manager": manager, "project_root": tmp_path}
+
+    def fake_execute(tool, **kwargs):
+        captured["context"] = tool.context
+        captured["execute"] = kwargs
+        compacted = [
+            {"role": "system", "content": "# Continuation Summary\n## Current objective\nKeep GUI parity."},
+            *agent.get_history()[-2:],
+        ]
+        agent.set_history(compacted)
+        manager.update_messages(compacted)
+        return ToolResult.ok("Context compressed: 120 -> 30 tokens")
+
+    monkeypatch.setattr(ContextManagementTool, "execute", fake_execute)
+    bridge = ReverieSdkBridge()
+    bridge.project_root = tmp_path.resolve()
+    bridge.interface = _Interface()
+    monkeypatch.setattr(bridge, "recovery_payload", lambda: {"summary": {}, "checkpoints": [], "operations": []})
+    monkeypatch.setattr(
+        bridge,
+        "context_status_payload",
+        lambda: {"ready": True, "indexing": False, "files": 1, "symbols": 2, "progress": 100, "label": "Ready", "automatic_retrieval": True},
+    )
+
+    response = bridge.dispatch(
+        {
+            "id": "compact-1",
+            "action": "compactContext",
+            "payload": {
+                "sessionId": session.id,
+                "focus": "preserve provider failures",
+                "projectRoot": str(tmp_path),
+            },
+        }
+    )
+
+    assert "compactContext" in _BACKGROUND_DISPATCH_ACTIONS
+    assert captured["init"] == {"persist_config_changes": False, "defer_runtime_enrichment": True}
+    assert captured["execute"] == {
+        "action": "compress",
+        "keep_last_messages": 8,
+        "focus": "preserve provider failures",
+    }
+    assert captured["context"]["session_manager"] is manager
+    assert response["type"] == "context.compacted"
+    assert response["message"] == "Context compressed: 120 -> 30 tokens"
+    assert response["session"]["messages"][0]["content"].startswith("# Continuation Summary")
+    assert manager.get_current_session().messages == response["session"]["messages"]
+
+
 def test_renaming_or_deleting_a_background_session_preserves_the_active_session(tmp_path: Path) -> None:
     from reverie.sdk_bridge import ReverieSdkBridge
 

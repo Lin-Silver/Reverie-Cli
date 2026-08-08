@@ -6,7 +6,18 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from .config import normalize_thinking_output_style, normalize_tool_output_style
 from .modes import list_modes, normalize_mode
-from .security_policy import PERMISSION_LEVELS, normalize_permission_level
+from .security_policy import (
+    PERMISSION_LEVELS,
+    PERMISSION_MODES,
+    RISK_LEVELS,
+    normalize_permission_level,
+    normalize_permission_mode,
+    normalize_review_config,
+    normalize_risk_level,
+    permission_mode_description,
+    permission_mode_label,
+    resolve_review_config,
+)
 
 
 def setting_mode_options() -> List[str]:
@@ -27,6 +38,34 @@ def setting_tool_output_choices() -> List[str]:
 def setting_thinking_output_choices() -> List[str]:
     """Available streamed reasoning transcript styles."""
     return ["full", "compact", "hidden"]
+
+
+def review_model_label(config: Any) -> str:
+    """Human-facing description of which model performs the Auto Check review."""
+    review = resolve_review_config(getattr(config, "security", {}) or {})
+    if review.get("model_mode") != "custom":
+        return "follow main model"
+    name = str(review.get("model") or "").strip()
+    source = str(review.get("source") or "").strip()
+    if not name:
+        return f"{source or 'custom'} (model not set)"
+    return f"{source}:{name}" if source else name
+
+
+def security_setting_value(key: str, config: Any) -> Any:
+    """Resolve one security-block setting value for the CLI and desktop panes."""
+    security = getattr(config, "security", {}) or {}
+    if key == "permission_level":
+        return normalize_permission_level(security.get("permission_level"))
+    if key == "permission_mode":
+        return normalize_permission_mode(security.get("permission_mode"))
+    if key == "strict_allow_read_only":
+        return bool(security.get("strict_allow_read_only", False))
+    if key == "review_approve_risk_at":
+        return normalize_review_config(security.get("review")).get("approve_risk_at")
+    if key == "review_model":
+        return review_model_label(config)
+    return None
 
 
 def get_setting_items(
@@ -146,6 +185,38 @@ def get_setting_items(
             "choices": list(PERMISSION_LEVELS),
             "description": "Control which tool classes the software permits. Full Control is the default; dangerous operations remain blocked by hard policy.",
             "command": "Edit security.permission_level to reduce the software-enforced tool surface.",
+        },
+        {
+            "name": "Permission Mode",
+            "key": "permission_mode",
+            "kind": "choice",
+            "choices": list(PERMISSION_MODES),
+            "labels": {mode: permission_mode_label(mode) for mode in PERMISSION_MODES},
+            "descriptions": {mode: permission_mode_description(mode) for mode in PERMISSION_MODES},
+            "description": "How tool calls are approved on top of the hard permission level.",
+            "command": "/permission mode default|auto_check|strict",
+        },
+        {
+            "name": "Auto Check Threshold",
+            "key": "review_approve_risk_at",
+            "kind": "choice",
+            "choices": list(RISK_LEVELS),
+            "description": "In Auto Check mode, pause for you at this reviewed risk level and above.",
+            "command": "/permission threshold <none|low|medium|high|critical>",
+        },
+        {
+            "name": "Auto Check Model",
+            "key": "review_model",
+            "kind": "readonly",
+            "description": "Model used for the Auto Check review call. Follows the main model unless you pin one.",
+            "command": "/permission model follow | /permission model <source> <name>",
+        },
+        {
+            "name": "Strict Allows Read-Only",
+            "key": "strict_allow_read_only",
+            "kind": "bool",
+            "description": "In Strict mode, let provably read-only tools (search, read, list) run without a prompt.",
+            "command": "/permission readonly on|off",
         },
         {
             "name": "Rules",
@@ -285,6 +356,12 @@ def apply_setting_value(
         parsed = parse_bool(value)
         if parsed is None:
             return False, f"{item.get('name', normalized_key)} expects on/off.", False
+        if normalized_key == "strict_allow_read_only":
+            security = dict(getattr(config, "security", {}) or {})
+            security["strict_allow_read_only"] = parsed
+            config.security = security
+            state = "allowed without a prompt" if parsed else "prompted like every other tool"
+            return True, f"Strict mode: read-only tools are {state}.", True
         setattr(config, normalized_key, parsed)
         return True, f"{item.get('name', normalized_key)} set to {'on' if parsed else 'off'}.", False
     if kind == "int":
@@ -306,6 +383,26 @@ def apply_setting_value(
             config.security = dict(getattr(config, "security", {}) or {})
             config.security["permission_level"] = level
             return True, f"Permission level set to {level}.", True
+        if normalized_key == "permission_mode":
+            raw = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+            mode = normalize_permission_mode(value)
+            if raw and raw != mode and mode == "default" and raw not in PERMISSION_MODES:
+                return False, "Unsupported permission mode. Use default, auto_check, or strict.", False
+            security = dict(getattr(config, "security", {}) or {})
+            security["permission_mode"] = mode
+            config.security = security
+            return True, f"Permission mode set to {permission_mode_label(mode)}.", True
+        if normalized_key == "review_approve_risk_at":
+            raw = str(value or "").strip().lower()
+            threshold = normalize_risk_level(value)
+            if raw not in RISK_LEVELS and threshold == "medium" and raw != "medium":
+                return False, "Unsupported risk threshold. Use none, low, medium, high, or critical.", False
+            security = dict(getattr(config, "security", {}) or {})
+            review = normalize_review_config(security.get("review"))
+            review["approve_risk_at"] = threshold
+            security["review"] = review
+            config.security = security
+            return True, f"Auto Check pauses at risk '{threshold}' and above.", True
         if normalized_key == "mode":
             config.mode = normalize_mode(value)
             return True, f"Mode set to {config.mode}.", True

@@ -21,5 +21,6 @@ describe("core protocol runtime boundary", () => {
     expect(assertCoreResponse("initialize", { type: "state", state: {} }).type).toBe("state");
     expect(() => assertCoreResponse("initialize", { type: "session", state: {} })).toThrow(/protocol mismatch/);
     expect(() => assertCoreResponse("initialize", { type: "state" })).toThrow(/missing: state/);
+    expect(() => assertCoreResponse("compactContext", { type: "context.compacted", success: true })).toThrow(/missing: message, session, sessions, recovery, context_engine/);
   });
 });

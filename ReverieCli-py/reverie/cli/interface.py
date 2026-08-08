@@ -3158,8 +3158,8 @@ class ReverieInterface:
                     if chunk == THINKING_START_MARKER:
                         # Flush any pending content before entering thinking mode
                         if current_markdown_text:
-                            self._flush_markdown_content(current_markdown_text, final=True)
-                            current_markdown_text = ""
+                            pending_markdown, current_markdown_text = current_markdown_text, ""
+                            self._flush_markdown_content(pending_markdown, final=True)
                         ensure_response_header()
                         in_thinking_mode = True
                         if self._current_thinking_output_style() != "hidden":
@@ -3172,8 +3172,8 @@ class ReverieInterface:
                     if chunk == THINKING_END_MARKER:
                         # Flush any pending thinking content and exit thinking mode
                         if thinking_content.strip():
-                            self._print_thinking_content(thinking_content)
-                            thinking_content = ""
+                            pending_thinking, thinking_content = thinking_content, ""
+                            self._print_thinking_content(pending_thinking)
                         in_thinking_mode = False
                         continue
                     
@@ -3188,11 +3188,11 @@ class ReverieInterface:
                     decoded_event = decode_stream_event(chunk) if chunk.startswith(STREAM_EVENT_MARKER) else None
                     if decoded_event:
                         if current_markdown_text:
-                            self._flush_markdown_content(current_markdown_text, final=True)
-                            current_markdown_text = ""
+                            pending_markdown, current_markdown_text = current_markdown_text, ""
+                            self._flush_markdown_content(pending_markdown, final=True)
                         if thinking_content.strip():
-                            self._print_thinking_content(thinking_content)
-                            thinking_content = ""
+                            pending_thinking, thinking_content = thinking_content, ""
+                            self._print_thinking_content(pending_thinking)
                         in_thinking_mode = False
                         self._handle_stream_tool_event(decoded_event)
                         ensure_response_header()
@@ -3209,8 +3209,8 @@ class ReverieInterface:
                     if is_tool_markup:
                         # Flush pending markdown
                         if current_markdown_text:
-                            self._flush_markdown_content(current_markdown_text, final=True)
-                            current_markdown_text = ""
+                            pending_markdown, current_markdown_text = current_markdown_text, ""
+                            self._flush_markdown_content(pending_markdown, final=True)
                         # Add tool output directly; if markup is malformed, render as plain text.
                         try:
                             self.console.print(Text.from_markup(chunk))
@@ -3226,13 +3226,18 @@ class ReverieInterface:
                         if flushable_text:
                             self._flush_markdown_content(flushable_text)
                 
-                # Final flush - print all accumulated content
+                # Final flush - print all accumulated content. Clear the buffer
+                # *before* rendering: a Ctrl+C landing inside the render would
+                # otherwise leave it populated and the KeyboardInterrupt handler
+                # below would print the same text a second time.
                 if current_markdown_text.strip():
-                    self._flush_markdown_content(current_markdown_text, final=True)
-                
+                    pending_markdown, current_markdown_text = current_markdown_text, ""
+                    self._flush_markdown_content(pending_markdown, final=True)
+
                 # Flush any remaining thinking content
                 if thinking_content.strip():
-                    self._print_thinking_content(thinking_content)
+                    pending_thinking, thinking_content = thinking_content, ""
+                    self._print_thinking_content(pending_thinking)
             
             finally:
                 snapshot = self._snapshot_stream_input_state()
@@ -4003,7 +4008,7 @@ class ReverieInterface:
         no_index: bool = False,
         fresh_session: bool = True,
         event_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
-        approval_callback: Optional[Callable[[Any, Dict[str, Any], str], str]] = None,
+        approval_callback: Optional[Callable[..., Any]] = None,
         source_override: Optional[str] = None,
         model_override: Optional[str] = None,
         reasoning_override: Optional[str] = None,
@@ -4515,30 +4520,78 @@ class ReverieInterface:
             'rollback_manager': self.rollback_manager
         }
 
-    def _approve_tool_call(self, tool: Any, arguments: Dict[str, Any], denial: str) -> str:
+    _RISK_STYLES = {
+        "none": "MINT_SOFT",
+        "low": "MINT_SOFT",
+        "medium": "PEACH_SOFT",
+        "high": "AMBER_GLOW",
+        "critical": "CORAL_VIBRANT",
+    }
+
+    def _approve_tool_call(
+        self,
+        tool: Any,
+        arguments: Dict[str, Any],
+        denial: str,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> Any:
         """Ask for a narrowly scoped elevation without changing persisted permissions."""
         if self.headless:
             return "deny"
+        info = details if isinstance(details, dict) else {}
         tool_name = str(getattr(tool, "name", "tool") or "tool")
-        summary = str(getattr(tool, "get_execution_message", lambda **_: tool_name)(**arguments))
+        try:
+            summary = str(getattr(tool, "get_execution_message", lambda **_: tool_name)(**arguments))
+        except Exception:
+            summary = tool_name
+
+        risk = str(info.get("risk") or "").strip().lower()
+        risk_style = getattr(self.theme, self._RISK_STYLES.get(risk, "AMBER_GLOW"), self.theme.AMBER_GLOW)
+        mode = str(info.get("permission_mode") or "").strip()
+        heading = {
+            "auto_check": "Auto Check flagged this call",
+            "strict": "Strict mode: approval required",
+        }.get(mode, "Permission required")
+
+        lines = [
+            f"[bold {risk_style}]{heading}[/bold {risk_style}]",
+            f"[{self.theme.TEXT_PRIMARY}]{escape(summary)}[/{self.theme.TEXT_PRIMARY}]",
+        ]
+        if risk:
+            reviewer = str(info.get("review_source") or "").strip()
+            tail = f" · {escape(reviewer)}" if reviewer and reviewer != "policy" else ""
+            lines.append(f"[{risk_style}]risk: {escape(risk)}{tail}[/{risk_style}]")
+        detail_text = str(info.get("reason") or denial or "").strip()
+        if detail_text:
+            lines.append(f"[{self.theme.TEXT_DIM}]{escape(detail_text)}[/{self.theme.TEXT_DIM}]")
+        concerns = info.get("concerns")
+        if isinstance(concerns, list) and concerns:
+            tags = ", ".join(escape(str(tag)) for tag in concerns[:8])
+            lines.append(f"[{self.theme.TEXT_DIM}]concerns: {tags}[/{self.theme.TEXT_DIM}]")
+        lines.append(
+            f"[{self.theme.TEXT_DIM}]1 allow · 2 allow for session · 3 deny · 4 reply to the model[/{self.theme.TEXT_DIM}]"
+        )
+
         self.console.print(
             Panel(
-                Text.from_markup(
-                    f"[bold {self.theme.AMBER_GLOW}]Permission required[/bold {self.theme.AMBER_GLOW}]\n"
-                    f"[{self.theme.TEXT_PRIMARY}]{escape(summary)}[/{self.theme.TEXT_PRIMARY}]\n"
-                    f"[{self.theme.TEXT_DIM}]{escape(denial)}[/{self.theme.TEXT_DIM}]"
-                ),
+                Text.from_markup("\n".join(lines)),
                 title=f"[{self.theme.PURPLE_SOFT}]Approve {escape(tool_name)}[/{self.theme.PURPLE_SOFT}]",
-                border_style=self.theme.AMBER_GLOW,
+                border_style=risk_style,
                 box=box.ROUNDED,
             )
         )
         choice = Prompt.ask(
             "Permission",
-            choices=["once", "session", "deny"],
-            default="deny",
-        )
-        return choice.strip().lower()
+            choices=["1", "2", "3", "4", "once", "session", "deny", "message"],
+            default="3",
+        ).strip().lower()
+        decision = {"1": "once", "2": "session", "3": "deny", "4": "message"}.get(choice, choice)
+        if decision != "message":
+            return decision
+        note = Prompt.ask(f"[{self.theme.BLUE_SOFT}]Message to the model[/{self.theme.BLUE_SOFT}]", default="").strip()
+        if not note:
+            return "deny"
+        return {"decision": "message", "message": note}
 
     def run_setup_wizard(self) -> None:
         """Run the first-time setup wizard with dreamy styling"""

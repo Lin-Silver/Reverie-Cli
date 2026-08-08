@@ -12,11 +12,18 @@ import hashlib
 import json
 import os
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..diagnostics import report_suppressed_exception
+from .roles import (
+    STORED_ASSISTANT_ROLE,
+    from_stored_messages,
+    from_stored_role,
+    to_stored_messages,
+)
 
 SESSION_INDEX_FILENAME = 'session_index.json'
 GENERATED_SESSION_NAME_PREFIXES = ('Session ', 'Prompt Run ', 'New Conversation')
@@ -52,9 +59,19 @@ class Session:
             'name': self.name,
             'created_at': self.created_at,
             'updated_at': self.updated_at,
-            'messages': self.messages,
+            'messages': to_stored_messages(self.messages),
             'metadata': self.metadata
         }
+
+    def to_wire_dict(self) -> dict:
+        """Serialize for UI and in-process consumers, keeping the `assistant` role.
+
+        Only saved transcripts use the `Reverie` spelling; every live consumer
+        (desktop bridge, provider payloads) expects the provider-facing role.
+        """
+        payload = self.to_dict()
+        payload['messages'] = from_stored_messages(payload.get('messages', []))
+        return payload
 
     @classmethod
     def from_dict(cls, data: dict) -> 'Session':
@@ -63,7 +80,7 @@ class Session:
             name=data['name'],
             created_at=data['created_at'],
             updated_at=data['updated_at'],
-            messages=data.get('messages', []),
+            messages=from_stored_messages(data.get('messages', [])),
             metadata=data.get('metadata', {})
         )
 
@@ -114,6 +131,11 @@ class SessionManager:
         self._ensure_dirs()
         self._current_session: Optional[Session] = None
         self._session_index: Dict[str, Dict[str, Any]] = self._load_session_index()
+        self._session_index_dirty = False
+        # Last `current_session_id` written to session_state.json, so repeated
+        # saves of the same session skip a redundant fsync'd write.
+        self._persisted_state_session_id: Optional[str] = None
+        self._state_loaded_from_disk = False
 
         # Enhanced features
         self.memory_indexer = memory_indexer
@@ -178,6 +200,29 @@ class SessionManager:
 
         return True
 
+    @staticmethod
+    def _replace_with_retry(temp_path: Path, target_path: Path) -> None:
+        """Rename `temp_path` over `target_path`, retrying transient Windows locks.
+
+        On Windows the rename fails with `PermissionError` (WinError 5/32) whenever
+        anything else holds the target open for even a moment -- an antivirus or
+        search indexer scanning the file Reverie just wrote, or a second Reverie
+        window reading the same session. The lock clears in milliseconds, but
+        without a retry the save is lost and the error propagates into the agent
+        turn. POSIX renames are atomic and never hit this, so the retry is a no-op
+        there.
+        """
+        delay = 0.01
+        for attempt in range(5):
+            try:
+                temp_path.replace(target_path)
+                return
+            except PermissionError:
+                if attempt == 4:
+                    raise
+                time.sleep(delay)
+                delay *= 2
+
     def _write_json_atomic(self, target_path: Path, payload: Dict) -> None:
         target_path = Path(target_path)
         target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -197,7 +242,7 @@ class SessionManager:
                 f.flush()
                 os.fsync(f.fileno())
 
-            temp_path.replace(target_path)
+            self._replace_with_retry(temp_path, target_path)
 
             # Best-effort directory sync so the rename is durable on POSIX filesystems.
             try:
@@ -247,7 +292,22 @@ class SessionManager:
                 index[str(session_entry['id'])] = session_entry
         return index
 
-    def _save_session_index(self) -> None:
+    def _save_session_index(self, *, force: bool = True) -> None:
+        """Persist the session index.
+
+        The index is derived data: every entry can be rebuilt from the session
+        files themselves, and in-process readers go through `self._session_index`
+        rather than the file. Appending a message changes `message_count` and
+        `updated_at`, so a naive write here costs a full rewrite plus an fsync on
+        *every* message of an agent turn. `force=False` therefore only marks the
+        index dirty and lets a later flush coalesce those writes; anything another
+        process can observe (listing, deleting, switching sessions, shutdown)
+        still forces the write.
+        """
+        self._session_index_dirty = True
+        if not force:
+            return
+
         payload = {
             'workspace_id': self.workspace_id,
             'workspace_path': self.workspace_path,
@@ -255,6 +315,12 @@ class SessionManager:
             'sessions': self._session_index,
         }
         self._write_json_atomic(self.session_index_path, payload)
+        self._session_index_dirty = False
+
+    def flush_session_index(self) -> None:
+        """Write the session index if a deferred update is still pending."""
+        if self._session_index_dirty:
+            self._save_session_index(force=True)
 
     def _session_index_entry(self, session: Session) -> Dict[str, Any]:
         metadata = self._merge_scope_metadata(session.metadata)
@@ -341,15 +407,21 @@ class SessionManager:
             self._save_session_index()
         return changed
 
-    def _write_session(self, session: Session, *, touch_updated_at: bool = True) -> None:
+    def _write_session(self, session: Session, *, touch_updated_at: bool = True) -> Dict:
         if touch_updated_at:
             session.updated_at = datetime.now().isoformat()
 
         session.metadata = self._merge_scope_metadata(session.metadata)
         session_path = self.sessions_dir / f"{session.id}.json"
-        self._write_json_atomic(session_path, session.to_dict())
+        payload = session.to_dict()
+        self._write_json_atomic(session_path, payload)
         self._session_index[session.id] = self._session_index_entry(session)
-        self._save_session_index()
+        # Deferred: the transcript itself is already durable above, and the index
+        # entry is reconstructible from it. Flushed by the observable operations.
+        self._save_session_index(force=False)
+        # Returned so a live memory-index refresh can reuse this exact payload
+        # instead of reading the file back off disk and re-parsing it.
+        return payload
 
     def _archive_current_transcript_before_compaction(
         self,
@@ -402,12 +474,22 @@ class SessionManager:
         session.metadata['full_transcript_archives'] = archives[-20:]
         return str(target_path)
 
-    def _refresh_memory_index_for_session(self, session_id: str) -> None:
-        """Refresh the memory index for one session when the mode opts into live indexing."""
+    def _refresh_memory_index_for_session(
+        self,
+        session_id: str,
+        session_data: Optional[Dict] = None,
+    ) -> None:
+        """Refresh the memory index for one session when the mode opts into live indexing.
+
+        `session_data` is the payload the caller just wrote to disk. Handing it
+        over lets the indexer skip re-reading and re-parsing the whole
+        transcript, which is the dominant cost of a live refresh on a long
+        session.
+        """
         if not self.refresh_memory_index_on_save or not self.memory_indexer:
             return
         try:
-            self.memory_indexer.refresh_session(session_id)
+            self.memory_indexer.refresh_session(session_id, session_data=session_data)
         except Exception:
             report_suppressed_exception("refresh session memory index")
 
@@ -415,6 +497,16 @@ class SessionManager:
         if not session_id:
             if self.state_path.exists():
                 self.state_path.unlink()
+            self._persisted_state_session_id = None
+            return
+
+        # Only `current_session_id` matters to readers, and it does not change
+        # while a session is being appended to. Re-writing the file per message
+        # is pure overhead, so skip once the pointer is known to be on disk.
+        if (
+            self._persisted_state_session_id == session_id
+            and self.state_path.exists()
+        ):
             return
 
         state = {
@@ -424,6 +516,7 @@ class SessionManager:
             'updated_at': datetime.now().isoformat()
         }
         self._write_json_atomic(self.state_path, state)
+        self._persisted_state_session_id = session_id
 
     def _load_state(self) -> Dict[str, Any]:
         if not self.state_path.exists():
@@ -475,9 +568,11 @@ class SessionManager:
         )
 
         self._current_session = session
-        self._write_session(session, touch_updated_at=False)
+        payload = self._write_session(session, touch_updated_at=False)
+        # A new session is externally observable, so land the index now.
+        self.flush_session_index()
         self._save_state(session.id)
-        self._refresh_memory_index_for_session(session.id)
+        self._refresh_memory_index_for_session(session.id, payload)
         return session
 
     def save_session(self, session: Optional[Session] = None) -> None:
@@ -486,8 +581,8 @@ class SessionManager:
         if session is None:
             return
 
-        self._write_session(session, touch_updated_at=True)
-        self._refresh_memory_index_for_session(session.id)
+        payload = self._write_session(session, touch_updated_at=True)
+        self._refresh_memory_index_for_session(session.id, payload)
 
         if self._current_session and self._current_session.id == session.id:
             self._save_state(session.id)
@@ -506,6 +601,9 @@ class SessionManager:
 
     def load_session(self, session_id: str) -> Optional[Session]:
         """Load a session by ID"""
+        # Switching away from the active session: land any deferred index write
+        # so the outgoing session's counts are not lost.
+        self.flush_session_index()
         session_path = self.sessions_dir / f"{session_id}.json"
 
         if not session_path.exists():
@@ -555,6 +653,7 @@ class SessionManager:
 
     def list_sessions(self) -> List[SessionInfo]:
         """List sessions for the current workspace"""
+        self.flush_session_index()
         self._ensure_session_index()
         sessions: List[SessionInfo] = []
         for entry in self._session_index.values():
@@ -690,7 +789,7 @@ class SessionManager:
                 searchable = "\n".join(part for part in (content_text, reasoning_text, call_names) if part)
                 if needle in searchable.lower():
                     preview = content_text or reasoning_text or call_names
-                    results.append({"session_id": info.id, "session_name": info.name, "message_index": index, "role": message.get("role", ""), "text": preview[:500]})
+                    results.append({"session_id": info.id, "session_name": info.name, "message_index": index, "role": from_stored_role(message.get("role", "")), "text": preview[:500]})
                     if len(results) >= limit:
                         return results
         return results
@@ -707,7 +806,8 @@ class SessionManager:
         else:
             lines = [f"# {session.name}", ""]
             for message in session.messages:
-                role = str(message.get("role", "message")).title()
+                raw_role = str(message.get("role", "message"))
+                role = STORED_ASSISTANT_ROLE if raw_role == "assistant" else raw_role.title()
                 content = message.get("content", "")
                 text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False, indent=2)
                 lines.extend([f"## {role}", "", text, ""])
@@ -801,9 +901,9 @@ class SessionManager:
                 new_session.metadata['handoff_path'] = handoff_path
 
         self._current_session = new_session
-        self._write_session(new_session, touch_updated_at=False)
+        payload = self._write_session(new_session, touch_updated_at=False)
         self._save_state(new_session.id)
-        self._refresh_memory_index_for_session(new_session.id)
+        self._refresh_memory_index_for_session(new_session.id, payload)
         return new_session
 
     def _persist_handoff_packet(

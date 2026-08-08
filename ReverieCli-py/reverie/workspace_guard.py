@@ -115,6 +115,11 @@ class ShadowGitManager:
                     raise WorkspaceGuardError(completed.stderr.strip() or "Could not initialize shadow Git repository")
             self._git("config", "core.autocrlf", "false")
             self._git("config", "core.filemode", "false")
+            # The shadow repo lives under `.reverie/projects/<sanitized full project
+            # path>/`, so its loose-object paths are already long before Git appends
+            # `objects/ab/<38 hex>`. Without this, Git for Windows refuses the write
+            # with "Filename too long" and every checkpoint fails.
+            self._git("config", "core.longpaths", "true")
             exclude = self.git_dir / "info" / "exclude"
             exclude.parent.mkdir(parents=True, exist_ok=True)
             exclude.write_text(".git/\n.reverie/\ndist-staging/\n", encoding="utf-8")

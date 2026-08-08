@@ -21,6 +21,7 @@ from collections import defaultdict
 from ..diagnostics import report_suppressed_exception
 
 from ..context_engine.fragments import ContextFragment, make_context_fragment, truncate_to_token_cap
+from .roles import from_stored_role
 
 
 logger = logging.getLogger(__name__)
@@ -253,7 +254,7 @@ class MemoryIndexer:
         """Extract tool call names from a message"""
         tool_calls = []
         
-        if message.get('role') == 'assistant' and 'tool_calls' in message:
+        if from_stored_role(message.get('role')) == 'assistant' and 'tool_calls' in message:
             for tool_call in message['tool_calls']:
                 if isinstance(tool_call, dict):
                     function = tool_call.get('function', {})
@@ -295,60 +296,105 @@ class MemoryIndexer:
             session_summaries=session_summaries,
         )
     
-    def index_session(self, session_id: str) -> int:
+    def index_session(
+        self,
+        session_id: str,
+        reuse: Optional[Dict[str, 'MemoryFragment']] = None,
+        session_data: Optional[Dict[str, Any]] = None,
+    ) -> int:
         """
         Index a single session file.
-        
+
+        Args:
+            session_id: Session to index.
+            reuse: Fragments from a previous pass, keyed by fragment id. Sessions
+                are append-only, so a fragment whose role and redacted content are
+                unchanged can be carried over instead of re-running keyword,
+                entity, and tool extraction over it.
+            session_data: Already-loaded session payload. A live refresh runs
+                straight after the caller wrote that same session to disk, so
+                passing it avoids re-reading and re-parsing the whole transcript.
+
         Returns:
             Number of fragments indexed
         """
-        session_path = self.sessions_dir / f"{session_id}.json"
-        
-        if not session_path.exists():
-            return 0
+        if session_data is None:
+            session_path = self.sessions_dir / f"{session_id}.json"
+
+            if not session_path.exists():
+                return 0
+
+            try:
+                with open(session_path, 'r', encoding='utf-8') as f:
+                    session_data = json.load(f)
+            except Exception as e:
+                logger.warning("Error indexing session %s: %s", session_id, e)
+                return 0
 
         try:
-            with open(session_path, 'r', encoding='utf-8') as f:
-                session_data = json.load(f)
-            
             messages = session_data.get('messages', [])
             indexed_count = 0
-            
+            reusable = reuse or {}
+            timestamp = session_data.get('updated_at', '')
+
             for idx, message in enumerate(messages):
-                role = message.get('role', '')
+                role = from_stored_role(message.get('role', ''))
                 content = message.get('content', '')
-                
+
                 if not content or role == 'system':
                     continue
 
                 safe_content = self._redact_memory_text(str(content))
-                
+
                 # Create fragment
                 fragment_id = self._create_fragment_id(session_id, idx)
-                
+
+                cached = reusable.get(fragment_id)
+                if (
+                    cached is not None
+                    and cached.role == role
+                    and cached.content == safe_content[:1000]
+                ):
+                    # Same message as last pass: keep the derived fields and only
+                    # move the timestamp forward, matching a full re-index.
+                    cached.timestamp = timestamp
+                    self.fragments[fragment_id] = cached
+                    indexed_count += 1
+                    continue
+
                 fragment = MemoryFragment(
                     session_id=session_id,
                     message_index=idx,
                     role=role,
                     content=safe_content[:1000],  # Limit content length
-                    timestamp=session_data.get('updated_at', ''),
+                    timestamp=timestamp,
                     keywords=self._extract_keywords(safe_content),
                     entities=self._extract_entities(safe_content),
                     tool_calls=self._extract_tool_calls(message)
                 )
-                
+
                 self.fragments[fragment_id] = fragment
                 indexed_count += 1
-            
+
             return indexed_count
-        
+
         except Exception as e:
             logger.warning("Error indexing session %s: %s", session_id, e)
             return 0
 
-    def refresh_session(self, session_id: str) -> int:
+    def refresh_session(
+        self,
+        session_id: str,
+        session_data: Optional[Dict[str, Any]] = None,
+    ) -> int:
         """
         Re-index a single session and persist the refreshed project index.
+
+        Args:
+            session_id: Session to re-index.
+            session_data: Already-loaded session payload, forwarded to
+                `index_session` so a live refresh skips a redundant disk read of
+                the file the caller just wrote.
 
         Returns:
             Number of fragments indexed for the session.
@@ -356,15 +402,22 @@ class MemoryIndexer:
         if not self.index:
             self.load_index()
 
-        stale_fragment_ids = [
-            fragment_id
+        # Detach this session's fragments and offer them back to index_session:
+        # sessions are append-only, so every message but the new tail is
+        # unchanged and can skip keyword, entity, and tool extraction.
+        previous = {
+            fragment_id: fragment
             for fragment_id, fragment in self.fragments.items()
             if fragment.session_id == session_id
-        ]
-        for fragment_id in stale_fragment_ids:
+        }
+        for fragment_id in previous:
             self.fragments.pop(fragment_id, None)
 
-        indexed_count = self.index_session(session_id)
+        indexed_count = self.index_session(
+            session_id,
+            reuse=previous,
+            session_data=session_data,
+        )
         self._rebuild_indexes_from_fragments()
         self._save_index()
         self._save_fragments()

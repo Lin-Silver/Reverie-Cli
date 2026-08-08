@@ -35,8 +35,11 @@ class ContextManagementTool(BaseTool):
             },
             "keep_last_messages": {
                 "type": "integer",
-                "description": "For 'truncate_history' or 'compress': Number of recent messages to keep (e.g., 10). Default is 20.",
-                "default": 20
+                "description": "For 'truncate_history' or 'compress': Number of recent messages to keep verbatim. Compression defaults to 8; other history actions retain the prior default of 20."
+            },
+            "focus": {
+                "type": "string",
+                "description": "For 'compress': Optional user-supplied details that the compacted continuation context should prioritize."
             },
             "summary": {
                 "type": "string",
@@ -65,12 +68,13 @@ class ContextManagementTool(BaseTool):
     def execute(
         self,
         action: str,
-        keep_last_messages: int = 20,
+        keep_last_messages: Optional[int] = None,
         summary: str = "",
         checkpoint_id: str = "",
         gdd_path: str = "",
         asset_manifest_path: str = "",
-        task_list_path: str = ""
+        task_list_path: str = "",
+        focus: str = "",
     ) -> ToolResult:
         """
         Execute context management action.
@@ -79,11 +83,14 @@ class ContextManagementTool(BaseTool):
         agent = self.context.get('agent')
         if not agent:
             return ToolResult.fail("Context tool requires access to Agent instance")
+
+        if keep_last_messages is None:
+            keep_last_messages = 8 if action == "compress" else 20
         
         try:
             if action == "compress":
                 # Use the compressor for intelligent compression
-                return self._compress_with_llm(agent, keep_last_messages)
+                return self._compress_with_llm(agent, keep_last_messages, focus=focus)
             elif action == "truncate_history":
                 return self._truncate_history(agent, keep_last_messages)
             elif action == "summarize_history":
@@ -278,14 +285,12 @@ class ContextManagementTool(BaseTool):
         except Exception:
             return None
     
-    def _compress_with_llm(self, agent, keep_last: int) -> ToolResult:
+    def _compress_with_llm(self, agent, keep_last: int, *, focus: str = "") -> ToolResult:
         """Compress history using LLM-based compression"""
         from ..context_engine.compressor import ContextCompressor
         
         history = agent.get_history()
         original_tokens = int(agent.get_token_estimate()) if hasattr(agent, "get_token_estimate") else 0
-        if len(history) <= keep_last:
-            return ToolResult.ok(f"History is already short ({len(history)} messages). No changes made.")
         
         # Get compressor
         project_root = self.context.get('project_root')
@@ -310,7 +315,7 @@ class ContextManagementTool(BaseTool):
         
         # Get client
         client = None
-        if provider in ['openai-sdk', 'openai-chat', 'anthropic']:
+        if provider in ['openai-sdk', 'openai-chat', 'openai-responses', 'anthropic']:
             client = getattr(agent, '_client', None)
         
         # Compress
@@ -322,15 +327,28 @@ class ContextManagementTool(BaseTool):
                 session_id=session_id,
                 provider=provider,
                 base_url=base_url,
-                api_key=api_key
+                api_key=api_key,
+                custom_headers=getattr(agent, 'custom_headers', None),
+                workspace_stats_manager=self.context.get('workspace_stats_manager'),
+                model_display_name=getattr(agent, 'model_display_name', model),
+                keep_last_messages=keep_last,
+                focus=focus,
             )
-            
+
+            if compressed_history == history:
+                return ToolResult.ok(
+                    f"Context is already compact ({len(history)} messages). No changes made."
+                )
+
             # Update agent history
             agent.set_history(compressed_history)
             
             # Save to session
             if session_manager and hasattr(session_manager, 'update_messages'):
                 session_manager.update_messages(compressed_history)
+
+            if hasattr(agent, '_record_compaction_memory'):
+                agent._record_compaction_memory(compressed_history, session_id)
             
             compressed_tokens = int(agent.get_token_estimate()) if hasattr(agent, "get_token_estimate") else 0
             return ToolResult.ok(

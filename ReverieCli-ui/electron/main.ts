@@ -350,11 +350,13 @@ class CoreBridge {
     const id = `desktop-${Date.now()}-${++this.sequence}`;
     const timeoutMs = action === "runPrompt" || action === "indexWorkspace"
       ? 0
-      : action === "refreshModelSources"
-        ? 120_000
-        : action === "getSession"
-          ? 15_000
-          : 60_000;
+      : action === "compactContext"
+        ? 180_000
+        : action === "refreshModelSources"
+          ? 120_000
+          : action === "getSession"
+            ? 15_000
+            : 60_000;
     return new Promise<JsonRecord>((resolve, reject) => {
       const timer = timeoutMs > 0
         ? setTimeout(() => {

@@ -82,6 +82,7 @@ DIRECT_COMMANDS = {
     "blender",
     "playtest",
     "pt",
+    "compact",
     "ce",
 }
 

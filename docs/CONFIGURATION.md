@@ -92,9 +92,37 @@ Common top-level keys:
   "atlas_mode": {},
   "subagents": {},
   "writer_mode": {},
-  "gamer_mode": {}
+  "gamer_mode": {},
+  "security": {}
 }
 ```
+
+## Security and Approval Policy
+
+The `security` block holds both the hard capability ceiling and the approval mode layered on top of it:
+
+```json
+{
+  "security": {
+    "permission_level": "full_control",
+    "permission_mode": "default",
+    "strict_allow_read_only": false,
+    "review": {
+      "model_mode": "follow",
+      "source": "",
+      "model": "",
+      "model_index": 0,
+      "timeout": 45,
+      "max_tokens": 900,
+      "approve_risk_at": "medium",
+      "fail_open": false,
+      "review_read_only": false
+    }
+  }
+}
+```
+
+`permission_mode` is `default`, `auto_check`, or `strict`; `review` configures the Auto Check reviewer, and `model_mode` is `follow` (reuse the chat model) or `custom` (use `source` plus `model`/`model_index`). Every value is clamped or falls back on load, so a hand-edited or partial block never blocks startup. Manage the whole block from the settings UI or the `/permission` commands rather than by hand. See [SECURITY_PERMISSIONS.md](SECURITY_PERMISSIONS.md) for what each mode actually does.
 
 ## Custom Compatibility Providers
 

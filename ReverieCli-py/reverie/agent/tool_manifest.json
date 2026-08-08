@@ -582,11 +582,13 @@
       "use_when": "Long sessions need continuity protection.",
       "parameters": {
         "action": "compress, truncate, checkpoint, or restore.",
-        "keep_recent": "Optional recent message count.",
+        "keep_last_messages": "Optional recent message count preserved verbatim; compression defaults to 8.",
+        "focus": "Optional user guidance for facts the compacted continuation context should prioritize.",
         "checkpoint_id": "Optional checkpoint id."
       },
       "examples": [
-        "context_management(action=\"checkpoint\")"
+        "context_management(action=\"checkpoint\")",
+        "context_management(action=\"compress\", focus=\"preserve uncommitted files and failed verification\")"
       ]
     },
     "memory_retrieval": {

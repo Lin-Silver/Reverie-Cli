@@ -252,7 +252,10 @@ export interface SettingItem {
   key: string;
   kind: string;
   choices?: Array<string | number>;
+  labels?: Record<string, string>;
+  descriptions?: Record<string, string>;
   description: string;
+  command?: string;
   value: unknown;
   min?: number;
   max?: number;

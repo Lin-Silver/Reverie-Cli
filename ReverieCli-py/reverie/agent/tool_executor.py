@@ -29,7 +29,16 @@ from ..tools.registry import (
     get_supported_modes_for_tool,
     is_tool_visible_in_mode,
 )
-from ..security_policy import normalize_permission_level, permission_denial
+from ..security_policy import (
+    heuristic_risk_prior,
+    normalize_permission_level,
+    normalize_permission_mode,
+    permission_denial,
+    resolve_review_config,
+    risk_requires_approval,
+    strict_allows_read_only,
+)
+from .permission_review import ToolCallVerdict, describe_call
 from ..plugin.dynamic_tool import RuntimePluginDynamicTool
 from ..workspace_guard import ShadowGitManager, WorkspaceGuardError
 
@@ -104,7 +113,20 @@ class ToolExecutor:
         self._rats_generation: int = -1
         self._schema_cache: Dict[tuple[Any, ...], List[Dict[str, Any]]] = {}
         self._session_approved_tools: set[str] = set()
+        self._review_verdicts: Dict[str, ToolCallVerdict] = {}
         self._init_tools()
+
+    def set_review_verdicts(self, verdicts: Dict[str, ToolCallVerdict]) -> None:
+        """Store the Auto Check verdicts for the tool calls of one response."""
+        self._review_verdicts = dict(verdicts or {})
+
+    def clear_review_verdicts(self) -> None:
+        """Drop verdicts once a response's tool calls have all run."""
+        self._review_verdicts = {}
+
+    def get_review_verdict(self, tool_call_id: str) -> Optional[ToolCallVerdict]:
+        """Look up a stored verdict by tool-call id."""
+        return self._review_verdicts.get(str(tool_call_id or ""))
     
     def _init_tools(self) -> None:
         """Initialize all available tools with context"""
@@ -871,6 +893,188 @@ class ToolExecutor:
 
         return normalized
     
+    _APPROVAL_ALIASES = {
+        "allow": "once", "approve": "once", "yes": "once", "y": "once", "1": "once",
+        "always": "session", "all": "session", "session_allow": "session", "2": "session",
+        "message": "message", "feedback": "message", "custom": "message",
+        "personalized": "message", "personalize": "message", "3": "message",
+        "no": "deny", "n": "deny", "reject": "deny", "cancel": "deny",
+    }
+
+    @staticmethod
+    def _normalize_approval_decision(raw: Any) -> tuple[str, str]:
+        """Map an approval reply onto (decision, user message)."""
+        message = ""
+        if isinstance(raw, dict):
+            decision = str(raw.get("decision") or raw.get("action") or "").strip().lower()
+            message = str(raw.get("message") or raw.get("feedback") or raw.get("text") or "").strip()
+        else:
+            decision = str(raw or "").strip()
+            head = decision.split(":", 1)[0].strip().lower()
+            if ":" in decision and head in {"message", "feedback", "custom", "personalized"}:
+                message = decision.split(":", 1)[1].strip()
+                decision = head
+            decision = decision.strip().lower()
+        decision = ToolExecutor._APPROVAL_ALIASES.get(decision, decision)
+        if decision not in {"once", "session", "deny", "message"}:
+            decision = "deny"
+        if decision == "message" and not message:
+            decision = "deny"
+        return decision, message[:2000]
+
+    def _ask_tool_approval(
+        self,
+        tool: BaseTool,
+        arguments: Dict[str, Any],
+        reason: str,
+        details: Dict[str, Any],
+    ) -> tuple[str, str]:
+        """Escalate one call to the user. Returns ("unavailable", "") with no handler."""
+        handler = self.context.get("tool_approval_handler")
+        if not callable(handler):
+            return "unavailable", ""
+        try:
+            if self._approval_handler_takes_details(handler):
+                raw = handler(tool, arguments, reason, details)
+            else:
+                raw = handler(tool, arguments, reason)
+        except Exception:
+            report_suppressed_exception("tool approval handler", logger=logger)
+            return "deny", ""
+        return self._normalize_approval_decision(raw)
+
+    @staticmethod
+    def _approval_handler_takes_details(handler: Any) -> bool:
+        """Whether an approval handler accepts the extra review-details argument."""
+        import inspect
+
+        try:
+            signature = inspect.signature(handler)
+        except (TypeError, ValueError):
+            return False
+        positional = 0
+        for parameter in signature.parameters.values():
+            if parameter.kind == parameter.VAR_POSITIONAL:
+                return True
+            if parameter.kind in (parameter.POSITIONAL_ONLY, parameter.POSITIONAL_OR_KEYWORD):
+                positional += 1
+        return positional >= 4
+
+    def _review_single_call(
+        self,
+        tool: BaseTool,
+        arguments: Dict[str, Any],
+        tool_call_id: str,
+        review: Dict[str, Any],
+        permission_level: str,
+    ) -> Optional[ToolCallVerdict]:
+        """Review one call that arrived without a batch verdict."""
+        if bool(getattr(tool, "read_only", False)) and not review.get("review_read_only"):
+            return None
+        call = describe_call(tool, arguments, tool_call_id or f"{tool.name}-pending")
+        try:
+            from .permission_reviewer import review_tool_calls
+
+            outcome = review_tool_calls(
+                [call],
+                agent=self.context.get("agent"),
+                config=getattr(self.context.get("agent"), "config", None),
+                review=review,
+                workspace_root=str(self.project_root),
+                permission_level=permission_level,
+            )
+        except Exception:
+            report_suppressed_exception("auto check review", logger=logger)
+            if review.get("fail_open"):
+                return None
+            return ToolCallVerdict(
+                call_id=call["id"],
+                tool_name=tool.name,
+                risk=heuristic_risk_prior(tool, arguments),
+                reason="Reviewer unavailable; fell back to the static risk prior.",
+                source="heuristic",
+            )
+        if not outcome.ok and review.get("fail_open"):
+            return None
+        verdict = outcome.verdicts.get(call["id"])
+        if verdict is not None:
+            self._review_verdicts[call["id"]] = verdict
+        return verdict
+
+    def _approval_gate(
+        self,
+        tool: BaseTool,
+        arguments: Dict[str, Any],
+        *,
+        tool_call_id: str,
+        denial: Optional[str],
+        security: Dict[str, Any],
+        permission_level: str,
+    ) -> Optional[ToolResult]:
+        """Apply hard policy plus the configured approval mode.
+
+        Returns None to let the call run, or the ToolResult that blocks it.
+        """
+        mode = normalize_permission_mode(security.get("permission_mode"))
+        verdict: Optional[ToolCallVerdict] = None
+        reason = ""
+        risk = ""
+
+        if denial:
+            reason = denial
+            risk = "high"
+        elif mode == "strict":
+            if bool(getattr(tool, "read_only", False)) and strict_allows_read_only(security):
+                return None
+            reason = "Strict mode: every tool call needs your explicit approval."
+            risk = heuristic_risk_prior(tool, arguments)
+        elif mode == "auto_check":
+            review = resolve_review_config(security)
+            verdict = self.get_review_verdict(tool_call_id) or self._review_single_call(
+                tool, arguments, tool_call_id, review, permission_level
+            )
+            if verdict is None:
+                return None
+            risk = verdict.risk
+            if not risk_requires_approval(verdict.risk, review.get("approve_risk_at")):
+                return None
+            reason = verdict.reason or f"Auto Check rated this call '{verdict.risk}'."
+        else:
+            return None
+
+        if tool.name in self._session_approved_tools:
+            return None
+
+        details = {
+            "tool_name": tool.name,
+            "tool_call_id": str(tool_call_id or ""),
+            "permission_mode": mode,
+            "permission_level": permission_level,
+            "risk": risk,
+            "reason": reason,
+            "hard_denial": bool(denial),
+            "read_only": bool(getattr(tool, "read_only", False)),
+            "concerns": list(verdict.concerns) if verdict is not None else [],
+            "review_source": verdict.source if verdict is not None else "policy",
+        }
+        decision, message = self._ask_tool_approval(tool, arguments, reason, details)
+
+        if decision == "session":
+            self._session_approved_tools.add(tool.name)
+            return None
+        if decision == "once":
+            return None
+        if decision == "message":
+            return ToolResult.fail(
+                f"The user declined this {tool.name} call and replied: {message}"
+            )
+        if decision == "unavailable":
+            return ToolResult.fail(
+                denial
+                or f"{reason} No approval channel is available in this session, so the call was blocked."
+            )
+        return ToolResult.fail(denial or f"The user denied this {tool.name} call. {reason}".strip())
+
     def execute(self, tool_name: str, arguments: Dict[str, Any], tool_call_id: str = "") -> ToolResult:
         """
         Execute a tool with given arguments.
@@ -919,21 +1123,16 @@ class ToolExecutor:
             security.get("permission_level") if isinstance(security, dict) else security
         )
         denial = permission_denial(tool, permission_level)
-        if denial:
-            approval_handler = self.context.get("tool_approval_handler")
-            approved = tool.name in self._session_approved_tools
-            if not approved and callable(approval_handler):
-                try:
-                    decision = str(approval_handler(tool, normalized_arguments, denial) or "deny").strip().lower()
-                except Exception:
-                    decision = "deny"
-                if decision == "session":
-                    self._session_approved_tools.add(tool.name)
-                    approved = True
-                elif decision == "once":
-                    approved = True
-            if not approved:
-                return ToolResult.fail(denial)
+        gate = self._approval_gate(
+            tool,
+            normalized_arguments,
+            tool_call_id=tool_call_id,
+            denial=denial,
+            security=security if isinstance(security, dict) else {},
+            permission_level=permission_level,
+        )
+        if gate is not None:
+            return gate
         active_mode = normalize_mode(getattr(agent, "mode", "reverie")) if agent is not None else "reverie"
         if active_mode == "writer" and tool.name in {"str_replace_editor", "create_file", "delete_file", "file_ops"}:
             raw_path = str(normalized_arguments.get("path", "") or "").strip()

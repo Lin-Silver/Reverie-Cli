@@ -41,12 +41,35 @@ from ..settings_catalog import (
     apply_workspace_mode_setting,
     get_setting_items,
     parse_bool as parse_setting_bool,
+    review_model_label,
     setting_mode_options,
     setting_theme_options,
     setting_thinking_output_choices,
     setting_tool_output_choices,
 )
+from ..security_policy import (
+    PERMISSION_LEVELS,
+    PERMISSION_MODES,
+    RISK_LEVELS,
+    normalize_permission_level,
+    normalize_permission_mode,
+    normalize_risk_level,
+    normalize_security_config,
+    permission_mode_description,
+    permission_mode_label,
+)
 from ..tools.tool_catalog import ToolCatalogTool
+
+# Accepted spellings for /permission mode beyond the canonical mode names.
+_PERMISSION_MODE_INPUTS = {
+    "auto", "autocheck", "auto_check", "check", "approve_for_me",
+    "manual", "always_ask", "ask", "off", "none", "builtin",
+}
+# Model sources the Auto Check reviewer can be pinned to.
+_REVIEW_MODEL_SOURCES = {
+    "standard", "nvidia", "codex", "modelscope", "sensenova",
+    "aihubmix", "agnes", "webgemini", "opencode",
+}
 
 
 class CommandHandler:
@@ -105,6 +128,7 @@ class CommandHandler:
             'mcp': self.cmd_mcp,
             'setting': self.cmd_setting,
             'settings': self.cmd_setting,
+            'permission': self.cmd_permission,
             'rules': self.cmd_rules,
             'workspace': self.cmd_workspace,
             'tti': self.cmd_tti,
@@ -125,6 +149,7 @@ class CommandHandler:
             'blender': self.cmd_blender,
             'playtest': self.cmd_playtest,
             'pt': self.cmd_playtest,
+            'compact': self.cmd_compact,
             'CE': self.cmd_context_engine,  # Context Engine management (case-sensitive)
         }
         self._help_topic_items_cache: tuple[Dict[str, object], ...] = tuple()
@@ -11608,6 +11633,369 @@ class CommandHandler:
         
         return True
     
+    def cmd_permission(self, args: str) -> bool:
+        """Inspect and change the tool-call approval policy."""
+        raw = args.strip()
+        lowered = raw.lower()
+
+        if not raw or lowered in ("status", "show"):
+            return self._cmd_permission_status()
+
+        parts = raw.split(maxsplit=1)
+        action = parts[0].strip().lower().replace("_", "-")
+        value = parts[1].strip() if len(parts) > 1 else ""
+
+        if action == "mode":
+            return self._cmd_permission_mode(value)
+        if action in ("threshold", "risk", "risk-at"):
+            return self._cmd_permission_threshold(value)
+        if action in ("model", "reviewer", "checker"):
+            return self._cmd_permission_model(value)
+        if action in ("readonly", "read-only"):
+            return self._cmd_permission_readonly(value)
+        if action in ("timeout", "review-timeout"):
+            return self._cmd_permission_review_int("timeout", "Review timeout", value, 5, 600, "s")
+        if action in ("max-tokens", "tokens"):
+            return self._cmd_permission_review_int("max_tokens", "Review token budget", value, 200, 8192, "")
+        if action in ("fail-open", "failopen"):
+            return self._cmd_permission_review_bool("fail_open", "Fail open on reviewer error", value)
+        if action in ("review-read-only", "check-read-only"):
+            return self._cmd_permission_review_bool("review_read_only", "Review read-only calls", value)
+        if action == "level":
+            return self._cmd_permission_level(value)
+
+        self.console.print(
+            f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Unknown /permission subcommand: {escape(action)}[/{self.theme.CORAL_SOFT}]"
+        )
+        self._cmd_permission_usage()
+        return True
+
+    def _cmd_permission_usage(self) -> None:
+        """Print the /permission subcommand reference."""
+        lines = [
+            ("/permission", "Show the current approval policy."),
+            ("/permission mode default|auto_check|strict", "Switch how tool calls are approved."),
+            ("/permission threshold <none|low|medium|high|critical>", "Auto Check pauses at this risk and above."),
+            ("/permission model follow", "Review with the main model."),
+            ("/permission model <source> <name>", "Pin a dedicated reviewer model."),
+            ("/permission readonly on|off", "Strict mode: auto-allow read-only tools."),
+            ("/permission timeout <5-600>", "Reviewer request timeout in seconds."),
+            ("/permission max-tokens <200-8192>", "Reviewer response budget."),
+            ("/permission fail-open on|off", "Allow calls when the reviewer itself fails."),
+            ("/permission level <read_only|workspace_write|developer|full_control>", "Hard capability ceiling."),
+        ]
+        for command, description in lines:
+            self.console.print(
+                f"  [{self.theme.BLUE_SOFT}]{command}[/{self.theme.BLUE_SOFT}]"
+                f"  [{self.theme.TEXT_DIM}]{description}[/{self.theme.TEXT_DIM}]"
+            )
+
+    def _permission_config(self):
+        """Load config plus its normalized security block."""
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return None, None
+        config = config_manager.load()
+        security = normalize_security_config(getattr(config, "security", {}) or {})
+        return config, security
+
+    def _permission_commit(self, config, security: Dict[str, Any], message: str) -> bool:
+        """Persist a security-block change and reinitialize the agent."""
+        config.security = security
+        return self._setting_save_and_reinit(config, message, reinit=True)
+
+    def _cmd_permission_mode(self, value: str) -> bool:
+        """Switch the approval mode."""
+        config, security = self._permission_config()
+        if config is None:
+            return True
+        raw = value.strip().lower().replace("-", "_").replace(" ", "_")
+        if not raw:
+            current = normalize_permission_mode(security.get("permission_mode"))
+            self.console.print(
+                f"[{self.theme.TEXT_SECONDARY}]Current mode: "
+                f"[{self.theme.BLUE_SOFT}]{permission_mode_label(current)}[/{self.theme.BLUE_SOFT}][/{self.theme.TEXT_SECONDARY}]"
+            )
+            for mode in PERMISSION_MODES:
+                self.console.print(
+                    f"  [{self.theme.PURPLE_SOFT}]{mode}[/{self.theme.PURPLE_SOFT}]"
+                    f"  [{self.theme.TEXT_DIM}]{permission_mode_description(mode)}[/{self.theme.TEXT_DIM}]"
+                )
+            return True
+        mode = normalize_permission_mode(raw)
+        if raw not in PERMISSION_MODES and raw not in _PERMISSION_MODE_INPUTS:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Unknown mode: {escape(value)}. "
+                f"Use default, auto_check, or strict.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+        security["permission_mode"] = mode
+        return self._permission_commit(
+            config,
+            security,
+            f"Permission mode set to {permission_mode_label(mode)}. {permission_mode_description(mode)}",
+        )
+
+    def _cmd_permission_threshold(self, value: str) -> bool:
+        """Set the Auto Check escalation threshold."""
+        config, security = self._permission_config()
+        if config is None:
+            return True
+        raw = value.strip().lower()
+        if not raw:
+            current = security["review"].get("approve_risk_at")
+            self.console.print(
+                f"[{self.theme.TEXT_SECONDARY}]Auto Check pauses at "
+                f"[{self.theme.BLUE_SOFT}]{current}[/{self.theme.BLUE_SOFT}] and above. "
+                f"Options: {', '.join(RISK_LEVELS)}[/{self.theme.TEXT_SECONDARY}]"
+            )
+            return True
+        if raw not in RISK_LEVELS:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Unknown risk level: {escape(value)}. "
+                f"Use one of {', '.join(RISK_LEVELS)}.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+        security["review"]["approve_risk_at"] = normalize_risk_level(raw)
+        return self._permission_commit(
+            config, security, f"Auto Check now pauses at risk '{raw}' and above."
+        )
+
+    def _cmd_permission_readonly(self, value: str) -> bool:
+        """Toggle Strict-mode read-only auto-allow."""
+        config, security = self._permission_config()
+        if config is None:
+            return True
+        parsed = self._setting_parse_bool(value)
+        if parsed is None:
+            state = "on" if security.get("strict_allow_read_only") else "off"
+            self.console.print(
+                f"[{self.theme.TEXT_SECONDARY}]Strict read-only auto-allow is "
+                f"[{self.theme.BLUE_SOFT}]{state}[/{self.theme.BLUE_SOFT}]. Use on or off.[/{self.theme.TEXT_SECONDARY}]"
+            )
+            return True
+        security["strict_allow_read_only"] = parsed
+        detail = (
+            "read-only tools run without a prompt"
+            if parsed
+            else "every tool call waits for approval"
+        )
+        return self._permission_commit(config, security, f"Strict mode: {detail}.")
+
+    def _cmd_permission_review_bool(self, key: str, label: str, value: str) -> bool:
+        """Toggle one boolean reviewer option."""
+        config, security = self._permission_config()
+        if config is None:
+            return True
+        parsed = self._setting_parse_bool(value)
+        if parsed is None:
+            state = "on" if security["review"].get(key) else "off"
+            self.console.print(
+                f"[{self.theme.TEXT_SECONDARY}]{label} is "
+                f"[{self.theme.BLUE_SOFT}]{state}[/{self.theme.BLUE_SOFT}]. Use on or off.[/{self.theme.TEXT_SECONDARY}]"
+            )
+            return True
+        security["review"][key] = parsed
+        return self._permission_commit(config, security, f"{label} set to {'on' if parsed else 'off'}.")
+
+    def _cmd_permission_review_int(
+        self, key: str, label: str, value: str, minimum: int, maximum: int, unit: str
+    ) -> bool:
+        """Set one integer reviewer option."""
+        config, security = self._permission_config()
+        if config is None:
+            return True
+        raw = value.strip()
+        if not raw:
+            self.console.print(
+                f"[{self.theme.TEXT_SECONDARY}]{label} is "
+                f"[{self.theme.BLUE_SOFT}]{security['review'].get(key)}{unit}[/{self.theme.BLUE_SOFT}] "
+                f"(range {minimum}-{maximum}).[/{self.theme.TEXT_SECONDARY}]"
+            )
+            return True
+        try:
+            parsed = int(raw)
+        except ValueError:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} {label} must be an integer.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+        if parsed < minimum or parsed > maximum:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} {label} must be between "
+                f"{minimum} and {maximum}.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+        security["review"][key] = parsed
+        return self._permission_commit(config, security, f"{label} set to {parsed}{unit}.")
+
+    def _cmd_permission_model(self, value: str) -> bool:
+        """Choose the model that performs Auto Check reviews."""
+        config, security = self._permission_config()
+        if config is None:
+            return True
+        raw = value.strip()
+        review = security["review"]
+
+        if not raw:
+            if review.get("model_mode") != "custom":
+                self.console.print(
+                    f"[{self.theme.TEXT_SECONDARY}]Reviewer follows the main model "
+                    f"([{self.theme.BLUE_SOFT}]{escape(str(getattr(config.active_model, 'model_display_name', '') or 'none'))}"
+                    f"[/{self.theme.BLUE_SOFT}]).[/{self.theme.TEXT_SECONDARY}]"
+                )
+            else:
+                self.console.print(
+                    f"[{self.theme.TEXT_SECONDARY}]Reviewer is pinned to "
+                    f"[{self.theme.BLUE_SOFT}]{escape(review_model_label(config))}[/{self.theme.BLUE_SOFT}]."
+                    f"[/{self.theme.TEXT_SECONDARY}]"
+                )
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]/permission model follow  ·  "
+                f"/permission model standard <name|index>  ·  /permission model <source> <name>[/{self.theme.TEXT_DIM}]"
+            )
+            standard = list(getattr(config, "models", []) or [])
+            for index, model in enumerate(standard):
+                self.console.print(
+                    f"  [{self.theme.PURPLE_SOFT}]{index}[/{self.theme.PURPLE_SOFT}] "
+                    f"[{self.theme.TEXT_SECONDARY}]{escape(str(getattr(model, 'model_display_name', '') or getattr(model, 'model', '')))}"
+                    f"[/{self.theme.TEXT_SECONDARY}]"
+                )
+            return True
+
+        lowered = raw.lower()
+        if lowered in ("follow", "main", "same", "auto", "inherit"):
+            review["model_mode"] = "follow"
+            review["source"] = ""
+            review["model"] = ""
+            review["model_index"] = 0
+            return self._permission_commit(
+                config, security, "Auto Check reviews now follow the main model."
+            )
+
+        parts = raw.split(maxsplit=1)
+        source = parts[0].strip().lower()
+        target = parts[1].strip() if len(parts) > 1 else ""
+        if source not in _REVIEW_MODEL_SOURCES:
+            source, target = "standard", raw
+
+        if source == "standard":
+            models = list(getattr(config, "models", []) or [])
+            if not models:
+                self.console.print(
+                    f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} No standard models are configured.[/{self.theme.CORAL_SOFT}]"
+                )
+                return True
+            index = -1
+            if target.isdigit():
+                index = int(target)
+            else:
+                wanted = target.lower()
+                for position, model in enumerate(models):
+                    name = str(getattr(model, "model", "") or "").lower()
+                    display = str(getattr(model, "model_display_name", "") or "").lower()
+                    if wanted and (wanted == name or wanted == display or wanted in name or wanted in display):
+                        index = position
+                        break
+            if not (0 <= index < len(models)):
+                self.console.print(
+                    f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} No standard model matches: "
+                    f"{escape(target or raw)}[/{self.theme.CORAL_SOFT}]"
+                )
+                return True
+            chosen = models[index]
+            review["model_mode"] = "custom"
+            review["source"] = "standard"
+            review["model"] = str(getattr(chosen, "model", "") or "")
+            review["model_index"] = index
+            label = str(getattr(chosen, "model_display_name", "") or review["model"])
+            return self._permission_commit(
+                config, security, f"Auto Check reviews now use {label}."
+            )
+
+        if not target:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Specify a model name: "
+                f"/permission model {escape(source)} <name>[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+        review["model_mode"] = "custom"
+        review["source"] = source
+        review["model"] = target
+        review["model_index"] = 0
+        return self._permission_commit(
+            config, security, f"Auto Check reviews now use {source}:{target}."
+        )
+
+    def _cmd_permission_level(self, value: str) -> bool:
+        """Change the hard capability ceiling."""
+        config, security = self._permission_config()
+        if config is None:
+            return True
+        raw = value.strip().lower().replace("-", "_")
+        if not raw:
+            self.console.print(
+                f"[{self.theme.TEXT_SECONDARY}]Permission level is "
+                f"[{self.theme.BLUE_SOFT}]{security.get('permission_level')}[/{self.theme.BLUE_SOFT}]. "
+                f"Options: {', '.join(PERMISSION_LEVELS)}[/{self.theme.TEXT_SECONDARY}]"
+            )
+            return True
+        level = normalize_permission_level(raw)
+        if raw not in PERMISSION_LEVELS and level == "full_control" and raw != "full_control":
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Unknown permission level: {escape(value)}. "
+                f"Use one of {', '.join(PERMISSION_LEVELS)}.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+        security["permission_level"] = level
+        return self._permission_commit(config, security, f"Permission level set to {level}.")
+
+    def _cmd_permission_status(self) -> bool:
+        """Render the current approval policy."""
+        config, security = self._permission_config()
+        if config is None:
+            return True
+        review = security["review"]
+        mode = normalize_permission_mode(security.get("permission_mode"))
+        level = security.get("permission_level")
+
+        table = Table(box=box.SIMPLE, show_header=False, pad_edge=False, expand=False)
+        table.add_column(style=self.theme.TEXT_DIM, no_wrap=True)
+        table.add_column(style=self.theme.TEXT_PRIMARY)
+        table.add_row("Mode", f"{permission_mode_label(mode)} — {permission_mode_description(mode)}")
+        table.add_row("Level", str(level))
+        if mode == "auto_check":
+            table.add_row("Pauses at", f"risk {review.get('approve_risk_at')} and above")
+            table.add_row("Reviewer", review_model_label(config))
+            table.add_row(
+                "Reviewer limits",
+                f"{review.get('timeout')}s timeout · {review.get('max_tokens')} tokens"
+                f" · read-only reviewed: {'yes' if review.get('review_read_only') else 'no'}"
+                f" · fail open: {'yes' if review.get('fail_open') else 'no'}",
+            )
+        if mode == "strict":
+            table.add_row(
+                "Read-only tools",
+                "auto-allowed" if security.get("strict_allow_read_only") else "prompted like every other tool",
+            )
+
+        self.console.print()
+        self.console.print(
+            Panel(
+                table,
+                title=f"[{self.theme.PURPLE_SOFT}]Permission Policy[/{self.theme.PURPLE_SOFT}]",
+                border_style=self.theme.BORDER_PRIMARY,
+                box=box.ROUNDED,
+                padding=(0, 1),
+            )
+        )
+        self._cmd_permission_usage()
+        self.console.print()
+        return True
+
     def cmd_setting(self, args: str) -> bool:
         """Manage settings through a richer TUI or direct subcommands."""
         raw = args.strip()
@@ -13200,6 +13588,74 @@ class CommandHandler:
             return False
         return True
 
+    def cmd_compact(self, args: str) -> bool:
+        """Manually compact the active conversation, optionally prioritizing user guidance."""
+        return self._run_context_compaction(focus=args.strip())
+
+    def _run_context_compaction(self, *, focus: str = "") -> bool:
+        agent = self.app.get('agent')
+        config_manager = self.app.get('config_manager')
+        if not agent:
+            self._show_activity_event("Context Engine", "No active agent session.", status="error")
+            return True
+
+        working_detail = "Summarizing older turns into continuation-grade working memory."
+        if focus:
+            working_detail = f"Prioritizing: {self._truncate_middle(focus, 180)}"
+        self._show_activity_event(
+            "Context Engine",
+            "Compressing conversation context.",
+            status="working",
+            detail=working_detail,
+            blank_before=True,
+        )
+
+        try:
+            from ..tools.context_management import ContextManagementTool
+
+            context_tool = ContextManagementTool(dict(self.app))
+            result = context_tool.execute(
+                action="compress",
+                keep_last_messages=8,
+                focus=focus,
+            )
+
+            if result.success:
+                detail_parts = [str(result.output or "Context compression completed.")]
+                try:
+                    usage = self._get_context_usage_snapshot(agent, config_manager)
+                    if usage:
+                        detail_parts.append(
+                            f"Current usage: {usage.get('total_tokens', 0):,} / "
+                            f"{usage.get('max_tokens', 128000):,} tokens "
+                            f"({usage.get('percentage', 0):.1f}%)"
+                        )
+                except Exception:
+                    report_suppressed_exception("render context usage summary")
+                self._show_activity_event(
+                    "Context Engine",
+                    "Context compression completed.",
+                    status="success",
+                    detail="  •  ".join(detail_parts),
+                )
+            else:
+                self._show_activity_event(
+                    "Context Engine",
+                    "Compression failed.",
+                    status="error",
+                    detail=str(result.error or ""),
+                )
+        except Exception as e:
+            self._show_activity_event(
+                "Context Engine",
+                "Compression raised an unexpected error.",
+                status="error",
+                detail=str(e),
+            )
+
+        self.console.print()
+        return True
+
     def cmd_context_engine(self, args: str) -> bool:
         """
         Context Engine management command (/CE)
@@ -13307,7 +13763,8 @@ class CommandHandler:
                 self._build_command_table(
                     [
                         ("/CE", "Show current context usage and quick actions"),
-                        ("/CE compress", "Manually compact the current conversation context"),
+                        ("/compact [focus]", "Compact now with optional retention guidance"),
+                        ("/CE compress", "Compatibility form of /compact"),
                         ("/CE info", "Show detailed message and mode information"),
                         ("/CE stats", "Print the raw context statistics output"),
                     ],
@@ -13321,58 +13778,7 @@ class CommandHandler:
 
         # Compress command
         elif args == "compress":
-            self._show_activity_event(
-                "Context Engine",
-                "Compressing conversation context.",
-                status="working",
-                detail="Summarizing older turns into a smaller working memory.",
-                blank_before=True,
-            )
-
-            try:
-                from ..tools.context_management import ContextManagementTool
-                context_tool = ContextManagementTool({'project_root': self.app.get('project_root')})
-                context_tool.context = {
-                    'agent': agent,
-                    'config_manager': config_manager,
-                    'project_root': self.app.get('project_root')
-                }
-                
-                result = context_tool.execute(action="compress")
-                
-                if result.success:
-                    detail = ""
-                    # Show new token count
-                    try:
-                        usage = self._get_context_usage_snapshot(agent, config_manager)
-                        if usage:
-                            detail = (
-                                f"New usage: {usage.get('total_tokens', 0):,} / "
-                                f"{usage.get('max_tokens', 128000):,} tokens "
-                                f"({usage.get('percentage', 0):.1f}%)"
-                            )
-                    except Exception:
-                        report_suppressed_exception("render context usage summary")
-
-                    self.console.print(f"[{self.theme.MINT_SOFT}]{escape(str(result.output or 'Context compression completed.'))}[/{self.theme.MINT_SOFT}]")
-                else:
-                    self._show_activity_event(
-                        "Context Engine",
-                        "Compression failed.",
-                        status="error",
-                        detail=str(result.error or ""),
-                    )
-
-            except Exception as e:
-                self._show_activity_event(
-                    "Context Engine",
-                    "Compression raised an unexpected error.",
-                    status="error",
-                    detail=str(e),
-                )
-
-            self.console.print()
-            return True
+            return self._run_context_compaction()
 
         # Info command
         elif args == "info":

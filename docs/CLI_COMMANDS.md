@@ -95,7 +95,8 @@ ModelScope is called through OpenAI Chat Completions and reads `MODELSCOPE_API_K
 | `/search <query>` | Run a web search |
 | `/index` | Rebuild the current workspace index |
 | `/CE` | Show Context Engine status |
-| `/CE compress` | Compress current conversation context |
+| `/compact [focus]` | Compact the active conversation now, optionally prioritizing specific details |
+| `/CE compress` | Compatibility form of `/compact` |
 | `/CE info` | Show context and prompt details |
 | `/CE stats` | Show token statistics |
 | `/tti models` | Open the TTI model selector |
@@ -113,6 +114,7 @@ entering the TUI. Drop the leading slash and pass the same arguments:
 reverie setting status
 reverie setting mode reverie
 reverie tools search context
+reverie compact "preserve failed tests and uncommitted files"
 reverie --path C:\work\project setting workspace on
 ```
 
@@ -140,6 +142,17 @@ reverie --path C:\work\project setting workspace on
 | `/rules edit` | Open `rules.txt` in the default editor |
 | `/rules add <text>` | Add a rule |
 | `/rules remove <number>` | Remove a rule |
+| `/permission` | Show the current approval policy and subcommand list |
+| `/permission mode default\|auto_check\|strict` | Switch how tool calls are approved |
+| `/permission threshold <none\|low\|medium\|high\|critical>` | Auto Check pauses at this reviewed risk and above |
+| `/permission model follow` | Review tool calls with the main model |
+| `/permission model <source> <name>` | Pin a dedicated reviewer model |
+| `/permission readonly on\|off` | Strict mode: auto-allow provably read-only tools |
+| `/permission review-read-only on\|off` | Auto Check: also review read-only tools |
+| `/permission timeout <5-600>` | Reviewer request timeout in seconds |
+| `/permission max-tokens <200-8192>` | Reviewer response token budget |
+| `/permission fail-open on\|off` | Allow calls through when the reviewer itself fails |
+| `/permission level <read_only\|workspace_write\|developer\|full_control>` | Change the hard capability ceiling |
 | `/workspace` | Show workspace-config status |
 | `/workspace enable` | Enable workspace-local config |
 | `/workspace disable` | Return to the default profile |

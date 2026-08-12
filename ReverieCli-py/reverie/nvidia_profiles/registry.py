@@ -6,19 +6,13 @@ import sys
 from typing import Any, Callable, Dict, Optional
 
 from . import (
-    deepseek_v4,
     glm_5_2,
     gpt_oss_120b,
-    kimi_k2_6,
     minimax,
-    mistral_large_3,
-    mistral_medium_35,
-    mistral_small_4,
+    muse_glimmer,
     nemotron_3_super,
     nemotron_3_ultra,
-    nemotron_35_nano,
-    qwen_35,
-    step_35_flash,
+    nemotron_35_lightning,
     step_37_flash,
 )
 
@@ -26,25 +20,17 @@ from . import (
 ProfileBuilder = Callable[[Dict[str, Any]], Dict[str, Any]]
 
 _OPENAI_PROFILES: Dict[str, ProfileBuilder] = {
+    "meta/muse-glimmer-30b": muse_glimmer.build_openai_options,
+    "nvidia/nemotron-3.5-lightning-30b-a3b": nemotron_35_lightning.build_openai_options,
     "nvidia/nemotron-3-super-120b-a12b": nemotron_3_super.build_openai_options,
     "nvidia/nemotron-3-ultra-550b-a55b": nemotron_3_ultra.build_openai_options,
-    "nvidia/nemotron-3.5-nano-30b-a3b": nemotron_35_nano.build_openai_options,
-    "minimaxai/minimax-m2.7": minimax.build_m27_openai_options,
     "z-ai/glm-5.2": glm_5_2.build_openai_options,
-    "stepfun-ai/step-3.5-flash": step_35_flash.build_openai_options,
-    "deepseek-ai/deepseek-v4-pro": deepseek_v4.build_openai_options,
-    "deepseek-ai/deepseek-v4-flash": deepseek_v4.build_openai_options,
     "openai/gpt-oss-120b": gpt_oss_120b.build_openai_options,
 }
 
 _REQUEST_PROFILES: Dict[str, ProfileBuilder] = {
     "minimaxai/minimax-m3": minimax.build_m3_request_defaults,
-    "mistralai/mistral-small-4-119b-2603": mistral_small_4.build_request_defaults,
-    "mistralai/mistral-medium-3.5-128b": mistral_medium_35.build_request_defaults,
-    "qwen/qwen3.5-397b-a17b": qwen_35.build_397b_request_defaults,
     "stepfun-ai/step-3.7-flash": step_37_flash.build_request_defaults,
-    "mistralai/mistral-large-3-675b-instruct-2512": mistral_large_3.build_request_defaults,
-    "moonshotai/kimi-k2.6": kimi_k2_6.build_request_defaults,
 }
 
 _CONTEXT_OVERRIDES: Dict[str, int] = {

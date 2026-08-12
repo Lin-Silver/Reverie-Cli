@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import copy
+import ctypes
 import hashlib
 import http.client
 import json
@@ -24,13 +26,37 @@ RATS_SETTINGS_VERSION = 2
 RATS_STATE_VERSION = 2
 RATS_PERMISSIONS = ("read", "project", "edit", "asset", "ai", "run", "build")
 _TOKEN_RE = re.compile(r"^[0-9a-f]{64}$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _SERVICE_RE = re.compile(r"^rats-[1-9][0-9]*-[a-z0-9]+$")
 _IDENTIFIER_RE = re.compile(r"[^a-z0-9_-]+")
 _MAX_DESCRIPTOR_BYTES = 128 * 1024
 _MAX_RESPONSE_BYTES = 1024 * 1024
 _MAX_DIAGNOSTIC_BYTES = 2 * 1024 * 1024
 _MAX_DIAGNOSTIC_ENTRIES = 240
+_MAX_TERMINAL_TASK_HISTORY_PER_SESSION = 64
 _DEFAULT_LOADED_TOOLS = ("ping", "version", "get_status", "project.status")
+_REVERIE_ENGINE_PRODUCT_NAMES = frozenset({"Reverie Engine", "Reverie Engine (Console)"})
+_REVERIE_ENGINE_TERMINAL_PRODUCT_NAME = "Reverie Engine Terminal"
+_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+_SYNCHRONIZE = 0x00100000
+_WAIT_TIMEOUT = 0x00000102
+_MAX_WINDOWS_PROCESS_ID = 0xFFFFFFFF
+_MAX_WINDOWS_PROCESS_PATH = 32768
+_TERMINAL_TASK_STATES = frozenset(
+    {
+        "cancelled",
+        "canceled",
+        "completed",
+        "error",
+        "failed",
+        "killed",
+        "stopped",
+        "succeeded",
+        "success",
+        "timed_out",
+        "timeout",
+    }
+)
 
 
 class RatsClientError(RuntimeError):
@@ -60,6 +86,61 @@ def _record(value: Any) -> Dict[str, Any]:
 
 def _text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _canonical_rtp_value_sha256(source: str, field: str) -> str:
+    """Hash one canonical top-level value emitted by Engine JSON::stringify.
+
+    Engine hashes ``result`` or ``error`` separately, then embeds that value in
+    an envelope using the same compact, sorted serializer. Hashing the exact
+    value span preserves Engine-specific float formatting. This is an audit
+    consistency check, not an authentication mechanism.
+    """
+    decoder = json.JSONDecoder()
+    length = len(source)
+    index = 0
+    while index < length and source[index].isspace():
+        index += 1
+    if index >= length or source[index] != "{":
+        return ""
+    index += 1
+    matched = ""
+    while index < length:
+        while index < length and source[index].isspace():
+            index += 1
+        if index < length and source[index] == "}":
+            break
+        try:
+            key, index = decoder.raw_decode(source, index)
+        except json.JSONDecodeError:
+            return ""
+        if not isinstance(key, str):
+            return ""
+        while index < length and source[index].isspace():
+            index += 1
+        if index >= length or source[index] != ":":
+            return ""
+        index += 1
+        while index < length and source[index].isspace():
+            index += 1
+        value_start = index
+        try:
+            _value, index = decoder.raw_decode(source, index)
+        except json.JSONDecodeError:
+            return ""
+        if key == field:
+            matched = source[value_start:index]
+        while index < length and source[index].isspace():
+            index += 1
+        if index < length and source[index] == ",":
+            index += 1
+            continue
+        if index < length and source[index] == "}":
+            break
+        return ""
+    if not matched:
+        return ""
+    return hashlib.sha256(matched.encode("utf-8")).hexdigest()
 
 
 def _path_key(value: Path | str) -> str:
@@ -94,8 +175,167 @@ def rats_discovery_root_for_executable(executable: Path | str) -> Path:
     return Path(executable).expanduser().resolve(strict=False).parent / "ReverieLocal" / "RATS" / "Services"
 
 
-def _existing_executable(executable: Path) -> bool:
-    return executable.is_file()
+def _windows_product_names(executable: Path) -> Tuple[str, ...]:
+    if os.name != "nt" or not executable.is_file():
+        return ()
+    try:
+        from ctypes import wintypes
+
+        version = ctypes.WinDLL("version", use_last_error=True)
+        version.GetFileVersionInfoSizeW.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(wintypes.DWORD)]
+        version.GetFileVersionInfoSizeW.restype = wintypes.DWORD
+        version.GetFileVersionInfoW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p]
+        version.GetFileVersionInfoW.restype = wintypes.BOOL
+        version.VerQueryValueW.argtypes = [
+            ctypes.c_void_p,
+            wintypes.LPCWSTR,
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(wintypes.UINT),
+        ]
+        version.VerQueryValueW.restype = wintypes.BOOL
+
+        ignored = wintypes.DWORD()
+        size = version.GetFileVersionInfoSizeW(str(executable), ctypes.byref(ignored))
+        if not size:
+            return ()
+        version_info = ctypes.create_string_buffer(size)
+        if not version.GetFileVersionInfoW(str(executable), 0, size, version_info):
+            return ()
+
+        translation_pointer = ctypes.c_void_p()
+        translation_size = wintypes.UINT()
+        if not version.VerQueryValueW(
+            version_info,
+            r"\VarFileInfo\Translation",
+            ctypes.byref(translation_pointer),
+            ctypes.byref(translation_size),
+        ):
+            return ()
+        if not translation_pointer.value or translation_size.value < 4:
+            return ()
+
+        translations = ctypes.cast(translation_pointer, ctypes.POINTER(wintypes.WORD))
+        product_names: List[str] = []
+        for index in range(translation_size.value // 4):
+            language = translations[index * 2]
+            code_page = translations[index * 2 + 1]
+            product_pointer = ctypes.c_void_p()
+            product_length = wintypes.UINT()
+            query = f"\\StringFileInfo\\{language:04x}{code_page:04x}\\ProductName"
+            if not version.VerQueryValueW(
+                version_info,
+                query,
+                ctypes.byref(product_pointer),
+                ctypes.byref(product_length),
+            ):
+                continue
+            if not product_pointer.value or not product_length.value:
+                continue
+            product_name = ctypes.wstring_at(product_pointer.value, product_length.value).rstrip("\0")
+            if product_name and product_name not in product_names:
+                product_names.append(product_name)
+        return tuple(product_names)
+    except (AttributeError, OSError, OverflowError, TypeError, ValueError):
+        return ()
+
+
+def _reverie_engine_executable(executable: Path) -> bool:
+    if os.name != "nt":
+        return executable.is_file()
+    return any(product_name in _REVERIE_ENGINE_PRODUCT_NAMES for product_name in _windows_product_names(executable))
+
+
+def _identity_executable(executable: Path) -> Path:
+    return executable
+
+
+def _reverie_engine_provider_executable(executable: Path) -> Path:
+    candidate = executable.expanduser().resolve(strict=False)
+    if os.name != "nt" or not candidate.name.lower().endswith(".terminal.exe"):
+        return candidate
+    if _REVERIE_ENGINE_TERMINAL_PRODUCT_NAME not in _windows_product_names(candidate):
+        return candidate
+    provider = candidate.with_name(candidate.name[: -len(".terminal.exe")] + ".exe")
+    return provider if _reverie_engine_executable(provider) else candidate
+
+
+def _windows_process_image_from_handle(process: int) -> Optional[Path]:
+    if os.name != "nt" or not process:
+        return None
+    try:
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.QueryFullProcessImageNameW.argtypes = [
+            wintypes.HANDLE,
+            wintypes.DWORD,
+            wintypes.LPWSTR,
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+        kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        kernel32.WaitForSingleObject.restype = wintypes.DWORD
+
+        if kernel32.WaitForSingleObject(process, 0) != _WAIT_TIMEOUT:
+            return None
+        image = ctypes.create_unicode_buffer(_MAX_WINDOWS_PROCESS_PATH)
+        image_length = wintypes.DWORD(len(image))
+        if not kernel32.QueryFullProcessImageNameW(process, 0, image, ctypes.byref(image_length)):
+            return None
+        if kernel32.WaitForSingleObject(process, 0) != _WAIT_TIMEOUT:
+            return None
+        return Path(image.value).resolve(strict=False)
+    except (AttributeError, OSError, OverflowError, TypeError, ValueError):
+        return None
+
+
+def _windows_process_image(pid: int) -> Optional[Path]:
+    if os.name != "nt" or pid <= 0 or pid > _MAX_WINDOWS_PROCESS_ID:
+        return None
+    try:
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+
+        process = kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION | _SYNCHRONIZE, False, pid)
+        if not process:
+            return None
+        try:
+            return _windows_process_image_from_handle(process)
+        finally:
+            kernel32.CloseHandle(process)
+    except (AttributeError, OSError, OverflowError, TypeError, ValueError):
+        return None
+
+
+def _same_executable(left: Path, right: Path) -> bool:
+    try:
+        return os.path.samefile(left, right)
+    except (OSError, ValueError):
+        return _path_key(left) == _path_key(right)
+
+
+def _windows_process_matches_executable(pid: int, executable: Path) -> bool:
+    process_image = _windows_process_image(pid)
+    return process_image is not None and _same_executable(process_image, executable)
+
+
+def _reverie_engine_process(pid: int, executable: Path) -> bool:
+    if os.name == "nt":
+        return _windows_process_matches_executable(pid, executable)
+    if pid <= 0 or not executable.is_file():
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
 
 @dataclass(frozen=True)
@@ -111,6 +351,8 @@ class RatsProviderSpec:
     label: str
     tool_tags: Tuple[str, ...] = ()
     executable_error: str = "Select an existing executable for this RATS provider."
+    process_validator: Callable[[int, Path], bool] = _reverie_engine_process
+    executable_normalizer: Callable[[Path], Path] = _identity_executable
 
     @property
     def service_kind(self) -> str:
@@ -122,12 +364,21 @@ class RatsProviderSpec:
 
     def validate_executable(self, executable: Path) -> bool:
         try:
-            return bool(self.executable_validator(executable))
-        except (OSError, ValueError, TypeError):
+            return bool(self.executable_validator(self.normalize_executable(executable)))
+        except (OSError, OverflowError, ValueError, TypeError):
+            return False
+
+    def validate_process(self, pid: int, executable: Path) -> bool:
+        try:
+            return bool(self.process_validator(int(pid), self.normalize_executable(executable)))
+        except (OSError, OverflowError, ValueError, TypeError):
             return False
 
     def discovery_root_for_executable(self, executable: Path | str) -> Path:
-        return Path(self.discovery_root_resolver(Path(executable).expanduser().resolve(strict=False))).resolve(strict=False)
+        return Path(self.discovery_root_resolver(self.normalize_executable(Path(executable)))).resolve(strict=False)
+
+    def normalize_executable(self, executable: Path | str) -> Path:
+        return Path(self.executable_normalizer(Path(executable))).expanduser().resolve(strict=False)
 
 
 @dataclass(frozen=True)
@@ -164,12 +415,14 @@ RATS_SUPPORTED_PROVIDERS = RatsProviderRegistry(
             provider_id="reverie.engine",
             product="Reverie Engine",
             service_kinds=("builtin",),
-            executable_validator=_existing_executable,
+            executable_validator=_reverie_engine_executable,
+            process_validator=_reverie_engine_process,
             discovery_root_resolver=rats_discovery_root_for_executable,
             permission_classes=RATS_PERMISSIONS,
             label="Reverie Engine",
             tool_tags=("reverie-engine",),
             executable_error="Select an existing Reverie Engine executable.",
+            executable_normalizer=_reverie_engine_provider_executable,
         ),
     }
 )
@@ -207,6 +460,7 @@ class _RatsSession:
     permissions: List[str] = field(default_factory=list)
     compact_tools: List[Dict[str, Any]] = field(default_factory=list)
     definitions: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    io_lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
 
 def _parse_rats_descriptor(
@@ -253,6 +507,8 @@ def _parse_rats_descriptor(
     if not _TOKEN_RE.fullmatch(control_token):
         return None, "invalid_control_token"
     resolved_executable = executable.resolve(strict=False)
+    if not supported.validate_process(pid, resolved_executable):
+        return None, "process_executable_mismatch"
     resolved_descriptor = Path(descriptor_path).resolve(strict=False)
     if _path_key(resolved_descriptor.parent) != _path_key(
         supported.discovery_root_for_executable(resolved_executable)
@@ -370,8 +626,13 @@ class RatsRuntime:
         self._generation = 0
         self._definition_signature = ""
         self._has_refreshed = False
+        self._closed = False
         self._tasks: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+        # Lock order: lifecycle -> session I/O -> state. Diagnostics is a leaf lock.
+        # Never wait for lifecycle or session I/O while holding the state lock.
         self._lock = threading.RLock()
+        self._lifecycle_lock = threading.RLock()
+        self._diagnostics_lock = threading.Lock()
 
     @staticmethod
     def _validate_deadline(deadline_ms: Optional[int]) -> Optional[int]:
@@ -451,19 +712,20 @@ class RatsRuntime:
             entry["taskState"] = _text(task_state)
         if progress is not None:
             entry["progress"] = max(0.0, min(1.0, float(progress)))
-        self._diagnostics.append(entry)
-        self._diagnostics = self._diagnostics[-_MAX_DIAGNOSTIC_ENTRIES:]
-        try:
-            self.state_dir.mkdir(parents=True, exist_ok=True)
-            if self.diagnostics_path.is_file() and self.diagnostics_path.stat().st_size > _MAX_DIAGNOSTIC_BYTES:
-                retained = self.diagnostics_path.read_text(encoding="utf-8", errors="replace").splitlines()[-800:]
-                temporary = self.diagnostics_path.with_suffix(f".tmp-{uuid.uuid4().hex}")
-                temporary.write_text("\n".join(retained) + "\n", encoding="utf-8")
-                os.replace(temporary, self.diagnostics_path)
-            with self.diagnostics_path.open("a", encoding="utf-8") as stream:
-                stream.write(json.dumps(entry, ensure_ascii=False, separators=(",", ":")) + "\n")
-        except OSError:
-            pass
+        with self._diagnostics_lock:
+            self._diagnostics.append(entry)
+            self._diagnostics = self._diagnostics[-_MAX_DIAGNOSTIC_ENTRIES:]
+            try:
+                self.state_dir.mkdir(parents=True, exist_ok=True)
+                if self.diagnostics_path.is_file() and self.diagnostics_path.stat().st_size > _MAX_DIAGNOSTIC_BYTES:
+                    retained = self.diagnostics_path.read_text(encoding="utf-8", errors="replace").splitlines()[-800:]
+                    temporary = self.diagnostics_path.with_suffix(f".tmp-{uuid.uuid4().hex}")
+                    temporary.write_text("\n".join(retained) + "\n", encoding="utf-8")
+                    os.replace(temporary, self.diagnostics_path)
+                with self.diagnostics_path.open("a", encoding="utf-8") as stream:
+                    stream.write(json.dumps(entry, ensure_ascii=False, separators=(",", ":")) + "\n")
+            except OSError:
+                pass
 
     def _read_settings(self) -> Dict[str, Any]:
         try:
@@ -482,7 +744,6 @@ class RatsRuntime:
             executable = _text(record.get("executable"))
             if not executable:
                 continue
-            path = Path(executable).expanduser().resolve(strict=False)
             provider_id = _text(record.get("providerId") or record.get("provider_id"))
             if migrating_legacy:
                 provider_id = "reverie.engine"
@@ -495,6 +756,7 @@ class RatsRuntime:
                     reason="unsupported_provider",
                 )
                 continue
+            path = provider.normalize_executable(executable)
             discovery_root = _text(record.get("discoveryRoot"))
             if discovery_root:
                 discovery_path = _unique_paths([discovery_root])
@@ -608,7 +870,8 @@ class RatsRuntime:
             )
             raise RatsClientError("RATS response exceeded the 1 MiB client limit.", code="response_too_large")
         try:
-            payload = _record(json.loads(raw.decode("utf-8")))
+            response_text = raw.decode("utf-8")
+            payload = _record(json.loads(response_text))
         except (UnicodeError, json.JSONDecodeError) as exc:
             self._log_diagnostic(
                 "rtp.request",
@@ -620,23 +883,45 @@ class RatsRuntime:
                 duration_ms=round((time.perf_counter() - started) * 1000),
             )
             raise RatsClientError("RATS returned malformed JSON.", status=response.status, code="malformed_response") from exc
-        if payload.get("protocol") != RATS_PROTOCOL:
+        request_task_id = _text((args or {}).get("task_id")) if isinstance(args, dict) else ""
+
+        def reject_response(code: str, message: str) -> None:
             self._log_diagnostic(
                 "rtp.request",
                 level="error",
                 service_id=descriptor.service_id,
                 provider_id=descriptor.provider_id,
                 operation=operation,
-                reason="protocol_mismatch",
+                reason=code,
                 duration_ms=round((time.perf_counter() - started) * 1000),
+                task_id=request_task_id,
             )
-            raise RatsClientError("RATS protocol response did not match reverie.rtp/1.", status=response.status, code="protocol_mismatch")
-        if response.status >= 400 or payload.get("ok") is not True:
+            raise RatsClientError(message, status=response.status, code=code)
+
+        if payload.get("protocol") != RATS_PROTOCOL:
+            reject_response("protocol_mismatch", "RATS protocol response did not match reverie.rtp/1.")
+        response_id = payload.get("id")
+        if response_id is None or response_id == "":
+            reject_response("response_id_missing", "RATS response did not include the request id.")
+        if response_id != request_object["id"]:
+            reject_response("response_id_mismatch", "RATS response id did not match the request id.")
+
+        response_failed = response.status >= 400 or payload.get("ok") is not True
+        result_sha256 = _text(payload.get("result_sha256")).lower()
+        if not result_sha256:
+            reject_response("result_hash_missing", "RATS response did not include the result SHA-256 audit value.")
+        hash_field = "error" if response_failed else "result"
+        expected_sha256 = _canonical_rtp_value_sha256(response_text, hash_field)
+        if not _SHA256_RE.fullmatch(result_sha256) or not expected_sha256 or result_sha256 != expected_sha256:
+            reject_response(
+                "result_hash_mismatch",
+                f"RATS response {hash_field} did not match its SHA-256 audit value.",
+            )
+
+        if response_failed:
             error = _record(payload.get("error"))
             error_code = _text(error.get("code")) or "request_failed"
             audit_id = _text(payload.get("audit_id"))
-            result_sha256 = _text(payload.get("result_sha256"))
-            task_id = _text((args or {}).get("task_id")) if isinstance(args, dict) else ""
             self._log_diagnostic(
                 "rtp.request",
                 level="warning",
@@ -647,7 +932,7 @@ class RatsRuntime:
                 duration_ms=round((time.perf_counter() - started) * 1000),
                 audit_id=audit_id,
                 result_sha256=result_sha256,
-                task_id=task_id,
+                task_id=request_task_id,
             )
             raise RatsClientError(
                 _text(error.get("message")) or f"RATS request failed with HTTP {response.status}.",
@@ -659,7 +944,6 @@ class RatsRuntime:
             )
         result = _record(payload.get("result"))
         task = _record(result.get("task"))
-        request_task_id = _text((args or {}).get("task_id")) if isinstance(args, dict) else ""
         task_id = _text(task.get("task_id")) or request_task_id
         next_cursor = result.get("next_cursor")
         self._log_diagnostic(
@@ -669,7 +953,7 @@ class RatsRuntime:
             operation=operation,
             duration_ms=round((time.perf_counter() - started) * 1000),
             audit_id=_text(payload.get("audit_id")),
-            result_sha256=_text(payload.get("result_sha256")),
+            result_sha256=result_sha256,
             task_id=task_id,
             cursor=int(next_cursor) if isinstance(next_cursor, int) and not isinstance(next_cursor, bool) else None,
             task_state=_text(result.get("state")),
@@ -701,6 +985,7 @@ class RatsRuntime:
             pass
 
     def _describe_into_session(self, session: _RatsSession, names: Iterable[Any]) -> List[Dict[str, Any]]:
+        """Populate a provisional session before it is published in ``_sessions``."""
         requested = list(dict.fromkeys(_text(name) for name in names if _text(name)))[:16]
         if not requested:
             return []
@@ -718,7 +1003,6 @@ class RatsRuntime:
             if name and isinstance(request_schema, dict):
                 session.definitions[name] = definition
                 definitions.append(dict(definition))
-        self._update_generation()
         return definitions
 
     def _open_session(self, descriptor: RatsDescriptor, permissions: List[str]) -> _RatsSession:
@@ -731,115 +1015,149 @@ class RatsRuntime:
         token = _text(opened.get("session_token")).lower()
         if not _TOKEN_RE.fullmatch(token):
             raise RatsClientError("RATS did not return a valid 256-bit session token.", code="invalid_session_token")
-        index = self._request(descriptor, "catalog.index", session_token=token)
         session = _RatsSession(
             descriptor=descriptor,
             token=token,
             permissions=list(permissions),
-            compact_tools=_compact_tools(index.get("tools")),
         )
-        preload = [
-            name
-            for name in _DEFAULT_LOADED_TOOLS
-            if any(tool.get("name") == name and tool.get("schema") for tool in session.compact_tools)
-        ]
-        if preload:
-            self._describe_into_session(session, preload)
-        return session
+        try:
+            index = self._request(descriptor, "catalog.index", session_token=token)
+            session.compact_tools = _compact_tools(index.get("tools"))
+            preload = [
+                name
+                for name in _DEFAULT_LOADED_TOOLS
+                if any(tool.get("name") == name and tool.get("schema") for tool in session.compact_tools)
+            ]
+            if preload:
+                self._describe_into_session(session, preload)
+            return session
+        except RatsClientError:
+            self._close_session(session)
+            raise
+
+    def _detach_session(self, session: _RatsSession) -> bool:
+        session_key = (session.descriptor.provider_id, session.descriptor.service_id)
+        with self._lock:
+            if self._sessions.get(session_key) is not session:
+                return False
+            self._sessions.pop(session_key, None)
+            self._drop_tasks_for_session(session)
+            self._update_generation()
+            return True
 
     def _service_record(
         self,
         descriptor: RatsDescriptor,
         settings: Dict[str, Any],
     ) -> Optional[Dict[str, Any]]:
+        session_key = (descriptor.provider_id, descriptor.service_id)
+        locked_session: Optional[_RatsSession] = None
+        while True:
+            with self._lock:
+                session = self._sessions.get(session_key)
+            if session is None:
+                break
+            session.io_lock.acquire()
+            with self._lock:
+                if self._sessions.get(session_key) is session:
+                    locked_session = session
+                    break
+            session.io_lock.release()
+
         probe_started = time.perf_counter()
         try:
-            hello = self._request(descriptor, "hello", timeout=self.probe_timeout)
-        except RatsClientError:
-            session = self._sessions.pop((descriptor.provider_id, descriptor.service_id), None)
-            if session is not None:
-                self._drop_tasks_for_session(session)
-                self._update_generation()
-            return None
-        expected_hello = {
-            "service_id": descriptor.service_id,
-            "protocol": RATS_PROTOCOL,
-            "provider_id": descriptor.provider_id,
-            "service_kind": descriptor.service_kind,
-            "product": descriptor.product,
-        }
-        mismatched_field = next((key for key, value in expected_hello.items() if hello.get(key) != value), "")
-        if mismatched_field:
-            self._log_diagnostic(
-                "provider.rejected",
-                level="warning",
-                service_id=descriptor.service_id,
-                provider_id=descriptor.provider_id,
-                reason=f"hello_{mismatched_field}_mismatch",
-                duration_ms=round((time.perf_counter() - probe_started) * 1000),
-            )
-            session = self._sessions.pop((descriptor.provider_id, descriptor.service_id), None)
-            if session is not None:
-                self._drop_tasks_for_session(session)
-                self._update_generation()
-            return None
-
-        probe_latency_ms = round((time.perf_counter() - probe_started) * 1000)
-        selection = self._selection(settings, descriptor.provider_id, descriptor.executable)
-        base = {
-            "serviceId": descriptor.service_id,
-            "providerId": descriptor.provider_id,
-            "serviceKind": descriptor.service_kind,
-            "product": descriptor.product,
-            "productVersion": descriptor.product_version,
-            "executable": str(descriptor.executable),
-            "pid": descriptor.pid,
-            "endpoint": descriptor.endpoint,
-            "protocol": RATS_PROTOCOL,
-            "descriptorPath": str(descriptor.descriptor_path),
-            "catalogRevision": descriptor.catalog_revision,
-            "nativeToolCount": descriptor.native_tool_count,
-            "startedUtc": descriptor.started_utc,
-            "probeLatencyMs": probe_latency_ms,
-            "enabled": selection is not None,
-            "connection": "available",
-            "sessionActive": False,
-            "permissions": normalize_rats_permissions(selection.get("permissions")) if selection else ["read"],
-            "tools": [],
-            "loadedToolNames": [],
-            "error": "",
-        }
-        try:
-            session_key = (descriptor.provider_id, descriptor.service_id)
-            session = self._sessions.get(session_key)
-            if selection is None:
-                if session is not None:
+            try:
+                hello = self._request(descriptor, "hello", timeout=self.probe_timeout)
+            except RatsClientError:
+                if session is not None and self._detach_session(session):
                     self._close_session(session)
-                    self._drop_tasks_for_session(session)
-                    self._sessions.pop(session_key, None)
-                    self._update_generation()
+                return None
+            expected_hello = {
+                "service_id": descriptor.service_id,
+                "protocol": RATS_PROTOCOL,
+                "provider_id": descriptor.provider_id,
+                "service_kind": descriptor.service_kind,
+                "product": descriptor.product,
+            }
+            mismatched_field = next((key for key, value in expected_hello.items() if hello.get(key) != value), "")
+            if mismatched_field:
+                self._log_diagnostic(
+                    "provider.rejected",
+                    level="warning",
+                    service_id=descriptor.service_id,
+                    provider_id=descriptor.provider_id,
+                    reason=f"hello_{mismatched_field}_mismatch",
+                    duration_ms=round((time.perf_counter() - probe_started) * 1000),
+                )
+                if session is not None and self._detach_session(session):
+                    self._close_session(session)
+                return None
+
+            probe_latency_ms = round((time.perf_counter() - probe_started) * 1000)
+            selection = self._selection(settings, descriptor.provider_id, descriptor.executable)
+            base = {
+                "serviceId": descriptor.service_id,
+                "providerId": descriptor.provider_id,
+                "serviceKind": descriptor.service_kind,
+                "product": descriptor.product,
+                "productVersion": descriptor.product_version,
+                "executable": str(descriptor.executable),
+                "pid": descriptor.pid,
+                "endpoint": descriptor.endpoint,
+                "protocol": RATS_PROTOCOL,
+                "descriptorPath": str(descriptor.descriptor_path),
+                "catalogRevision": descriptor.catalog_revision,
+                "nativeToolCount": descriptor.native_tool_count,
+                "startedUtc": descriptor.started_utc,
+                "probeLatencyMs": probe_latency_ms,
+                "enabled": selection is not None,
+                "connection": "available",
+                "sessionActive": False,
+                "permissions": normalize_rats_permissions(selection.get("permissions")) if selection else ["read"],
+                "tools": [],
+                "loadedToolNames": [],
+                "error": "",
+            }
+            if selection is None:
+                if session is not None and self._detach_session(session):
+                    self._close_session(session)
                 return base
+
             permissions = normalize_rats_permissions(selection.get("permissions"))
             if session is not None and (
                 session.permissions != permissions
                 or _path_key(session.descriptor.executable) != _path_key(descriptor.executable)
                 or session.descriptor.port != descriptor.port
             ):
-                self._close_session(session)
-                self._drop_tasks_for_session(session)
-                self._sessions.pop(session_key, None)
+                if self._detach_session(session):
+                    self._close_session(session)
                 session = None
             if session is not None:
                 try:
                     self._request(descriptor, "status", session_token=session.token)
                 except RatsClientError:
-                    self._drop_tasks_for_session(session)
-                    self._sessions.pop(session_key, None)
+                    if self._detach_session(session):
+                        self._close_session(session)
                     session = None
             if session is None:
-                session = self._open_session(descriptor, permissions)
-                self._sessions[session_key] = session
-                self._update_generation()
+                try:
+                    provisional = self._open_session(descriptor, permissions)
+                except RatsClientError as exc:
+                    with self._lock:
+                        if self._sessions.get(session_key) is None:
+                            self._drop_tasks_for_key(*session_key)
+                    base["error"] = str(exc)
+                    return base
+                with self._lock:
+                    published = not self._closed and self._sessions.get(session_key) is None
+                    if published:
+                        self._sessions[session_key] = provisional
+                        self._update_generation()
+                if not published:
+                    self._close_session(provisional)
+                    base["error"] = "RATS session changed while it was being opened."
+                    return base
+                session = provisional
             base.update(
                 {
                     "connection": "connected",
@@ -849,94 +1167,107 @@ class RatsRuntime:
                     "loadedToolNames": sorted(session.definitions),
                 }
             )
-        except RatsClientError as exc:
-            session = self._sessions.pop((descriptor.provider_id, descriptor.service_id), None)
-            if session is not None:
-                self._drop_tasks_for_session(session)
-            else:
-                self._drop_tasks_for_key(descriptor.provider_id, descriptor.service_id)
-            base["error"] = str(exc)
-            self._update_generation()
-        return base
+            return base
+        finally:
+            if locked_session is not None:
+                locked_session.io_lock.release()
 
-    def refresh(self) -> Dict[str, Any]:
+    def _ensure_open(self) -> None:
         with self._lock:
-            started = time.perf_counter()
-            settings = self._read_settings()
-            roots = self._roots(settings)
-            rejections: List[Dict[str, str]] = []
-            for root in roots:
-                if not root.is_dir():
-                    self._log_diagnostic(
-                        "discovery.root_missing",
-                        level="warning",
-                        reason="directory_not_found",
-                        path=str(root),
-                    )
-            descriptors = discover_rats_descriptors(roots, rejections, self.provider_registry)
-            for rejection in rejections:
+            if self._closed:
+                raise RatsClientError("The RATS runtime has been shut down.", code="runtime_closed")
+
+    def _refresh_lifecycle(self) -> Dict[str, Any]:
+        self._ensure_open()
+        started = time.perf_counter()
+        settings = self._read_settings()
+        roots = self._roots(settings)
+        rejections: List[Dict[str, str]] = []
+        for root in roots:
+            if not root.is_dir():
                 self._log_diagnostic(
-                    "discovery.rejected",
+                    "discovery.root_missing",
                     level="warning",
-                    reason=rejection.get("reason", "descriptor_rejected"),
-                    path=rejection.get("path", ""),
+                    reason="directory_not_found",
+                    path=str(root),
                 )
-            services = []
-            for descriptor in descriptors:
-                service = self._service_record(descriptor, settings)
-                if service is not None:
-                    services.append(service)
-            current_ids = {(service["providerId"], service["serviceId"]) for service in services}
-            for session_key in list(self._sessions):
-                if session_key not in current_ids:
-                    session = self._sessions.pop(session_key, None)
-                    if session is not None:
-                        self._drop_tasks_for_session(session)
-                    else:
-                        self._drop_tasks_for_key(*session_key)
+        descriptors = discover_rats_descriptors(roots, rejections, self.provider_registry)
+        for rejection in rejections:
+            self._log_diagnostic(
+                "discovery.rejected",
+                level="warning",
+                reason=rejection.get("reason", "descriptor_rejected"),
+                path=rejection.get("path", ""),
+            )
+        services = []
+        for descriptor in descriptors:
+            service = self._service_record(descriptor, settings)
+            if service is not None:
+                services.append(service)
+
+        current_ids = {(service["providerId"], service["serviceId"]) for service in services}
+        with self._lock:
+            stale_sessions = [
+                session
+                for session_key, session in self._sessions.items()
+                if session_key not in current_ids
+            ]
+            for session in stale_sessions:
+                self._sessions.pop((session.descriptor.provider_id, session.descriptor.service_id), None)
+                self._drop_tasks_for_session(session)
             self._has_refreshed = True
             self._update_generation()
-            scan_duration_ms = round((time.perf_counter() - started) * 1000)
-            self._log_diagnostic(
-                "discovery.complete",
-                duration_ms=scan_duration_ms,
-                count=len(services),
-            )
-            return {
-                "protocol": RATS_PROTOCOL,
-                "stateVersion": RATS_STATE_VERSION,
-                "settingsVersion": RATS_SETTINGS_VERSION,
-                "statePath": str(self.settings_path),
-                "diagnosticsPath": str(self.diagnostics_path),
-                "discoveryRoots": [str(path) for path in roots],
-                "configuredDiscoveryRoots": list(settings["discoveryRoots"]),
-                "enabledProviders": list(settings["enabledProviders"]),
-                # Deprecated compatibility view for packaged Desktop clients.
-                "enabledEngines": [
-                    {
-                        "executable": item["executable"],
-                        "permissions": list(item["permissions"]),
-                    }
-                    for item in settings["enabledProviders"]
-                    if item.get("providerId") == "reverie.engine"
-                ],
-                "supportedProviders": [
-                    {
-                        "providerId": provider_id,
-                        "product": provider.product,
-                        "serviceKind": provider.service_kind,
-                        "label": provider.label,
-                        "permissions": list(provider.permission_classes),
-                        "toolTags": list(provider.tool_tags),
-                    }
-                    for provider_id, provider in sorted(self.provider_registry.items())
-                ],
-                "services": services,
-                "scanDurationMs": scan_duration_ms,
-                "rejectedDescriptorCount": len(rejections),
-                "diagnostics": list(self._diagnostics[-160:]),
-                "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            }
+        for session in stale_sessions:
+            with session.io_lock:
+                self._close_session(session)
+
+        scan_duration_ms = round((time.perf_counter() - started) * 1000)
+        self._log_diagnostic(
+            "discovery.complete",
+            duration_ms=scan_duration_ms,
+            count=len(services),
+        )
+        with self._diagnostics_lock:
+            diagnostics = list(self._diagnostics[-160:])
+        return {
+            "protocol": RATS_PROTOCOL,
+            "stateVersion": RATS_STATE_VERSION,
+            "settingsVersion": RATS_SETTINGS_VERSION,
+            "statePath": str(self.settings_path),
+            "diagnosticsPath": str(self.diagnostics_path),
+            "discoveryRoots": [str(path) for path in roots],
+            "configuredDiscoveryRoots": list(settings["discoveryRoots"]),
+            "enabledProviders": list(settings["enabledProviders"]),
+            # Deprecated compatibility view for packaged Desktop clients.
+            "enabledEngines": [
+                {
+                    "executable": item["executable"],
+                    "permissions": list(item["permissions"]),
+                }
+                for item in settings["enabledProviders"]
+                if item.get("providerId") == "reverie.engine"
+            ],
+            "supportedProviders": [
+                {
+                    "providerId": provider_id,
+                    "product": provider.product,
+                    "serviceKind": provider.service_kind,
+                    "label": provider.label,
+                    "permissions": list(provider.permission_classes),
+                    "toolTags": list(provider.tool_tags),
+                }
+                for provider_id, provider in sorted(self.provider_registry.items())
+            ],
+            "services": services,
+            "scanDurationMs": scan_duration_ms,
+            "rejectedDescriptorCount": len(rejections),
+            "diagnostics": diagnostics,
+            "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+
+    def refresh(self) -> Dict[str, Any]:
+        with self._lifecycle_lock:
+            return self._refresh_lifecycle()
 
     def _provider(self, provider_id: str) -> RatsProviderSpec:
         normalized = _text(provider_id)
@@ -946,9 +1277,10 @@ class RatsRuntime:
         return provider
 
     def register_provider_executable(self, provider_id: str, executable: Path | str) -> Dict[str, Any]:
-        with self._lock:
+        with self._lifecycle_lock:
+            self._ensure_open()
             provider = self._provider(provider_id)
-            path = Path(executable).expanduser().resolve(strict=False)
+            path = provider.normalize_executable(executable)
             if not provider.validate_executable(path):
                 raise ValueError(provider.executable_error)
             settings = self._read_settings()
@@ -959,19 +1291,20 @@ class RatsRuntime:
                 )
             ]
             self._write_settings(settings)
-            return self.refresh()
+            return self._refresh_lifecycle()
 
     # Compatibility alias: remove after packaged Desktop clients use ratsRegisterProvider.
     def add_engine(self, executable: Path | str) -> Dict[str, Any]:
         return self.register_provider_executable("reverie.engine", executable)
 
     def remove_discovery_root(self, root: Path | str) -> Dict[str, Any]:
-        with self._lock:
+        with self._lifecycle_lock:
+            self._ensure_open()
             key = _path_key(root)
             settings = self._read_settings()
             settings["discoveryRoots"] = [item for item in settings["discoveryRoots"] if _path_key(item) != key]
             self._write_settings(settings)
-            return self.refresh()
+            return self._refresh_lifecycle()
 
     def set_provider_enabled(
         self,
@@ -980,9 +1313,10 @@ class RatsRuntime:
         enabled: bool,
         permissions: Any,
     ) -> Dict[str, Any]:
-        with self._lock:
+        with self._lifecycle_lock:
+            self._ensure_open()
             provider = self._provider(provider_id)
-            path = Path(executable).expanduser().resolve(strict=False)
+            path = provider.normalize_executable(executable)
             settings = self._read_settings()
             key = _path_key(path)
             settings["enabledProviders"] = [
@@ -1010,7 +1344,7 @@ class RatsRuntime:
                     key=lambda item: (item["providerId"], item["executable"].lower())
                 )
             self._write_settings(settings)
-            return self.refresh()
+            return self._refresh_lifecycle()
 
     # Compatibility alias: remove after packaged Desktop clients use ratsSetProviderEnabled.
     def set_engine_enabled(self, executable: Path | str, enabled: bool, permissions: Any) -> Dict[str, Any]:
@@ -1023,11 +1357,36 @@ class RatsRuntime:
         *,
         provider_id: str = "",
     ) -> List[Dict[str, Any]]:
+        requested = list(dict.fromkeys(_text(name) for name in names if _text(name)))[:16]
+        if not requested:
+            return []
         with self._lock:
             session = self._find_session(service_id, provider_id)
             if session is None:
                 raise ValueError("Enable the RATS service before requesting tool definitions.")
-            return self._describe_into_session(session, names)
+        with session.io_lock:
+            with self._lock:
+                if not self._session_is_current(session):
+                    raise ValueError("Enable the RATS service before requesting tool definitions.")
+            result = self._request(
+                session.descriptor,
+                "catalog.describe",
+                {"names": requested},
+                session_token=session.token,
+            )
+            definitions: List[Dict[str, Any]] = []
+            for item in result.get("tools", []) if isinstance(result.get("tools"), list) else []:
+                definition = _record(item)
+                name = _text(definition.get("name"))
+                if name and isinstance(definition.get("request_schema"), dict):
+                    definitions.append(dict(definition))
+            with self._lock:
+                if not self._session_is_current(session):
+                    raise ValueError("Enable the RATS service before requesting tool definitions.")
+                for definition in definitions:
+                    session.definitions[_text(definition.get("name"))] = definition
+                self._update_generation()
+            return definitions
 
     def _find_session(self, service_id: str, provider_id: str = "") -> Optional[_RatsSession]:
         normalized_service_id = _text(service_id)
@@ -1041,6 +1400,10 @@ class RatsRuntime:
         ]
         return matches[0] if len(matches) == 1 else None
 
+    def _session_is_current(self, session: _RatsSession) -> bool:
+        key = (session.descriptor.provider_id, session.descriptor.service_id)
+        return self._sessions.get(key) is session
+
     def search(
         self,
         query: str,
@@ -1050,10 +1413,10 @@ class RatsRuntime:
         provider_id: str = "",
         load: bool = True,
     ) -> List[Dict[str, Any]]:
+        wanted = _text(query)
+        if not wanted:
+            raise ValueError("RATS search requires a non-empty query.")
         with self._lock:
-            wanted = _text(query)
-            if not wanted:
-                raise ValueError("RATS search requires a non-empty query.")
             selected = self._find_session(service_id, provider_id) if service_id else None
             if service_id and selected is None:
                 sessions = []
@@ -1065,23 +1428,47 @@ class RatsRuntime:
                 ]
             else:
                 sessions = [selected] if selected is not None else list(self._sessions.values())
-            matches: List[Dict[str, Any]] = []
-            for session in sessions:
+        matches: List[Dict[str, Any]] = []
+        request_limit = min(16, max(1, int(limit)))
+        for session in sessions:
+            with session.io_lock:
+                session_key = (session.descriptor.provider_id, session.descriptor.service_id)
+                with self._lock:
+                    if self._sessions.get(session_key) is not session:
+                        continue
+                    compact_tools = list(session.compact_tools)
                 result = self._request(
                     session.descriptor,
                     "catalog.search",
-                    {"query": wanted, "limit": min(16, max(1, int(limit)))},
+                    {"query": wanted, "limit": request_limit},
                     session_token=session.token,
                 )
                 local = [_record(item) for item in result.get("matches", []) if isinstance(item, dict)]
+                definitions: List[Dict[str, Any]] = []
                 if load:
                     describable = [
                         _text(item.get("name"))
                         for item in local
-                        if any(tool.get("name") == _text(item.get("name")) and tool.get("schema") for tool in session.compact_tools)
+                        if any(tool.get("name") == _text(item.get("name")) and tool.get("schema") for tool in compact_tools)
                     ]
                     if describable:
-                        self._describe_into_session(session, describable)
+                        described = self._request(
+                            session.descriptor,
+                            "catalog.describe",
+                            {"names": list(dict.fromkeys(describable))[:16]},
+                            session_token=session.token,
+                        )
+                        for item in described.get("tools", []) if isinstance(described.get("tools"), list) else []:
+                            definition = _record(item)
+                            if _text(definition.get("name")) and isinstance(definition.get("request_schema"), dict):
+                                definitions.append(dict(definition))
+                with self._lock:
+                    if self._sessions.get(session_key) is not session:
+                        continue
+                    for definition in definitions:
+                        session.definitions[_text(definition.get("name"))] = definition
+                    if definitions:
+                        self._update_generation()
                 for item in local:
                     item["providerId"] = session.descriptor.provider_id
                     item["serviceId"] = session.descriptor.service_id
@@ -1091,7 +1478,7 @@ class RatsRuntime:
                     )
                     item["executable"] = str(session.descriptor.executable)
                     matches.append(item)
-            return sorted(matches, key=lambda item: (-int(item.get("score", 0) or 0), _text(item.get("name"))))[: max(1, int(limit))]
+        return sorted(matches, key=lambda item: (-int(item.get("score", 0) or 0), _text(item.get("name"))))[: max(1, int(limit))]
 
     def call_tool(
         self,
@@ -1108,6 +1495,10 @@ class RatsRuntime:
             session = self._find_session(service_id, provider_id)
             if session is None:
                 raise RatsClientError("The selected RATS service is not connected.", code="session_unavailable")
+        with session.io_lock:
+            with self._lock:
+                if not self._session_is_current(session):
+                    raise RatsClientError("The selected RATS service is not connected.", code="session_unavailable")
             result = self._request(
                 session.descriptor,
                 "tool.call",
@@ -1119,7 +1510,9 @@ class RatsRuntime:
             )
             task = _record(result.get("task"))
             if task:
-                self._remember_task(session, task, result=result)
+                with self._lock:
+                    if self._session_is_current(session):
+                        self._remember_task(session, task, result=result)
             return result
 
     def _task_key(self, session: _RatsSession, task_id: str) -> Tuple[str, str, str]:
@@ -1169,6 +1562,17 @@ class RatsRuntime:
             raise RatsClientError("The task is not registered in this CLI session.", code="task_unavailable")
         return session, task, key
 
+    def _confirm_task_snapshot(
+        self,
+        session: _RatsSession,
+        task: Dict[str, Any],
+        key: Tuple[str, str, str],
+    ) -> None:
+        if not self._session_is_current(session):
+            raise RatsClientError("The selected RATS service is not connected.", code="session_unavailable")
+        if self._tasks.get(key) is not task:
+            raise RatsClientError("The task is not registered in this CLI session.", code="task_unavailable")
+
     def _drop_tasks_for_session(self, session: _RatsSession) -> None:
         provider_id = session.descriptor.provider_id
         service_id = session.descriptor.service_id
@@ -1181,6 +1585,30 @@ class RatsRuntime:
             if key[0] == provider_id and key[1] == service_id:
                 self._tasks.pop(key, None)
 
+    @staticmethod
+    def _task_is_terminal(task: Dict[str, Any]) -> bool:
+        if bool(task.get("cancelled", False)):
+            return True
+        status = _record(task.get("status"))
+        if status.get("running") is False:
+            return True
+        return _text(status.get("state")).lower() in _TERMINAL_TASK_STATES
+
+    def _prune_terminal_task_history(self, session: _RatsSession) -> None:
+        """Keep the newest terminal history entries; never evict active tasks.
+
+        Callers hold ``self._lock``. Dict insertion order is the deterministic
+        first-registration order because updates do not reinsert an existing key.
+        """
+        session_prefix = (session.descriptor.provider_id, session.descriptor.service_id)
+        terminal_keys = [
+            key
+            for key, task in self._tasks.items()
+            if key[:2] == session_prefix and self._task_is_terminal(task)
+        ]
+        for key in terminal_keys[:-_MAX_TERMINAL_TASK_HISTORY_PER_SESSION]:
+            self._tasks.pop(key, None)
+
     def task_status(
         self,
         service_id: str,
@@ -1191,16 +1619,27 @@ class RatsRuntime:
     ) -> Dict[str, Any]:
         with self._lock:
             session, task, key = self._find_task(service_id, task_id, provider_id)
-            result = self._request(
-                session.descriptor,
-                "task.status",
-                {"task_id": _text(task_id)},
-                session_token=session.token,
-                timeout=self.tool_timeout,
-                deadline_ms=deadline_ms,
-            )
-            task.update({"status": dict(result), "cursor": int(result.get("next_cursor", task.get("cursor", 0)) or 0), "error": ""})
-            self._tasks[key] = task
+        with session.io_lock:
+            with self._lock:
+                self._confirm_task_snapshot(session, task, key)
+            try:
+                result = self._request(
+                    session.descriptor,
+                    "task.status",
+                    {"task_id": _text(task_id)},
+                    session_token=session.token,
+                    timeout=self.tool_timeout,
+                    deadline_ms=deadline_ms,
+                )
+            except (RatsClientError, ValueError) as exc:
+                with self._lock:
+                    if self._session_is_current(session) and self._tasks.get(key) is task:
+                        task["error"] = str(exc)
+                raise
+            with self._lock:
+                if self._session_is_current(session) and self._tasks.get(key) is task:
+                    task.update({"status": dict(result), "cursor": int(result.get("next_cursor", task.get("cursor", 0)) or 0), "error": ""})
+                    self._prune_terminal_task_history(session)
             return result
 
     def task_events(
@@ -1215,27 +1654,37 @@ class RatsRuntime:
     ) -> Dict[str, Any]:
         with self._lock:
             session, task, key = self._find_task(service_id, task_id, provider_id)
+        with session.io_lock:
+            with self._lock:
+                self._confirm_task_snapshot(session, task, key)
             if cursor is None:
                 cursor = int(task.get("cursor", 0) or 0)
             if isinstance(cursor, bool) or not isinstance(cursor, int) or cursor < 0:
                 raise ValueError("RTP task cursor must be a non-negative integer.")
             if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1 or limit > 64:
                 raise ValueError("RTP task event limit must be an integer between 1 and 64.")
-            result = self._request(
-                session.descriptor,
-                "task.events",
-                {"task_id": _text(task_id), "cursor": cursor, "limit": limit},
-                session_token=session.token,
-                timeout=self.tool_timeout,
-                deadline_ms=deadline_ms,
-            )
+            try:
+                result = self._request(
+                    session.descriptor,
+                    "task.events",
+                    {"task_id": _text(task_id), "cursor": cursor, "limit": limit},
+                    session_token=session.token,
+                    timeout=self.tool_timeout,
+                    deadline_ms=deadline_ms,
+                )
+            except (RatsClientError, ValueError) as exc:
+                with self._lock:
+                    if self._session_is_current(session) and self._tasks.get(key) is task:
+                        task["error"] = str(exc)
+                raise
             events = result.get("events") if isinstance(result.get("events"), list) else []
-            task["events"] = [*task.get("events", []), *events][-128:]
-            task["cursor"] = int(result.get("next_cursor", cursor) or cursor)
-            task["next_event_sequence"] = max(int(task.get("next_event_sequence", 0) or 0), task["cursor"] + 1)
-            task["truncated"] = bool(result.get("truncated", False))
-            task["error"] = ""
-            self._tasks[key] = task
+            with self._lock:
+                if self._session_is_current(session) and self._tasks.get(key) is task:
+                    task["events"] = [*task.get("events", []), *events][-128:]
+                    task["cursor"] = int(result.get("next_cursor", cursor) or cursor)
+                    task["next_event_sequence"] = max(int(task.get("next_event_sequence", 0) or 0), task["cursor"] + 1)
+                    task["truncated"] = bool(result.get("truncated", False))
+                    task["error"] = ""
             return result
 
     def cancel_task(
@@ -1248,6 +1697,9 @@ class RatsRuntime:
     ) -> Dict[str, Any]:
         with self._lock:
             session, task, key = self._find_task(service_id, task_id, provider_id)
+        with session.io_lock:
+            with self._lock:
+                self._confirm_task_snapshot(session, task, key)
             result = self._request(
                 session.descriptor,
                 "task.cancel",
@@ -1256,10 +1708,12 @@ class RatsRuntime:
                 timeout=self.tool_timeout,
                 deadline_ms=deadline_ms,
             )
-            task["status"] = dict(result.get("output", {}))
-            task["cancelled"] = bool(result.get("cancelled", False))
-            task["error"] = ""
-            self._tasks[key] = task
+            with self._lock:
+                if self._session_is_current(session) and self._tasks.get(key) is task:
+                    task["status"] = dict(result.get("output", {}))
+                    task["cancelled"] = bool(result.get("cancelled", False))
+                    task["error"] = ""
+                    self._prune_terminal_task_history(session)
             return result
 
     def task_logs(
@@ -1274,24 +1728,33 @@ class RatsRuntime:
     ) -> Dict[str, Any]:
         with self._lock:
             session, task, key = self._find_task(service_id, task_id, provider_id)
+        with session.io_lock:
+            with self._lock:
+                self._confirm_task_snapshot(session, task, key)
             if cursor is None:
                 cursor = int(task.get("log_cursor", 0) or 0)
             if isinstance(cursor, bool) or not isinstance(cursor, int) or cursor < 0:
                 raise ValueError("RTP task log cursor must be a non-negative integer.")
             if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1 or limit > 65_536:
                 raise ValueError("RTP task log limit must be an integer between 1 and 65536.")
-            result = self.call_tool(
-                service_id,
-                "logs.read",
-                {"task_id": _text(task_id), "cursor": cursor, "limit": limit},
-                provider_id=provider_id,
+            result = self._request(
+                session.descriptor,
+                "tool.call",
+                {
+                    "name": "logs.read",
+                    "arguments": {"task_id": _text(task_id), "cursor": cursor, "limit": limit},
+                    "dry_run": False,
+                },
+                session_token=session.token,
+                timeout=self.tool_timeout,
                 deadline_ms=deadline_ms,
             )
             output = _record(result.get("output"))
-            task["log_cursor"] = int(output.get("next_cursor", cursor) or cursor)
-            task["logs"] = output
-            task["error"] = ""
-            self._tasks[key] = task
+            with self._lock:
+                if self._session_is_current(session) and self._tasks.get(key) is task:
+                    task["log_cursor"] = int(output.get("next_cursor", cursor) or cursor)
+                    task["logs"] = output
+                    task["error"] = ""
             return output
 
     def get_tasks(self, *, service_id: str = "", provider_id: str = "") -> List[Dict[str, Any]]:
@@ -1307,20 +1770,19 @@ class RatsRuntime:
     def sync_tasks(self, *, service_id: str = "", provider_id: str = "") -> List[Dict[str, Any]]:
         with self._lock:
             selected = [
-                (task["service_id"], task["task_id"], task["provider_id"])
-                for task in self._tasks.values()
+                key
+                for key, task in self._tasks.items()
                 if (not service_id or task.get("service_id") == _text(service_id))
                 and (not provider_id or task.get("provider_id") == _text(provider_id))
+                and not self._task_is_terminal(task)
             ]
-            for task_service_id, task_id, task_provider_id in selected:
-                try:
-                    self.task_status(task_service_id, task_id, provider_id=task_provider_id)
-                    self.task_events(task_service_id, task_id, provider_id=task_provider_id)
-                except (RatsClientError, ValueError) as exc:
-                    task = self._tasks.get((task_provider_id, task_service_id, task_id))
-                    if task is not None:
-                        task["error"] = str(exc)
-            return self.get_tasks(service_id=service_id, provider_id=provider_id)
+        for task_provider_id, task_service_id, task_id in selected:
+            try:
+                self.task_status(task_service_id, task_id, provider_id=task_provider_id)
+                self.task_events(task_service_id, task_id, provider_id=task_provider_id)
+            except (RatsClientError, ValueError):
+                pass
+        return self.get_tasks(service_id=service_id, provider_id=provider_id)
 
     def compact_catalog(self) -> List[Dict[str, Any]]:
         with self._lock:
@@ -1358,9 +1820,19 @@ class RatsRuntime:
         return candidate
 
     def get_tool_definitions(self, force_refresh: bool = False) -> List[Dict[str, Any]]:
+        _generation, definitions = self.get_tool_definitions_snapshot(force_refresh=force_refresh)
+        return definitions
+
+    def get_tool_definitions_snapshot(
+        self,
+        force_refresh: bool = False,
+    ) -> Tuple[int, List[Dict[str, Any]]]:
+        """Return one generation and its matching independent definition snapshot."""
         with self._lock:
-            if force_refresh or not self._has_refreshed:
-                self.refresh()
+            needs_refresh = force_refresh or not self._has_refreshed
+        if needs_refresh:
+            self.refresh()
+        with self._lock:
             definitions: List[Dict[str, Any]] = []
             used: set[str] = set()
             for session in sorted(self._sessions.values(), key=lambda item: _path_key(item.descriptor.executable)):
@@ -1383,8 +1855,8 @@ class RatsRuntime:
                             "native_tool_name": tool_name,
                             "qualified_name": qualified_name,
                             "description": _text(source.get("summary")) or f"Native RATS provider tool {tool_name}.",
-                            "parameters": dict(source.get("request_schema", {})),
-                            "response_schema": dict(source.get("response_schema", {})),
+                            "parameters": copy.deepcopy(source.get("request_schema", {})),
+                            "response_schema": copy.deepcopy(source.get("response_schema", {})),
                             "category": _text(source.get("category")) or "rats",
                             "tags": tags,
                             "permission": permission,
@@ -1395,11 +1867,18 @@ class RatsRuntime:
                             "service_executable": str(session.descriptor.executable),
                         }
                     )
-            return definitions
+            return self._generation, definitions
 
     def _update_generation(self) -> None:
         material = [
-            (session.descriptor.service_id, sorted(session.definitions), session.permissions)
+            {
+                "provider_id": session.descriptor.provider_id,
+                "service_id": session.descriptor.service_id,
+                "permissions": sorted(dict.fromkeys(session.permissions)),
+                "definitions": {
+                    name: session.definitions[name] for name in sorted(session.definitions)
+                },
+            }
             for session in sorted(
                 self._sessions.values(),
                 key=lambda item: (item.descriptor.provider_id, item.descriptor.service_id),
@@ -1419,12 +1898,18 @@ class RatsRuntime:
             return bool(self._sessions)
 
     def shutdown(self) -> None:
-        with self._lock:
-            for session in list(self._sessions.values()):
-                self._close_session(session)
-            self._sessions.clear()
-            self._tasks.clear()
-            self._update_generation()
+        with self._lifecycle_lock:
+            with self._lock:
+                if self._closed:
+                    return
+                self._closed = True
+                sessions = list(self._sessions.values())
+                self._sessions.clear()
+                self._tasks.clear()
+                self._update_generation()
+            for session in sessions:
+                with session.io_lock:
+                    self._close_session(session)
 
 
 __all__ = [

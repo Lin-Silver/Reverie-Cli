@@ -94,7 +94,11 @@ def _external_catalog(source: str, config: Config, *, fetch_live: bool = False) 
     if source == "opencode":
         from .opencode import get_opencode_model_catalog
 
-        return get_opencode_model_catalog()
+        return get_opencode_model_catalog(
+            getattr(config, "opencode", {}),
+            fetch_live=fetch_live,
+            force_refresh=fetch_live,
+        )
     if source == "aihubmix":
         from .aihubmix import get_aihubmix_model_catalog
 
@@ -106,7 +110,11 @@ def _external_catalog(source: str, config: Config, *, fetch_live: bool = False) 
     if source == "sensenova":
         from .sensenova import get_sensenova_model_catalog
 
-        return get_sensenova_model_catalog()
+        return get_sensenova_model_catalog(
+            getattr(config, "sensenova", {}),
+            fetch_live=fetch_live,
+            force_refresh=fetch_live,
+        )
     if source == "modelscope":
         from .modelscope import get_modelscope_model_catalog
 
@@ -257,6 +265,10 @@ def build_model_sources_payload(config: Config, *, fetch_live: bool = False) -> 
         }
         if source != "standard":
             source_payload["config"] = _safe_provider_config(source, config)
+        if source in {"sensenova", "opencode"}:
+            source_payload["catalog_live"] = bool(models) and all(
+                item.get("catalog_source") == "api" for item in models
+            )
         if source == "agnes":
             from .agnes import get_agnes_source_catalog
 
@@ -319,7 +331,11 @@ def apply_model_selection(
 ) -> Dict[str, Any]:
     """Apply a source/model/reasoning selection to a Config instance."""
     normalized_source = normalize_active_model_source(source)
-    catalog = _standard_catalog(config) if normalized_source == "standard" else _external_catalog(normalized_source, config)
+    catalog = (
+        _standard_catalog(config)
+        if normalized_source == "standard"
+        else _external_catalog(normalized_source, config, fetch_live=normalized_source in {"sensenova", "opencode"})
+    )
     selection_query = model_id
     if not str(selection_query or "").strip():
         selection_query = (

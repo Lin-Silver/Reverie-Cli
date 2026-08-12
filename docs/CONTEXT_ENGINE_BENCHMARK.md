@@ -43,3 +43,43 @@ After both fixes, five consecutive 8-worker builds of the Context Engine package
 
 With this in place the ranking-stability item deferred on 2026-07-21 is resolved at its source: the top lexical-channel hit no longer jitters, because the index it is derived from is now reproducible.
 
+## 2026-08-10 — Index/query analysis symmetry for compound identifiers
+
+Studying [`alibaba/zvec`](https://github.com/alibaba/zvec), whose full-text stack models analysis as an explicit *pipeline* (tokenizer → token filters, run identically at index and query time), surfaced a structural asymmetry in this engine: the two sides did not agree on what a token was.
+
+SQLite FTS5's `porter unicode61` splits on underscores but stores `ModelAdmin` as the single opaque token `modeladmin`. The retriever's query tokenizer, however, *does* split camel case. The consequence was silent and total: a query for `model`, `admin`, `user`, or `name` returned **zero** hits against a file defining `ModelAdmin.getUserName`. One Django worktree contains 6,369 distinct camelCase identifiers across 80,382 occurrences — and Django is snake_case-dominant, so camel-heavy ecosystems (JavaScript/TypeScript, Java, Go) lose substantially more.
+
+The fix supplies the missing token-filter half of the pipeline (`context_engine/text_analysis.py`) and indexes its output in a dedicated `subwords` column on both `content_search` and `chunk_search`. Three design choices matter:
+
+* **A separate column rather than appending to `body`.** Inlining the expansion would inflate the primary field's term frequencies and document lengths, corrupting BM25 for the original spellings. A distinct column is independently weighted (`bm25(content_search, 1.0, 0.35)`; `bm25(chunk_search, 5.5, 3.0, 1.8, 1.0, 0.6)`) so an exact match on the full identifier always outranks a sub-token match.
+* **One entry per distinct sub-token per document, not per occurrence.** The goal is to make a term *reachable*; frequency signal stays with the text as written. Index growth measured on Django: **1.4%**. Per-occurrence emission would have roughly doubled it.
+* **No snake_case expansion.** `unicode61` already splits underscores, so expanding it would double the vocabulary for no recall gain.
+
+A `PRAGMA user_version` schema guard discards caches written before the new column, which would otherwise be appended to with mismatched column arity.
+
+**The instructive part of this change was a regression it initially caused.** `content_document_frequencies()` issued its `MATCH` unscoped, so the new column immediately began contributing to document frequency: every `*Admin` symbol donated an `admin` posting, making precisely the discriminative terms look common and stripping them of the rare-term IDF bonus. This re-created, through a new door, the exact defect corrected on 2026-07-20. Holdout fell to Recall@1 0.583 / nDCG 0.804. Scoping the frequency query to `body` restored and slightly exceeded the baseline. The general rule, now covered by a regression test: **an expansion column may broaden reachability, but must never enter term statistics.**
+
+Held-out profiles (indices rebuilt per instance), baseline → final:
+
+| Profile | Instances | Recall@1 | Recall@5 | Recall@10 | MRR@10 | nDCG@10 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Holdout | 12 | 0.67 → 0.67 | 1.00 → 1.00 | 1.00 → 1.00 | 0.781 → 0.794 | 0.835 → 0.846 |
+| Generalization | 10 | 0.50 → 0.50 | 0.60 → 0.60 | 0.60 → 0.60 | 0.520 → 0.520 | 0.539 → 0.539 |
+| Blind | 9 | 0.56 → 0.56 | 1.00 → 1.00 | 1.00 → 1.00 | 0.731 → 0.713 | 0.799 → 0.785 |
+
+Holdout improves; generalization is unchanged to the last digit; blind loses one instance from rank 2 to rank 3 (the ΔMRR of 1/54 is exactly (1/2 − 1/3)/9). The honest reading of a ±1-instance movement on a 9-instance profile is noise, not signal — these sets are too small for a single rank shift to carry meaning. The change is justified by the mechanism it corrects, which is a genuine recall hole on camel-cased code that these Python-dominated profiles are poorly positioned to measure.
+
+**One candidate change was tested and rejected.** Replacing the counter in `_score_file_content_for_task` with textbook BM25 saturation and length normalization produced *bit-identical* results across all 35 tuning instances (`quick` n=12, `validation` n=23 — every metric equal to the last digit). That function is not a retrieval channel: it re-scores the top-32 candidates already selected by the FTS channels, so it can reorder a shortlist but never change its membership. It was reverted rather than kept as unmeasurable complexity. One real defect found inside it was kept: the scoring loop terminated once it had collected four *reasons*, silently abandoning every remaining query term.
+
+### The schema guard was itself a bug
+
+The `PRAGMA user_version` guard above was written to drop and rebuild an incompatible index. Checking where it actually fires showed that this was backwards. `_begin_content_index_rebuild` unlinks its target and builds into a fresh temporary file, so `user_version` is always 0 there and the drop branch never runs. The only caller that can reach it is `_begin_content_index_update` — the *incremental* path, which opens the existing database and then rewrites **only the files it was handed**. Dropping the tables there discards every unchanged file's postings and re-inserts a handful, while `incremental_index` still reports success.
+
+A three-file reproduction reduced the content index to the single changed file. The condition needed to hit this is ordinary: upgrade the build, edit one file, and let the watcher fire before any full re-index. Search then silently misses most of the repository, with no error and a valid-looking cache on disk.
+
+The guard now distinguishes the two callers. A rebuild may discard, an in-place update raises `OutdatedContentIndexError` and leaves the old database untouched and readable; `incremental_index`'s existing handler catches it and skips content indexing for that pass, because both write helpers are already no-ops when the connection is `None`. `CacheManager.CACHE_VERSION` moves to `1.11.0` in the same change, which is what forces the full rebuild that legitimately replaces the layout — the two counters have to move together, since nothing re-indexes while the JSON cache still validates.
+
+The prior regression test asserted the drop-and-recreate behaviour, so it encoded the bug as expected output. It passed only because its fixture held one file, making the loss invisible. It is replaced by a multi-file test that fails against the old behaviour on the reachability assertion, plus a test pinning the `CACHE_VERSION` rejection. Holdout is unchanged at Recall@1 0.667 / MRR 0.794 / nDCG 0.846 — bit-identical to the pre-fix run, as expected for a fix on a path the benchmark's rebuilt-per-instance indices never take.
+
+The general lesson is the same one the DF regression taught, in a different register: a guard is only correct relative to the caller that reaches it, so it is worth checking which callers actually can. Here the branch that looked like the safety mechanism was unreachable from the safe caller and destructive from the unsafe one.
+

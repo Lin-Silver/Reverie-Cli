@@ -191,14 +191,14 @@ def test_provider_smoke_redacts_secrets_and_skips_unknown(tmp_path) -> None:
 
 
 def test_provider_smoke_parses_model_overrides() -> None:
-    single = parse_model_overrides("z-ai/glm-5.2,qwen/qwen3.5-397b-a17b", ["nvidia"])
+    single = parse_model_overrides("z-ai/glm-5.2,meta/muse-glimmer-30b", ["nvidia"])
     multi = parse_model_overrides(
-        "nvidia:z-ai/glm-5.2|qwen/qwen3.5-397b-a17b,modelscope:stepfun-ai/Step-3.7-Flash",
+        "nvidia:z-ai/glm-5.2|meta/muse-glimmer-30b,modelscope:stepfun-ai/Step-3.7-Flash",
         ["nvidia", "modelscope"],
     )
 
-    assert single == {"nvidia": ["z-ai/glm-5.2", "qwen/qwen3.5-397b-a17b"]}
+    assert single == {"nvidia": ["z-ai/glm-5.2", "meta/muse-glimmer-30b"]}
     assert multi == {
-        "nvidia": ["z-ai/glm-5.2", "qwen/qwen3.5-397b-a17b"],
+        "nvidia": ["z-ai/glm-5.2", "meta/muse-glimmer-30b"],
         "modelscope": ["stepfun-ai/Step-3.7-Flash"],
     }

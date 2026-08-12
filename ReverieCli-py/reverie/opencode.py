@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import os
+import time
+from hashlib import sha256
 from typing import Any, Dict, List, Optional
+
+import requests
 
 
 OPENCODE_DEFAULT_API_URL = "https://opencode.ai/zen/v1"
@@ -16,6 +20,7 @@ OPENCODE_DEFAULT_CONTEXT_TOKENS = 200_000
 OPENCODE_DEFAULT_MAX_TOKENS = 16_384
 OPENCODE_DEFAULT_TEMPERATURE = 0.7
 OPENCODE_DEFAULT_TOP_P = 1.0
+OPENCODE_MODEL_CACHE_TTL_SECONDS = 300
 
 _REASONING_LABELS = {
     "none": ("Non-think", "Disable reasoning for a faster direct response."),
@@ -50,6 +55,7 @@ def _opencode_model(
     thinking_control: str = "fixed",
     thinking_options: Optional[List[Dict[str, str]]] = None,
     default_thinking_choice: str = "",
+    free: bool = True,
 ) -> Dict[str, Any]:
     return {
         "id": str(model_id or "").strip(),
@@ -65,7 +71,7 @@ def _opencode_model(
         "thinking_options": list(thinking_options or []),
         "default_thinking_choice": str(default_thinking_choice or ""),
         "tool_calling": True,
-        "free": True,
+        "free": bool(free),
     }
 
 
@@ -84,7 +90,7 @@ _OPENCODE_MODEL_CATALOG: List[Dict[str, Any]] = [
         context_length=200_000,
         max_output_tokens=128_000,
         thinking_control="effort",
-        thinking_options=_reasoning_options("none", "high", "max"),
+        thinking_options=_reasoning_options("low", "high", "max"),
         default_thinking_choice="high",
     ),
     _opencode_model(
@@ -97,13 +103,13 @@ _OPENCODE_MODEL_CATALOG: List[Dict[str, Any]] = [
         vision_modalities=["image", "audio", "video"],
     ),
     _opencode_model(
-        "north-mini-code-free",
-        "North Mini Code Free",
-        "OpenCode Zen free North Mini Code model with selectable reasoning.",
-        context_length=256_000,
+        "hy3-free",
+        "Hy3 Free",
+        "OpenCode Zen free Hy3 reasoning model.",
+        context_length=190_000,
         max_output_tokens=64_000,
         thinking_control="effort",
-        thinking_options=_reasoning_options("none", "high"),
+        thinking_options=_reasoning_options("low", "medium", "high"),
         default_thinking_choice="high",
     ),
     _opencode_model(
@@ -114,14 +120,16 @@ _OPENCODE_MODEL_CATALOG: List[Dict[str, Any]] = [
         max_output_tokens=128_000,
     ),
     _opencode_model(
-        "ling-3.0-flash-free",
-        "Ling 3.0 Flash Free",
-        "OpenCode Zen free Ling 3.0 Flash model with selectable reasoning effort.",
+        "ling-3.0-tiny-free",
+        "Ling 3.0 Tiny Free",
+        "OpenCode Zen free compact Ling 3.0 reasoning model.",
         context_length=262_144,
         max_output_tokens=32_768,
-        thinking_control="effort",
-        thinking_options=_reasoning_options("low", "medium", "high"),
-        default_thinking_choice="medium",
+    ),
+    _opencode_model(
+        "nemotron-3.5-lightning-free",
+        "Nemotron 3.5 Lightning Free",
+        "OpenCode Zen free Nemotron 3.5 Lightning reasoning model.",
     ),
     _opencode_model(
         "laguna-s-2.1-free",
@@ -133,11 +141,120 @@ _OPENCODE_MODEL_CATALOG: List[Dict[str, Any]] = [
         thinking_options=_reasoning_options("low", "medium", "high"),
         default_thinking_choice="medium",
     ),
+    _opencode_model(
+        "deepseek-v4-pro",
+        "DeepSeek V4 Pro",
+        "OpenCode Zen paid DeepSeek V4 Pro model available with an API key.",
+        context_length=1_000_000,
+        max_output_tokens=384_000,
+        free=False,
+        thinking_control="effort",
+        thinking_options=_reasoning_options("high", "max"),
+        default_thinking_choice="high",
+    ),
+    _opencode_model(
+        "deepseek-v4-flash",
+        "DeepSeek V4 Flash",
+        "OpenCode Zen paid DeepSeek V4 Flash model available with an API key.",
+        context_length=1_000_000,
+        max_output_tokens=384_000,
+        free=False,
+        thinking_control="effort",
+        thinking_options=_reasoning_options("low", "high", "max"),
+        default_thinking_choice="high",
+    ),
+    _opencode_model(
+        "minimax-m3",
+        "MiniMax M3",
+        "OpenCode Zen paid MiniMax M3 model available with an API key.",
+        context_length=512_000,
+        max_output_tokens=128_000,
+        free=False,
+    ),
+    _opencode_model(
+        "minimax-m2.7",
+        "MiniMax M2.7",
+        "OpenCode Zen paid MiniMax M2.7 model available with an API key.",
+        context_length=204_800,
+        max_output_tokens=131_072,
+        free=False,
+    ),
+    _opencode_model(
+        "minimax-m2.5",
+        "MiniMax M2.5",
+        "OpenCode Zen paid MiniMax M2.5 model available with an API key.",
+        context_length=204_800,
+        max_output_tokens=131_072,
+        free=False,
+    ),
+    _opencode_model(
+        "glm-5.2",
+        "GLM 5.2",
+        "OpenCode Zen paid GLM 5.2 model available with an API key.",
+        context_length=204_800,
+        max_output_tokens=131_072,
+        free=False,
+        thinking_control="effort",
+        thinking_options=_reasoning_options("high", "max"),
+        default_thinking_choice="high",
+    ),
+    _opencode_model(
+        "glm-5.1",
+        "GLM 5.1",
+        "OpenCode Zen paid GLM 5.1 reasoning model available with an API key.",
+        context_length=204_800,
+        max_output_tokens=131_072,
+        free=False,
+    ),
+    _opencode_model(
+        "glm-5",
+        "GLM 5",
+        "OpenCode Zen paid GLM 5 reasoning model available with an API key.",
+        context_length=204_800,
+        max_output_tokens=131_072,
+        free=False,
+    ),
+    _opencode_model(
+        "kimi-k2.5",
+        "Kimi K2.5",
+        "OpenCode Zen paid multimodal Kimi K2.5 model available with an API key.",
+        context_length=262_144,
+        max_output_tokens=65_536,
+        vision=True,
+        vision_modalities=["image", "video"],
+        free=False,
+    ),
+    _opencode_model(
+        "kimi-k2.6",
+        "Kimi K2.6",
+        "OpenCode Zen paid multimodal Kimi K2.6 model available with an API key.",
+        context_length=262_144,
+        max_output_tokens=65_536,
+        vision=True,
+        vision_modalities=["image", "video"],
+        free=False,
+    ),
+    _opencode_model(
+        "kimi-k2.7-code",
+        "Kimi K2.7 Code",
+        "OpenCode Zen paid Kimi K2.7 coding model available with an API key.",
+        free=False,
+    ),
+    _opencode_model(
+        "kimi-k3",
+        "Kimi K3",
+        "OpenCode Zen paid Kimi K3 model available with an API key.",
+        free=False,
+        thinking_control="effort",
+        thinking_options=_reasoning_options("max"),
+        default_thinking_choice="max",
+    ),
 ]
 
 _OPENCODE_MODEL_METADATA = {
     str(item["id"]).strip().lower(): dict(item) for item in _OPENCODE_MODEL_CATALOG
 }
+_OPENCODE_MODEL_CACHE: Dict[str, Any] = {"key": "", "expires_at": 0.0, "models": []}
 
 
 def default_opencode_config() -> Dict[str, Any]:
@@ -158,9 +275,76 @@ def default_opencode_config() -> Dict[str, Any]:
     }
 
 
-def get_opencode_model_catalog() -> List[Dict[str, Any]]:
-    """Return the supported OpenCode free-model catalog."""
-    return [dict(item) for item in _OPENCODE_MODEL_CATALOG]
+def _opencode_models_url(api_url: Any) -> str:
+    return f"{resolve_opencode_sdk_base_url(api_url).rstrip('/')}/models"
+
+
+def fetch_opencode_model_catalog(
+    opencode_config: Any = None,
+    *,
+    timeout: int = 5,
+    force_refresh: bool = False,
+) -> List[Dict[str, Any]]:
+    """Fetch models exposed by Zen and keep only models this source can call correctly."""
+    cfg = default_opencode_config()
+    if isinstance(opencode_config, dict):
+        cfg.update(opencode_config)
+    api_key = resolve_opencode_api_key(cfg)
+    models_url = _opencode_models_url(cfg.get("api_url"))
+    auth_hash = sha256(api_key.encode("utf-8")).hexdigest() if api_key else "anonymous"
+    cache_key = f"{models_url}:{auth_hash}"
+    now = time.monotonic()
+    if (
+        not force_refresh
+        and _OPENCODE_MODEL_CACHE.get("key") == cache_key
+        and float(_OPENCODE_MODEL_CACHE.get("expires_at") or 0.0) > now
+    ):
+        return [dict(item) for item in _OPENCODE_MODEL_CACHE.get("models", [])]
+
+    headers = {"Accept": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    response = requests.get(models_url, headers=headers, timeout=max(1, int(timeout or 5)))
+    response.raise_for_status()
+    payload = response.json()
+    raw_models = payload.get("data", payload.get("models", [])) if isinstance(payload, dict) else []
+    live_ids = {
+        str(item.get("id") or item.get("model") or "").strip().lower()
+        for item in raw_models
+        if isinstance(item, dict)
+    }
+    models = [
+        {**dict(item), "catalog_source": "api"}
+        for item in _OPENCODE_MODEL_CATALOG
+        if str(item["id"]).lower() in live_ids and (api_key or bool(item.get("free")))
+    ]
+    _OPENCODE_MODEL_CACHE.update(
+        key=cache_key,
+        expires_at=now + OPENCODE_MODEL_CACHE_TTL_SECONDS,
+        models=models,
+    )
+    return [dict(item) for item in models]
+
+
+def get_opencode_model_catalog(
+    opencode_config: Any = None,
+    *,
+    fetch_live: bool = False,
+    force_refresh: bool = False,
+) -> List[Dict[str, Any]]:
+    """Return anonymous free models or API-key models supported by this source."""
+    cfg = default_opencode_config()
+    if isinstance(opencode_config, dict):
+        cfg.update(opencode_config)
+    if fetch_live:
+        try:
+            live_models = fetch_opencode_model_catalog(cfg, force_refresh=force_refresh)
+            if live_models:
+                return live_models
+        except (requests.RequestException, ValueError, TypeError):
+            pass
+    has_api_key = bool(resolve_opencode_api_key(cfg))
+    return [dict(item) for item in _OPENCODE_MODEL_CATALOG if has_api_key or bool(item.get("free"))]
 
 
 def get_opencode_model_metadata(model_id: Any) -> Optional[Dict[str, Any]]:
@@ -179,10 +363,15 @@ def resolve_opencode_selected_model(opencode_config: Any, model_id: Optional[str
         cfg.update(opencode_config)
 
     wanted = str(model_id or cfg.get("selected_model_id", OPENCODE_DEFAULT_MODEL_ID) or "").strip().lower()
-    matched = get_opencode_model_metadata(wanted)
+    catalog = get_opencode_model_catalog(cfg)
+    matched = next((dict(item) for item in catalog if str(item.get("id") or "").lower() == wanted), None)
     if matched:
         return matched
-    return get_opencode_model_catalog()[0]
+    default_model = next(
+        (dict(item) for item in catalog if str(item.get("id") or "").lower() == OPENCODE_DEFAULT_MODEL_ID),
+        None,
+    )
+    return default_model or (dict(catalog[0]) if catalog else None)
 
 
 def resolve_opencode_sdk_base_url(api_url: Any) -> str:

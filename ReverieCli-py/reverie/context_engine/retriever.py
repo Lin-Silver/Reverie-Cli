@@ -873,9 +873,10 @@ class ContextRetriever:
             if count <= 0:
                 continue
             score += min(2.4, 0.35 * count) * weight
-            reasons.append(f"content:{term_lower}")
-            if len(reasons) >= 4:
-                break
+            # Only the reason list is capped: breaking out of the loop here
+            # would silently stop scoring every remaining query term.
+            if len(reasons) < 4:
+                reasons.append(f"content:{term_lower}")
         return score, reasons
 
     def _rank_task_search_terms(

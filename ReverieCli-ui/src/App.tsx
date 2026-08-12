@@ -2354,6 +2354,15 @@ function taskKey(task: RatsTaskRecord): string {
   return `${task.provider_id}:${task.service_id}:${task.task_id}`;
 }
 
+const RTP_TASK_LOG_HISTORY_LIMIT = 64 * 1024;
+
+function appendTaskLogHistory(previous: string, incoming: string): string {
+  const combined = `${previous}${incoming}`;
+  return combined.length > RTP_TASK_LOG_HISTORY_LIMIT
+    ? combined.slice(-RTP_TASK_LOG_HISTORY_LIMIT)
+    : combined;
+}
+
 function recordValue(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
@@ -2382,12 +2391,34 @@ function RtpTasksView() {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const requestSequence = useRef(0);
+  const loadInFlight = useRef(false);
+  const selectedKeyRef = useRef("");
   const eventHistory = useRef<Record<string, Array<Record<string, unknown>>>>({});
   const logHistory = useRef<Record<string, string>>({});
   const logCursors = useRef<Record<string, number>>({});
   const cancelledTasks = useRef(new Set<string>());
+  const selectTask = useCallback((key: string) => {
+    selectedKeyRef.current = key;
+    setSelectedKey(key);
+  }, []);
+  const retainTaskCacheKeys = useCallback((validKeys: Set<string>) => {
+    for (const key of Object.keys(eventHistory.current)) {
+      if (!validKeys.has(key)) delete eventHistory.current[key];
+    }
+    for (const key of Object.keys(logHistory.current)) {
+      if (!validKeys.has(key)) delete logHistory.current[key];
+    }
+    for (const key of Object.keys(logCursors.current)) {
+      if (!validKeys.has(key)) delete logCursors.current[key];
+    }
+    for (const key of cancelledTasks.current) {
+      if (!validKeys.has(key)) cancelledTasks.current.delete(key);
+    }
+  }, []);
 
   const load = useCallback(async (foreground = false) => {
+    if (loadInFlight.current) return;
+    loadInFlight.current = true;
     const sequence = ++requestSequence.current;
     if (foreground) setLoading(true);
     try {
@@ -2395,27 +2426,28 @@ function RtpTasksView() {
       const nextState = stateResponse.rats;
       if (sequence !== requestSequence.current) return;
       setState(nextState);
-      const service = nextState.services.find((item) => item.connection === "connected" && item.sessionActive);
-      if (!service) {
+      const connectedServices = nextState.services.filter((item) => item.connection === "connected" && item.sessionActive);
+      if (!connectedServices.length) {
+        retainTaskCacheKeys(new Set<string>());
         setTasks([]);
-        setSelectedKey("");
+        selectTask("");
         setDetail(null);
         setError("");
         return;
       }
-      const tasksResponse = await window.reverie.request("ratsTasks", {
-        providerId: service.providerId,
-        serviceId: service.serviceId,
-      });
-      const nextTasks = ((Array.isArray(tasksResponse.tasks) ? tasksResponse.tasks : []) as RatsTaskRecord[]).map((task) =>
+      const tasksResponse = await window.reverie.request("ratsTasks", {});
+      const taskRecords = (Array.isArray(tasksResponse.tasks) ? tasksResponse.tasks : []) as RatsTaskRecord[];
+      if (sequence !== requestSequence.current) return;
+      retainTaskCacheKeys(new Set(taskRecords.map(taskKey)));
+      const nextTasks = taskRecords.map((task) =>
         cancelledTasks.current.has(taskKey(task)) ? { ...task, cancelled: true } : task,
       );
-      if (sequence !== requestSequence.current) return;
       setTasks(nextTasks);
-      const nextKey = selectedKey && nextTasks.some((task) => taskKey(task) === selectedKey)
-        ? selectedKey
-        : taskKey(nextTasks[0] ?? ({ provider_id: "", service_id: "", task_id: "" } as RatsTaskRecord));
-      setSelectedKey(nextKey);
+      const currentKey = selectedKeyRef.current;
+      const nextKey = currentKey && nextTasks.some((task) => taskKey(task) === currentKey)
+        ? currentKey
+        : nextTasks[0] ? taskKey(nextTasks[0]) : "";
+      selectTask(nextKey);
       if (!nextKey || !nextTasks.some((task) => taskKey(task) === nextKey)) {
         setDetail(null);
         setError("");
@@ -2424,12 +2456,23 @@ function RtpTasksView() {
       const task = nextTasks.find((item) => taskKey(item) === nextKey) as RatsTaskRecord;
       const eventCursor = Number(recordValue(task.status).next_cursor ?? task.cursor ?? 0) || 0;
       const logCursor = logCursors.current[nextKey] ?? 0;
-      const [statusResponse, eventsResponse, logsResponse] = await Promise.all([
-        window.reverie.request("ratsTaskStatus", { providerId: service.providerId, serviceId: service.serviceId, taskId: task.task_id, deadlineMs: 5_000 }).catch(() => null),
-        window.reverie.request("ratsTaskEvents", { providerId: service.providerId, serviceId: service.serviceId, taskId: task.task_id, cursor: eventCursor, limit: 32, deadlineMs: 5_000 }).catch(() => null),
-        window.reverie.request("ratsTaskLogs", { providerId: service.providerId, serviceId: service.serviceId, taskId: task.task_id, cursor: logCursor, limit: 8_192, deadlineMs: 5_000 }).catch(() => null),
+      const [statusResult, eventsResult, logsResult] = await Promise.allSettled([
+        window.reverie.request("ratsTaskStatus", { providerId: task.provider_id, serviceId: task.service_id, taskId: task.task_id, deadlineMs: 5_000 }),
+        window.reverie.request("ratsTaskEvents", { providerId: task.provider_id, serviceId: task.service_id, taskId: task.task_id, cursor: eventCursor, limit: 32, deadlineMs: 5_000 }),
+        window.reverie.request("ratsTaskLogs", { providerId: task.provider_id, serviceId: task.service_id, taskId: task.task_id, cursor: logCursor, limit: 8_192, deadlineMs: 5_000 }),
       ]);
-      if (sequence !== requestSequence.current) return;
+      if (sequence !== requestSequence.current || selectedKeyRef.current !== nextKey) return;
+      const failedResult = [statusResult, eventsResult, logsResult].find((result) => result.status === "rejected");
+      if (failedResult?.status === "rejected") {
+        setDetail(null);
+        const reason = failedResult.reason;
+        setError(reason instanceof Error ? reason.message : String(reason));
+        return;
+      }
+      if (statusResult.status !== "fulfilled" || eventsResult.status !== "fulfilled" || logsResult.status !== "fulfilled") return;
+      const statusResponse = statusResult.value;
+      const eventsResponse = eventsResult.value;
+      const logsResponse = logsResult.value;
       const status = statusResponse?.result ?? recordValue(task.status);
       const eventResult = eventsResponse?.result ?? {};
       const incomingEvents = Array.isArray(eventResult.events) ? eventResult.events as Array<Record<string, unknown>> : [];
@@ -2444,7 +2487,7 @@ function RtpTasksView() {
       eventHistory.current[nextKey] = mergedEvents;
       const logResult = logsResponse?.result ?? {};
       const logText = String(logResult.text ?? "");
-      if (logText) logHistory.current[nextKey] = `${logHistory.current[nextKey] ?? ""}${logText}`;
+      if (logText) logHistory.current[nextKey] = appendTaskLogHistory(logHistory.current[nextKey] ?? "", logText);
       const nextLogCursor = Number(logResult.next_cursor ?? logCursor) || logCursor;
       logCursors.current[nextKey] = nextLogCursor;
       setDetail({ status: recordValue(status), events: mergedEvents, logs: logHistory.current[nextKey] ?? "", logCursor: nextLogCursor });
@@ -2453,26 +2496,35 @@ function RtpTasksView() {
       if (sequence === requestSequence.current) setError(loadError instanceof Error ? loadError.message : String(loadError));
     } finally {
       if (sequence === requestSequence.current) setLoading(false);
+      loadInFlight.current = false;
     }
-  }, [selectedKey]);
+  }, [retainTaskCacheKeys, selectTask]);
 
   useEffect(() => {
-    void load(true);
-    const timer = window.setInterval(() => void load(false), 1500);
-    return () => window.clearInterval(timer);
+    let stopped = false;
+    let timer: number | null = null;
+    const poll = async (foreground: boolean) => {
+      await load(foreground);
+      if (!stopped) timer = window.setTimeout(() => void poll(false), 1500);
+    };
+    void poll(true);
+    return () => {
+      stopped = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
   }, [load]);
 
   const selectedTask = tasks.find((task) => taskKey(task) === selectedKey) ?? null;
-  const selectedService = selectedTask
-    ? state?.services.find((service) => service.providerId === selectedTask.provider_id && service.serviceId === selectedTask.service_id)
-    : state?.services.find((service) => service.connection === "connected" && service.sessionActive);
   const status = detail?.status ?? recordValue(selectedTask?.status);
   const output = recordValue(status.output);
-  const progress = typeof status.progress === "number" ? status.progress : typeof output.progress === "number" ? output.progress : null;
+  const progressValue = typeof status.progress === "number" ? status.progress : typeof output.progress === "number" ? output.progress : null;
+  const progress = progressValue !== null && Number.isFinite(progressValue)
+    ? Math.max(0, Math.min(1, progressValue)) * 100
+    : null;
   const connected = state?.services.filter((service) => service.connection === "connected" && service.sessionActive).length ?? 0;
 
   const cancel = useCallback(async () => {
-    if (!selectedTask || !selectedService) return;
+    if (!selectedTask) return;
     const key = taskKey(selectedTask);
     setBusy(key);
     try {
@@ -2489,7 +2541,7 @@ function RtpTasksView() {
     } finally {
       setBusy("");
     }
-  }, [load, selectedService, selectedTask]);
+  }, [load, selectedTask]);
 
   return (
     <div className="page-scroll rats-tasks-page">
@@ -2505,7 +2557,7 @@ function RtpTasksView() {
         <div><FileText size={17} /><span>{t("事件记录")}<strong>{detail?.events.length ?? 0}</strong></span></div>
       </div>
       {error && <div className="page-loading error"><AlertCircle size={18} />{error}</div>}
-      {!selectedService && !loading ? (
+      {connected === 0 && !loading ? (
         <div className="empty-panel rats-task-empty"><ShieldCheck size={28} /><strong>{t("尚未启用 RTP 服务")}</strong><span>{t("先在 RATS 页面显式启用 Reverie Engine，运行中的任务会在这里自动出现。")}</span></div>
       ) : (
         <div className="rats-task-layout">
@@ -2515,7 +2567,7 @@ function RtpTasksView() {
               {tasks.map((task) => {
                 const itemStatus = recordValue(task.status);
                 const itemKey = taskKey(task);
-                return <button type="button" className={`rats-task-row ${itemKey === selectedKey ? "active" : ""}`} key={itemKey} onClick={() => setSelectedKey(itemKey)}>
+                return <button type="button" className={`rats-task-row ${itemKey === selectedKey ? "active" : ""}`} key={itemKey} onClick={() => { selectTask(itemKey); setDetail(null); void load(true); }}>
                   <span className={`rats-task-dot ${taskRunning(task, itemStatus) ? "running" : "done"}`} />
                   <span className="rats-task-row-main"><strong>{task.tool || t("原生任务")}</strong><code>{task.task_id}</code></span>
                   <span className={`rats-status ${taskRunning(task, itemStatus) ? "connected" : "available"}`}>{taskStatusLabel(task, itemStatus, t)}</span>
@@ -2528,7 +2580,7 @@ function RtpTasksView() {
             {!selectedTask ? <div className="rats-task-detail-empty"><Clock3 size={24} /><strong>{t("选择一个任务查看详情")}</strong></div> : <>
               <div className="rats-task-detail-header"><div><p>{t("RTP 任务详情")}</p><h2 id="rats-task-detail-title">{selectedTask.tool || t("原生任务")}</h2></div><div className="rats-task-detail-actions"><span className={`rats-status ${taskRunning(selectedTask, status) ? "connected" : "available"}`}>{taskStatusLabel(selectedTask, status, t)}</span>{taskRunning(selectedTask, status) && <button type="button" className="danger-button" onClick={() => void cancel()} disabled={busy === taskKey(selectedTask)}><Square size={13} />{t("取消任务")}</button>}</div></div>
               <div className="rats-task-meta"><div><span>{t("任务 ID")}</span><code>{selectedTask.task_id}</code></div><div><span>{t("提供者")}</span><code>{selectedTask.provider_id}</code></div><div><span>{t("事件游标")}</span><code>{String(status.next_cursor ?? selectedTask.cursor ?? 0)}</code></div><div><span>{t("截止时间")}</span><code>{String(selectedTask.deadline_msec ?? 0)} ms</code></div></div>
-              {progress !== null && <div className="rats-task-progress"><div><span>{t("进度")}</span><strong>{Math.round(Math.max(0, Math.min(100, progress)))}%</strong></div><div className="rats-task-progress-track"><span style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} /></div></div>}
+              {progress !== null && <div className="rats-task-progress"><div><span>{t("进度")}</span><strong>{Math.round(progress)}%</strong></div><div className="rats-task-progress-track"><span style={{ width: `${progress}%` }} /></div></div>}
               <div className="rats-task-detail-grid">
                 <section className="rats-task-stream" aria-labelledby="rats-task-events-title"><div className="rats-task-subheading"><div><h3 id="rats-task-events-title">{t("版本化事件")}</h3><span>reverie.rtp.task/1</span></div><span>{detail?.events.length ?? 0}</span></div><div className="rats-task-events">{detail?.events.map((event, index) => <div className="rats-task-event" key={`${String(event.sequence ?? "")}:${String(event.type ?? "")}:${index}`}><div><strong>{String(event.type ?? t("事件"))}</strong><span>{String(event.timestamp_utc ?? event.timestamp ?? "")}</span></div><code>{event.sequence === undefined ? "—" : `#${String(event.sequence)}`}</code><pre>{JSON.stringify(event.payload ?? event.output ?? {}, null, 2)}</pre></div>)}{!detail?.events.length && <div className="rats-task-empty-inline">{t("等待事件")}</div>}</div></section>
                 <section className="rats-task-stream" aria-labelledby="rats-task-logs-title"><div className="rats-task-subheading"><div><h3 id="rats-task-logs-title">{t("任务日志")}</h3><span>{t("实时增量读取")}</span></div><code>{detail?.logCursor ?? 0}</code></div><pre className="rats-task-log-output">{detail?.logs || t("等待日志")}</pre></section>
@@ -3235,6 +3287,16 @@ export default function App() {
     } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
   }, [t, toast]);
 
+  const openModelPicker = useCallback(() => {
+    setModelPickerOpen(true);
+    void window.reverie.request("refreshModelSources", {}).then((response) => {
+      if (!response.models) return;
+      setState((current) => current ? { ...current, models: response.models } : current);
+    }).catch(() => {
+      // Keep the initialized fallback catalog available when live discovery fails.
+    });
+  }, []);
+
   const selectReasoning = useCallback(async (reasoning: string) => {
     if (!state) return;
     const source = visibleModelSources(state.models.sources).find((item) => item.active);
@@ -3475,7 +3537,7 @@ export default function App() {
     <div className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${inspectorOpen ? "with-inspector" : ""}`}>
       <Sidebar state={state} view={view} setView={setView} activeSessionId={activeSessionId} openSession={(id) => void openSession(id)} newSession={() => void createSession()} sessionBusy={sessionBusy} selectWorkspace={() => void selectWorkspace()} switchWorkspace={(projectRoot) => void switchWorkspace(projectRoot)} openSearch={() => setSessionSearchOpen(true)} preferences={uiPreferences} toggleSidebar={toggleSidebar} renameSession={(target) => setRenameSessionTarget({ id: target.id, name: target.name })} toggleArchive={toggleSessionArchive} deleteSession={deleteSession} deleteArchivedSessions={deleteArchivedSessions} deleteProject={deleteProject} />
       <main className="main-area">
-        <Topbar state={state} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} openModelPicker={() => setModelPickerOpen(true)} selectReasoning={(value) => void selectReasoning(value)} setMode={(mode) => void updateSetting("mode", mode)} inspectorOpen={inspectorOpen} toggleInspector={() => setInspectorOpen((value) => !value)} openCommands={() => setCommandOpen(true)} theme={theme} setTheme={changeTheme} />
+        <Topbar state={state} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} openModelPicker={openModelPicker} selectReasoning={(value) => void selectReasoning(value)} setMode={(mode) => void updateSetting("mode", mode)} inspectorOpen={inspectorOpen} toggleInspector={() => setInspectorOpen((value) => !value)} openCommands={() => setCommandOpen(true)} theme={theme} setTheme={changeTheme} />
         <div className="content-area">{page}</div>
       </main>
       {inspectorOpen && <Inspector state={state} liveTurn={liveTurn} indexWorkspace={() => void indexWorkspace()} compactContext={() => void compactContext()} compactDisabled={running || sessionBusy} />}

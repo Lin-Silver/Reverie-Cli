@@ -37,16 +37,43 @@ The CLI accepts only discovery descriptors that declare the exact
 identity, an absolute provider executable path, a valid service id and token,
 an endpoint exactly matching `http://127.0.0.1:<port>/rtp`, and a descriptor
 parent matching that provider's registry-defined discovery root. It then
-requires live `hello` values to match the descriptor. Unknown, mismatched, or
-offline entries are omitted from the service list. Control and session tokens
-remain only in the Python core process. Renderer responses, settings, and
-diagnostics contain neither token nor tool arguments.
+requires live `hello` values to match the descriptor. On Windows, the current
+`reverie.engine` adapter additionally requires PE VersionInfo `ProductName` to
+be exactly `Reverie Engine` or `Reverie Engine (Console)`, queries the live PID
+with `QueryFullProcessImageNameW`, and requires that process image to match the
+descriptor executable. Unknown, mismatched, dead, or offline entries are
+omitted from the service list.
+
+The control token is a bearer capability stored in the Engine's live discovery
+descriptor; it is not confined to the Python process. On the client side, the
+independent session token is returned only to the Python core; the Engine keeps
+the current token in memory to validate requests. Neither token is written to
+CLI settings, diagnostics, or renderer responses, and diagnostics also omit
+tool arguments. Windows ProductName and PID-image matching prevent ordinary
+accidental or text-file impersonation, but an unsigned local binary can copy
+version metadata, and PID-image matching does not prove that the PID owns the
+advertised TCP port. Any same-user process able to read the Engine descriptor
+remains inside the current local trust boundary.
+
+For every parsed RTP response, the Python client requires an exact echoed
+request ID and verifies `result_sha256` against the response's raw canonical
+`result` or `error` value span. This deliberately preserves Godot's float
+formatting. The Engine contract serializes both the hashed value and outer
+envelope with `JSON::stringify(value, "", true, false)`. The unkeyed hash detects
+inconsistency and supports audit correlation; it does not authenticate the
+server.
 
 `REVERIE_RATS_DISCOVERY_ROOTS` can add local discovery directories for a
 development/test process. Its value is not copied into the settings file. The
 desktop file picker registers a supported provider through its provider
 adapter; the current adapter derives `ReverieLocal/RATS/Services` for
-Reverie Engine.
+Reverie Engine. Windows editor builds also provide a small
+`reverie.windows.editor.x86_64.terminal.exe` console host. The picker accepts
+that file only when its PE ProductName is exactly `Reverie Engine Terminal`
+and the adjacent main executable independently passes the normal Engine
+ProductName check; settings, discovery, and live PID-image validation then use
+the adjacent real Engine executable. The terminal wrapper itself is never
+treated as the RTP service process.
 There is no port scan, network broadcast, or arbitrary local-server catalog.
 
 Anonymous presence probes have a 350 ms deadline, normal session/catalog
@@ -99,21 +126,37 @@ until the Engine publishes a versioned schema.
 ## Verified scope and remaining work
 
 The provider-neutral client covers typed allowlisted provider specs,
-descriptor/root and live identity validation, fast-fail deadlines, bounded
-sanitized diagnostics, versioned persisted selections, permission-controlled
-session open/rotation/close, live status, compact catalog display, progressive
-definition loading, dynamic native tool calls, the toggleable desktop log
-drawer, and graceful shutdown. Unit tests use only repository-local test
-directories. The real end-to-end test places its project, CLI state, logs, and
-temporary files under the selected Engine executable's `ReverieLocal`
-directory.
+descriptor/root and live PID-image identity validation, exact response-ID and
+canonical result/error-hash checks, fast-fail deadlines, bounded sanitized
+diagnostics, versioned persisted selections, permission-controlled session
+open/rotation/close, live status, compact catalog display, progressive
+definition loading, schema-sensitive dynamic-tool regeneration, native task
+calls, the toggleable desktop log drawer, and graceful shutdown. Socket I/O is
+serialized per session without holding the global state lock. Automatic task
+synchronization skips terminal tasks; each session retains every active task
+and at most 64 terminal records. The renderer keeps at most 128 task events and
+the latest 64 Ki characters of logs for the selected task.
 
-Focused provider tests pass 8/8. The Python suite passes 831/831; the desktop
-suite passes 53 tests with 1 existing skip (54 total), with TypeScript
-typecheck and production build passing; and real desktop-core→RTP E2E passes
-against exact Engine binary `0.1.dev.custom_build.36888aaf3`. The RATS page and
-log drawer are interaction-tested but have not received a current real-window
-visual inspection.
+Unit tests use only repository-local test directories. The real end-to-end
+test creates a UUID-named, owner-marked project, CLI state, log, and temporary
+tree under the selected Engine executable's `ReverieLocal` directory. It binds
+the new descriptor to the exact launched PID and executable and revalidates
+those ownership fields before deleting only that test descriptor.
+
+Working-tree revalidation on 2026-08-12 passed the RATS runtime file with 34
+tests and 1 conditional skip, the real Engine E2E with 10 tests, and the complete
+Python suite with 939 tests and 2 conditional skips. The focused RTP desktop
+interaction selection passed 16/16; the complete desktop suite passed 63 tests
+with 1 conditional skip. TypeScript typecheck and the production build passed.
+The verified Windows terminal wrapper normalization is included in the runtime
+file. A direct cross-repository check selected the real terminal executable,
+persisted its verified sibling main Engine executable, connected the
+`reverie.engine` service, and loaded 19 tools under `read`. The real provider
+tests used the current working-tree Engine binary reporting
+`0.1.dev.custom_build.8917976f3`; that version string identifies the baseline
+HEAD and does not encode the uncommitted Engine fixes compiled into the binary.
+The RATS page and task workspace are interaction-tested but have not received a
+current real-window visual inspection.
 
 RATS is designed for multiple explicitly supported Reverie/Rilance providers,
 but Reverie Engine is the only provider currently implemented, verified, and

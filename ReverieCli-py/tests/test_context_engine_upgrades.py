@@ -17,6 +17,7 @@ from reverie.context_engine.parsers.base import ParseResult
 from reverie.context_engine.parsers.config_parser import ConfigParser
 from reverie.context_engine.retriever import ContextRetriever, TaskContextFile
 from reverie.context_engine.symbol_table import Symbol, SymbolKind, SymbolTable
+from reverie.context_engine.text_analysis import split_identifier, subword_terms
 from reverie.context_engine.workspace import detect_workspace_profile
 from reverie.session.memory_indexer import MemoryIndexer
 from reverie.tools.codebase_retrieval import CodebaseRetrievalTool
@@ -1505,3 +1506,222 @@ def test_parallel_full_index_matches_serial_and_is_reproducible(tmp_path: Path) 
     assert parallel_runs[0] == serial
     # ...and is bit-for-bit reproducible across runs.
     assert all(run == parallel_runs[0] for run in parallel_runs)
+
+
+def test_identifier_splitting_covers_camel_acronym_and_digit_boundaries() -> None:
+    assert split_identifier("ModelAdmin") == ["model", "admin"]
+    assert split_identifier("HTTPServerError") == ["http", "server", "error"]
+    assert split_identifier("utf8Codec") == ["utf", "8", "codec"]
+    assert split_identifier("output_transaction") == ["output", "transaction"]
+    # Nothing to split: callers rely on the empty list to skip simple names.
+    assert split_identifier("scheduler") == []
+    assert split_identifier("") == []
+
+
+def test_subword_terms_emit_distinct_tokens_and_skip_simple_identifiers() -> None:
+    terms = subword_terms("class ModelAdmin:\n    def getUserName(self): ...\n")
+    # ``get`` is a stop particle, ``self``/``def`` are not compounds at all.
+    assert terms == ["model", "admin", "user", "name"]
+
+    # Each sub-token appears once per document however often it recurs, so the
+    # index grows with distinct vocabulary rather than file length.
+    repeated = subword_terms("ModelAdmin ModelAdmin ModelAdmin")
+    assert repeated == ["model", "admin"]
+
+    assert subword_terms("plain prose without identifiers") == []
+    assert len(subword_terms("class AlphaBeta: pass", limit=1)) == 1
+
+
+def test_camel_case_identifiers_are_reachable_by_their_parts(tmp_path: Path) -> None:
+    """FTS5's ``porter unicode61`` stores ``ModelAdmin`` as one opaque token,
+    but the retriever's query tokenizer splits camel case -- so ``model`` and
+    ``admin`` used to return nothing at all.
+
+    Regression guard for that index/query analysis asymmetry: the indexer now
+    runs the same identifier splitting the query side does and stores the
+    sub-tokens in a dedicated ``subwords`` column.
+    """
+    target = tmp_path / "src" / "options.py"
+    target.parent.mkdir()
+    target.write_text(
+        "class ModelAdmin:\n"
+        "    def getUserName(self):\n"
+        "        return self.name\n",
+        encoding="utf-8",
+    )
+    indexer = CodebaseIndexer(tmp_path, cache_dir=tmp_path / "cache")
+    assert indexer.full_index(show_progress=False).success is True
+
+    for part in ("model", "admin", "user", "name"):
+        hits = indexer.search_content_terms([(part, 1.0)], limit=5)
+        assert hits, f"sub-token {part!r} should reach the file containing it"
+        assert Path(hits[0]["file_path"]).name == "options.py"
+
+    chunks = indexer.search_code_chunks([("admin", 1.0)], limit=5)
+    assert chunks
+    assert any(hit["symbol"].endswith("ModelAdmin") for hit in chunks)
+
+    # The original spelling still matches, and sub-tokens are down-weighted so
+    # they never outrank an exact hit on the full identifier.
+    exact = indexer.search_content_terms([("getUserName", 1.0)], limit=5)
+    assert exact and Path(exact[0]["file_path"]).name == "options.py"
+
+
+def test_subword_column_does_not_outrank_exact_identifier_matches(tmp_path: Path) -> None:
+    exact = tmp_path / "src" / "exact.py"
+    partial = tmp_path / "src" / "partial.py"
+    exact.parent.mkdir()
+    exact.write_text("marker = 'lease_epoch'\n", encoding="utf-8")
+    # Only reachable through the sub-token expansion of ``leaseEpochGuard``.
+    partial.write_text("leaseEpochGuard = 1\n", encoding="utf-8")
+    indexer = CodebaseIndexer(tmp_path, cache_dir=tmp_path / "cache")
+    assert indexer.full_index(show_progress=False).success is True
+
+    hits = indexer.search_content_terms([("lease", 1.0), ("epoch", 1.0)], limit=5)
+
+    assert hits is not None
+    names = [Path(hit["file_path"]).name for hit in hits]
+    assert "partial.py" in names, "sub-tokens must still be reachable"
+    assert names[0] == "exact.py", "exact field matches outrank sub-token matches"
+
+
+def test_stale_subwords_are_removed_on_incremental_reindex(tmp_path: Path) -> None:
+    """Contentless FTS5 tables need a delete payload whose column count matches
+    the table, or stale postings leak and rows accumulate.
+    """
+    target = tmp_path / "src" / "widget.py"
+    target.parent.mkdir()
+    target.write_text("class RenderPipeline:\n    pass\n", encoding="utf-8")
+    indexer = CodebaseIndexer(tmp_path, cache_dir=tmp_path / "cache")
+    assert indexer.full_index(show_progress=False).success is True
+    assert indexer.search_content_terms([("pipeline", 1.0)], limit=5)
+
+    target.write_text("class DisplayBuffer:\n    pass\n", encoding="utf-8")
+    indexer.incremental_index([target.resolve()])
+
+    assert indexer.search_content_terms([("pipeline", 1.0)], limit=5) == []
+    assert indexer.search_content_terms([("buffer", 1.0)], limit=5)
+    with sqlite3.connect(indexer._cache_manager.content_search_path) as connection:
+        assert connection.execute("SELECT count(*) FROM content_search").fetchone()[0] == connection.execute(
+            "SELECT count(*) FROM content_documents"
+        ).fetchone()[0]
+
+
+def test_document_frequency_ignores_subword_expansion(tmp_path: Path) -> None:
+    """IDF must be computed from text people actually wrote.
+
+    The ``subwords`` column repeats the parts of every compound identifier, so
+    counting it toward document frequency would make precisely the
+    discriminative terms look common -- ``admin`` would appear in every file
+    holding any ``*Admin`` symbol -- and strip them of the rare-term bonus.
+    Reachability is broadened by the expansion; term statistics are not.
+    """
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.py").write_text("marker = 'lease_epoch'\n", encoding="utf-8")
+    (src / "b.py").write_text("leaseEpochGuard = 1\n", encoding="utf-8")
+    (src / "c.py").write_text("otherEpochThing = 2\n", encoding="utf-8")
+    indexer = CodebaseIndexer(tmp_path, cache_dir=tmp_path / "cache")
+    assert indexer.full_index(show_progress=False).success is True
+
+    frequencies = indexer.content_document_frequencies(["epoch", "guard"])
+
+    assert indexer.content_document_total() == 3
+    assert frequencies is not None
+    # Only ``a.py`` spells ``epoch`` as its own token in the body.
+    assert frequencies["epoch"] == 1
+    # ``guard`` exists solely as an expansion of ``leaseEpochGuard``.
+    assert frequencies["guard"] == 0
+    # ...yet every file remains retrievable by the sub-token.
+    reachable = indexer.search_content_terms([("epoch", 1.0)], limit=9)
+    assert {Path(hit["file_path"]).name for hit in reachable} == {"a.py", "b.py", "c.py"}
+
+
+def test_outdated_content_index_is_not_updated_in_place(tmp_path: Path) -> None:
+    """An in-place update must refuse a pre-``subwords`` database.
+
+    A full index builds a fresh database beside the cache and swaps it in, so
+    it can safely discard an old layout. The incremental path opens whatever
+    file is already on disk and only rewrites the files it was handed --
+    dropping the tables there would leave every *unchanged* file unsearchable
+    while still reporting success. Several files are indexed here because a
+    single-file fixture cannot observe that loss.
+    """
+    cache_dir = tmp_path / "cache"
+    root = tmp_path / "proj"
+    source = root / "src"
+    source.mkdir(parents=True)
+    for name in ("alpha", "beta", "gamma"):
+        (source / f"{name}.py").write_text(
+            f"class {name.capitalize()}Adapter:\n    epoch = '{name}'\n", encoding="utf-8"
+        )
+
+    indexer = CodebaseIndexer(root, cache_dir=cache_dir)
+    assert indexer.full_index(show_progress=False).success is True
+    search_path = indexer._cache_manager.content_search_path
+    assert len(indexer.search_content_terms([("epoch", 1.0)], limit=9)) == 3
+
+    # Downgrade the cache on disk to the pre-``subwords`` layout.
+    connection = sqlite3.connect(search_path)
+    try:
+        connection.execute("PRAGMA user_version = 1")
+        connection.commit()
+    finally:
+        connection.close()
+
+    stale = CodebaseIndexer(root, cache_dir=cache_dir)
+    assert stale.load_cache() is True
+    changed = source / "alpha.py"
+    changed.write_text(
+        "class AlphaAdapter:\n    epoch = 'alpha'\n\n\nclass Extra:\n    pass\n",
+        encoding="utf-8",
+    )
+    stale.incremental_index([changed.resolve()])
+
+    # The refusal leaves the existing index intact and readable rather than
+    # reducing it to the one file this increment happened to touch.
+    reachable = {
+        Path(hit["file_path"]).name
+        for hit in stale.search_content_terms([("epoch", 1.0)], limit=9)
+    }
+    assert reachable == {"alpha.py", "beta.py", "gamma.py"}
+
+    # A full index is what legitimately replaces the old layout.
+    rebuilt = CodebaseIndexer(root, cache_dir=cache_dir)
+    assert rebuilt.full_index(show_progress=False).success is True
+    connection = sqlite3.connect(search_path)
+    try:
+        columns = [
+            row[1]
+            for row in connection.execute("PRAGMA table_info(content_search)").fetchall()
+        ]
+        version = connection.execute("PRAGMA user_version").fetchone()[0]
+    finally:
+        connection.close()
+    assert columns == ["body", "subwords"]
+    assert version == CodebaseIndexer._CONTENT_INDEX_SCHEMA_VERSION
+    assert len(rebuilt.search_content_terms([("epoch", 1.0)], limit=9)) == 3
+
+
+def test_cache_version_rejects_index_written_before_subword_schema(tmp_path: Path) -> None:
+    """The JSON cache version is what forces the rebuild after an upgrade.
+
+    ``PRAGMA user_version`` guards the FTS database, but nothing re-indexes
+    while the JSON cache still validates, so the two counters have to move
+    together: a stale cache must be rejected outright so ``full_index`` runs.
+    """
+    cache_dir = tmp_path / "cache"
+    root = tmp_path / "proj"
+    root.mkdir()
+    (root / "mod.py").write_text("class Thing:\n    pass\n", encoding="utf-8")
+    indexer = CodebaseIndexer(root, cache_dir=cache_dir)
+    assert indexer.full_index(show_progress=False).success is True
+
+    index_file = cache_dir / "index.json"
+    payload = json.loads(index_file.read_text(encoding="utf-8"))
+    assert payload["version"] == CacheManager.CACHE_VERSION
+    payload["version"] = "1.10.0"
+    index_file.write_text(json.dumps(payload), encoding="utf-8")
+
+    reloaded = CodebaseIndexer(root, cache_dir=cache_dir)
+    assert reloaded.load_cache() is False

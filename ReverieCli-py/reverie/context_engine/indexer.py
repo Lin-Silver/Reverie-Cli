@@ -38,8 +38,18 @@ from .parsers.lua_parser import LuaParser
 from .parsers.gdscript_parser import GDScriptParser
 from .parsers.config_parser import ConfigParser
 from .cache import CacheManager
+from .text_analysis import expand_identifier_text, subword_expansion
 from ..config import get_project_data_dir
 from ..diagnostics import report_suppressed_exception
+
+
+class OutdatedContentIndexError(RuntimeError):
+    """Raised when a cached content index predates the current schema.
+
+    Signals that the database has to be rebuilt from scratch rather than
+    updated in place; callers that only rewrite a subset of files must not
+    proceed against it.
+    """
 
 
 @dataclass
@@ -620,15 +630,52 @@ class CodebaseIndexer:
                     self._upsert_content_index(file_key, search_body, parse_result.symbols)
                 delattr(file_info, "_content_search_body")
 
+    # Bumped whenever the content index schema or the analysis pipeline
+    # changes, so a cache written by an older build is discarded instead of
+    # being appended to with incompatible column arity or vocabulary.
+    _CONTENT_INDEX_SCHEMA_VERSION = 2
+
     @staticmethod
-    def _initialize_content_index(connection: sqlite3.Connection) -> None:
+    def _initialize_content_index(
+        connection: sqlite3.Connection,
+        *,
+        allow_discard: bool = True,
+    ) -> None:
+        """Create the content-search schema, discarding an incompatible one.
+
+        ``allow_discard`` must be false for callers that update an index in
+        place. Dropping the tables there would keep only the rows the caller
+        goes on to write, silently reducing the index to the changed files;
+        such callers need :class:`OutdatedContentIndexError` instead so they
+        can leave the existing database alone.
+        """
+        stored_version = int(
+            connection.execute("PRAGMA user_version").fetchone()[0] or 0
+        )
+        if stored_version != CodebaseIndexer._CONTENT_INDEX_SCHEMA_VERSION:
+            if not allow_discard:
+                raise OutdatedContentIndexError(
+                    f"content index schema version {stored_version} cannot be "
+                    f"updated in place (expected "
+                    f"{CodebaseIndexer._CONTENT_INDEX_SCHEMA_VERSION})"
+                )
+            # Older layouts (or a future one on downgrade) cannot be updated in
+            # place: drop them and rebuild from scratch.
+            for table in (
+                "content_search", "chunk_search", "content_documents",
+                "chunk_documents", "fts_delete_payloads",
+            ):
+                connection.execute(f"DROP TABLE IF EXISTS {table}")
+            connection.execute(
+                f"PRAGMA user_version = {CodebaseIndexer._CONTENT_INDEX_SCHEMA_VERSION}"
+            )
         connection.execute(
             "CREATE TABLE IF NOT EXISTS content_documents "
             "(rowid INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT NOT NULL UNIQUE)"
         )
         connection.execute(
             "CREATE VIRTUAL TABLE IF NOT EXISTS content_search "
-            "USING fts5(body, content='', tokenize='porter unicode61')"
+            "USING fts5(body, subwords, content='', tokenize='porter unicode61')"
         )
         connection.execute(
             "CREATE TABLE IF NOT EXISTS chunk_documents ("
@@ -641,7 +688,8 @@ class CodebaseIndexer:
         )
         connection.execute(
             "CREATE VIRTUAL TABLE IF NOT EXISTS chunk_search USING fts5("
-            "name, signature, documentation, body, content='', tokenize='porter unicode61')"
+            "name, signature, documentation, body, subwords, "
+            "content='', tokenize='porter unicode61')"
         )
         connection.execute(
             "CREATE TABLE IF NOT EXISTS fts_delete_payloads ("
@@ -752,8 +800,16 @@ class CodebaseIndexer:
     def _begin_content_index_update(self) -> None:
         path = self._cache_manager.content_search_path
         connection = sqlite3.connect(path)
-        self._initialize_content_index(connection)
-        connection.execute("BEGIN")
+        try:
+            # An in-place update must never discard the existing index: the
+            # caller only rewrites the files it was handed, so a wipe here
+            # would leave every unchanged file unsearchable. Refusing keeps the
+            # older database readable until a full index replaces it.
+            self._initialize_content_index(connection, allow_discard=False)
+            connection.execute("BEGIN")
+        except Exception:
+            connection.close()
+            raise
         self._content_index_connection = connection
 
     def _finish_content_index_update(self) -> None:
@@ -775,7 +831,7 @@ class CodebaseIndexer:
         self._content_df_cache.clear()
 
     @staticmethod
-    def _symbol_search_fields(symbol: Symbol) -> Optional[Tuple[str, str, str, str]]:
+    def _symbol_search_fields(symbol: Symbol) -> Optional[Tuple[str, str, str, str, str]]:
         searchable_kinds = {
             "CLASS", "ENUM", "FUNCTION", "INTERFACE", "MACRO", "METHOD", "MODULE",
             "NAMESPACE", "PROPERTY", "STRUCT", "TRAIT", "TYPE_ALIAS",
@@ -785,8 +841,8 @@ class CodebaseIndexer:
             return None
         qualified_name = str(symbol.qualified_name or "")
         simple_name = str(symbol.name or "")
-        expanded_name = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", simple_name).replace("_", " ")
-        name = " ".join(part for part in (qualified_name, simple_name, expanded_name, kind.lower()) if part)
+        expanded_name = expand_identifier_text(simple_name)
+        name = " ".join(part for part in (qualified_name, expanded_name, kind.lower()) if part)
         signature = str(symbol.signature or "")[:4096]
         documentation = str(symbol.docstring or "")[:8192]
         body = str(symbol.source_code or "")
@@ -794,7 +850,11 @@ class CodebaseIndexer:
             return None
         if len(body) > 49152:
             body = body[:36864] + "\n...\n" + body[-8192:]
-        return name, signature, documentation, body
+        # Sub-tokens of camel-cased identifiers live in their own column so a
+        # query for ``admin`` reaches ``ModelAdmin`` without inflating the term
+        # frequencies (and therefore the BM25 weighting) of the real fields.
+        subwords = subword_expansion(qualified_name, signature, body, limit=192)
+        return name, signature, documentation, body, subwords
 
     def _upsert_content_index(
         self,
@@ -806,13 +866,13 @@ class CodebaseIndexer:
         if connection is None:
             return
         self._delete_fts_rows(
-            connection, "content_documents", "content_search", ("body",), str(file_path)
+            connection, "content_documents", "content_search", ("body", "subwords"), str(file_path)
         )
         self._delete_fts_rows(
             connection,
             "chunk_documents",
             "chunk_search",
-            ("name", "signature", "documentation", "body"),
+            ("name", "signature", "documentation", "body", "subwords"),
             str(file_path),
         )
         cursor = connection.execute(
@@ -820,16 +880,20 @@ class CodebaseIndexer:
             (str(file_path),),
         )
         content_rowid = int(cursor.lastrowid)
+        content_body = str(content or "")
+        # One entry per distinct sub-token, not per occurrence: enough to make
+        # the term reachable, while the body column keeps carrying frequency.
+        content_subwords = subword_expansion(content_body, limit=768)
         connection.execute(
-            "INSERT INTO content_search(rowid, body) VALUES (?, ?)",
-            (content_rowid, str(content or "")),
+            "INSERT INTO content_search(rowid, body, subwords) VALUES (?, ?, ?)",
+            (content_rowid, content_body, content_subwords),
         )
         connection.execute(
             "INSERT INTO fts_delete_payloads(search_table, rowid, delete_payload) VALUES (?, ?, ?)",
             (
                 "content_search",
                 content_rowid,
-                self._pack_fts_delete_payload((str(content or ""),)),
+                self._pack_fts_delete_payload((content_body, content_subwords)),
             ),
         )
         # Collect chunk rows and insert them in three bulk executemany calls
@@ -839,7 +903,7 @@ class CodebaseIndexer:
         # because the content index connection is single-threaded within a
         # transaction, and it turns O(symbols) SQLite round-trips into O(1).
         document_rows: List[Tuple[int, str, str, str, int, int]] = []
-        search_rows: List[Tuple[int, str, str, str, str]] = []
+        search_rows: List[Tuple[int, str, str, str, str, str]] = []
         payload_rows: List[Tuple[str, int, bytes]] = []
         next_rowid: Optional[int] = None
         for symbol in list(symbols or [])[:512]:
@@ -874,8 +938,8 @@ class CodebaseIndexer:
                 document_rows,
             )
             connection.executemany(
-                "INSERT INTO chunk_search(rowid, name, signature, documentation, body) "
-                "VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO chunk_search(rowid, name, signature, documentation, body, subwords) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
                 search_rows,
             )
             connection.executemany(
@@ -890,14 +954,14 @@ class CodebaseIndexer:
                 self._content_index_connection,
                 "content_documents",
                 "content_search",
-                ("body",),
+                ("body", "subwords"),
                 str(file_path),
             )
             self._delete_fts_rows(
                 self._content_index_connection,
                 "chunk_documents",
                 "chunk_search",
-                ("name", "signature", "documentation", "body"),
+                ("name", "signature", "documentation", "body", "subwords"),
                 str(file_path),
             )
 
@@ -926,7 +990,8 @@ class CodebaseIndexer:
                 for term, weight in terms:
                     query = f'"{term.replace(chr(34), chr(34) * 2)}"'
                     rows = connection.execute(
-                        "SELECT content_documents.path, bm25(content_search) AS relevance "
+                        "SELECT content_documents.path, "
+                        "bm25(content_search, 1.0, 0.35) AS relevance "
                         "FROM content_search JOIN content_documents "
                         "ON content_documents.rowid = content_search.rowid "
                         "WHERE content_search MATCH ? ORDER BY relevance, "
@@ -1002,7 +1067,14 @@ class CodebaseIndexer:
                     for term in missing:
                         # FTS5 MATCH needs a quoted phrase so identifiers with
                         # underscores or punctuation are treated literally.
-                        query = f'"{term.replace(chr(34), chr(34) * 2)}"'
+                        # Scope to ``body``: the ``subwords`` column repeats the
+                        # parts of every compound identifier, so counting it here
+                        # would inflate df for exactly the discriminative terms
+                        # IDF exists to reward (``admin`` would look common
+                        # because every ``*Admin`` symbol contributes a posting).
+                        # DF must reflect the text people actually wrote.
+                        escaped = term.replace(chr(34), chr(34) * 2)
+                        query = f'body : "{escaped}"'
                         try:
                             row = connection.execute(
                                 "SELECT COUNT(*) FROM content_search WHERE content_search MATCH ?",
@@ -1064,7 +1136,7 @@ class CodebaseIndexer:
                         "SELECT chunk_documents.rowid, chunk_documents.path, "
                         "chunk_documents.symbol, chunk_documents.kind, "
                         "chunk_documents.start_line, chunk_documents.end_line, "
-                        "bm25(chunk_search, 5.5, 3.0, 1.8, 1.0) AS relevance "
+                        "bm25(chunk_search, 5.5, 3.0, 1.8, 1.0, 0.6) AS relevance "
                         "FROM chunk_search JOIN chunk_documents "
                         "ON chunk_documents.rowid = chunk_search.rowid "
                         "WHERE chunk_search MATCH ? ORDER BY relevance, "
@@ -1206,8 +1278,6 @@ class CodebaseIndexer:
 
     def _extract_text_tokens(self, *values: str) -> List[str]:
         """Extract a compact set of retrieval-friendly tokens."""
-        import re
-
         stop_words = {
             'the', 'and', 'for', 'with', 'from', 'into', 'that', 'this', 'these',
             'those', 'your', 'have', 'will', 'would', 'should', 'could', 'their',

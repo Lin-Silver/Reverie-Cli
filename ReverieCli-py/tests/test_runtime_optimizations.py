@@ -38,10 +38,10 @@ class _FakeStreamingResponse:
         self._lines = list(lines)
 
     def iter_lines(self, decode_unicode: bool = True, chunk_size: int = 0):
-        assert decode_unicode is True
+        assert decode_unicode is False
         assert chunk_size >= 512
         for line in self._lines:
-            yield line
+            yield line.encode("utf-8")
 
 
 class _BrokenStreamingResponse:
@@ -50,10 +50,10 @@ class _BrokenStreamingResponse:
         self._error = error
 
     def iter_lines(self, decode_unicode: bool = True, chunk_size: int = 0):
-        assert decode_unicode is True
+        assert decode_unicode is False
         assert chunk_size >= 512
         for line in self._lines:
-            yield line
+            yield line.encode("utf-8")
         raise self._error
 
 
@@ -119,6 +119,21 @@ def test_iter_sse_data_strings_handles_multiline_events_and_raw_json() -> None:
         '{"type":"content","text":"hello"}\n{"type":"content","text":" world"}',
         '{"choices":[{"delta":{"content":"tail"}}]}',
     ]
+
+
+def test_iter_sse_data_strings_decodes_utf8_without_response_charset() -> None:
+    response = _FakeStreamingResponse(
+        [
+            'data: {"choices":[{"delta":{"content":"你好，世界"}}]}',
+            "",
+            "data: [DONE]",
+            "",
+        ]
+    )
+
+    payloads = list(iter_sse_data_strings(response))
+
+    assert payloads == ['{"choices":[{"delta":{"content":"你好，世界"}}]}']
 
 
 def test_iter_sse_data_strings_tolerates_premature_close_after_partial_payload() -> None:

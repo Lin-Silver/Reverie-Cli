@@ -20,22 +20,18 @@ from .nvidia_profiles import (
 
 NVIDIA_DEFAULT_API_URL = "https://integrate.api.nvidia.com/v1"
 NVIDIA_DEFAULT_REQUEST_ENDPOINT = "/chat/completions"
-NVIDIA_DEFAULT_MODEL_ID = "qwen/qwen3.5-397b-a17b"
-NVIDIA_DEFAULT_MODEL_DISPLAY_NAME = "Qwen3.5 397B A17B"
+NVIDIA_DEFAULT_MODEL_ID = "meta/muse-glimmer-30b"
+NVIDIA_DEFAULT_MODEL_DISPLAY_NAME = "Muse Glimmer 30B"
 NVIDIA_COMPUTER_CONTROLLER_MODEL_ID = NVIDIA_DEFAULT_MODEL_ID
 NVIDIA_COMPUTER_CONTROLLER_MODEL_DISPLAY_NAME = NVIDIA_DEFAULT_MODEL_DISPLAY_NAME
 NVIDIA_API_KEY_HINT_URL = "https://build.nvidia.com/settings/api-keys"
 NVIDIA_DEFAULT_IMAGE_TOKEN_ESTIMATE = 1024
 NVIDIA_DEFAULT_CONTEXT_TOKENS = 262_144
 NVIDIA_NEMOTRON_3_SUPER_CONTEXT_TOKENS = 1_000_000
-NVIDIA_MINIMAX_CONTEXT_TOKENS = 204_800
 NVIDIA_GLM_5_2_CONTEXT_TOKENS = 1_000_000
 NVIDIA_STEP_FLASH_CONTEXT_TOKENS = 256_000
 NVIDIA_STEP_37_FLASH_MAX_OUTPUT_TOKENS = 16_384
 NVIDIA_GPT_OSS_120B_CONTEXT_TOKENS = 128_000
-NVIDIA_KIMI_K2_6_CONTEXT_TOKENS = 262_144
-NVIDIA_DEEPSEEK_V4_CONTEXT_TOKENS = 1_000_000
-NVIDIA_DEEPSEEK_V4_MAX_OUTPUT_TOKENS = 262_144
 NVIDIA_MINIMAX_M3_CONTEXT_TOKENS = 1_000_000
 NVIDIA_MINIMAX_M3_MAX_OUTPUT_TOKENS = 8_192
 NVIDIA_DEFAULT_REASONING_EFFORT = "high"
@@ -123,21 +119,18 @@ NVIDIA_REASONING_NONE_LOW_HIGH_OPTIONS = (
     _thinking_option("low", "Low", "Low-effort reasoning with fewer reasoning tokens."),
     _thinking_option("none", "Non-think", "Disable reasoning tokens."),
 )
-NVIDIA_REASONING_NONE_HIGH_MAX_OPTIONS = (
-    _thinking_option("high", "High", "High reasoning mode."),
-    _thinking_option("max", "Max", "Maximum reasoning effort."),
-    _thinking_option("none", "Non-think", "Disable thinking."),
-)
 NVIDIA_REASONING_LOW_MEDIUM_HIGH_OPTIONS = (
     _thinking_option("low", "Low", "Basic reasoning with lower latency."),
     _thinking_option("medium", "Medium", "Balanced reasoning depth."),
     _thinking_option("high", "High", "Detailed step-by-step reasoning."),
 )
-NVIDIA_REASONING_NONE_LOW_MEDIUM_HIGH_OPTIONS = (
+NVIDIA_REASONING_ALL_OPTIONS = (
     _thinking_option("none", "Non-think", "Disable reasoning tokens."),
-    _thinking_option("low", "Low", "Basic reasoning with lower latency."),
-    _thinking_option("medium", "Medium", "Balanced reasoning depth."),
-    _thinking_option("high", "High", "Detailed step-by-step reasoning."),
+    _thinking_option("minimal", "Minimal", "Use the smallest reasoning allocation."),
+    _thinking_option("low", "Low", "Use a light reasoning allocation."),
+    _thinking_option("medium", "Medium", "Use a balanced reasoning allocation."),
+    _thinking_option("high", "High", "Use a detailed reasoning allocation."),
+    _thinking_option("max", "Max", "Use the maximum reasoning allocation."),
 )
 
 
@@ -258,27 +251,30 @@ def _openai_model(
 
 
 _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
-    _request_model(
-        "mistralai/mistral-small-4-119b-2603",
-        "Mistral Small 4 119B",
-        "Request transport with selectable reasoning_effort none/high.",
+    _openai_model(
+        "meta/muse-glimmer-30b",
+        "Muse Glimmer 30B",
+        "Multimodal OpenAI SDK transport with selectable reasoning_effort and native tool calling.",
         vision=True,
         thinking=True,
         thinking_control="effort",
-        thinking_options=list(NVIDIA_REASONING_NONE_HIGH_OPTIONS),
+        thinking_options=list(NVIDIA_REASONING_ALL_OPTIONS),
         default_thinking_choice="high",
-        context_length=NVIDIA_DEFAULT_CONTEXT_TOKENS,
+        context_length=131_072,
+        max_output_tokens=16_384,
+        default_max_tokens=8_192,
     ),
-    _request_model(
-        "mistralai/mistral-medium-3.5-128b",
-        "Mistral Medium 3.5 128B",
-        "Request transport with 256k multimodal context and selectable reasoning_effort none/high.",
-        vision=True,
+    _openai_model(
+        "nvidia/nemotron-3.5-lightning-30b-a3b",
+        "Nemotron 3.5 Lightning 30B A3B",
+        "OpenAI SDK transport with toggleable NVIDIA chat-template thinking and reasoning_budget.",
         thinking=True,
-        thinking_control="effort",
-        thinking_options=list(NVIDIA_REASONING_NONE_HIGH_OPTIONS),
-        default_thinking_choice="high",
-        context_length=NVIDIA_DEFAULT_CONTEXT_TOKENS,
+        thinking_control="toggle",
+        thinking_options=list(NVIDIA_THINKING_TOGGLE_OPTIONS),
+        default_thinking_choice="true",
+        context_length=1_048_576,
+        max_output_tokens=32_768,
+        default_max_tokens=16_384,
     ),
     _openai_model(
         "nvidia/nemotron-3-super-120b-a12b",
@@ -301,28 +297,12 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         default_max_tokens=16_384,
     ),
     _openai_model(
-        "nvidia/nemotron-3.5-nano-30b-a3b",
-        "Nemotron 3.5 Nano 30B A3B",
-        "OpenAI SDK transport with NVIDIA chat-template thinking and reasoning_budget.",
-        thinking=True,
-        thinking_control="fixed",
-        context_length=1_000_000,
-        max_output_tokens=16_384,
-        default_max_tokens=16_384,
-    ),
-    _openai_model(
         "poolside/laguna-xs-2.1",
         "Laguna XS 2.1",
         "OpenAI SDK transport for agentic coding and tool use.",
         context_length=262_000,
         max_output_tokens=8_192,
         default_max_tokens=8_192,
-    ),
-    _openai_model(
-        "minimaxai/minimax-m2.7",
-        "MiniMax M2.7",
-        "OpenAI SDK transport.",
-        context_length=NVIDIA_MINIMAX_CONTEXT_TOKENS,
     ),
     _request_model(
         "minimaxai/minimax-m3",
@@ -338,17 +318,6 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         max_output_tokens=NVIDIA_MINIMAX_M3_MAX_OUTPUT_TOKENS,
         tool_calling=True,
     ),
-    _request_model(
-        "qwen/qwen3.5-397b-a17b",
-        "Qwen3.5 397B A17B",
-        "Request transport with enable_thinking, top_k, and repetition controls.",
-        vision=True,
-        thinking=True,
-        thinking_control="toggle",
-        thinking_options=list(NVIDIA_THINKING_TOGGLE_OPTIONS),
-        default_thinking_choice="true",
-        context_length=NVIDIA_DEFAULT_CONTEXT_TOKENS,
-    ),
     _openai_model(
         "z-ai/glm-5.2",
         "GLM-5.2",
@@ -359,14 +328,6 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         max_output_tokens=32_768,
         default_max_tokens=16_384,
     ),
-    _openai_model(
-        "stepfun-ai/step-3.5-flash",
-        "Step-3.5-Flash",
-        "OpenAI SDK transport.",
-        thinking=True,
-        thinking_control="fixed",
-        context_length=NVIDIA_STEP_FLASH_CONTEXT_TOKENS,
-    ),
     _request_model(
         "stepfun-ai/step-3.7-flash",
         "Step-3.7-Flash",
@@ -376,46 +337,6 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         thinking_control="fixed",
         context_length=NVIDIA_STEP_FLASH_CONTEXT_TOKENS,
         max_output_tokens=NVIDIA_STEP_37_FLASH_MAX_OUTPUT_TOKENS,
-    ),
-    _openai_model(
-        "deepseek-ai/deepseek-v4-pro",
-        "DeepSeek V4 Pro",
-        "OpenAI SDK transport with 1M context and selectable Non-think/High/Max chat-template reasoning.",
-        thinking=True,
-        thinking_control="effort",
-        thinking_options=list(NVIDIA_REASONING_NONE_HIGH_MAX_OPTIONS),
-        default_thinking_choice="high",
-        context_length=NVIDIA_DEEPSEEK_V4_CONTEXT_TOKENS,
-        max_output_tokens=NVIDIA_DEEPSEEK_V4_MAX_OUTPUT_TOKENS,
-    ),
-    _openai_model(
-        "deepseek-ai/deepseek-v4-flash",
-        "DeepSeek V4 Flash",
-        "OpenAI SDK transport with 1M context and selectable Non-think/High/Max chat-template reasoning.",
-        thinking=True,
-        thinking_control="effort",
-        thinking_options=list(NVIDIA_REASONING_NONE_HIGH_MAX_OPTIONS),
-        default_thinking_choice="high",
-        context_length=NVIDIA_DEEPSEEK_V4_CONTEXT_TOKENS,
-        max_output_tokens=NVIDIA_DEEPSEEK_V4_MAX_OUTPUT_TOKENS,
-    ),
-    _request_model(
-        "mistralai/mistral-large-3-675b-instruct-2512",
-        "Mistral Large 3 675B",
-        "Request transport with instruct defaults.",
-        vision=True,
-        context_length=NVIDIA_DEFAULT_CONTEXT_TOKENS,
-    ),
-    _request_model(
-        "moonshotai/kimi-k2.6",
-        "Kimi K2.6",
-        "Request transport with chat-template thinking controls.",
-        vision=True,
-        thinking=True,
-        thinking_control="toggle",
-        thinking_options=list(NVIDIA_THINKING_TOGGLE_OPTIONS),
-        default_thinking_choice="true",
-        context_length=NVIDIA_KIMI_K2_6_CONTEXT_TOKENS,
     ),
     _openai_model(
         "openai/gpt-oss-120b",

@@ -243,7 +243,7 @@ It does not require a direct API key for anonymous text routing. When no explici
 The `nvidia` section stores the NVIDIA API key, selected model, transport-specific defaults, and optional endpoint override used by the NVIDIA source.
 
 Get the API key from `https://build.nvidia.com/settings/api-keys`.
-Reverie also reads `NVIDIA_API_KEY` from the environment when it is present, and Computer Controller mode pins the runtime to `qwen/qwen3.5-397b-a17b`.
+Reverie also reads `NVIDIA_API_KEY` from the environment when it is present, and Computer Controller mode pins the runtime to `meta/muse-glimmer-30b`.
 
 Some NVIDIA models expose provider-side thinking controls. These are model-specific fixed choices, not prompt instructions:
 

@@ -6214,7 +6214,7 @@ class CommandHandler:
 
         provider_cfg["selected_model_id"] = selected_model["id"]
         provider_cfg["selected_model_display_name"] = selected_model["display_name"]
-        if config_attr == "nvidia":
+        if config_attr in {"nvidia", "sensenova"}:
             try:
                 full_context_tokens = int(selected_model.get("context_length") or 0)
             except (TypeError, ValueError):
@@ -7120,10 +7120,15 @@ class CommandHandler:
             if not self._ensure_opencode_configuration(config):
                 return True
 
+        catalog = get_opencode_model_catalog(
+            getattr(config, "opencode", {}) if config_manager else {},
+            fetch_live=True,
+            force_refresh=True,
+        )
         return self._select_external_provider_model(
             config_attr="opencode",
             normalize_config=normalize_opencode_config,
-            catalog=get_opencode_model_catalog(),
+            catalog=catalog,
             provider_label="Opencode",
             active_source="opencode",
             model_query=model_query,
@@ -7947,10 +7952,16 @@ class CommandHandler:
     def _cmd_sensenova_model(self, model_query: str) -> bool:
         from ..sensenova import get_sensenova_model_catalog, normalize_sensenova_config
 
+        config_manager = self.app.get('config_manager')
+        provider_config = getattr(config_manager.load(), "sensenova", {}) if config_manager else {}
         return self._select_external_provider_model(
             config_attr="sensenova",
             normalize_config=normalize_sensenova_config,
-            catalog=get_sensenova_model_catalog(),
+            catalog=get_sensenova_model_catalog(
+                provider_config,
+                fetch_live=True,
+                force_refresh=True,
+            ),
             provider_label="SenseNova",
             active_source="sensenova",
             model_query=model_query,

@@ -28,6 +28,8 @@ export const CORE_RESPONSE_CONTRACT = {
   deleteSession: { type: "session.updated", required: ["session", "sessions"] },
   deleteSessions: { type: "sessions.deleted", required: ["deleted_session_ids", "session", "sessions"] },
   resolveApproval: { type: "approval.resolved", required: ["approval_id", "decision"] },
+  getModelSources: { type: "models", required: ["models"] },
+  refreshModelSources: { type: "models", required: ["models"] },
   selectModel: { type: "model.selected", required: ["models", "workspace"] },
   setSetting: { type: "setting.updated", required: ["success", "message", "settings"] },
   setProviderConfig: { type: "provider.updated", required: ["models", "workspace"] },

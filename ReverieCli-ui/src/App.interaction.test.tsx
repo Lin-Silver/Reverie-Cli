@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
 import { DEFAULT_UI_PREFERENCES } from "./preferences";
-import type { DesktopState, RatsState, SessionState } from "./types";
+import type { DesktopState, ModelSourcesState, RatsState, RatsTaskRecord, SessionState } from "./types";
 
 const baseSession: SessionState = {
   id: "session-1",
@@ -121,7 +121,18 @@ const desktopState: DesktopState = {
   recovery: { summary: {}, checkpoints: [], operations: [] },
 };
 
-function installDesktopApi(options: { legacyRats?: boolean; approvalRequest?: Record<string, unknown> } = {}) {
+function installDesktopApi(options: {
+  legacyRats?: boolean;
+  approvalRequest?: Record<string, unknown>;
+  ratsStateTransform?: (state: RatsState) => RatsState;
+  ratsTasks?: (payload: Record<string, unknown>, cancelled: boolean) => RatsTaskRecord[] | Promise<RatsTaskRecord[]>;
+  ratsTaskProgress?: number;
+  ratsTaskFailure?: (action: "ratsTaskStatus" | "ratsTaskEvents" | "ratsTaskLogs") => Error | null;
+  ratsTaskStatus?: (payload: Record<string, unknown>, cancelled: boolean) => Record<string, unknown>;
+  ratsTaskEvents?: (payload: Record<string, unknown>, cancelled: boolean) => Record<string, unknown>;
+  ratsTaskLogText?: (payload: Record<string, unknown>) => string;
+  refreshedModels?: ModelSourcesState;
+} = {}) {
   let promptFinished = false;
   let ratsEnabled = false;
   let ratsTaskCancelled = false;
@@ -171,8 +182,9 @@ function installDesktopApi(options: { legacyRats?: boolean; approvalRequest?: Re
     ],
     updatedAt: "2026-07-29T12:00:00Z",
     });
-    if (!options.legacyRats) return state;
-    const legacy = { ...state, enabledEngines: [{ executable: "C:/Engine/reverie.windows.editor.x86_64.exe", permissions: ["read"] }] } as RatsState & { enabledProviders?: RatsState["enabledProviders"] };
+    const transformedState = options.ratsStateTransform?.(state) ?? state;
+    if (!options.legacyRats) return transformedState;
+    const legacy = { ...transformedState, enabledEngines: [{ executable: "C:/Engine/reverie.windows.editor.x86_64.exe", permissions: ["read"] }] } as RatsState & { enabledProviders?: RatsState["enabledProviders"] };
     delete legacy.enabledProviders;
     return legacy;
   };
@@ -195,6 +207,10 @@ function installDesktopApi(options: { legacyRats?: boolean; approvalRequest?: Re
       };
     }
     if (action === "listTools") return { type: "tools", mode: "reverie", tools: [] };
+    if (action === "refreshModelSources") return {
+      type: "models",
+      models: options.refreshedModels ?? desktopState.models,
+    };
     if (action === "ratsState") return { type: "rats.state", rats: ratsState() };
     if (action === "ratsRegisterProvider" || action === "ratsRemoveRoot") return { type: "rats.state", rats: ratsState() };
     if (action === "ratsSetProviderEnabled") {
@@ -205,21 +221,37 @@ function installDesktopApi(options: { legacyRats?: boolean; approvalRequest?: Re
       return { type: "rats.definitions", service_id: String(payload.serviceId), definitions: [{ name: "project.status", request_schema: { type: "object" }, response_schema: { type: "object" } }] };
     }
     if (action === "ratsTasks") {
+      const taskRecords = options.ratsTasks
+        ? await options.ratsTasks(payload, ratsTaskCancelled)
+        : ratsEnabled
+          ? [{ provider_id: "reverie.engine", service_id: "rats-4242-testservice", task_id: "task-e2e-1", tool: "run.play", deadline_msec: 5_000, cursor: 1, status: { running: !ratsTaskCancelled, next_cursor: 2, output: { running: !ratsTaskCancelled } }, events: [{ sequence: 1, type: "task.started", timestamp_utc: "2026-07-29T12:00:02Z", payload: { tool: "run.play" } }] }]
+          : [];
       return {
         type: "rats.tasks",
-        service_id: String(payload.serviceId),
-        provider_id: String(payload.providerId),
-        tasks: ratsEnabled ? [{ provider_id: "reverie.engine", service_id: "rats-4242-testservice", task_id: "task-e2e-1", tool: "run.play", deadline_msec: 5_000, cursor: 1, status: { running: !ratsTaskCancelled, next_cursor: 2, output: { running: !ratsTaskCancelled } }, events: [{ sequence: 1, type: "task.started", timestamp_utc: "2026-07-29T12:00:02Z", payload: { tool: "run.play" } }] }] : [],
+        service_id: String(payload.serviceId ?? ""),
+        provider_id: String(payload.providerId ?? ""),
+        tasks: taskRecords,
       };
     }
     if (action === "ratsTaskStatus") {
-      return { type: "rats.task.status", service_id: String(payload.serviceId), task_id: String(payload.taskId), result: { running: !ratsTaskCancelled, next_cursor: 2, output: { running: !ratsTaskCancelled } } };
+      const failure = options.ratsTaskFailure?.(action);
+      if (failure) throw failure;
+      const result = options.ratsTaskStatus?.(payload, ratsTaskCancelled)
+        ?? { running: !ratsTaskCancelled, next_cursor: 2, output: { running: !ratsTaskCancelled, ...(options.ratsTaskProgress === undefined ? {} : { progress: options.ratsTaskProgress }) } };
+      return { type: "rats.task.status", service_id: String(payload.serviceId), task_id: String(payload.taskId), result };
     }
     if (action === "ratsTaskEvents") {
-      return { type: "rats.task.events", service_id: String(payload.serviceId), task_id: String(payload.taskId), result: { schema: "reverie.rtp.task/1", events: [{ sequence: 1, type: "task.started", timestamp_utc: "2026-07-29T12:00:02Z", payload: { tool: "run.play" } }], next_cursor: 2 } };
+      const failure = options.ratsTaskFailure?.(action);
+      if (failure) throw failure;
+      const result = options.ratsTaskEvents?.(payload, ratsTaskCancelled)
+        ?? { schema: "reverie.rtp.task/1", events: [{ sequence: 1, type: "task.started", timestamp_utc: "2026-07-29T12:00:02Z", payload: { tool: "run.play" } }], next_cursor: 2 };
+      return { type: "rats.task.events", service_id: String(payload.serviceId), task_id: String(payload.taskId), result };
     }
     if (action === "ratsTaskLogs") {
-      return { type: "rats.task.logs", service_id: String(payload.serviceId), task_id: String(payload.taskId), result: { text: "run.play started\n", next_cursor: 18 } };
+      const failure = options.ratsTaskFailure?.(action);
+      if (failure) throw failure;
+      const text = options.ratsTaskLogText?.(payload) ?? "run.play started\n";
+      return { type: "rats.task.logs", service_id: String(payload.serviceId), task_id: String(payload.taskId), result: { text, next_cursor: Number(payload.cursor ?? 0) + text.length } };
     }
     if (action === "ratsTaskCancel") {
       ratsTaskCancelled = true;
@@ -331,6 +363,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
   vi.restoreAllMocks();
 });
@@ -526,6 +559,40 @@ describe("desktop GUI interactions", () => {
     }));
   });
 
+  it("refreshes the provider catalog when the model picker opens", async () => {
+    const refreshedModels: ModelSourcesState = {
+      ...desktopState.models,
+      sources: [...desktopState.models.sources, {
+        id: "sensenova",
+        display_name: "SenseNova",
+        active: false,
+        selected_model_id: "sensenova-6.8-flash-lite",
+        selected_reasoning: { control: "provider-managed", options: [], value: "" },
+        models: [{
+          id: "sensenova-6.8-flash-lite",
+          display_name: "SenseNova 6.8 Flash Lite",
+          description: "Live model",
+          vision: true,
+          tool_calling: true,
+          thinking: true,
+          reasoning: { control: "provider-managed", options: [], value: "" },
+        }],
+        config_fields: [],
+        catalog_live: true,
+      }],
+    };
+    const { request } = installDesktopApi({ refreshedModels });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: /Test Model/ }));
+    const dialog = await screen.findByRole("dialog", { name: "模型来源" });
+    await waitFor(() => expect(request).toHaveBeenCalledWith("refreshModelSources", {}));
+    await user.click(await within(dialog).findByRole("button", { name: /SenseNova/ }));
+
+    expect(await within(dialog).findByRole("button", { name: /SenseNova 6.8 Flash Lite/ })).toBeTruthy();
+  });
+
   it("opens the RATS page, explicitly enables a service, and inspects one progressive definition", async () => {
     const { api } = installDesktopApi();
     const user = userEvent.setup();
@@ -572,31 +639,274 @@ describe("desktop GUI interactions", () => {
     expect(screen.queryByText(/display error/i)).toBeNull();
   });
 
-  it("shows synchronized RTP task status, versioned events, logs, and cancellation", async () => {
-    const { api } = installDesktopApi();
+  it("aggregates RTP tasks across services and routes details and cancellation through the task", async () => {
+    const task: RatsTaskRecord = {
+      provider_id: "reverie.second",
+      service_id: "rats-second",
+      task_id: "task-second-1",
+      tool: "run.play",
+      deadline_msec: 5_000,
+      cursor: 1,
+      status: { running: true, next_cursor: 2, output: { running: true } },
+      events: [{ sequence: 1, type: "task.started", timestamp_utc: "2026-07-29T12:00:02Z", payload: { tool: "run.play" } }],
+    };
+    const { api } = installDesktopApi({
+      ratsStateTransform: (state) => ({
+        ...state,
+        services: [
+          {
+            ...state.services[0],
+            providerId: "reverie.empty",
+            serviceId: "rats-empty",
+            enabled: true,
+            connection: "connected",
+            sessionActive: true,
+          },
+          {
+            ...state.services[0],
+            providerId: task.provider_id,
+            serviceId: task.service_id,
+            enabled: true,
+            connection: "connected",
+            sessionActive: true,
+          },
+        ],
+      }),
+      ratsTasks: (payload, cancelled) => Object.keys(payload).length === 0
+        ? [{ ...task, cancelled, status: { ...task.status, running: !cancelled, output: { running: !cancelled } } }]
+        : [],
+      ratsTaskProgress: 0.25,
+    });
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(await screen.findByRole("button", { name: "RATS" }));
-    await screen.findByText("Reverie Engine");
-    await user.click(screen.getByRole("switch"));
-    await waitFor(() => expect(api.request).toHaveBeenCalledWith("ratsSetProviderEnabled", expect.objectContaining({ enabled: true })));
-
-    await user.click(screen.getByRole("button", { name: "RTP 任务" }));
+    await user.click(await screen.findByRole("button", { name: "RTP 任务" }));
     expect(await screen.findByText("RTP 任务详情")).toBeTruthy();
-    expect((await screen.findAllByText("task-e2e-1")).length).toBeGreaterThanOrEqual(2);
+    expect((await screen.findAllByText(task.task_id)).length).toBeGreaterThanOrEqual(2);
+    expect(await screen.findByText("25%")).toBeTruthy();
     expect(await screen.findByText("task.started")).toBeTruthy();
     expect(await screen.findByText(/run\.play started/)).toBeTruthy();
-    expect(api.request).toHaveBeenCalledWith("ratsTaskEvents", expect.objectContaining({ taskId: "task-e2e-1", limit: 32 }));
-    expect(api.request).toHaveBeenCalledWith("ratsTaskLogs", expect.objectContaining({ taskId: "task-e2e-1", limit: 8192 }));
+    expect(api.request).toHaveBeenCalledWith("ratsTasks", {});
+    expect(api.request).toHaveBeenCalledWith("ratsTaskStatus", expect.objectContaining({ providerId: task.provider_id, serviceId: task.service_id, taskId: task.task_id }));
+    expect(api.request).toHaveBeenCalledWith("ratsTaskEvents", expect.objectContaining({ providerId: task.provider_id, serviceId: task.service_id, taskId: task.task_id, limit: 32 }));
+    expect(api.request).toHaveBeenCalledWith("ratsTaskLogs", expect.objectContaining({ providerId: task.provider_id, serviceId: task.service_id, taskId: task.task_id, limit: 8192 }));
 
     await user.click(screen.getByRole("button", { name: "取消任务" }));
     await waitFor(() => expect(api.request).toHaveBeenCalledWith("ratsTaskCancel", {
-      providerId: "reverie.engine",
-      serviceId: "rats-4242-testservice",
-      taskId: "task-e2e-1",
+      providerId: task.provider_id,
+      serviceId: task.service_id,
+      taskId: task.task_id,
       deadlineMs: 5_000,
     }));
     expect((await screen.findAllByText("已取消")).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("keeps slow RTP polling single-flight", async () => {
+    let releaseTasks: () => void = () => {};
+    const taskGate = new Promise<void>((resolve) => {
+      releaseTasks = resolve;
+    });
+    let activeRequests = 0;
+    let maximumConcurrentRequests = 0;
+    let taskRequests = 0;
+    installDesktopApi({
+      ratsStateTransform: (state) => ({
+        ...state,
+        services: state.services.map((service) => ({
+          ...service,
+          enabled: true,
+          connection: "connected",
+          sessionActive: true,
+        })),
+      }),
+      ratsTasks: async () => {
+        taskRequests += 1;
+        activeRequests += 1;
+        maximumConcurrentRequests = Math.max(maximumConcurrentRequests, activeRequests);
+        await taskGate;
+        activeRequests -= 1;
+        return [];
+      },
+    });
+    const { unmount } = render(<App />);
+    const tasksButton = await screen.findByRole("button", { name: "RTP 任务" });
+
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        fireEvent.click(tasksButton);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(6_000);
+      });
+
+      expect(taskRequests).toBe(1);
+      expect(maximumConcurrentRequests).toBe(1);
+    } finally {
+      releaseTasks();
+      await act(async () => {
+        await taskGate;
+      });
+      unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears stale RTP task detail and reports a detail request failure", async () => {
+    let failStatus = false;
+    installDesktopApi({
+      ratsStateTransform: (state) => ({
+        ...state,
+        services: state.services.map((service) => ({ ...service, enabled: true, connection: "connected", sessionActive: true })),
+      }),
+      ratsTasks: () => [{
+        provider_id: "reverie.engine",
+        service_id: "rats-4242-testservice",
+        task_id: "task-detail-error",
+        tool: "run.play",
+        deadline_msec: 5_000,
+        cursor: 1,
+        status: { running: true, next_cursor: 2, output: { running: true } },
+        events: [],
+      }],
+      ratsTaskFailure: (action) => failStatus && action === "ratsTaskStatus" ? new Error("status transport failed") : null,
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "RTP 任务" }));
+    expect(await screen.findByText(/run\.play started/)).toBeTruthy();
+    failStatus = true;
+    await user.click(screen.getByRole("button", { name: "刷新" }));
+
+    expect(await screen.findByText(/status transport failed/)).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText(/run\.play started/)).toBeNull());
+  });
+
+  it("bounds retained RTP task logs to the latest 64 Ki characters", async () => {
+    let logRequest = 0;
+    installDesktopApi({
+      ratsStateTransform: (state) => ({
+        ...state,
+        services: state.services.map((service) => ({ ...service, enabled: true, connection: "connected", sessionActive: true })),
+      }),
+      ratsTasks: () => [{
+        provider_id: "reverie.engine",
+        service_id: "rats-4242-testservice",
+        task_id: "task-bounded-logs",
+        tool: "run.play",
+        deadline_msec: 5_000,
+        cursor: 1,
+        status: { running: true, next_cursor: 2, output: { running: true } },
+        events: [],
+      }],
+      ratsTaskLogText: () => logRequest++ === 0 ? "A".repeat(65_536) : "B".repeat(1_024),
+    });
+    const user = userEvent.setup();
+    const { container } = render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "RTP 任务" }));
+    await waitFor(() => expect(container.querySelector(".rats-task-log-output")?.textContent?.length).toBe(65_536));
+    await user.click(screen.getByRole("button", { name: "刷新" }));
+
+    await waitFor(() => {
+      const text = container.querySelector(".rats-task-log-output")?.textContent ?? "";
+      expect(text.length).toBe(65_536);
+      expect(text.endsWith("B".repeat(1_024))).toBe(true);
+      expect(text.startsWith("A".repeat(1_024))).toBe(true);
+    });
+  });
+
+  it("evicts disappeared and offline RTP task caches before the same key is reused", async () => {
+    let phase = 0;
+    const reusedLogCursors: number[] = [];
+    const reconnectedLogCursors: number[] = [];
+    const taskId = "task-reused-key";
+    const taskRecord = (running: boolean): RatsTaskRecord => ({
+      provider_id: "reverie.engine",
+      service_id: "rats-4242-testservice",
+      task_id: taskId,
+      tool: "run.play",
+      deadline_msec: 5_000,
+      cursor: 0,
+      status: { running, next_cursor: 0, output: { running } },
+      events: [],
+    });
+    installDesktopApi({
+      ratsStateTransform: (state) => ({
+        ...state,
+        services: state.services.map((service) => ({
+          ...service,
+          enabled: true,
+          connection: phase === 3 ? "available" : "connected",
+          sessionActive: phase !== 3,
+        })),
+      }),
+      ratsTasks: (_payload, cancelled) => {
+        if (phase === 1) return [];
+        return [taskRecord(phase >= 2 || !cancelled)];
+      },
+      ratsTaskStatus: (_payload, cancelled) => {
+        const running = phase >= 2 || !cancelled;
+        return { running, next_cursor: 0, output: { running } };
+      },
+      ratsTaskEvents: () => {
+        const type = phase >= 4 ? "task.reconnected" : phase >= 2 ? "task.reused" : "task.initial";
+        return {
+          schema: "reverie.rtp.task/1",
+          events: [{ sequence: 1, type, timestamp_utc: "2026-08-09T00:00:00Z", payload: {} }],
+          next_cursor: 1,
+        };
+      },
+      ratsTaskLogText: (payload) => {
+        const cursor = Number(payload.cursor ?? 0);
+        if (phase >= 4) {
+          reconnectedLogCursors.push(cursor);
+          return "reconnected-log\n";
+        }
+        if (phase >= 2) {
+          reusedLogCursors.push(cursor);
+          return "reused-log\n";
+        }
+        return "initial-log\n";
+      },
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "RTP 任务" }));
+    expect(await screen.findByText("task.initial")).toBeTruthy();
+    expect(await screen.findByText(/initial-log/)).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "取消任务" }));
+    expect((await screen.findAllByText("已取消")).length).toBeGreaterThanOrEqual(1);
+
+    phase = 1;
+    await user.click(screen.getByRole("button", { name: "刷新" }));
+    await waitFor(() => expect(screen.queryByText(taskId)).toBeNull());
+
+    phase = 2;
+    await user.click(screen.getByRole("button", { name: "刷新" }));
+    expect(await screen.findByText("task.reused")).toBeTruthy();
+    expect(await screen.findByText(/reused-log/)).toBeTruthy();
+    expect(screen.queryByText("task.initial")).toBeNull();
+    expect(screen.queryByText(/initial-log/)).toBeNull();
+    expect(screen.queryByText("已取消")).toBeNull();
+    expect(screen.getByRole("button", { name: "取消任务" })).toBeTruthy();
+    expect(reusedLogCursors[0]).toBe(0);
+
+    phase = 3;
+    await user.click(screen.getByRole("button", { name: "刷新" }));
+    expect(await screen.findByText("尚未启用 RTP 服务")).toBeTruthy();
+
+    phase = 4;
+    await user.click(screen.getByRole("button", { name: "刷新" }));
+    expect(await screen.findByText("task.reconnected")).toBeTruthy();
+    expect(await screen.findByText(/reconnected-log/)).toBeTruthy();
+    expect(screen.queryByText("task.reused")).toBeNull();
+    expect(screen.queryByText(/reused-log/)).toBeNull();
+    expect(reconnectedLogCursors[0]).toBe(0);
   });
 });

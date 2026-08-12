@@ -52,10 +52,10 @@ Reverie supports a wide range of LLM providers out of the box. Each provider has
 
 | Provider           | Description                                                                                                     | Key Models                                                                                                                                                                                  |
 | ------------------ | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **NVIDIA**         | NVIDIA-hosted catalog via`integrate.api.nvidia.com`                                                             | Qwen3.5 397B, DeepSeek V4 Pro/V4 Flash, Kimi K2.6, GLM-5.2, MiniMax M2.7/M3, Mistral Small 4, Mistral Medium 3.5, Mistral Large 3, Step-3.5/3.7-Flash, GPT-OSS-120B, Nemotron 3 Super/Ultra and 3.5 Nano, Laguna XS 2.1 |
+| **NVIDIA**         | NVIDIA-hosted catalog via`integrate.api.nvidia.com`                                                             | Muse Glimmer 30B, Nemotron 3.5 Lightning, Nemotron 3 Super/Ultra, GLM-5.2, MiniMax M3, Step-3.7-Flash, GPT-OSS-120B, Laguna XS 2.1 |
 | **ModelScope**     | OpenAI Chat Completions API on `api-inference.modelscope.cn` with core-published model capabilities             | Step 3.7 Flash, GLM-5.2, DeepSeek V4 Pro, DeepSeek V4 Flash                                                                                                                            |
 | **Codex**          | ChatGPT backend or Responses-compatible reverse proxy                                                           | GPT-5.6, GPT-5.5, and other models discovered from the live Codex CLI cache                                                                                                                 |
-| **SenseNova**      | SenseTime SenseNova API with model-specific OpenAI/Anthropic transports                                         | DeepSeek V4 Flash (1M context), SenseNova 6.7 Flash Lite (vision)                                                                                                                           |
+| **SenseNova**      | SenseTime SenseNova API with live model discovery and OpenAI-compatible transport                              | Live account catalog; fallback includes DeepSeek V4 Flash, GLM-5.2, and SenseNova 6.8 Flash Lite                                                                                            |
 | **AIHubMix**       | Third-party API gateway (OpenAI-compatible)                                                                     | GPT-5.5 Free (with/without reasoning), GPT-4o Free, GPT-4.1 Free                                                                                                                            |
 | **Agnes**          | Agnes AI OpenAI-compatible API (text, image, video)                                                             | Agnes 2.5 Pro Alpha, Agnes 2.5 Flash, Agnes 2.0 Flash, image/video generation                                                                                                                |
 | **WebGemini**      | Anonymous Gemini Web access via`gemini.google.com`                                                              | Gemini 3.5 Flash, Gemini 3.5 Flash Thinking, Gemini 3.5 Flash Thinking Lite, Gemini 3.1 Pro, Gemini Auto, Gemini Flash Lite                                                                 |
@@ -188,7 +188,7 @@ Reverie-Cli/
 │   │   │   └── tool_executor.py← Tool execution
 │   │   ├── cli/
 │   │   │   └── interface.py   ← Terminal UI (Rich-based)
-│   │   ├── nvidia.py          ← NVIDIA provider integration (17 models)
+│   │   ├── nvidia.py          ← NVIDIA provider integration (9 models)
 │   │   ├── codex.py           ← Codex/ChatGPT provider integration
 │   │   ├── modelscope.py      ← ModelScope OpenAI Chat provider and capability catalog
 │   │   ├── sensenova.py       ← SenseNova OpenAI-compatible provider
@@ -275,7 +275,7 @@ reverie
 reverie --mode reverie-atlas
 
 # Start with a specific provider/model
-reverie --provider nvidia --model qwen/qwen3.5-397b-a17b
+reverie --provider nvidia --model meta/muse-glimmer-30b
 
 # Resume the last session
 reverie --resume
@@ -316,10 +316,10 @@ Reverie uses `config.json` stored in the project's `.reverie/` directory or the 
   "nvidia": {
     "enabled": true,
     "api_key": "nvapi-...",
-    "selected_model_id": "qwen/qwen3.5-397b-a17b",
-    "selected_model_display_name": "Qwen3.5 397B A17B",
+    "selected_model_id": "meta/muse-glimmer-30b",
+    "selected_model_display_name": "Muse Glimmer 30B",
     "api_url": "https://integrate.api.nvidia.com/v1",
-    "max_context_tokens": 262144,
+    "max_context_tokens": 131072,
     "timeout": 60,
     "max_tokens": 16384,
     "temperature": 0.60,
@@ -481,41 +481,35 @@ Desktop orchestration through an embedded Open Computer Use-compatible desktop r
 
 ### NVIDIA (Recommended for High-Throughput)
 
-NVIDIA's hosted API at `integrate.api.nvidia.com` provides access to 15 supported models. Key configurations:
+NVIDIA's hosted API at `integrate.api.nvidia.com` provides access to 9 supported models. Key configurations:
 
 **Model catalog (hardcoded in `reverie/nvidia.py`):**
 
 
-| Model ID                                       | Display Name            | Transport  | Vision       | Thinking                   | Context |
-| ---------------------------------------------- | ----------------------- | ---------- | ------------ | -------------------------- | ------- |
-| `qwen/qwen3.5-397b-a17b`                       | Qwen3.5 397B A17B       | request    | ✅           | toggle                     | 262K    |
-| `nvidia/nemotron-3-ultra-550b-a55b`            | Nemotron 3 Ultra 550B   | openai-sdk | ❌           | fixed thinking             | 1M      |
-| `z-ai/glm-5.2`                                 | GLM-5.2                 | openai-sdk | ❌           | ❌                         | 1M      |
-| `deepseek-ai/deepseek-v4-pro`                  | DeepSeek V4 Pro         | openai-sdk | ❌           | effort (none/high/max)     | 1M      |
-| `deepseek-ai/deepseek-v4-flash`                | DeepSeek V4 Flash       | openai-sdk | ❌           | effort (none/low/med/high) | 1M      |
-| `minimaxai/minimax-m2.7`                       | MiniMax M2.7            | openai-sdk | ❌           | ❌                         | 204K    |
-| `minimaxai/minimax-m3`                         | MiniMax M3              | request    | ✅ (img+vid) | effort (none/high)         | 1M      |
-| `mistralai/mistral-small-4-119b-2603`          | Mistral Small 4 119B    | request    | ✅           | effort (none/high)         | 262K    |
-| `mistralai/mistral-medium-3.5-128b`            | Mistral Medium 3.5 128B | request    | ✅           | effort (none/high)         | 262K    |
-| `mistralai/mistral-large-3-675b-instruct-2512` | Mistral Large 3 675B    | request    | ✅           | ❌                         | 262K    |
-| `stepfun-ai/step-3.5-flash`                    | Step-3.5-Flash          | openai-sdk | ❌           | fixed (always-on)          | 256K    |
-| `stepfun-ai/step-3.7-flash`                    | Step-3.7-Flash          | request    | ✅ (img)     | ❌                         | 256K    |
-| `moonshotai/kimi-k2.6`                         | Kimi K2.6               | request    | ✅           | toggle                     | 262K    |
-| `openai/gpt-oss-120b`                          | GPT-OSS-120B            | openai-sdk | ❌           | effort (low/med/high)      | 128K    |
-| `nvidia/nemotron-3-super-120b-a12b`            | Nemotron 3 Super 120B   | openai-sdk | ❌           | effort (none/low/high)     | 1M      |
+| Model ID                                         | Display Name                     | Transport  | Vision       | Thinking                            | Context |
+| ------------------------------------------------ | -------------------------------- | ---------- | ------------ | ----------------------------------- | ------- |
+| `meta/muse-glimmer-30b`                          | Muse Glimmer 30B                 | openai-sdk | ✅           | effort (none/min/low/med/high/max)  | 131K    |
+| `nvidia/nemotron-3.5-lightning-30b-a3b`          | Nemotron 3.5 Lightning 30B A3B  | openai-sdk | ❌           | toggle                              | 1M      |
+| `nvidia/nemotron-3-ultra-550b-a55b`              | Nemotron 3 Ultra 550B           | openai-sdk | ❌           | fixed thinking                      | 1M      |
+| `nvidia/nemotron-3-super-120b-a12b`              | Nemotron 3 Super 120B           | openai-sdk | ❌           | effort (none/low/high)              | 1M      |
+| `poolside/laguna-xs-2.1`                         | Laguna XS 2.1                   | openai-sdk | ❌           | ❌                                  | 262K    |
+| `minimaxai/minimax-m3`                           | MiniMax M3                      | request    | ✅ (img+vid) | effort (none/high)                  | 1M      |
+| `z-ai/glm-5.2`                                   | GLM-5.2                         | openai-sdk | ❌           | fixed thinking                      | 1M      |
+| `stepfun-ai/step-3.7-flash`                      | Step-3.7-Flash                  | request    | ✅           | fixed thinking                      | 256K    |
+| `openai/gpt-oss-120b`                            | GPT-OSS-120B                    | openai-sdk | ❌           | effort (low/med/high)               | 128K    |
 
 **Transport types:**
 
-- `request` — Direct HTTP POST with chat-template kwargs (for models like Kimi K2.6, MiniMax M3, Qwen3.5, Mistral)
-- `openai-sdk` — OpenAI-compatible SDK transport (for models like DeepSeek V4 Pro, Nemotron 3 Ultra, GPT-OSS-120B)
+- `request` — Direct HTTP POST with model-specific defaults (for MiniMax M3 and Step-3.7-Flash)
+- `openai-sdk` — OpenAI-compatible SDK transport (for models like Muse Glimmer, Nemotron, GLM-5.2, and GPT-OSS-120B)
 
 **Thinking control:**
 
-- `toggle` — Binary on/off (Qwen3.5 397B, Kimi K2.6)
-- `effort` — Selectable levels: `none`/`low`/`medium`/`high`/`max` (DeepSeek V4 Pro, Nemotron, Mistral models, GPT-OSS-120B, MiniMax M3)
-- `fixed` — Always-on thinking (Step-3.5-Flash)
+- `toggle` — Binary on/off (Nemotron 3.5 Lightning)
+- `effort` — Fixed per-model levels (Muse Glimmer, Nemotron 3 Super, GPT-OSS-120B, MiniMax M3)
+- `fixed` — Always-on provider reasoning (Nemotron 3 Ultra, GLM-5.2, and Step-3.7-Flash)
 
-**Vision models:** MiniMax M3, Mistral Small 4, Mistral Medium 3.5, Mistral Large 3, Qwen3.5 397B, Kimi K2.6, Step-3.7-Flash support image and/or video input.
+**Vision models:** Muse Glimmer, MiniMax M3, and Step-3.7-Flash support image and/or video input.
 
 ### ModelScope
 
@@ -553,7 +547,7 @@ Connects to ChatGPT's backend API. Supports:
 | Model ID                   | Display Name             | Context   | Thinking    | Vision |
 | -------------------------- | ------------------------ | --------- | ----------- | ------ |
 | `deepseek-v4-flash`        | DeepSeek V4 Flash        | 1,000,000 | ✅ (effort) | ❌     |
-| `sensenova-6.7-flash-lite` | SenseNova 6.7 Flash Lite | 262,144   | ❌          | ✅     |
+| `sensenova-6.8-flash-lite` | SenseNova 6.8 Flash Lite | 262,144   | ❌          | ✅     |
 
 Reasoning effort is selectable: `none`, `low`, `medium`, `high`.
 
@@ -885,7 +879,7 @@ from reverie.nvidia import (
 )
 
 catalog = get_nvidia_model_catalog()  # List of model dicts
-metadata = get_nvidia_model_metadata("qwen/qwen3.5-397b-a17b")
+metadata = get_nvidia_model_metadata("meta/muse-glimmer-30b")
 
 # ModelScope
 from reverie.modelscope import (

@@ -71,7 +71,7 @@ def test_desktop_catalog_uses_native_model_reasoning_metadata() -> None:
     opencode = _source(payload, "opencode")
     deepseek = next(item for item in opencode["models"] if item["id"] == "deepseek-v4-flash-free")
     assert deepseek["reasoning"]["control"] == "effort"
-    assert [item["id"] for item in deepseek["reasoning"]["options"]] == ["none", "high", "max"]
+    assert [item["id"] for item in deepseek["reasoning"]["options"]] == ["low", "high", "max"]
 
     modelscope = _source(payload, "modelscope")
     step = next(item for item in modelscope["models"] if item["id"] == "stepfun-ai/Step-3.7-Flash")
@@ -94,6 +94,46 @@ def test_desktop_catalog_uses_native_model_reasoning_metadata() -> None:
                 assert reasoning["value"] in {item["id"] for item in reasoning["options"]}
 
 
+def test_desktop_live_refresh_passes_sensenova_config_to_provider(monkeypatch) -> None:
+    from reverie import sensenova as sensenova_module
+
+    captured = {}
+
+    def fake_catalog(provider_config, *, fetch_live=False, force_refresh=False):
+        captured.update(
+            provider_config=dict(provider_config),
+            fetch_live=fetch_live,
+            force_refresh=force_refresh,
+        )
+        return [{
+            "id": "future-chat-model",
+            "display_name": "Future Chat Model",
+            "description": "Discovered live.",
+            "transport": "openai-chat",
+            "context_length": 123_456,
+            "max_output_tokens": 7_890,
+            "vision": False,
+            "thinking": False,
+            "tool_calling": True,
+            "thinking_control": "none",
+            "thinking_options": [],
+            "default_thinking_choice": "",
+            "catalog_source": "api",
+        }]
+
+    monkeypatch.setattr(sensenova_module, "get_sensenova_model_catalog", fake_catalog)
+    config = Config(sensenova={"api_key": "sense-test", "selected_model_id": "future-chat-model"})
+
+    payload = build_model_sources_payload(config, fetch_live=True)
+    source = _source(payload, "sensenova")
+
+    assert captured["provider_config"]["api_key"] == "sense-test"
+    assert captured["fetch_live"] is True
+    assert captured["force_refresh"] is True
+    assert [item["id"] for item in source["models"]] == ["future-chat-model"]
+    assert source["catalog_live"] is True
+
+
 def test_model_selection_updates_model_specific_reasoning() -> None:
     config = Config()
     selected = apply_model_selection(config, "codex", "gpt-5.6-sol", "high")
@@ -108,8 +148,8 @@ def test_model_selection_updates_model_specific_reasoning() -> None:
     assert config.nvidia["selected_model_id"] == toggle_model["id"]
     assert config.nvidia["enable_thinking"] is False
 
-    apply_model_selection(config, "opencode", "ling-3.0-flash-free", "high")
-    assert config.opencode["selected_model_id"] == "ling-3.0-flash-free"
+    apply_model_selection(config, "opencode", "hy3-free", "high")
+    assert config.opencode["selected_model_id"] == "hy3-free"
     assert config.opencode["reasoning_effort"] == "high"
 
     apply_model_selection(config, "modelscope", "ZhipuAI/GLM-5.2", "none")
@@ -219,8 +259,11 @@ def test_desktop_approval_request_can_be_resolved_while_prompt_waits() -> None:
 def test_sdk_bridge_exposes_rats_task_status_events_cancel_and_logs_actions() -> None:
     from reverie.sdk_bridge import ReverieSdkBridge
 
+    sync_calls = []
+
     class FakeRatsRuntime:
         def sync_tasks(self, **kwargs):
+            sync_calls.append(dict(kwargs))
             return [{"service_id": kwargs.get("service_id", ""), "task_id": "run-1", "status": {"running": True}}]
 
         def task_status(self, service_id, task_id, **kwargs):
@@ -239,6 +282,9 @@ def test_sdk_bridge_exposes_rats_task_status_events_cancel_and_logs_actions() ->
     bridge.rats_runtime = FakeRatsRuntime()
     tasks = bridge.dispatch({"id": "tasks", "action": "ratsTasks", "payload": {"serviceId": "rats-1-test"}})
     assert tasks["type"] == "rats.tasks" and tasks["tasks"][0]["task_id"] == "run-1"
+    all_tasks = bridge.dispatch({"id": "all-tasks", "action": "ratsTasks", "payload": {}})
+    assert all_tasks["type"] == "rats.tasks" and all_tasks["service_id"] == "" and all_tasks["provider_id"] == ""
+    assert sync_calls[-1] == {"service_id": "", "provider_id": ""}
     status = bridge.dispatch({"id": "status", "action": "ratsTaskStatus", "payload": {"serviceId": "rats-1-test", "taskId": "run-1"}})
     assert status["type"] == "rats.task.status" and status["result"]["running"] is True
     events = bridge.dispatch({"id": "events", "action": "ratsTaskEvents", "payload": {"serviceId": "rats-1-test", "taskId": "run-1"}})

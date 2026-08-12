@@ -455,8 +455,8 @@ class ToolExecutor:
                 self._invalidate_schema_cache()
             return
         try:
-            definitions = runtime.get_tool_definitions(force_refresh=False)
-            generation = int(runtime.get_generation())
+            generation, definitions = runtime.get_tool_definitions_snapshot(force_refresh=False)
+            generation = int(generation)
         except Exception as exc:
             logger.debug("Failed to sync RATS tools: %s", exc, exc_info=True)
             return

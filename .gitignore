@@ -65,6 +65,7 @@ Reverie UI/artifacts/
 /ReverieCli-ui/.kernel/
 /ReverieCli-ui/.runtime/
 /ReverieCli-ui/.vite-cache/
+/ReverieCli-ui/.focused-temp/
 /ReverieCli-ui/build/generated/
 /ReverieCli-ui/dist/
 /ReverieCli-ui/dist-electron/

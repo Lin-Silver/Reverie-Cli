@@ -262,8 +262,8 @@ def test_active_model_reuses_standard_nvidia_key_for_computer_controller():
     config = Config(
         models=[
             ModelConfig(
-                model="stepfun-ai/step-3.5-flash",
-                model_display_name="step-3.5-flash[NVIDIA]",
+                model="meta/muse-glimmer-30b",
+                model_display_name="Muse Glimmer 30B[NVIDIA]",
                 base_url="https://integrate.api.nvidia.com/v1",
                 api_key="nvapi-test",
             )
@@ -273,7 +273,7 @@ def test_active_model_reuses_standard_nvidia_key_for_computer_controller():
         nvidia={
             "enabled": True,
             "api_key": "",
-            "selected_model_id": "qwen/qwen3.5-397b-a17b",
+            "selected_model_id": "meta/muse-glimmer-30b",
         },
     )
 

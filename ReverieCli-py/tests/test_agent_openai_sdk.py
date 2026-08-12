@@ -22,8 +22,8 @@ def _nvidia_config() -> SimpleNamespace:
         api_enable_debug_logging=False,
         active_model_source="nvidia",
         nvidia={
-            "selected_model_id": "deepseek-ai/deepseek-v4-pro",
-            "selected_model_display_name": "DeepSeek V4 Pro",
+            "selected_model_id": "meta/muse-glimmer-30b",
+            "selected_model_display_name": "Muse Glimmer 30B",
             "reasoning_effort": "max",
             "timeout": 23,
         },
@@ -105,7 +105,7 @@ def test_openai_sdk_client_receives_resolved_provider_timeout_when_needed(monkey
     agent = ReverieAgent(
         base_url="https://integrate.api.nvidia.com/v1",
         api_key="x",
-        model="deepseek-ai/deepseek-v4-pro",
+        model="meta/muse-glimmer-30b",
         project_root=tmp_path,
         provider="openai-sdk",
         config=_nvidia_config(),
@@ -584,7 +584,7 @@ def test_legacy_nvidia_default_timeout_does_not_override_global_timeout_when_nee
     agent = ReverieAgent(
         base_url="https://integrate.api.nvidia.com/v1",
         api_key="x",
-        model="deepseek-ai/deepseek-v4-pro",
+        model="meta/muse-glimmer-30b",
         project_root=tmp_path,
         provider="openai-sdk",
         config=config,
@@ -602,7 +602,7 @@ def test_openai_sdk_stream_emits_visible_wait_event_before_request(monkeypatch, 
     agent = ReverieAgent(
         base_url="https://integrate.api.nvidia.com/v1",
         api_key="x",
-        model="deepseek-ai/deepseek-v4-pro",
+        model="meta/muse-glimmer-30b",
         project_root=tmp_path,
         provider="openai-sdk",
         config=_nvidia_config(),
@@ -615,7 +615,7 @@ def test_openai_sdk_stream_emits_visible_wait_event_before_request(monkeypatch, 
 
     assert event["event"] == "model_request"
     assert event["message"] == "Waiting for NVIDIA API response"
-    assert event["detail"] == "deepseek-ai/deepseek-v4-pro | stream"
+    assert event["detail"] == "meta/muse-glimmer-30b | stream"
     assert event["meta"] == "timeout 23s"
     assert "create_kwargs" not in seen
 
@@ -626,12 +626,7 @@ def test_openai_sdk_stream_emits_visible_wait_event_before_request(monkeypatch, 
 
     create_kwargs = seen["create_kwargs"]
     assert create_kwargs["timeout"] == 23
-    assert create_kwargs["extra_body"] == {
-        "chat_template_kwargs": {
-            "thinking": True,
-            "reasoning_effort": "max",
-        }
-    }
+    assert create_kwargs["extra_body"] == {"reasoning_effort": "max"}
     assert create_kwargs["messages"][0]["role"] == "system"
     assert all(message["role"] != "system" for message in create_kwargs["messages"][1:])
 
@@ -663,7 +658,7 @@ def test_openai_sdk_retries_transient_create_errors(monkeypatch, tmp_path):
     agent = ReverieAgent(
         base_url="https://integrate.api.nvidia.com/v1",
         api_key="x",
-        model="deepseek-ai/deepseek-v4-pro",
+        model="meta/muse-glimmer-30b",
         project_root=tmp_path,
         provider="openai-sdk",
         config=config,
@@ -696,7 +691,7 @@ def test_compaction_memory_is_persisted_to_memory_index(monkeypatch, tmp_path):
     agent = ReverieAgent(
         base_url="https://integrate.api.nvidia.com/v1",
         api_key="x",
-        model="deepseek-ai/deepseek-v4-pro",
+        model="meta/muse-glimmer-30b",
         project_root=tmp_path,
         provider="openai-sdk",
         config=_nvidia_config(),
@@ -762,7 +757,7 @@ def test_nvidia_short_turn_keeps_full_tools_and_reasoning(monkeypatch, tmp_path)
     agent = ReverieAgent(
         base_url="https://integrate.api.nvidia.com/v1",
         api_key="x",
-        model="deepseek-ai/deepseek-v4-pro",
+        model="meta/muse-glimmer-30b",
         project_root=tmp_path,
         provider="openai-sdk",
         config=_nvidia_config(),
@@ -780,14 +775,8 @@ def test_nvidia_short_turn_keeps_full_tools_and_reasoning(monkeypatch, tmp_path)
 
     create_kwargs = seen["create_kwargs"]
     assert create_kwargs["tools"] == [tool_schema]
-    assert create_kwargs["extra_body"] == {
-        "chat_template_kwargs": {
-            "thinking": True,
-            "reasoning_effort": "max",
-        }
-    }
-    assert create_kwargs["max_tokens"] <= 262144
-    assert create_kwargs["max_tokens"] > 250000
+    assert create_kwargs["extra_body"] == {"reasoning_effort": "max"}
+    assert create_kwargs["max_tokens"] == 16384
 
 
 def test_repository_turn_requires_one_context_engine_call_then_returns_to_auto(tmp_path):
@@ -892,20 +881,20 @@ def test_general_programming_explanation_does_not_force_repository_tool(tmp_path
 def test_nvidia_request_provider_clamps_output_to_remaining_context(tmp_path):
     config = _nvidia_config()
     config.nvidia = {
-        "selected_model_id": "mistralai/mistral-medium-3.5-128b",
-        "selected_model_display_name": "Mistral Medium 3.5 128B",
-        "max_tokens": 262144,
+        "selected_model_id": "stepfun-ai/step-3.7-flash",
+        "selected_model_display_name": "Step-3.7-Flash",
+        "max_tokens": 16384,
     }
     agent = ReverieAgent(
         base_url="https://integrate.api.nvidia.com/v1/chat/completions",
         api_key="x",
-        model="mistralai/mistral-medium-3.5-128b",
+        model="stepfun-ai/step-3.7-flash",
         project_root=tmp_path,
         provider="request",
         config=config,
     )
     payload = {
-        "model": "mistralai/mistral-medium-3.5-128b",
+        "model": "stepfun-ai/step-3.7-flash",
         "messages": [
             {"role": "system", "content": "system" * 2000},
             {"role": "user", "content": "hello" * 4000},
@@ -924,9 +913,7 @@ def test_nvidia_request_provider_clamps_output_to_remaining_context(tmp_path):
 
     prepared = agent._prepare_request_payload(payload)
 
-    assert prepared["max_tokens"] < 262144
-    assert prepared["max_tokens"] > 200000
-    assert prepared["reasoning_effort"] == "high"
+    assert prepared["max_tokens"] == 16384
 
 
 def test_nvidia_minimax_m3_request_payload_uses_thinking_mode_and_stream_reasoning(tmp_path):
@@ -1004,7 +991,7 @@ def test_display_suppresses_model_request_stream_event():
             "category": "Model",
             "message": "Waiting for NVIDIA API response",
             "status": "working",
-            "detail": "deepseek-ai/deepseek-v4-pro | stream",
+            "detail": "meta/muse-glimmer-30b | stream",
             "meta": "timeout 23s",
         }
     )

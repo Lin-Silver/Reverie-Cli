@@ -182,6 +182,7 @@ export interface ModelSource {
     values: Record<string, unknown>;
     configured_secrets: Record<string, boolean>;
   };
+  catalog_live?: boolean;
   modalities?: {
     live: boolean;
     llm: number;

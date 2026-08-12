@@ -29,11 +29,14 @@ def iter_sse_data_strings(response, *, chunk_size: int = DEFAULT_SSE_CHUNK_SIZE)
     in_sse_event = False
 
     try:
-        for raw_line in response.iter_lines(decode_unicode=True, chunk_size=max(512, int(chunk_size or DEFAULT_SSE_CHUNK_SIZE))):
+        for raw_line in response.iter_lines(decode_unicode=False, chunk_size=max(512, int(chunk_size or DEFAULT_SSE_CHUNK_SIZE))):
             if raw_line is None:
                 continue
 
-            line = str(raw_line or "").rstrip("\r")
+            if isinstance(raw_line, bytes):
+                line = raw_line.decode("utf-8", errors="replace").rstrip("\r")
+            else:
+                line = str(raw_line or "").rstrip("\r")
             stripped = line.strip()
 
             if line == "":

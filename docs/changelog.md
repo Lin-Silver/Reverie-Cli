@@ -6,6 +6,7 @@ Released 2026-07-17.
 
 * Fixed UTF-8 decoding for OpenCode Zen streaming responses whose `text/event-stream` content type omits a charset, preventing Chinese and other non-ASCII output from appearing as mojibake.
 * Replaced the stale Opencode model picker with a live `/v1/models` refresh. Anonymous use is restricted to the eight current free Chat Completions models; configured API keys also expose supported paid Chat Completions models returned by Zen. Models that require Responses, Anthropic Messages, or Google-specific endpoints stay excluded so every listed entry uses this source's actual transport. The built-in metadata snapshot and reasoning controls were synchronized with current OpenCode documentation and models.dev data, with a safe fallback when live discovery is unavailable.
+* Hardened complete desktop builds against machine-local network configuration. Locked npm installation now retries without the user-level `.npmrc` when its proxy is unavailable, Electron and electron-builder tool archives use checksum-verified mirrors with environment overrides, and Windows automation can pass `--no-pause`.
 
 ### Post-release update (still v2.5.0) — 2026-08-01
 

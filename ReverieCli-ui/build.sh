@@ -14,8 +14,14 @@ command -v npm >/dev/null || { echo "[ERROR] npm is required."; exit 1; }
 
 "$REPO_ROOT/ReverieCli-py/build.sh" --reuse-venv --test-exe
 cd "$SCRIPT_DIR"
-npm ci
+if ! npm ci --fetch-retries=0 --fetch-timeout=15000; then
+  echo "[WARN] npm ci failed with the current user npm configuration." >&2
+  echo "[WARN] Retrying without the user-level .npmrc in case a local proxy is unavailable." >&2
+  npm ci --userconfig=/dev/null
+fi
 export REVERIE_EXTERNAL_KERNEL_PATH="$REPO_ROOT/dist/reverie"
+export ELECTRON_MIRROR="${ELECTRON_MIRROR:-https://npmmirror.com/mirrors/electron/}"
+export ELECTRON_BUILDER_BINARIES_MIRROR="${ELECTRON_BUILDER_BINARIES_MIRROR:-https://npmmirror.com/mirrors/electron-builder-binaries/}"
 npm run dist:linux
 
 VERSION="$(node -p "require('./package.json').version")"

@@ -28,7 +28,7 @@ npm run dist:linux
 npm run dist:mac
 ```
 
-For complete local builds, use `build.bat` on Windows or `build.sh` on Linux. They build and sanity-check the core first, install locked desktop dependencies, build the GUI packages, and verify the expected filenames.
+For complete local builds, use `build.bat` on Windows or `build.sh` on Linux. They build and sanity-check the core first, install locked desktop dependencies, build the GUI packages, and verify the expected filenames. If a user-level npm proxy is configured but unavailable, dependency installation automatically retries without the user-level `.npmrc`. Electron and electron-builder tool archives use checksum-verified mirrors by default; set `ELECTRON_MIRROR` or `ELECTRON_BUILDER_BINARIES_MIRROR` before invoking the script to override them. Automated Windows builds can pass `--no-pause`.
 
 The rolling `latest` GitHub Release is rebuilt from every `main` push and is marked as a prerelease. Its downloads are grouped Windows → Linux → macOS Apple Silicon → macOS Intel, and its four platform kernel records are consolidated into `reverie-kernels.json`.
 

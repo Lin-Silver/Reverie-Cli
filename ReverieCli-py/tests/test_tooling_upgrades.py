@@ -1270,6 +1270,23 @@ def test_local_build_scripts_bundle_embedded_chromium() -> None:
     assert '"playwright==1.61.0"' in setup
 
 
+def test_desktop_build_scripts_survive_unavailable_user_proxy() -> None:
+    repo_root = Path(__file__).resolve().parents[2] / "ReverieCli-ui"
+    build_bat = (repo_root / "build.bat").read_text(encoding="utf-8", errors="replace")
+    build_sh = (repo_root / "build.sh").read_text(encoding="utf-8")
+
+    assert "npm ci --userconfig=NUL" in build_bat
+    assert "npm ci --userconfig=/dev/null" in build_sh
+    assert "--fetch-retries=0 --fetch-timeout=15000" in build_bat
+    assert "--fetch-retries=0 --fetch-timeout=15000" in build_sh
+    for script in (build_bat, build_sh):
+        assert "ELECTRON_MIRROR" in script
+        assert "ELECTRON_BUILDER_BINARIES_MIRROR" in script
+        assert "https://npmmirror.com/mirrors/electron/" in script
+        assert "https://npmmirror.com/mirrors/electron-builder-binaries/" in script
+    assert 'if /i "%~1"=="--no-pause"' in build_bat
+
+
 def test_mcp_resource_tools_list_and_read(tmp_path: Path) -> None:
     runtime = DummyRuntime()
     context = {

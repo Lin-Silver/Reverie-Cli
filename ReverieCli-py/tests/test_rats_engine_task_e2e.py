@@ -730,17 +730,24 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             set_state.success is True
             and set_state.data.get("state_cells") == ["cli-cell"]
             and set_state.data.get("state_dirty") is True
+            and set_state.data.get("state_handoff_count") == 0
         )
         read_state = executor.execute(
             dynamic_tools["world.get_cell_state"],
             {"node_path": "Streamer", "cell_id": "cli-cell"},
         )
         assert read_state.success is True and read_state.data.get("state") == cli_cell_state
-        saved_state = executor.execute(
-            dynamic_tools["world.save_state_store"],
-            {"node_path": "Streamer"},
+        refreshed_world = executor.execute(
+            dynamic_tools["world.refresh_streaming"],
+            {"node_path": "Streamer", "observer_position": [1000.0, 0.0, 0.0]},
         )
-        assert saved_state.success is True and saved_state.data.get("state_dirty") is False
+        assert (
+            refreshed_world.success is True
+            and refreshed_world.data.get("loaded_cells") == []
+            and refreshed_world.data.get("state_dirty") is False
+            and refreshed_world.data.get("state_handoff_count") == 1
+            and refreshed_world.data.get("last_state_handoff_cells") == ["cli-cell"]
+        )
         cleared_state = executor.execute(
             dynamic_tools["world.clear_cell_state"],
             {"node_path": "Streamer", "cell_id": "cli-cell"},
@@ -756,11 +763,11 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             {"node_path": "Streamer", "cell_id": "cli-cell"},
         )
         assert read_loaded_state.success is True and read_loaded_state.data.get("state") == cli_cell_state
-        refreshed_world = executor.execute(
-            dynamic_tools["world.refresh_streaming"],
-            {"node_path": "Streamer", "observer_position": [1000.0, 0.0, 0.0]},
+        saved_state = executor.execute(
+            dynamic_tools["world.save_state_store"],
+            {"node_path": "Streamer"},
         )
-        assert refreshed_world.success is True and refreshed_world.data.get("loaded_cells") == []
+        assert saved_state.success is True and saved_state.data.get("state_dirty") is False
         loaded_world = executor.execute(
             dynamic_tools["world.load_cell"],
             {"node_path": "Streamer", "cell_id": "cli-cell"},

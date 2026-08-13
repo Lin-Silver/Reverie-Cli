@@ -578,10 +578,24 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             "world.release_cell",
             "world.rebase_origin",
             "world.set_streaming_budget",
+            "world.set_cell_state",
+            "world.get_cell_state",
+            "world.clear_cell_state",
+            "world.save_state_store",
+            "world.load_state_store",
+            "world.clear_state_store",
             "world.streaming_status",
             "world.stop_streaming",
         ]
-        definitions = runtime.describe(service_id, requested_dynamic_tools, provider_id=PROVIDER_ID)
+        definitions = []
+        for offset in range(0, len(requested_dynamic_tools), 16):
+            definitions.extend(
+                runtime.describe(
+                    service_id,
+                    requested_dynamic_tools[offset : offset + 16],
+                    provider_id=PROVIDER_ID,
+                )
+            )
         assert {item.get("name") for item in definitions} == set(requested_dynamic_tools)
         executor = ToolExecutor(project_root)
         executor.update_context("rats_runtime", runtime)
@@ -596,6 +610,10 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
         assert all(name in schemas for name in dynamic_tools.values())
         assert schemas[dynamic_tools["animation.status"]].get("additionalProperties") is False
         assert schemas[dynamic_tools["world.streaming_status"]].get("additionalProperties") is False
+        assert schemas[dynamic_tools["world.set_cell_state"]]["properties"]["state"].get("additionalProperties") is True
+        definitions_by_name = {item["name"]: item for item in definitions}
+        assert definitions_by_name["world.get_cell_state"].get("permission") == "read"
+        assert definitions_by_name["world.set_cell_state"].get("permission") == "run"
 
         configured = executor.execute(
             dynamic_tools["animation.configure"],
@@ -698,6 +716,46 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             and budgeted_world.data.get("loaded_declared_resident_bytes") == 1024
             and budgeted_world.data.get("deferred_cells") == []
         )
+        cleared_store = executor.execute(
+            dynamic_tools["world.clear_state_store"],
+            {"node_path": "Streamer"},
+        )
+        assert cleared_store.success is True and cleared_store.data.get("state_count") == 0
+        cli_cell_state = {"checkpoint": 9, "flags": ["cli", True], "nested": {"coins": 4}}
+        set_state = executor.execute(
+            dynamic_tools["world.set_cell_state"],
+            {"node_path": "Streamer", "cell_id": "cli-cell", "state": cli_cell_state},
+        )
+        assert (
+            set_state.success is True
+            and set_state.data.get("state_cells") == ["cli-cell"]
+            and set_state.data.get("state_dirty") is True
+        )
+        read_state = executor.execute(
+            dynamic_tools["world.get_cell_state"],
+            {"node_path": "Streamer", "cell_id": "cli-cell"},
+        )
+        assert read_state.success is True and read_state.data.get("state") == cli_cell_state
+        saved_state = executor.execute(
+            dynamic_tools["world.save_state_store"],
+            {"node_path": "Streamer"},
+        )
+        assert saved_state.success is True and saved_state.data.get("state_dirty") is False
+        cleared_state = executor.execute(
+            dynamic_tools["world.clear_cell_state"],
+            {"node_path": "Streamer", "cell_id": "cli-cell"},
+        )
+        assert cleared_state.success is True and cleared_state.data.get("state_count") == 0
+        loaded_state = executor.execute(
+            dynamic_tools["world.load_state_store"],
+            {"node_path": "Streamer"},
+        )
+        assert loaded_state.success is True and loaded_state.data.get("state_cells") == ["cli-cell"]
+        read_loaded_state = executor.execute(
+            dynamic_tools["world.get_cell_state"],
+            {"node_path": "Streamer", "cell_id": "cli-cell"},
+        )
+        assert read_loaded_state.success is True and read_loaded_state.data.get("state") == cli_cell_state
         refreshed_world = executor.execute(
             dynamic_tools["world.refresh_streaming"],
             {"node_path": "Streamer", "observer_position": [1000.0, 0.0, 0.0]},
@@ -713,6 +771,11 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             {"node_path": "Streamer", "cell_id": "cli-cell"},
         )
         assert released_world.success is True and released_world.data.get("loaded_cells") == []
+        cleared_store = executor.execute(
+            dynamic_tools["world.clear_state_store"],
+            {"node_path": "Streamer"},
+        )
+        assert cleared_store.success is True and cleared_store.data.get("state_count") == 0
         stopped_world = executor.execute(
             dynamic_tools["world.stop_streaming"],
             {"node_path": "Streamer"},

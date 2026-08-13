@@ -442,6 +442,7 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
         )
         (project_root / "animation").mkdir()
         (project_root / "scenes").mkdir()
+        (project_root / "world").mkdir()
         (project_root / "animation" / "cli_library.tres").write_text(
             '[gd_resource type="AnimationLibrary" load_steps=2 format=3]\n\n'
             '[sub_resource type="Animation" id="Animation_idle"]\n'
@@ -456,6 +457,22 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             '[node name="AnimationPlayer" type="AnimationPlayer" parent="."]\nroot_node = NodePath("..")\n\n'
             '[node name="StateMachine" type="ReverieAnimationStateMachine" parent="."]\n'
             'configuration = ExtResource("1_config")\nanimation_player_path = NodePath("../AnimationPlayer")\n',
+            encoding="utf-8",
+        )
+        (project_root / "scenes" / "world_content.tscn").write_text(
+            '[gd_scene format=3]\n\n[node name="CliWorldContent" type="Node3D"]\n',
+            encoding="utf-8",
+        )
+        (project_root / "scenes" / "world_runtime.tscn").write_text(
+            '[gd_scene load_steps=2 format=3]\n\n'
+            '[ext_resource type="ReverieWorldCell" path="res://world/cli_cell.tres" id="1_cell"]\n\n'
+            '[node name="WorldRuntime" type="Node3D"]\n\n'
+            '[node name="Streamer" type="ReverieWorldStreamer" parent="."]\n'
+            'cell_resource_paths = PackedStringArray("res://world/cli_cell.tres")\n'
+            'observer_position = Vector3(0, 0, 0)\n'
+            'load_distance = 0.0\n'
+            'unload_distance = 10.0\n'
+            'update_interval = 0.0\n',
             encoding="utf-8",
         )
         env = os.environ.copy()
@@ -476,7 +493,7 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
         log = log_path.open("w", encoding="utf-8")
         runtime = RatsRuntime(cli_state_root, request_timeout=2.0, probe_timeout=0.5, tool_timeout=15.0)
         process = subprocess.Popen(
-            [str(binary), "--editor", "--headless", "--path", str(project_root), "--quit-after", "900"],
+            [str(binary), "--editor", "--headless", "--path", str(project_root), "--quit-after", "7200"],
             cwd=engine_root,
             env=env,
             stdout=log,
@@ -548,29 +565,38 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
         )
         assert service["connection"] == "connected", service
 
-        requested_animation_tools = [
+        requested_dynamic_tools = [
             "animation.configure",
             "scene.open",
             "animation.play",
             "animation.status",
+            "world.create_region",
+            "world.create_cell",
+            "world.start_streaming",
+            "world.refresh_streaming",
+            "world.load_cell",
+            "world.release_cell",
+            "world.streaming_status",
+            "world.stop_streaming",
         ]
-        definitions = runtime.describe(service_id, requested_animation_tools, provider_id=PROVIDER_ID)
-        assert {item.get("name") for item in definitions} == set(requested_animation_tools)
+        definitions = runtime.describe(service_id, requested_dynamic_tools, provider_id=PROVIDER_ID)
+        assert {item.get("name") for item in definitions} == set(requested_dynamic_tools)
         executor = ToolExecutor(project_root)
         executor.update_context("rats_runtime", runtime)
         schemas = {
             item["function"]["name"]: item["function"]["parameters"]
             for item in executor.get_tool_schemas(mode="reverie")
         }
-        dynamic_animation_tools = {
+        dynamic_tools = {
             native_name: f"rats_reverie_engine_{native_name.replace('.', '_')}"
-            for native_name in requested_animation_tools
+            for native_name in requested_dynamic_tools
         }
-        assert all(name in schemas for name in dynamic_animation_tools.values())
-        assert schemas[dynamic_animation_tools["animation.status"]].get("additionalProperties") is False
+        assert all(name in schemas for name in dynamic_tools.values())
+        assert schemas[dynamic_tools["animation.status"]].get("additionalProperties") is False
+        assert schemas[dynamic_tools["world.streaming_status"]].get("additionalProperties") is False
 
         configured = executor.execute(
-            dynamic_animation_tools["animation.configure"],
+            dynamic_tools["animation.configure"],
             {
                 "path": "animation/cli_states.tres",
                 "configuration_id": "cli-runtime.01",
@@ -584,20 +610,89 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
         )
         assert configured.success is True and configured.data.get("schema") == "reverie.animation-configuration/1"
         opened = executor.execute(
-            dynamic_animation_tools["scene.open"],
+            dynamic_tools["scene.open"],
             {"path": "scenes/animation_runtime.tscn"},
         )
         assert opened.success is True and opened.data.get("root_type") == "Node"
         played = executor.execute(
-            dynamic_animation_tools["animation.play"],
+            dynamic_tools["animation.play"],
             {"node_path": "StateMachine"},
         )
         assert played.success is True and played.data.get("current_state") == "idle" and played.data.get("playing") is True
         animation_status = executor.execute(
-            dynamic_animation_tools["animation.status"],
+            dynamic_tools["animation.status"],
             {"node_path": "StateMachine"},
         )
         assert animation_status.success is True and animation_status.data.get("schema") == "reverie.animation-playback/1"
+
+        region = executor.execute(
+            dynamic_tools["world.create_region"],
+            {
+                "path": "world/cli_region.tres",
+                "region_id": "cli-region",
+                "realm_id": "cli-realm",
+                "origin_cell": [0, 0, 0],
+                "cell_count": [2, 1, 1],
+                "cell_size": [100.0, 50.0, 100.0],
+                "persistence_key": "cli-region-state",
+            },
+        )
+        assert region.success is True and region.data.get("schema") == "reverie.world-region/1"
+        cell = executor.execute(
+            dynamic_tools["world.create_cell"],
+            {
+                "path": "world/cli_cell.tres",
+                "region_path": "world/cli_region.tres",
+                "cell_id": "cli-cell",
+                "coordinate": [0, 0, 0],
+                "content_scenes": ["scenes/world_content.tscn"],
+                "persistence_key": "cli-cell-state",
+            },
+        )
+        assert cell.success is True and cell.data.get("schema") == "reverie.world-cell/1"
+        opened_world = executor.execute(
+            dynamic_tools["scene.open"],
+            {"path": "scenes/world_runtime.tscn"},
+        )
+        assert opened_world.success is True and opened_world.data.get("root_type") == "Node3D"
+        started_world = executor.execute(
+            dynamic_tools["world.start_streaming"],
+            {"node_path": "Streamer"},
+        )
+        world_start_failure = {}
+        if started_world.success is not True:
+            log.flush()
+            world_start_failure = {
+                "tool_error": started_world.error,
+                "process_exit": process.poll(),
+                "engine_log": log_path.read_text(encoding="utf-8", errors="replace")[-4000:],
+            }
+        assert started_world.success is True and started_world.data.get("loaded_cells") == ["cli-cell"], world_start_failure
+        world_status = executor.execute(
+            dynamic_tools["world.streaming_status"],
+            {"node_path": "Streamer"},
+        )
+        assert world_status.success is True and world_status.data.get("schema") == "reverie.world-streaming/1"
+        refreshed_world = executor.execute(
+            dynamic_tools["world.refresh_streaming"],
+            {"node_path": "Streamer", "observer_position": [1000.0, 0.0, 0.0]},
+        )
+        assert refreshed_world.success is True and refreshed_world.data.get("loaded_cells") == []
+        loaded_world = executor.execute(
+            dynamic_tools["world.load_cell"],
+            {"node_path": "Streamer", "cell_id": "cli-cell"},
+        )
+        assert loaded_world.success is True and loaded_world.data.get("manually_loaded_cells") == ["cli-cell"]
+        released_world = executor.execute(
+            dynamic_tools["world.release_cell"],
+            {"node_path": "Streamer", "cell_id": "cli-cell"},
+        )
+        assert released_world.success is True and released_world.data.get("loaded_cells") == []
+        stopped_world = executor.execute(
+            dynamic_tools["world.stop_streaming"],
+            {"node_path": "Streamer"},
+        )
+        assert stopped_world.success is True and stopped_world.data.get("active") is False
 
         started = runtime.call_tool(
             service_id,

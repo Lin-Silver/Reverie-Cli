@@ -576,6 +576,7 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             "world.refresh_streaming",
             "world.load_cell",
             "world.release_cell",
+            "world.rebase_origin",
             "world.streaming_status",
             "world.stop_streaming",
         ]
@@ -673,6 +674,18 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             {"node_path": "Streamer"},
         )
         assert world_status.success is True and world_status.data.get("schema") == "reverie.world-streaming/1"
+        rebased_world = executor.execute(
+            dynamic_tools["world.rebase_origin"],
+            {"node_path": "Streamer", "origin_cell": [1, 0, 0]},
+        )
+        assert (
+            rebased_world.success is True
+            and rebased_world.data.get("origin_cell") == [1, 0, 0]
+            and rebased_world.data.get("origin_world_position") == [100.0, 0.0, 0.0]
+            and rebased_world.data.get("last_rebase_delta") == [100.0, 0.0, 0.0]
+            and rebased_world.data.get("rebase_count") == 1
+            and rebased_world.data.get("loaded_cells") == ["cli-cell"]
+        )
         refreshed_world = executor.execute(
             dynamic_tools["world.refresh_streaming"],
             {"node_path": "Streamer", "observer_position": [1000.0, 0.0, 0.0]},

@@ -14,6 +14,7 @@ from typing import Callable
 import pytest
 
 from reverie.rats import RatsRuntime
+from reverie.agent.tool_executor import ToolExecutor
 
 
 ENGINE_BIN = str(os.environ.get("REVERIE_RATS_ENGINE_BIN", "")).strip()
@@ -439,6 +440,24 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             "[gd_scene format=3]\n\n[node name=\"RatsCliTaskFixture\" type=\"Node2D\"]\n",
             encoding="utf-8",
         )
+        (project_root / "animation").mkdir()
+        (project_root / "scenes").mkdir()
+        (project_root / "animation" / "cli_library.tres").write_text(
+            '[gd_resource type="AnimationLibrary" load_steps=2 format=3]\n\n'
+            '[sub_resource type="Animation" id="Animation_idle"]\n'
+            'resource_name = "Idle"\nlength = 1.0\n\n'
+            '[resource]\n_data = {\n&"Idle": SubResource("Animation_idle")\n}\n',
+            encoding="utf-8",
+        )
+        (project_root / "scenes" / "animation_runtime.tscn").write_text(
+            '[gd_scene load_steps=2 format=3]\n\n'
+            '[ext_resource type="ReverieAnimationConfiguration" path="res://animation/cli_states.tres" id="1_config"]\n\n'
+            '[node name="AnimationRuntime" type="Node"]\n\n'
+            '[node name="AnimationPlayer" type="AnimationPlayer" parent="."]\nroot_node = NodePath("..")\n\n'
+            '[node name="StateMachine" type="ReverieAnimationStateMachine" parent="."]\n'
+            'configuration = ExtResource("1_config")\nanimation_player_path = NodePath("../AnimationPlayer")\n',
+            encoding="utf-8",
+        )
         env = os.environ.copy()
         env.update(
             {
@@ -517,7 +536,7 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             time.sleep(0.1)
         assert discovered_service is not None, state
         service_id = owned_descriptor.service_id
-        state = runtime.set_provider_enabled(PROVIDER_ID, binary, True, ["read", "run"])
+        state = runtime.set_provider_enabled(PROVIDER_ID, binary, True, ["read", "project", "edit", "run"])
         service = next(
             item
             for item in state["services"]
@@ -528,6 +547,57 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             and _path_key(Path(item["descriptorPath"])) == _path_key(owned_descriptor.descriptor_path)
         )
         assert service["connection"] == "connected", service
+
+        requested_animation_tools = [
+            "animation.configure",
+            "scene.open",
+            "animation.play",
+            "animation.status",
+        ]
+        definitions = runtime.describe(service_id, requested_animation_tools, provider_id=PROVIDER_ID)
+        assert {item.get("name") for item in definitions} == set(requested_animation_tools)
+        executor = ToolExecutor(project_root)
+        executor.update_context("rats_runtime", runtime)
+        schemas = {
+            item["function"]["name"]: item["function"]["parameters"]
+            for item in executor.get_tool_schemas(mode="reverie")
+        }
+        dynamic_animation_tools = {
+            native_name: f"rats_reverie_engine_{native_name.replace('.', '_')}"
+            for native_name in requested_animation_tools
+        }
+        assert all(name in schemas for name in dynamic_animation_tools.values())
+        assert schemas[dynamic_animation_tools["animation.status"]].get("additionalProperties") is False
+
+        configured = executor.execute(
+            dynamic_animation_tools["animation.configure"],
+            {
+                "path": "animation/cli_states.tres",
+                "configuration_id": "cli-runtime.01",
+                "animation_library_path": "animation/cli_library.tres",
+                "states": [{"id": "idle", "animation": "Idle"}],
+                "initial_state": "idle",
+                "transitions": [],
+                "playback_speed": 1.0,
+                "root_motion_track": "",
+            },
+        )
+        assert configured.success is True and configured.data.get("schema") == "reverie.animation-configuration/1"
+        opened = executor.execute(
+            dynamic_animation_tools["scene.open"],
+            {"path": "scenes/animation_runtime.tscn"},
+        )
+        assert opened.success is True and opened.data.get("root_type") == "Node"
+        played = executor.execute(
+            dynamic_animation_tools["animation.play"],
+            {"node_path": "StateMachine"},
+        )
+        assert played.success is True and played.data.get("current_state") == "idle" and played.data.get("playing") is True
+        animation_status = executor.execute(
+            dynamic_animation_tools["animation.status"],
+            {"node_path": "StateMachine"},
+        )
+        assert animation_status.success is True and animation_status.data.get("schema") == "reverie.animation-playback/1"
 
         started = runtime.call_tool(
             service_id,

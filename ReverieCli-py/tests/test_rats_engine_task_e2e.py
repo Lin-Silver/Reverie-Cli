@@ -577,6 +577,7 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             "world.load_cell",
             "world.release_cell",
             "world.rebase_origin",
+            "world.set_streaming_budget",
             "world.streaming_status",
             "world.stop_streaming",
         ]
@@ -646,6 +647,7 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
                 "region_path": "world/cli_region.tres",
                 "cell_id": "cli-cell",
                 "coordinate": [0, 0, 0],
+                "declared_resident_bytes": 1024,
                 "content_scenes": ["scenes/world_content.tscn"],
                 "persistence_key": "cli-cell-state",
             },
@@ -685,6 +687,16 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             and rebased_world.data.get("last_rebase_delta") == [100.0, 0.0, 0.0]
             and rebased_world.data.get("rebase_count") == 1
             and rebased_world.data.get("loaded_cells") == ["cli-cell"]
+        )
+        budgeted_world = executor.execute(
+            dynamic_tools["world.set_streaming_budget"],
+            {"node_path": "Streamer", "max_loaded_cells": 1, "max_declared_resident_bytes": 1024},
+        )
+        assert (
+            budgeted_world.success is True
+            and budgeted_world.data.get("budget_limited") is True
+            and budgeted_world.data.get("loaded_declared_resident_bytes") == 1024
+            and budgeted_world.data.get("deferred_cells") == []
         )
         refreshed_world = executor.execute(
             dynamic_tools["world.refresh_streaming"],

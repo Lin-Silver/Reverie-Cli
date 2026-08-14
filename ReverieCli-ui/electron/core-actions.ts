@@ -19,6 +19,8 @@ export const CORE_RESPONSE_CONTRACT = {
   initialize: { type: "state", required: ["state"] },
   getSession: { type: "session", required: ["session", "sessions"] },
   getContextStatus: { type: "context.status", required: ["context_engine"] },
+  getSubagents: { type: "subagents", required: ["subagents"] },
+  getSubagentRunLog: { type: "subagent.log", required: ["run_id", "log"] },
   createSession: { type: "session.created", required: ["session", "sessions"] },
   runPrompt: { type: "prompt.result", required: ["result", "sessions", "recovery"] },
   compactContext: { type: "context.compacted", required: ["success", "message", "session", "sessions", "recovery", "context_engine"] },

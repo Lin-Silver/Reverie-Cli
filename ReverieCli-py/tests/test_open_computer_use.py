@@ -118,6 +118,79 @@ def test_actions_require_a_prior_app_state() -> None:
         service._snapshot("Editor")
 
 
+def test_list_apps_uses_native_window_enumeration(monkeypatch) -> None:
+    service = object.__new__(OpenComputerUseService)
+    windows = [
+        {
+            "name": "chrome",
+            "pid": 42,
+            "window_title": "Demo - Google Chrome",
+            "window_handle": 100,
+            "window_bounds": {"x": 0, "y": 0, "width": 800, "height": 600},
+            "status": "running",
+        }
+    ]
+    monkeypatch.setattr(service, "_native_windows", lambda: windows)
+    monkeypatch.setattr(
+        service,
+        "_top_level_windows",
+        lambda: pytest.fail("desktop-wide UI Automation enumeration must not be used"),
+    )
+
+    assert service.list_apps() == windows
+
+
+def test_resolve_app_binds_uia_to_the_matched_native_handle(monkeypatch) -> None:
+    class _Automation:
+        def __init__(self) -> None:
+            self.handles = []
+
+        def ControlFromHandle(self, handle):
+            self.handles.append(handle)
+            return "bound-control"
+
+    service = object.__new__(OpenComputerUseService)
+    service.auto = _Automation()
+    monkeypatch.setattr(
+        service,
+        "_native_windows",
+        lambda: [
+            {
+                "name": "chrome",
+                "pid": 42,
+                "window_title": "Demo - Google Chrome",
+                "window_handle": 100,
+                "window_bounds": {"x": 0, "y": 0, "width": 800, "height": 600},
+                "status": "running",
+            }
+        ],
+    )
+
+    assert service._resolve_app("Demo - Google Chrome") == "bound-control"
+    assert service.auto.handles == [100]
+
+
+def test_press_key_focuses_the_observed_target_before_sending(monkeypatch) -> None:
+    calls = []
+
+    class _Control:
+        def SetFocus(self):
+            calls.append("focus")
+
+    class _Automation:
+        def SendKeys(self, keys, *, charMode):
+            calls.append(("keys", keys, charMode))
+
+    service = object.__new__(OpenComputerUseService)
+    service.auto = _Automation()
+    service._snapshots = {"chrome": object()}
+    monkeypatch.setattr(service, "_resolve_app", lambda _app: _Control())
+
+    service.press_key("chrome", "win+down")
+
+    assert calls == ["focus", ("keys", "{Win}{DOWN}", False)]
+
+
 def test_persisted_tool_history_omits_inline_screenshot_data() -> None:
     result = ToolResult.ok(
         "Observed Editor.",

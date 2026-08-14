@@ -3683,13 +3683,61 @@ class ReverieAgent:
         """Build a visible status event before a potentially slow provider call."""
         model_text = str(model or self.model or "model").strip() or "model"
         transport = "stream" if stream else "non-stream"
+        activity_id = f"model-{uuid.uuid4().hex}"
+        self._pending_model_activity = {
+            "activity_id": activity_id,
+            "provider_label": str(provider_label or "Model API").strip() or "Model API",
+            "model": model_text,
+            "transport": transport,
+            "started_at": time.monotonic(),
+        }
         return encode_stream_event(
             "model_request",
+            activity_id=activity_id,
             category="Model",
-            message=f"Waiting for {provider_label} response",
+            message=f"Connecting to {provider_label} stream" if stream else f"Requesting {provider_label} response",
             status="working",
             detail=f"{model_text} | {transport}",
-            meta=f"timeout {int(timeout or 60)}s",
+            meta=f"connect timeout {int(timeout or 60)}s",
+        )
+
+    def _model_stream_connected_event(self) -> Optional[str]:
+        """Close the pending model-request activity when upstream starts yielding."""
+        activity = getattr(self, "_pending_model_activity", None)
+        if not isinstance(activity, dict):
+            return None
+        self._pending_model_activity = None
+        elapsed_ms = max(0, int((time.monotonic() - float(activity.get("started_at", time.monotonic()))) * 1000))
+        provider_label = str(activity.get("provider_label") or "Model API")
+        transport = str(activity.get("transport") or "stream")
+        return encode_stream_event(
+            "model_response",
+            activity_id=str(activity.get("activity_id") or ""),
+            category="Model",
+            message=f"{provider_label} stream connected" if transport == "stream" else f"{provider_label} responded",
+            status="success",
+            detail=f"{activity.get('model') or self.model} | {transport}",
+            meta=f"first event in {elapsed_ms}ms",
+        )
+
+    def _model_stream_failed_event(self, error: BaseException) -> Optional[str]:
+        """Close the pending model-request activity with its real failure."""
+        activity = getattr(self, "_pending_model_activity", None)
+        if not isinstance(activity, dict):
+            return None
+        self._pending_model_activity = None
+        provider_label = str(activity.get("provider_label") or "Model API")
+        error_text = str(error or "Model stream failed").strip()
+        if len(error_text) > 300:
+            error_text = f"{error_text[:297]}..."
+        return encode_stream_event(
+            "model_error",
+            activity_id=str(activity.get("activity_id") or ""),
+            category="Model",
+            message=f"{provider_label} stream failed",
+            status="error",
+            detail=error_text,
+            meta=f"{activity.get('model') or self.model} | {activity.get('transport') or 'stream'}",
         )
 
     def _emit_api_retry_event(
@@ -3774,7 +3822,12 @@ class ReverieAgent:
 
     def _should_stop_on_finish_reason(self) -> bool:
         """Whether a natural provider stop reason should end the turn."""
-        return normalize_mode(self.mode) != "computer-controller"
+        # Tool calls are committed and continued before this completion check.
+        # Once a provider reports a natural stop, every mode has finished the
+        # current assistant turn; requiring a textual //END// marker here makes
+        # computer-controller resend the same conversation until its much larger
+        # continuation budget is exhausted.
+        return True
 
     def _should_end_generation(self, collected_content: str, finish_reason: Optional[str]) -> bool:
         """Decide whether the current assistant turn is complete."""
@@ -3868,6 +3921,10 @@ class ReverieAgent:
             return
 
         event_type = str(event.get("type", "") or "").strip().lower()
+        if event_type != "error":
+            connected_event = self._model_stream_connected_event()
+            if connected_event:
+                yield connected_event
         if event_type == "reasoning":
             for chunk in state.add_reasoning(event.get("text", "")):
                 yield chunk
@@ -4851,6 +4908,9 @@ class ReverieAgent:
                 session_id=session_id,
                 tags=["error", "turn"],
             )
+            failed_event = self._model_stream_failed_event(e)
+            if failed_event:
+                yield failed_event
             yield error_msg
         finally:
             self._cleanup_completed_task_artifacts()

@@ -1214,7 +1214,12 @@ class ToolExecutor:
             return result
 
         shadow_guard = self.context.get("shadow_git_manager")
-        if isinstance(shadow_guard, ShadowGitManager) and not bool(getattr(tool, "read_only", False)):
+        needs_workspace_checkpoint = bool(getattr(tool, "workspace_checkpoint", True))
+        if (
+            isinstance(shadow_guard, ShadowGitManager)
+            and needs_workspace_checkpoint
+            and not bool(getattr(tool, "read_only", False))
+        ):
             for raw_path in self._path_like_argument_values(normalized_arguments):
                 try:
                     shadow_guard.ensure_workspace_path(raw_path, purpose=f"run {tool.name}")
@@ -1258,7 +1263,7 @@ class ToolExecutor:
                 return result
 
         before_checkpoint = None
-        if isinstance(shadow_guard, ShadowGitManager):
+        if isinstance(shadow_guard, ShadowGitManager) and needs_workspace_checkpoint:
             try:
                 before_checkpoint = shadow_guard.checkpoint(
                     f"Before tool {tool.name}",

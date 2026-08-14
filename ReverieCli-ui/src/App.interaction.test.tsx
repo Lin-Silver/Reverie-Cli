@@ -132,6 +132,7 @@ function installDesktopApi(options: {
   ratsTaskEvents?: (payload: Record<string, unknown>, cancelled: boolean) => Record<string, unknown>;
   ratsTaskLogText?: (payload: Record<string, unknown>) => string;
   refreshedModels?: ModelSourcesState;
+  initialState?: DesktopState;
 } = {}) {
   let promptFinished = false;
   let ratsEnabled = false;
@@ -189,7 +190,7 @@ function installDesktopApi(options: {
     return legacy;
   };
   const request = vi.fn(async (action: string, payload: Record<string, unknown>) => {
-    if (action === "initialize") return { type: "state", state: desktopState };
+    if (action === "initialize") return { type: "state", state: options.initialState ?? desktopState };
     if (action === "getSession") {
       const requested = String(payload.sessionId);
       const session = requested === searchSession.id
@@ -257,12 +258,49 @@ function installDesktopApi(options: {
       ratsTaskCancelled = true;
       return { type: "rats.task.cancelled", service_id: String(payload.serviceId), task_id: String(payload.taskId), result: { cancelled: true, output: { running: false } } };
     }
+    if (action === "getSubagents") {
+      return {
+        type: "subagents",
+        subagents: {
+          available: true,
+          agents: [{ id: "reviewer", name: "Reviewer", enabled: true, color: "#7c8cff", mode: "reverie", created_at: "2026-08-14T10:00:00Z", updated_at: "2026-08-14T10:00:02Z", model_ref: { display_name: "Review Model" } }],
+          runs: [{ run_id: "reviewer-run-1", subagent_id: "reviewer", task_id: "task-1", status: "completed", started_at: "2026-08-14T10:00:00Z", ended_at: "2026-08-14T10:00:02Z", summary: "Validated the selected files.", error: "", log_path: "subagents/reviewer/runs/reviewer-run-1.json" }],
+        },
+      };
+    }
+    if (action === "getSubagentRunLog") {
+      return {
+        type: "subagent.log",
+        run_id: String(payload.runId),
+        log: {
+          run: { run_id: "reviewer-run-1", subagent_id: "reviewer", task_id: "task-1", status: "completed", started_at: "2026-08-14T10:00:00Z", ended_at: "2026-08-14T10:00:02Z", summary: "Validated the selected files.", error: "", log_path: "subagents/reviewer/runs/reviewer-run-1.json" },
+          subagent: { id: "reviewer", name: "Reviewer", color: "#7c8cff" },
+          model: { model: "review-model", display_name: "Review Model", provider: "request" },
+          assignment: "Validate the selected files.",
+          events: [{ category: "SubAgent", message: "Validation complete", status: "success", agent_id: "reviewer" }],
+        },
+      };
+    }
     if (action === "selectModel") {
       return {
         type: "model.selected",
         selected: { id: String(payload.modelId) },
         models: desktopState.models,
         workspace: desktopState.workspace,
+      };
+    }
+    if (action === "setSetting") {
+      const mode = String(payload.value);
+      const activeModel = mode === "computer-controller"
+        ? { id: "meta/muse-glimmer-30b", display_name: "Muse Glimmer 30B", provider: "openai-chat" }
+        : desktopState.models.active_model;
+      return {
+        type: "setting.updated",
+        success: true,
+        message: "saved",
+        settings: desktopState.settings,
+        models: { ...desktopState.models, active_model: activeModel },
+        workspace: { ...desktopState.workspace, mode, active_model: activeModel },
       };
     }
     if (action === "runPrompt") {
@@ -435,6 +473,24 @@ describe("desktop GUI interactions", () => {
     expect(await screen.findByText("Cache inspection complete")).toBeTruthy();
   });
 
+  it("shows SubAgent runs as a timeline with a separate readable output view", async () => {
+    const { request } = installDesktopApi();
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("button", { name: "命令面板" });
+
+    await user.click(screen.getByRole("button", { name: "SubAgents" }));
+
+    expect((await screen.findAllByText("Reviewer")).length).toBeGreaterThan(0);
+    expect(await screen.findByText("Validate the selected files.")).toBeTruthy();
+    expect(await screen.findByText("Validation complete")).toBeTruthy();
+    await user.click(screen.getByRole("tab", { name: "输出" }));
+    const output = document.querySelector(".subagent-output");
+    expect(output).toBeTruthy();
+    expect(within(output as HTMLElement).getByText("Validated the selected files.")).toBeTruthy();
+    expect(request).toHaveBeenCalledWith("getSubagentRunLog", { runId: "reviewer-run-1" });
+  });
+
   it("sends a personalized approval reply back to the model through the typed bridge", async () => {
     const { request } = installDesktopApi({
       approvalRequest: {
@@ -591,6 +647,30 @@ describe("desktop GUI interactions", () => {
     await user.click(await within(dialog).findByRole("button", { name: /SenseNova/ }));
 
     expect(await within(dialog).findByRole("button", { name: /SenseNova 6.8 Flash Lite/ })).toBeTruthy();
+  });
+
+  it("hides model selection while Computer mode uses its pinned model", async () => {
+    installDesktopApi({
+      initialState: {
+        ...desktopState,
+        models: {
+          ...desktopState.models,
+          active_model: { id: "meta/muse-glimmer-30b", display_name: "Muse Glimmer 30B", provider: "openai-chat" },
+        },
+        workspace: {
+          ...desktopState.workspace,
+          mode: "computer-controller",
+          active_source: "nvidia",
+          active_model: { id: "meta/muse-glimmer-30b", display_name: "Muse Glimmer 30B", provider: "openai-chat" },
+        },
+      },
+    });
+    const { container } = render(<App />);
+
+    expect(await screen.findByRole("button", { name: /Computer/ })).toBeTruthy();
+    expect(container.querySelector(".model-trigger")).toBeNull();
+    expect(screen.getByText("Muse Glimmer 30B")).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "模型来源" })).toBeNull();
   });
 
   it("opens the RATS page, explicitly enables a service, and inspects one progressive definition", async () => {

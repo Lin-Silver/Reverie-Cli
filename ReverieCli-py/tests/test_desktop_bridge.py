@@ -295,6 +295,72 @@ def test_sdk_bridge_exposes_rats_task_status_events_cancel_and_logs_actions() ->
     assert logs["type"] == "rats.task.logs" and logs["result"]["text"] == "hello"
 
 
+def test_sdk_bridge_exposes_subagent_dashboard_and_sanitized_run_log(tmp_path: Path) -> None:
+    from reverie.sdk_bridge import ReverieSdkBridge
+
+    spec = SimpleNamespace(to_dict=lambda: {
+        "id": "reviewer",
+        "name": "Reviewer",
+        "enabled": True,
+        "color": "#7c8cff",
+        "mode": "reverie",
+        "model_ref": {"display_name": "Review Model"},
+    })
+    run_payload = {
+        "run_id": "reviewer-run-1",
+        "subagent_id": "reviewer",
+        "task_id": "task-1",
+        "status": "completed",
+        "started_at": "2026-08-14T10:00:00Z",
+        "ended_at": "2026-08-14T10:00:02Z",
+        "summary": "Validated the selected files.",
+        "error": "",
+        "log_path": str(tmp_path / "run.json"),
+    }
+    run = SimpleNamespace(to_dict=lambda: dict(run_payload))
+
+    class _Manager:
+        @staticmethod
+        def is_available():
+            return True
+
+        @staticmethod
+        def list_specs():
+            return [spec]
+
+        @staticmethod
+        def list_recent_runs():
+            return [run]
+
+        @staticmethod
+        def get_run(run_id):
+            return run if run_id == "reviewer-run-1" else None
+
+        @staticmethod
+        def get_run_log(run_id):
+            return {
+                "run": run_payload,
+                "subagent": spec.to_dict(),
+                "model": {"model": "review-model", "display_name": "Review Model", "provider": "request"},
+                "assignment": "Validate the selected files.",
+                "events": [{"status": "success", "message": "Validation complete"}],
+            }
+
+    bridge = ReverieSdkBridge()
+    bridge.project_root = tmp_path.resolve()
+    bridge.interface = SimpleNamespace(subagent_manager=_Manager())
+
+    dashboard = bridge.dispatch({"id": "agents", "action": "getSubagents", "payload": {}})
+    log = bridge.dispatch({"id": "log", "action": "getSubagentRunLog", "payload": {"runId": "reviewer-run-1"}})
+
+    assert dashboard["type"] == "subagents"
+    assert dashboard["subagents"]["agents"][0]["id"] == "reviewer"
+    assert dashboard["subagents"]["runs"][0]["status"] == "completed"
+    assert log["type"] == "subagent.log"
+    assert log["log"]["assignment"] == "Validate the selected files."
+    assert "api_key" not in log["log"]["model"]
+
+
 def test_session_titles_are_compact_and_legacy_names_are_upgraded(tmp_path: Path) -> None:
     manager = SessionManager(tmp_path / "state", project_root=tmp_path)
     session = manager.create_session("Prompt Run 2026-07-15 10:00:00")

@@ -104,6 +104,7 @@ class ComputerControlTool(BaseTool):
     aliases = ("computer_control", "desktop_control")
     search_hint = "observe and operate the windows desktop"
     tool_category = "desktop"
+    workspace_checkpoint = False
     tool_tags = ("desktop", "screen", "window", "mouse", "keyboard", "observe", "ui")
     """Observe and control the local computer from a single tool."""
 

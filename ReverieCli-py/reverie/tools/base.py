@@ -86,6 +86,7 @@ class BaseTool(ABC):
     destructive: bool = False
     should_defer: bool = False
     always_load: bool = False
+    workspace_checkpoint: bool = True
     max_result_chars: float = 50_000
     
     # Parameter schema in JSON Schema format

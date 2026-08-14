@@ -33,6 +33,14 @@ class _OutsideWriterTool(BaseTool):
         return ToolResult.ok("written")
 
 
+class _DesktopActionTool(BaseTool):
+    name = "desktop_action"
+    workspace_checkpoint = False
+
+    def execute(self, **kwargs) -> ToolResult:
+        return ToolResult.ok("desktop action completed")
+
+
 def _guard(workspace: Path, state_root: Path) -> ShadowGitManager:
     return ShadowGitManager(workspace, state_root / "project-data")
 
@@ -139,6 +147,23 @@ def test_mutating_tool_cannot_target_outside_workspace(tmp_path: Path) -> None:
     assert not result.success
     assert "outside the active workspace" in result.error
     assert not outside.exists()
+
+
+def test_desktop_action_does_not_depend_on_workspace_checkpoint_repository(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    guard = _guard(workspace, tmp_path / "state")
+    guard.git_dir.mkdir(parents=True)
+    (guard.git_dir / "index.lock").write_text("stale", encoding="utf-8")
+    executor = ToolExecutor(workspace)
+    executor.update_context("shadow_git_manager", guard)
+    executor._register_tool_instance(_DesktopActionTool(executor.context))
+    executor._rebuild_tool_alias_lookup()
+
+    result = executor.execute("desktop_action", {})
+
+    assert result.success
+    assert result.output == "desktop action completed"
 
 
 def test_guard_rejects_parent_traversal(tmp_path: Path) -> None:

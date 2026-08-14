@@ -6,7 +6,7 @@ from threading import Thread
 from typing import Any
 import json
 
-from reverie.agent.subagents import SubagentManager
+from reverie.agent.subagents import SubagentManager, SubagentRun
 from reverie.agent.tool_executor import ToolExecutor
 from reverie.config import Config, ModelConfig, normalize_subagent_config
 from reverie.nvidia import default_nvidia_config
@@ -268,3 +268,58 @@ def test_subagent_assignment_prompt_positions_worker_as_scoped_validator(tmp_pat
     assert "Default policy: read-only" in prompt
     assert "No write_scope was assigned" in prompt
     assert "- reverie/context_engine" in prompt
+
+
+def test_subagent_run_logs_are_restart_visible_and_do_not_persist_credentials(tmp_path: Path) -> None:
+    model = ModelConfig(
+        model="fake-subagent-model",
+        model_display_name="Fake Subagent Model",
+        base_url="http://127.0.0.1",
+        api_key="super-secret-key",
+        provider="request",
+    )
+    config = Config(models=[model], active_model_index=0, mode="reverie")
+    manager = SubagentManager(_FakeInterface(tmp_path, config))
+    spec = manager.create_subagent(
+        {
+            "source": "standard",
+            "index": 0,
+            "model": model.model,
+            "display_name": model.model_display_name,
+        },
+        subagent_id="reviewer",
+    )
+    run = SubagentRun(
+        run_id="reviewer-run-1",
+        subagent_id=spec.id,
+        task_id="task-1",
+        status="completed",
+        started_at="2026-08-14T10:00:00Z",
+        ended_at="2026-08-14T10:00:02Z",
+        summary="Validated the target files.",
+    )
+
+    manager._persist_run_log(
+        run,
+        spec,
+        model,
+        "Validate the target files.",
+        events=[{"category": "SubAgent", "message": "Validation complete", "status": "success", "arguments": {"api_key": "event-secret-key"}}],
+    )
+    raw_log = Path(run.log_path).read_text(encoding="utf-8")
+    manager._runs.clear()
+
+    assert "super-secret-key" not in raw_log
+    assert "event-secret-key" not in raw_log
+    assert "[REDACTED]" in raw_log
+    assert manager.list_recent_runs()[0].run_id == run.run_id
+    log = manager.get_run_log(run.run_id)
+    assert log is not None
+    assert log["assignment"] == "Validate the target files."
+    assert log["model"] == {
+        "model": "fake-subagent-model",
+        "display_name": "Fake Subagent Model",
+        "provider": "request",
+    }
+    assert log["events"][0]["status"] == "success"
+    manager.shutdown()

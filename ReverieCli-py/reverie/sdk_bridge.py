@@ -447,6 +447,38 @@ class ReverieSdkBridge:
                 "type": "context.status",
                 "context_engine": self.context_status_payload(),
             }
+        if action == "getSubagents":
+            manager = self.ensure_interface().subagent_manager
+            return {
+                "id": request_id,
+                "type": "subagents",
+                "subagents": {
+                    "available": bool(manager.is_available()),
+                    "agents": [spec.to_dict() for spec in manager.list_specs()],
+                    "runs": [run.to_dict() for run in manager.list_recent_runs()[:100]],
+                },
+            }
+        if action == "getSubagentRunLog":
+            manager = self.ensure_interface().subagent_manager
+            run_id = str(payload.get("runId") or "").strip()
+            if not run_id:
+                raise ValueError("runId is required.")
+            run = manager.get_run(run_id)
+            if run is None:
+                raise ValueError(f"Subagent run not found: {run_id}")
+            log = manager.get_run_log(run_id) or {
+                "run": run.to_dict(),
+                "subagent": {},
+                "model": {},
+                "assignment": "",
+                "events": [],
+            }
+            return {
+                "id": request_id,
+                "type": "subagent.log",
+                "run_id": run_id,
+                "log": _json_safe(log),
+            }
         if action == "resolveApproval":
             approval_id = str(payload.get("approvalId") or payload.get("id") or "").strip()
             decision = str(payload.get("decision") or "deny").strip().lower()
@@ -823,6 +855,8 @@ class ReverieSdkBridge:
                 "success": success,
                 "message": detail,
                 "settings": self.settings_payload(),
+                "models": self.model_sources_payload(),
+                "workspace": self.workspace_payload(),
             }
         if action in {"listPlugins", "refreshPlugins"}:
             return {

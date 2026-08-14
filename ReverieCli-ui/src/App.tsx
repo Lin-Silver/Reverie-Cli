@@ -4,6 +4,7 @@ import {
   Archive,
   ArchiveRestore,
   AtSign,
+  Bot,
   Brain,
   Check,
   CheckCircle2,
@@ -91,6 +92,10 @@ import type {
   SessionMessage,
   SessionState,
   SettingItem,
+  SubagentRunLog,
+  SubagentRunRecord,
+  SubagentSpecRecord,
+  SubagentsState,
   ToolRecord,
   ViewId,
 } from "./types";
@@ -258,12 +263,37 @@ function messageText(content: unknown, language: "zh-CN" | "en-US" = "zh-CN"): s
   return content == null ? "" : JSON.stringify(content, null, 2);
 }
 
-function eventLabel(event: Record<string, unknown>): { title: string; detail: string; status: string } {
-  const type = String(event.type ?? event.kind ?? "activity");
-  const title = String(event.title ?? event.name ?? event.tool_name ?? event.message ?? type);
-  const detail = String(event.detail ?? event.output ?? event.error ?? "");
-  const status = String(event.status ?? (type.includes("error") ? "error" : "info"));
-  return { title, detail, status };
+function eventText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value == null) return "";
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function eventLabel(event: Record<string, unknown>): { title: string; detail: string; status: string; category: string; meta: string; toolName: string; agentId: string } {
+  const type = String(event.type ?? event.kind ?? event.event ?? "activity");
+  const eventType = String(event.event ?? type);
+  const toolName = String(event.tool_name ?? event.name ?? "");
+  const title = String(event.title ?? event.message ?? event.tool_name ?? event.name ?? eventType);
+  const detail = eventText(event.detail ?? event.output ?? event.error ?? event.text ?? "");
+  const inferredStatus = eventType === "model_request" || eventType === "tool_start"
+    ? "working"
+    : eventType === "model_response" || (eventType === "tool_result" && event.success !== false)
+      ? "success"
+      : type.includes("error") || eventType.includes("error") || (eventType === "tool_result" && event.success === false)
+        ? "error"
+        : "info";
+  const rawStatus = String(event.status ?? inferredStatus).toLowerCase();
+  const status = ["working", "running", "queued", "pending"].includes(rawStatus)
+    ? "working"
+    : rawStatus === "completed" || rawStatus === "done" ? "success" : rawStatus;
+  const category = String(event.category ?? (eventType.includes("tool") ? "Tool" : eventType.includes("model") ? "Model" : "Activity"));
+  const meta = String(event.meta ?? "");
+  const agentId = String(event.agent_id ?? "");
+  return { title, detail, status, category, meta, toolName, agentId };
 }
 
 function IconButton({
@@ -500,6 +530,9 @@ function Sidebar({
         </button>
         <button type="button" className={view === "tools" ? "active" : ""} onClick={() => setView("tools")}>
           <Wrench size={16} /> {t("工具")}
+        </button>
+        <button type="button" className={view === "subagents" ? "active" : ""} onClick={() => setView("subagents")}>
+          <Bot size={16} /> {t("SubAgents")}
         </button>
         <button type="button" className={view === "rats" ? "active" : ""} onClick={() => setView("rats")}>
           <Database size={16} /> RATS
@@ -796,6 +829,7 @@ function Topbar({
   const selectedReasoning = reasoningOptions.find((item) => item.id === reasoning?.value);
   const mode = MODES.find((item) => item[0] === state.workspace.mode) ?? MODES[0];
   const ModeIcon = mode[2];
+  const modelSelectionLocked = state.workspace.mode === "computer-controller";
   useEffect(() => {
     const closeMenus = (event: globalThis.KeyboardEvent) => {
       if (event.key !== "Escape") return;
@@ -811,11 +845,13 @@ function Topbar({
     <header className="topbar">
       <div className="topbar-left">
         {sidebarCollapsed && <IconButton label={`${t("展开左侧栏")} (Ctrl+B)`} ariaKeyShortcuts="Control+B Meta+B" onClick={toggleSidebar}><PanelLeftOpen size={16} /></IconButton>}
-        <button type="button" className="model-trigger" onClick={openModelPicker}>
-          <span>{activeSource ? state.models.active_model?.display_name || t("选择模型") : t("选择模型")}</span>
-          <small>{activeSource?.display_name || t("选择模型来源")}</small>
-          <ChevronDown size={14} />
-        </button>
+        {!modelSelectionLocked && (
+          <button type="button" className="model-trigger" onClick={openModelPicker}>
+            <span>{activeSource ? state.models.active_model?.display_name || t("选择模型") : t("选择模型")}</span>
+            <small>{activeSource?.display_name || t("选择模型来源")}</small>
+            <ChevronDown size={14} />
+          </button>
+        )}
         {reasoning && reasoning.control !== "none" && (
           <div className="relative">
             <button
@@ -922,12 +958,31 @@ function Topbar({
 
 function ActivityItem({ event }: { event: Record<string, unknown> }) {
   const item = eventLabel(event);
+  const longDetail = item.detail.length > 160 || item.detail.includes("\n");
+  const statusIcon = item.status === "success"
+    ? <CheckCircle2 size={14} />
+    : item.status === "error" || item.status === "warning"
+      ? <AlertCircle size={14} />
+      : item.status === "working"
+        ? <RefreshCw className="spin" size={13} />
+        : <Circle size={9} />;
+  const categoryIcon = item.toolName || item.category.toLowerCase().includes("tool")
+    ? <ToolGlyph name={item.toolName || item.title} size={13} />
+    : item.category.toLowerCase().includes("subagent")
+      ? <Bot size={13} />
+      : item.category.toLowerCase().includes("model")
+        ? <Brain size={13} />
+        : <Activity size={13} />;
   return (
     <div className={`activity-item ${item.status}`}>
-      <div className="activity-status">
-        {item.status === "success" ? <CheckCircle2 size={14} /> : item.status === "error" ? <AlertCircle size={14} /> : <Circle size={9} />}
+      <div className="activity-status">{statusIcon}</div>
+      <div className="activity-copy">
+        <div className="activity-heading"><strong>{item.title}</strong><small>{categoryIcon}{item.category}</small>{item.agentId && item.agentId !== "main" && <code>{item.agentId}</code>}</div>
+        {item.detail && (longDetail ? (
+          <details className="activity-detail"><summary>{item.detail.replace(/\s+/g, " ").slice(0, 150)}<ChevronDown size={12} /></summary><pre>{item.detail}</pre></details>
+        ) : <span className="activity-detail-inline">{item.detail}</span>)}
+        {item.meta && <small className="activity-meta">{item.meta}</small>}
       </div>
-      <div><strong>{item.title}</strong>{item.detail && <span>{item.detail}</span>}</div>
     </div>
   );
 }
@@ -976,16 +1031,16 @@ function HistoryToolResult({
   );
 }
 
-function HistoryReasoning({ text, defaultExpanded }: { text: string; defaultExpanded: boolean }) {
+function HistoryReasoning({ text, defaultExpanded, active = false }: { text: string; defaultExpanded: boolean; active?: boolean }) {
   const { language, t } = useI18n();
   const [expanded, setExpanded] = useState(defaultExpanded);
   useEffect(() => setExpanded(defaultExpanded), [defaultExpanded]);
   const preview = text.replace(/\s+/g, " ").trim().slice(0, 110);
   return (
-    <details className="reasoning-block" open={expanded} onToggle={(event) => setExpanded(event.currentTarget.open)}>
+    <details className={`reasoning-block ${active ? "active" : ""}`} open={expanded} onToggle={(event) => setExpanded(event.currentTarget.open)}>
       <summary>
         <span className="reasoning-icon"><Brain size={14} /></span>
-        <span className="reasoning-title"><strong>{t("推理记录")}</strong><small>{t("模型返回的内部分析")}</small></span>
+        <span className="reasoning-title"><strong>{t(active ? "正在思考" : "推理记录")}</strong><small>{t(active ? "模型正在生成推理过程" : "模型返回的内部分析")}</small></span>
         <span className="reasoning-preview">{preview}</span>
         <small>{t("reasoning.characters", { count: text.length.toLocaleString(language) })}</small>
         <ChevronDown size={13} />
@@ -1056,6 +1111,8 @@ function LiveMessage({ turn, running, preferences }: { turn: LiveTurn; running: 
     return () => window.clearInterval(timer);
   }, [running, turn.startedAt]);
   const elapsed = Math.max(0, Math.round((clock - (turn.startedAt ?? clock)) / 1000));
+  const liveStatus = turn.error ? t("失败") : running ? t("正在处理") : t("已完成");
+  const liveStatusClass = turn.error ? "error" : running ? "working" : "success";
   return (
     <>
       <article className="message user">
@@ -1063,11 +1120,11 @@ function LiveMessage({ turn, running, preferences }: { turn: LiveTurn; running: 
         <div className="message-body"><div className="user-text">{turn.userText}</div></div>
       </article>
       <article className="message assistant live-message">
-        <div className="message-heading"><div className="message-avatar"><Sparkles size={15} strokeWidth={1.7} /></div><strong>Reverie</strong><span className="live-status">{t("正在处理")}</span></div>
+        <div className="message-heading"><div className="message-avatar"><Sparkles size={15} strokeWidth={1.7} /></div><strong>Reverie</strong><span className={`live-status ${liveStatusClass}`}>{liveStatus}</span></div>
         <div className="message-body">
-          {preferences.showReasoning && turn.reasoningText && <HistoryReasoning text={turn.reasoningText} defaultExpanded={preferences.expandReasoning} />}
+          {preferences.showReasoning && turn.reasoningText && <HistoryReasoning text={turn.reasoningText} defaultExpanded={preferences.expandReasoning} active={running} />}
           {preferences.showLiveActivity && (running || turn.events.length > 0) && (
-            <details className="live-run-summary" open={running && !turn.assistantText}>
+            <details className="live-run-summary" open={running}>
               <summary><Clock3 size={14} /><strong>{running ? t("live.elapsed", { seconds: elapsed }) : t("本轮活动")}</strong><span>{t("live.activityCount", { count: turn.events.length })}</span><ChevronDown size={13} /></summary>
               <div className="inline-activities">
                 {turn.events.length
@@ -2350,6 +2407,207 @@ function RatsView() {
   );
 }
 
+const ACTIVE_SUBAGENT_STATUSES = new Set(["queued", "running", "cancelling"]);
+
+function subagentStatusLabel(status: string, t: (key: string) => string): string {
+  const normalized = status.trim().toLowerCase();
+  if (normalized === "queued") return t("排队中");
+  if (normalized === "running") return t("运行中");
+  if (normalized === "cancelling") return t("正在取消");
+  if (normalized === "cancelled") return t("已取消");
+  if (normalized === "failed") return t("失败");
+  if (normalized === "completed") return t("已完成");
+  return status || t("未知");
+}
+
+function subagentModelName(agent: SubagentSpecRecord): string {
+  return String(agent.model_ref.display_name ?? agent.model_ref.model ?? agent.model_ref.source ?? "—");
+}
+
+function SubagentsView() {
+  const { language, t } = useI18n();
+  const [snapshot, setSnapshot] = useState<SubagentsState | null>(null);
+  const [selectedAgentId, setSelectedAgentId] = useState("all");
+  const [selectedRunId, setSelectedRunId] = useState("");
+  const [runLog, setRunLog] = useState<SubagentRunLog | null>(null);
+  const [runFilter, setRunFilter] = useState("");
+  const [detailTab, setDetailTab] = useState<"timeline" | "output">("timeline");
+  const [loading, setLoading] = useState(true);
+  const [logLoading, setLogLoading] = useState(false);
+  const [error, setError] = useState("");
+  const loadInFlight = useRef(false);
+  const logSequence = useRef(0);
+
+  const load = useCallback(async (foreground = false) => {
+    if (loadInFlight.current) return;
+    loadInFlight.current = true;
+    if (foreground) setLoading(true);
+    try {
+      const response = await window.reverie.request("getSubagents", {});
+      setSnapshot(response.subagents);
+      setError("");
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : String(loadError));
+    } finally {
+      setLoading(false);
+      loadInFlight.current = false;
+    }
+  }, []);
+
+  useEffect(() => { void load(true); }, [load]);
+
+  const hasActiveRuns = snapshot?.runs.some((run) => ACTIVE_SUBAGENT_STATUSES.has(run.status.toLowerCase())) ?? false;
+  useEffect(() => {
+    const timer = window.setInterval(() => void load(false), hasActiveRuns ? 1_500 : 6_000);
+    return () => window.clearInterval(timer);
+  }, [hasActiveRuns, load]);
+
+  const filteredRuns = useMemo(() => {
+    const needle = runFilter.trim().toLowerCase();
+    return (snapshot?.runs ?? []).filter((run) => {
+      if (selectedAgentId !== "all" && run.subagent_id !== selectedAgentId) return false;
+      if (!needle) return true;
+      return [run.run_id, run.task_id, run.subagent_id, run.status, run.summary, run.error]
+        .some((value) => value.toLowerCase().includes(needle));
+    });
+  }, [runFilter, selectedAgentId, snapshot?.runs]);
+
+  useEffect(() => {
+    if (selectedRunId && filteredRuns.some((run) => run.run_id === selectedRunId)) return;
+    setSelectedRunId(filteredRuns[0]?.run_id ?? "");
+  }, [filteredRuns, selectedRunId]);
+
+  const selectedRun = filteredRuns.find((run) => run.run_id === selectedRunId) ?? null;
+  useEffect(() => {
+    const sequence = ++logSequence.current;
+    if (!selectedRunId) {
+      setRunLog(null);
+      return;
+    }
+    setLogLoading(true);
+    void window.reverie.request("getSubagentRunLog", { runId: selectedRunId }).then((response) => {
+      if (sequence === logSequence.current) setRunLog(response.log);
+    }).catch((logError) => {
+      if (sequence === logSequence.current) {
+        setRunLog(null);
+        setError(logError instanceof Error ? logError.message : String(logError));
+      }
+    }).finally(() => {
+      if (sequence === logSequence.current) setLogLoading(false);
+    });
+  }, [selectedRunId, selectedRun?.ended_at, selectedRun?.status]);
+
+  const agents = snapshot?.agents ?? [];
+  const runs = snapshot?.runs ?? [];
+  const activeCount = runs.filter((run) => ACTIVE_SUBAGENT_STATUSES.has(run.status.toLowerCase())).length;
+  const completedCount = runs.filter((run) => run.status.toLowerCase() === "completed").length;
+  const failedCount = runs.filter((run) => run.status.toLowerCase() === "failed").length;
+  const selectedAgent = agents.find((agent) => agent.id === selectedRun?.subagent_id);
+  const runStatus = selectedRun?.status.toLowerCase() ?? "";
+  const runOutput = selectedRun?.error || selectedRun?.summary || runLog?.run.error || runLog?.run.summary || "";
+
+  return (
+    <div className="page-scroll subagents-page">
+      <PageHeader
+        icon={<Bot size={20} />}
+        title={t("SubAgents")}
+        description={t("集中查看委派代理、运行状态、执行时间线与脱敏日志。")}
+        action={<button type="button" className="secondary-button" onClick={() => void load(true)} disabled={loading}><RefreshCw className={loading ? "spin" : ""} size={14} />{t("刷新")}</button>}
+      />
+      <div className="tool-overview subagent-overview">
+        <div><Bot size={17} /><span>{t("已配置代理")}<strong>{agents.length}</strong></span></div>
+        <div><Activity size={17} /><span>{t("正在执行")}<strong>{activeCount}</strong></span></div>
+        <div><CheckCircle2 size={17} /><span>{t("已完成运行")}<strong>{completedCount}</strong></span></div>
+        <div><AlertCircle size={17} /><span>{t("失败运行")}<strong>{failedCount}</strong></span></div>
+      </div>
+      {error && <div className="page-loading error"><AlertCircle size={18} />{error}</div>}
+      {snapshot && !snapshot.available ? (
+        <div className="empty-panel subagent-empty"><Bot size={30} /><strong>{t("当前模式不支持 SubAgents")}</strong><span>{t("请切换到 Reverie 或 Computer 模式后再查看。")}</span></div>
+      ) : (
+        <div className="subagent-dashboard">
+          <section className="subagent-agent-panel" aria-labelledby="subagent-agents-title">
+            <div className="subagent-panel-heading"><div><h2 id="subagent-agents-title">{t("代理")}</h2><p>{t("按代理筛选运行记录")}</p></div><span>{agents.length}</span></div>
+            <div className="subagent-agent-list">
+              <button type="button" className={selectedAgentId === "all" ? "active" : ""} onClick={() => setSelectedAgentId("all")}>
+                <span className="subagent-avatar all"><Bot size={16} /></span>
+                <span><strong>{t("全部代理")}</strong><small>{t("subagent.runCount", { count: runs.length })}</small></span>
+              </button>
+              {agents.map((agent) => {
+                const agentRuns = runs.filter((run) => run.subagent_id === agent.id);
+                const agentActive = agentRuns.some((run) => ACTIVE_SUBAGENT_STATUSES.has(run.status.toLowerCase()));
+                return (
+                  <button type="button" className={selectedAgentId === agent.id ? "active" : ""} key={agent.id} onClick={() => setSelectedAgentId(agent.id)}>
+                    <span className={`subagent-avatar ${agentActive ? "working" : ""}`} style={{ color: agent.color, borderColor: agent.color }}><Bot size={16} /></span>
+                    <span><strong>{agent.name || agent.id}</strong><small>{subagentModelName(agent)}</small></span>
+                    <code>{agentRuns.length}</code>
+                  </button>
+                );
+              })}
+              {!agents.length && !loading && <div className="subagent-list-empty"><Bot size={22} /><span>{t("尚未配置 SubAgent")}</span><small>{t("可在对话中让 Reverie 创建并委派代理。")}</small></div>}
+            </div>
+          </section>
+
+          <section className="subagent-runs-panel" aria-labelledby="subagent-runs-title">
+            <div className="subagent-panel-heading runs"><div><h2 id="subagent-runs-title">{t("运行记录")}</h2><p>{t(hasActiveRuns ? "活动运行每 1.5 秒自动刷新" : "显示当前工作区的历史运行")}</p></div><span>{filteredRuns.length}</span></div>
+            <label className="subagent-run-search"><Search size={14} /><input value={runFilter} onChange={(event) => setRunFilter(event.target.value)} placeholder={t("筛选运行、状态或摘要")} /></label>
+            <div className="subagent-run-list">
+              {filteredRuns.map((run) => {
+                const status = run.status.toLowerCase();
+                const running = ACTIVE_SUBAGENT_STATUSES.has(status);
+                const agent = agents.find((item) => item.id === run.subagent_id);
+                return (
+                  <button type="button" className={`subagent-run-row ${selectedRunId === run.run_id ? "active" : ""}`} key={run.run_id} onClick={() => setSelectedRunId(run.run_id)}>
+                    <span className={`subagent-run-state ${status}`}>{running ? <RefreshCw className="spin" size={13} /> : status === "completed" ? <Check size={13} /> : <AlertCircle size={13} />}</span>
+                    <span className="subagent-run-copy"><strong>{agent?.name || run.subagent_id}</strong><small>{run.summary || run.error || run.task_id}</small></span>
+                    <span className={`subagent-status ${status}`}>{subagentStatusLabel(run.status, t)}</span>
+                    <time>{formatTime(run.started_at, language)}</time>
+                  </button>
+                );
+              })}
+              {!filteredRuns.length && <div className="subagent-list-empty"><Clock3 size={22} /><span>{t("暂无运行记录")}</span><small>{t("SubAgent 开始工作后会在这里显示。")}</small></div>}
+            </div>
+          </section>
+
+          <section className="subagent-detail-panel" aria-labelledby="subagent-detail-title">
+            {!selectedRun ? (
+              <div className="subagent-detail-empty"><Bot size={28} /><strong>{t("选择一条运行查看日志")}</strong><span>{t("时间线会把模型等待、工具调用和完成状态分开呈现。")}</span></div>
+            ) : (
+              <>
+                <div className="subagent-detail-header">
+                  <div><p>{selectedAgent?.name || selectedRun.subagent_id}</p><h2 id="subagent-detail-title">{selectedRun.task_id || selectedRun.run_id}</h2></div>
+                  <span className={`subagent-status ${runStatus}`}>{subagentStatusLabel(selectedRun.status, t)}</span>
+                </div>
+                <div className="subagent-detail-meta">
+                  <div><span>{t("模型")}</span><strong>{runLog?.model.display_name || runLog?.model.model || (selectedAgent ? subagentModelName(selectedAgent) : "—")}</strong></div>
+                  <div><span>{t("开始时间")}</span><strong>{new Date(selectedRun.started_at).toLocaleString(language)}</strong></div>
+                  <div><span>{t("运行 ID")}</span><code>{selectedRun.run_id}</code></div>
+                </div>
+                {runLog?.assignment && <div className="subagent-assignment"><span>{t("委派任务")}</span><p>{runLog.assignment}</p></div>}
+                <div className="subagent-detail-tabs" role="tablist" aria-label={t("SubAgent 日志视图")}>
+                  <button type="button" role="tab" aria-selected={detailTab === "timeline"} className={detailTab === "timeline" ? "active" : ""} onClick={() => setDetailTab("timeline")}><Activity size={14} />{t("时间线")}<span>{runLog?.events.length ?? 0}</span></button>
+                  <button type="button" role="tab" aria-selected={detailTab === "output"} className={detailTab === "output" ? "active" : ""} onClick={() => setDetailTab("output")}><FileText size={14} />{t("输出")}</button>
+                </div>
+                <div className="subagent-detail-body">
+                  {logLoading ? <div className="subagent-log-loading"><RefreshCw className="spin" size={15} />{t("正在读取日志")}</div> : detailTab === "timeline" ? (
+                    <div className="subagent-timeline">
+                      {runLog?.events.length ? runLog.events.map((event, index) => <ActivityItem key={`${String(event.event ?? event.message ?? "event")}-${index}`} event={event} />) : <div className="subagent-log-empty"><Activity size={22} /><span>{t("该运行没有保存结构化事件")}</span></div>}
+                    </div>
+                  ) : (
+                    <div className={`subagent-output ${selectedRun.error ? "error" : ""}`}>
+                      {runOutput ? <Markdown>{runOutput}</Markdown> : <div className="subagent-log-empty"><FileText size={22} /><span>{t("正在等待代理输出")}</span></div>}
+                    </div>
+                  )}
+                </div>
+                {runLog && <details className="subagent-raw-log"><summary><Code2 size={13} />{t("查看脱敏原始日志")}<ChevronDown size={13} /></summary><pre>{JSON.stringify(runLog, null, 2)}</pre></details>}
+              </>
+            )}
+          </section>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function taskKey(task: RatsTaskRecord): string {
   return `${task.provider_id}:${task.service_id}:${task.task_id}`;
 }
@@ -3288,6 +3546,7 @@ export default function App() {
   }, [t, toast]);
 
   const openModelPicker = useCallback(() => {
+    if (state?.workspace.mode === "computer-controller") return;
     setModelPickerOpen(true);
     void window.reverie.request("refreshModelSources", {}).then((response) => {
       if (!response.models) return;
@@ -3295,7 +3554,11 @@ export default function App() {
     }).catch(() => {
       // Keep the initialized fallback catalog available when live discovery fails.
     });
-  }, []);
+  }, [state?.workspace.mode]);
+
+  useEffect(() => {
+    if (state?.workspace.mode === "computer-controller") setModelPickerOpen(false);
+  }, [state?.workspace.mode]);
 
   const selectReasoning = useCallback(async (reasoning: string) => {
     if (!state) return;
@@ -3313,7 +3576,7 @@ export default function App() {
       const response = await window.reverie.request("setSetting", { key, value });
       if (response.success === false) throw new Error(String(response.message ?? t("设置未保存")));
       const settings = response.settings;
-      setState((current) => current ? { ...current, settings, workspace: key === "mode" ? { ...current.workspace, mode: String(value) } : current.workspace } : current);
+      setState((current) => current ? { ...current, settings, models: response.models, workspace: response.workspace } : current);
       toast(t("设置已保存"), "success");
     } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
   }, [t, toast]);
@@ -3523,6 +3786,7 @@ export default function App() {
     if (view === "tools") return <ToolsView mode={state.workspace.mode} />;
     if (view === "rats") return <RatsView />;
     if (view === "tasks") return <RtpTasksView />;
+    if (view === "subagents") return <SubagentsView />;
     if (view === "plugins") return <PluginsView plugins={state.plugins.records} updatePlugin={updatePlugin} refresh={refreshPlugins} />;
     if (view === "recovery") return <RecoveryView recovery={state.recovery} rollback={rollback} />;
     if (view === "settings") return <SettingsView state={state} updateSetting={updateSetting} selectModel={selectModel} saveProvider={saveProvider} addStandard={() => setStandardModelOpen(true)} deleteStandard={deleteStandard} paths={desktopPaths} selectCoreData={() => void selectCoreData()} theme={theme} setTheme={changeTheme} preferences={uiPreferences} updatePreferences={updateUiPreferences} selectBackground={() => void selectBackground()} clearBackground={() => void clearBackground()} />;
@@ -3541,7 +3805,7 @@ export default function App() {
         <div className="content-area">{page}</div>
       </main>
       {inspectorOpen && <Inspector state={state} liveTurn={liveTurn} indexWorkspace={() => void indexWorkspace()} compactContext={() => void compactContext()} compactDisabled={running || sessionBusy} />}
-      {modelPickerOpen && <ModelPicker state={state} onSelect={(source, model, reasoning) => void selectModel(source, model, reasoning)} close={() => setModelPickerOpen(false)} />}
+      {modelPickerOpen && state.workspace.mode !== "computer-controller" && <ModelPicker state={state} onSelect={(source, model, reasoning) => void selectModel(source, model, reasoning)} close={() => setModelPickerOpen(false)} />}
       {commandOpen && <CommandPalette commands={state.commands.items} close={() => setCommandOpen(false)} choose={chooseCommand} />}
       {sessionSearchOpen && <SessionSearch close={() => setSessionSearchOpen(false)} openSession={(id) => void openSession(id)} />}
       {renameSessionTarget && <RenameSessionModal session={renameSessionTarget} close={() => setRenameSessionTarget(null)} save={(name) => void renameSession(name)} />}

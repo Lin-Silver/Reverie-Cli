@@ -14,6 +14,50 @@ from reverie.tools.serial_novel import DEFAULT_OUTPUT_DIR, STATE_SCHEMA
 from reverie.request_identity import REVERIE_CLIENT_HEADER, REVERIE_CLIENT_IDENTITY
 
 
+def test_computer_controller_stops_when_provider_finishes_the_answer() -> None:
+    agent = ReverieAgent.__new__(ReverieAgent)
+    agent.mode = "computer-controller"
+
+    assert agent._should_end_generation("Hello! How can I help?", "stop") is True
+    assert agent._should_end_generation("Task complete.", "end_turn") is True
+    assert agent._should_end_generation("Provider omitted a finish reason.", None) is True
+    assert agent._should_end_generation("Truncated response", "length") is False
+
+
+def test_computer_controller_stream_makes_one_api_call_after_natural_stop(monkeypatch, tmp_path) -> None:
+    seen = {"calls": 0}
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            seen["calls"] += 1
+            delta = SimpleNamespace(content="Hello! How can I help?", reasoning_content=None, thinking=None, reasoning=None, tool_calls=[])
+            choice = SimpleNamespace(delta=delta, finish_reason="stop")
+            return iter([SimpleNamespace(choices=[choice])])
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    fake_module = types.ModuleType("openai")
+    fake_module.OpenAI = FakeOpenAI
+    monkeypatch.setitem(sys.modules, "openai", fake_module)
+    agent = ReverieAgent(
+        base_url="https://integrate.api.nvidia.com/v1",
+        api_key="x",
+        model="meta/muse-glimmer-30b",
+        project_root=tmp_path,
+        provider="openai-sdk",
+        config=_nvidia_config(),
+        mode="computer-controller",
+    )
+    agent.tool_executor.get_tool_schemas = lambda mode="reverie": []
+
+    chunks = list(agent._process_streaming_openai_sdk())
+
+    assert seen["calls"] == 1
+    assert "Hello! How can I help?" in chunks
+
+
 def _nvidia_config() -> SimpleNamespace:
     return SimpleNamespace(
         api_max_retries=1,
@@ -596,7 +640,7 @@ def test_legacy_nvidia_default_timeout_does_not_override_global_timeout_when_nee
     assert seen["init_kwargs"]["timeout"] == 41
 
 
-def test_openai_sdk_stream_emits_visible_wait_event_before_request(monkeypatch, tmp_path):
+def test_openai_sdk_stream_emits_connecting_event_before_request(monkeypatch, tmp_path):
     seen = {}
     _install_fake_openai(monkeypatch, seen)
     agent = ReverieAgent(
@@ -614,9 +658,9 @@ def test_openai_sdk_stream_emits_visible_wait_event_before_request(monkeypatch, 
     event = decode_stream_event(next(stream))
 
     assert event["event"] == "model_request"
-    assert event["message"] == "Waiting for NVIDIA API response"
+    assert event["message"] == "Connecting to NVIDIA API stream"
     assert event["detail"] == "meta/muse-glimmer-30b | stream"
-    assert event["meta"] == "timeout 23s"
+    assert event["meta"] == "connect timeout 23s"
     assert "create_kwargs" not in seen
 
     try:
@@ -629,6 +673,64 @@ def test_openai_sdk_stream_emits_visible_wait_event_before_request(monkeypatch, 
     assert create_kwargs["extra_body"] == {"reasoning_effort": "max"}
     assert create_kwargs["messages"][0]["role"] == "system"
     assert all(message["role"] != "system" for message in create_kwargs["messages"][1:])
+
+
+def test_openai_sdk_stream_closes_wait_activity_on_first_upstream_event(monkeypatch, tmp_path) -> None:
+    class FakeCompletions:
+        def create(self, **kwargs):
+            delta = SimpleNamespace(content="Hello", reasoning_content=None, thinking=None, reasoning=None, tool_calls=[])
+            return iter([SimpleNamespace(choices=[SimpleNamespace(delta=delta, finish_reason="stop")])])
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    fake_module = types.ModuleType("openai")
+    fake_module.OpenAI = FakeOpenAI
+    monkeypatch.setitem(sys.modules, "openai", fake_module)
+    agent = ReverieAgent(
+        base_url="https://integrate.api.nvidia.com/v1",
+        api_key="x",
+        model="meta/muse-glimmer-30b",
+        project_root=tmp_path,
+        provider="openai-sdk",
+        config=_nvidia_config(),
+    )
+    agent.tool_executor.get_tool_schemas = lambda mode="reverie": []
+
+    chunks = list(agent._process_streaming_openai_sdk())
+    events = [decoded for chunk in chunks if (decoded := decode_stream_event(chunk)) is not None]
+
+    assert [event["event"] for event in events] == ["model_request", "model_response"]
+    assert events[0]["activity_id"] == events[1]["activity_id"]
+    assert events[1]["status"] == "success"
+    assert events[1]["message"] == "NVIDIA API stream connected"
+    assert "Hello" in chunks
+
+
+def test_model_stream_failure_replaces_pending_request_activity(tmp_path) -> None:
+    agent = ReverieAgent(
+        base_url="https://integrate.api.nvidia.com/v1",
+        api_key="x",
+        model="meta/muse-glimmer-30b",
+        project_root=tmp_path,
+        provider="openai-sdk",
+        config=_nvidia_config(),
+    )
+    request = decode_stream_event(agent._model_request_stream_event(
+        provider_label="NVIDIA API",
+        model=agent.model,
+        stream=True,
+        timeout=23,
+    ))
+    failure = decode_stream_event(agent._model_stream_failed_event(RuntimeError("upstream disconnected")))
+
+    assert request is not None and failure is not None
+    assert failure["event"] == "model_error"
+    assert failure["activity_id"] == request["activity_id"]
+    assert failure["status"] == "error"
+    assert failure["detail"] == "upstream disconnected"
+    assert agent._model_stream_failed_event(RuntimeError("duplicate")) is None
 
 
 def test_openai_sdk_retries_transient_create_errors(monkeypatch, tmp_path):

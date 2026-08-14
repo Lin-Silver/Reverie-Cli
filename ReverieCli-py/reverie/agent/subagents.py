@@ -32,6 +32,23 @@ _NON_REVERIE_WORKFLOW_MODES = {
     "writer",
     "computer-controller",
 }
+_LOG_SECRET_FIELDS = {
+    "api_key",
+    "apikey",
+    "authorization",
+    "cookie",
+    "credentials",
+    "custom_headers",
+    "password",
+    "refresh_token",
+    "secret",
+    "set_cookie",
+    "token",
+    "access_token",
+}
+_LOG_SECRET_TEXT_RE = re.compile(
+    r"(?i)(\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|authorization)\b\s*[:=]\s*)([^\s,;}]+)"
+)
 
 
 def _is_base_reverie_mode(mode: Any) -> bool:
@@ -47,6 +64,32 @@ def _utc_timestamp() -> str:
 def _safe_subagent_id(value: str) -> str:
     candidate = re.sub(r"[^A-Za-z0-9._-]+", "-", str(value or "").strip()).strip("-._")
     return candidate or "subagent"
+
+
+def _json_log_safe(value: Any, *, field: str = "") -> Any:
+    normalized_field = str(field or "").strip().lower().replace("-", "_")
+    if normalized_field in _LOG_SECRET_FIELDS:
+        return "[REDACTED]"
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(key): _json_log_safe(item, field=str(key)) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_log_safe(item) for item in value]
+    if isinstance(value, str):
+        return _LOG_SECRET_TEXT_RE.sub(r"\1[REDACTED]", value)
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
+def _model_log_payload(model: ModelConfig) -> Dict[str, Any]:
+    """Return useful model identity without persisting credentials or headers."""
+    return {
+        "model": str(getattr(model, "model", "") or ""),
+        "display_name": str(getattr(model, "model_display_name", "") or ""),
+        "provider": str(getattr(model, "provider", "") or ""),
+    }
 
 
 @dataclass(frozen=True)
@@ -579,6 +622,7 @@ class SubagentManager:
         retain_summary: bool = False,
     ) -> SubagentRun:
         cancel_event = self._cancel_events[run.run_id]
+        run_events: List[Dict[str, Any]] = []
         try:
             if cancel_event.is_set():
                 run.status = "cancelled"
@@ -590,6 +634,33 @@ class SubagentManager:
                 child_config,
                 read_scope=read_scope,
                 write_scope=write_scope,
+            )
+            parent_handler = child_agent.tool_executor.context.get("ui_event_handler")
+
+            def _capture_run_event(event: Dict[str, Any]) -> None:
+                if not isinstance(event, dict):
+                    return
+                decorated = {
+                    **dict(event),
+                    "agent_id": spec.id,
+                    "agent_color": spec.color,
+                    "parent_agent_id": "main",
+                    "run_id": run.run_id,
+                    "task_id": run.task_id,
+                }
+                safe_decorated = _json_log_safe(decorated)
+                run_events.append(safe_decorated)
+                if callable(parent_handler):
+                    parent_handler(safe_decorated)
+
+            child_agent.tool_executor.update_context("ui_event_handler", _capture_run_event)
+            _capture_run_event(
+                {
+                    "category": "SubAgent",
+                    "message": f"{spec.name or spec.id} started delegated work",
+                    "status": "working",
+                    "detail": str(assignment or "").strip(),
+                }
             )
             prompt = self._build_assignment_prompt(
                 spec=spec,
@@ -633,7 +704,16 @@ class SubagentManager:
                 run.error = str(exc)
         finally:
             run.ended_at = _utc_timestamp()
-            self._persist_run_log(run, spec, model, assignment)
+            if "_capture_run_event" in locals():
+                _capture_run_event(
+                    {
+                        "category": "SubAgent",
+                        "message": f"{spec.name or spec.id} {run.status}",
+                        "status": "success" if run.status == "completed" else "error" if run.status == "failed" else "warning",
+                        "detail": run.error or run.summary[:240],
+                    }
+                )
+            self._persist_run_log(run, spec, model, assignment, events=run_events)
             with self._run_lock:
                 self._runs[run.run_id] = run
 
@@ -743,6 +823,8 @@ class SubagentManager:
         spec: SubagentSpec,
         model: ModelConfig,
         assignment: str,
+        *,
+        events: Optional[List[Dict[str, Any]]] = None,
     ) -> None:
         log_dir = self._runs_dir(spec.id)
         log_dir.mkdir(parents=True, exist_ok=True)
@@ -751,10 +833,11 @@ class SubagentManager:
         payload = {
             "run": run.to_dict(),
             "subagent": spec.to_dict(),
-            "model": model.to_dict(),
+            "model": _model_log_payload(model),
             "assignment": str(assignment or ""),
+            "events": list(events or []),
         }
-        log_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        log_path.write_text(json.dumps(_json_log_safe(payload), indent=2, ensure_ascii=False), encoding="utf-8")
 
     def get_run(self, run_id: str) -> Optional[SubagentRun]:
         wanted = str(run_id or "").strip()
@@ -783,5 +866,54 @@ class SubagentManager:
 
     def list_recent_runs(self) -> List[SubagentRun]:
         with self._run_lock:
-            runs = list(self._runs.values())
-        return sorted(runs, key=lambda item: item.started_at, reverse=True)
+            runs_by_id = {run.run_id: run for run in self._runs.values()}
+        project_data_dir = getattr(self.interface, "project_data_dir", None)
+        if project_data_dir is not None:
+            paths = sorted(
+                Path(project_data_dir).glob("subagents/*/runs/*.json"),
+                key=lambda path: path.stat().st_mtime if path.exists() else 0.0,
+                reverse=True,
+            )
+            for path in paths[:100]:
+                try:
+                    payload = json.loads(path.read_text(encoding="utf-8"))
+                    run_payload = payload.get("run") if isinstance(payload, dict) else None
+                    if not isinstance(run_payload, dict):
+                        continue
+                    restored = SubagentRun.from_dict(run_payload)
+                    restored.log_path = str(path)
+                    runs_by_id.setdefault(restored.run_id, restored)
+                except (OSError, ValueError):
+                    continue
+        return sorted(runs_by_id.values(), key=lambda item: item.started_at, reverse=True)
+
+    def get_run_log(self, run_id: str) -> Optional[Dict[str, Any]]:
+        """Load one persisted run log while keeping model credentials private."""
+        run = self.get_run(run_id)
+        project_data_dir = getattr(self.interface, "project_data_dir", None)
+        if run is None or project_data_dir is None or not run.log_path:
+            return None
+        log_root = (Path(project_data_dir) / "subagents").resolve()
+        path = Path(run.log_path).resolve()
+        try:
+            path.relative_to(log_root)
+        except ValueError:
+            return None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        if not isinstance(payload, dict):
+            return None
+        model = payload.get("model") if isinstance(payload.get("model"), dict) else {}
+        return {
+            "run": payload.get("run") if isinstance(payload.get("run"), dict) else run.to_dict(),
+            "subagent": payload.get("subagent") if isinstance(payload.get("subagent"), dict) else {},
+            "model": {
+                "model": str(model.get("model") or ""),
+                "display_name": str(model.get("display_name") or model.get("model_display_name") or ""),
+                "provider": str(model.get("provider") or ""),
+            },
+            "assignment": _json_log_safe(str(payload.get("assignment") or "")),
+            "events": _json_log_safe(payload.get("events") if isinstance(payload.get("events"), list) else []),
+        }

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 import base64
 import ctypes
+from ctypes import wintypes
 import io
 import re
 import sys
@@ -78,19 +79,33 @@ class OpenComputerUseService:
     def __init__(self, output_dir: Path):
         if sys.platform != "win32":
             raise ComputerUseError("Embedded Computer Use currently requires Windows.")
-        try:
-            import uiautomation as automation
-            from PIL import ImageGrab
-        except ImportError as exc:
-            raise ComputerUseError(
-                "Embedded Computer Use requires the 'uiautomation' and 'Pillow' packages."
-            ) from exc
-
-        self.auto = automation
-        self.image_grab = ImageGrab
+        self.auto = None
+        self.image_grab = None
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self._snapshots: Dict[str, AppSnapshot] = {}
+
+    def _ensure_automation(self) -> Any:
+        if self.auto is not None:
+            return self.auto
+        try:
+            import uiautomation as automation
+        except ImportError as exc:
+            raise ComputerUseError(
+                "Embedded Computer Use requires the 'uiautomation' package."
+            ) from exc
+        self.auto = automation
+        return automation
+
+    def _ensure_image_grab(self) -> Any:
+        if self.image_grab is not None:
+            return self.image_grab
+        try:
+            from PIL import ImageGrab
+        except ImportError as exc:
+            raise ComputerUseError("Embedded Computer Use requires the 'Pillow' package.") from exc
+        self.image_grab = ImageGrab
+        return ImageGrab
 
     @staticmethod
     def _key(value: str) -> str:
@@ -113,6 +128,17 @@ class OpenComputerUseService:
     def _process_name(self, process_id: int) -> str:
         PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
         kernel32 = ctypes.windll.kernel32
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.QueryFullProcessImageNameW.argtypes = [
+            wintypes.HANDLE,
+            wintypes.DWORD,
+            wintypes.LPWSTR,
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
         handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(process_id))
         if not handle:
             return str(process_id)
@@ -125,6 +151,72 @@ class OpenComputerUseService:
             kernel32.CloseHandle(handle)
         return str(process_id)
 
+    def _native_windows(self) -> List[Dict[str, Any]]:
+        """Enumerate top-level windows without querying every UIA provider.
+
+        Some Electron/Chromium accessibility providers can block indefinitely
+        while UI Automation walks the desktop root.  Win32 enumeration is
+        sufficient for app discovery and gives UIA a single known handle for
+        the later, app-scoped observation.
+        """
+        user32 = ctypes.windll.user32
+        enum_proc_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        user32.EnumWindows.argtypes = [enum_proc_type, wintypes.LPARAM]
+        user32.EnumWindows.restype = wintypes.BOOL
+        user32.IsWindowVisible.argtypes = [wintypes.HWND]
+        user32.IsWindowVisible.restype = wintypes.BOOL
+        user32.IsIconic.argtypes = [wintypes.HWND]
+        user32.IsIconic.restype = wintypes.BOOL
+        user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+        user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+        user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+        user32.GetWindowTextLengthW.restype = ctypes.c_int
+        user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+        user32.GetWindowTextW.restype = ctypes.c_int
+        user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+        user32.GetWindowRect.restype = wintypes.BOOL
+
+        windows: List[Dict[str, Any]] = []
+
+        @enum_proc_type
+        def visit(handle: int, _lparam: int) -> bool:
+            if not user32.IsWindowVisible(handle):
+                return True
+            process_id = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(handle, ctypes.byref(process_id))
+            rect = wintypes.RECT()
+            if process_id.value <= 0 or not user32.GetWindowRect(handle, ctypes.byref(rect)):
+                return True
+            width = int(rect.right - rect.left)
+            height = int(rect.bottom - rect.top)
+            if width <= 0 or height <= 0:
+                return True
+            length = max(0, int(user32.GetWindowTextLengthW(handle)))
+            if length == 0:
+                return True
+            buffer = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(handle, buffer, length + 1)
+            windows.append(
+                {
+                    "name": self._process_name(int(process_id.value)),
+                    "pid": int(process_id.value),
+                    "window_title": self._safe_text(buffer.value, full=True),
+                    "window_handle": int(handle),
+                    "window_bounds": {
+                        "x": int(rect.left),
+                        "y": int(rect.top),
+                        "width": width,
+                        "height": height,
+                    },
+                    "status": "minimized" if user32.IsIconic(handle) else "running",
+                }
+            )
+            return True
+
+        if not user32.EnumWindows(visit, 0):
+            raise ComputerUseError("Unable to enumerate desktop applications with Win32.")
+        return windows
+
     def _top_level_windows(self) -> Iterable[Any]:
         try:
             return self.auto.GetRootControl().GetChildren()
@@ -132,49 +224,29 @@ class OpenComputerUseService:
             raise ComputerUseError(f"Unable to enumerate desktop applications: {exc}") from exc
 
     def list_apps(self) -> List[Dict[str, Any]]:
-        apps: List[Dict[str, Any]] = []
-        seen: set[tuple[int, int]] = set()
-        for control in self._top_level_windows():
-            process_id = int(self._getattr(control, "ProcessId", 0) or 0)
-            handle = int(self._getattr(control, "NativeWindowHandle", 0) or 0)
-            title = self._safe_text(self._getattr(control, "Name", ""), full=True)
-            bounds = self._rect(control)
-            if process_id <= 0 or not bounds or (process_id, handle) in seen:
-                continue
-            seen.add((process_id, handle))
-            apps.append(
-                {
-                    "name": self._process_name(process_id),
-                    "pid": process_id,
-                    "window_title": title or "untitled",
-                    "window_handle": handle,
-                    "window_bounds": bounds,
-                    "status": "running",
-                }
-            )
+        apps = self._native_windows()
         return sorted(apps, key=lambda item: (item["name"].lower(), item["pid"]))
 
     def _resolve_app(self, query: str) -> Any:
         wanted = self._key(query)
         if not wanted:
             raise ComputerUseError("app is required")
-        exact: List[Any] = []
-        partial: List[Any] = []
-        for control in self._top_level_windows():
-            process_id = int(self._getattr(control, "ProcessId", 0) or 0)
-            if not self._rect(control):
-                continue
-            title = self._safe_text(self._getattr(control, "Name", ""), full=True)
-            process_name = self._process_name(process_id)
-            candidates = {self._key(process_name), self._key(title), str(process_id)}
+        exact: List[Dict[str, Any]] = []
+        partial: List[Dict[str, Any]] = []
+        for window in self._native_windows():
+            candidates = {
+                self._key(window["name"]),
+                self._key(window["window_title"]),
+                str(window["pid"]),
+            }
             if wanted in candidates:
-                exact.append(control)
+                exact.append(window)
             elif any(wanted in candidate for candidate in candidates if candidate):
-                partial.append(control)
+                partial.append(window)
         matches = exact or partial
         if not matches:
             raise ComputerUseError(f"App not found or has no accessible window: {query}")
-        return matches[0]
+        return self._ensure_automation().ControlFromHandle(matches[0]["window_handle"])
 
     @staticmethod
     def _rect(control: Any) -> Optional[Dict[str, int]]:
@@ -296,7 +368,7 @@ class OpenComputerUseService:
             bounds["x"] + bounds["width"],
             bounds["y"] + bounds["height"],
         )
-        image = self.image_grab.grab(bbox=bbox, all_screens=True)
+        image = self._ensure_image_grab().grab(bbox=bbox, all_screens=True)
         buffer = io.BytesIO()
         image.save(buffer, format="PNG")
         payload = buffer.getvalue()
@@ -522,6 +594,7 @@ class OpenComputerUseService:
 
     def press_key(self, app: str, key: str) -> None:
         self._snapshot(app)
+        self._resolve_app(app).SetFocus()
         parts = [part for part in re.split(r"[+]", str(key or "").strip()) if part]
         if not parts:
             raise ComputerUseError("key is required")
@@ -531,4 +604,5 @@ class OpenComputerUseService:
 
     def type_text(self, app: str, text: str) -> None:
         self._snapshot(app)
+        self._resolve_app(app).SetFocus()
         self.auto.SendKeys(str(text), charMode=True)

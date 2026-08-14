@@ -29,6 +29,7 @@ class _ComputerUseTool(BaseTool):
     tool_tags = ("desktop", "accessibility", "computer-use", "embedded-mcp")
     concurrency_safe = False
     always_load = True
+    workspace_checkpoint = False
 
     def _run(self, operation) -> ToolResult:
         try:

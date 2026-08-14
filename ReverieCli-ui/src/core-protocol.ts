@@ -8,6 +8,8 @@ import type {
   SessionListState,
   SessionState,
   SettingsState,
+  SubagentRunLog,
+  SubagentsState,
   ToolRecord,
   RatsState,
   WorkspaceState,
@@ -54,6 +56,8 @@ interface CoreRequestMap {
   initialize: { payload: { projectRoot: string }; response: Envelope<"state", { state: DesktopState }> };
   getSession: { payload: { sessionId: string }; response: Envelope<"session", { session: SessionState; sessions: SessionListState }> };
   getContextStatus: { payload: EmptyPayload; response: Envelope<"context.status", { context_engine: NonNullable<WorkspaceState["context_engine"]> }> };
+  getSubagents: { payload: EmptyPayload; response: Envelope<"subagents", { subagents: SubagentsState }> };
+  getSubagentRunLog: { payload: { runId: string }; response: Envelope<"subagent.log", { run_id: string; log: SubagentRunLog }> };
   createSession: { payload: { name?: string }; response: Envelope<"session.created", { session: SessionState; sessions: SessionListState }> };
   runPrompt: {
     payload: { prompt: string; sessionId: string; mode: string; stream: boolean; projectRoot?: string; noIndex?: boolean; freshSession?: boolean; source?: string; model?: string; reasoning?: string };
@@ -72,7 +76,7 @@ interface CoreRequestMap {
   getModelSources: { payload: EmptyPayload; response: Envelope<"models", { models: ModelSourcesState }> };
   refreshModelSources: { payload: EmptyPayload; response: Envelope<"models", { models: ModelSourcesState }> };
   selectModel: { payload: { source: string; modelId: string; reasoning?: string }; response: Envelope<"model.selected", { selected: Record<string, unknown>; models: ModelSourcesState; workspace: WorkspaceState }> };
-  setSetting: { payload: { key: string; value: unknown }; response: Envelope<"setting.updated", { success: boolean; message: string; settings: SettingsState }> };
+  setSetting: { payload: { key: string; value: unknown }; response: Envelope<"setting.updated", { success: boolean; message: string; settings: SettingsState; models: ModelSourcesState; workspace: WorkspaceState }> };
   setProviderConfig: { payload: { source: string; patch: Record<string, unknown>; clearFields?: string[] }; response: Envelope<"provider.updated", { models: ModelSourcesState; workspace: WorkspaceState }> };
   addStandardModel: { payload: { model: Record<string, unknown> }; response: Envelope<"standard-model.updated", { index: number; models: ModelSourcesState; workspace: WorkspaceState }> };
   deleteStandardModel: { payload: { index: number }; response: Envelope<"standard-model.updated", { index: number; models: ModelSourcesState; workspace: WorkspaceState }> };

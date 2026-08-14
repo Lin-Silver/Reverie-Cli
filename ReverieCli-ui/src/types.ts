@@ -1,4 +1,41 @@
-export type ViewId = "chat" | "tools" | "rats" | "tasks" | "plugins" | "recovery" | "settings";
+export type ViewId = "chat" | "tools" | "rats" | "tasks" | "subagents" | "plugins" | "recovery" | "settings";
+
+export interface SubagentSpecRecord {
+  id: string;
+  name: string;
+  enabled: boolean;
+  color: string;
+  mode: string;
+  created_at: string;
+  updated_at: string;
+  model_ref: Record<string, unknown>;
+}
+
+export interface SubagentRunRecord {
+  run_id: string;
+  subagent_id: string;
+  task_id: string;
+  status: string;
+  started_at: string;
+  ended_at: string;
+  summary: string;
+  error: string;
+  log_path: string;
+}
+
+export interface SubagentsState {
+  available: boolean;
+  agents: SubagentSpecRecord[];
+  runs: SubagentRunRecord[];
+}
+
+export interface SubagentRunLog {
+  run: SubagentRunRecord;
+  subagent: Partial<SubagentSpecRecord>;
+  model: { model?: string; display_name?: string; provider?: string };
+  assignment: string;
+  events: Array<Record<string, unknown>>;
+}
 
 export type RatsPermission = "read" | "project" | "edit" | "asset" | "ai" | "run" | "build";
 

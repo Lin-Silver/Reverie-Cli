@@ -13,7 +13,12 @@ from typing import Callable
 
 import pytest
 
-from _engine_pairing import ENGINE_BIN_ENV, discover_engine_binary, engine_pairing_skip_reason
+from _engine_pairing import (
+    ENGINE_BIN_ENV,
+    assert_response_schema,
+    discover_engine_binary,
+    engine_pairing_skip_reason,
+)
 from reverie.rats import RatsRuntime
 from reverie.agent.tool_executor import ToolExecutor
 
@@ -403,6 +408,22 @@ def test_remove_test_directory_rejects_missing_or_foreign_owner_marker(tmp_path:
     assert foreign.exists()
 
 
+def test_response_schema_guard_names_the_engine_contract_that_drifted() -> None:
+    assert_response_schema("world.streaming_status", {"schema": "reverie.world-streaming/2"})
+
+    with pytest.raises(AssertionError) as drift:
+        assert_response_schema("world.streaming_status", {"schema": "reverie.world-streaming/3"})
+    message = str(drift.value)
+    assert "world.streaming_status" in message
+    assert "reverie.world-streaming/3" in message
+    assert "reverie.world-streaming/2" in message
+    assert "ENGINE_RESPONSE_SCHEMAS" in message
+
+    # A response that omits `schema` entirely is drift, not a silent pass.
+    with pytest.raises(AssertionError):
+        assert_response_schema("world.streaming_status", {})
+
+
 def _settle_streaming(
     executor: ToolExecutor,
     refresh_tool: object,
@@ -663,7 +684,8 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
                 "root_motion_track": "",
             },
         )
-        assert configured.success is True and configured.data.get("schema") == "reverie.animation-configuration/1"
+        assert configured.success is True
+        assert_response_schema("animation.configure", configured.data)
         opened = executor.execute(
             dynamic_tools["scene.open"],
             {"path": "scenes/animation_runtime.tscn"},
@@ -678,7 +700,8 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             dynamic_tools["animation.status"],
             {"node_path": "StateMachine"},
         )
-        assert animation_status.success is True and animation_status.data.get("schema") == "reverie.animation-playback/1"
+        assert animation_status.success is True
+        assert_response_schema("animation.status", animation_status.data)
 
         region = executor.execute(
             dynamic_tools["world.create_region"],
@@ -692,7 +715,8 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
                 "persistence_key": "cli-region-state",
             },
         )
-        assert region.success is True and region.data.get("schema") == "reverie.world-region/1"
+        assert region.success is True
+        assert_response_schema("world.create_region", region.data)
         cell = executor.execute(
             dynamic_tools["world.create_cell"],
             {
@@ -705,7 +729,8 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
                 "persistence_key": "cli-cell-state",
             },
         )
-        assert cell.success is True and cell.data.get("schema") == "reverie.world-cell/1"
+        assert cell.success is True
+        assert_response_schema("world.create_cell", cell.data)
         opened_world = executor.execute(
             dynamic_tools["scene.open"],
             {"path": "scenes/world_runtime.tscn"},
@@ -737,7 +762,8 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             dynamic_tools["world.streaming_status"],
             {"node_path": "Streamer"},
         )
-        assert world_status.success is True and world_status.data.get("schema") == "reverie.world-streaming/2"
+        assert world_status.success is True
+        assert_response_schema("world.streaming_status", world_status.data)
         rebased_world = executor.execute(
             dynamic_tools["world.rebase_origin"],
             {"node_path": "Streamer", "origin_cell": [1, 0, 0]},
@@ -861,7 +887,7 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
         assert started.get("output", {}).get("running") is True and task_id
 
         events = runtime.task_events(service_id, task_id, provider_id=PROVIDER_ID)
-        assert events.get("schema") == "reverie.rtp.task/1"
+        assert_response_schema("task.events", events)
         assert events.get("events", [])[0].get("type") == "task.started"
         status = runtime.task_status(service_id, task_id, provider_id=PROVIDER_ID)
         assert status.get("task_id") == task_id

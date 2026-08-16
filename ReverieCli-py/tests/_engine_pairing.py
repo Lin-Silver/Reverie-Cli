@@ -59,3 +59,29 @@ def engine_pairing_skip_reason() -> str:
         "No Reverie Engine editor binary was discovered beside this repository; "
         f"build one or set {ENGINE_BIN_ENV} to run the real Engine/Cli RTP pairing."
     )
+
+
+# Response `schema` identifiers this repository pins on the live Engine. Each
+# entry is a cross-repository contract, so keeping them in one table means an
+# Engine bump surfaces as a single reviewed line here instead of an opaque
+# assertion failure deep inside the pairing test.
+ENGINE_RESPONSE_SCHEMAS = {
+    "animation.configure": "reverie.animation-configuration/1",
+    "animation.status": "reverie.animation-playback/1",
+    "world.create_region": "reverie.world-region/1",
+    "world.create_cell": "reverie.world-cell/1",
+    "world.streaming_status": "reverie.world-streaming/2",
+    "task.events": "reverie.rtp.task/1",
+}
+
+
+def assert_response_schema(tool: str, payload: dict) -> None:
+    """Assert one Engine response contract, naming the drift when it breaks."""
+    expected = ENGINE_RESPONSE_SCHEMAS[tool]
+    actual = payload.get("schema")
+    assert actual == expected, (
+        f"Engine cross-repository contract drift: {tool} reports schema {actual!r} "
+        f"but this repository pins {expected!r}. Review the Engine change, adopt "
+        f"the new response contract in the pairing test, and update "
+        f"ENGINE_RESPONSE_SCHEMAS in tests/_engine_pairing.py."
+    )

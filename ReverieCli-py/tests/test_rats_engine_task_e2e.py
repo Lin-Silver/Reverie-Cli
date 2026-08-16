@@ -13,11 +13,12 @@ from typing import Callable
 
 import pytest
 
+from _engine_pairing import ENGINE_BIN_ENV, discover_engine_binary, engine_pairing_skip_reason
 from reverie.rats import RatsRuntime
 from reverie.agent.tool_executor import ToolExecutor
 
 
-ENGINE_BIN = str(os.environ.get("REVERIE_RATS_ENGINE_BIN", "")).strip()
+ENGINE_BIN = os.fspath(discover_engine_binary() or "")
 DISCOVERY_SCHEMA = "reverie.rats.discovery/1"
 PROVIDER_ID = "reverie.engine"
 OWNER_MARKER_NAME = ".reverie-rats-e2e-owner"
@@ -402,11 +403,45 @@ def test_remove_test_directory_rejects_missing_or_foreign_owner_marker(tmp_path:
     assert foreign.exists()
 
 
-@pytest.mark.skipif(not ENGINE_BIN, reason="Set REVERIE_RATS_ENGINE_BIN to run the real Engine/Cli RTP E2E.")
+def _settle_streaming(
+    executor: ToolExecutor,
+    refresh_tool: object,
+    node_path: str,
+    expected_loaded: list[str] | None = None,
+    timeout: float = 10.0,
+):
+    """Drive the Engine's bounded async cell streaming to a settled status.
+
+    Cell streaming is asynchronous and reports `reverie.world-streaming/2`, so
+    `world.start_streaming`, `world.rebase_origin` and `world.refresh_streaming`
+    return a transitional status whose `loaded_cells` is still converging. Pump
+    `world.refresh_streaming` until the queue, in-flight loads and cancellations
+    have all drained, then let the caller assert on the settled status.
+    """
+    deadline = time.monotonic() + timeout
+    latest = executor.execute(refresh_tool, {"node_path": node_path})
+    while True:
+        data = latest.data if latest.success else {}
+        settled = (
+            latest.success is True
+            and not data.get("async_transition_pending", False)
+            and not data.get("queued_cells")
+            and not data.get("loading_cells")
+            and not data.get("cancelling_cells")
+        )
+        if settled and (expected_loaded is None or data.get("loaded_cells") == expected_loaded):
+            return latest
+        if time.monotonic() >= deadline:
+            return latest
+        time.sleep(0.01)
+        latest = executor.execute(refresh_tool, {"node_path": node_path})
+
+
+@pytest.mark.skipif(not ENGINE_BIN, reason=engine_pairing_skip_reason())
 def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
     launch_binary = Path(ENGINE_BIN).resolve()
     if not launch_binary.is_file():
-        pytest.fail(f"REVERIE_RATS_ENGINE_BIN does not point to a file: {launch_binary}")
+        pytest.fail(f"{ENGINE_BIN_ENV} does not point to a file: {launch_binary}")
     binary = launch_binary
     if launch_binary.name.lower().endswith(".console.exe"):
         binary = launch_binary.with_name(launch_binary.name[: -len(".console.exe")] + ".exe")
@@ -688,12 +723,21 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
                 "process_exit": process.poll(),
                 "engine_log": log_path.read_text(encoding="utf-8", errors="replace")[-4000:],
             }
-        assert started_world.success is True and started_world.data.get("loaded_cells") == ["cli-cell"], world_start_failure
+        assert started_world.success is True, world_start_failure
+        settled_world = _settle_streaming(
+            executor,
+            dynamic_tools["world.refresh_streaming"],
+            "Streamer",
+            ["cli-cell"],
+        )
+        assert settled_world.success is True and settled_world.data.get("loaded_cells") == ["cli-cell"], (
+            world_start_failure or settled_world.data
+        )
         world_status = executor.execute(
             dynamic_tools["world.streaming_status"],
             {"node_path": "Streamer"},
         )
-        assert world_status.success is True and world_status.data.get("schema") == "reverie.world-streaming/1"
+        assert world_status.success is True and world_status.data.get("schema") == "reverie.world-streaming/2"
         rebased_world = executor.execute(
             dynamic_tools["world.rebase_origin"],
             {"node_path": "Streamer", "origin_cell": [1, 0, 0]},
@@ -704,7 +748,15 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             and rebased_world.data.get("origin_world_position") == [100.0, 0.0, 0.0]
             and rebased_world.data.get("last_rebase_delta") == [100.0, 0.0, 0.0]
             and rebased_world.data.get("rebase_count") == 1
-            and rebased_world.data.get("loaded_cells") == ["cli-cell"]
+        )
+        settled_rebase = _settle_streaming(
+            executor,
+            dynamic_tools["world.refresh_streaming"],
+            "Streamer",
+            ["cli-cell"],
+        )
+        assert settled_rebase.success is True and settled_rebase.data.get("loaded_cells") == ["cli-cell"], (
+            settled_rebase.data
         )
         budgeted_world = executor.execute(
             dynamic_tools["world.set_streaming_budget"],
@@ -741,13 +793,20 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             dynamic_tools["world.refresh_streaming"],
             {"node_path": "Streamer", "observer_position": [1000.0, 0.0, 0.0]},
         )
-        assert (
-            refreshed_world.success is True
-            and refreshed_world.data.get("loaded_cells") == []
-            and refreshed_world.data.get("state_dirty") is False
-            and refreshed_world.data.get("state_handoff_count") == 1
-            and refreshed_world.data.get("last_state_handoff_cells") == ["cli-cell"]
+        assert refreshed_world.success is True
+        settled_unload = _settle_streaming(
+            executor,
+            dynamic_tools["world.refresh_streaming"],
+            "Streamer",
+            [],
         )
+        assert (
+            settled_unload.success is True
+            and settled_unload.data.get("loaded_cells") == []
+            and settled_unload.data.get("state_dirty") is False
+            and settled_unload.data.get("state_handoff_count") == 1
+            and settled_unload.data.get("last_state_handoff_cells") == ["cli-cell"]
+        ), settled_unload.data
         cleared_state = executor.execute(
             dynamic_tools["world.clear_cell_state"],
             {"node_path": "Streamer", "cell_id": "cli-cell"},

@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 import reverie.rats as rats_module
+from _engine_pairing import discover_engine_binary, engine_pairing_skip_reason
 from reverie.agent.tool_executor import ToolExecutor
 from reverie.rats import (
     RATS_PROTOCOL,
@@ -32,19 +33,8 @@ from reverie.rats import (
 
 CONTROL_TOKEN = "a" * 64
 SESSION_TOKEN = "b" * 64
-def _engine_binary_from_environment() -> Path | None:
-    value = str(os.environ.get("REVERIE_RATS_ENGINE_BIN", "")).strip()
-    if not value:
-        return None
-    binary = Path(value).expanduser().resolve()
-    if binary.name.lower().endswith(".console.exe"):
-        provider_binary = binary.with_name(binary.name[: -len(".console.exe")] + ".exe")
-        if provider_binary.is_file():
-            return provider_binary
-    return binary
 
-
-ENGINE_BINARY = _engine_binary_from_environment()
+ENGINE_BINARY = discover_engine_binary()
 
 
 def _allow_test_process(_pid: int, _executable: Path) -> bool:
@@ -618,7 +608,7 @@ def test_descriptor_rejects_a_pid_whose_image_does_not_match_the_executable() ->
 
 @pytest.mark.skipif(
     os.name != "nt" or ENGINE_BINARY is None,
-    reason="Set REVERIE_RATS_ENGINE_BIN to validate a real Reverie Engine executable and process.",
+    reason=engine_pairing_skip_reason(),
 )
 def test_production_reverie_provider_accepts_a_real_engine_binary_and_process() -> None:
     assert ENGINE_BINARY is not None

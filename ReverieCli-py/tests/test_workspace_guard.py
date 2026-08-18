@@ -1,4 +1,6 @@
 from pathlib import Path
+import json
+import subprocess
 
 from reverie.agent.tool_executor import ToolExecutor
 from reverie.tools.base import BaseTool, ToolResult
@@ -186,3 +188,127 @@ def test_command_exec_rejects_inline_interpreter_code(tmp_path: Path) -> None:
 
     assert not result.success
     assert "inline interpreter" in result.error
+
+
+def _vanished_add_failure() -> subprocess.CompletedProcess[str]:
+    """What Git reports when a file disappears between the walk and the open."""
+    return subprocess.CompletedProcess(
+        args=["git", "add"],
+        returncode=128,
+        stdout="",
+        stderr=(
+            'error: open(".godot/global_script_class_cache.cfg14995211.tmp"): '
+            "No such file or directory\n"
+            'error: unable to index file ".godot/global_script_class_cache.cfg14995211.tmp"\n'
+            "fatal: adding files failed\n"
+        ),
+    )
+
+
+def _as_git_result(
+    failure: subprocess.CompletedProcess[str], *, check: bool
+) -> subprocess.CompletedProcess[str]:
+    """Apply ``_git``'s own check contract, so a caller that demands success raises.
+
+    Without this a fake would let the pre-fix code path look healthy: it called
+    ``add`` with ``check=True`` and would have raised on this exact stderr.
+    """
+    if check:
+        raise WorkspaceGuardError(failure.stderr.strip())
+    return failure
+
+
+def test_a_file_that_vanishes_mid_checkpoint_does_not_fail_the_operation(tmp_path: Path) -> None:
+    """A checkpoint is a safety net; unrelated churn must not abort the real work."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "keep.txt").write_text("keep", encoding="utf-8")
+    guard = _guard(workspace, tmp_path / "state")
+    guard.ensure_initialized()
+
+    real_git = guard._git
+    attempts = {"count": 0}
+
+    def flaky_git(*args: str, check: bool = True):
+        if args[:2] == ("add", "-A"):
+            attempts["count"] += 1
+            if attempts["count"] == 1:
+                # Stage for real, then report the vanished temp file as Git does.
+                real_git(*args, check=False)
+                return _as_git_result(_vanished_add_failure(), check=check)
+        return real_git(*args, check=check)
+
+    guard._git = flaky_git
+
+    checkpoint = guard.checkpoint("baseline")
+
+    assert attempts["count"] == 2, "the failed add must be retried"
+    assert checkpoint.commit
+    assert checkpoint.changed
+    guard._git = real_git
+    tracked = real_git("ls-tree", "--name-only", "HEAD").stdout.split()
+    assert "keep.txt" in tracked
+
+
+def test_persistent_churn_is_audited_instead_of_raising(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "keep.txt").write_text("keep", encoding="utf-8")
+    guard = _guard(workspace, tmp_path / "state")
+    guard.ensure_initialized()
+
+    real_git = guard._git
+    attempts = {"count": 0}
+
+    def always_churning(*args: str, check: bool = True):
+        if args[:2] == ("add", "-A"):
+            attempts["count"] += 1
+            real_git(*args, check=False)
+            return _as_git_result(_vanished_add_failure(), check=check)
+        return real_git(*args, check=check)
+
+    guard._git = always_churning
+
+    checkpoint = guard.checkpoint("baseline")
+
+    assert attempts["count"] == ShadowGitManager.STAGE_RETRY_LIMIT
+    assert checkpoint.commit
+    records = [
+        json.loads(line)
+        for line in guard.audit_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    churn = [record for record in records if record["event"] == "checkpoint_stage_churn"]
+    assert churn, "a thin checkpoint must be explainable after the fact"
+    assert any("global_script_class_cache" in path for path in churn[-1]["paths"])
+
+
+def test_a_real_add_failure_still_fails_the_checkpoint(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    guard = _guard(workspace, tmp_path / "state")
+    guard.ensure_initialized()
+
+    real_git = guard._git
+
+    def broken_git(*args: str, check: bool = True):
+        if args[:2] == ("add", "-A"):
+            return _as_git_result(
+                subprocess.CompletedProcess(
+                    args=["git", "add"],
+                    returncode=128,
+                    stdout="",
+                    stderr="fatal: not a git repository\n",
+                ),
+                check=check,
+            )
+        return real_git(*args, check=check)
+
+    guard._git = broken_git
+
+    try:
+        guard.checkpoint("baseline")
+    except WorkspaceGuardError as exc:
+        assert "not a git repository" in str(exc)
+    else:
+        raise AssertionError("A genuine Git failure was swallowed")

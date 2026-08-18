@@ -95,6 +95,70 @@ class ShadowGitManager:
             raise WorkspaceGuardError(completed.stderr.strip() or completed.stdout.strip() or "Git checkpoint failed")
         return completed
 
+    # ``git add -A`` walks the tree, then opens each path it found. Anything that
+    # disappears in between -- a build's scratch file, an editor's ``.tmp`` cache,
+    # a scanner's shadow copy -- makes Git report ``fatal: adding files failed``
+    # and exit non-zero, even though every surviving file was staged fine.
+    STAGE_RETRY_LIMIT = 3
+    _VANISHED_PATH_MARKERS = (
+        "no such file or directory",
+        "unable to index file",
+        "could not open",
+    )
+
+    @classmethod
+    def _only_vanished_paths(cls, completed: subprocess.CompletedProcess[str]) -> bool:
+        """Whether an `add` failure is entirely explained by files that went away."""
+        reported = [
+            line.strip()
+            for line in (completed.stderr or "").splitlines()
+            if line.strip().startswith("error:")
+        ]
+        if not reported:
+            return False
+        return all(
+            any(marker in line.lower() for marker in cls._VANISHED_PATH_MARKERS)
+            for line in reported
+        )
+
+    def _stage_workspace_tree(self, exclusions: list[str]) -> None:
+        """Stage the workspace, tolerating files that vanish mid-walk.
+
+        A checkpoint is a safety net for the operation the user actually asked
+        for. Letting unrelated filesystem churn abort that operation is strictly
+        worse than checkpointing whatever still exists, so a vanished-path
+        failure is retried and then accepted -- any other failure still raises.
+        """
+        last: Optional[subprocess.CompletedProcess[str]] = None
+        for _ in range(self.STAGE_RETRY_LIMIT):
+            completed = self._git("add", "-A", "-f", "--", ".", *exclusions, check=False)
+            if completed.returncode == 0:
+                return
+            if not self._only_vanished_paths(completed):
+                raise WorkspaceGuardError(
+                    completed.stderr.strip() or completed.stdout.strip() or "Git checkpoint failed"
+                )
+            last = completed
+        # Still churning after the retries: keep the files that did stage rather
+        # than failing the caller's tool call over a file that no longer exists.
+        if last is not None:
+            self._record_stage_churn(last)
+
+    def _record_stage_churn(self, completed: subprocess.CompletedProcess[str]) -> None:
+        """Note the paths that kept vanishing so a thin checkpoint is explainable."""
+        vanished = [
+            line.strip()
+            for line in (completed.stderr or "").splitlines()
+            if line.strip().startswith("error:")
+        ]
+        self._audit(
+            {
+                "event": "checkpoint_stage_churn",
+                "retries": self.STAGE_RETRY_LIMIT,
+                "paths": vanished[:20],
+            }
+        )
+
     def ensure_initialized(self) -> None:
         with self._lock:
             if self._ready:
@@ -138,7 +202,7 @@ class ShadowGitManager:
             # The shadow index intentionally ignores the user's .gitignore so
             # ignored source/config files are protected too. Generated and
             # dependency trees stay out unless a path-aware tool targets one.
-            self._git("add", "-A", "-f", "--", ".", *exclusions)
+            self._stage_workspace_tree(exclusions)
             for raw_path in force_paths:
                 candidate = self.ensure_workspace_path(raw_path, purpose="checkpoint file")
                 if candidate.exists() and candidate.is_file():

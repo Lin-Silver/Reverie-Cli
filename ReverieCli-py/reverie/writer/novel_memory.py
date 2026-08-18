@@ -315,7 +315,9 @@ class NovelMemorySystem:
                 }
                 for name, char in self.characters.items()
             }
-            chars_file.write_text(json.dumps(chars_data, ensure_ascii=False, indent=2))
+            chars_file.write_text(
+                json.dumps(chars_data, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
             
             # Save locations
             locs_file = self.storage_dir / "locations.json"
@@ -331,7 +333,9 @@ class NovelMemorySystem:
                 }
                 for name, loc in self.locations.items()
             }
-            locs_file.write_text(json.dumps(locs_data, ensure_ascii=False, indent=2))
+            locs_file.write_text(
+                json.dumps(locs_data, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
             
             # Save themes
             themes_file = self.storage_dir / "themes.json"
@@ -345,7 +349,9 @@ class NovelMemorySystem:
                 }
                 for name, theme in self.themes.items()
             }
-            themes_file.write_text(json.dumps(themes_data, ensure_ascii=False, indent=2))
+            themes_file.write_text(
+                json.dumps(themes_data, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
             
             # Save metadata
             meta_file = self.storage_dir / "metadata.json"
@@ -356,7 +362,9 @@ class NovelMemorySystem:
                 "current_chapter": self.current_chapter,
                 "total_words": self.total_words,
             }
-            meta_file.write_text(json.dumps(meta_data, ensure_ascii=False, indent=2))
+            meta_file.write_text(
+                json.dumps(meta_data, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
         except Exception as e:
             print(f"Error saving memory to disk: {e}")
     

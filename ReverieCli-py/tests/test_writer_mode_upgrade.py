@@ -1024,10 +1024,10 @@ def test_serial_novel_caps_repeated_quality_gate_retries_and_requires_reprepare(
     ).success
     _configure(tool, "repair-budget")
     repeated = (
-        "å¥¹æŠŠä¿®å¥½çš„æ¯å­æ”¾å›žæœ¨æž¶ï¼Œçª—å¤–é›¨å£°åŽ‹ä½Žäº†å±‹å†…çš„è°ˆè¯ã€‚"
-        "ä¸¤ä¸ªäººå„è‡ªæ”¶æ‹¾å·¥å…·ï¼Œè°ä¹Ÿæ²¡æœ‰å‚¬ä¿ƒè°å…ˆç¦»å¼€ã€‚é—¨è¾¹çš„ä¼žè¿˜æ»´ç€æ°´ï¼Œå¥¹ä»¬å†³å®šå†ç­‰ä¸€ä¼šå„¿ã€‚"
+        "她把修好的杯子放回木架，窗外雨声压低了屋内的谈话。"
+        "两个人各自收拾工具，谁也没有催促谁先离开。门边的伞还滴着水，她们决定再等一会儿。"
     )
-    first = repeated + ("æ½®" * 1000)
+    first = repeated + ("潮" * 1000)
     assert tool.execute(
         action="prepare_chapter",
         novel_id="repair-budget",
@@ -1049,7 +1049,7 @@ def test_serial_novel_caps_repeated_quality_gate_retries_and_requires_reprepare(
         data={"outline": "Second complete scene.", "target_chars": 1000},
     ).success
 
-    second = ("æ±" * 500) + repeated + ("æ±" * 500)
+    second = ("汐" * 500) + repeated + ("汐" * 500)
     first_retry = tool.execute(
         action="commit_chapter",
         novel_id="repair-budget",
@@ -1063,7 +1063,7 @@ def test_serial_novel_caps_repeated_quality_gate_retries_and_requires_reprepare(
         action="commit_chapter",
         novel_id="repair-budget",
         chapter=2,
-        data={"content": second + "æ³¢" * 10, "summary": "Still repeats the first."},
+        data={"content": second + "波" * 10, "summary": "Still repeats the first."},
     )
     assert second_retry.success is False
     assert "attempt 2/3" in str(second_retry.error)
@@ -1072,7 +1072,7 @@ def test_serial_novel_caps_repeated_quality_gate_retries_and_requires_reprepare(
         action="commit_chapter",
         novel_id="repair-budget",
         chapter=2,
-        data={"content": second + "æ²«" * 20, "summary": "Still repeats the first after more rewrites."},
+        data={"content": second + "沫" * 20, "summary": "Still repeats the first after more rewrites."},
     )
     assert third_retry.success is False
     assert "exhausted 3 deterministic quality-gate revision attempts" in str(third_retry.error)
@@ -1089,7 +1089,7 @@ def test_serial_novel_caps_repeated_quality_gate_retries_and_requires_reprepare(
         action="commit_chapter",
         novel_id="repair-budget",
         chapter=2,
-        data={"content": "æ¾œ" * 1000, "summary": "A clean retry without re-prepare should still be blocked."},
+        data={"content": "澜" * 1000, "summary": "A clean retry without re-prepare should still be blocked."},
     )
     assert blocked.success is False
     assert "Call action='prepare_chapter' again" in str(blocked.error)
@@ -1104,7 +1104,7 @@ def test_serial_novel_caps_repeated_quality_gate_retries_and_requires_reprepare(
     assert reprepared.success
     assert reprepared.data["pending_draft"] is None
 
-    clean_second = ("æ¾œ" * 500) + ("ç¯ä¸‹çš„ç™½ç“·ç¢Ÿåç€ä¸€åœˆæ¸©é’çš„å…‰ï¼Œå¥¹ä»¬æŠŠå½“æ—¥çš„å·¥å…·ä¸€ä»¶ä»¶å½’ä½ã€‚" * 18)
+    clean_second = ("澜" * 500) + ("灯下的白瓷碟反着一圈温钝的光，她们把当日的工具一件件归位。" * 18)
     committed = tool.execute(
         action="commit_chapter",
         novel_id="repair-budget",
@@ -1876,7 +1876,7 @@ def test_writer_promotes_embedded_textual_tool_wrapper_before_direct_prose_commi
         action="bootstrap",
         novel_id="writer-embedded-wrapper",
         title="Writer Embedded Wrapper",
-        brief="å†™ä¸€éƒ¨é•¿ç¯‡GLè¿žè½½å°è¯´ï¼Œå¥³ä¸»ç¾¤åƒï¼Œæ—¥å¸¸å‘ã€‚",
+        brief="写一部长篇GL连载小说，女主群像，日常向。",
         target_chars=100000,
         chapter_target_chars=4000,
     ).success
@@ -1885,14 +1885,14 @@ def test_writer_promotes_embedded_textual_tool_wrapper_before_direct_prose_commi
         action="prepare_chapter",
         novel_id="writer-embedded-wrapper",
         chapter=1,
-        title="é›¨éœ²è½¬è§’",
+        title="雨露转角",
         data={
-            "outline": "ç¬¬ä¸€ç« ã€Šé›¨éœ²è½¬è§’ã€‹ï¼šå¥³ä¸»åœ¨é›¨å¤œé‡Œä¸Žå¦ä¸€ä½å¥³ä¸»ç›¸é‡ã€‚",
-            "scene_beats": ["é›¨å¤œç›¸é‡", "å…±ä¼åŒè¡Œ", "åˆ†åˆ«åçš„çº¦å®š"],
-            "continuity_requirements": ["ä¿æŒåŽŸåˆ›æž¶ç©ºä¸–ç•Œè§‚å’Œç»†è…»æ–‡é£Ž"],
+            "outline": "第一章《雨露转角》：女主在雨夜里与另一位女主相遇。",
+            "scene_beats": ["雨夜相遇", "å…±ä¼同行", "åˆ†åˆ«åçš„çº¦å®š"],
+            "continuity_requirements": ["保持原创架空世界观和细腻文风"],
             "relationship_progression": ["ä¸¤äººä»Žé™Œç”Ÿåˆ°äº§ç”Ÿåæ­¥ä¿¡ä»»"],
-            "opening_hook": "é›¨ç‚¹é¡ºç€çŸ³é˜¶æ¾„æ¾„åœ°å¾€ä¸‹æ»šã€‚",
-            "ending_hook": "å¥¹ä»¬çº¦å¥½æ˜Žæ—¥å†è§ã€‚",
+            "opening_hook": "雨点顺着石阶澄澄地往下滚。",
+            "ending_hook": "她们约好明日再见。",
             "target_chars": 4000,
         },
     ).success
@@ -1929,7 +1929,7 @@ def test_writer_promotes_embedded_textual_tool_wrapper_before_direct_prose_commi
         "</parameter>\n"
         "<parameter=data>\n"
         '{"content":"'
-        + ("æ½®" * 1800)
+        + ("潮" * 1800)
         + '","summary":"Embedded wrapper chapter."}\n'
         "</parameter>\n"
         "</function>\n"
@@ -1944,7 +1944,7 @@ def test_writer_promotes_embedded_textual_tool_wrapper_before_direct_prose_commi
     assert arguments["novel_id"] == "writer-embedded-wrapper"
     assert arguments["chapter"] == 1
     assert arguments["data"]["summary"] == "Embedded wrapper chapter."
-    assert arguments["data"]["content"].startswith("æ½®")
+    assert arguments["data"]["content"].startswith("潮")
     assert state.collected_content == ""
 
 
@@ -1956,7 +1956,7 @@ def test_writer_retries_plain_prose_instead_of_executing_metadata_only_commit_wr
         action="bootstrap",
         novel_id="writer-direct-prose-retry",
         title="Writer Direct Prose Retry",
-        brief="å†™ä¸€éƒ¨é•¿ç¯‡GLè¿žè½½å°è¯´ï¼Œå¥³ä¸»ç¾¤åƒï¼Œæ—¥å¸¸å‘ã€‚",
+        brief="写一部长篇GL连载小说，女主群像，日常向。",
         target_chars=100000,
         chapter_target_chars=4000,
     ).success
@@ -1965,14 +1965,14 @@ def test_writer_retries_plain_prose_instead_of_executing_metadata_only_commit_wr
         action="prepare_chapter",
         novel_id="writer-direct-prose-retry",
         chapter=1,
-        title="é›¨åŽçš„çŸ³é˜¶",
+        title="雨后的石阶",
         data={
-            "outline": "ç¬¬ä¸€ç« ã€Šé›¨åŽçš„çŸ³é˜¶ã€‹ï¼šå¥³ä¸»åœ¨é›¨å¤œå›žå®¶ï¼Œç”¨å®‰é™æ—¥å¸¸æŽ¨è¿›å…³ç³»ã€‚",
-            "scene_beats": ["å›žå®¶", "æ¥¼é“å¯’æš„", "çª—è¾¹åœç•™"],
-            "continuity_requirements": ["ä¿æŒç»†è…»æ—¥å¸¸é£Žæ ¼"],
-            "relationship_progression": ["ä¸¤ä½å¥³ä¸»å»ºç«‹æœ€åˆçš„ç†Ÿæ‚‰æ„Ÿ"],
-            "opening_hook": "ç¯å½±è½åœ¨æ½®æ¹¿çš„çŸ³é˜¶ä¸Šã€‚",
-            "ending_hook": "å¥¹æŠŠèŒ¶æ¯æ”¾åœ¨çª—æ²¿è¾¹ã€‚",
+            "outline": "第一章《雨后的石阶》：女主在雨夜回家，用安静日常推进关系。",
+            "scene_beats": ["回家", "楼道寒暄", "窗边停留"],
+            "continuity_requirements": ["保持细腻日常风格"],
+            "relationship_progression": ["两位女主建立最初的熟悉感"],
+            "opening_hook": "灯影落在潮湿的石阶上。",
+            "ending_hook": "她把茶杯放在窗沿边。",
             "target_chars": 4000,
         },
     ).success
@@ -2056,7 +2056,7 @@ def test_writer_retries_direct_prose_that_only_repeats_preserved_tail(tmp_path: 
         action="bootstrap",
         novel_id="writer-repeat-tail",
         title="Writer Repeat Tail",
-        brief="å†™ä¸€éƒ¨é•¿ç¯‡GLè¿žè½½å°è¯´ï¼Œå¥³ä¸»ç¾¤åƒï¼Œæ—¥å¸¸å‘ã€‚",
+        brief="写一部长篇GL连载小说，女主群像，日常向。",
         target_chars=100000,
         chapter_target_chars=4000,
     ).success
@@ -2065,14 +2065,14 @@ def test_writer_retries_direct_prose_that_only_repeats_preserved_tail(tmp_path: 
         action="prepare_chapter",
         novel_id="writer-repeat-tail",
         chapter=1,
-        title="è¿œç¯ä¸‹çš„èŒ¶ç›˜",
+        title="远灯下的茶盘",
         data={
-            "outline": "ç¬¬ä¸€ç« ã€Šè¿œç¯ä¸‹çš„èŒ¶ç›˜ã€‹ï¼šå¥³ä¸»åœ¨èŒ¶é¦™å’Œå¯¹è¯é‡Œå¼€å§‹å»ºç«‹å…³ç³»ã€‚",
-            "scene_beats": ["æ”¶æ‹¾æ¡Œé¢", "é€’å‡ºèŒ¶ç›˜", "å®‰é™å¯¹è§†"],
-            "continuity_requirements": ["ä¿æŒç»†è…»æ—¥å¸¸å‘ä¸ŽåŽŸåˆ›æž¶ç©ºä¸–ç•Œè§‚"],
-            "relationship_progression": ["ä¸¤äººä»Žå°å¿ƒè¯•æŽ¢åˆ°å‡ºçŽ°åˆæ­¥é»˜å¥‘"],
-            "opening_hook": "èŒ¶æ°´åœ¨çª„å£çš„å¾®å…‰é‡Œåå°„å‡ºä¸€çº¿é‡‘è‰²ã€‚",
-            "ending_hook": "å¥¹ä»¬æŠŠæœ€åŽä¸€ç›èŒ¶ç‚¹å¹¶æŽ’æ‘†å¥½ã€‚",
+            "outline": "第一章《远灯下的茶盘》：女主在茶香和对话里开始建立关系。",
+            "scene_beats": ["收拾桌面", "递出茶盘", "安静对视"],
+            "continuity_requirements": ["保持细腻日常向与原创架空世界观"],
+            "relationship_progression": ["两人从小心试探到出现初步默契"],
+            "opening_hook": "茶水在窄口的微光里反射出一线金色。",
+            "ending_hook": "她们把最后一盏茶点并排摆好。",
             "target_chars": 4000,
         },
     ).success
@@ -2082,9 +2082,9 @@ def test_writer_retries_direct_prose_that_only_repeats_preserved_tail(tmp_path: 
         chapter=1,
         data={
             "content": (
-                "å¥¹æŠŠèŒ¶ç›˜æ”¶åˆ°çª—å°ä¸Šï¼Œå¬è§é›¨å£°åœ¨ç“¦æªä¸Šæ…¢æ…¢æ»šè¿‡ã€‚\n\n"
-                "å¯¹é¢çš„å¥³å­©æ²¡æœ‰ç«‹åˆ»è¯´è¯ï¼Œåªæ˜¯ç”¨æŒ‡å°–è½»è½»åŽ‹ä½çƒ­æ°”ã€‚\n\n"
-                "å¥¹æŠŠæœ€åŽä¸€åªèŒ¶ç›æŽ¨åˆ°å¯¹æ–¹é¢å‰ï¼Œæ£‰å¸ƒè¢–å£è¹­è¿‡æ¡Œæ²¿ï¼Œç•™ä¸‹ä¸€å°æ®µæ¸©çƒ­çš„æ°´ç—•ã€‚"
+                "她把茶盘收到窗台上，听见雨声在瓦檐上慢慢滚过。\n\n"
+                "对面的女孩没有立刻说话，只是用指尖轻轻压住热气。\n\n"
+                "她把最后一只茶盏推到对方面前，棉布袖口蹭过桌沿，留下一小段温热的水痕。"
             ),
             "summary": "A complete but intentionally short tea-room scene.",
         },
@@ -2277,7 +2277,7 @@ def test_writer_promotes_short_append_only_direct_prose_into_commit_tool_call(tm
         action="bootstrap",
         novel_id="writer-short-append",
         title="Writer Short Append",
-        brief="å†™ä¸€éƒ¨é•¿ç¯‡GLè¿žè½½å°è¯´ï¼Œå¥³ä¸»ç¾¤åƒï¼Œæ—¥å¸¸å‘ã€‚",
+        brief="写一部长篇GL连载小说，女主群像，日常向。",
         target_chars=100000,
         chapter_target_chars=4000,
     ).success
@@ -2286,14 +2286,14 @@ def test_writer_promotes_short_append_only_direct_prose_into_commit_tool_call(tm
         action="prepare_chapter",
         novel_id="writer-short-append",
         chapter=1,
-        title="çª—å°å°æ°”å€™",
+        title="窗台小气候",
         data={
-            "outline": "ç¬¬ä¸€ç« ã€Šçª—å°å°æ°”å€™ã€‹ï¼šå¥³ä¸»åœ¨æ—¥å¸¸ç…§æ–™èŠ±æˆ¿çš„è¿‡ç¨‹ä¸­æŽ¨è¿›å…³ç³»ã€‚",
-            "scene_beats": ["æ¸…æ™¨æµ‡æ°´", "æ•´ç†çª—å°", "è½»å£°å¯¹è¯"],
-            "continuity_requirements": ["ä¿æŒæž¶ç©ºä¸–ç•Œè§‚ä¸Žç»†è…»æ—¥å¸¸é£Žæ ¼"],
-            "relationship_progression": ["ä¸¤äººä»Žç”Ÿç–åˆ°äº§ç”Ÿè¯•æŽ¢æ€§ä¿¡ä»»"],
-            "opening_hook": "æ•£éœ¾è¿˜åœåœ¨çª—æ£‚å¤–ä¾§ã€‚",
-            "ending_hook": "å¥¹æŠŠçƒ­èŒ¶æŽ¨åˆ°å¯¹æ–¹æ‰‹è¾¹ã€‚",
+            "outline": "第一章《窗台小气候》：女主在日常照料花房的过程中推进关系。",
+            "scene_beats": ["清晨浇水", "整理窗台", "轻声对话"],
+            "continuity_requirements": ["保持架空世界观与细腻日常风格"],
+            "relationship_progression": ["两人从生疏到产生试探性信任"],
+            "opening_hook": "散霾还停在窗棂外侧。",
+            "ending_hook": "她把热茶推到对方手边。",
             "target_chars": 4000,
         },
     ).success
@@ -2322,7 +2322,7 @@ def test_writer_promotes_short_append_only_direct_prose_into_commit_tool_call(tm
         config=config,
     )
     state = _StreamingTurnState()
-    state.collected_content = "å¥¹æŠŠæ¹¿æ¶¦çš„è¢–å£å‘å†…æŠ˜äº†ä¸€æŠ˜ï¼ŒåˆæŠŠæŒ‡å°–åœåœ¨æ¯æ²¿ä¸Šï¼Œå¬ç€çª—å¤–é›¾æ°”ç¼“ç¼“ç§»åŠ¨ã€‚" * 6
+    state.collected_content = "她把湿润的袖口向内折了一折，又把指尖停在杯沿上，听着窗外雾气缓缓移动。" * 6
 
     promoted = agent._promote_writer_direct_prose_commit(state)
 
@@ -2333,7 +2333,7 @@ def test_writer_promotes_short_append_only_direct_prose_into_commit_tool_call(tm
     assert arguments["chapter"] == 1
     assert "append_content" in arguments["data"]
     assert "content" not in arguments["data"]
-    assert arguments["data"]["append_content"].startswith("å¥¹æŠŠæ¹¿æ¶¦çš„è¢–å£å‘å†…æŠ˜äº†ä¸€æŠ˜")
+    assert arguments["data"]["append_content"].startswith("她把湿润的袖口向内折了一折")
 
 
 def test_writer_promotes_provider_json_into_real_tool_call(tmp_path: Path) -> None:

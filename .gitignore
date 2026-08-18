@@ -47,6 +47,10 @@ env/
 # Logs and temporary files
 *.log
 *.tmp
+# Scratch output from local desktop-automation probes.
+/.tmp-*/
+/.tmp-*.json
+@AutomationLog.txt
 
 # Reverie local state and secrets
 .reverie/

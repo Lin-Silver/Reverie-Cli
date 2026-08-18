@@ -84,6 +84,12 @@ HIDDEN_STREAM_TOKEN = "//END//"
 THINKING_OPEN_TAG_LITERAL = "<think>"
 THINKING_CLOSE_TAG_LITERAL = "</think>"
 
+# Hosted reasoning models sometimes open `reasoning_content` with a verbatim
+# replay of the user's message, which then shows the request twice in the UI and
+# twice in the saved transcript. Only replays of prompts at least this long are
+# stripped: below it, a coincidental match is more likely than a real echo.
+REASONING_ECHO_GUARD_MIN_CHARS = 12
+
 # Configure logging for debugging
 logger = logging.getLogger(__name__)
 
@@ -501,6 +507,9 @@ class _StreamingTurnState:
     content_tag_buffer: str = ""
     inline_thinking: bool = False
     token_to_hide: str = HIDDEN_STREAM_TOKEN
+    reasoning_echo_guard: str = ""
+    reasoning_echo_buffer: str = ""
+    reasoning_echo_resolved: bool = False
 
     @staticmethod
     def _find_tag(text: str, tag: str) -> int:
@@ -527,13 +536,48 @@ class _StreamingTurnState:
         reasoning_text = str(text or "")
         if not reasoning_text:
             return []
+        if self.reasoning_echo_guard and not self.reasoning_echo_resolved:
+            self.reasoning_echo_buffer += reasoning_text
+            return self._resolve_reasoning_echo(final=False)
+        return self._emit_reasoning(reasoning_text)
+
+    def _emit_reasoning(self, text: str) -> List[str]:
+        if not text:
+            return []
         chunks: List[str] = []
-        self.collected_thinking += reasoning_text
+        self.collected_thinking += text
         if not self.thinking_started:
             chunks.append(THINKING_START_MARKER)
             self.thinking_started = True
-        chunks.append(reasoning_text)
+        chunks.append(text)
         return chunks
+
+    def _resolve_reasoning_echo(self, *, final: bool) -> List[str]:
+        """Drop a verbatim echo of the prompt from the front of the reasoning trace.
+
+        Some hosted reasoning models replay the user's message as the first line
+        of ``reasoning_content``, which shows the request twice in the UI and
+        twice in the saved transcript. The echo can only be recognized once
+        enough of the trace has arrived, so the opening fragments are buffered
+        until they either match the guard or diverge from it.
+        """
+        guard = self.reasoning_echo_guard
+        pending = self.reasoning_echo_buffer
+        if not pending:
+            return []
+
+        candidate = pending.lstrip()
+        if not final and len(candidate) <= len(guard) and guard.startswith(candidate):
+            # Still undecided: the echo may continue in the next chunk. `<=` keeps
+            # a candidate that exactly fills the guard buffered too, so the
+            # whitespace that follows the echo is stripped with it.
+            return []
+
+        self.reasoning_echo_resolved = True
+        self.reasoning_echo_buffer = ""
+        if candidate.startswith(guard):
+            pending = candidate[len(guard):].lstrip()
+        return self._emit_reasoning(pending)
 
     def _add_visible_content(self, text: Any) -> List[str]:
         content_text = str(text or "")
@@ -583,13 +627,13 @@ class _StreamingTurnState:
                 if close_index >= 0:
                     thinking_text = buffer[:close_index]
                     if thinking_text:
-                        chunks.extend(self.add_reasoning(thinking_text))
+                        chunks.extend(self._emit_reasoning(thinking_text))
                     self.content_tag_buffer = buffer[close_index + len(THINKING_CLOSE_TAG_LITERAL):]
                     self.inline_thinking = False
                     continue
 
                 if final:
-                    chunks.extend(self.add_reasoning(buffer))
+                    chunks.extend(self._emit_reasoning(buffer))
                     self.content_tag_buffer = ""
                     break
 
@@ -598,7 +642,7 @@ class _StreamingTurnState:
                     (THINKING_CLOSE_TAG_LITERAL,),
                 )
                 if safe_text:
-                    chunks.extend(self.add_reasoning(safe_text))
+                    chunks.extend(self._emit_reasoning(safe_text))
                 self.content_tag_buffer = pending_suffix
                 break
 
@@ -702,6 +746,8 @@ class _StreamingTurnState:
         chunks: List[str] = []
         chunks.extend(self._drain_content_tag_buffer(final=True))
         self.inline_thinking = False
+        if self.reasoning_echo_buffer:
+            chunks.extend(self._resolve_reasoning_echo(final=True))
         if self.thinking_started:
             chunks.append(THINKING_END_MARKER)
             self.thinking_started = False
@@ -3838,6 +3884,157 @@ class ReverieAgent:
             return False
         return finish_reason in ("stop", "end_turn", "end", None)
 
+    # ------------------------------------------------------------------
+    # Output-less model turns
+    #
+    # A turn that returns neither a tool call nor visible text used to end the
+    # run outright. With a reasoning model that is a routine event -- the whole
+    # response lands in `reasoning_content` -- and ending there leaves the user
+    # with a half-finished task, no summary, and a transcript whose last entry
+    # is a tool result. These helpers turn that dead end into a bounded retry
+    # that asks for the next tool call or the closing summary.
+    # ------------------------------------------------------------------
+
+    def _empty_turn_retry_limit(self) -> int:
+        """How many output-less model turns to recover from before giving up."""
+        if normalize_mode(self.mode) == "computer-controller":
+            return 6
+        return 3
+
+    def _empty_turn_recovery_instruction(
+        self,
+        messages: List[Dict[str, Any]],
+        *,
+        attempt: int,
+        limit: int,
+    ) -> str:
+        """Build the reminder sent after a turn produced no tool call and no text."""
+        parts = [
+            f"Recovery notice {attempt}/{limit}: your previous turn returned no tool call and no visible "
+            "text, so nothing reached the user and the request is still unfinished.",
+        ]
+        if self._latest_tool_name_from_messages(messages):
+            parts.append("Re-read the tool result above before deciding what to do next.")
+        if attempt >= limit:
+            parts.append(
+                "Do not call another tool in this turn. Reply now in plain text describing what was "
+                "accomplished, what is still missing, and the next step you would take."
+            )
+        else:
+            parts.append(
+                "Either call the next tool the request needs, or -- only once the request is genuinely "
+                "complete -- reply with a short plain-text summary of the result."
+            )
+        if normalize_mode(self.mode) == "computer-controller":
+            parts.append("End a final summary with //END//.")
+        return " ".join(parts)
+
+    def _recover_empty_model_turn(
+        self,
+        messages: List[Dict[str, Any]],
+        *,
+        attempt: int,
+    ) -> bool:
+        """Nudge the model after an output-less turn.
+
+        ``messages`` is the request that just came back empty; it is read to
+        describe the situation but never mutated -- it has already been handed to
+        the provider, and every caller rebuilds its request from ``self.messages``
+        before asking again, which is where the reminder has to live.
+
+        Returns True when the caller should request another turn, False when the
+        recovery budget is spent and the run has to stop.
+        """
+        limit = self._empty_turn_retry_limit()
+        if attempt > limit:
+            return False
+        self._append_internal_system_message(
+            self.messages,
+            self._empty_turn_recovery_instruction(messages, attempt=attempt, limit=limit),
+        )
+        return True
+
+    def _history_lacks_closing_assistant_text(self) -> bool:
+        """Whether the run would end without any assistant text for this turn."""
+        for message in reversed(self.messages):
+            if not isinstance(message, dict):
+                continue
+            role = str(message.get("role", "") or "").strip().lower()
+            if role == "user":
+                return True
+            if role != "assistant":
+                continue
+            if message.get("tool_calls"):
+                continue
+            return not _coerce_text_fragments(message.get("content", "")).strip()
+        return False
+
+    def _record_unsummarized_turn(
+        self,
+        *,
+        request_messages: Optional[List[Dict[str, Any]]] = None,
+        session_id: str,
+    ) -> str:
+        """Persist a visible notice when the model never returned a closing summary.
+
+        ``request_messages`` is the prompt of the model call that came back
+        empty; pass it so the spent request is still accounted for.  The
+        end-of-turn safety net has no such call to attribute and omits it.
+        """
+        if not self._history_lacks_closing_assistant_text():
+            return ""
+        notice = (
+            "The model stopped without returning any text for this turn, so the request is not finished. "
+            "The tool results above are the only progress made. Send the request again to continue from here."
+        )
+        self.messages.append(_build_assistant_history_message(notice))
+        if request_messages is not None:
+            self._record_model_usage(
+                request_messages=request_messages,
+                assistant_text=notice,
+                session_id=session_id,
+            )
+        return notice
+
+    # ------------------------------------------------------------------
+    # Reasoning traces
+    # ------------------------------------------------------------------
+
+    def _latest_user_prompt_text(self) -> str:
+        """Return the plain text of the most recent user message."""
+        for message in reversed(self.messages):
+            if not isinstance(message, dict):
+                continue
+            if str(message.get("role", "") or "").strip().lower() != "user":
+                continue
+            return _coerce_text_fragments(message.get("content", "")).strip()
+        return ""
+
+    def _reasoning_echo_guard(self) -> str:
+        """Return the prompt text that must not be replayed as reasoning.
+
+        Short prompts are ignored: dropping a handful of characters that merely
+        happen to match risks losing real reasoning, and the duplication is only
+        noticeable for prompts long enough to read as a repeat of the request.
+        """
+        prompt = self._latest_user_prompt_text()
+        return prompt if len(prompt) >= REASONING_ECHO_GUARD_MIN_CHARS else ""
+
+    def _new_turn_state(self) -> _StreamingTurnState:
+        """Create a streaming turn state wired to this turn's echo guard."""
+        return _StreamingTurnState(reasoning_echo_guard=self._reasoning_echo_guard())
+
+    def _strip_reasoning_prompt_echo(self, reasoning_text: Any) -> str:
+        """Remove a leading verbatim replay of the prompt from a reasoning trace."""
+        text = str(reasoning_text or "")
+        guard = self._reasoning_echo_guard()
+        if not guard:
+            return text
+        candidate = text.lstrip()
+        if not candidate.startswith(guard):
+            return text
+        return candidate[len(guard):].lstrip()
+
     def _emit_ui_event(
         self,
         *,
@@ -4356,6 +4553,7 @@ class ReverieAgent:
 
         max_continuations = self._completion_continuation_limit()
         continuation_count = 0
+        empty_turn_count = 0
 
         while True:
             self._check_and_compress_context(session_id=session_id)
@@ -4426,7 +4624,7 @@ class ReverieAgent:
                 logger.error(f"Streaming API request failed for {provider_name}: {e}")
                 raise
 
-            state = _StreamingTurnState()
+            state = self._new_turn_state()
             try:
                 for data_str in self._iter_sse_data_strings(response):
                     events, parser_state = parse_codex_sse_event(data_str, parser_state)
@@ -4480,6 +4678,16 @@ class ReverieAgent:
                 messages = _sanitize_messages_for_relay(self._build_messages(resolve_local_images=True))
                 continue
 
+            empty_turn_count += 1
+            if self._recover_empty_model_turn(messages, attempt=empty_turn_count):
+                continue
+
+            notice = self._record_unsummarized_turn(
+                request_messages=request_messages,
+                session_id=session_id,
+            )
+            if notice:
+                yield notice
             break
 
     def _process_non_streaming_native_provider(self, provider_name: str, session_id: str = "default") -> str:
@@ -4496,6 +4704,7 @@ class ReverieAgent:
         cfg = normalize_webgemini_config(getattr(self.config, "webgemini", {}))
         max_continuations = self._completion_continuation_limit()
         continuation_count = 0
+        empty_turn_count = 0
 
         while True:
             self._check_and_compress_context(session_id=session_id)
@@ -4510,7 +4719,7 @@ class ReverieAgent:
                 timeout=effective_timeout,
             )
 
-            state = _StreamingTurnState()
+            state = self._new_turn_state()
             try:
                 if tools:
                     text, tool_calls = generate_webgemini_message(
@@ -4600,6 +4809,16 @@ class ReverieAgent:
                     break
                 continue
 
+            empty_turn_count += 1
+            if self._recover_empty_model_turn(messages, attempt=empty_turn_count):
+                continue
+
+            notice = self._record_unsummarized_turn(
+                request_messages=request_messages,
+                session_id=session_id,
+            )
+            if notice:
+                yield notice
             break
 
     def _process_non_streaming_webgemini(self, session_id: str = "default") -> str:
@@ -4890,8 +5109,18 @@ class ReverieAgent:
         try:
             if stream:
                 yield from self._process_streaming(session_id=session_id)
+                # Safety net: no provider path may end a turn whose last history
+                # entry is a tool result. The per-provider loops already retry an
+                # output-less turn; this covers every other way a loop can exit
+                # without the model having said anything.
+                notice = self._record_unsummarized_turn(session_id=session_id)
+                if notice:
+                    yield notice
             else:
                 response = self._process_non_streaming(session_id=session_id)
+                notice = self._record_unsummarized_turn(session_id=session_id)
+                if notice:
+                    response = f"{response}\n{notice}" if response else notice
                 yield response
         except Exception as e:
             error_msg = f"Error processing message: {str(e)}"
@@ -5033,6 +5262,10 @@ class ReverieAgent:
         use_curl: bool = False,
     ) -> Generator[str, None, None]:
         """Process a turn through OpenAI Responses using the SDK or system curl."""
+        max_continuations = self._completion_continuation_limit()
+        continuation_count = 0
+        empty_turn_count = 0
+
         while True:
             self._check_and_compress_context(session_id=session_id)
             request_messages = self._build_messages()
@@ -5053,7 +5286,7 @@ class ReverieAgent:
                 response = self._create_openai_response(payload)
                 events = self._iter_openai_responses_sdk_events(response)
 
-            state = _StreamingTurnState()
+            state = self._new_turn_state()
             try:
                 for event in events:
                     yield from self._apply_stream_event(state, event)
@@ -5086,14 +5319,31 @@ class ReverieAgent:
                 yield from self._execute_streamed_tool_calls(state.tool_calls, messages, session_id=session_id)
                 continue
             if outcome == "retry_direct_prose":
+                continuation_count += 1
+                if continuation_count >= max_continuations:
+                    break
                 continue
+            if outcome == "content":
+                break
+
+            empty_turn_count += 1
+            if self._recover_empty_model_turn(messages, attempt=empty_turn_count):
+                continue
+
+            notice = self._record_unsummarized_turn(
+                request_messages=request_messages,
+                session_id=session_id,
+            )
+            if notice:
+                yield notice
             break
-    
+
     def _process_streaming_openai_sdk(self, session_id: str = "default") -> Generator[str, None, None]:
         """Process with streaming response using OpenAI SDK"""
         max_continuations = self._completion_continuation_limit()
         continuation_count = 0
-        
+        empty_turn_count = 0
+
         while True:
             self._check_and_compress_context(session_id=session_id)
             tools = self.get_visible_tool_schemas()
@@ -5206,7 +5456,7 @@ class ReverieAgent:
                         if value is not None
                     },
                 )
-            state = _StreamingTurnState()
+            state = self._new_turn_state()
             try:
                 for event in self._iter_openai_sdk_stream_events(response):
                     yield from self._apply_stream_event(state, event)
@@ -5256,15 +5506,27 @@ class ReverieAgent:
                 messages = self._build_messages(resolve_local_images=True)
                 continue
 
+            empty_turn_count += 1
+            if self._recover_empty_model_turn(messages, attempt=empty_turn_count):
+                messages = self._build_messages(resolve_local_images=True)
+                continue
+
+            notice = self._record_unsummarized_turn(
+                request_messages=request_messages,
+                session_id=session_id,
+            )
+            if notice:
+                yield notice
             break
-    
+
     def _process_streaming_request(self, session_id: str = "default") -> Generator[str, None, None]:
         """Process with streaming response using requests library"""
         import requests
 
         max_continuations = self._completion_continuation_limit()
         continuation_count = 0
-        
+        empty_turn_count = 0
+
         while True:
             self._check_and_compress_context(session_id=session_id)
             tools = self.get_visible_tool_schemas()
@@ -5305,7 +5567,7 @@ class ReverieAgent:
                 logger.error(f"Streaming API request failed: {e}")
                 raise
             
-            state = _StreamingTurnState()
+            state = self._new_turn_state()
             provider_label = self._request_provider_label()
 
             try:
@@ -5367,13 +5629,25 @@ class ReverieAgent:
                 messages = self._build_messages(resolve_local_images=True)
                 continue
 
+            empty_turn_count += 1
+            if self._recover_empty_model_turn(messages, attempt=empty_turn_count):
+                messages = self._build_messages(resolve_local_images=True)
+                continue
+
+            notice = self._record_unsummarized_turn(
+                request_messages=request_messages,
+                session_id=session_id,
+            )
+            if notice:
+                yield notice
             break
-    
+
     def _process_streaming_anthropic(self, session_id: str = "default") -> Generator[str, None, None]:
         """Process with streaming response using Anthropic SDK"""
         max_continuations = self._completion_continuation_limit()
         continuation_count = 0
-        
+        empty_turn_count = 0
+
         while True:
             self._check_and_compress_context(session_id=session_id)
             tools = self.get_visible_tool_schemas()
@@ -5406,7 +5680,7 @@ class ReverieAgent:
                 kwargs,
                 log=logger,
             ) as stream:
-                state = _StreamingTurnState()
+                state = self._new_turn_state()
 
                 for event in stream:
                     if event.type == "content_block_delta" and hasattr(event.delta, "type"):
@@ -5476,9 +5750,21 @@ class ReverieAgent:
 
                     system_message, anthropic_messages = _convert_messages_to_anthropic_format(self._build_messages())
                     continue
-            
+
+                empty_turn_count += 1
+                if self._recover_empty_model_turn(messages, attempt=empty_turn_count):
+                    system_message, anthropic_messages = _convert_messages_to_anthropic_format(self._build_messages())
+                    continue
+
+                notice = self._record_unsummarized_turn(
+                    request_messages=request_messages,
+                    session_id=session_id,
+                )
+                if notice:
+                    yield notice
+
             break
-    
+
     def _process_non_streaming(self, session_id: str = "default") -> str:
         """Process without streaming"""
         if self.provider == "openai-chat":
@@ -5533,6 +5819,9 @@ class ReverieAgent:
     ) -> str:
         """Process non-streaming Responses calls through the SDK or system curl."""
         all_content: List[str] = []
+        max_continuations = self._completion_continuation_limit()
+        continuation_count = 0
+        empty_turn_count = 0
         while True:
             self._check_and_compress_context(session_id=session_id)
             request_messages = self._build_messages()
@@ -5558,14 +5847,31 @@ class ReverieAgent:
                     pass
                 continue
             if outcome == "retry_direct_prose":
+                continuation_count += 1
+                if continuation_count >= max_continuations:
+                    break
                 continue
+            if outcome == "content":
+                break
+
+            empty_turn_count += 1
+            if self._recover_empty_model_turn(messages, attempt=empty_turn_count):
+                continue
+
+            notice = self._record_unsummarized_turn(
+                request_messages=request_messages,
+                session_id=session_id,
+            )
+            if notice:
+                all_content.append(notice)
             break
         return "\n".join(all_content)
-    
+
     def _process_non_streaming_openai_sdk(self, session_id: str = "default") -> str:
         """Process without streaming using OpenAI SDK"""
         all_content = []
-        
+        empty_turn_count = 0
+
         while True:
             self._check_and_compress_context(session_id=session_id)
             tools = self.get_visible_tool_schemas()
@@ -5678,11 +5984,13 @@ class ReverieAgent:
             choice = response.choices[0]
             message = choice.message
             message_content = _coerce_text_fragments(getattr(message, "content", None))
-            message_reasoning = _extract_text_from_candidates(
-                message,
-                "reasoning_content",
-                "thinking",
-                "reasoning",
+            message_reasoning = self._strip_reasoning_prompt_echo(
+                _extract_text_from_candidates(
+                    message,
+                    "reasoning_content",
+                    "thinking",
+                    "reasoning",
+                )
             )
             
             # Check for tool calls
@@ -5822,21 +6130,33 @@ class ReverieAgent:
                 )
                 
                 all_content.append(content)
-                
+
                 # Rebuild messages for next call
                 messages = self._build_messages(resolve_local_images=True)
                 continue
-            
+
+            empty_turn_count += 1
+            if self._recover_empty_model_turn(messages, attempt=empty_turn_count):
+                messages = self._build_messages(resolve_local_images=True)
+                continue
+
+            notice = self._record_unsummarized_turn(
+                request_messages=request_messages,
+                session_id=session_id,
+            )
+            if notice:
+                all_content.append(notice)
             break
-        
+
         return '\n'.join(all_content)
-    
+
     def _process_non_streaming_request(self, session_id: str = "default") -> str:
         """Process without streaming using requests library"""
         import requests
 
         all_content = []
-        
+        empty_turn_count = 0
+
         while True:
             self._check_and_compress_context(session_id=session_id)
             tools = self.get_visible_tool_schemas()
@@ -5881,11 +6201,13 @@ class ReverieAgent:
             choice = choices[0]
             message = choice.get("message", {})
             message_content = _extract_text_from_candidates(message, "content")
-            message_reasoning = _extract_text_from_candidates(
-                message,
-                "reasoning_content",
-                "thinking",
-                "reasoning",
+            message_reasoning = self._strip_reasoning_prompt_echo(
+                _extract_text_from_candidates(
+                    message,
+                    "reasoning_content",
+                    "thinking",
+                    "reasoning",
+                )
             )
             
             # Check for tool calls
@@ -6015,15 +6337,27 @@ class ReverieAgent:
                 all_content.append(content)
                 messages = self._build_messages(resolve_local_images=True)
                 continue
-            
+
+            empty_turn_count += 1
+            if self._recover_empty_model_turn(messages, attempt=empty_turn_count):
+                messages = self._build_messages(resolve_local_images=True)
+                continue
+
+            notice = self._record_unsummarized_turn(
+                request_messages=request_messages,
+                session_id=session_id,
+            )
+            if notice:
+                all_content.append(notice)
             break
-        
+
         return '\n'.join(all_content)
-    
+
     def _process_non_streaming_anthropic(self, session_id: str = "default") -> str:
         """Process without streaming using Anthropic SDK"""
         all_content = []
-        
+        empty_turn_count = 0
+
         while True:
             self._check_and_compress_context(session_id=session_id)
             tools = self.get_visible_tool_schemas()
@@ -6186,9 +6520,20 @@ class ReverieAgent:
                 all_content.append(collected_content)
                 system_message, anthropic_messages = _convert_messages_to_anthropic_format(self._build_messages())
                 continue
-            
+
+            empty_turn_count += 1
+            if self._recover_empty_model_turn(messages, attempt=empty_turn_count):
+                system_message, anthropic_messages = _convert_messages_to_anthropic_format(self._build_messages())
+                continue
+
+            notice = self._record_unsummarized_turn(
+                request_messages=request_messages,
+                session_id=session_id,
+            )
+            if notice:
+                all_content.append(notice)
             break
-        
+
         return '\n'.join(all_content)
     
     def clear_history(self) -> None:

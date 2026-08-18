@@ -75,6 +75,13 @@ def _join_discovery(runtime: MCPRuntime) -> None:
     assert not thread.is_alive()
 
 
+# A caller that waited for discovery would pay the full ``release.wait(timeout=2.0)``
+# hold below, so any budget under that catches a blocking regression. The measured
+# non-blocking cost is well under a millisecond; the headroom is for a cold process
+# on a loaded machine, where thread startup alone has been seen to cost 0.16s.
+NON_BLOCKING_BUDGET_SECONDS = 0.5
+
+
 def test_automatic_discovery_is_non_blocking_and_status_uses_pending_snapshot(tmp_path: Path, monkeypatch) -> None:
     started = threading.Event()
     release = threading.Event()
@@ -95,12 +102,15 @@ def test_automatic_discovery_is_non_blocking_and_status_uses_pending_snapshot(tm
 
     before = time.perf_counter()
     assert runtime.get_tool_definitions() == []
-    assert time.perf_counter() - before < 0.1
+    assert time.perf_counter() - before < NON_BLOCKING_BUDGET_SECONDS
     assert started.wait(timeout=1.0)
 
     before = time.perf_counter()
     rows = runtime.list_server_status()
-    assert time.perf_counter() - before < 0.1
+    assert time.perf_counter() - before < NON_BLOCKING_BUDGET_SECONDS
+    # Discovery is still parked on ``release``, so these three prove the caller was
+    # served from the pending snapshot rather than from a completed discovery.
+    assert not release.is_set()
     assert rows[0]["health"] == "pending"
     assert runtime.describe_for_prompt() == ""
 

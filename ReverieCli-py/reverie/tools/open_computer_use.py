@@ -1,4 +1,4 @@
-"""Nine embedded tools compatible with the Open Computer Use MCP contract."""
+"""Embedded tools compatible with the Open Computer Use MCP contract."""
 
 from __future__ import annotations
 
@@ -22,6 +22,20 @@ def _service(context: Dict[str, Any]) -> OpenComputerUseService:
     service = OpenComputerUseService(output_dir)
     context["open_computer_use_service"] = service
     return service
+
+
+_REFRESH_HINT = "Refresh get_app_state before the next app action."
+
+
+def _action_result(report: Any, fallback: str) -> ToolResult:
+    """Report what the desktop actually did, not just that a call returned.
+
+    The service returns a description of the observed change; older/stubbed
+    services return nothing, in which case only the fallback is reported.
+    """
+    observed = str(report or "").strip()
+    output = f"{observed}\n{_REFRESH_HINT}" if observed else f"{fallback} {_REFRESH_HINT}"
+    return ToolResult.ok(output, data={"observed_change": observed})
 
 
 class _ComputerUseTool(BaseTool):
@@ -50,10 +64,58 @@ class ListAppsTool(_ComputerUseTool):
         def operation(service: OpenComputerUseService) -> ToolResult:
             apps = service.list_apps()
             lines = [
-                f"{item['name']} -- {item['name']} [running, pid={item['pid']}, window={item['window_title']}]"
+                "{name} [{status}, pid={pid}, window={window_title}]".format(
+                    name=item["name"],
+                    status=item.get("status") or "running",
+                    pid=item["pid"],
+                    window_title=item["window_title"],
+                )
                 for item in apps
             ]
-            return ToolResult.ok("\n".join(lines) or "No accessible desktop apps found.", data={"apps": apps})
+            output = "\n".join(lines) or (
+                "No accessible desktop apps found. Use launch_app to start the program you need."
+            )
+            return ToolResult.ok(output, data={"apps": apps})
+
+        return self._run(operation)
+
+
+class LaunchAppTool(_ComputerUseTool):
+    name = "launch_app"
+    description = (
+        "Start a program, document, or URL that is not running yet, and report the window it opened. "
+        "Use this instead of hunting for a desktop or taskbar icon: 'msedge', 'notepad', a full path, "
+        "or a https:// URL all work."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "target": {
+                "type": "string",
+                "description": (
+                    "Executable name ('msedge', 'notepad'), full path, document path, or URL. "
+                    "Bare names are resolved the same way the Run dialog resolves them."
+                ),
+            },
+            "arguments": {
+                "type": "string",
+                "description": "Command-line arguments, for example the URL to open in a browser.",
+            },
+        },
+        "required": ["target"],
+        "additionalProperties": False,
+    }
+
+    def get_execution_message(self, **kwargs) -> str:
+        return f"Launching {kwargs.get('target', 'an app')}..."
+
+    def execute(self, target: str, arguments: str = "", **kwargs) -> ToolResult:
+        def operation(service: OpenComputerUseService) -> ToolResult:
+            report = service.launch_app(target, arguments=arguments)
+            return ToolResult.ok(
+                f"{report}\nCall get_app_state on the new window before acting on it.",
+                data={"target": target, "arguments": arguments, "observed_change": report},
+            )
 
         return self._run(operation)
 
@@ -78,11 +140,17 @@ class GetAppStateTool(_ComputerUseTool):
     def execute(self, app: str, show_full_text: bool = False, **kwargs) -> ToolResult:
         def operation(service: OpenComputerUseService) -> ToolResult:
             state = service.get_app_state(app, show_full_text=bool(show_full_text))
+            scale = float(getattr(state, "screenshot_scale", 1.0) or 1.0)
             header = [
                 f"App: {state.process_name} (pid={state.process_id})",
                 f"Window: {state.window_title or 'untitled'}",
-                "Accessibility tree:",
             ]
+            if abs(scale - 1.0) > 1e-6:
+                header.append(
+                    f"Screenshot scaled to {scale:.3f} of the window size; element frames and x/y "
+                    "coordinates are both in this screenshot's pixel space."
+                )
+            header.append("Accessibility tree:")
             output = "\n".join(header + state.tree_lines)
             data_url = f"data:image/png;base64,{state.screenshot_base64}"
             return ToolResult.ok(
@@ -92,6 +160,7 @@ class GetAppStateTool(_ComputerUseTool):
                     "pid": state.process_id,
                     "window_title": state.window_title,
                     "window_bounds": state.bounds,
+                    "screenshot_scale": scale,
                     "elements": [item.to_dict() for item in state.elements.values()],
                     "file_path": state.screenshot_path,
                     "mime_type": "image/png",
@@ -108,12 +177,19 @@ class GetAppStateTool(_ComputerUseTool):
 
 class ClickTool(_ComputerUseTool):
     name = "click"
-    description = "Click an element by index, or pixel coordinates from the latest app screenshot."
+    description = (
+        "Click an element by index, or pixel coordinates from the latest app screenshot. "
+        "A single left click only selects list items and icons; use click_count=2 or "
+        "perform_secondary_action(action=\"Invoke\") to activate one."
+    )
     parameters = {
         "type": "object",
         "properties": {
             "app": {"type": "string"},
-            "element_index": {"type": "string"},
+            "element_index": {
+                "type": "string",
+                "description": "Element index from the latest get_app_state tree, for example \"6\".",
+            },
             "x": {"type": "number"},
             "y": {"type": "number"},
             "click_count": {"type": "integer", "minimum": 1, "default": 1},
@@ -125,8 +201,7 @@ class ClickTool(_ComputerUseTool):
 
     def execute(self, app: str, **kwargs) -> ToolResult:
         def operation(service: OpenComputerUseService) -> ToolResult:
-            service.click(app, **kwargs)
-            return ToolResult.ok("Click completed. Refresh get_app_state before the next app action.")
+            return _action_result(service.click(app, **kwargs), "Click completed.")
 
         return self._run(operation)
 
@@ -149,22 +224,31 @@ class DragTool(_ComputerUseTool):
 
     def execute(self, app: str, from_x: Any, from_y: Any, to_x: Any, to_y: Any, **kwargs) -> ToolResult:
         return self._run(
-            lambda service: (
-                service.drag(app, from_x, from_y, to_x, to_y),
-                ToolResult.ok("Drag completed. Refresh get_app_state before the next app action."),
-            )[1]
+            lambda service: _action_result(
+                service.drag(app, from_x, from_y, to_x, to_y), "Drag completed."
+            )
         )
 
 
 class PerformSecondaryActionTool(_ComputerUseTool):
     name = "perform_secondary_action"
-    description = "Invoke a secondary accessibility action exposed by an element."
+    description = (
+        "Invoke a secondary accessibility action exposed by an element. This is the reliable way to "
+        "activate icons, list items, and menu entries that a single click would only select."
+    )
     parameters = {
         "type": "object",
         "properties": {
             "app": {"type": "string"},
-            "element_index": {"type": "string"},
-            "action": {"type": "string"},
+            "element_index": {
+                "type": "string",
+                "description": "Element index from the latest get_app_state tree, for example \"6\".",
+            },
+            "action": {
+                "type": "string",
+                "enum": ["Invoke", "Toggle", "Select", "Expand", "Collapse", "ScrollIntoView"],
+                "description": "One of the element's listed Secondary Actions.",
+            },
         },
         "required": ["app", "element_index", "action"],
         "additionalProperties": False,
@@ -172,10 +256,10 @@ class PerformSecondaryActionTool(_ComputerUseTool):
 
     def execute(self, app: str, element_index: str, action: str, **kwargs) -> ToolResult:
         return self._run(
-            lambda service: (
+            lambda service: _action_result(
                 service.perform_secondary_action(app, element_index, action),
-                ToolResult.ok(f"Secondary action {action!r} completed."),
-            )[1]
+                f"Secondary action {action!r} completed.",
+            )
         )
 
 
@@ -186,7 +270,10 @@ class ScrollTool(_ComputerUseTool):
         "type": "object",
         "properties": {
             "app": {"type": "string"},
-            "element_index": {"type": "string"},
+            "element_index": {
+                "type": "string",
+                "description": "Element index from the latest get_app_state tree, for example \"6\".",
+            },
             "direction": {"type": "string", "enum": ["up", "down", "left", "right"]},
             "pages": {"type": "number", "default": 1},
         },
@@ -196,21 +283,23 @@ class ScrollTool(_ComputerUseTool):
 
     def execute(self, app: str, element_index: str, direction: str, pages: float = 1, **kwargs) -> ToolResult:
         return self._run(
-            lambda service: (
-                service.scroll(app, element_index, direction, pages),
-                ToolResult.ok("Scroll completed. Refresh get_app_state before the next app action."),
-            )[1]
+            lambda service: _action_result(
+                service.scroll(app, element_index, direction, pages), "Scroll completed."
+            )
         )
 
 
 class SetValueTool(_ComputerUseTool):
     name = "set_value"
-    description = "Set the value of a settable accessibility element."
+    description = "Set the value of a settable accessibility element and read it back to confirm."
     parameters = {
         "type": "object",
         "properties": {
             "app": {"type": "string"},
-            "element_index": {"type": "string"},
+            "element_index": {
+                "type": "string",
+                "description": "Element index from the latest get_app_state tree, for example \"6\".",
+            },
             "value": {"type": "string"},
         },
         "required": ["app", "element_index", "value"],
@@ -219,10 +308,9 @@ class SetValueTool(_ComputerUseTool):
 
     def execute(self, app: str, element_index: str, value: str, **kwargs) -> ToolResult:
         return self._run(
-            lambda service: (
-                service.set_value(app, element_index, value),
-                ToolResult.ok("Element value updated."),
-            )[1]
+            lambda service: _action_result(
+                service.set_value(app, element_index, value), "Element value updated."
+            )
         )
 
 
@@ -238,7 +326,7 @@ class TypeTextTool(_ComputerUseTool):
 
     def execute(self, app: str, text: str, **kwargs) -> ToolResult:
         return self._run(
-            lambda service: (service.type_text(app, text), ToolResult.ok("Text typed."))[1]
+            lambda service: _action_result(service.type_text(app, text), "Text typed.")
         )
 
 
@@ -256,12 +344,13 @@ class PressKeyTool(_ComputerUseTool):
 
     def execute(self, app: str, key: str, **kwargs) -> ToolResult:
         return self._run(
-            lambda service: (service.press_key(app, key), ToolResult.ok(f"Key {key!r} pressed."))[1]
+            lambda service: _action_result(service.press_key(app, key), f"Key {key!r} pressed.")
         )
 
 
 COMPUTER_USE_TOOL_CLASSES: tuple[Type[BaseTool], ...] = (
     ListAppsTool,
+    LaunchAppTool,
     GetAppStateTool,
     ClickTool,
     DragTool,
@@ -278,6 +367,7 @@ __all__ = [
     "ClickTool",
     "DragTool",
     "GetAppStateTool",
+    "LaunchAppTool",
     "ListAppsTool",
     "PerformSecondaryActionTool",
     "PressKeyTool",

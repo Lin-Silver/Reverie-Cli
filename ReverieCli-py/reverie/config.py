@@ -29,6 +29,7 @@ from .security_policy import (
 )
 from .storage import (
     ProjectStorageResolver,
+    git_checkpoints_dir,
     sanitize_project_name,
 )
 from .codex import (
@@ -782,6 +783,19 @@ def get_project_data_dir(project_path: Path, app_root: Optional[Path] = None) ->
     Project data lives under the app's `.reverie/projects/` directory.
     """
     return ProjectStorageResolver.for_project(project_path, launcher_root=app_root).project_dir
+
+
+def get_workspace_checkpoint_dir(project_data_dir: Path, app_root: Optional[Path] = None) -> Path:
+    """
+    Get the checkpoint repository directory for a project data store.
+
+    The repository is deliberately *not* nested inside the project data
+    directory: that directory is named after the workspace's whole absolute
+    path, and Git refuses a `GIT_DIR` over 220 characters, which would leave
+    every mutating tool refused on a workspace that merely sits deep enough.
+    """
+    root = Path(app_root).expanduser().resolve() if app_root is not None else get_app_root()
+    return git_checkpoints_dir(root, project_data_dir)
 
 
 @dataclass

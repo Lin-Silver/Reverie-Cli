@@ -17,7 +17,7 @@ import math
 import re
 import time
 
-from ..config import get_project_data_dir
+from ..config import get_project_data_dir, get_workspace_checkpoint_dir
 from ..diagnostics import report_suppressed_exception
 from ..modes import normalize_mode
 from ..tools.base import BaseTool, ToolResult
@@ -87,7 +87,11 @@ class ToolExecutor:
         memory_indexer=None,
     ):
         self.project_root = project_root
-        
+
+        # The checkpoint repository is kept out of the project data directory so
+        # its GIT_DIR stays short enough for Git on Windows to accept.
+        project_data_dir = get_project_data_dir(project_root)
+
         # Shared context for all tools
         self.context = {
             'project_root': project_root,
@@ -99,7 +103,11 @@ class ToolExecutor:
             # Bare executors are an internal/test API. User-facing Agents replace
             # this with Config.security immediately after construction.
             'security': {'permission_level': 'full_control'},
-            'shadow_git_manager': ShadowGitManager(project_root, get_project_data_dir(project_root)),
+            'shadow_git_manager': ShadowGitManager(
+                project_root,
+                project_data_dir,
+                checkpoint_dir=get_workspace_checkpoint_dir(project_data_dir),
+            ),
         }
 
         # Initialize tools

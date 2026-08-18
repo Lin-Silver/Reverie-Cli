@@ -49,10 +49,26 @@ class ShadowGitManager:
         "**/*.gz",
     )
 
-    def __init__(self, project_root: Path, project_data_dir: Path):
+    # Git dies with `fatal: '$GIT_DIR' too big` once the value exceeds
+    # PATH_MAX - 40. Git for Windows builds against PATH_MAX 260, so 220 is the
+    # real ceiling there; POSIX PATH_MAX 4096 leaves so much room that only
+    # Windows needs checking.
+    MAX_WINDOWS_GIT_DIR_CHARS = 220
+
+    def __init__(
+        self,
+        project_root: Path,
+        project_data_dir: Path,
+        *,
+        checkpoint_dir: Optional[Path] = None,
+    ):
         self.project_root = Path(project_root).expanduser().resolve()
         self.project_data_dir = Path(project_data_dir).expanduser().resolve()
-        self.git_dir = self.project_data_dir / "git-checkpoints"
+        self.git_dir = (
+            Path(checkpoint_dir).expanduser().resolve()
+            if checkpoint_dir is not None
+            else self.project_data_dir / "git-checkpoints"
+        )
         self.deleted_files_dir = self.project_data_dir / "deleted-files"
         self.audit_path = self.project_data_dir / "security" / "workspace_mutations.jsonl"
         self._lock = threading.RLock()
@@ -159,12 +175,27 @@ class ShadowGitManager:
             }
         )
 
+    def _require_usable_git_dir(self) -> None:
+        """Reject an over-long checkpoint path with its cause, not Git's riddle.
+
+        Git reports only `fatal: '$GIT_DIR' too big` -- no path, no limit, no
+        hint that a directory name is at fault -- and the caller sees every
+        mutating tool refused. Name the number and the path instead.
+        """
+        rendered = str(self.git_dir)
+        if os.name == "nt" and len(rendered) > self.MAX_WINDOWS_GIT_DIR_CHARS:
+            raise WorkspaceGuardError(
+                f"Checkpoint repository path is {len(rendered)} characters, past the "
+                f"{self.MAX_WINDOWS_GIT_DIR_CHARS} Git allows for GIT_DIR on Windows: {rendered}"
+            )
+
     def ensure_initialized(self) -> None:
         with self._lock:
             if self._ready:
                 return
             if shutil.which("git") is None:
                 raise WorkspaceGuardError("Git is required for automatic workspace checkpoints but was not found.")
+            self._require_usable_git_dir()
             self.git_dir.parent.mkdir(parents=True, exist_ok=True)
             if not (self.git_dir / "HEAD").is_file():
                 completed = subprocess.run(
@@ -179,10 +210,10 @@ class ShadowGitManager:
                     raise WorkspaceGuardError(completed.stderr.strip() or "Could not initialize shadow Git repository")
             self._git("config", "core.autocrlf", "false")
             self._git("config", "core.filemode", "false")
-            # The shadow repo lives under `.reverie/projects/<sanitized full project
-            # path>/`, so its loose-object paths are already long before Git appends
-            # `objects/ab/<38 hex>`. Without this, Git for Windows refuses the write
-            # with "Filename too long" and every checkpoint fails.
+            # Workspace files can sit arbitrarily deep, and Git for Windows
+            # refuses to write a path over 260 characters with "Filename too
+            # long", which would fail the checkpoint that is meant to protect
+            # them.
             self._git("config", "core.longpaths", "true")
             exclude = self.git_dir / "info" / "exclude"
             exclude.parent.mkdir(parents=True, exist_ok=True)

@@ -52,6 +52,7 @@ from ..config import (
     ModelConfig,
     Config,
     get_computer_controller_data_dir,
+    get_workspace_checkpoint_dir,
     model_source_display_name,
     normalize_thinking_output_style,
     normalize_tool_output_style,
@@ -1107,7 +1108,13 @@ class ReverieInterface:
             else self.config_manager.project_data_dir
         )
         self.project_data_dir.mkdir(parents=True, exist_ok=True)
-        self.shadow_git_manager = ShadowGitManager(self.project_root, self.project_data_dir)
+        self.shadow_git_manager = ShadowGitManager(
+            self.project_root,
+            self.project_data_dir,
+            checkpoint_dir=get_workspace_checkpoint_dir(
+                self.project_data_dir, self.config_manager.app_root
+            ),
+        )
 
         self.indexer = None
         self.retriever = None

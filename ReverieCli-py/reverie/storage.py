@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass
@@ -10,7 +11,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
+REVERIE_DATA_DIRNAME = ".reverie"
 PROJECTS_DATA_DIRNAME = "projects"
+GIT_CHECKPOINTS_DATA_DIRNAME = "git-checkpoints"
 PROJECT_METADATA_FILENAME = "project_metadata.json"
 PROJECT_LAYOUT_FILENAME = "storage_layout.json"
 
@@ -92,6 +95,33 @@ def sanitize_project_name(project_path: Any) -> str:
     return safe[:120]
 
 
+def project_storage_key(project_path: Any) -> str:
+    """Return a short, stable key for stores that nest deep paths underneath.
+
+    `sanitize_project_name` spells out the workspace's entire absolute path,
+    which is readable but up to 120 characters on its own. That is fine for a
+    leaf data directory and wrong for one that has machinery nested under it:
+    Git rejects a `GIT_DIR` longer than 220 characters outright, so a store
+    keyed by name is length-limited by where the user happens to keep files.
+    """
+    return hashlib.sha256(str(_resolve_path(project_path)).encode("utf-8")).hexdigest()[:16]
+
+
+def git_checkpoints_dir(launcher_root: Any, project_data_dir: Any) -> Path:
+    """Return the short-path home of a project store's checkpoint repository.
+
+    Keyed by the data directory rather than the workspace so each runtime scope
+    keeps its own repository, exactly as it did when the repository lived inside
+    that directory.
+    """
+    return (
+        _resolve_path(launcher_root)
+        / REVERIE_DATA_DIRNAME
+        / GIT_CHECKPOINTS_DATA_DIRNAME
+        / project_storage_key(project_data_dir)
+    )
+
+
 @dataclass(frozen=True)
 class ProjectStorageResolver:
     """Resolve all project-level data under the launcher-local portable root."""
@@ -109,7 +139,7 @@ class ProjectStorageResolver:
 
     @property
     def reverie_root(self) -> Path:
-        return self.launcher_root / ".reverie"
+        return self.launcher_root / REVERIE_DATA_DIRNAME
 
     @property
     def projects_root(self) -> Path:

@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Dict, Optional
 
 from .base import BaseTool, ToolResult
-from ..config import get_project_data_dir
+from ..config import get_project_data_dir, get_workspace_checkpoint_dir
 from ..workspace_guard import ShadowGitManager
 
 
@@ -104,7 +104,12 @@ Example:
 
         guard = self.context.get("shadow_git_manager")
         if not isinstance(guard, ShadowGitManager):
-            guard = ShadowGitManager(self.get_project_root(), get_project_data_dir(self.get_project_root()))
+            project_data_dir = get_project_data_dir(self.get_project_root())
+            guard = ShadowGitManager(
+                self.get_project_root(),
+                project_data_dir,
+                checkpoint_dir=get_workspace_checkpoint_dir(project_data_dir),
+            )
 
         try:
             guard.checkpoint("Before delete_file", force_paths=(file_path,))

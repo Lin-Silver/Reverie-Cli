@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import os
 import subprocess
 
 from reverie.agent.tool_executor import ToolExecutor
@@ -312,3 +313,49 @@ def test_a_real_add_failure_still_fails_the_checkpoint(tmp_path: Path) -> None:
         assert "not a git repository" in str(exc)
     else:
         raise AssertionError("A genuine Git failure was swallowed")
+
+
+def test_checkpoint_repository_survives_a_deep_app_root(tmp_path: Path, monkeypatch) -> None:
+    """A deep app root must not push GIT_DIR past the length Git accepts.
+
+    Git dies with `fatal: '$GIT_DIR' too big` above 220 characters, and the
+    executor turns that into "Workspace checkpoint unavailable", refusing every
+    tool call that touches the workspace. So the checkpoint repository may not
+    live under a directory whose name spells out the workspace's whole absolute
+    path -- that name alone is up to 120 characters.
+    """
+    deep_app_root = tmp_path.joinpath(*(f"level-{index}" for index in range(6)))
+    deep_app_root.mkdir(parents=True)
+    monkeypatch.setenv("REVERIE_APP_ROOT", str(deep_app_root))
+    workspace = tmp_path / "nested" / "workspace-with-a-fairly-long-directory-name"
+    workspace.mkdir(parents=True)
+
+    executor = ToolExecutor(project_root=workspace)
+    guard = executor.context["shadow_git_manager"]
+    assert len(str(guard.git_dir)) <= ShadowGitManager.MAX_WINDOWS_GIT_DIR_CHARS
+
+    result = executor.execute("file_ops", {"operation": "mkdir", "path": "artifacts"}, tool_call_id="deep-mkdir")
+    assert result.success, result.error
+    assert (workspace / "artifacts").is_dir()
+    assert guard.git_dir.is_dir()
+
+
+def test_over_long_checkpoint_path_reports_its_own_cause(tmp_path: Path) -> None:
+    """The refusal has to name the path and the limit, unlike Git's message."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    over_long = tmp_path / ("d" * (ShadowGitManager.MAX_WINDOWS_GIT_DIR_CHARS + 1 - len(str(tmp_path)) - 1))
+    guard = ShadowGitManager(workspace, tmp_path / "project-data", checkpoint_dir=over_long)
+
+    if os.name != "nt":
+        # POSIX allows PATH_MAX 4096, so this path is simply usable there.
+        guard.ensure_initialized()
+        return
+
+    try:
+        guard.ensure_initialized()
+    except WorkspaceGuardError as exc:
+        assert str(ShadowGitManager.MAX_WINDOWS_GIT_DIR_CHARS) in str(exc)
+        assert str(guard.git_dir) in str(exc)
+    else:
+        raise AssertionError("An unusable checkpoint path was accepted")

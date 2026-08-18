@@ -40,6 +40,13 @@ def test_agent_regression_harness_runs_stable_baseline(tmp_path: Path) -> None:
     summary = harness.run()
 
     assert summary["schema"] == "reverie.agent.regression.v1"
+    # The harness records why each scenario failed. Assert on that first, so a
+    # platform-specific failure names the scenario instead of reporting only
+    # ``assert False is True``.
+    failed = [
+        f"{result['id']}: {result['detail']}" for result in summary["results"] if not result["passed"]
+    ]
+    assert not failed, "Regression scenarios failed -> " + " | ".join(failed)
     assert summary["passed"] is True
     assert summary["total"] >= 4
     assert summary["score"] == 100

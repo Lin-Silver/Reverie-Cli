@@ -55,11 +55,21 @@ jobs:
       PYTHONUTF8: "1"
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      # actions/setup-python's post step fails the job when pip's cache directory
+      # is missing, which on Windows happened after every artifact had already
+      # been built and uploaded. A failed build leaves `publish` skipped, so the
+      # rolling `latest` release keeps serving stale binaries. Pin the location
+      # so it is created once, in the workspace, on every runner.
+      PIP_CACHE_DIR: ${{ github.workspace }}/.pip-cache
 
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Create the pip cache directory
+        shell: bash
+        run: mkdir -p "$PIP_CACHE_DIR"
 
       - uses: actions/setup-python@v5
         with:
@@ -316,17 +326,29 @@ jobs:
           else
             gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" -F prerelease=false -f make_latest=true >/dev/null
           fi
-          for old_asset in $(gh release view "$release_tag" --json assets --jq '.assets[].name'); do
-            gh release delete-asset "$release_tag" "$old_asset" --yes
+          # Upload over the existing assets, then prune whatever is left from an
+          # older version. Deleting every asset up front left the rolling release
+          # with no downloads for the length of the upload, and permanently empty
+          # if any single upload failed partway through.
+          assets=(
+            "Reverie-Setup-$version-x64.exe#Windows · Reverie-Setup-$version-x64.exe"
+            "Reverie-Portable-$version-x64.exe#Windows · Reverie-Portable-$version-x64.exe"
+            "reverie.exe#Windows · reverie.exe"
+            "Reverie-$version-linux-x64.AppImage#Linux · Reverie-$version-linux-x64.AppImage"
+            "Reverie-$version-linux-x64.deb#Linux · Reverie-$version-linux-x64.deb"
+            "reverie#Linux · reverie"
+            "Reverie-$version-macOS-Apple-Silicon.dmg#macOS Apple Silicon · Reverie-$version-macOS-Apple-Silicon.dmg"
+            "Reverie-CLI-macOS-Apple-Silicon#macOS Apple Silicon · Reverie-CLI-macOS-Apple-Silicon"
+            "Reverie-$version-macOS-Intel.dmg#macOS Intel · Reverie-$version-macOS-Intel.dmg"
+            "Reverie-CLI-macOS-Intel#macOS Intel · Reverie-CLI-macOS-Intel"
+            "reverie-kernels.json#Verification · reverie-kernels.json"
+          )
+          for asset in "${assets[@]}"; do
+            gh release upload "$release_tag" "release-assets/$asset" --clobber
           done
-          gh release upload "$release_tag" "release-assets/Reverie-Setup-$version-x64.exe#Windows · Reverie-Setup-$version-x64.exe"
-          gh release upload "$release_tag" "release-assets/Reverie-Portable-$version-x64.exe#Windows · Reverie-Portable-$version-x64.exe"
-          gh release upload "$release_tag" "release-assets/reverie.exe#Windows · reverie.exe"
-          gh release upload "$release_tag" "release-assets/Reverie-$version-linux-x64.AppImage#Linux · Reverie-$version-linux-x64.AppImage"
-          gh release upload "$release_tag" "release-assets/Reverie-$version-linux-x64.deb#Linux · Reverie-$version-linux-x64.deb"
-          gh release upload "$release_tag" "release-assets/reverie#Linux · reverie"
-          gh release upload "$release_tag" "release-assets/Reverie-$version-macOS-Apple-Silicon.dmg#macOS Apple Silicon · Reverie-$version-macOS-Apple-Silicon.dmg"
-          gh release upload "$release_tag" "release-assets/Reverie-CLI-macOS-Apple-Silicon#macOS Apple Silicon · Reverie-CLI-macOS-Apple-Silicon"
-          gh release upload "$release_tag" "release-assets/Reverie-$version-macOS-Intel.dmg#macOS Intel · Reverie-$version-macOS-Intel.dmg"
-          gh release upload "$release_tag" "release-assets/Reverie-CLI-macOS-Intel#macOS Intel · Reverie-CLI-macOS-Intel"
-          gh release upload "$release_tag" "release-assets/reverie-kernels.json#Verification · reverie-kernels.json"
+          published=$(printf '%s\n' "${assets[@]}" | cut -d'#' -f1)
+          for old_asset in $(gh release view "$release_tag" --json assets --jq '.assets[].name'); do
+            if ! grep -qxF "$old_asset" <<<"$published"; then
+              gh release delete-asset "$release_tag" "$old_asset" --yes
+            fi
+          done

@@ -516,6 +516,13 @@ def test_provider_spec_preserves_legacy_optional_positional_arguments() -> None:
     assert spec.process_validator is rats_module._reverie_engine_process
 
 
+@pytest.mark.skipif(
+    os.name != "nt",
+    reason=(
+        "Terminal-wrapper normalization is Windows-only: the product-name check reads the "
+        "Windows version resource, and off-Windows the validator deliberately accepts any file."
+    ),
+)
 def test_reverie_terminal_selection_normalizes_only_a_verified_terminal_wrapper(monkeypatch: pytest.MonkeyPatch) -> None:
     root = _test_root("terminal-provider-normalization")
     terminal = root / "reverie.windows.editor.x86_64.terminal.exe"

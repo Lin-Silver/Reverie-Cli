@@ -81,6 +81,8 @@ SubAgents are enabled in `reverie` and `computer-controller` modes, including NV
 | `/provider <name> models [model-id]` | Refresh the live model list and select a model |
 | `/provider <name> test` | Verify a provider with one real minimal request |
 | `/provider <name> use` | Make the provider the active model source |
+| `/provider <name> context [limit]` | Set the context limit remembered for the selected model (`128000`, `128k`, `1.2m`) |
+| `/provider <name> thinking on\|off\|toggle` | Turn thinking mode on or off for a custom provider (on by default) |
 | `/provider <name> key` | Replace the stored API key |
 | `/provider <name> url <base-url>` | Change a custom provider's base URL |
 | `/provider <name> format` | Change a custom provider's API request format |
@@ -95,6 +97,12 @@ ModelScope is called through OpenAI Chat Completions and reads `MODELSCOPE_API_K
 `/provider` is the one surface over every source. `/provider list` mixes the built-in sources above with the providers you added yourself, shows which ones have an API key, and probes each reachable endpoint in parallel to report online state, latency, and how many models it publishes. Sources without a catalog endpoint (Codex, WebGemini) are marked "not probed"; use `/provider <name> test` for those.
 
 `/provider add` asks for exactly four things - provider name, base URL, API key, and API request format (OpenAI Chat Completions, OpenAI Responses, or Anthropic Messages) - then calls the provider's model-list endpoint and opens the model selector. The provider, its key, its cached catalog, and the model you picked are written to `custom_providers` in the shared `config.json`, so the next session starts on the same model. `/provider <name> models` calls the endpoint again to pick up new models.
+
+The first time you select one of a custom provider's models, Reverie asks for that model's context limit and saves it under that provider's `model_context_limits`. Selecting the same model again reuses the saved limit silently, and models you never select are never asked about; a saved limit outranks whatever window the gateway published. `/provider <name> context 256k` changes it later. Thinking mode is on by default for custom providers and can be turned off per provider with `/provider <name> thinking off`; a gateway that rejects the thinking flags degrades to a plain request for that turn instead of failing it.
+
+Every stored provider also extends command completion, so once `xkiro` exists, `/provider xkiro models`, `/provider xkiro context`, `/provider xkiro thinking`, and the rest of its actions complete like built-in commands.
+
+Raw stream frames (`[[REVERIE_EVENT]]{...}`) are internal protocol details rendered as activity lines; they are echoed verbatim only under `reverie --debug` or `REVERIE_DEBUG=1`.
 ## Tools and Context
 
 | Command | Description |

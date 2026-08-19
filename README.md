@@ -65,6 +65,19 @@ All providers support streaming responses where applicable. Reasoning/thinking t
 
 Use `/provider list` to see every source at once with its API-key flag and a parallel availability probe, and `/provider add` to register your own gateway from four fields: name, base URL, API key, and API request format.
 
+A custom provider keeps two extra settings of its own:
+
+- **Per-model context limit.** Gateways rarely publish a trustworthy context window, so the first time you pick one of a provider's models Reverie asks for that model's limit and remembers it. Every later selection of the same provider and model reuses the saved value without asking, and models you never pick are never asked about. Change a saved limit with `/provider <name> context 256k` (`128000`, `128k`, and `1.2m` are all accepted).
+- **Thinking mode**, which is **on by default**. A gateway that rejects the thinking flags degrades to a plain request for that turn instead of failing it; turn it off permanently with `/provider <name> thinking off`.
+
+Every stored provider also extends command completion: once `xkiro` exists, `/provider xkiro models`, `/provider xkiro context`, `/provider xkiro thinking`, and the rest of its actions complete like built-in commands, both in the terminal and in the Desktop command palette.
+
+The Desktop app exposes the same surface under **Settings → 模型与提供商 → Custom Provider**: add, edit, enable/disable, delete, refresh the live catalog, test availability, pick a model, and confirm a model's context limit.
+
+### Debug output
+
+Raw internal stream frames (`[[REVERIE_EVENT]]{...}`) are protocol details that the display turns into activity lines. They are only printed when debug mode is on — start with `reverie --debug`, or set `REVERIE_DEBUG=1`. Debug mode only widens what Reverie prints; it never changes what is sent to a provider or written to disk.
+
 ### Prompt Caching
 
 Reverie prefers provider-side prompt-prefix caching for every production text-model call, including streaming and non-streaming chat, Responses, native HTTP/curl compatibility transports, Context Engine compression, and automatic session handoff:

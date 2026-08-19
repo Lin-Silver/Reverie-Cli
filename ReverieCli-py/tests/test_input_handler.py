@@ -283,6 +283,31 @@ def test_command_completion_includes_literal_subcommands() -> None:
     assert "/browser restore" in commands
 
 
+def test_command_completion_grows_with_a_configured_custom_provider() -> None:
+    """A stored provider completes like a built-in command."""
+    from reverie.custom_providers import (
+        build_custom_provider_command_completions,
+        default_custom_providers_config,
+        upsert_custom_provider,
+    )
+
+    section = upsert_custom_provider(
+        default_custom_providers_config(),
+        {"id": "xkiro", "name": "xkiro", "base_url": "https://api.xkiro.invalid/v1"},
+    )
+    handler = _handler()
+    handler.command_provider = lambda: build_custom_provider_command_completions(section)
+
+    commands = {command for command, _ in handler.get_command_completions("/provider xkiro")}
+
+    assert "/provider xkiro" in commands
+    assert "/provider xkiro models" in commands
+    assert "/provider xkiro context" in commands
+    assert "/provider xkiro thinking" in commands
+    # The built-in entries are still reachable.
+    assert "/provider" in {command for command, _ in handler.get_command_completions("/provider")}
+
+
 def test_windows_prompt_editor_completes_with_tab(monkeypatch) -> None:
     msvcrt = pytest.importorskip("msvcrt")
 

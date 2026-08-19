@@ -6,7 +6,57 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
 import { DEFAULT_UI_PREFERENCES } from "./preferences";
-import type { DesktopState, ModelSourcesState, RatsState, RatsTaskRecord, SessionState } from "./types";
+import type { CustomProviderRecord, DesktopState, ModelSource, ModelSourcesState, ProviderProbe, RatsState, RatsTaskRecord, SessionState } from "./types";
+
+function customProviderRecord(overrides: Partial<CustomProviderRecord> = {}): CustomProviderRecord {
+  return {
+    id: "xkiro",
+    name: "xkiro",
+    base_url: "https://api.xkiro.invalid/v1",
+    models_url: "https://api.xkiro.invalid/v1/models",
+    format: "openai-chat",
+    format_label: "OpenAI Chat Completions",
+    enabled: true,
+    active: true,
+    api_key_masked: "sk-l…9f2c",
+    api_key_configured: true,
+    api_key_source: "config",
+    selected_model_id: "xkiro-pro",
+    selected_model_display_name: "xkiro-pro",
+    max_context_tokens: 128_000,
+    max_tokens: 8_192,
+    supports_vision: false,
+    thinking: true,
+    model_context_limits: { "xkiro-pro": 128_000 },
+    models_synced_at: 1_760_000_000,
+    models: [{
+      id: "xkiro-pro",
+      display_name: "xkiro-pro",
+      description: "",
+      vision: false,
+      tool_calling: true,
+      thinking: false,
+      context_length: 128_000,
+      reasoning: { control: "none", options: [], value: "" },
+      context_limit: 128_000,
+      needs_context_limit: false,
+      suggested_context_limit: 128_000,
+    }, {
+      id: "xkiro-lite",
+      display_name: "xkiro-lite",
+      description: "",
+      vision: false,
+      tool_calling: true,
+      thinking: false,
+      context_length: 32_000,
+      reasoning: { control: "none", options: [], value: "" },
+      context_limit: 0,
+      needs_context_limit: true,
+      suggested_context_limit: 32_000,
+    }],
+    ...overrides,
+  };
+}
 
 const baseSession: SessionState = {
   id: "session-1",
@@ -133,10 +183,59 @@ function installDesktopApi(options: {
   ratsTaskLogText?: (payload: Record<string, unknown>) => string;
   refreshedModels?: ModelSourcesState;
   initialState?: DesktopState;
+  customProviders?: CustomProviderRecord[];
 } = {}) {
   let promptFinished = false;
   let ratsEnabled = false;
   let ratsTaskCancelled = false;
+  let providers: CustomProviderRecord[] = (options.customProviders ?? []).map((record) => ({ ...record }));
+  const customSource = (): ModelSource => ({
+    id: "custom",
+    display_name: "Custom Provider",
+    active: providers.some((record) => record.active),
+    selected_model_id: providers.find((record) => record.active)?.selected_model_id ?? "",
+    selected_reasoning: { control: "none", options: [], value: "" },
+    models: [],
+    config_fields: [],
+    custom_providers: providers,
+    custom_provider_formats: [
+      { id: "openai-chat", label: "OpenAI Chat Completions", description: "POST <base>/chat/completions with a Bearer key." },
+      { id: "openai-responses", label: "OpenAI Responses", description: "POST <base>/responses with a Bearer key." },
+      { id: "anthropic", label: "Anthropic Messages", description: "POST <base>/messages with an x-api-key header." },
+    ],
+  });
+  const models = (): ModelSourcesState => options.customProviders
+    ? { ...desktopState.models, sources: [...desktopState.models.sources, customSource()] }
+    : desktopState.models;
+  const customEnvelope = (provider: CustomProviderRecord | null) => ({
+    type: "custom-provider.updated",
+    provider,
+    models: models(),
+    workspace: desktopState.workspace,
+  });
+  const probeFor = (key: string): ProviderProbe => {
+    const provider = providers.find((record) => `custom:${record.id}` === key);
+    return {
+      key,
+      name: provider?.name ?? key,
+      kind: provider ? "custom" : "builtin",
+      source: provider ? "custom" : key,
+      provider_id: provider?.id ?? "",
+      format_label: provider?.format_label ?? "",
+      base_url: provider?.base_url ?? "",
+      key_state: "configured",
+      key_hint: provider?.api_key_masked ?? "",
+      active: provider?.active ?? false,
+      enabled: provider?.enabled ?? true,
+      probeable: true,
+      probe_note: "",
+      status: provider?.id === "relay" ? "unauthorized" : "online",
+      latency_ms: provider?.id === "relay" ? null : 42,
+      model_count: provider?.models.length ?? 0,
+      detail: provider?.id === "relay" ? "HTTP 401 from the catalog endpoint." : "2 models",
+      probe: "GET /models",
+    };
+  };
   const eventListeners: Array<(message: { event: unknown }) => void> = [];
   const emitCoreEvent = (event: Record<string, unknown>) => {
     for (const listener of [...eventListeners]) listener({ event });
@@ -190,7 +289,70 @@ function installDesktopApi(options: {
     return legacy;
   };
   const request = vi.fn(async (action: string, payload: Record<string, unknown>) => {
-    if (action === "initialize") return { type: "state", state: options.initialState ?? desktopState };
+    if (action === "initialize") {
+      const state = options.initialState ?? desktopState;
+      return { type: "state", state: options.customProviders ? { ...state, models: models() } : state };
+    }
+    if (action === "addCustomProvider") {
+      const input = payload.provider as { name: string; base_url: string; api_key: string; format: string };
+      const record = customProviderRecord({
+        id: input.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+        name: input.name.trim(),
+        base_url: input.base_url.trim(),
+        format: input.format,
+        format_label: customSource().custom_provider_formats?.find((item) => item.id === input.format)?.label ?? input.format,
+        active: false,
+        selected_model_id: "",
+        selected_model_display_name: "",
+      });
+      providers = [...providers, record];
+      return customEnvelope(record);
+    }
+    if (action === "updateCustomProvider") {
+      const patch = payload.patch as Partial<CustomProviderRecord>;
+      let updated: CustomProviderRecord | null = null;
+      providers = providers.map((record) => {
+        if (record.id !== payload.providerId) return record;
+        updated = { ...record, ...patch };
+        return updated;
+      });
+      return customEnvelope(updated);
+    }
+    if (action === "deleteCustomProvider") {
+      const removed = providers.find((record) => record.id === payload.providerId) ?? null;
+      providers = providers.filter((record) => record.id !== payload.providerId);
+      return customEnvelope(removed);
+    }
+    if (action === "refreshCustomProviderModels") {
+      const refreshed = providers.find((record) => record.id === payload.providerId) ?? null;
+      return customEnvelope(refreshed);
+    }
+    if (action === "selectCustomProviderModel") {
+      let selected: CustomProviderRecord | null = null;
+      const modelId = String(payload.modelId);
+      const confirmed = payload.contextLimit === undefined ? 0 : Number(payload.contextLimit);
+      providers = providers.map((record) => {
+        if (record.id !== payload.providerId) return { ...record, active: false };
+        // The core stores the confirmed limit, so the model stops asking.
+        const limit = confirmed || record.model_context_limits[modelId] || 0;
+        selected = {
+          ...record,
+          active: true,
+          selected_model_id: modelId,
+          selected_model_display_name: modelId,
+          model_context_limits: limit ? { ...record.model_context_limits, [modelId]: limit } : record.model_context_limits,
+          models: record.models.map((model) => model.id === modelId && limit
+            ? { ...model, context_limit: limit, needs_context_limit: false }
+            : model),
+        };
+        return selected;
+      });
+      return customEnvelope(selected);
+    }
+    if (action === "probeProviders") {
+      const keys = (payload.keys as string[] | undefined) ?? providers.map((record) => `custom:${record.id}`);
+      return { type: "providers.probed", probes: keys.map(probeFor) };
+    }
     if (action === "getSession") {
       const requested = String(payload.sessionId);
       const session = requested === searchSession.id
@@ -988,5 +1150,163 @@ describe("desktop GUI interactions", () => {
     expect(screen.queryByText("task.reused")).toBeNull();
     expect(screen.queryByText(/reused-log/)).toBeNull();
     expect(reconnectedLogCursors[0]).toBe(0);
+  });
+
+  async function openCustomProviderPage(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(await screen.findByRole("button", { name: "设置" }));
+    await user.click(await screen.findByRole("button", { name: "模型与提供商" }));
+    await user.click(await screen.findByRole("button", { name: /Custom Provider/ }));
+  }
+
+  it("adds a custom provider from the desktop page with the four documented fields", async () => {
+    const { request } = installDesktopApi({ customProviders: [] });
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("button", { name: "命令面板" });
+
+    await openCustomProviderPage(user);
+    expect(screen.getByText("还没有自定义 Provider")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "添加 Provider" }));
+    const dialog = await screen.findByRole("dialog", { name: "添加 Provider" });
+    expect(within(dialog).getByText("POST <base>/chat/completions with a Bearer key.")).toBeTruthy();
+    const submit = within(dialog).getByRole("button", { name: "添加 Provider" });
+    expect((submit as HTMLButtonElement).disabled).toBe(true);
+
+    await user.type(within(dialog).getByLabelText("Provider 名称"), "xkiro");
+    await user.type(within(dialog).getByLabelText("Base URL"), "https://api.xkiro.invalid/v1");
+    await user.type(within(dialog).getByLabelText("API Key"), "sk-live-secret");
+    await user.selectOptions(within(dialog).getByLabelText("API 请求格式"), "anthropic");
+    await user.click(within(dialog).getByRole("button", { name: "添加 Provider" }));
+
+    await waitFor(() => expect(request).toHaveBeenCalledWith("addCustomProvider", {
+      provider: { name: "xkiro", base_url: "https://api.xkiro.invalid/v1", api_key: "sk-live-secret", format: "anthropic" },
+    }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "添加 Provider" })).toBeNull());
+    expect(await screen.findByText("Anthropic Messages")).toBeTruthy();
+    expect(document.body.textContent).not.toContain("sk-live-secret");
+  });
+
+  it("shows every custom provider with a masked key and tests availability in one pass", async () => {
+    const { request } = installDesktopApi({
+      customProviders: [
+        customProviderRecord(),
+        customProviderRecord({ id: "relay", name: "relay", base_url: "https://relay.invalid", format: "anthropic", format_label: "Anthropic Messages", api_key_masked: "sk-a…env", api_key_source: "env", active: false, selected_model_id: "", models: [] }),
+      ],
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("button", { name: "命令面板" });
+
+    await openCustomProviderPage(user);
+    expect(screen.getByText("sk-l…9f2c")).toBeTruthy();
+    expect(screen.getByText("sk-a…env · 来自环境变量")).toBeTruthy();
+    expect(screen.getByText("使用中")).toBeTruthy();
+    expect(screen.getByText("目录还是空的")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "测试全部" }));
+
+    await waitFor(() => expect(request).toHaveBeenCalledWith("probeProviders", { keys: ["custom:xkiro", "custom:relay"] }));
+    expect(await screen.findByText("在线")).toBeTruthy();
+    expect(await screen.findByText("密钥无效")).toBeTruthy();
+    expect(screen.getByText("HTTP 401 from the catalog endpoint.")).toBeTruthy();
+    expect(screen.getByText("42ms")).toBeTruthy();
+  });
+
+  it("selects a model from a custom provider's fetched catalog", async () => {
+    const { request } = installDesktopApi({
+      customProviders: [customProviderRecord({ active: false, selected_model_id: "" })],
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("button", { name: "命令面板" });
+
+    await openCustomProviderPage(user);
+    // xkiro-pro already carries a saved limit, so selecting it must not ask again.
+    await user.click(screen.getByRole("button", { name: /xkiro-pro/ }));
+
+    await waitFor(() => expect(request).toHaveBeenCalledWith("selectCustomProviderModel", {
+      providerId: "xkiro",
+      modelId: "xkiro-pro",
+    }));
+    expect(screen.queryByRole("dialog", { name: "模型上下文限额" })).toBeNull();
+    expect(await screen.findByText("使用中")).toBeTruthy();
+  });
+
+  it("asks for a context limit the first time a model is chosen, then reuses it", async () => {
+    const { request } = installDesktopApi({
+      customProviders: [customProviderRecord({ active: false, selected_model_id: "" })],
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("button", { name: "命令面板" });
+
+    await openCustomProviderPage(user);
+    await user.click(screen.getByRole("button", { name: /xkiro-lite/ }));
+
+    // Nothing is stored until the user confirms the limit.
+    const dialog = await screen.findByRole("dialog", { name: "模型上下文限额" });
+    expect(request).not.toHaveBeenCalledWith("selectCustomProviderModel", expect.anything());
+    const input = within(dialog).getByLabelText("上下文限额") as HTMLInputElement;
+    expect(input.value).toBe("32000");
+    await user.clear(input);
+    await user.type(input, "64k");
+    await user.click(within(dialog).getByRole("button", { name: "保存并使用" }));
+
+    await waitFor(() => expect(request).toHaveBeenCalledWith("selectCustomProviderModel", {
+      providerId: "xkiro",
+      modelId: "xkiro-lite",
+      contextLimit: 64_000,
+    }));
+    expect(await screen.findByText("64K ctx")).toBeTruthy();
+
+    // The second selection of the same model reuses the stored limit silently.
+    await user.click(screen.getByRole("button", { name: /xkiro-pro/ }));
+    await user.click(screen.getByRole("button", { name: /xkiro-lite/ }));
+    await waitFor(() => expect(request).toHaveBeenCalledWith("selectCustomProviderModel", {
+      providerId: "xkiro",
+      modelId: "xkiro-lite",
+    }));
+    expect(screen.queryByRole("dialog", { name: "模型上下文限额" })).toBeNull();
+  });
+
+  it("turns thinking mode off for a custom provider", async () => {
+    const { request } = installDesktopApi({ customProviders: [customProviderRecord()] });
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("button", { name: "命令面板" });
+
+    await openCustomProviderPage(user);
+    expect(screen.getByText("已开启（默认）")).toBeTruthy();
+    await user.click(screen.getByRole("switch", { name: "思考模式" }));
+
+    await waitFor(() => expect(request).toHaveBeenCalledWith("updateCustomProvider", {
+      providerId: "xkiro",
+      patch: { thinking: false },
+    }));
+    expect(await screen.findByText("已关闭")).toBeTruthy();
+  });
+
+  it("disables and deletes a custom provider, asking for confirmation only before deletion", async () => {
+    const { request } = installDesktopApi({ customProviders: [customProviderRecord()] });
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("button", { name: "命令面板" });
+
+    await openCustomProviderPage(user);
+    await user.click(screen.getByRole("switch", { name: "启用" }));
+
+    await waitFor(() => expect(request).toHaveBeenCalledWith("updateCustomProvider", {
+      providerId: "xkiro",
+      patch: { enabled: false },
+    }));
+    expect(await screen.findByText("已停用")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "删除" }));
+    expect(request).not.toHaveBeenCalledWith("deleteCustomProvider", expect.anything());
+    await user.click(await screen.findByRole("button", { name: "删除 Provider" }));
+
+    await waitFor(() => expect(request).toHaveBeenCalledWith("deleteCustomProvider", { providerId: "xkiro" }));
+    expect(await screen.findByText("还没有自定义 Provider")).toBeTruthy();
   });
 });

@@ -9,7 +9,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 
 _BACKGROUND_DISPATCH_ACTIONS = frozenset({"runPrompt", "compactContext", "workspaceMentions", "indexWorkspace"})
@@ -330,14 +330,64 @@ class ReverieSdkBridge:
             self.interface.agent.set_history(session.messages)
         return _json_safe(session.to_wire_dict())
 
-    @staticmethod
-    def commands_payload() -> Dict[str, Any]:
+    def commands_payload(self) -> Dict[str, Any]:
         from .cli.help_catalog import HELP_SECTION_ORDER, HELP_TOPICS
 
+        items = [dict(item, id=topic_id) for topic_id, item in HELP_TOPICS.items()]
+        # A user's own providers become real commands, so the desktop palette
+        # lists them next to the built-in topics instead of hiding them behind
+        # the generic /provider entry.
+        provider_commands = self._custom_provider_command_items()
+        if provider_commands:
+            items.extend(provider_commands)
         return {
             "sections": list(HELP_SECTION_ORDER),
-            "items": [dict(item, id=topic_id) for topic_id, item in HELP_TOPICS.items()],
+            "items": items,
         }
+
+    def _custom_provider_command_items(self) -> List[Dict[str, Any]]:
+        """Return one palette entry per stored custom provider."""
+        try:
+            from .custom_providers import (
+                CUSTOM_PROVIDER_COMMAND_ACTIONS,
+                list_custom_providers,
+            )
+
+            interface = self.ensure_interface()
+            config = interface.config_manager.load()
+            records = list_custom_providers(getattr(config, "custom_providers", {}))
+        except Exception:
+            from .diagnostics import report_suppressed_exception
+
+            report_suppressed_exception("build custom provider command payload")
+            return []
+
+        items: List[Dict[str, Any]] = []
+        for record in records:
+            provider_id = str(record.get("id") or "").strip()
+            if not provider_id:
+                continue
+            label = str(record.get("name") or provider_id).strip() or provider_id
+            items.append({
+                "id": f"provider:{provider_id}",
+                "command": f"/provider {provider_id}",
+                "section": "Providers",
+                "summary": f"{label}: inspect, pick a model, test, or activate this custom provider.",
+                "overview": " | ".join(action for action, _ in CUSTOM_PROVIDER_COMMAND_ACTIONS if action),
+                "subcommands": [
+                    {
+                        "usage": f"/provider {provider_id}{' ' + action if action else ''}",
+                        "description": description,
+                    }
+                    for action, description in CUSTOM_PROVIDER_COMMAND_ACTIONS
+                ],
+                "examples": [
+                    f"/provider {provider_id} models",
+                    f"/provider {provider_id} test",
+                    f"/provider {provider_id} use",
+                ],
+            })
+        return items
 
     def recovery_payload(self) -> Dict[str, Any]:
         interface = self.ensure_interface()
@@ -644,6 +694,72 @@ class ReverieSdkBridge:
                 "index": index,
                 "models": self.model_sources_payload(),
                 "workspace": self.workspace_payload(),
+            }
+        if action in {
+            "addCustomProvider",
+            "updateCustomProvider",
+            "deleteCustomProvider",
+            "refreshCustomProviderModels",
+            "selectCustomProviderModel",
+        }:
+            from .desktop_catalog import (
+                create_custom_provider,
+                delete_custom_provider,
+                refresh_custom_provider_models,
+                select_custom_provider_model,
+                update_custom_provider,
+            )
+
+            interface = self.ensure_interface()
+            config = interface.config_manager.load()
+            provider_ref = payload.get("providerId") or payload.get("provider") or ""
+            provider: Optional[Dict[str, Any]] = None
+            if action == "addCustomProvider":
+                provider = create_custom_provider(
+                    config,
+                    payload.get("provider") if isinstance(payload.get("provider"), dict) else payload,
+                )
+            elif action == "updateCustomProvider":
+                provider = update_custom_provider(
+                    config,
+                    provider_ref,
+                    payload.get("patch") if isinstance(payload.get("patch"), dict) else {},
+                )
+            elif action == "deleteCustomProvider":
+                delete_custom_provider(config, provider_ref)
+            elif action == "refreshCustomProviderModels":
+                provider = refresh_custom_provider_models(config, provider_ref)
+            else:
+                provider = select_custom_provider_model(
+                    config,
+                    provider_ref,
+                    payload.get("modelId") or payload.get("model") or "",
+                    payload.get("contextLimit"),
+                )
+            interface.config_manager.save(config)
+            self._refresh_agent()
+            return {
+                "id": request_id,
+                "type": "custom-provider.updated",
+                "provider": _json_safe(provider),
+                "models": self.model_sources_payload(),
+                "workspace": self.workspace_payload(),
+            }
+        if action == "probeProviders":
+            from .desktop_catalog import probe_provider_availability
+
+            interface = self.ensure_interface()
+            config = interface.config_manager.load()
+            keys = payload.get("keys")
+            return {
+                "id": request_id,
+                "type": "providers.probed",
+                "probes": _json_safe(
+                    probe_provider_availability(
+                        config,
+                        [str(key) for key in keys] if isinstance(keys, list) else None,
+                    )
+                ),
             }
         if action == "listSessions":
             return {"id": request_id, "type": "sessions", "sessions": self.sessions_payload()}

@@ -242,6 +242,416 @@ def test_desktop_provider_patches_are_refused_for_custom_providers() -> None:
         )
 
 
+class _FakeCatalogResponse:
+    """Minimal stand-in for the ``requests`` response of a ``/models`` call."""
+
+    def __init__(self, model_ids=("kiro-pro", "kiro-mini")) -> None:
+        self._model_ids = list(model_ids)
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self):
+        return {"data": [{"id": model_id} for model_id in self._model_ids]}
+
+
+def _install_fake_catalog(monkeypatch, model_ids=("kiro-pro", "kiro-mini")) -> list:
+    """Serve one canned catalog and record the URLs that were asked for."""
+    from reverie import custom_providers as custom_providers_module
+
+    calls: list = []
+
+    def fake_get(url, *, headers, timeout):
+        calls.append(url)
+        return _FakeCatalogResponse(model_ids)
+
+    monkeypatch.setattr(custom_providers_module.requests, "get", fake_get)
+    return calls
+
+
+def _two_custom_providers() -> Config:
+    """One active provider plus a second, so activation is observable."""
+    from reverie.custom_providers import upsert_custom_provider
+
+    config = _custom_provider_config()
+    config.custom_providers = upsert_custom_provider(
+        config.custom_providers,
+        {
+            "id": "relay",
+            "name": "My Relay",
+            "base_url": "https://relay.invalid",
+            "api_key": "sk-relay-987654321",
+            "format": "anthropic",
+            "models": [{"id": "claude-x", "display_name": "Claude X", "context_length": 64000}],
+        },
+    )
+    return config
+
+
+def test_desktop_payload_lists_every_custom_provider_without_its_key() -> None:
+    from reverie.custom_providers import CUSTOM_PROVIDER_FORMATS
+
+    source = _source(build_model_sources_payload(_two_custom_providers()), "custom")
+
+    providers = source["custom_providers"]
+    assert [item["id"] for item in providers] == ["xkiro", "relay"]
+    assert [item["active"] for item in providers] == [True, False]
+    assert providers[0]["api_key_masked"] == "xk-l...3456"
+    assert providers[0]["api_key_configured"] is True
+    assert providers[0]["api_key_source"] == "config"
+    assert providers[1]["format_label"] == "Anthropic Messages"
+    assert providers[1]["models_url"] == "https://relay.invalid/models"
+    assert "xk-live-abcdef123456" not in json.dumps(source)
+    assert [item["id"] for item in source["custom_provider_formats"]] == list(CUSTOM_PROVIDER_FORMATS)
+
+
+def test_desktop_add_custom_provider_uses_four_fields_and_pulls_the_catalog(monkeypatch) -> None:
+    from reverie.desktop_catalog import create_custom_provider
+
+    calls = _install_fake_catalog(monkeypatch)
+    config = Config()
+
+    provider = create_custom_provider(
+        config,
+        {
+            # A pasted request URL, not a bare base: the suffix is trimmed for us.
+            "base_url": "api.xkiro.invalid/v1/chat/completions",
+            "api_key": "xk-live-abcdef123456",
+            "format": "openai-chat",
+            "name": "xKiro Relay",
+        },
+    )
+
+    assert calls == ["https://api.xkiro.invalid/v1/models"]
+    assert provider["id"] == "xkiro-relay"
+    assert provider["name"] == "xKiro Relay"
+    assert provider["base_url"] == "https://api.xkiro.invalid/v1"
+    assert [item["id"] for item in provider["models"]] == ["kiro-mini", "kiro-pro"]
+    assert provider["models_synced_at"] > 0
+    assert "sync_error" not in provider
+    # Adding stocks the catalog; picking a model is the separate, activating step.
+    assert provider["selected_model_id"] == ""
+    assert config.active_model_source == "standard"
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("name", "", "letters or digits"),
+        ("name", "!!!", "letters or digits"),
+        ("base_url", "", "base URL is required"),
+        ("api_key", "", "API key is required"),
+    ],
+)
+def test_desktop_add_custom_provider_requires_each_field(field, value, message) -> None:
+    from reverie.desktop_catalog import create_custom_provider
+
+    payload = {
+        "name": "xkiro",
+        "base_url": "https://api.xkiro.invalid/v1",
+        "api_key": "xk-live-abcdef123456",
+        "format": "openai-chat",
+    }
+    payload[field] = value
+
+    with pytest.raises(ValueError, match=message):
+        create_custom_provider(Config(), payload)
+
+
+@pytest.mark.parametrize("name", ["codex", "sensenova", "standard", "custom"])
+def test_desktop_add_custom_provider_refuses_built_in_source_names(name) -> None:
+    from reverie.desktop_catalog import create_custom_provider
+
+    with pytest.raises(ValueError, match="built-in source name"):
+        create_custom_provider(
+            Config(),
+            {
+                "name": name,
+                "base_url": "https://api.xkiro.invalid/v1",
+                "api_key": "xk-live-abcdef123456",
+                "format": "openai-chat",
+            },
+        )
+
+
+def test_desktop_add_custom_provider_refuses_a_duplicate() -> None:
+    from reverie.desktop_catalog import create_custom_provider
+
+    with pytest.raises(ValueError, match="already exists"):
+        create_custom_provider(
+            _custom_provider_config(),
+            {
+                "name": "xkiro",
+                "base_url": "https://api.xkiro.invalid/v1",
+                "api_key": "xk-live-abcdef123456",
+                "format": "openai-chat",
+            },
+        )
+
+
+def test_desktop_add_custom_provider_keeps_the_record_when_the_catalog_call_fails(monkeypatch) -> None:
+    """A wrong URL should not discard the other three fields the user typed."""
+    from reverie import custom_providers as custom_providers_module
+    from reverie.custom_providers import find_custom_provider
+    from reverie.desktop_catalog import create_custom_provider
+
+    def fake_get(url, *, headers, timeout):
+        raise custom_providers_module.requests.ConnectionError("name resolution failed")
+
+    monkeypatch.setattr(custom_providers_module.requests, "get", fake_get)
+    config = Config()
+
+    provider = create_custom_provider(
+        config,
+        {
+            "name": "xkiro",
+            "base_url": "https://api.xkiro.invalid/v1",
+            "api_key": "xk-live-abcdef123456",
+            "format": "openai-chat",
+        },
+    )
+
+    assert provider["models"] == []
+    assert "name resolution failed" in provider["sync_error"]
+    assert find_custom_provider(config.custom_providers, "xkiro") is not None
+
+
+def test_desktop_update_custom_provider_preserves_an_omitted_key(monkeypatch) -> None:
+    from reverie.custom_providers import find_custom_provider
+    from reverie.desktop_catalog import update_custom_provider
+
+    calls = _install_fake_catalog(monkeypatch, ("kiro-pro", "kiro-ultra"))
+    config = _custom_provider_config()
+
+    provider = update_custom_provider(
+        config, "xkiro", {"name": "xKiro EU", "base_url": "https://eu.xkiro.invalid/v1", "api_key": ""}
+    )
+
+    assert provider["name"] == "xKiro EU"
+    assert provider["base_url"] == "https://eu.xkiro.invalid/v1"
+    # The endpoint moved, so the catalog is re-read rather than left stale.
+    assert calls == ["https://eu.xkiro.invalid/v1/models"]
+    assert [item["id"] for item in provider["models"]] == ["kiro-pro", "kiro-ultra"]
+    assert find_custom_provider(config.custom_providers, "xkiro")["api_key"] == "xk-live-abcdef123456"
+
+
+def test_desktop_update_custom_provider_leaves_the_catalog_alone_for_a_rename(monkeypatch) -> None:
+    from reverie.desktop_catalog import update_custom_provider
+
+    calls = _install_fake_catalog(monkeypatch)
+
+    update_custom_provider(_custom_provider_config(), "xkiro", {"name": "Renamed"})
+
+    assert calls == []
+
+
+def test_desktop_update_custom_provider_rejects_undeclared_fields() -> None:
+    from reverie.desktop_catalog import update_custom_provider
+
+    with pytest.raises(ValueError, match="Unsupported custom provider field"):
+        update_custom_provider(_custom_provider_config(), "xkiro", {"max_tokens": 999})
+
+
+def test_desktop_select_custom_provider_model_activates_that_provider() -> None:
+    from reverie.custom_providers import find_custom_provider
+    from reverie.desktop_catalog import select_custom_provider_model
+
+    config = _two_custom_providers()
+
+    provider = select_custom_provider_model(config, "relay", "claude-x")
+
+    assert provider["id"] == "relay"
+    assert provider["active"] is True
+    assert provider["selected_model_id"] == "claude-x"
+    assert config.active_model_source == "custom"
+    assert config.custom_providers["active_provider_id"] == "relay"
+    assert find_custom_provider(config.custom_providers, "relay")["max_context_tokens"] == 64000
+
+
+def test_desktop_select_custom_provider_model_refuses_a_model_outside_the_catalog() -> None:
+    from reverie.desktop_catalog import select_custom_provider_model
+
+    with pytest.raises(ValueError, match="Refresh it first"):
+        select_custom_provider_model(_custom_provider_config(), "xkiro", "gpt-9")
+
+
+def test_desktop_payload_reports_which_models_still_owe_a_context_limit() -> None:
+    from reverie.custom_providers import set_custom_provider_model_context_limit, upsert_custom_provider
+
+    config = _custom_provider_config()
+    config.custom_providers = upsert_custom_provider(
+        config.custom_providers,
+        set_custom_provider_model_context_limit(
+            next(item for item in config.custom_providers["providers"] if item["id"] == "xkiro"),
+            "kiro-pro",
+            256000,
+        ),
+    )
+
+    provider = _source(build_model_sources_payload(config), "custom")["custom_providers"][0]
+
+    assert provider["thinking"] is True  # on by default
+    assert provider["model_context_limits"] == {"kiro-pro": 256000}
+    models = {item["id"]: item for item in provider["models"]}
+    assert models["kiro-pro"]["context_limit"] == 256000
+    assert models["kiro-pro"]["needs_context_limit"] is False
+    # Never chosen, so the desktop knows to ask once before using it.
+    assert models["kiro-mini"]["context_limit"] == 0
+    assert models["kiro-mini"]["needs_context_limit"] is True
+    assert models["kiro-mini"]["suggested_context_limit"] == 32000
+
+
+def test_desktop_selection_saves_the_confirmed_context_limit_once() -> None:
+    from reverie.custom_providers import find_custom_provider
+    from reverie.desktop_catalog import select_custom_provider_model
+
+    config = _custom_provider_config()
+
+    provider = select_custom_provider_model(config, "xkiro", "kiro-mini", "64k")
+
+    assert provider["selected_model_id"] == "kiro-mini"
+    assert provider["model_context_limits"] == {"kiro-mini": 64000}
+    assert provider["max_context_tokens"] == 64000  # the answer beats the published 32000
+
+    # Selecting it again without a limit reuses the saved one instead of resetting it.
+    select_custom_provider_model(config, "xkiro", "kiro-mini")
+    record = find_custom_provider(config.custom_providers, "xkiro")
+    assert record["model_context_limits"] == {"kiro-mini": 64000}
+
+
+def test_desktop_selection_without_an_answer_falls_back_to_the_suggestion() -> None:
+    from reverie.desktop_catalog import select_custom_provider_model
+
+    provider = select_custom_provider_model(_custom_provider_config(), "xkiro", "kiro-mini")
+
+    # No model is ever left without a limit, even if the desktop skips the ask.
+    assert provider["model_context_limits"] == {"kiro-mini": 32000}
+
+
+def test_desktop_selection_refuses_a_nonsense_context_limit() -> None:
+    from reverie.desktop_catalog import select_custom_provider_model
+
+    with pytest.raises(ValueError, match="not a usable context limit"):
+        select_custom_provider_model(_custom_provider_config(), "xkiro", "kiro-mini", "plenty")
+
+
+def test_desktop_update_custom_provider_toggles_thinking_mode(monkeypatch) -> None:
+    from reverie.custom_providers import find_custom_provider
+    from reverie.desktop_catalog import update_custom_provider
+
+    calls = _install_fake_catalog(monkeypatch)
+    config = _custom_provider_config()
+
+    provider = update_custom_provider(config, "xkiro", {"thinking": False})
+
+    assert provider["thinking"] is False
+    assert find_custom_provider(config.custom_providers, "xkiro")["thinking"] is False
+    assert calls == []  # a local flag, so the catalog is left alone
+
+    assert update_custom_provider(config, "xkiro", {"thinking": True})["thinking"] is True
+
+
+def test_desktop_command_palette_grows_with_each_custom_provider() -> None:
+    from reverie.sdk_bridge import ReverieSdkBridge
+
+    config = _two_custom_providers()
+    bridge = ReverieSdkBridge()
+    bridge.ensure_interface = lambda *args, **kwargs: SimpleNamespace(
+        config_manager=SimpleNamespace(load=lambda: config)
+    )
+
+    entries = {item["command"]: item for item in bridge.commands_payload()["items"]}
+
+    assert "/provider" in entries  # the built-in topic is still listed
+    for provider_id in ("xkiro", "relay"):
+        entry = entries[f"/provider {provider_id}"]
+        assert entry["section"] == "Providers"
+        usages = [item["usage"] for item in entry["subcommands"]]
+        for action in ("models", "test", "use", "context", "thinking", "remove"):
+            assert f"/provider {provider_id} {action}" in usages
+
+
+def test_desktop_command_palette_is_unchanged_without_custom_providers() -> None:
+    from reverie.sdk_bridge import ReverieSdkBridge
+
+    bridge = ReverieSdkBridge()
+    bridge.ensure_interface = lambda *args, **kwargs: SimpleNamespace(
+        config_manager=SimpleNamespace(load=lambda: Config())
+    )
+
+    commands = [item["command"] for item in bridge.commands_payload()["items"]]
+
+    assert "/provider" in commands
+    assert not any(command.startswith("/provider ") for command in commands)
+
+
+def test_desktop_delete_custom_provider_falls_back_to_the_standard_source() -> None:
+    from reverie.custom_providers import find_custom_provider
+    from reverie.desktop_catalog import delete_custom_provider
+
+    config = _custom_provider_config()
+
+    delete_custom_provider(config, "xkiro")
+
+    assert find_custom_provider(config.custom_providers, "xkiro") is None
+    assert config.active_model_source == "standard"
+
+
+def test_desktop_delete_custom_provider_keeps_custom_active_when_another_remains() -> None:
+    from reverie.desktop_catalog import delete_custom_provider, select_custom_provider_model
+
+    config = _two_custom_providers()
+    select_custom_provider_model(config, "relay", "claude-x")
+
+    delete_custom_provider(config, "xkiro")
+
+    assert config.active_model_source == "custom"
+    assert config.custom_providers["active_provider_id"] == "relay"
+
+
+def test_desktop_disabling_the_active_custom_provider_falls_back_to_standard() -> None:
+    from reverie.desktop_catalog import update_custom_provider
+
+    config = _custom_provider_config()
+
+    provider = update_custom_provider(config, "xkiro", {"enabled": False})
+
+    assert provider["enabled"] is False
+    assert config.active_model_source == "standard"
+
+
+def test_desktop_probe_reports_one_row_per_requested_provider(monkeypatch) -> None:
+    from reverie.desktop_catalog import probe_provider_availability
+
+    calls = _install_fake_catalog(monkeypatch, ("kiro-pro", "kiro-mini", "kiro-ultra"))
+    config = _two_custom_providers()
+
+    probes = probe_provider_availability(config, ["custom:xkiro", "custom:relay"])
+
+    assert [item["key"] for item in probes] == ["custom:xkiro", "custom:relay"]
+    assert [item["status"] for item in probes] == ["online", "online"]
+    assert [item["model_count"] for item in probes] == [3, 3]
+    assert probes[0]["name"] == "xkiro"
+    assert probes[0]["provider_id"] == "xkiro"
+    assert probes[0]["kind"] == "custom"
+    assert sorted(calls) == ["https://api.xkiro.invalid/v1/models", "https://relay.invalid/models"]
+    assert "xk-live-abcdef123456" not in json.dumps(probes)
+
+
+def test_desktop_probe_marks_unprobeable_builtins_without_calling(monkeypatch) -> None:
+    from reverie.desktop_catalog import probe_provider_availability
+
+    calls = _install_fake_catalog(monkeypatch)
+
+    probes = probe_provider_availability(_custom_provider_config(), ["codex", "webgemini"])
+
+    assert [item["key"] for item in probes] == ["codex", "webgemini"]
+    assert [item["status"] for item in probes] == ["not-probed", "not-probed"]
+    assert all(item["probeable"] is False for item in probes)
+    assert all("/provider" in item["detail"] for item in probes)
+    assert calls == []
+
+
 def test_standard_model_crud_preserves_secret_when_update_omits_it() -> None:
     config = Config()
     index = add_standard_model(

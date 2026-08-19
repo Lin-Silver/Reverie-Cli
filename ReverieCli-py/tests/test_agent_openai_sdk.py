@@ -261,6 +261,79 @@ def test_openai_sdk_provider_error_preserves_tool_fields_on_retry_failure(tmp_pa
     assert calls[1]["messages"] == calls[0]["messages"]
 
 
+def test_a_gateway_that_rejects_the_thinking_flags_retries_once_without_them(tmp_path):
+    """Thinking is on by default, so a refusal of the flags must not fail the turn."""
+
+    class FakeProviderError(Exception):
+        status_code = 400
+
+    calls = []
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            calls.append(dict(kwargs))
+            if len(calls) == 1:
+                raise FakeProviderError(
+                    "Unrecognized request argument supplied: chat_template_kwargs"
+                )
+            return "ok"
+
+    fake_client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+    agent = ReverieAgent(
+        base_url="https://api.xkiro.invalid/v1",
+        api_key="x",
+        model="qwen/qwen3.8-max",
+        project_root=tmp_path,
+        provider="openai-sdk",
+        config=_standard_config(),
+    )
+    agent._ensure_client = lambda: fake_client
+
+    response = agent._create_openai_chat_completion(
+        model="qwen/qwen3.8-max",
+        messages=[{"role": "user", "content": "hello"}],
+        stream=True,
+        timeout=17,
+        extra_body={
+            "chat_template_kwargs": {"enable_thinking": True, "thinking": True},
+            "top_k": 20,
+        },
+    )
+
+    assert response == "ok"
+    assert len(calls) == 2
+    # Only the thinking flags are dropped; every other request field survives.
+    assert calls[1]["extra_body"] == {"top_k": 20}
+    assert calls[1]["messages"] == calls[0]["messages"]
+    assert calls[1]["stream"] is True
+
+
+def test_only_a_thinking_flag_refusal_triggers_the_thinking_fallback():
+    from reverie.agent.agent import (
+        _has_thinking_hints,
+        _is_thinking_hint_rejection,
+        _without_thinking_hints,
+    )
+
+    assert _has_thinking_hints({"extra_body": {"chat_template_kwargs": {}}}) is True
+    assert _has_thinking_hints({"extra_body": {"top_k": 20}}) is False
+    assert _has_thinking_hints({"messages": []}) is False
+
+    assert _without_thinking_hints({"extra_body": {"enable_thinking": True}}) == {}
+
+    class ProviderError(Exception):
+        def __init__(self, message, status_code=None):
+            super().__init__(message)
+            self.status_code = status_code
+
+    assert _is_thinking_hint_rejection(ProviderError("unknown field enable_thinking", 400)) is True
+    assert _is_thinking_hint_rejection(ProviderError("thinking is not supported", 422)) is True
+    # A throttle or an outage says nothing about the flags, so keep them.
+    assert _is_thinking_hint_rejection(ProviderError("thinking rate limited", 429)) is False
+    assert _is_thinking_hint_rejection(ProviderError("thinking exploded", 500)) is False
+    assert _is_thinking_hint_rejection(ProviderError("invalid api key", 401)) is False
+
+
 def test_agnes_retries_once_with_fresh_user_query_after_tool_chain(tmp_path):
     class FakeProviderError(Exception):
         status_code = 400
@@ -1100,6 +1173,98 @@ def test_display_suppresses_model_request_stream_event():
 
     assert handled is True
     assert "Waiting for NVIDIA API response" not in console.export_text()
+
+
+def test_display_suppresses_model_response_stream_event():
+    console = Console(record=True, force_terminal=False, width=120)
+    display = DisplayComponents(console)
+
+    handled = display.show_stream_event(
+        {
+            "event": "model_response",
+            "category": "Model",
+            "message": "Custom Provider API stream connected",
+            "status": "success",
+            "detail": "qwen/qwen3.8-max | stream",
+            "meta": "first event in 30250ms",
+        }
+    )
+
+    # Handled, so the caller never falls back to printing the raw frame.
+    assert handled is True
+    assert console.export_text().strip() == ""
+
+
+def test_display_surfaces_a_model_error_stream_event():
+    console = Console(record=True, force_terminal=False, width=120)
+    display = DisplayComponents(console)
+
+    handled = display.show_stream_event(
+        {
+            "event": "model_error",
+            "category": "Model",
+            "message": "Custom Provider API stream failed",
+            "status": "error",
+            "detail": "HTTP 502",
+        }
+    )
+
+    assert handled is True
+    assert "Custom Provider API stream failed" in console.export_text()
+
+
+def _tracing_interface(console):
+    """Build the smallest object that can run ``_trace_stream_event``."""
+    from reverie.cli.interface import ReverieInterface
+    from reverie.cli.theme import DECO, THEME
+
+    interface = ReverieInterface.__new__(ReverieInterface)
+    interface.console = console
+    interface.theme = THEME
+    interface.deco = DECO
+    return interface
+
+
+def test_a_raw_stream_frame_is_hidden_outside_debug_mode(monkeypatch):
+    from reverie.runtime_flags import DEBUG_ENV_VAR, set_debug_mode
+
+    monkeypatch.delenv(DEBUG_ENV_VAR, raising=False)
+    monkeypatch.setattr("reverie.runtime_flags._debug_override", None, raising=False)
+    console = Console(record=True, force_terminal=False, width=200)
+    frame = '[[REVERIE_EVENT]]{"event": "model_response", "message": "connected"}'
+
+    _tracing_interface(console)._trace_stream_event(frame)
+    assert console.export_text().strip() == ""
+
+    try:
+        set_debug_mode(True)
+        _tracing_interface(console)._trace_stream_event(frame)
+        assert "REVERIE_EVENT" in console.export_text()
+    finally:
+        set_debug_mode(None)
+
+
+def test_debug_mode_reads_the_environment_when_no_flag_was_passed(monkeypatch):
+    from reverie.runtime_flags import DEBUG_ENV_VAR, debug_mode_enabled, set_debug_mode
+
+    monkeypatch.setattr("reverie.runtime_flags._debug_override", None, raising=False)
+
+    monkeypatch.delenv(DEBUG_ENV_VAR, raising=False)
+    assert debug_mode_enabled() is False
+
+    monkeypatch.setenv(DEBUG_ENV_VAR, "off")
+    assert debug_mode_enabled() is False
+
+    monkeypatch.setenv(DEBUG_ENV_VAR, "1")
+    assert debug_mode_enabled() is True
+
+    # An explicit --debug/--no-debug decision outranks the environment.
+    try:
+        monkeypatch.setenv(DEBUG_ENV_VAR, "1")
+        set_debug_mode(False)
+        assert debug_mode_enabled() is False
+    finally:
+        set_debug_mode(None)
 
 
 def test_nvidia_help_matches_supported_commands():

@@ -36,6 +36,30 @@ CUSTOM_PROVIDER_MODEL_CACHE_TTL_SECONDS = 300
 CUSTOM_PROVIDER_ANTHROPIC_VERSION = "2023-06-01"
 CUSTOM_PROVIDER_MAX_PROVIDERS = 64
 
+# A gateway rarely publishes a trustworthy context window, so the limit is asked
+# once per model and then reused.  These bounds only reject values that could
+# not describe a real window.
+CUSTOM_PROVIDER_MIN_CONTEXT_TOKENS = 1_000
+CUSTOM_PROVIDER_MAX_CONTEXT_TOKENS = 10_000_000
+
+# Every ``/provider <id> <action>`` pair offered as a completion once a provider
+# is stored, so the command surface grows with the user's own providers.
+CUSTOM_PROVIDER_COMMAND_ACTIONS: Tuple[Tuple[str, str], ...] = (
+    ("", "Show this provider in detail"),
+    ("models", "Refresh the catalog and pick a model"),
+    ("test", "Verify with one real minimal request"),
+    ("use", "Make this provider the active model source"),
+    ("context", "Set the context limit for the selected model"),
+    ("thinking", "Turn thinking mode on or off"),
+    ("key", "Replace the stored API key"),
+    ("url", "Change the base URL"),
+    ("format", "Change the API request format"),
+    ("rename", "Rename this provider"),
+    ("enable", "Keep this provider stored and usable"),
+    ("disable", "Keep this provider stored but skip it"),
+    ("remove", "Delete this provider"),
+)
+
 # Request formats a custom provider may speak.  Each one maps onto a transport
 # the agent already implements, so no new request path is introduced here.
 CUSTOM_PROVIDER_FORMATS: Tuple[str, ...] = (
@@ -259,6 +283,8 @@ def default_custom_provider(
         "max_tokens": CUSTOM_PROVIDER_DEFAULT_MAX_TOKENS,
         "timeout": CUSTOM_PROVIDER_DEFAULT_TIMEOUT,
         "supports_vision": False,
+        "thinking": True,
+        "model_context_limits": {},
         "custom_headers": {},
         "models": [],
         "models_synced_at": 0.0,
@@ -278,6 +304,134 @@ def _normalize_int(value: Any, default: int, *, minimum: int = 1) -> int:
     if number < minimum:
         return default
     return number
+
+
+def _coerce_bool(value: Any, default: bool) -> bool:
+    """Read a persisted or typed on/off value without treating text as truthy."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in ("true", "yes", "on", "1", "enable", "enabled"):
+        return True
+    if text in ("false", "no", "off", "0", "disable", "disabled", "none"):
+        return False
+    return default
+
+
+def parse_context_token_limit(value: Any) -> Optional[int]:
+    """Parse a typed context limit such as ``128000``, ``128k``, or ``1.2m``.
+
+    Returns ``None`` for anything that cannot describe a real context window so
+    the caller can ask again instead of storing a nonsense limit.
+    """
+    if isinstance(value, bool):
+        return None
+    text = str(value if value is not None else "").strip().lower()
+    if not text:
+        return None
+    text = text.replace(",", "").replace("_", "").replace(" ", "")
+    for suffix in ("tokens", "token", "tok"):
+        if text.endswith(suffix):
+            text = text[: -len(suffix)].strip()
+            break
+    multiplier = 1
+    if text.endswith("k"):
+        multiplier, text = 1_000, text[:-1]
+    elif text.endswith("m"):
+        multiplier, text = 1_000_000, text[:-1]
+    try:
+        number = int(float(text) * multiplier)
+    except (TypeError, ValueError):
+        return None
+    if number < CUSTOM_PROVIDER_MIN_CONTEXT_TOKENS:
+        return None
+    return min(number, CUSTOM_PROVIDER_MAX_CONTEXT_TOKENS)
+
+
+def _model_limit_key(model_id: Any) -> str:
+    """Return the map key used for one model's stored context limit."""
+    return str(model_id or "").strip().lower()
+
+
+def get_custom_provider_model_context_limit(provider: Any, model_id: Any = None) -> Optional[int]:
+    """Return the context limit the user saved for one model, if any."""
+    record = normalize_custom_provider(provider)
+    if not record:
+        return None
+    key = _model_limit_key(model_id or record.get("selected_model_id"))
+    if not key:
+        return None
+    limit = record.get("model_context_limits", {}).get(key)
+    return int(limit) if limit else None
+
+
+def custom_provider_model_needs_context_limit(provider: Any, model_id: Any) -> bool:
+    """Report whether this model is being selected for the first time.
+
+    The limit is only ever asked once per provider and model; every later
+    selection reuses the stored value.
+    """
+    return get_custom_provider_model_context_limit(provider, model_id) is None
+
+
+def suggest_custom_provider_model_context_limit(provider: Any, model_id: Any) -> int:
+    """Return the best default to offer when asking for a model's limit."""
+    saved = get_custom_provider_model_context_limit(provider, model_id)
+    if saved:
+        return saved
+    record = normalize_custom_provider(provider) or {}
+    key = _model_limit_key(model_id)
+    for item in record.get("models") or []:
+        if _model_limit_key(item.get("id")) == key:
+            published = parse_context_token_limit(item.get("context_length"))
+            if published:
+                return published
+            break
+    return CUSTOM_PROVIDER_DEFAULT_CONTEXT_TOKENS
+
+
+def set_custom_provider_model_context_limit(
+    provider: Any, model_id: Any, limit: Any
+) -> Dict[str, Any]:
+    """Store one model's context limit on a provider record.
+
+    Returns a normalized copy of the record; an unparseable limit leaves the
+    stored map untouched so a bad answer cannot erase a good one.
+    """
+    record = normalize_custom_provider(provider)
+    if not record:
+        return {}
+    key = _model_limit_key(model_id)
+    parsed = parse_context_token_limit(limit)
+    if not key or not parsed:
+        return record
+    limits = dict(record.get("model_context_limits") or {})
+    limits[key] = parsed
+    record["model_context_limits"] = limits
+    return normalize_custom_provider(record) or record
+
+
+def build_custom_provider_command_completions(raw_config: Any) -> Dict[str, str]:
+    """Return ``/provider <id> <action>`` completions for every stored provider.
+
+    The generated entries are what makes a user's own provider feel like a
+    first-class command: once ``xkiro`` exists, ``/provider xkiro model`` and the
+    rest of its actions complete like any built-in command.
+    """
+    completions: Dict[str, str] = {}
+    for record in list_custom_providers(raw_config):
+        provider_id = str(record.get("id") or "").strip()
+        if not provider_id:
+            continue
+        label = str(record.get("name") or provider_id).strip() or provider_id
+        for action, description in CUSTOM_PROVIDER_COMMAND_ACTIONS:
+            command = f"/provider {provider_id}{' ' + action if action else ''}"
+            completions[command] = f"{label}: {description}"
+    return completions
 
 
 def normalize_custom_provider_model(raw_model: Any) -> Optional[Dict[str, Any]]:
@@ -338,11 +492,24 @@ def normalize_custom_provider(raw_provider: Any) -> Optional[Dict[str, Any]]:
     cfg["api_key_env"] = str(raw_provider.get("api_key_env", "") or "").strip()
     cfg["enabled"] = bool(raw_provider.get("enabled", True))
     cfg["supports_vision"] = bool(raw_provider.get("supports_vision", False))
+    # Thinking is on by default: a custom gateway is usually pointed at a
+    # reasoning model, and the user can still turn it off per provider.
+    cfg["thinking"] = _coerce_bool(raw_provider.get("thinking", True), True)
     cfg["max_context_tokens"] = _normalize_int(
         raw_provider.get("max_context_tokens"), CUSTOM_PROVIDER_DEFAULT_CONTEXT_TOKENS
     )
     cfg["max_tokens"] = _normalize_int(raw_provider.get("max_tokens"), CUSTOM_PROVIDER_DEFAULT_MAX_TOKENS)
     cfg["timeout"] = _normalize_int(raw_provider.get("timeout"), CUSTOM_PROVIDER_DEFAULT_TIMEOUT, minimum=1)
+
+    context_limits: Dict[str, int] = {}
+    raw_limits = raw_provider.get("model_context_limits")
+    if isinstance(raw_limits, dict):
+        for raw_key, raw_value in raw_limits.items():
+            model_key = _model_limit_key(raw_key)
+            limit = parse_context_token_limit(raw_value)
+            if model_key and limit:
+                context_limits[model_key] = limit
+    cfg["model_context_limits"] = context_limits
 
     headers: Dict[str, str] = {}
     raw_headers = raw_provider.get("custom_headers")
@@ -380,9 +547,14 @@ def normalize_custom_provider(raw_provider: Any) -> Optional[Dict[str, Any]]:
         cfg["selected_model_display_name"] = selected_name or (
             matched["display_name"] if matched else selected_id
         )
+        # A limit the user typed for this exact model outranks whatever the
+        # gateway published, and survives a catalog refresh that drops it.
+        saved_limit = context_limits.get(_model_limit_key(selected_id))
+        if saved_limit:
+            cfg["max_context_tokens"] = saved_limit
+        elif matched and matched.get("context_length"):
+            cfg["max_context_tokens"] = int(matched["context_length"])
         if matched:
-            if matched.get("context_length"):
-                cfg["max_context_tokens"] = int(matched["context_length"])
             if matched.get("max_output_tokens"):
                 cfg["max_tokens"] = min(cfg["max_tokens"], int(matched["max_output_tokens"]))
             if matched.get("vision"):
@@ -605,16 +777,22 @@ def resolve_custom_provider_selected_model(
     wanted = str(model_id or record.get("selected_model_id") or "").strip()
     if not wanted:
         return None
+    saved_limit = record.get("model_context_limits", {}).get(_model_limit_key(wanted))
     models = record.get("models") or []
     matched = next((item for item in models if item["id"].lower() == wanted.lower()), None)
     if matched:
-        return dict(matched)
+        resolved = dict(matched)
+        if saved_limit:
+            resolved["context_length"] = int(saved_limit)
+        return resolved
     # A selection made before a catalog refresh is still callable by id.
     return {
         "id": wanted,
         "display_name": str(record.get("selected_model_display_name") or wanted),
         "description": "",
-        "context_length": int(record.get("max_context_tokens") or CUSTOM_PROVIDER_DEFAULT_CONTEXT_TOKENS),
+        "context_length": int(
+            saved_limit or record.get("max_context_tokens") or CUSTOM_PROVIDER_DEFAULT_CONTEXT_TOKENS
+        ),
         "max_output_tokens": int(record.get("max_tokens") or CUSTOM_PROVIDER_DEFAULT_MAX_TOKENS),
         "vision": bool(record.get("supports_vision", False)),
         "tool_calling": True,
@@ -662,7 +840,9 @@ def build_custom_provider_runtime_model_data(
         "max_context_tokens": context_tokens,
         "provider": custom_provider_transport(record.get("format")),
         "supports_vision": supports_vision,
-        "thinking_mode": None,
+        # ``true``/``false`` is the string contract ``ModelConfig.thinking_mode``
+        # already uses for OpenAI-compatible transports.
+        "thinking_mode": "true" if record.get("thinking", True) else "false",
         "endpoint": "",
         "custom_headers": dict(record.get("custom_headers") or {}),
         "vision": supports_vision,

@@ -85,6 +85,7 @@ from ..nvidia import (
     resolve_nvidia_selected_model,
 )
 from ..plugin.runtime_manager import RuntimePluginManager
+from ..runtime_flags import debug_mode_enabled, set_debug_mode
 from ..workspace_guard import ShadowGitManager
 
 
@@ -948,9 +949,11 @@ class StreamingFooter:
 class ReverieInterface:
     """Main interactive interface for Reverie Cli with Dreamscape theme"""
     
-    def __init__(self, project_root: Path, *, headless: bool = False):
+    def __init__(self, project_root: Path, *, headless: bool = False, debug: Optional[bool] = None):
         self.project_root = project_root
         self.headless = bool(headless)
+        if debug is not None:
+            set_debug_mode(debug)
         self._context_worker_limit: Optional[int] = None
         _configure_stdio_for_terminal_output()
         self.console = Console(width=None, force_terminal=not self.headless)
@@ -1808,6 +1811,17 @@ class ReverieInterface:
             if completion_summary:
                 event["had_live_progress"] = bool(completion_summary.get("had_live_progress"))
             self._refresh_streaming_footer(force=True)
+
+    def _trace_stream_event(self, chunk: str) -> None:
+        """Echo one raw stream frame when debug mode is on.
+
+        ``[[REVERIE_EVENT]]{...}`` is an internal protocol detail that the
+        display renders into activity lines.  A normal session must never see the
+        raw frame, so it is printed only for debugging.
+        """
+        if not debug_mode_enabled():
+            return
+        self.console.print(f"[{self.theme.TEXT_DIM}]{escape(str(chunk))}[/{self.theme.TEXT_DIM}]")
 
     def _get_live_tool_panel(self):
         """Return the active tool details panel for the streaming footer."""
@@ -3006,6 +3020,17 @@ class ReverieInterface:
                         completions[f"/plugins info {plugin_id}"] = "Inspect runtime plugin"
             except Exception:
                 report_suppressed_exception("load runtime plugin command completions")
+        # A user's own providers should complete like built-in commands, so every
+        # stored provider contributes its own `/provider <id> <action>` entries.
+        try:
+            from ..custom_providers import build_custom_provider_command_completions
+
+            config = self.config_manager.load()
+            completions.update(
+                build_custom_provider_command_completions(getattr(config, "custom_providers", {}))
+            )
+        except Exception:
+            report_suppressed_exception("load custom provider command completions")
         return completions
     
     def _process_message(self, message: str) -> bool:
@@ -3211,8 +3236,8 @@ class ReverieInterface:
                         in_thinking_mode = False
                         self._handle_stream_tool_event(decoded_event)
                         ensure_response_header()
-                        if not self.display.show_stream_event(decoded_event):
-                            self.console.print(chunk)
+                        self._trace_stream_event(chunk)
+                        self.display.show_stream_event(decoded_event)
                         continue
                     
                     # Check for known tool/system styled markers.

@@ -77,12 +77,16 @@ import remarkGfm from "remark-gfm";
 import type {
   CommandRecord,
   ConfigField,
+  CustomProviderFormat,
+  CustomProviderModel,
+  CustomProviderRecord,
   DesktopPaths,
   DesktopState,
   LiveTurn,
   ModelRecord,
   ModelSource,
   PluginRecord,
+  ProviderProbe,
   RatsPermission,
   RatsServiceRecord,
   RatsState,
@@ -1575,8 +1579,8 @@ function ToolsView({ mode }: { mode: string }) {
   );
 }
 
-function Toggle({ checked, onChange, disabled = false }: { checked: boolean; onChange: (checked: boolean) => void; disabled?: boolean }) {
-  return <button type="button" role="switch" aria-checked={checked} className={`toggle ${checked ? "on" : ""}`} onClick={() => onChange(!checked)} disabled={disabled}><span /></button>;
+function Toggle({ checked, onChange, disabled = false, label }: { checked: boolean; onChange: (checked: boolean) => void; disabled?: boolean; label?: string }) {
+  return <button type="button" role="switch" aria-checked={checked} aria-label={label} className={`toggle ${checked ? "on" : ""}`} onClick={() => onChange(!checked)} disabled={disabled}><span /></button>;
 }
 
 function PluginsView({
@@ -1716,18 +1720,325 @@ function ProviderFieldControl({ field, value, configured, update }: { field: Con
   );
 }
 
+const PROBE_STATUS_LABELS: Record<string, string> = {
+  online: "在线",
+  empty: "目录为空",
+  unauthorized: "密钥无效",
+  throttled: "速率受限",
+  offline: "无法连接",
+  error: "调用失败",
+  unconfigured: "未配置",
+  "not-probed": "未检测",
+};
+
+function probeTone(status: string): string {
+  if (status === "online") return "ok";
+  if (status === "empty" || status === "throttled" || status === "not-probed") return "warn";
+  if (status === "unconfigured") return "idle";
+  return "bad";
+}
+
+function ProbeBadge({ probe }: { probe?: ProviderProbe }) {
+  const { t } = useI18n();
+  if (!probe) return null;
+  const label = t(PROBE_STATUS_LABELS[probe.status] ?? probe.status);
+  return (
+    <span className={`probe-badge ${probeTone(probe.status)}`}>
+      <span className="probe-dot" />
+      {label}
+      {probe.status === "online" && probe.latency_ms != null && <small>{probe.latency_ms}ms</small>}
+    </span>
+  );
+}
+
+/** Everything the Custom Provider page needs, bundled so it can be passed through in one prop. */
+type CustomProviderControls = {
+  probes: Record<string, ProviderProbe>;
+  probing: boolean;
+  add: () => void;
+  edit: (provider: CustomProviderRecord) => void;
+  remove: (provider: CustomProviderRecord) => void;
+  toggle: (provider: CustomProviderRecord, enabled: boolean) => void;
+  setThinking: (provider: CustomProviderRecord, enabled: boolean) => void;
+  refresh: (provider: CustomProviderRecord) => void;
+  probe: (keys: string[]) => void;
+  selectModel: (provider: CustomProviderRecord, model: CustomProviderModel) => void;
+  editContextLimit: (provider: CustomProviderRecord, model: CustomProviderModel) => void;
+};
+
+function CustomProviderPanel({ source, controls }: { source: ModelSource; controls: CustomProviderControls }) {
+  const { t } = useI18n();
+  const providers = source.custom_providers ?? [];
+  const probeKeys = providers.map((provider) => `custom:${provider.id}`);
+  return (
+    <div className="provider-content">
+      <div className="section-heading">
+        <div>
+          <h2>{source.display_name}</h2>
+          <p>{t("自己的 OpenAI、Responses 或 Anthropic 兼容网关：填四个字段，模型列表由 Reverie 拉取。")}</p>
+        </div>
+        <div className="section-heading-actions">
+          {providers.length > 0 && (
+            <button type="button" className="secondary-button small" onClick={() => controls.probe(probeKeys)} disabled={controls.probing}>
+              <Zap size={14} />{controls.probing ? t("检测中…") : t("测试全部")}
+            </button>
+          )}
+          <button type="button" className="primary-button small" onClick={controls.add}><Plus size={14} />{t("添加 Provider")}</button>
+        </div>
+      </div>
+      {providers.length === 0 && (
+        <div className="empty-panel compact">
+          <Database size={22} />
+          <strong>{t("还没有自定义 Provider")}</strong>
+          <span>{t("需要 Provider 名称、Base URL、API Key 和请求格式四项，随后即可在 TUI、命令行和 GUI 中使用。")}</span>
+        </div>
+      )}
+      {providers.map((provider) => {
+        const probe = controls.probes[`custom:${provider.id}`];
+        return (
+          <article className={`custom-provider-card ${provider.active ? "active" : ""} ${provider.enabled ? "" : "disabled"}`} key={provider.id}>
+            <header>
+              <div className="custom-provider-title">
+                <strong>{provider.name}</strong>
+                {provider.active && <span className="provider-flag">{t("使用中")}</span>}
+                {!provider.enabled && <span className="provider-flag muted">{t("已停用")}</span>}
+                <ProbeBadge probe={probe} />
+              </div>
+              <div className="custom-provider-actions">
+                <IconButton label={t("测试")} onClick={() => controls.probe([`custom:${provider.id}`])} disabled={controls.probing}><Zap size={14} /></IconButton>
+                <IconButton label={t("刷新目录")} onClick={() => controls.refresh(provider)}><RefreshCw size={14} /></IconButton>
+                <IconButton label={t("编辑")} onClick={() => controls.edit(provider)}><Pencil size={14} /></IconButton>
+                <Toggle label={t("启用")} checked={provider.enabled} onChange={(checked) => controls.toggle(provider, checked)} />
+                <IconButton label={t("删除")} onClick={() => controls.remove(provider)}><Trash2 size={14} /></IconButton>
+              </div>
+            </header>
+            <dl className="custom-provider-meta">
+              <div><dt>Base URL</dt><dd>{provider.base_url}</dd></div>
+              <div><dt>{t("请求格式")}</dt><dd>{provider.format_label}</dd></div>
+              <div>
+                <dt>API Key</dt>
+                <dd>
+                  {provider.api_key_configured
+                    ? `${provider.api_key_masked}${provider.api_key_source === "env" ? ` · ${t("来自环境变量")}` : ""}`
+                    : t("未配置")}
+                </dd>
+              </div>
+              <div className="custom-provider-thinking">
+                <dt>{t("思考模式")}</dt>
+                <dd>
+                  <Toggle label={t("思考模式")} checked={provider.thinking} onChange={(checked) => controls.setThinking(provider, checked)} />
+                  <span>{provider.thinking ? t("已开启（默认）") : t("已关闭")}</span>
+                </dd>
+              </div>
+            </dl>
+            {probe && probe.status !== "online" && probe.detail && <p className="custom-provider-note">{probe.detail}</p>}
+            {provider.sync_error && <p className="custom-provider-note">{provider.sync_error}</p>}
+            <div className="settings-model-grid">
+              {provider.models.map((model) => (
+                <div className={`settings-model-card ${provider.active && provider.selected_model_id === model.id ? "active" : ""}`} key={model.id}>
+                  <button type="button" className="model-card-main" onClick={() => controls.selectModel(provider, model)}>
+                    <div><strong>{model.display_name}</strong><span>{model.id}</span></div>
+                    {provider.active && provider.selected_model_id === model.id ? <CheckCircle2 size={16} /> : <Circle size={14} />}
+                  </button>
+                  <div className="tag-row">
+                    <button type="button" className="tag-button" onClick={() => controls.editContextLimit(provider, model)}>
+                      {model.context_limit
+                        ? `${formatTokens(model.context_limit)} ctx`
+                        : t("设置上下文")}
+                    </button>
+                    {model.vision && <span>vision</span>}
+                  </div>
+                </div>
+              ))}
+              {provider.models.length === 0 && (
+                <div className="empty-panel compact">
+                  <Database size={22} />
+                  <strong>{t("目录还是空的")}</strong>
+                  <span>{t("点击刷新目录，从该 Provider 的 /models 接口重新获取。")}</span>
+                </div>
+              )}
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
+function CustomProviderModal({
+  provider,
+  formats,
+  close,
+  save,
+}: {
+  provider: CustomProviderRecord | null;
+  formats: CustomProviderFormat[];
+  close: () => void;
+  save: (values: { name: string; base_url: string; api_key: string; format: string }) => void;
+}) {
+  const { t } = useI18n();
+  const dialogRef = useRef<HTMLFormElement>(null);
+  useDialogFocus(dialogRef, close);
+  const editing = Boolean(provider);
+  const [values, setValues] = useState({
+    name: provider?.name ?? "",
+    base_url: provider?.base_url ?? "",
+    api_key: "",
+    format: provider?.format ?? formats[0]?.id ?? "openai-chat",
+  });
+  const update = (key: keyof typeof values, value: string) => setValues((current) => ({ ...current, [key]: value }));
+  // An existing provider already has a stored key, so only a new one must supply it.
+  const valid = Boolean(values.name.trim() && values.base_url.trim() && (editing || values.api_key.trim()));
+  const activeFormat = formats.find((item) => item.id === values.format);
+  return (
+    <div className="modal-backdrop" onMouseDown={close}>
+      <form
+        ref={dialogRef}
+        className="form-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="custom-provider-title"
+        tabIndex={-1}
+        onMouseDown={(event) => event.stopPropagation()}
+        onSubmit={(event) => { event.preventDefault(); if (valid) save(values); }}
+      >
+        <div className="form-modal-header">
+          <div>
+            <h2 id="custom-provider-title">{editing ? t("编辑 Provider") : t("添加 Provider")}</h2>
+            <p>{t("只需四项，模型列表会自动从该 Provider 拉取。")}</p>
+          </div>
+          <IconButton label={t("关闭")} onClick={close}><X size={16} /></IconButton>
+        </div>
+        <div className="form-grid single">
+          <label>
+            <span>{t("Provider 名称")}</span>
+            <input autoFocus value={values.name} onChange={(event) => update("name", event.target.value)} placeholder={t("例如 xkiro")} />
+          </label>
+          <label>
+            <span>Base URL</span>
+            <input value={values.base_url} onChange={(event) => update("base_url", event.target.value)} placeholder="https://api.xkiro.com/v1" />
+          </label>
+          <label>
+            <span>API Key</span>
+            <input
+              type="password"
+              value={values.api_key}
+              onChange={(event) => update("api_key", event.target.value)}
+              placeholder={editing ? t("已配置；留空保持不变") : ""}
+            />
+          </label>
+          <label>
+            <span>{t("API 请求格式")}</span>
+            <select value={values.format} onChange={(event) => update("format", event.target.value)}>
+              {formats.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+            </select>
+          </label>
+        </div>
+        {activeFormat && <p className="form-modal-hint">{activeFormat.description}</p>}
+        <div className="form-modal-footer">
+          <button type="button" className="secondary-button" onClick={close}>{t("取消")}</button>
+          <button type="submit" className="primary-button" disabled={!valid}>{editing ? t("保存") : t("添加 Provider")}</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+const CONTEXT_LIMIT_MIN = 1_000;
+const CONTEXT_LIMIT_MAX = 10_000_000;
+
+/** Parse the same shorthand the CLI accepts: 128000, 128k, 1.2m. */
+function parseContextLimit(value: string): number | null {
+  const text = value.trim().toLowerCase().replace(/[,_\s]/g, "").replace(/tokens?$/, "");
+  if (!text) return null;
+  const multiplier = text.endsWith("k") ? 1_000 : text.endsWith("m") ? 1_000_000 : 1;
+  const digits = multiplier === 1 ? text : text.slice(0, -1);
+  if (!/^\d+(\.\d+)?$/.test(digits)) return null;
+  const tokens = Math.floor(Number(digits) * multiplier);
+  if (tokens < CONTEXT_LIMIT_MIN) return null;
+  return Math.min(tokens, CONTEXT_LIMIT_MAX);
+}
+
+/**
+ * Ask for one model's context limit.
+ *
+ * Gateways rarely publish a window worth trusting, so the answer is collected
+ * the first time a model is picked and reused on every later selection.
+ */
+function ContextLimitModal({
+  provider,
+  model,
+  close,
+  save,
+}: {
+  provider: CustomProviderRecord;
+  model: CustomProviderModel;
+  close: () => void;
+  save: (limit: number) => void;
+}) {
+  const { t } = useI18n();
+  const dialogRef = useRef<HTMLFormElement>(null);
+  useDialogFocus(dialogRef, close);
+  const suggested = model.context_limit || model.suggested_context_limit || 128_000;
+  const [value, setValue] = useState(String(suggested));
+  const parsed = parseContextLimit(value);
+  return (
+    <div className="modal-backdrop" onMouseDown={close}>
+      <form
+        ref={dialogRef}
+        className="form-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="context-limit-title"
+        tabIndex={-1}
+        onMouseDown={(event) => event.stopPropagation()}
+        onSubmit={(event) => { event.preventDefault(); if (parsed) save(parsed); }}
+      >
+        <div className="form-modal-header">
+          <div>
+            <h2 id="context-limit-title">{t("模型上下文限额")}</h2>
+            <p>{t("provider.contextPrompt", { name: `${provider.name} · ${model.display_name}` })}</p>
+          </div>
+          <IconButton label={t("关闭")} onClick={close}><X size={16} /></IconButton>
+        </div>
+        <div className="form-grid single">
+          <label>
+            <span>{t("上下文限额")}</span>
+            <input
+              autoFocus
+              value={value}
+              onChange={(event) => setValue(event.target.value)}
+              placeholder="128000"
+              aria-label={t("上下文限额")}
+            />
+          </label>
+        </div>
+        <p className="form-modal-hint">
+          {t("provider.contextRange", { min: CONTEXT_LIMIT_MIN.toLocaleString(), max: CONTEXT_LIMIT_MAX.toLocaleString() })}
+        </p>
+        <div className="form-modal-footer">
+          <button type="button" className="secondary-button" onClick={close}>{t("取消")}</button>
+          <button type="submit" className="primary-button" disabled={!parsed}>{t("保存并使用")}</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function ProviderSettings({
   state,
   selectModel,
   saveProvider,
   addStandard,
   deleteStandard,
+  customProviders,
 }: {
   state: DesktopState;
   selectModel: (source: ModelSource, model: ModelRecord) => void;
   saveProvider: (source: ModelSource, patch: Record<string, unknown>) => void;
   addStandard: () => void;
   deleteStandard: (index: number) => void;
+  customProviders: CustomProviderControls;
 }) {
   const { t } = useI18n();
   const [sourceId, setSourceId] = useState(state.models.active_source);
@@ -1747,6 +2058,9 @@ function ProviderSettings({
       <div className="provider-tabs">
         {sources.map((item) => <button type="button" key={item.id} className={item.id === source.id ? "active" : ""} onClick={() => setSourceId(item.id)}>{item.display_name}{item.active && <span />}</button>)}
       </div>
+      {source.id === "custom" ? (
+        <CustomProviderPanel source={source} controls={customProviders} />
+      ) : (
       <div className="provider-content">
         <div className="section-heading">
           <div><h2>{source.display_name}</h2><p>{sourceDescription}</p></div>
@@ -1764,7 +2078,14 @@ function ProviderSettings({
               {source.id === "standard" && <button type="button" className="delete-model" onClick={() => deleteStandard(Number(model.id))}><Trash2 size={13} /></button>}
             </div>
           ))}
-          {source.models.length === 0 && <div className="empty-panel compact"><Database size={22} /><strong>{t("还没有标准模型")}</strong><span>{t("添加一个模型后即可用于 TUI、命令行和 GUI。")}</span></div>}
+          {source.models.length === 0 && (
+            <div className="empty-panel compact">
+              <Database size={22} />
+              {source.id === "standard"
+                ? <><strong>{t("还没有标准模型")}</strong><span>{t("添加一个模型后即可用于 TUI、命令行和 GUI。")}</span></>
+                : <><strong>{t("该来源暂无可用模型")}</strong><span>{t("先在下方填好连接配置，Reverie 会重新获取模型目录。")}</span></>}
+            </div>
+          )}
         </div>
         {source.config_fields.length > 0 && (
           <div className="provider-config">
@@ -1777,6 +2098,7 @@ function ProviderSettings({
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }
@@ -1788,6 +2110,7 @@ function SettingsView({
   saveProvider,
   addStandard,
   deleteStandard,
+  customProviders,
   paths,
   selectCoreData,
   theme,
@@ -1803,6 +2126,7 @@ function SettingsView({
   saveProvider: (source: ModelSource, patch: Record<string, unknown>) => void;
   addStandard: () => void;
   deleteStandard: (index: number) => void;
+  customProviders: CustomProviderControls;
   paths: DesktopPaths | null;
   selectCoreData: () => void;
   theme: ThemePreference;
@@ -2002,7 +2326,7 @@ function SettingsView({
         {tab === "models" && (
           <>
             <PageHeader icon={<Brain size={20} />} title={t("模型与提供商")} description={t("选择模型、配置凭据，并检查模型级思考与多模态能力。")} />
-            <ProviderSettings state={state} selectModel={selectModel} saveProvider={saveProvider} addStandard={addStandard} deleteStandard={deleteStandard} />
+            <ProviderSettings state={state} selectModel={selectModel} saveProvider={saveProvider} addStandard={addStandard} deleteStandard={deleteStandard} customProviders={customProviders} />
           </>
         )}
         {tab === "about" && (
@@ -2931,6 +3255,10 @@ export default function App() {
   const [commandOpen, setCommandOpen] = useState(false);
   const [sessionSearchOpen, setSessionSearchOpen] = useState(false);
   const [standardModelOpen, setStandardModelOpen] = useState(false);
+  const [providerModal, setProviderModal] = useState<{ provider: CustomProviderRecord | null } | null>(null);
+  const [contextLimitModal, setContextLimitModal] = useState<{ provider: CustomProviderRecord; model: CustomProviderModel } | null>(null);
+  const [providerProbes, setProviderProbes] = useState<Record<string, ProviderProbe>>({});
+  const [providerProbing, setProviderProbing] = useState(false);
   const [renameSessionTarget, setRenameSessionTarget] = useState<{ id: string; name: string } | null>(null);
   const [approval, setApproval] = useState<Record<string, unknown> | null>(null);
   const [mentionItems, setMentionItems] = useState<Array<Record<string, unknown>>>([]);
@@ -3602,6 +3930,134 @@ export default function App() {
     setConfirmation({ title: t("删除标准模型？"), message: t("这会从 Reverie 内核配置中移除该模型，但不会删除任何远端数据。"), label: t("删除模型"), danger: true, action: () => { void (async () => { try { const response = await window.reverie.request("deleteStandardModel", { index }); setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current); toast(t("模型已删除"), "success"); } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); } })(); } });
   }, [t, toast]);
 
+  const saveCustomProvider = useCallback(async (values: { name: string; base_url: string; api_key: string; format: string }) => {
+    const editing = providerModal?.provider ?? null;
+    try {
+      const response = editing
+        ? await window.reverie.request("updateCustomProvider", { providerId: editing.id, patch: values })
+        : await window.reverie.request("addCustomProvider", { provider: values });
+      setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current);
+      setProviderModal(null);
+      const syncError = response.provider?.sync_error;
+      if (syncError) toast(syncError, "error");
+      else toast(editing ? t("provider.saved", { name: values.name }) : t("provider.added", { name: values.name }), "success");
+    } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
+  }, [providerModal, t, toast]);
+
+  const patchCustomProvider = useCallback(async (provider: CustomProviderRecord, patch: Record<string, unknown>) => {
+    try {
+      const response = await window.reverie.request("updateCustomProvider", { providerId: provider.id, patch });
+      setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current);
+      toast(t("provider.saved", { name: provider.name }), "success");
+    } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
+  }, [t, toast]);
+
+  const refreshCustomProvider = useCallback(async (provider: CustomProviderRecord) => {
+    try {
+      const response = await window.reverie.request("refreshCustomProviderModels", { providerId: provider.id });
+      setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current);
+      toast(t("provider.catalogRefreshed", { name: provider.name, count: response.provider?.models.length ?? 0 }), "success");
+    } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
+  }, [t, toast]);
+
+  const deleteCustomProvider = useCallback((provider: CustomProviderRecord) => {
+    setConfirmation({
+      title: t("删除这个 Provider？"),
+      message: t("这会从 Reverie 内核配置中移除该 Provider 及其模型选择，远端服务不受影响。"),
+      label: t("删除 Provider"),
+      danger: true,
+      action: () => { void (async () => {
+        try {
+          const response = await window.reverie.request("deleteCustomProvider", { providerId: provider.id });
+          setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current);
+          setProviderProbes((current) => { const next = { ...current }; delete next[`custom:${provider.id}`]; return next; });
+          toast(t("Provider 已删除"), "success");
+        } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
+      })(); },
+    });
+  }, [t, toast]);
+
+  const selectCustomProviderModel = useCallback(async (
+    provider: CustomProviderRecord,
+    model: CustomProviderModel,
+    contextLimit?: number,
+  ) => {
+    // The limit is asked exactly once per model; afterwards the stored value is
+    // reused so switching models stays a single click.
+    if (model.needs_context_limit && contextLimit === undefined) {
+      setContextLimitModal({ provider, model });
+      return;
+    }
+    try {
+      const response = await window.reverie.request("selectCustomProviderModel", {
+        providerId: provider.id,
+        modelId: model.id,
+        ...(contextLimit === undefined ? {} : { contextLimit }),
+      });
+      setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current);
+      setContextLimitModal(null);
+      toast(t("model.switched", { name: model.display_name }), "success");
+    } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
+  }, [t, toast]);
+
+  const saveCustomProviderContextLimit = useCallback(async (
+    provider: CustomProviderRecord,
+    model: CustomProviderModel,
+    limit: number,
+  ) => {
+    // Reuse the selection call: it both stores the limit and pins the model, so
+    // confirming a limit can never leave the two out of step.
+    try {
+      const response = await window.reverie.request("selectCustomProviderModel", {
+        providerId: provider.id,
+        modelId: model.id,
+        contextLimit: limit,
+      });
+      setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current);
+      setContextLimitModal(null);
+      toast(t("provider.contextSaved", { name: model.display_name, tokens: limit.toLocaleString() }), "success");
+    } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
+  }, [t, toast]);
+
+  const setCustomProviderThinking = useCallback(async (provider: CustomProviderRecord, enabled: boolean) => {
+    try {
+      const response = await window.reverie.request("updateCustomProvider", { providerId: provider.id, patch: { thinking: enabled } });
+      setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current);
+      toast(t(enabled ? "provider.thinkingOn" : "provider.thinkingOff", { name: provider.name }), "success");
+    } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
+  }, [t, toast]);
+
+  const probeProviders = useCallback(async (keys: string[]) => {
+    if (!keys.length) return;
+    setProviderProbing(true);
+    try {
+      const response = await window.reverie.request("probeProviders", { keys });
+      setProviderProbes((current) => {
+        const next = { ...current };
+        for (const probe of response.probes) next[probe.key] = probe;
+        return next;
+      });
+      const offline = response.probes.filter((probe) => probe.probeable && probe.status !== "online").length;
+      if (offline) toast(t("provider.probeIssues", { count: offline }), "error");
+      else toast(t("provider.probeOk", { count: response.probes.length }), "success");
+    } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
+    finally { setProviderProbing(false); }
+  }, [t, toast]);
+
+  const customProviderControls = useMemo<CustomProviderControls>(() => ({
+    probes: providerProbes,
+    probing: providerProbing,
+    add: () => setProviderModal({ provider: null }),
+    edit: (provider) => setProviderModal({ provider }),
+    remove: deleteCustomProvider,
+    toggle: (provider, enabled) => void patchCustomProvider(provider, { enabled }),
+    setThinking: (provider, enabled) => void setCustomProviderThinking(provider, enabled),
+    refresh: (provider) => void refreshCustomProvider(provider),
+    probe: (keys) => void probeProviders(keys),
+    selectModel: (provider, model) => void selectCustomProviderModel(provider, model),
+    editContextLimit: (provider, model) => setContextLimitModal({ provider, model }),
+  }), [providerProbes, providerProbing, deleteCustomProvider, patchCustomProvider, setCustomProviderThinking, refreshCustomProvider, probeProviders, selectCustomProviderModel]);
+
   const updatePlugin = useCallback(async (action: "setPluginEnabled" | "setPluginTrust", plugin: PluginRecord, value: boolean) => {
     try {
       const response = action === "setPluginEnabled"
@@ -3789,9 +4245,9 @@ export default function App() {
     if (view === "subagents") return <SubagentsView />;
     if (view === "plugins") return <PluginsView plugins={state.plugins.records} updatePlugin={updatePlugin} refresh={refreshPlugins} />;
     if (view === "recovery") return <RecoveryView recovery={state.recovery} rollback={rollback} />;
-    if (view === "settings") return <SettingsView state={state} updateSetting={updateSetting} selectModel={selectModel} saveProvider={saveProvider} addStandard={() => setStandardModelOpen(true)} deleteStandard={deleteStandard} paths={desktopPaths} selectCoreData={() => void selectCoreData()} theme={theme} setTheme={changeTheme} preferences={uiPreferences} updatePreferences={updateUiPreferences} selectBackground={() => void selectBackground()} clearBackground={() => void clearBackground()} />;
+    if (view === "settings") return <SettingsView state={state} updateSetting={updateSetting} selectModel={selectModel} saveProvider={saveProvider} addStandard={() => setStandardModelOpen(true)} deleteStandard={deleteStandard} customProviders={customProviderControls} paths={desktopPaths} selectCoreData={() => void selectCoreData()} theme={theme} setTheme={changeTheme} preferences={uiPreferences} updatePreferences={updateUiPreferences} selectBackground={() => void selectBackground()} clearBackground={() => void clearBackground()} />;
     return <ChatView session={session} liveTurn={liveTurn} running={running} prompt={prompt} setPrompt={setPrompt} send={() => void sendPrompt()} cancel={() => void cancelPrompt()} mentionItems={mentionItems} mentionOpen={mentionOpen} mentionLoading={mentionLoading} requestMentions={() => void requestMentions()} chooseMention={(value) => { setPrompt((current) => `${current}${current && !current.endsWith(" ") ? " " : ""}${value} `); setMentionOpen(false); }} attachments={attachments} selectAttachment={() => void selectAttachment()} removeAttachment={removeAttachment} modelName={state.models.active_model?.display_name ?? "Reverie"} sessionBusy={sessionBusy} renameSession={() => { if (session) setRenameSessionTarget({ id: session.id, name: session.name }); }} forkSession={() => void forkActiveSession()} rewindSession={rewindActiveSession} deleteSession={() => { if (session) deleteSession(session); }} preferences={uiPreferences} updatePreferences={updateUiPreferences} />;
-  }, [state, view, updatePlugin, refreshPlugins, rollback, updateSetting, selectModel, saveProvider, deleteStandard, desktopPaths, selectCoreData, theme, changeTheme, uiPreferences, updateUiPreferences, selectBackground, clearBackground, session, liveTurn, running, prompt, mentionItems, mentionOpen, mentionLoading, attachments, selectAttachment, removeAttachment, sendPrompt, cancelPrompt, requestMentions, sessionBusy, forkActiveSession, rewindActiveSession, deleteSession]);
+  }, [state, view, updatePlugin, refreshPlugins, rollback, updateSetting, selectModel, saveProvider, deleteStandard, customProviderControls, desktopPaths, selectCoreData, theme, changeTheme, uiPreferences, updateUiPreferences, selectBackground, clearBackground, session, liveTurn, running, prompt, mentionItems, mentionOpen, mentionLoading, attachments, selectAttachment, removeAttachment, sendPrompt, cancelPrompt, requestMentions, sessionBusy, forkActiveSession, rewindActiveSession, deleteSession]);
 
   if (bootError) return <I18nProvider language={uiPreferences.language}><ErrorScreen error={bootError} retry={() => void initialize()} /></I18nProvider>;
   if (!state) return <I18nProvider language={uiPreferences.language}><LoadingScreen /></I18nProvider>;
@@ -3810,6 +4266,22 @@ export default function App() {
       {sessionSearchOpen && <SessionSearch close={() => setSessionSearchOpen(false)} openSession={(id) => void openSession(id)} />}
       {renameSessionTarget && <RenameSessionModal session={renameSessionTarget} close={() => setRenameSessionTarget(null)} save={(name) => void renameSession(name)} />}
       {standardModelOpen && <StandardModelModal close={() => setStandardModelOpen(false)} save={(model) => void addStandard(model)} />}
+      {providerModal && (
+        <CustomProviderModal
+          provider={providerModal.provider}
+          formats={state.models.sources.find((item) => item.id === "custom")?.custom_provider_formats ?? []}
+          close={() => setProviderModal(null)}
+          save={(values) => void saveCustomProvider(values)}
+        />
+      )}
+      {contextLimitModal && (
+        <ContextLimitModal
+          provider={contextLimitModal.provider}
+          model={contextLimitModal.model}
+          close={() => setContextLimitModal(null)}
+          save={(limit) => void saveCustomProviderContextLimit(contextLimitModal.provider, contextLimitModal.model, limit)}
+        />
+      )}
       {approval && <ApprovalModal approval={approval} resolve={(decision, message) => void resolveApproval(decision, message)} />}
       {confirmation && <ConfirmModal title={confirmation.title} message={confirmation.message} confirmLabel={confirmation.label} danger={confirmation.danger} close={() => setConfirmation(null)} confirm={() => { const action = confirmation.action; setConfirmation(null); action(); }} />}
       <Toasts items={toasts} />

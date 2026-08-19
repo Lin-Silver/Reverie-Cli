@@ -1,9 +1,11 @@
 import type { CoreActionName } from "../electron/core-actions";
 import type {
+  CustomProviderRecord,
   DesktopState,
   ModelSourcesState,
   PluginsState,
   PromptResult,
+  ProviderProbe,
   RecoveryState,
   SessionListState,
   SessionState,
@@ -17,6 +19,11 @@ import type {
 
 type EmptyPayload = Record<never, never>;
 type Envelope<Type extends string, Body extends object> = { id?: string | number | null; type: Type } & Body;
+/** Every custom-provider mutation answers with the record it touched plus fresh state. */
+type CustomProviderEnvelope = Envelope<
+  "custom-provider.updated",
+  { provider: CustomProviderRecord | null; models: ModelSourcesState; workspace: WorkspaceState }
+>;
 
 /** Decisions the approval prompt can return. `message` carries a free-form reply to the model. */
 export type ApprovalDecision = "once" | "session" | "deny" | "message";
@@ -80,6 +87,12 @@ interface CoreRequestMap {
   setProviderConfig: { payload: { source: string; patch: Record<string, unknown>; clearFields?: string[] }; response: Envelope<"provider.updated", { models: ModelSourcesState; workspace: WorkspaceState }> };
   addStandardModel: { payload: { model: Record<string, unknown> }; response: Envelope<"standard-model.updated", { index: number; models: ModelSourcesState; workspace: WorkspaceState }> };
   deleteStandardModel: { payload: { index: number }; response: Envelope<"standard-model.updated", { index: number; models: ModelSourcesState; workspace: WorkspaceState }> };
+  addCustomProvider: { payload: { provider: { name: string; base_url: string; api_key: string; format: string } }; response: CustomProviderEnvelope };
+  updateCustomProvider: { payload: { providerId: string; patch: Record<string, unknown> }; response: CustomProviderEnvelope };
+  deleteCustomProvider: { payload: { providerId: string }; response: CustomProviderEnvelope };
+  refreshCustomProviderModels: { payload: { providerId: string }; response: CustomProviderEnvelope };
+  selectCustomProviderModel: { payload: { providerId: string; modelId: string; contextLimit?: number }; response: CustomProviderEnvelope };
+  probeProviders: { payload: { keys?: string[] }; response: Envelope<"providers.probed", { probes: ProviderProbe[] }> };
   setPluginEnabled: { payload: { pluginId: string; enabled: boolean }; response: Envelope<"plugin.updated", { plugin_id: string; plugins: PluginsState; settings: SettingsState }> };
   setPluginTrust: { payload: { pluginId: string; trusted: boolean }; response: Envelope<"plugin.updated", { plugin_id: string; plugins: PluginsState; settings: SettingsState }> };
   refreshPlugins: { payload: EmptyPayload; response: Envelope<"plugins", { plugins: PluginsState }> };

@@ -314,8 +314,8 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
         "command": "/provider",
         "section": "Providers",
         "summary": "List every model source with its API-key flag and live availability, and add your own endpoints.",
-        "detail": "`/provider list` shows built-in sources and custom providers in one table and probes them in parallel, reporting online state, latency, and how many models each one publishes. `/provider add` collects exactly four fields - provider name, base URL, API key, and API request format - then fetches the live model list so you can pick a model. Custom providers are stored in the shared `config.json` under `custom_providers`, so a selection made here is what the next session uses. Supported formats are OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages.",
-        "overview": "list [--no-probe], add, <name>, <name> models|test|use|key|url|format|rename|remove",
+        "detail": "`/provider list` shows built-in sources and custom providers in one table and probes them in parallel, reporting online state, latency, and how many models each one publishes. `/provider add` collects exactly four fields - provider name, base URL, API key, and API request format - then fetches the live model list so you can pick a model. The first time you pick a model, Reverie asks for that model's context limit and remembers it, so later selections of the same model never ask again. Thinking mode is on by default and degrades to a plain request if the provider rejects it. Custom providers are stored in the shared `config.json` under `custom_providers`, so a selection made here is what the next session uses. Supported formats are OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages.",
+        "overview": "list [--no-probe], add, <name>, <name> models|test|use|context|thinking|key|url|format|rename|remove",
         "aliases": ["/providers"],
         "subcommands": [
             {"usage": "/provider list", "description": "List all sources with API-key flags and probe every reachable one in parallel."},
@@ -326,6 +326,8 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
             {"usage": "/provider <name> models <model-id>", "description": "Select a model directly without opening the selector."},
             {"usage": "/provider <name> test", "description": "Verify the provider with one real minimal chat request."},
             {"usage": "/provider <name> use", "description": "Make the provider the active model source."},
+            {"usage": "/provider <name> context [limit]", "description": "Set the context limit remembered for the selected model; accepts 128000, 128k, or 1.2m.", "example": "/provider xkiro context 256k"},
+            {"usage": "/provider <name> thinking on|off", "description": "Turn thinking mode on or off for this provider (on by default).", "example": "/provider xkiro thinking off"},
             {"usage": "/provider <name> key", "description": "Replace the stored API key."},
             {"usage": "/provider <name> url <base-url>", "description": "Change a custom provider's base URL."},
             {"usage": "/provider <name> format", "description": "Change a custom provider's API request format."},
@@ -333,7 +335,7 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
             {"usage": "/provider <name> enable|disable", "description": "Keep a custom provider stored but skip it while disabled."},
             {"usage": "/provider <name> remove", "description": "Delete a custom provider and its saved key after confirmation."},
         ],
-        "examples": ["/provider list", "/provider list --no-probe", "/provider add", "/provider xkiro models", "/provider xkiro test", "/provider xkiro use"],
+        "examples": ["/provider list", "/provider list --no-probe", "/provider add", "/provider xkiro models", "/provider xkiro context 256k", "/provider xkiro thinking off", "/provider xkiro test", "/provider xkiro use"],
     },
     "tools": {
         "command": "/tools",

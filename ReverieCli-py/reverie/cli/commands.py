@@ -8660,6 +8660,10 @@ class CommandHandler:
 
         if action in ("models", "model", "refresh", "sync"):
             return self._cmd_provider_models(row, value)
+        if action in ("context", "context-limit", "contextlimit", "window", "tokens"):
+            return self._cmd_provider_context(row, value)
+        if action in ("thinking", "think", "reasoning"):
+            return self._cmd_provider_thinking(row, value)
         if action in ("test", "check", "probe", "ping"):
             return self._cmd_provider_test(row, value)
         if action in ("use", "activate", "switch", "select"):
@@ -8692,6 +8696,8 @@ class CommandHandler:
             f"[{self.theme.PINK_SOFT}]/provider add[/{self.theme.PINK_SOFT}]                  Add a provider (name, base URL, API key, format)",
             f"[{self.theme.PINK_SOFT}]/provider <name>[/{self.theme.PINK_SOFT}]               Show one provider in detail",
             f"[{self.theme.PINK_SOFT}]/provider <name> models[/{self.theme.PINK_SOFT}]        Refresh the live model list and pick a model",
+            f"[{self.theme.PINK_SOFT}]/provider <name> context[/{self.theme.PINK_SOFT}]       Set the context limit for the selected model",
+            f"[{self.theme.PINK_SOFT}]/provider <name> thinking[/{self.theme.PINK_SOFT}]      Turn thinking mode on or off (on by default)",
             f"[{self.theme.PINK_SOFT}]/provider <name> test[/{self.theme.PINK_SOFT}]          Verify with one real minimal request",
             f"[{self.theme.PINK_SOFT}]/provider <name> use[/{self.theme.PINK_SOFT}]           Make it the active model source",
             f"[{self.theme.PINK_SOFT}]/provider <name> key[/{self.theme.PINK_SOFT}]           Replace the stored API key",
@@ -9040,8 +9046,11 @@ class CommandHandler:
     ) -> bool:
         """Refresh a custom provider's catalog, then persist the chosen model."""
         from ..custom_providers import (
+            custom_provider_model_needs_context_limit,
             fetch_custom_provider_models,
             find_custom_provider,
+            get_custom_provider_model_context_limit,
+            set_custom_provider_model_context_limit,
             upsert_custom_provider,
         )
 
@@ -9128,6 +9137,20 @@ class CommandHandler:
         if selected.get("vision") is not None:
             stored["supports_vision"] = bool(selected.get("vision"))
 
+        # A gateway's published window is often missing or wrong, so the limit is
+        # asked the first time a model is chosen and reused silently afterwards.
+        model_id = stored["selected_model_id"]
+        model_label = stored["selected_model_display_name"] or model_id
+        if custom_provider_model_needs_context_limit(stored, model_id):
+            limit = self._prompt_custom_provider_context_limit(
+                stored, model_id, model_label, first_time=True
+            )
+            stored = set_custom_provider_model_context_limit(stored, model_id, limit)
+            context_note = f"context limit {limit:,} tokens (saved)"
+        else:
+            saved_limit = get_custom_provider_model_context_limit(stored, model_id) or 0
+            context_note = f"context limit {saved_limit:,} tokens (saved earlier)"
+
         config.custom_providers = upsert_custom_provider(config.custom_providers, stored, activate=True)
         config.active_model_source = "custom"
         self._save_provider_config(config, config_manager, mirror_custom=True)
@@ -9137,6 +9160,7 @@ class CommandHandler:
             f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Switched to {escape(stored['name'])} model: "
             f"{escape(stored['selected_model_display_name'])} ({escape(stored['selected_model_id'])})[/{self.theme.MINT_VIBRANT}]"
         )
+        self.console.print(f"[{self.theme.TEXT_DIM}]{escape(context_note)}[/{self.theme.TEXT_DIM}]")
         self.console.print()
         return True
 
@@ -9147,7 +9171,7 @@ class CommandHandler:
             if delegate is not None:
                 return delegate()
 
-        from ..custom_providers import find_custom_provider
+        from ..custom_providers import find_custom_provider, get_custom_provider_model_context_limit
 
         config_manager = self.app.get('config_manager')
         config = config_manager.load() if config_manager else None
@@ -9161,6 +9185,10 @@ class CommandHandler:
         synced_text = (
             time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(synced)) if synced else "never"
         )
+        saved_limit = get_custom_provider_model_context_limit(record)
+        context_text = f"{int(record.get('max_context_tokens') or 0):,} tokens"
+        if saved_limit:
+            context_text += " (saved for this model)"
         lines = [
             f"[{self.theme.BLUE_SOFT}]Kind:[/{self.theme.BLUE_SOFT}] {'built-in source' if row.kind == 'builtin' else 'custom provider'}",
             f"[{self.theme.BLUE_SOFT}]Active:[/{self.theme.BLUE_SOFT}] {'YES' if row.active else 'no'}",
@@ -9170,7 +9198,9 @@ class CommandHandler:
             f"[{self.theme.BLUE_SOFT}]API key:[/{self.theme.BLUE_SOFT}] {escape(row.key_hint)}",
             f"[{self.theme.BLUE_SOFT}]Selected model:[/{self.theme.BLUE_SOFT}] {escape(row.selected_model_display_name or '(none)')}",
             f"[{self.theme.BLUE_SOFT}]Cached models:[/{self.theme.BLUE_SOFT}] {len(record.get('models') or [])} (synced {synced_text})",
-            f"[{self.theme.BLUE_SOFT}]Context window:[/{self.theme.BLUE_SOFT}] {int(record.get('max_context_tokens') or 0):,} tokens",
+            f"[{self.theme.BLUE_SOFT}]Context window:[/{self.theme.BLUE_SOFT}] {context_text}",
+            f"[{self.theme.BLUE_SOFT}]Saved limits:[/{self.theme.BLUE_SOFT}] {len(record.get('model_context_limits') or {})} model(s)",
+            f"[{self.theme.BLUE_SOFT}]Thinking:[/{self.theme.BLUE_SOFT}] {'on' if record.get('thinking', True) else 'off'}",
             f"[{self.theme.BLUE_SOFT}]Enabled:[/{self.theme.BLUE_SOFT}] {'YES' if row.enabled else 'no'}",
         ]
         self.console.print()
@@ -9184,7 +9214,7 @@ class CommandHandler:
             )
         )
         self.console.print(
-            f"[{self.theme.TEXT_DIM}]/provider {escape(row.key.split(':', 1)[-1])} models | test | use[/{self.theme.TEXT_DIM}]"
+            f"[{self.theme.TEXT_DIM}]/provider {escape(row.key.split(':', 1)[-1])} models | test | use | context | thinking[/{self.theme.TEXT_DIM}]"
         )
         self.console.print()
         return True
@@ -9215,6 +9245,161 @@ class CommandHandler:
             )
             return True
         return self._provider_sync_and_select(record, model_query=model_query)
+
+    def _prompt_custom_provider_context_limit(
+        self,
+        record: Dict[str, Any],
+        model_id: str,
+        model_label: str,
+        *,
+        first_time: bool = False,
+    ) -> int:
+        """Ask for one model's context limit, defaulting to the best guess we have.
+
+        Gateways rarely publish a trustworthy window, so the user is asked once per
+        model.  An unusable answer falls back to the suggested value rather than
+        leaving the model without a limit.
+        """
+        from ..custom_providers import (
+            CUSTOM_PROVIDER_MAX_CONTEXT_TOKENS,
+            CUSTOM_PROVIDER_MIN_CONTEXT_TOKENS,
+            parse_context_token_limit,
+            suggest_custom_provider_model_context_limit,
+        )
+
+        suggested = suggest_custom_provider_model_context_limit(record, model_id)
+        self.console.print()
+        if first_time:
+            self.console.print(
+                f"[{self.theme.PURPLE_SOFT}]{self.deco.SPARKLE} First time using "
+                f"{escape(model_label)} — set its context limit.[/{self.theme.PURPLE_SOFT}]"
+            )
+        self.console.print(
+            f"[{self.theme.TEXT_DIM}]Accepts 128000, 128k, or 1.2m "
+            f"({CUSTOM_PROVIDER_MIN_CONTEXT_TOKENS:,}-{CUSTOM_PROVIDER_MAX_CONTEXT_TOKENS:,} tokens). "
+            f"Press Enter to keep {suggested:,}.[/{self.theme.TEXT_DIM}]"
+        )
+
+        for _ in range(3):
+            answer = Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Context limit",
+                default=str(suggested),
+            )
+            limit = parse_context_token_limit(answer)
+            if limit:
+                return limit
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Not a usable context limit.[/{self.theme.CORAL_SOFT}]"
+            )
+
+        self.console.print(
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Using {suggested:,} tokens for now; "
+            f"change it later with /provider {escape(str(record.get('id') or ''))} context.[/{self.theme.AMBER_GLOW}]"
+        )
+        return suggested
+
+    def _cmd_provider_context(self, row: Any, value: str) -> bool:
+        """Set the context limit remembered for a custom provider's model."""
+        if row.kind == "builtin":
+            return self._provider_builtin_only(row, "the context limit")
+
+        from ..custom_providers import (
+            get_custom_provider_model_context_limit,
+            parse_context_token_limit,
+            set_custom_provider_model_context_limit,
+            upsert_custom_provider,
+        )
+
+        config_manager, config, record = self._load_custom_provider_record(row)
+        if record is None:
+            return True
+
+        model_id = str(record.get("selected_model_id") or "").strip()
+        if not model_id:
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} {escape(row.name)} has no model selected yet. "
+                f"Run /provider {escape(str(record.get('id') or ''))} models first.[/{self.theme.AMBER_GLOW}]"
+            )
+            return True
+        model_label = str(record.get("selected_model_display_name") or model_id)
+
+        typed = str(value or "").strip()
+        if typed:
+            limit = parse_context_token_limit(typed)
+            if not limit:
+                self.console.print(
+                    f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} '{escape(typed)}' is not a usable context "
+                    f"limit.[/{self.theme.CORAL_SOFT}]"
+                )
+                return True
+        else:
+            saved = get_custom_provider_model_context_limit(record, model_id)
+            if saved:
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]{escape(model_label)} currently uses {saved:,} "
+                    f"tokens.[/{self.theme.TEXT_DIM}]"
+                )
+            limit = self._prompt_custom_provider_context_limit(record, model_id, model_label)
+
+        record = set_custom_provider_model_context_limit(record, model_id, limit)
+        config.custom_providers = upsert_custom_provider(config.custom_providers, record)
+        self._save_provider_config(config, config_manager, mirror_custom=True)
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} {escape(model_label)} context limit set to "
+            f"{limit:,} tokens.[/{self.theme.MINT_VIBRANT}]"
+        )
+        return True
+
+    def _cmd_provider_thinking(self, row: Any, value: str) -> bool:
+        """Turn thinking mode on or off for one custom provider."""
+        if row.kind == "builtin":
+            return self._provider_builtin_only(row, "thinking mode")
+
+        from ..custom_providers import upsert_custom_provider
+
+        config_manager, config, record = self._load_custom_provider_record(row)
+        if record is None:
+            return True
+
+        current = bool(record.get("thinking", True))
+        typed = str(value or "").strip().lower()
+        if typed in ("on", "true", "yes", "enable", "enabled", "1"):
+            enabled = True
+        elif typed in ("off", "false", "no", "disable", "disabled", "0"):
+            enabled = False
+        elif typed in ("toggle", "flip", "switch"):
+            enabled = not current
+        elif typed in ("status", "show", ""):
+            if not typed:
+                enabled = Confirm.ask(
+                    f"[{self.theme.BLUE_SOFT}]Thinking mode for {escape(row.name)}?[/{self.theme.BLUE_SOFT}]",
+                    default=current,
+                )
+            else:
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]{escape(row.name)} thinking mode: "
+                    f"{'on' if current else 'off'}[/{self.theme.TEXT_DIM}]"
+                )
+                return True
+        else:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Use on, off, or toggle.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        record["thinking"] = enabled
+        config.custom_providers = upsert_custom_provider(config.custom_providers, record)
+        self._save_provider_config(config, config_manager, mirror_custom=True)
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Thinking mode "
+            f"{'enabled' if enabled else 'disabled'} for {escape(row.name)}.[/{self.theme.MINT_VIBRANT}]"
+        )
+        if enabled:
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Providers that reject the thinking flags fall back to a plain "
+                f"request automatically.[/{self.theme.TEXT_DIM}]"
+            )
+        return True
 
     def _render_provider_probe(
         self,

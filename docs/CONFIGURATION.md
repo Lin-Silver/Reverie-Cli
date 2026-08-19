@@ -309,6 +309,10 @@ The `custom_providers` section stores the providers you added with `/provider ad
         "max_tokens": 16384,
         "timeout": 60,
         "supports_vision": false,
+        "thinking": true,
+        "model_context_limits": {
+          "z-ai/glm-5": 200000
+        },
         "custom_headers": {},
         "models": [],
         "models_synced_at": 1771459200.0
@@ -322,10 +326,14 @@ The `custom_providers` section stores the providers you added with `/provider ad
 - `format` is one of `openai-chat` (POST `/chat/completions`), `openai-responses` (POST `/responses`), or `anthropic` (POST `/messages` with `x-api-key`). It decides both how the model list is read and which transport runs the chat request.
 - `api_key_env` names an environment variable to read the key from instead of storing it; a stored `api_key` wins when both are set.
 - `models` is the catalog cached from the provider's own model-list endpoint, refreshed by `/provider <name> models`. `models_synced_at` is the epoch seconds of the last successful refresh.
+- `model_context_limits` maps a lowercased model id to the context limit you confirmed for it. Reverie asks once, the first time you select that model, and reuses the saved value on every later selection; models you never select stay absent. A saved limit outranks the window the gateway published for that model and drives `max_context_tokens` at runtime. Edit it with `/provider <name> context 256k` (`128000`, `128k`, and `1.2m` are accepted; values outside 1,000-10,000,000 tokens are rejected, and unparseable entries are dropped on load).
+- `thinking` turns thinking mode on or off for this provider and defaults to `true`. It is sent as OpenAI-compatible thinking flags; a gateway that rejects them causes one automatic retry without them for that request, leaving the stored setting alone. Change it with `/provider <name> thinking off`.
 - `active_provider_id` selects which provider runs when `active_model_source` is `custom`. A provider needs a base URL, a resolvable key, and a selected model before it becomes usable.
 - Up to 64 providers can be stored.
 
 `/provider list` probes each provider's model-list endpoint in parallel and reports online state, latency, and model count. `/provider <name> test` instead sends one minimal chat request, which is the only way to verify sources with no catalog endpoint.
+
+The Desktop app edits the same section under **Settings → 模型与提供商 → Custom Provider**, including the per-model context limit and the thinking toggle. Stored API keys never leave the core: the desktop payload carries only a masked hint.
 
 ## Plugin SDK Depot
 

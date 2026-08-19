@@ -23,8 +23,12 @@ from reverie.cli.help_catalog import HELP_TOPICS, normalize_help_topic
 from reverie.config import EXTERNAL_MODEL_SOURCES, Config, ConfigManager
 from reverie.custom_providers import (
     CUSTOM_PROVIDER_ANTHROPIC_VERSION,
+    CUSTOM_PROVIDER_COMMAND_ACTIONS,
+    CUSTOM_PROVIDER_DEFAULT_CONTEXT_TOKENS,
     CUSTOM_PROVIDER_FORMATS,
+    CUSTOM_PROVIDER_MAX_CONTEXT_TOKENS,
     CUSTOM_PROVIDER_MAX_PROVIDERS,
+    build_custom_provider_command_completions,
     build_custom_provider_openai_options,
     build_custom_provider_runtime_model_data,
     custom_provider_auth_headers,
@@ -32,23 +36,28 @@ from reverie.custom_providers import (
     custom_provider_format_choices,
     custom_provider_format_label,
     custom_provider_models_url,
+    custom_provider_model_needs_context_limit,
     custom_provider_transport,
     default_custom_provider,
     default_custom_providers_config,
     fetch_custom_provider_models,
     find_custom_provider,
+    get_custom_provider_model_context_limit,
     list_custom_providers,
     mask_secret,
     normalize_custom_provider,
     normalize_custom_provider_format,
     normalize_custom_providers_config,
+    parse_context_token_limit,
     probe_custom_provider,
     probe_custom_provider_chat,
     remove_custom_provider,
     resolve_active_custom_provider,
     resolve_custom_provider_api_key,
     resolve_custom_provider_base_url,
+    set_custom_provider_model_context_limit,
     slugify_provider_name,
+    suggest_custom_provider_model_context_limit,
     upsert_custom_provider,
 )
 from reverie.request_identity import REVERIE_CLIENT_HEADER
@@ -478,6 +487,158 @@ def test_an_ambiguous_prefix_resolves_to_nothing() -> None:
     section = upsert_custom_provider(section, {"id": "relay-b", "name": "relay-b"})
 
     assert find_custom_provider(section, "relay") is None
+
+
+# --------------------------------------------------------------------------
+# Per-model context limits and thinking mode
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "typed, expected",
+    [
+        ("128000", 128000),
+        ("128k", 128000),
+        ("128K", 128000),
+        ("1.2m", 1200000),
+        ("  256,000 tokens ", 256000),
+        ("32_000", 32000),
+        (200000, 200000),
+        ("999", None),  # below the floor a real window could have
+        ("", None),
+        ("plenty", None),
+        (None, None),
+        (True, None),  # a bool is never a token count
+    ],
+)
+def test_a_typed_context_limit_is_parsed_or_refused(typed, expected) -> None:
+    assert parse_context_token_limit(typed) == expected
+
+
+def test_an_absurd_context_limit_is_clamped_rather_than_refused() -> None:
+    assert parse_context_token_limit("900m") == CUSTOM_PROVIDER_MAX_CONTEXT_TOKENS
+
+
+def test_thinking_mode_is_on_by_default_and_can_be_turned_off() -> None:
+    assert normalize_custom_provider(_xkiro_record())["thinking"] is True
+    assert normalize_custom_provider(_xkiro_record(thinking=False))["thinking"] is False
+    assert normalize_custom_provider(_xkiro_record(thinking="off"))["thinking"] is False
+
+
+def test_a_fresh_record_owes_a_limit_for_every_model() -> None:
+    record = normalize_custom_provider(_xkiro_record())
+
+    assert record["model_context_limits"] == {}
+    assert custom_provider_model_needs_context_limit(record, "kiro-pro") is True
+    assert get_custom_provider_model_context_limit(record, "kiro-pro") is None
+
+
+def test_a_saved_limit_is_reused_and_never_asked_for_twice() -> None:
+    record = set_custom_provider_model_context_limit(_xkiro_record(), "Kiro-Pro", "256k")
+
+    # The key is case-folded, so the same model is recognized however it is typed.
+    assert record["model_context_limits"] == {"kiro-pro": 256000}
+    assert custom_provider_model_needs_context_limit(record, "kiro-pro") is False
+    assert get_custom_provider_model_context_limit(record, "KIRO-PRO") == 256000
+
+    # A model the user never chose is left alone.
+    assert custom_provider_model_needs_context_limit(record, "kiro-mini") is True
+
+
+def test_the_selected_model_limit_is_the_default_lookup() -> None:
+    record = set_custom_provider_model_context_limit(_xkiro_record(), "kiro-pro", 256000)
+
+    assert get_custom_provider_model_context_limit(record) == 256000
+
+
+def test_a_bad_answer_cannot_erase_a_saved_limit() -> None:
+    record = set_custom_provider_model_context_limit(_xkiro_record(), "kiro-pro", 256000)
+    record = set_custom_provider_model_context_limit(record, "kiro-pro", "nonsense")
+
+    assert record["model_context_limits"] == {"kiro-pro": 256000}
+
+
+def test_a_suggested_limit_prefers_the_saved_value_then_the_published_window() -> None:
+    record = _xkiro_record()
+
+    # Published by the gateway.
+    assert suggest_custom_provider_model_context_limit(record, "kiro-pro") == 200000
+    # Not in the catalog at all.
+    assert (
+        suggest_custom_provider_model_context_limit(record, "kiro-ghost")
+        == CUSTOM_PROVIDER_DEFAULT_CONTEXT_TOKENS
+    )
+    # Saved by the user, which outranks whatever the gateway published.
+    saved = set_custom_provider_model_context_limit(record, "kiro-pro", 256000)
+    assert suggest_custom_provider_model_context_limit(saved, "kiro-pro") == 256000
+
+
+def test_hand_edited_limits_are_filtered_when_the_config_loads() -> None:
+    record = normalize_custom_provider(
+        _xkiro_record(
+            model_context_limits={
+                "Kiro-Pro": "256k",
+                "kiro-mini": 0,
+                "": 128000,
+                "kiro-broken": "plenty",
+            }
+        )
+    )
+
+    assert record["model_context_limits"] == {"kiro-pro": 256000}
+
+
+def test_a_saved_limit_outranks_the_published_context_window() -> None:
+    record = set_custom_provider_model_context_limit(_xkiro_record(), "kiro-pro", 256000)
+    section = upsert_custom_provider(default_custom_providers_config(), record, activate=True)
+
+    data = build_custom_provider_runtime_model_data(section)
+
+    assert data["max_context_tokens"] == 256000  # not the catalog's 200000
+    assert data["thinking_mode"] == "true"
+
+
+def test_thinking_mode_reaches_the_runtime_payload_as_a_string() -> None:
+    section = upsert_custom_provider(
+        default_custom_providers_config(), _xkiro_record(thinking=False), activate=True
+    )
+
+    assert build_custom_provider_runtime_model_data(section)["thinking_mode"] == "false"
+
+
+# --------------------------------------------------------------------------
+# Generated command completions
+# --------------------------------------------------------------------------
+
+
+def test_every_stored_provider_contributes_its_own_commands() -> None:
+    section = upsert_custom_provider(default_custom_providers_config(), _xkiro_record())
+
+    completions = build_custom_provider_command_completions(section)
+
+    assert len(completions) == len(CUSTOM_PROVIDER_COMMAND_ACTIONS)
+    for action, _ in CUSTOM_PROVIDER_COMMAND_ACTIONS:
+        command = f"/provider xkiro{' ' + action if action else ''}"
+        assert command in completions
+        assert completions[command].startswith("xkiro: ")
+    for expected in ("/provider xkiro models", "/provider xkiro context", "/provider xkiro thinking"):
+        assert expected in completions
+
+
+def test_command_completions_follow_the_provider_id_not_its_display_name() -> None:
+    section = upsert_custom_provider(
+        default_custom_providers_config(), {"id": "x-kiro-relay", "name": "X Kiro Relay"}
+    )
+
+    completions = build_custom_provider_command_completions(section)
+
+    assert "/provider x-kiro-relay models" in completions
+    assert completions["/provider x-kiro-relay models"].startswith("X Kiro Relay: ")
+
+
+def test_no_providers_generate_no_commands() -> None:
+    assert build_custom_provider_command_completions(default_custom_providers_config()) == {}
+    assert build_custom_provider_command_completions(None) == {}
 
 
 # --------------------------------------------------------------------------
@@ -954,11 +1115,33 @@ def _install_fake_selector(monkeypatch, model_id: str) -> None:
     monkeypatch.setattr(tui_selector, "ModelSelector", FakeSelector)
 
 
+def _install_fake_prompts(monkeypatch, *answers: str) -> list:
+    """Answer Rich prompts in order and record every question that was asked.
+
+    Choosing a model now asks for that model's context limit the first time, so
+    command tests declare the answers they expect to be needed; anything asked
+    beyond that falls back to the offered default.
+    """
+    asked: list = []
+    remaining = list(answers)
+
+    def fake_ask(prompt="", **kwargs):
+        asked.append(str(prompt))
+        if remaining:
+            return remaining.pop(0)
+        return str(kwargs.get("default", "") or "")
+
+    monkeypatch.setattr(commands_module.Prompt, "ask", staticmethod(fake_ask))
+    return asked
+
+
 def test_adding_a_provider_asks_for_exactly_four_fields(tmp_path, monkeypatch) -> None:
     handler, config_manager = _handler(tmp_path, monkeypatch)
 
     asked: list = []
-    answers = iter(["xkiro", "api.xkiro.invalid/v1/chat/completions", "xk-live-abcdef123456", "1"])
+    answers = iter(
+        ["xkiro", "api.xkiro.invalid/v1/chat/completions", "xk-live-abcdef123456", "1", "256k"]
+    )
 
     def fake_ask(prompt="", **kwargs):
         asked.append(str(prompt))
@@ -974,8 +1157,11 @@ def test_adding_a_provider_asks_for_exactly_four_fields(tmp_path, monkeypatch) -
 
     assert handler.cmd_provider("add") is True
 
-    # Exactly four questions: name, base URL, API key, request format.
-    assert len(asked) == 4
+    # Exactly four questions describe the provider: name, base URL, API key,
+    # request format.  The only extra question belongs to the chosen model, and
+    # it is asked once per model rather than once per provider.
+    assert len(asked) == 5
+    assert "Context limit" in asked[4]
 
     reloaded = config_manager.load()
     record = find_custom_provider(reloaded.custom_providers, "xkiro")
@@ -984,6 +1170,7 @@ def test_adding_a_provider_asks_for_exactly_four_fields(tmp_path, monkeypatch) -
     assert record["api_key"] == "xk-live-abcdef123456"
     assert record["format"] == "openai-chat"
     assert record["selected_model_id"] == "kiro-pro"
+    assert record["model_context_limits"] == {"kiro-pro": 256000}
     assert record["models_synced_at"] > 0
     assert reloaded.active_model_source == "custom"
 
@@ -1021,12 +1208,144 @@ def test_selecting_a_model_by_query_skips_the_selector(tmp_path, monkeypatch) ->
     config_manager.save(config)
 
     _install_fake_get(monkeypatch, {"data": [{"id": "kiro-pro"}, {"id": "kiro-mini"}]}, [])
+    _install_fake_prompts(monkeypatch, "64k")
 
     assert handler.cmd_provider("xkiro models kiro-mini") is True
 
     record = find_custom_provider(config_manager.load().custom_providers, "xkiro")
     assert record["selected_model_id"] == "kiro-mini"
     assert config_manager.load().active_model_source == "custom"
+
+
+def test_a_models_context_limit_is_asked_once_and_reused_afterwards(tmp_path, monkeypatch) -> None:
+    handler, config_manager = _handler(tmp_path, monkeypatch)
+
+    config = config_manager.load()
+    config.custom_providers = upsert_custom_provider(
+        config.custom_providers, _xkiro_record(selected_model_id="")
+    )
+    config_manager.save(config)
+
+    _install_fake_get(monkeypatch, {"data": [{"id": "kiro-pro"}, {"id": "kiro-mini"}]}, [])
+    asked = _install_fake_prompts(monkeypatch, "64k")
+
+    assert handler.cmd_provider("xkiro models kiro-mini") is True
+
+    assert len(asked) == 1
+    assert "Context limit" in asked[0]
+    record = find_custom_provider(config_manager.load().custom_providers, "xkiro")
+    assert record["model_context_limits"] == {"kiro-mini": 64000}
+
+    # Choosing the same model again reuses the stored limit without asking.
+    cp._MODEL_CACHE.clear()
+    asked.clear()
+    assert handler.cmd_provider("xkiro models kiro-mini") is True
+
+    assert asked == []
+    assert "64,000 tokens (saved earlier)" in _output(handler)
+
+    # A different model of the same provider still owes an answer.
+    asked.clear()
+    cp._MODEL_CACHE.clear()
+    assert handler.cmd_provider("xkiro models kiro-pro") is True
+
+    assert len(asked) == 1
+    limits = find_custom_provider(config_manager.load().custom_providers, "xkiro")[
+        "model_context_limits"
+    ]
+    assert limits == {"kiro-mini": 64000, "kiro-pro": CUSTOM_PROVIDER_DEFAULT_CONTEXT_TOKENS}
+
+
+def test_the_saved_limit_drives_the_runtime_model_after_a_catalog_refresh(
+    tmp_path, monkeypatch
+) -> None:
+    handler, config_manager = _handler(tmp_path, monkeypatch)
+
+    config = config_manager.load()
+    config.custom_providers = upsert_custom_provider(
+        config.custom_providers, _xkiro_record(selected_model_id="")
+    )
+    config_manager.save(config)
+
+    # The gateway publishes 200k; the user says 256k, and the user wins.
+    _install_fake_get(monkeypatch, {"data": [{"id": "kiro-pro", "context_length": 200000}]}, [])
+    _install_fake_prompts(monkeypatch, "256k")
+
+    assert handler.cmd_provider("xkiro models kiro-pro") is True
+
+    section = config_manager.load().custom_providers
+    assert build_custom_provider_runtime_model_data(section)["max_context_tokens"] == 256000
+
+
+def test_the_context_command_stores_a_typed_limit(tmp_path, monkeypatch) -> None:
+    handler, config_manager = _handler(tmp_path, monkeypatch)
+
+    config = config_manager.load()
+    config.custom_providers = upsert_custom_provider(
+        config.custom_providers, _xkiro_record(), activate=True
+    )
+    config_manager.save(config)
+
+    assert handler.cmd_provider("xkiro context 256k") is True
+
+    record = find_custom_provider(config_manager.load().custom_providers, "xkiro")
+    assert record["model_context_limits"] == {"kiro-pro": 256000}
+    assert "256,000 tokens" in _output(handler)
+
+
+def test_the_context_command_refuses_a_nonsense_limit(tmp_path, monkeypatch) -> None:
+    handler, config_manager = _handler(tmp_path, monkeypatch)
+
+    config = config_manager.load()
+    config.custom_providers = upsert_custom_provider(config.custom_providers, _xkiro_record())
+    config_manager.save(config)
+
+    assert handler.cmd_provider("xkiro context plenty") is True
+
+    assert "not a usable context limit" in _output(handler)
+    assert find_custom_provider(config_manager.load().custom_providers, "xkiro")[
+        "model_context_limits"
+    ] == {}
+
+
+def test_the_context_command_needs_a_selected_model(tmp_path, monkeypatch) -> None:
+    handler, config_manager = _handler(tmp_path, monkeypatch)
+
+    config = config_manager.load()
+    config.custom_providers = upsert_custom_provider(
+        config.custom_providers, _xkiro_record(selected_model_id="")
+    )
+    config_manager.save(config)
+
+    assert handler.cmd_provider("xkiro context 256k") is True
+
+    assert "no model selected yet" in _output(handler)
+
+
+def test_the_thinking_command_turns_the_stored_flag_off_and_back_on(tmp_path, monkeypatch) -> None:
+    handler, config_manager = _handler(tmp_path, monkeypatch)
+
+    config = config_manager.load()
+    config.custom_providers = upsert_custom_provider(config.custom_providers, _xkiro_record())
+    config_manager.save(config)
+
+    assert handler.cmd_provider("xkiro thinking off") is True
+    assert find_custom_provider(config_manager.load().custom_providers, "xkiro")["thinking"] is False
+
+    assert handler.cmd_provider("xkiro thinking on") is True
+    assert find_custom_provider(config_manager.load().custom_providers, "xkiro")["thinking"] is True
+
+    assert handler.cmd_provider("xkiro thinking toggle") is True
+    assert find_custom_provider(config_manager.load().custom_providers, "xkiro")["thinking"] is False
+
+
+def test_context_and_thinking_are_custom_only(tmp_path, monkeypatch) -> None:
+    handler, _ = _handler(tmp_path, monkeypatch)
+
+    assert handler.cmd_provider("codex context 256k") is True
+    assert handler.cmd_provider("codex thinking off") is True
+
+    assert _output(handler).count("built-in source") == 2
 
 
 def test_action_first_word_order_is_accepted(tmp_path, monkeypatch) -> None:
@@ -1037,6 +1356,7 @@ def test_action_first_word_order_is_accepted(tmp_path, monkeypatch) -> None:
     config_manager.save(config)
 
     _install_fake_get(monkeypatch, {"data": [{"id": "kiro-pro"}, {"id": "kiro-mini"}]}, [])
+    _install_fake_prompts(monkeypatch, "64k")
 
     assert handler.cmd_provider("models xkiro kiro-mini") is True
     assert find_custom_provider(config_manager.load().custom_providers, "xkiro")["selected_model_id"] == "kiro-mini"
@@ -1104,5 +1424,17 @@ def test_provider_help_documents_the_command_surface() -> None:
     topic = HELP_TOPICS["provider"]
     assert topic["command"] == "/provider"
     subcommands = " ".join(str(item) for item in topic["subcommands"])
-    for expected in ("list", "add", "models", "test", "use", "key", "url", "format", "remove"):
+    for expected in (
+        "list",
+        "add",
+        "models",
+        "test",
+        "use",
+        "key",
+        "url",
+        "format",
+        "remove",
+        "context",
+        "thinking",
+    ):
         assert expected in subcommands

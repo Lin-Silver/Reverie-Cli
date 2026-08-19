@@ -292,6 +292,11 @@ def build_model_sources_payload(config: Config, *, fetch_live: bool = False) -> 
         }
         if source != "standard":
             source_payload["config"] = _safe_provider_config(source, config)
+        if source == "custom":
+            # The GUI edits a list of records, not one flat section, so it needs
+            # every provider rather than only the active one.
+            source_payload["custom_providers"] = custom_provider_entries(config)
+            source_payload["custom_provider_formats"] = custom_provider_format_options()
         if source in {"sensenova", "opencode"}:
             source_payload["catalog_live"] = bool(models) and all(
                 item.get("catalog_source") == "api" for item in models
@@ -496,7 +501,10 @@ def apply_provider_config_patch(
     if normalized_source == "standard":
         raise ValueError("Standard models are edited through the standard model actions.")
     if normalized_source == "custom":
-        raise ValueError("Custom providers are edited through the /provider commands.")
+        raise ValueError(
+            "Custom providers are a list of records, not a flat section; "
+            "edit them with the custom provider actions or /provider."
+        )
     field_specs = {item["key"]: item for item in _PROVIDER_CONFIG_FIELDS.get(normalized_source, [])}
     provider_config = dict(getattr(config, normalized_source, {}) or {})
     for key, value in dict(patch or {}).items():
@@ -575,3 +583,358 @@ def delete_standard_model(config: Config, index: int) -> None:
         raise ValueError("Standard model index is out of range.")
     config.models.pop(index)
     config.active_model_index = min(config.active_model_index, max(0, len(config.models) - 1))
+
+
+def custom_provider_format_options() -> List[Dict[str, str]]:
+    """Return the API request formats the desktop add-provider form may offer."""
+    from .custom_providers import custom_provider_format_choices
+
+    return [dict(choice) for choice in custom_provider_format_choices()]
+
+
+def _custom_provider_entry(config: Config, record: Dict[str, Any]) -> Dict[str, Any]:
+    """Describe one provider for the desktop without leaking its API key."""
+    from .custom_providers import (
+        custom_provider_format_label,
+        custom_provider_models_url,
+        get_custom_provider_model_context_limit,
+        mask_secret,
+        resolve_custom_provider_api_key,
+        suggest_custom_provider_model_context_limit,
+    )
+
+    resolved_key = resolve_custom_provider_api_key(record)
+    stored_key = str(record.get("api_key") or "").strip()
+    key_source = "config" if stored_key else "env" if resolved_key else "none"
+    models = []
+    for item in record.get("models", []):
+        model = _normalized_model("custom", item, record)
+        # The desktop needs to know which models still owe the user a context
+        # limit, so it can ask once on first selection just like the CLI does.
+        saved_limit = get_custom_provider_model_context_limit(record, model.get("id"))
+        model["context_limit"] = int(saved_limit or 0)
+        model["needs_context_limit"] = not saved_limit
+        model["suggested_context_limit"] = int(
+            suggest_custom_provider_model_context_limit(record, model.get("id"))
+        )
+        models.append(model)
+    active_provider_id = str(
+        (getattr(config, "custom_providers", {}) or {}).get("active_provider_id") or ""
+    ).strip()
+    return {
+        "id": str(record.get("id") or ""),
+        "name": str(record.get("name") or record.get("id") or ""),
+        "base_url": str(record.get("base_url") or ""),
+        "models_url": custom_provider_models_url(record),
+        "format": str(record.get("format") or ""),
+        "format_label": custom_provider_format_label(record.get("format")),
+        "enabled": bool(record.get("enabled", True)),
+        "active": bool(
+            record.get("id")
+            and record.get("id") == active_provider_id
+            and normalize_active_model_source(getattr(config, "active_model_source", "standard")) == "custom"
+        ),
+        "api_key_masked": mask_secret(resolved_key),
+        "api_key_configured": bool(resolved_key),
+        "api_key_source": key_source,
+        "selected_model_id": str(record.get("selected_model_id") or ""),
+        "selected_model_display_name": str(record.get("selected_model_display_name") or ""),
+        "max_context_tokens": int(record.get("max_context_tokens") or 0),
+        "max_tokens": int(record.get("max_tokens") or 0),
+        "supports_vision": bool(record.get("supports_vision", False)),
+        "thinking": bool(record.get("thinking", True)),
+        "model_context_limits": {
+            str(key): int(value)
+            for key, value in (record.get("model_context_limits") or {}).items()
+            if value
+        },
+        "models_synced_at": float(record.get("models_synced_at") or 0.0),
+        "models": models,
+    }
+
+
+def custom_provider_entries(config: Config) -> List[Dict[str, Any]]:
+    """Return every registered custom provider, key-masked, in stored order."""
+    from .custom_providers import list_custom_providers
+
+    return [
+        _custom_provider_entry(config, record)
+        for record in list_custom_providers(getattr(config, "custom_providers", {}))
+    ]
+
+
+def _require_custom_provider(config: Config, provider_ref: Any) -> Dict[str, Any]:
+    from .custom_providers import find_custom_provider
+
+    record = find_custom_provider(getattr(config, "custom_providers", {}), provider_ref)
+    if not record:
+        raise ValueError(f"No custom provider matches '{provider_ref}'.")
+    return record
+
+
+def _sync_custom_provider_models(
+    config: Config,
+    record: Dict[str, Any],
+    *,
+    force_refresh: bool = True,
+) -> Dict[str, Any]:
+    """Fetch the live catalog for one provider and store it on the record.
+
+    Raises the transport failure so the desktop can show why a refresh failed
+    instead of silently rendering a stale list.
+    """
+    import time
+
+    from .custom_providers import fetch_custom_provider_models, upsert_custom_provider
+
+    models = fetch_custom_provider_models(record, force_refresh=force_refresh)
+    updated = dict(record)
+    updated["models"] = models
+    updated["models_synced_at"] = time.time()
+    config.custom_providers = upsert_custom_provider(
+        getattr(config, "custom_providers", {}), updated
+    )
+    return _require_custom_provider(config, updated["id"])
+
+
+def create_custom_provider(config: Config, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Register one provider from the four desktop inputs and pull its catalog.
+
+    Validation mirrors ``/provider add`` so the GUI cannot create a record the
+    CLI would have rejected.
+    """
+    from .config import EXTERNAL_MODEL_SOURCES
+    from .custom_providers import (
+        CUSTOM_PROVIDER_MAX_PROVIDERS,
+        default_custom_provider,
+        list_custom_providers,
+        resolve_custom_provider_base_url,
+        slugify_provider_name,
+        upsert_custom_provider,
+    )
+
+    existing = list_custom_providers(getattr(config, "custom_providers", {}))
+    if len(existing) >= CUSTOM_PROVIDER_MAX_PROVIDERS:
+        raise ValueError(f"Provider limit reached ({CUSTOM_PROVIDER_MAX_PROVIDERS}). Remove one first.")
+
+    name = str(payload.get("name") or "").strip()
+    provider_id = slugify_provider_name(name)
+    if not provider_id:
+        raise ValueError("Provider name must contain letters or digits.")
+    if provider_id in set(EXTERNAL_MODEL_SOURCES) | {"standard", "custom"}:
+        raise ValueError(f"'{provider_id}' is a built-in source name. Pick another.")
+    if any(record["id"] == provider_id for record in existing):
+        raise ValueError(f"Provider '{provider_id}' already exists.")
+
+    base_url = resolve_custom_provider_base_url(payload.get("base_url"))
+    if not base_url:
+        raise ValueError("A base URL is required.")
+    api_key = str(payload.get("api_key") or "").strip()
+    if not api_key:
+        raise ValueError("An API key is required.")
+
+    provider = default_custom_provider(
+        provider_id=provider_id,
+        name=name,
+        base_url=base_url,
+        api_key=api_key,
+        provider_format=payload.get("format") or payload.get("provider_format") or "openai-chat",
+    )
+    config.custom_providers = upsert_custom_provider(getattr(config, "custom_providers", {}), provider)
+    record = _require_custom_provider(config, provider_id)
+    try:
+        record = _sync_custom_provider_models(config, record)
+    except Exception as error:  # The provider is saved; the catalog can be retried.
+        return {**_custom_provider_entry(config, record), "sync_error": str(error)}
+    return _custom_provider_entry(config, record)
+
+
+def update_custom_provider(
+    config: Config, provider_ref: Any, patch: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Edit one provider's four fields, preserving an omitted API key."""
+    from .custom_providers import (
+        normalize_custom_provider_format,
+        resolve_custom_provider_base_url,
+        upsert_custom_provider,
+    )
+
+    record = dict(_require_custom_provider(config, provider_ref))
+    patch = dict(patch or {})
+    unsupported = set(patch) - {"name", "base_url", "api_key", "format", "enabled", "thinking"}
+    if unsupported:
+        raise ValueError(f"Unsupported custom provider field: {sorted(unsupported)[0]}")
+
+    endpoint_changed = False
+    if "name" in patch:
+        name = str(patch.get("name") or "").strip()
+        if not name:
+            raise ValueError("Provider name cannot be empty.")
+        record["name"] = name
+    if "base_url" in patch:
+        base_url = resolve_custom_provider_base_url(patch.get("base_url"))
+        if not base_url:
+            raise ValueError("A base URL is required.")
+        endpoint_changed = endpoint_changed or base_url != record.get("base_url")
+        record["base_url"] = base_url
+    if "api_key" in patch and str(patch.get("api_key") or "").strip():
+        api_key = str(patch["api_key"]).strip()
+        endpoint_changed = endpoint_changed or api_key != record.get("api_key")
+        record["api_key"] = api_key
+    if "format" in patch:
+        provider_format = normalize_custom_provider_format(patch.get("format"))
+        endpoint_changed = endpoint_changed or provider_format != record.get("format")
+        record["format"] = provider_format
+    if "enabled" in patch:
+        record["enabled"] = bool(patch["enabled"])
+    if "thinking" in patch:
+        record["thinking"] = bool(patch["thinking"])
+
+    config.custom_providers = upsert_custom_provider(getattr(config, "custom_providers", {}), record)
+    stored = _require_custom_provider(config, record["id"])
+    if endpoint_changed:
+        try:
+            stored = _sync_custom_provider_models(config, stored)
+        except Exception as error:  # Keep the edit; report the failed refresh.
+            _resync_active_custom_provider(config)
+            return {**_custom_provider_entry(config, stored), "sync_error": str(error)}
+    _resync_active_custom_provider(config)
+    return _custom_provider_entry(config, stored)
+
+
+def delete_custom_provider(config: Config, provider_ref: Any) -> None:
+    """Remove one provider and fall back to the standard source when needed."""
+    from .custom_providers import remove_custom_provider
+
+    record = _require_custom_provider(config, provider_ref)
+    config.custom_providers, removed = remove_custom_provider(
+        getattr(config, "custom_providers", {}), record["id"]
+    )
+    if not removed:
+        raise ValueError(f"No custom provider matches '{provider_ref}'.")
+    _resync_active_custom_provider(config)
+
+
+def refresh_custom_provider_models(config: Config, provider_ref: Any) -> Dict[str, Any]:
+    """Re-fetch one provider's catalog from its live ``/models`` endpoint."""
+    record = _require_custom_provider(config, provider_ref)
+    stored = _sync_custom_provider_models(config, record)
+    _resync_active_custom_provider(config)
+    return _custom_provider_entry(config, stored)
+
+
+def select_custom_provider_model(
+    config: Config, provider_ref: Any, model_id: Any, context_limit: Any = None
+) -> Dict[str, Any]:
+    """Activate one provider and pin the model the user picked.
+
+    The desktop only ever offers models from the catalog it rendered, so an id
+    that is not in the stored catalog means a stale view rather than a
+    pre-refresh selection worth honouring.
+
+    ``context_limit`` carries the answer to the first-selection prompt.  When it
+    is omitted and the model has no stored limit, the suggested default is saved
+    so no selected model is ever left without one.
+    """
+    from .custom_providers import (
+        custom_provider_model_needs_context_limit,
+        parse_context_token_limit,
+        set_custom_provider_model_context_limit,
+        suggest_custom_provider_model_context_limit,
+        upsert_custom_provider,
+    )
+
+    record = dict(_require_custom_provider(config, provider_ref))
+    wanted = str(model_id or "").strip()
+    selected = next(
+        (
+            dict(item)
+            for item in record.get("models") or []
+            if str(item.get("id") or "").lower() == wanted.lower()
+        ),
+        None,
+    )
+    if not selected:
+        raise ValueError(
+            f"Model '{wanted}' is not in {record.get('name') or record.get('id')}'s catalog. Refresh it first."
+        )
+    record["enabled"] = True
+    record["selected_model_id"] = str(selected.get("id") or "")
+    record["selected_model_display_name"] = str(selected.get("display_name") or selected.get("id") or "")
+
+    requested_limit = parse_context_token_limit(context_limit)
+    if context_limit not in (None, "") and not requested_limit:
+        raise ValueError(f"'{context_limit}' is not a usable context limit.")
+    if not requested_limit and custom_provider_model_needs_context_limit(record, record["selected_model_id"]):
+        requested_limit = suggest_custom_provider_model_context_limit(record, record["selected_model_id"])
+    if requested_limit:
+        record = set_custom_provider_model_context_limit(
+            record, record["selected_model_id"], requested_limit
+        )
+
+    config.custom_providers = upsert_custom_provider(
+        getattr(config, "custom_providers", {}), record, activate=True
+    )
+    config.active_model_source = "custom"
+    return _custom_provider_entry(config, _require_custom_provider(config, record["id"]))
+
+
+def _resync_active_custom_provider(config: Config) -> None:
+    """Re-run the section normalizer and leave ``custom`` only if it still works."""
+    from .custom_providers import (
+        build_custom_provider_runtime_model_data,
+        normalize_custom_providers_config,
+    )
+
+    config.custom_providers = normalize_custom_providers_config(
+        getattr(config, "custom_providers", {})
+    )
+    if normalize_active_model_source(getattr(config, "active_model_source", "standard")) != "custom":
+        return
+    if not build_custom_provider_runtime_model_data(config.custom_providers):
+        config.active_model_source = "standard"
+
+
+def probe_provider_availability(
+    config: Config, keys: Optional[List[str]] = None, *, timeout: int = 10
+) -> List[Dict[str, Any]]:
+    """Probe sources concurrently, mirroring what ``/provider list`` reports.
+
+    ``keys`` accepts the row keys from the returned payload (``custom:<id>`` for
+    a user-added provider, the bare source id for a built-in); omitting it
+    probes every source.
+    """
+    from .provider_probe import collect_provider_rows, probe_provider_rows
+
+    wanted = {str(key).strip() for key in keys or [] if str(key).strip()}
+    rows = [row for row in collect_provider_rows(config) if not wanted or row.key in wanted]
+    probes = probe_provider_rows(rows, timeout=timeout)
+    results: List[Dict[str, Any]] = []
+    for row in rows:
+        probe = probes.get(row.key)
+        entry: Dict[str, Any] = {
+            "key": row.key,
+            "name": row.name,
+            "kind": row.kind,
+            "source": row.source,
+            "provider_id": "",
+            "format_label": row.format_label,
+            "base_url": row.base_url,
+            "key_state": row.key_state,
+            "key_hint": row.key_hint,
+            "active": row.active,
+            "enabled": row.enabled,
+            "probeable": row.probeable,
+            "probe_note": row.probe_note,
+        }
+        entry.update(
+            probe.to_dict()
+            if probe
+            else {"status": "not-probed", "latency_ms": None, "model_count": 0, "detail": row.probe_note}
+        )
+        # ``to_dict`` carries the probe's own name/id, which for a built-in row is
+        # a synthesized stand-in record; the row is the authority here.
+        entry["name"] = row.name
+        entry["provider_id"] = str(row.record.get("id") or "") if row.kind == "custom" else ""
+        results.append(entry)
+    return results

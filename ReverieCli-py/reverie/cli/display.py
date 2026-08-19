@@ -1510,6 +1510,19 @@ class DisplayComponents:
             # Internal bookkeeping event only. Rendering this before every tool
             # result makes NVIDIA/OpenAI-compatible streams noisy while waiting.
             return True
+        if event_type == "model_response":
+            # The closing half of the same bookkeeping pair: the response text
+            # itself starts streaming immediately after, which is the real signal.
+            return True
+        if event_type == "model_error":
+            self.show_activity_event(
+                category=str(event.get("category", "") or "Model"),
+                message=str(event.get("message", "") or "").strip(),
+                status=str(event.get("status", "") or "error"),
+                detail=str(event.get("detail", "") or "").strip(),
+                meta=str(event.get("meta", "") or "").strip(),
+            )
+            return True
         if event_type == "tool_review":
             self.show_tool_review_event(event)
             return True

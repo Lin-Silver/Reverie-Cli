@@ -372,9 +372,20 @@ def main(argv: list[str] | None = None):
         action='store_true',
         help='Print the machine-readable desktop kernel compatibility record and exit'
     )
-    
+
+    parser.add_argument(
+        '--debug',
+        action='store_true',
+        help='Show internal diagnostics such as raw stream events (or set REVERIE_DEBUG=1)'
+    )
+
     args = parser.parse_args(argv)
-    
+
+    if args.debug:
+        from reverie.runtime_flags import set_debug_mode
+
+        set_debug_mode(True)
+
     if args.version:
         print(f"Reverie Cli v{__version__}")
         print(f"Release status: {RELEASE_STATUS}")

@@ -207,6 +207,80 @@ export interface ConfigField {
   max?: number;
 }
 
+export interface CustomProviderFormat {
+  id: string;
+  label: string;
+  description: string;
+}
+
+export interface CustomProviderRecord {
+  id: string;
+  name: string;
+  base_url: string;
+  models_url: string;
+  format: string;
+  format_label: string;
+  enabled: boolean;
+  active: boolean;
+  /** Masked for display; the raw key never leaves the core. */
+  api_key_masked: string;
+  api_key_configured: boolean;
+  api_key_source: "config" | "env" | "none";
+  selected_model_id: string;
+  selected_model_display_name: string;
+  max_context_tokens: number;
+  max_tokens: number;
+  supports_vision: boolean;
+  /** Thinking mode is on by default for custom providers. */
+  thinking: boolean;
+  /** Context limits the user has confirmed, keyed by lowercased model id. */
+  model_context_limits: Record<string, number>;
+  models_synced_at: number;
+  models: CustomProviderModel[];
+  /** Present when the record saved but its catalog call failed. */
+  sync_error?: string;
+}
+
+export interface CustomProviderModel extends ModelRecord {
+  /** Tokens the user confirmed for this model, or 0 when never asked. */
+  context_limit: number;
+  /** True until the user has confirmed this model's context limit once. */
+  needs_context_limit: boolean;
+  /** What to prefill when asking for the limit. */
+  suggested_context_limit: number;
+}
+
+export type ProviderProbeStatus =
+  | "online"
+  | "empty"
+  | "unauthorized"
+  | "throttled"
+  | "offline"
+  | "error"
+  | "unconfigured"
+  | "not-probed";
+
+export interface ProviderProbe {
+  key: string;
+  name: string;
+  kind: "builtin" | "custom";
+  source: string;
+  provider_id: string;
+  format_label: string;
+  base_url: string;
+  key_state: string;
+  key_hint: string;
+  active: boolean;
+  enabled: boolean;
+  probeable: boolean;
+  probe_note: string;
+  status: ProviderProbeStatus;
+  latency_ms: number | null;
+  model_count: number;
+  detail: string;
+  probe: string;
+}
+
 export interface ModelSource {
   id: string;
   display_name: string;
@@ -226,6 +300,8 @@ export interface ModelSource {
     tti: number;
     ttv: number;
   };
+  custom_providers?: CustomProviderRecord[];
+  custom_provider_formats?: CustomProviderFormat[];
 }
 
 export interface ModelSourcesState {

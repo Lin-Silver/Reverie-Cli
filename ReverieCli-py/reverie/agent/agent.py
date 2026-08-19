@@ -1556,6 +1556,58 @@ def _should_retry_without_tooling(status_code: Any) -> bool:
     return isinstance(status_code, int) and 400 <= status_code < 600 and status_code != 429
 
 
+# Thinking is enabled by default, and a gateway that does not understand the
+# flags must degrade to a plain request instead of failing the turn.
+_THINKING_HINT_FIELDS = ("chat_template_kwargs", "enable_thinking", "clear_thinking")
+
+
+def _has_thinking_hints(payload: Dict[str, Any]) -> bool:
+    """Whether this request carries Reverie's thinking flags."""
+    extra_body = payload.get("extra_body")
+    if not isinstance(extra_body, dict):
+        return False
+    return any(field in extra_body for field in _THINKING_HINT_FIELDS)
+
+
+def _without_thinking_hints(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Drop only the thinking flags, preserving every other request field."""
+    prepared = dict(payload or {})
+    extra_body = prepared.get("extra_body")
+    if isinstance(extra_body, dict):
+        cleaned = {key: value for key, value in extra_body.items() if key not in _THINKING_HINT_FIELDS}
+        if cleaned:
+            prepared["extra_body"] = cleaned
+        else:
+            prepared.pop("extra_body", None)
+    return prepared
+
+
+def _is_thinking_hint_rejection(error: BaseException) -> bool:
+    """Whether a failure looks like the provider refusing the thinking flags."""
+    status = getattr(error, "status_code", None)
+    if not isinstance(status, int):
+        status = getattr(getattr(error, "response", None), "status_code", None)
+    if isinstance(status, int) and (status == 429 or not 400 <= status < 500):
+        return False
+    text = str(error or "").lower()
+    response = getattr(error, "response", None)
+    if response is not None:
+        text = f"{text} {str(getattr(response, 'text', '') or '')}".lower()
+    if not text:
+        return False
+    if any(field in text for field in _THINKING_HINT_FIELDS):
+        return True
+    if "thinking" not in text and "extra_body" not in text:
+        return False
+    return any(
+        marker in text
+        for marker in (
+            "unexpected", "unknown", "unsupported", "not supported", "unrecognized",
+            "invalid", "not permitted", "extra field", "extra fields", "additional propert",
+        )
+    )
+
+
 def _compact_payload_for_plain_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Build a minimal chat payload for small/local compatibility providers."""
     compact_payload = _strip_tooling_from_payload(payload)
@@ -3647,6 +3699,7 @@ class ReverieAgent:
         call_kwargs = apply_openai_prompt_cache(kwargs, namespace="agent-chat")
         fresh_user_query_retry_used = False
         prompt_cache_fallback_used = False
+        thinking_fallback_used = False
 
         for attempt in range(retries + 1):
             try:
@@ -3664,6 +3717,15 @@ class ReverieAgent:
                     logger.warning("Provider rejected prompt-cache hints; retrying once without them")
                     call_kwargs = without_prompt_cache(call_kwargs)
                     prompt_cache_fallback_used = True
+                    continue
+                if (
+                    not thinking_fallback_used
+                    and _has_thinking_hints(call_kwargs)
+                    and _is_thinking_hint_rejection(exc)
+                ):
+                    logger.warning("Provider rejected the thinking flags; retrying once without them")
+                    call_kwargs = _without_thinking_hints(call_kwargs)
+                    thinking_fallback_used = True
                     continue
                 if (
                     (

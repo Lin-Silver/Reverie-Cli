@@ -122,7 +122,14 @@ def test_standard_source_provider_label_uses_call_method(provider: str, expected
 
 
 def test_unconfigured_standard_source_has_neutral_provider_label() -> None:
-    assert ReverieInterface._resolve_provider_label(object(), Config()) == "Custom Provider"
+    # With no model configured there is no call method to name, so the label falls
+    # back to the source's own display name.
+    assert ReverieInterface._resolve_provider_label(object(), Config()) == MODEL_SOURCE_DISPLAY_NAMES["standard"]
+
+
+def test_unnamed_custom_source_falls_back_to_the_source_display_name() -> None:
+    config = Config(active_model_source="custom")
+    assert ReverieInterface._resolve_provider_label(object(), config) == MODEL_SOURCE_DISPLAY_NAMES["custom"]
 
 
 def test_source_display_table_covers_every_supported_source() -> None:

@@ -69,6 +69,7 @@ from ..agnes import build_agnes_openai_options
 from ..opencode import build_opencode_openai_options
 from ..sensenova import build_sensenova_openai_options
 from ..modelscope import build_modelscope_openai_options
+from ..custom_providers import build_custom_provider_openai_options
 from ..webgemini import (
     generate_webgemini_message,
     iter_webgemini_text_deltas,
@@ -2458,6 +2459,16 @@ class ReverieAgent:
             except Exception:
                 return timeout_value
 
+        if self._is_active_model_source("custom"):
+            try:
+                from ..custom_providers import resolve_active_custom_provider
+
+                record = resolve_active_custom_provider(getattr(config, "custom_providers", {}))
+                if record:
+                    return max(timeout_value, int(record.get("timeout", timeout_value)))
+            except Exception:
+                return timeout_value
+
         return timeout_value
 
     def _build_request_headers(self, stream: bool) -> Dict[str, str]:
@@ -3571,6 +3582,12 @@ class ReverieAgent:
                 model_for_sdk,
             )
             extra_body = provider_options.get("extra_body")
+        elif self._is_active_model_source("custom"):
+            provider_options = build_custom_provider_openai_options(
+                getattr(self.config, "custom_providers", {}),
+                model_id=model_for_sdk,
+            )
+            extra_body = self._openai_extra_body_for_thinking()
         else:
             extra_body = self._openai_extra_body_for_thinking()
             if extra_body is not None and isinstance(model_for_sdk, str) and "(" in model_for_sdk and ")" in model_for_sdk:
@@ -3839,6 +3856,17 @@ class ReverieAgent:
             try:
                 cfg = getattr(self.config, "sensenova", {})
                 candidate = int(cfg.get("max_tokens", max_tokens)) if isinstance(cfg, dict) else max_tokens
+                if candidate > 0:
+                    return candidate
+            except Exception:
+                return max_tokens
+        if self._is_active_model_source("custom"):
+            try:
+                options = build_custom_provider_openai_options(
+                    getattr(self.config, "custom_providers", {}),
+                    model_id=self.model,
+                )
+                candidate = int(options.get("max_tokens", max_tokens))
                 if candidate > 0:
                     return candidate
             except Exception:
@@ -5393,6 +5421,12 @@ class ReverieAgent:
                     model_for_sdk,
                 )
                 extra_body = provider_options.get("extra_body")
+            elif self._is_active_model_source("custom"):
+                provider_options = build_custom_provider_openai_options(
+                    getattr(self.config, "custom_providers", {}),
+                    model_id=model_for_sdk,
+                )
+                extra_body = self._openai_extra_body_for_thinking()
             else:
                 extra_body = self._openai_extra_body_for_thinking()
             if extra_body is not None and isinstance(model_for_sdk, str) and "(" in model_for_sdk and ")" in model_for_sdk:
@@ -5921,6 +5955,12 @@ class ReverieAgent:
                     model_for_sdk,
                 )
                 extra_body = provider_options.get("extra_body")
+            elif self._is_active_model_source("custom"):
+                provider_options = build_custom_provider_openai_options(
+                    getattr(self.config, "custom_providers", {}),
+                    model_id=model_for_sdk,
+                )
+                extra_body = self._openai_extra_body_for_thinking()
             else:
                 extra_body = self._openai_extra_body_for_thinking()
             if extra_body is not None and isinstance(model_for_sdk, str) and "(" in model_for_sdk and ")" in model_for_sdk:

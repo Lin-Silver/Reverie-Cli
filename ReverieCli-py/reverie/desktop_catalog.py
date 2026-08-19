@@ -83,6 +83,20 @@ _SECRET_FIELDS = {"api_key", "cookie", "xsrf_token"}
 
 def _external_catalog(source: str, config: Config, *, fetch_live: bool = False) -> List[Dict[str, Any]]:
     """Load one provider catalog using the provider's native helper."""
+    if source == "custom":
+        from .custom_providers import (
+            get_custom_provider_model_catalog,
+            resolve_active_custom_provider,
+        )
+
+        provider = resolve_active_custom_provider(getattr(config, "custom_providers", {}))
+        if not provider:
+            return []
+        return get_custom_provider_model_catalog(
+            provider,
+            fetch_live=fetch_live,
+            force_refresh=fetch_live,
+        )
     if source == "codex":
         from .codex import get_codex_model_catalog
 
@@ -223,8 +237,21 @@ def _normalized_model(source: str, raw_model: Dict[str, Any], provider_config: D
     return model
 
 
+def _raw_provider_config(source: str, config: Config) -> Dict[str, Any]:
+    """Return the provider settings dict backing one source.
+
+    Custom providers live in a list under ``custom_providers``, so the active
+    record stands in for the flat section the built-in sources use.
+    """
+    if source == "custom":
+        from .custom_providers import resolve_active_custom_provider
+
+        return dict(resolve_active_custom_provider(getattr(config, "custom_providers", {})) or {})
+    return dict(getattr(config, source, {}) or {})
+
+
 def _safe_provider_config(source: str, config: Config) -> Dict[str, Any]:
-    provider_config = dict(getattr(config, source, {}) or {})
+    provider_config = _raw_provider_config(source, config)
     configured_secrets: Dict[str, bool] = {}
     for key in _SECRET_FIELDS:
         if key in provider_config:
@@ -238,7 +265,7 @@ def build_model_sources_payload(config: Config, *, fetch_live: bool = False) -> 
     sources: List[Dict[str, Any]] = []
     active_source = normalize_active_model_source(getattr(config, "active_model_source", "standard"))
     for source in SUPPORTED_ACTIVE_MODEL_SOURCES:
-        provider_config = dict(getattr(config, source, {}) or {}) if source != "standard" else {}
+        provider_config = _raw_provider_config(source, config) if source != "standard" else {}
         raw_models = _standard_catalog(config) if source == "standard" else _external_catalog(source, config, fetch_live=fetch_live)
         models = [_normalized_model(source, item, provider_config) for item in raw_models]
         selected_id = ""
@@ -323,6 +350,34 @@ def _catalog_match(catalog: List[Dict[str, Any]], query: Any) -> Optional[Dict[s
     return matches[0] if len(matches) == 1 else None
 
 
+def _apply_custom_provider_selection(config: Config, selected: Dict[str, Any]) -> Dict[str, Any]:
+    """Store a model choice on the active custom provider record."""
+    from .custom_providers import resolve_active_custom_provider, upsert_custom_provider
+
+    provider = resolve_active_custom_provider(getattr(config, "custom_providers", {}))
+    if not provider:
+        raise ValueError("No custom provider is configured. Add one with /provider add.")
+    provider = dict(provider)
+    provider["selected_model_id"] = str(selected.get("id") or "")
+    provider["selected_model_display_name"] = str(selected.get("display_name") or selected.get("id") or "")
+    if selected.get("context_length"):
+        provider["max_context_tokens"] = int(selected["context_length"])
+    if selected.get("max_output_tokens"):
+        provider["max_tokens"] = min(
+            int(provider.get("max_tokens") or selected["max_output_tokens"]),
+            int(selected["max_output_tokens"]),
+        )
+    if selected.get("vision") is not None:
+        provider["supports_vision"] = bool(selected.get("vision"))
+    config.custom_providers = upsert_custom_provider(
+        getattr(config, "custom_providers", {}),
+        provider,
+        activate=True,
+    )
+    config.active_model_source = "custom"
+    return selected
+
+
 def apply_model_selection(
     config: Config,
     source: Any,
@@ -334,14 +389,18 @@ def apply_model_selection(
     catalog = (
         _standard_catalog(config)
         if normalized_source == "standard"
-        else _external_catalog(normalized_source, config, fetch_live=normalized_source in {"sensenova", "opencode"})
+        else _external_catalog(
+            normalized_source,
+            config,
+            fetch_live=normalized_source in {"sensenova", "opencode", "custom"},
+        )
     )
     selection_query = model_id
     if not str(selection_query or "").strip():
         selection_query = (
             str(getattr(config, "active_model_index", 0))
             if normalized_source == "standard"
-            else str((getattr(config, normalized_source, {}) or {}).get("selected_model_id") or "")
+            else str(_raw_provider_config(normalized_source, config).get("selected_model_id") or "")
         )
     selected = _catalog_match(catalog, selection_query)
     if selected is None:
@@ -351,6 +410,9 @@ def apply_model_selection(
         config.active_model_index = int(selected["id"])
         config.active_model_source = "standard"
         return selected
+
+    if normalized_source == "custom":
+        return _apply_custom_provider_selection(config, selected)
 
     provider_config = dict(getattr(config, normalized_source, {}) or {})
     provider_config["selected_model_id"] = str(selected.get("id") or "")
@@ -433,6 +495,8 @@ def apply_provider_config_patch(
     normalized_source = normalize_active_model_source(source)
     if normalized_source == "standard":
         raise ValueError("Standard models are edited through the standard model actions.")
+    if normalized_source == "custom":
+        raise ValueError("Custom providers are edited through the /provider commands.")
     field_specs = {item["key"]: item for item in _PROVIDER_CONFIG_FIELDS.get(normalized_source, [])}
     provider_config = dict(getattr(config, normalized_source, {}) or {})
     for key, value in dict(patch or {}).items():

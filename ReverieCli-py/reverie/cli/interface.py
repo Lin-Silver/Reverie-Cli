@@ -1278,6 +1278,7 @@ class ReverieInterface:
             "nvidia": "/nvidia key or /nvidia activate",
             "modelscope": "/modelscope key or /modelscope activate",
             "webgemini": "/webgemini activate",
+            "custom": "/provider list or /provider add",
         }
         command_hint = source_commands.get(source, "/model")
         return f"Use {command_hint} or edit {config_path}, then continue in the same TUI session."
@@ -1376,6 +1377,13 @@ class ReverieInterface:
         }
         if source_name == "standard":
             return provider_labels.get(provider_name, model_source_display_name(source_name))
+        if source_name == "custom":
+            # Show the provider the user named, not the generic source label.
+            from ..custom_providers import resolve_active_custom_provider
+
+            provider = resolve_active_custom_provider(getattr(config, "custom_providers", {}))
+            if provider:
+                return str(provider.get("name") or provider.get("id") or "").strip() or model_source_display_name(source_name)
         return model_source_display_name(source_name)
 
     def _format_startup_timing_meta(self, meta: str = "") -> str:

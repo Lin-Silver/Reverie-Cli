@@ -68,7 +68,7 @@ _PERMISSION_MODE_INPUTS = {
 # Model sources the Auto Check reviewer can be pinned to.
 _REVIEW_MODEL_SOURCES = {
     "standard", "nvidia", "codex", "modelscope", "sensenova",
-    "aihubmix", "agnes", "webgemini", "opencode",
+    "aihubmix", "agnes", "webgemini", "opencode", "custom",
 }
 
 
@@ -105,6 +105,8 @@ class CommandHandler:
             'sense': self.cmd_sensenova,
             'nvidia': self.cmd_nvidia,
             'modelscope': self.cmd_modelscope,
+            'provider': self.cmd_provider,
+            'providers': self.cmd_provider,
             'mode': self.cmd_mode,
             'status': self.cmd_status,
             'doctor': self.cmd_doctor,
@@ -8577,6 +8579,1004 @@ class CommandHandler:
             model_query=model_query,
             post_select_config=self._configure_nvidia_thinking_for_model,
         )
+
+    # ------------------------------------------------------------------
+    # /provider - one surface over built-in sources and custom providers
+    # ------------------------------------------------------------------
+
+    # Probe status -> (label, theme attribute name).
+    _PROVIDER_STATUS_LABELS = {
+        "online": ("online", "MINT_VIBRANT"),
+        "ok": ("online", "MINT_VIBRANT"),
+        "empty": ("no models", "AMBER_GLOW"),
+        "unauthorized": ("unauthorized", "CORAL_SOFT"),
+        "throttled": ("throttled", "AMBER_GLOW"),
+        "offline": ("offline", "CORAL_VIBRANT"),
+        "error": ("error", "CORAL_SOFT"),
+        "unconfigured": ("not configured", "TEXT_MUTED"),
+        "skipped": ("skipped", "TEXT_MUTED"),
+    }
+    # Subcommands that may be written before the provider name.
+    _PROVIDER_ACTION_FIRST = {"test", "check", "probe", "models", "model", "use", "activate", "remove", "delete"}
+
+    def cmd_provider(self, args: str) -> bool:
+        """Manage every model provider: built-in sources plus custom endpoints."""
+        raw = str(args or "").strip()
+        if not raw:
+            return self._cmd_provider_list(probe=False)
+
+        try:
+            tokens = [token for token in shlex.split(raw) if token]
+        except ValueError:
+            tokens = raw.split()
+        if not tokens:
+            return self._cmd_provider_list(probe=False)
+
+        head = tokens[0].lower()
+        rest = tokens[1:]
+
+        if head in ("list", "ls", "all"):
+            fast = any(token.lower() in ("--no-probe", "--fast", "fast", "quick", "offline") for token in rest)
+            return self._cmd_provider_list(probe=not fast)
+        if head in ("add", "new", "create"):
+            return self._cmd_provider_add()
+        if head in ("help", "usage", "?"):
+            return self._cmd_provider_usage()
+        if head in ("test", "check", "probe") and not rest:
+            return self._cmd_provider_list(probe=True)
+
+        # Accept "/provider test xkiro" as well as "/provider xkiro test".
+        if head in self._PROVIDER_ACTION_FIRST and rest:
+            tokens = [rest[0], head, *rest[1:]]
+            head, rest = tokens[0].lower(), tokens[1:]
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        from ..provider_probe import collect_provider_rows, find_provider_row
+
+        rows = collect_provider_rows(config_manager.load())
+        row = find_provider_row(rows, head)
+        if row is None:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Unknown provider: {escape(tokens[0])}[/{self.theme.CORAL_SOFT}]"
+            )
+            known = ", ".join(item.key.split(":", 1)[-1] for item in rows)
+            self.console.print(f"[{self.theme.TEXT_DIM}]Known providers: {escape(known)}[/{self.theme.TEXT_DIM}]")
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Add your own with /provider add.[/{self.theme.TEXT_DIM}]"
+            )
+            return True
+
+        if not rest:
+            return self._cmd_provider_detail(row)
+
+        action = rest[0].lower()
+        value = " ".join(rest[1:]).strip()
+
+        if action in ("models", "model", "refresh", "sync"):
+            return self._cmd_provider_models(row, value)
+        if action in ("test", "check", "probe", "ping"):
+            return self._cmd_provider_test(row, value)
+        if action in ("use", "activate", "switch", "select"):
+            return self._cmd_provider_activate(row)
+        if action in ("status", "info", "show", "detail"):
+            return self._cmd_provider_detail(row)
+        if action in ("key", "apikey", "api-key", "login", "token"):
+            return self._cmd_provider_key(row, value)
+        if action in ("url", "base-url", "baseurl", "endpoint"):
+            return self._cmd_provider_url(row, value)
+        if action in ("format", "type", "api-format", "kind"):
+            return self._cmd_provider_format(row, value)
+        if action in ("rename", "name", "label"):
+            return self._cmd_provider_rename(row, value)
+        if action in ("remove", "delete", "rm", "del"):
+            return self._cmd_provider_remove(row)
+        if action in ("enable", "disable", "on", "off"):
+            return self._cmd_provider_toggle(row, action in ("enable", "on"))
+
+        self.console.print(
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Unknown action: {escape(action)}[/{self.theme.AMBER_GLOW}]"
+        )
+        return self._cmd_provider_usage()
+
+    def _cmd_provider_usage(self) -> bool:
+        """Print the /provider command surface."""
+        lines = [
+            f"[{self.theme.PINK_SOFT}]/provider list[/{self.theme.PINK_SOFT}]                 All sources with key flags, probed in parallel",
+            f"[{self.theme.PINK_SOFT}]/provider list --no-probe[/{self.theme.PINK_SOFT}]      Same table without any network calls",
+            f"[{self.theme.PINK_SOFT}]/provider add[/{self.theme.PINK_SOFT}]                  Add a provider (name, base URL, API key, format)",
+            f"[{self.theme.PINK_SOFT}]/provider <name>[/{self.theme.PINK_SOFT}]               Show one provider in detail",
+            f"[{self.theme.PINK_SOFT}]/provider <name> models[/{self.theme.PINK_SOFT}]        Refresh the live model list and pick a model",
+            f"[{self.theme.PINK_SOFT}]/provider <name> test[/{self.theme.PINK_SOFT}]          Verify with one real minimal request",
+            f"[{self.theme.PINK_SOFT}]/provider <name> use[/{self.theme.PINK_SOFT}]           Make it the active model source",
+            f"[{self.theme.PINK_SOFT}]/provider <name> key[/{self.theme.PINK_SOFT}]           Replace the stored API key",
+            f"[{self.theme.PINK_SOFT}]/provider <name> url[/{self.theme.PINK_SOFT}]           Change the base URL",
+            f"[{self.theme.PINK_SOFT}]/provider <name> format[/{self.theme.PINK_SOFT}]        Change the API request format",
+            f"[{self.theme.PINK_SOFT}]/provider <name> rename[/{self.theme.PINK_SOFT}]        Rename a custom provider",
+            f"[{self.theme.PINK_SOFT}]/provider <name> remove[/{self.theme.PINK_SOFT}]        Delete a custom provider",
+        ]
+        self.console.print()
+        self.console.print(
+            Panel(
+                Text.from_markup("\n".join(lines)),
+                title=f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Providers {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]",
+                border_style=self.theme.BORDER_PRIMARY,
+                box=box.ROUNDED,
+                padding=(1, 2),
+            )
+        )
+        self.console.print()
+        return True
+
+    def _provider_status_cell(self, status: str) -> str:
+        """Render one probe status as themed markup."""
+        label, color_attr = self._PROVIDER_STATUS_LABELS.get(
+            str(status or "").strip().lower(), (str(status or "unknown"), "TEXT_DIM")
+        )
+        color = getattr(self.theme, color_attr, self.theme.TEXT_DIM)
+        return f"[{color}]{label}[/{color}]"
+
+    def _provider_key_cell(self, row: Any) -> str:
+        """Render the API key column: configured flag plus masked hint."""
+        state = str(getattr(row, "key_state", "") or "")
+        if state == "set":
+            return f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} {escape(row.key_hint)}[/{self.theme.MINT_VIBRANT}]"
+        if state == "env":
+            return f"[{self.theme.MINT_SOFT}]{self.deco.CHECK_FANCY} {escape(row.key_hint)}[/{self.theme.MINT_SOFT}]"
+        if state == "n/a":
+            return f"[{self.theme.TEXT_MUTED}]{escape(row.key_hint)}[/{self.theme.TEXT_MUTED}]"
+        return f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} not set[/{self.theme.CORAL_SOFT}]"
+
+    def _cmd_provider_list(self, *, probe: bool) -> bool:
+        """List every source with its key flag and, optionally, live availability."""
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        from ..provider_probe import collect_provider_rows, probe_provider_rows
+
+        rows = collect_provider_rows(config_manager.load())
+        probes: Dict[str, Any] = {}
+        if probe:
+            probeable = [row for row in rows if row.probeable and row.record]
+            with self.console.status(
+                f"[{self.theme.PURPLE_SOFT}]{self.deco.SPARKLE} Probing {len(probeable)} providers in parallel...[/{self.theme.PURPLE_SOFT}]"
+            ):
+                probes = probe_provider_rows(rows, timeout=10, max_workers=8)
+
+        table = Table(
+            show_header=True,
+            box=box.ROUNDED,
+            border_style=self.theme.BORDER_PRIMARY,
+            expand=True,
+        )
+        table.add_column("Provider", style=f"bold {self.theme.PINK_SOFT}", no_wrap=True)
+        table.add_column("Kind", style=self.theme.TEXT_DIM, no_wrap=True)
+        table.add_column("Format", style=self.theme.TEXT_SECONDARY, no_wrap=True)
+        table.add_column("API Key", no_wrap=True)
+        table.add_column("Model", style=self.theme.TEXT_SECONDARY)
+        if probe:
+            table.add_column("Status", no_wrap=True)
+            table.add_column("Latency", justify="right", style=self.theme.TEXT_DIM, no_wrap=True)
+            table.add_column("Models", justify="right", style=self.theme.TEXT_DIM, no_wrap=True)
+
+        notes: List[str] = []
+        for row in rows:
+            marker = f"[{self.theme.MINT_VIBRANT}]{self.deco.DIAMOND_FILLED}[/{self.theme.MINT_VIBRANT}] " if row.active else "  "
+            disabled = "" if row.enabled else f" [{self.theme.TEXT_MUTED}](disabled)[/{self.theme.TEXT_MUTED}]"
+            name_cell = f"{marker}{escape(row.name)}{disabled}"
+            model_cell = escape(row.selected_model_display_name or "-")
+            cells = [
+                name_cell,
+                "built-in" if row.kind == "builtin" else "custom",
+                escape(row.format_label),
+                self._provider_key_cell(row),
+                model_cell,
+            ]
+            if probe:
+                result = probes.get(row.key)
+                if result is None:
+                    cells.extend([f"[{self.theme.TEXT_MUTED}]not probed[/{self.theme.TEXT_MUTED}]", "-", "-"])
+                    if row.probe_note:
+                        notes.append(f"[{self.theme.TEXT_DIM}]{escape(row.name)}: {escape(row.probe_note)}[/{self.theme.TEXT_DIM}]")
+                else:
+                    cells.extend(
+                        [
+                            self._provider_status_cell(result.status),
+                            f"{result.latency_ms} ms" if result.latency_ms else "-",
+                            str(result.model_count or "-"),
+                        ]
+                    )
+                    if result.status != "online" and result.detail:
+                        notes.append(
+                            f"[{self.theme.TEXT_DIM}]{escape(row.name)}: {escape(result.detail)}[/{self.theme.TEXT_DIM}]"
+                        )
+            table.add_row(*cells)
+
+        self.console.print()
+        self.console.print(table)
+        for note in notes:
+            self.console.print(note)
+        self.console.print()
+        if not probe:
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Run /provider list to probe every provider in parallel.[/{self.theme.TEXT_DIM}]"
+            )
+        self.console.print(
+            f"[{self.theme.TEXT_DIM}]Add your own endpoint with /provider add, then /provider <name> models.[/{self.theme.TEXT_DIM}]"
+        )
+        self.console.print()
+        return True
+
+    def _provider_builtin_delegate(self, source: str, action: str) -> Optional[Callable[..., bool]]:
+        """Map a built-in source action onto its dedicated command handler."""
+        delegates: Dict[str, Dict[str, Callable[..., bool]]] = {
+            "models": {
+                "codex": self._cmd_codex_model,
+                "webgemini": self._cmd_webgemini_model,
+                "opencode": self._cmd_opencode_model,
+                "aihubmix": self._cmd_aihubmix_model,
+                "agnes": self._cmd_agnes_model,
+                "sensenova": self._cmd_sensenova_model,
+                "modelscope": self._cmd_modelscope_model,
+                "nvidia": self._cmd_nvidia_model,
+            },
+            "status": {
+                "codex": self._cmd_codex_status,
+                "webgemini": self._cmd_webgemini_status,
+                "opencode": self._cmd_opencode_status,
+                "aihubmix": self._cmd_aihubmix_status,
+                "agnes": self._cmd_agnes_status,
+                "sensenova": self._cmd_sensenova_status,
+                "modelscope": self._cmd_modelscope_status,
+                "nvidia": self._cmd_nvidia_status,
+            },
+            "activate": {
+                "codex": self._cmd_codex_activate,
+                "webgemini": self._cmd_webgemini_activate,
+                "opencode": self._cmd_opencode_activate,
+                "aihubmix": self._cmd_aihubmix_activate,
+                "agnes": self._cmd_agnes_activate,
+                "sensenova": self._cmd_sensenova_activate,
+                "modelscope": self._cmd_modelscope_activate,
+                "nvidia": self._cmd_nvidia_activate,
+            },
+            "key": {
+                "opencode": self._cmd_opencode_key,
+                "aihubmix": self._cmd_aihubmix_key,
+                "agnes": self._cmd_agnes_key,
+                "sensenova": self._cmd_sensenova_key,
+                "modelscope": self._cmd_modelscope_key,
+                "nvidia": self._cmd_nvidia_key,
+            },
+        }
+        return delegates.get(action, {}).get(source)
+
+    def _provider_builtin_only(self, row: Any, action: str) -> bool:
+        """Explain that a field belongs to the built-in source's own command."""
+        self.console.print(
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} {escape(row.name)} is a built-in source; "
+            f"{escape(action)} is managed by /{escape(row.source)}.[/{self.theme.AMBER_GLOW}]"
+        )
+        self.console.print(
+            f"[{self.theme.TEXT_DIM}]/provider add creates a custom provider you can edit here.[/{self.theme.TEXT_DIM}]"
+        )
+        return True
+
+    def _save_provider_config(self, config: Any, config_manager: Any, *, mirror_custom: bool = False) -> None:
+        """Persist config, mirroring custom providers into the shared config.json."""
+        config_manager.save(config)
+        if mirror_custom and config_manager.is_workspace_mode():
+            from ..config import Config, ConfigManager
+
+            project_root = self.app.get('project_root')
+            if project_root:
+                global_manager = ConfigManager(project_root, force_workspace_config=False)
+                global_manager.ensure_dirs()
+                global_path = global_manager.global_config_path
+                if global_path.exists():
+                    data = global_manager._load_json_payload(
+                        global_path,
+                        persist_repairs=True,
+                        record_notice=False,
+                    )
+                    global_config = Config.from_dict(data)
+                else:
+                    global_config = Config()
+                global_config.custom_providers = config.custom_providers
+                if str(getattr(config, "active_model_source", "") or "").strip().lower() == "custom":
+                    global_config.active_model_source = "custom"
+                global_manager.set_workspace_mode(False)
+                global_manager._loaded_config_path = global_path
+                global_manager.save(global_config)
+        if self.app.get('reinit_agent'):
+            self.app['reinit_agent']()
+
+    def _cmd_provider_add(self) -> bool:
+        """Collect the four provider fields, then fetch and select a model."""
+        from ..custom_providers import (
+            CUSTOM_PROVIDER_MAX_PROVIDERS,
+            custom_provider_format_choices,
+            custom_provider_models_url,
+            default_custom_provider,
+            list_custom_providers,
+            resolve_custom_provider_base_url,
+            slugify_provider_name,
+        )
+        from ..config import EXTERNAL_MODEL_SOURCES
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        existing = list_custom_providers(getattr(config, "custom_providers", {}))
+        if len(existing) >= CUSTOM_PROVIDER_MAX_PROVIDERS:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Provider limit reached "
+                f"({CUSTOM_PROVIDER_MAX_PROVIDERS}). Remove one first.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        self.console.print()
+        self.console.print(
+            Panel(
+                Text.from_markup(
+                    f"[{self.theme.TEXT_SECONDARY}]Four fields, then Reverie fetches the model list for you.[/{self.theme.TEXT_SECONDARY}]\n"
+                    f"[{self.theme.TEXT_DIM}]1. Provider name  2. Base URL  3. API key  4. API request format[/{self.theme.TEXT_DIM}]"
+                ),
+                title=f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} Add Provider {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]",
+                border_style=self.theme.BORDER_PRIMARY,
+                box=box.ROUNDED,
+                padding=(1, 2),
+            )
+        )
+
+        # 1. Provider name
+        name = Prompt.ask(
+            f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Provider name"
+        ).strip()
+        provider_id = slugify_provider_name(name)
+        if not provider_id:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Provider name must contain letters or digits.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+        if provider_id in set(EXTERNAL_MODEL_SOURCES) | {"standard", "custom"}:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} '{escape(provider_id)}' is a built-in source name. Pick another.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+        if any(record["id"] == provider_id for record in existing):
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Provider '{escape(provider_id)}' already exists. "
+                f"Use /provider {escape(provider_id)} url|key|format to edit it.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        # 2. Base URL
+        base_url_input = Prompt.ask(
+            f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Base URL "
+            f"[{self.theme.TEXT_DIM}](e.g. https://api.example.com/v1)[/{self.theme.TEXT_DIM}]"
+        ).strip()
+        base_url = resolve_custom_provider_base_url(base_url_input)
+        if not base_url:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} A base URL is required.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        # 3. API key
+        api_key = Prompt.ask(
+            f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] API Key",
+            password=True,
+        ).strip()
+        if not api_key:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} An API key is required.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        # 4. API request format
+        provider_format = self._prompt_provider_format(custom_provider_format_choices())
+        if not provider_format:
+            return True
+
+        provider = default_custom_provider(
+            provider_id=provider_id,
+            name=name,
+            base_url=base_url,
+            api_key=api_key,
+            provider_format=provider_format,
+        )
+        self.console.print()
+        self.console.print(
+            f"[{self.theme.TEXT_DIM}]Model list endpoint: {escape(custom_provider_models_url(provider))}[/{self.theme.TEXT_DIM}]"
+        )
+        return self._provider_sync_and_select(provider, model_query="", announce_created=True)
+
+    def _prompt_provider_format(self, choices: List[Dict[str, str]]) -> str:
+        """Ask which API request format the provider speaks."""
+        self.console.print()
+        self.console.print(
+            f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] API request format:"
+        )
+        for index, choice in enumerate(choices, start=1):
+            self.console.print(
+                f"  [{self.theme.PINK_SOFT}]{index}[/{self.theme.PINK_SOFT}]. "
+                f"[{self.theme.TEXT_SECONDARY}]{escape(choice['label'])}[/{self.theme.TEXT_SECONDARY}]"
+            )
+            self.console.print(f"     [{self.theme.TEXT_DIM}]{escape(choice['description'])}[/{self.theme.TEXT_DIM}]")
+        answer = Prompt.ask(
+            "Format",
+            choices=[str(index) for index in range(1, len(choices) + 1)],
+            default="1",
+        ).strip()
+        try:
+            return choices[int(answer) - 1]["id"]
+        except (TypeError, ValueError, IndexError):
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Invalid format choice.[/{self.theme.CORAL_SOFT}]"
+            )
+            return ""
+
+    def _provider_sync_and_select(
+        self,
+        provider: Dict[str, Any],
+        *,
+        model_query: str = "",
+        announce_created: bool = False,
+    ) -> bool:
+        """Refresh a custom provider's catalog, then persist the chosen model."""
+        from ..custom_providers import (
+            fetch_custom_provider_models,
+            find_custom_provider,
+            upsert_custom_provider,
+        )
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        record = dict(provider)
+        timeout = max(5, int(record.get("timeout") or 30))
+        models: List[Dict[str, Any]] = []
+        fetch_error = ""
+        with self.console.status(
+            f"[{self.theme.PURPLE_SOFT}]{self.deco.SPARKLE} Fetching model list from {escape(str(record.get('name') or record.get('id')))}...[/{self.theme.PURPLE_SOFT}]"
+        ):
+            try:
+                models = fetch_custom_provider_models(record, timeout=min(20, timeout), force_refresh=True)
+            except Exception as exc:
+                report_suppressed_exception("fetch custom provider model list")
+                fetch_error = str(exc)
+
+        if models:
+            record["models"] = models
+            record["models_synced_at"] = time.time()
+            self.console.print(
+                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} {len(models)} models available.[/{self.theme.MINT_VIBRANT}]"
+            )
+        else:
+            from ..custom_providers import mask_secret, resolve_custom_provider_api_key
+
+            secret = resolve_custom_provider_api_key(record)
+            detail = " ".join(str(fetch_error or "").split())
+            if secret and len(secret) >= 8:
+                detail = detail.replace(secret, mask_secret(secret))
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Could not refresh the model list"
+                f"{': ' + escape(detail[:180]) if detail else '.'}[/{self.theme.AMBER_GLOW}]"
+            )
+
+        # Persist the provider (and any refreshed catalog) before selecting.
+        config.custom_providers = upsert_custom_provider(getattr(config, "custom_providers", {}), record)
+        stored = find_custom_provider(config.custom_providers, record["id"]) or record
+        catalog = list(stored.get("models") or [])
+        if not catalog:
+            self._save_provider_config(config, config_manager, mirror_custom=True)
+            if announce_created:
+                self.console.print(
+                    f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Provider '{escape(stored['name'])}' saved.[/{self.theme.MINT_VIBRANT}]"
+                )
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]No models to choose from yet. Fix the endpoint or key, then run "
+                f"/provider {escape(stored['id'])} models.[/{self.theme.TEXT_DIM}]"
+            )
+            return True
+
+        selected = self._resolve_catalog_selection(
+            catalog=catalog,
+            current_selected_id=str(stored.get("selected_model_id", "") or ""),
+            model_query=model_query,
+            provider_label=str(stored.get("name") or stored["id"]),
+            provider_command=f"provider {stored['id']}",
+        )
+        if not selected:
+            self._save_provider_config(config, config_manager, mirror_custom=True)
+            if announce_created:
+                self.console.print(
+                    f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Provider '{escape(stored['name'])}' saved "
+                    f"with {len(catalog)} models. No model selected yet.[/{self.theme.MINT_VIBRANT}]"
+                )
+            return True
+
+        stored = dict(stored)
+        stored["selected_model_id"] = str(selected.get("id") or "")
+        stored["selected_model_display_name"] = str(selected.get("display_name") or selected.get("id") or "")
+        context_length = selected.get("context_length")
+        if context_length:
+            try:
+                stored["max_context_tokens"] = int(context_length)
+            except (TypeError, ValueError):
+                report_suppressed_exception("parse custom provider context length")
+        if selected.get("vision") is not None:
+            stored["supports_vision"] = bool(selected.get("vision"))
+
+        config.custom_providers = upsert_custom_provider(config.custom_providers, stored, activate=True)
+        config.active_model_source = "custom"
+        self._save_provider_config(config, config_manager, mirror_custom=True)
+
+        self.console.print()
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Switched to {escape(stored['name'])} model: "
+            f"{escape(stored['selected_model_display_name'])} ({escape(stored['selected_model_id'])})[/{self.theme.MINT_VIBRANT}]"
+        )
+        self.console.print()
+        return True
+
+    def _cmd_provider_detail(self, row: Any) -> bool:
+        """Show one provider without touching the network."""
+        if row.kind == "builtin":
+            delegate = self._provider_builtin_delegate(row.source, "status")
+            if delegate is not None:
+                return delegate()
+
+        from ..custom_providers import find_custom_provider
+
+        config_manager = self.app.get('config_manager')
+        config = config_manager.load() if config_manager else None
+        record = (
+            find_custom_provider(getattr(config, "custom_providers", {}), row.key.split(":", 1)[-1])
+            if config is not None
+            else None
+        ) or row.record
+
+        synced = float(record.get("models_synced_at") or 0.0)
+        synced_text = (
+            time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(synced)) if synced else "never"
+        )
+        lines = [
+            f"[{self.theme.BLUE_SOFT}]Kind:[/{self.theme.BLUE_SOFT}] {'built-in source' if row.kind == 'builtin' else 'custom provider'}",
+            f"[{self.theme.BLUE_SOFT}]Active:[/{self.theme.BLUE_SOFT}] {'YES' if row.active else 'no'}",
+            f"[{self.theme.BLUE_SOFT}]API format:[/{self.theme.BLUE_SOFT}] {escape(row.format_label)}",
+            f"[{self.theme.BLUE_SOFT}]Base URL:[/{self.theme.BLUE_SOFT}] {escape(row.base_url or '(not set)')}",
+            f"[{self.theme.BLUE_SOFT}]Model list:[/{self.theme.BLUE_SOFT}] {escape(row.models_url or '(not available)')}",
+            f"[{self.theme.BLUE_SOFT}]API key:[/{self.theme.BLUE_SOFT}] {escape(row.key_hint)}",
+            f"[{self.theme.BLUE_SOFT}]Selected model:[/{self.theme.BLUE_SOFT}] {escape(row.selected_model_display_name or '(none)')}",
+            f"[{self.theme.BLUE_SOFT}]Cached models:[/{self.theme.BLUE_SOFT}] {len(record.get('models') or [])} (synced {synced_text})",
+            f"[{self.theme.BLUE_SOFT}]Context window:[/{self.theme.BLUE_SOFT}] {int(record.get('max_context_tokens') or 0):,} tokens",
+            f"[{self.theme.BLUE_SOFT}]Enabled:[/{self.theme.BLUE_SOFT}] {'YES' if row.enabled else 'no'}",
+        ]
+        self.console.print()
+        self.console.print(
+            Panel(
+                Text.from_markup("\n".join(lines)),
+                title=f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} {escape(row.name)} {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]",
+                border_style=self.theme.BORDER_PRIMARY,
+                box=box.ROUNDED,
+                padding=(1, 2),
+            )
+        )
+        self.console.print(
+            f"[{self.theme.TEXT_DIM}]/provider {escape(row.key.split(':', 1)[-1])} models | test | use[/{self.theme.TEXT_DIM}]"
+        )
+        self.console.print()
+        return True
+
+    def _cmd_provider_models(self, row: Any, model_query: str) -> bool:
+        """Refresh the live model list and persist the chosen model."""
+        if row.kind == "builtin":
+            delegate = self._provider_builtin_delegate(row.source, "models")
+            if delegate is None:
+                return self._provider_builtin_only(row, "model selection")
+            return delegate(model_query)
+
+        from ..custom_providers import find_custom_provider
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+        record = find_custom_provider(
+            getattr(config_manager.load(), "custom_providers", {}),
+            row.key.split(":", 1)[-1],
+        )
+        if not record:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Provider '{escape(row.name)}' is no longer stored.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+        return self._provider_sync_and_select(record, model_query=model_query)
+
+    def _render_provider_probe(
+        self,
+        name: str,
+        status: str,
+        latency_ms: int,
+        detail: str,
+        *,
+        model: str = "",
+        probe_kind: str = "chat",
+    ) -> None:
+        """Print one availability result."""
+        ok = str(status or "").strip().lower() in ("online", "ok")
+        icon = self.deco.CHECK_FANCY if ok else self.deco.CROSS
+        color = self.theme.MINT_VIBRANT if ok else self.theme.CORAL_SOFT
+        headline = f"[{color}]{icon} {escape(name)}: {self._provider_status_cell(status)}"
+        if latency_ms:
+            headline += f" [{self.theme.TEXT_DIM}]({latency_ms} ms)[/{self.theme.TEXT_DIM}]"
+        headline += f"[/{color}]"
+        self.console.print()
+        self.console.print(headline)
+        if model:
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Probe: {escape(probe_kind)} | model: {escape(model)}[/{self.theme.TEXT_DIM}]"
+            )
+        if detail:
+            self.console.print(f"[{self.theme.TEXT_DIM}]{escape(detail)}[/{self.theme.TEXT_DIM}]")
+        self.console.print()
+
+    def _cmd_provider_test(self, row: Any, model_query: str) -> bool:
+        """Verify one provider with a real, minimal request."""
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+        config = config_manager.load()
+
+        if row.kind == "builtin":
+            from ..provider_smoke import SMOKE_RUNNERS
+
+            runner = SMOKE_RUNNERS.get(row.source)
+            if runner is None:
+                return self._provider_builtin_only(row, "availability testing")
+            with self.console.status(
+                f"[{self.theme.PURPLE_SOFT}]{self.deco.SPARKLE} Calling {escape(row.name)}...[/{self.theme.PURPLE_SOFT}]"
+            ):
+                result = runner(config, 45, model_query.strip())
+            self._render_provider_probe(
+                row.name,
+                result.status,
+                result.latency_ms,
+                " ".join(part for part in (result.error_class, result.message) if part),
+                model=result.model,
+                probe_kind="chat",
+            )
+            return True
+
+        from ..custom_providers import find_custom_provider, probe_custom_provider_chat
+
+        record = find_custom_provider(getattr(config, "custom_providers", {}), row.key.split(":", 1)[-1])
+        if not record:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Provider '{escape(row.name)}' is no longer stored.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+        wanted_model = model_query.strip() or str(record.get("selected_model_id") or "")
+        with self.console.status(
+            f"[{self.theme.PURPLE_SOFT}]{self.deco.SPARKLE} Calling {escape(row.name)}...[/{self.theme.PURPLE_SOFT}]"
+        ):
+            result = probe_custom_provider_chat(
+                record,
+                model_id=wanted_model,
+                timeout=max(5, int(record.get("timeout") or 30)),
+            )
+        self._render_provider_probe(
+            row.name,
+            result.status,
+            result.latency_ms,
+            result.detail,
+            model=wanted_model,
+            probe_kind="chat",
+        )
+        return True
+
+    def _cmd_provider_activate(self, row: Any) -> bool:
+        """Make one provider the active model source."""
+        if row.kind == "builtin":
+            delegate = self._provider_builtin_delegate(row.source, "activate")
+            if delegate is None:
+                return self._provider_builtin_only(row, "activation")
+            return delegate()
+
+        from ..custom_providers import (
+            build_custom_provider_runtime_model_data,
+            find_custom_provider,
+            upsert_custom_provider,
+        )
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        config = config_manager.load()
+        provider_id = row.key.split(":", 1)[-1]
+        record = find_custom_provider(getattr(config, "custom_providers", {}), provider_id)
+        if not record:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Provider '{escape(row.name)}' is no longer stored.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+        if not record.get("selected_model_id"):
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} {escape(row.name)} has no model selected yet - "
+                f"fetching the list now.[/{self.theme.AMBER_GLOW}]"
+            )
+            return self._provider_sync_and_select(record, model_query="")
+
+        config.custom_providers = upsert_custom_provider(config.custom_providers, record, activate=True)
+        if not build_custom_provider_runtime_model_data(config.custom_providers):
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} {escape(row.name)} is not usable yet. "
+                f"Check /provider {escape(provider_id)} for missing key, URL, or model.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+        config.active_model_source = "custom"
+        self._save_provider_config(config, config_manager, mirror_custom=True)
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} {escape(row.name)} is now the active model source "
+            f"({escape(str(record.get('selected_model_display_name') or record.get('selected_model_id')))}).[/{self.theme.MINT_VIBRANT}]"
+        )
+        return True
+
+    def _load_custom_provider_record(self, row: Any) -> tuple:
+        """Return (config_manager, config, record) for a custom provider row."""
+        from ..custom_providers import find_custom_provider
+
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
+            )
+            return None, None, None
+        config = config_manager.load()
+        record = find_custom_provider(getattr(config, "custom_providers", {}), row.key.split(":", 1)[-1])
+        if not record:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Provider '{escape(row.name)}' is no longer stored.[/{self.theme.CORAL_SOFT}]"
+            )
+            return config_manager, config, None
+        return config_manager, config, dict(record)
+
+    def _cmd_provider_key(self, row: Any, value: str) -> bool:
+        """Replace the stored API key for one provider."""
+        if row.kind == "builtin":
+            delegate = self._provider_builtin_delegate(row.source, "key")
+            if delegate is None:
+                return self._provider_builtin_only(row, "credentials")
+            return delegate()
+
+        from ..custom_providers import upsert_custom_provider
+
+        config_manager, config, record = self._load_custom_provider_record(row)
+        if record is None:
+            return True
+
+        api_key = str(value or "").strip()
+        if not api_key:
+            api_key = Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] {escape(row.name)} API Key",
+                password=True,
+            ).strip()
+        if not api_key:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} API key cannot be empty.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        record["api_key"] = api_key
+        config.custom_providers = upsert_custom_provider(config.custom_providers, record)
+        self._save_provider_config(config, config_manager, mirror_custom=True)
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} API key saved for {escape(row.name)}.[/{self.theme.MINT_VIBRANT}]"
+        )
+        self.console.print(
+            f"[{self.theme.TEXT_DIM}]Run /provider {escape(record['id'])} models to refresh the catalog.[/{self.theme.TEXT_DIM}]"
+        )
+        return True
+
+    def _cmd_provider_url(self, row: Any, value: str) -> bool:
+        """Change the base URL of a custom provider."""
+        if row.kind == "builtin":
+            return self._provider_builtin_only(row, "the base URL")
+
+        from ..custom_providers import (
+            custom_provider_models_url,
+            resolve_custom_provider_base_url,
+            upsert_custom_provider,
+        )
+
+        config_manager, config, record = self._load_custom_provider_record(row)
+        if record is None:
+            return True
+
+        candidate = str(value or "").strip()
+        if not candidate:
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Current base URL: {escape(str(record.get('base_url') or '(not set)'))}[/{self.theme.TEXT_DIM}]"
+            )
+            candidate = Prompt.ask("Base URL", default=str(record.get("base_url") or "")).strip()
+        base_url = resolve_custom_provider_base_url(candidate)
+        if not base_url:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} A base URL is required.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        record["base_url"] = base_url
+        config.custom_providers = upsert_custom_provider(config.custom_providers, record)
+        self._save_provider_config(config, config_manager, mirror_custom=True)
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Base URL set to {escape(base_url)}[/{self.theme.MINT_VIBRANT}]"
+        )
+        self.console.print(
+            f"[{self.theme.TEXT_DIM}]Model list endpoint: {escape(custom_provider_models_url(record))}[/{self.theme.TEXT_DIM}]"
+        )
+        return True
+
+    def _cmd_provider_format(self, row: Any, value: str) -> bool:
+        """Change the API request format of a custom provider."""
+        if row.kind == "builtin":
+            return self._provider_builtin_only(row, "the API format")
+
+        from ..custom_providers import (
+            custom_provider_format_choices,
+            custom_provider_format_label,
+            normalize_custom_provider_format,
+            upsert_custom_provider,
+        )
+
+        config_manager, config, record = self._load_custom_provider_record(row)
+        if record is None:
+            return True
+
+        choices = custom_provider_format_choices()
+        candidate = str(value or "").strip()
+        if candidate:
+            provider_format = normalize_custom_provider_format(candidate)
+        else:
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Current format: {escape(custom_provider_format_label(record.get('format')))}[/{self.theme.TEXT_DIM}]"
+            )
+            provider_format = self._prompt_provider_format(choices)
+        if not provider_format:
+            return True
+
+        record["format"] = provider_format
+        config.custom_providers = upsert_custom_provider(config.custom_providers, record)
+        self._save_provider_config(config, config_manager, mirror_custom=True)
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} API format set to "
+            f"{escape(custom_provider_format_label(provider_format))}[/{self.theme.MINT_VIBRANT}]"
+        )
+        self.console.print(
+            f"[{self.theme.TEXT_DIM}]Run /provider {escape(record['id'])} models to refresh the catalog.[/{self.theme.TEXT_DIM}]"
+        )
+        return True
+
+    def _cmd_provider_rename(self, row: Any, value: str) -> bool:
+        """Rename a custom provider, keeping its stored id stable."""
+        if row.kind == "builtin":
+            return self._provider_builtin_only(row, "renaming")
+
+        from ..custom_providers import upsert_custom_provider
+
+        config_manager, config, record = self._load_custom_provider_record(row)
+        if record is None:
+            return True
+
+        new_name = str(value or "").strip() or Prompt.ask("New display name", default=str(record.get("name") or "")).strip()
+        if not new_name:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Display name cannot be empty.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        record["name"] = new_name
+        config.custom_providers = upsert_custom_provider(config.custom_providers, record)
+        self._save_provider_config(config, config_manager, mirror_custom=True)
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Renamed to {escape(new_name)} "
+            f"(command name stays /provider {escape(record['id'])}).[/{self.theme.MINT_VIBRANT}]"
+        )
+        return True
+
+    def _cmd_provider_toggle(self, row: Any, enabled: bool) -> bool:
+        """Enable or disable a custom provider without deleting it."""
+        if row.kind == "builtin":
+            return self._provider_builtin_only(row, "enable/disable")
+
+        from ..custom_providers import upsert_custom_provider
+
+        config_manager, config, record = self._load_custom_provider_record(row)
+        if record is None:
+            return True
+
+        record["enabled"] = bool(enabled)
+        config.custom_providers = upsert_custom_provider(config.custom_providers, record)
+        if not enabled and row.active:
+            # A disabled provider cannot serve requests, so fall back to manual models.
+            config.active_model_source = "standard"
+        self._save_provider_config(config, config_manager, mirror_custom=True)
+        state = "enabled" if enabled else "disabled"
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} {escape(row.name)} {state}.[/{self.theme.MINT_VIBRANT}]"
+        )
+        return True
+
+    def _cmd_provider_remove(self, row: Any) -> bool:
+        """Delete a custom provider after confirmation."""
+        if row.kind == "builtin":
+            return self._provider_builtin_only(row, "removal")
+
+        from ..custom_providers import remove_custom_provider
+
+        config_manager, config, record = self._load_custom_provider_record(row)
+        if record is None:
+            return True
+
+        if not Confirm.ask(
+            f"[{self.theme.AMBER_GLOW}]Delete provider '{escape(row.name)}' and its saved key?[/{self.theme.AMBER_GLOW}]",
+            default=False,
+        ):
+            self.console.print(f"[{self.theme.TEXT_DIM}]Cancelled.[/{self.theme.TEXT_DIM}]")
+            return True
+
+        config.custom_providers, removed = remove_custom_provider(config.custom_providers, record["id"])
+        if not removed:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Nothing was removed.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+        if row.active:
+            from ..custom_providers import build_custom_provider_runtime_model_data
+
+            config.active_model_source = (
+                "custom" if build_custom_provider_runtime_model_data(config.custom_providers) else "standard"
+            )
+        self._save_provider_config(config, config_manager, mirror_custom=True)
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Provider '{escape(row.name)}' removed.[/{self.theme.MINT_VIBRANT}]"
+        )
+        if row.active:
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Active source is now "
+                f"{escape(self._format_model_source_label(config.active_model_source))}.[/{self.theme.TEXT_DIM}]"
+            )
+        return True
 
     def cmd_model(self, args: str) -> bool:
         """List and select models, or add/delete one"""

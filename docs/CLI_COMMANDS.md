@@ -74,10 +74,27 @@ SubAgents are enabled in `reverie` and `computer-controller` modes, including NV
 | `/modelscope activate` | Switch active source to ModelScope |
 | `/modelscope model <model-id>` | Set the ModelScope model id |
 | `/modelscope endpoint <value>` | Set or clear the OpenAI-compatible base URL |
+| `/provider list` | List every source with its API-key flag and probe each one in parallel |
+| `/provider list --no-probe` | Show the same table without any network calls |
+| `/provider add` | Add a custom provider: name, base URL, API key, API request format |
+| `/provider <name>` | Show one provider's endpoint, key state, format, and selected model |
+| `/provider <name> models [model-id]` | Refresh the live model list and select a model |
+| `/provider <name> test` | Verify a provider with one real minimal request |
+| `/provider <name> use` | Make the provider the active model source |
+| `/provider <name> key` | Replace the stored API key |
+| `/provider <name> url <base-url>` | Change a custom provider's base URL |
+| `/provider <name> format` | Change a custom provider's API request format |
+| `/provider <name> rename <label>` | Rename a custom provider |
+| `/provider <name> enable\|disable` | Keep a custom provider stored but skip it while disabled |
+| `/provider <name> remove` | Delete a custom provider and its saved key |
 
 Request-based NVIDIA vision models can also consume inline chat attachments like `@image.png`.
 Reverie also reads `NVIDIA_API_KEY` automatically when it is present, and Computer Controller mode pins the runtime to `meta/muse-glimmer-30b`.
 ModelScope is called through OpenAI Chat Completions and reads `MODELSCOPE_API_KEY`, `MODELSCOPE_TOKEN`, or `MODELSCOPE_ACCESS_TOKEN` automatically when present. Its live-verified default model is `stepfun-ai/Step-3.7-Flash`. Model and reasoning selectors are generated from the core capability catalog.
+
+`/provider` is the one surface over every source. `/provider list` mixes the built-in sources above with the providers you added yourself, shows which ones have an API key, and probes each reachable endpoint in parallel to report online state, latency, and how many models it publishes. Sources without a catalog endpoint (Codex, WebGemini) are marked "not probed"; use `/provider <name> test` for those.
+
+`/provider add` asks for exactly four things - provider name, base URL, API key, and API request format (OpenAI Chat Completions, OpenAI Responses, or Anthropic Messages) - then calls the provider's model-list endpoint and opens the model selector. The provider, its key, its cached catalog, and the model you picked are written to `custom_providers` in the shared `config.json`, so the next session starts on the same model. `/provider <name> models` calls the endpoint again to pick up new models.
 ## Tools and Context
 
 | Command | Description |

@@ -8,7 +8,7 @@ Current stable version: **v2.5.0** (released 2026-07-17).
 - **Native desktop**: Electron workspace host using the same Python core, with project/session management, full-window backgrounds, Context Engine file recommendations, arbitrary attachments, settings, tools, plugins, and recovery views
 - **RATS / RTP**: opt-in, executable-local allowlisted Reverie/Rilance provider discovery with Python-core session ownership, exact permissions, compact catalogs, and progressive native tool schemas; Reverie Engine is currently the only implemented provider
 - **Optional workflows**: spec-driven development, creative writing, browser automation, computer control, and game/3D asset authoring
-- **Multi-provider LLM** support: NVIDIA, ModelScope, Codex (ChatGPT), SenseNova, AIHubMix, Agnes, WebGemini, Opencode
+- **Multi-provider LLM** support: NVIDIA, ModelScope, Codex (ChatGPT), SenseNova, AIHubMix, Agnes, WebGemini, Opencode, plus any endpoint you add with `/provider add`
 - **Context Engine**: Augment-style codebase retrieval, LSP integration, git history analysis
 - **Session management**: Conversation persistence, rotation, working memory injection, handoff packets
 - **Approval policy**: Three tool-call approval modes — Default (software policy only), Auto Check (a stateless model review rates each call's risk and pauses only on risky ones), and Strict (every call waits for you); answer allow, deny, or reply in your own words to redirect the model. See [SECURITY_PERMISSIONS.md](docs/SECURITY_PERMISSIONS.md)
@@ -59,8 +59,11 @@ Reverie supports a wide range of LLM providers out of the box. Each provider has
 | **AIHubMix**       | Third-party API gateway (OpenAI-compatible)                                                                     | GPT-5.5 Free (with/without reasoning), GPT-4o Free, GPT-4.1 Free                                                                                                                            |
 | **Agnes**          | Agnes AI OpenAI-compatible API (text, image, video)                                                             | Agnes 2.5 Pro Alpha, Agnes 2.5 Flash, Agnes 2.0 Flash, image/video generation                                                                                                                |
 | **WebGemini**      | Anonymous Gemini Web access via`gemini.google.com`                                                              | Gemini 3.5 Flash, Gemini 3.5 Flash Thinking, Gemini 3.5 Flash Thinking Lite, Gemini 3.1 Pro, Gemini Auto, Gemini Flash Lite                                                                 |
+| **Custom**         | Any endpoint you add with `/provider add` - OpenAI Chat Completions, OpenAI Responses, or Anthropic Messages     | Read live from the provider's own model-list endpoint                                                                                                                                        |
 
 All providers support streaming responses where applicable. Reasoning/thinking toggles, temperature, top_p, max_tokens, and other parameters are configurable per provider.
+
+Use `/provider list` to see every source at once with its API-key flag and a parallel availability probe, and `/provider add` to register your own gateway from four fields: name, base URL, API key, and API request format.
 
 ### Prompt Caching
 
@@ -407,7 +410,7 @@ Reverie uses `config.json` stored in the project's `.reverie/` directory or the 
 
 | Key                       | Type   | Default      | Description                                                                                                                 |
 | ------------------------- | ------ | ------------ | --------------------------------------------------------------------------------------------------------------------------- |
-| `active_model_source`     | string | `"standard"` | Active provider:`standard`, `nvidia`, `codex`, `modelscope`, `sensenova`, `aihubmix`, `agnes`, `webgemini`, `opencode` |
+| `active_model_source`     | string | `"standard"` | Active provider:`standard`, `nvidia`, `codex`, `modelscope`, `sensenova`, `aihubmix`, `agnes`, `webgemini`, `opencode`, `custom` |
 | `tool_output_style`       | string | `"compact"`  | Tool result display:`compact`, `condensed`, `full`                                                                          |
 | `thinking_output_style`   | string | `"full"`     | Reasoning display:`hidden`, `compact`, `full`                                                                               |
 | `nvidia.enable_thinking`  | bool   | `true`       | Enable provider-side thinking for NVIDIA models                                                                             |

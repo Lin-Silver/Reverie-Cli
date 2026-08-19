@@ -3,6 +3,8 @@ from pathlib import Path
 import threading
 from types import SimpleNamespace
 
+import pytest
+
 from reverie.config import Config, ModelConfig
 from reverie.desktop_catalog import (
     add_standard_model,
@@ -155,6 +157,89 @@ def test_model_selection_updates_model_specific_reasoning() -> None:
     apply_model_selection(config, "modelscope", "ZhipuAI/GLM-5.2", "none")
     assert config.modelscope["selected_model_id"] == "ZhipuAI/GLM-5.2"
     assert config.modelscope["reasoning_effort"] == "none"
+
+
+def _custom_provider_config() -> Config:
+    """A config whose active source is one user-added provider.
+
+    The base URL uses the reserved ``.invalid`` TLD so a code path that skips
+    the fake transport fails loudly instead of calling a real gateway.
+    """
+    from reverie.custom_providers import default_custom_providers_config, upsert_custom_provider
+
+    config = Config()
+    config.custom_providers = upsert_custom_provider(
+        default_custom_providers_config(),
+        {
+            "id": "xkiro",
+            "name": "xkiro",
+            "base_url": "https://api.xkiro.invalid/v1",
+            "api_key": "xk-live-abcdef123456",
+            "format": "openai-chat",
+            "models": [
+                {"id": "kiro-pro", "display_name": "Kiro Pro", "context_length": 200000},
+                {"id": "kiro-mini", "display_name": "Kiro Mini", "context_length": 32000},
+            ],
+            "selected_model_id": "kiro-pro",
+        },
+        activate=True,
+    )
+    config.active_model_source = "custom"
+    return config
+
+
+def test_desktop_catalog_exposes_the_active_custom_provider_without_its_key() -> None:
+    payload = build_model_sources_payload(_custom_provider_config())
+    source = _source(payload, "custom")
+
+    assert source["active"] is True
+    assert source["selected_model_id"] == "kiro-pro"
+    assert [item["id"] for item in source["models"]] == ["kiro-pro", "kiro-mini"]
+    assert source["config"]["values"]["base_url"] == "https://api.xkiro.invalid/v1"
+    assert source["config"]["values"]["api_key"] == ""
+    assert source["config"]["configured_secrets"]["api_key"] is True
+
+
+def test_desktop_catalog_reports_no_models_until_a_custom_provider_exists() -> None:
+    source = _source(build_model_sources_payload(Config()), "custom")
+
+    assert source["models"] == []
+    assert source["active"] is False
+
+
+def test_desktop_model_selection_writes_back_to_the_custom_provider_record(monkeypatch) -> None:
+    from reverie import custom_providers as custom_providers_module
+    from reverie.custom_providers import find_custom_provider
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"data": [{"id": "kiro-pro"}, {"id": "kiro-mini", "context_length": 32000}]}
+
+    def fake_get(url, *, headers, timeout):
+        return FakeResponse()
+
+    monkeypatch.setattr(custom_providers_module.requests, "get", fake_get)
+    config = _custom_provider_config()
+
+    selected = apply_model_selection(config, "custom", "kiro-mini")
+
+    assert selected["id"] == "kiro-mini"
+    assert config.active_model_source == "custom"
+    record = find_custom_provider(config.custom_providers, "xkiro")
+    assert record["selected_model_id"] == "kiro-mini"
+    assert record["max_context_tokens"] == 32000
+
+
+def test_desktop_provider_patches_are_refused_for_custom_providers() -> None:
+    from reverie.desktop_catalog import apply_provider_config_patch
+
+    with pytest.raises(ValueError, match="/provider"):
+        apply_provider_config_patch(
+            _custom_provider_config(), "custom", {"base_url": "https://x.invalid"}
+        )
 
 
 def test_standard_model_crud_preserves_secret_when_update_omits_it() -> None:

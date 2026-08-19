@@ -89,6 +89,8 @@ Common top-level keys:
   "nvidia": {},
   "modelscope": {},
   "webgemini": {},
+  "opencode": {},
+  "custom_providers": {},
   "atlas_mode": {},
   "subagents": {},
   "writer_mode": {},
@@ -140,6 +142,8 @@ The `security` block holds both the hard capability ceiling and the approval mod
 
 When `active_model_source` is `standard`, Reverie uses `active_model_index` to choose from this list.
 
+For third-party gateways, prefer `/provider add`: it stores the endpoint under `custom_providers`, reads the provider's own model list, and keeps the model you picked. See [Custom Providers](#custom-providers). The `models` list here remains the manual path for one-off presets you want to edit by hand.
+
 ### Prompt Caching
 
 Prompt caching is enabled automatically and does not require a configuration key. Reverie sends stable hashed cache-routing keys through OpenAI Chat Completions and Responses transports, tries `cache_prompt` on raw OpenAI-compatible/local requests, and enables Anthropic's automatic ephemeral cache. The same policy is used for streaming, non-streaming, Context Engine compression, and session-handoff calls.
@@ -177,6 +181,8 @@ Supported values for `active_model_source`:
 - `nvidia`
 - `modelscope`
 - `webgemini`
+- `opencode`
+- `custom` - one of the providers you added with `/provider add`
 
 Older configs may still contain a `geminicli` block. That legacy section is not a current `active_model_source`; Gemini Web routing now uses `webgemini`.
 
@@ -279,6 +285,47 @@ Built-in ModelScope catalog:
 - `deepseek-ai/DeepSeek-V4-Flash` - DeepSeek V4 Flash, 1,048,576 token context, hosted reasoning on/off
 
 The desktop GUI consumes this catalog and its reasoning option values from the core, so source-specific capability changes do not require a duplicated frontend model list.
+
+### Custom Providers
+
+The `custom_providers` section stores the providers you added with `/provider add`. It is a pointer plus a list:
+
+```json
+{
+  "custom_providers": {
+    "active_provider_id": "xkiro",
+    "providers": [
+      {
+        "id": "xkiro",
+        "name": "xkiro",
+        "base_url": "https://api.xkiro.com/v1",
+        "api_key": "...",
+        "api_key_env": "",
+        "format": "openai-chat",
+        "enabled": true,
+        "selected_model_id": "z-ai/glm-5",
+        "selected_model_display_name": "z-ai/glm-5",
+        "max_context_tokens": 200000,
+        "max_tokens": 16384,
+        "timeout": 60,
+        "supports_vision": false,
+        "custom_headers": {},
+        "models": [],
+        "models_synced_at": 1771459200.0
+      }
+    ]
+  }
+}
+```
+
+- `id` is derived from the provider name and is what you type in `/provider <name> ...`. Renaming a provider changes `name` only.
+- `format` is one of `openai-chat` (POST `/chat/completions`), `openai-responses` (POST `/responses`), or `anthropic` (POST `/messages` with `x-api-key`). It decides both how the model list is read and which transport runs the chat request.
+- `api_key_env` names an environment variable to read the key from instead of storing it; a stored `api_key` wins when both are set.
+- `models` is the catalog cached from the provider's own model-list endpoint, refreshed by `/provider <name> models`. `models_synced_at` is the epoch seconds of the last successful refresh.
+- `active_provider_id` selects which provider runs when `active_model_source` is `custom`. A provider needs a base URL, a resolvable key, and a selected model before it becomes usable.
+- Up to 64 providers can be stored.
+
+`/provider list` probes each provider's model-list endpoint in parallel and reports online state, latency, and model count. `/provider <name> test` instead sends one minimal chat request, which is the only way to verify sources with no catalog endpoint.
 
 ## Plugin SDK Depot
 

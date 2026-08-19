@@ -46,6 +46,8 @@ DIRECT_COMMANDS = {
     "sense",
     "nvidia",
     "modelscope",
+    "provider",
+    "providers",
     "mode",
     "status",
     "doctor",

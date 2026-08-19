@@ -79,13 +79,19 @@ from .webgemini import (
     default_webgemini_config,
     normalize_webgemini_config,
 )
+from .custom_providers import (
+    build_custom_provider_runtime_model_data,
+    default_custom_providers_config,
+    normalize_custom_providers_config,
+)
 from .modes import normalize_mode
 from .version import CONFIG_VERSION, __version__
 
 EXTERNAL_MODEL_SOURCES = ("codex", "aihubmix", "agnes", "sensenova", "nvidia", "modelscope", "webgemini", "opencode")
-SUPPORTED_ACTIVE_MODEL_SOURCES = ("standard",) + EXTERNAL_MODEL_SOURCES
+SUPPORTED_ACTIVE_MODEL_SOURCES = ("standard", "custom") + EXTERNAL_MODEL_SOURCES
 MODEL_SOURCE_DISPLAY_NAMES = {
-    "standard": "Custom Provider",
+    "standard": "Manual Model",
+    "custom": "Custom Provider",
     "codex": "Codex",
     "aihubmix": "AIhubMix",
     "agnes": "Agnes",
@@ -145,6 +151,8 @@ def normalize_active_model_source(value: Any, default: str = "standard") -> str:
     candidate = str(value or "").strip().lower().replace("-", "_")
     aliases = {
         "oc": "opencode",
+        "custom_provider": "custom",
+        "custom_providers": "custom",
     }
     candidate = aliases.get(candidate, candidate)
     if candidate in SUPPORTED_ACTIVE_MODEL_SOURCES:
@@ -859,7 +867,7 @@ class Config:
     """Main configuration"""
     models: List[ModelConfig] = field(default_factory=list)
     active_model_index: int = 0
-    active_model_source: str = "standard"  # standard | codex | aihubmix | agnes | sensenova | nvidia | modelscope | webgemini | opencode
+    active_model_source: str = "standard"  # standard | custom | codex | aihubmix | agnes | sensenova | nvidia | modelscope | webgemini | opencode
     mode: str = "reverie"
     theme: str = "default"
     max_context_tokens: int = 128000
@@ -891,6 +899,7 @@ class Config:
     modelscope: Dict[str, Any] = field(default_factory=default_modelscope_config)
     webgemini: Dict[str, Any] = field(default_factory=default_webgemini_config)
     opencode: Dict[str, Any] = field(default_factory=default_opencode_config)
+    custom_providers: Dict[str, Any] = field(default_factory=default_custom_providers_config)
     atlas_mode: Dict[str, Any] = field(default_factory=default_atlas_mode_config)
     subagents: Dict[str, Any] = field(default_factory=default_subagent_config)
     
@@ -998,6 +1007,10 @@ class Config:
             runtime_opencode_model = build_opencode_runtime_model_data(self.opencode)
             return ModelConfig.from_dict(runtime_opencode_model) if runtime_opencode_model else None
 
+        if source == "custom":
+            runtime_custom_model = build_custom_provider_runtime_model_data(self.custom_providers)
+            return ModelConfig.from_dict(runtime_custom_model) if runtime_custom_model else None
+
         if 0 <= self.active_model_index < len(self.models):
             return self.models[self.active_model_index]
         return None
@@ -1061,6 +1074,7 @@ class Config:
         modelscope = normalize_modelscope_config(self.modelscope)
         webgemini = normalize_webgemini_config(self.webgemini)
         opencode = normalize_opencode_config(self.opencode)
+        custom_providers = normalize_custom_providers_config(self.custom_providers)
         atlas_mode = normalize_atlas_mode_config(self.atlas_mode)
         subagents = normalize_subagent_config(self.subagents)
         active_model_source = normalize_active_model_source(self.active_model_source)
@@ -1096,6 +1110,7 @@ class Config:
             'modelscope': modelscope,
             'webgemini': webgemini,
             'opencode': opencode,
+            'custom_providers': custom_providers,
             'atlas_mode': atlas_mode,
             'subagents': subagents,
         }
@@ -1174,6 +1189,8 @@ class Config:
         webgemini = normalize_webgemini_config(raw_webgemini)
         raw_opencode = data.get('opencode', data.get('oc', {}))
         opencode = normalize_opencode_config(raw_opencode)
+        raw_custom_providers = data.get('custom_providers', data.get('customProviders', {}))
+        custom_providers = normalize_custom_providers_config(raw_custom_providers)
         raw_atlas_mode = data.get('atlas_mode', {})
         atlas_mode = normalize_atlas_mode_config(raw_atlas_mode)
         raw_subagents = data.get('subagents', {})
@@ -1211,6 +1228,7 @@ class Config:
             modelscope=modelscope,
             webgemini=webgemini,
             opencode=opencode,
+            custom_providers=custom_providers,
             atlas_mode=atlas_mode,
             subagents=subagents,
         )
@@ -1876,6 +1894,14 @@ class ConfigManager:
                     needs_update = True
                     break
 
+        # Check if custom_providers section is missing or needs renormalization
+        if 'custom_providers' not in data:
+            needs_update = True
+        elif not isinstance(data.get('custom_providers'), dict):
+            needs_update = True
+        elif normalize_custom_providers_config(data.get('custom_providers')) != data.get('custom_providers'):
+            needs_update = True
+
         # Check if atlas_mode section is missing
         if 'atlas_mode' not in data:
             needs_update = True
@@ -2070,6 +2096,8 @@ class ConfigManager:
             return True
         if build_opencode_runtime_model_data(getattr(config, "opencode", {})):
             return True
+        if build_custom_provider_runtime_model_data(getattr(config, "custom_providers", {})):
+            return True
         return False
     
     def add_model(self, model_config: ModelConfig) -> None:
@@ -2104,6 +2132,8 @@ class ConfigManager:
                     config.active_model_source = "webgemini"
                 elif build_opencode_runtime_model_data(getattr(config, "opencode", {})):
                     config.active_model_source = "opencode"
+                elif build_custom_provider_runtime_model_data(getattr(config, "custom_providers", {})):
+                    config.active_model_source = "custom"
             self.save(config)
             return True
         return False

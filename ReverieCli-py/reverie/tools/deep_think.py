@@ -43,15 +43,14 @@ class DeepThinkTool(BaseTool):
     workspace_checkpoint = False
     max_result_chars = 4_000
     description = (
-        "Think step by step in private before acting. Write your full reasoning into "
+        "Think step by step before acting, in the open. Write your full reasoning into "
         "the 'thought' argument: restate the problem, list what you know and what you "
         "still need, weigh the options, then commit to a concrete next step. Nothing is "
-        "executed and nothing is shown to the user as an answer -- this is your "
-        "scratchpad. Use it before a non-obvious edit, when a plan has more than one "
-        "reasonable shape, when a tool result contradicts what you expected, or when "
-        "you are about to debug something you do not yet understand. Do not call it "
-        "twice in a row without doing real work in between, and never use it to reply "
-        "to the user."
+        "executed and nothing here is read as your answer -- this is your reasoning, "
+        "shown to the user as thinking. Call it once at the start of every turn, before "
+        "any other tool and before replying, and again whenever a result contradicts "
+        "what you expected. Do not call it twice in a row without doing real work in "
+        "between, and never use it to reply to the user."
     )
 
     parameters = {

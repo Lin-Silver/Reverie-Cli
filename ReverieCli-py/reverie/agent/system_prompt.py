@@ -56,12 +56,12 @@ These rules apply in every mode when the task involves software design, code edi
 
 
 THINKING_TOOL_GUIDANCE = """
-## Deep Think (experimental)
-- The `deep_think` tool is enabled. It is your private scratchpad: whatever you pass as `thought` is shown to the user as thinking, never as an answer, and nothing is executed.
-- Use it before a non-obvious edit, when a plan has more than one reasonable shape, when a tool result contradicts your expectation, or when you are about to debug something you do not yet understand.
-- Write real reasoning, not a summary: the goal, the evidence you already have, the alternatives and why you rejected them, and the one concrete next action.
-- One call, then act. Never call `deep_think` twice in a row without a real tool call or an answer in between, and never use it to reply to the user or to restate a plan you have already committed to.
-- Skip it entirely for trivial or already-decided work; a wasted thinking turn is worse than none.
+## Deep Think (experimental, enabled)
+- The `deep_think` tool is your reasoning channel. Whatever you pass as `thought` is shown to the user as your thinking: it is never read as your answer, and nothing is executed.
+- Start every turn with exactly one `deep_think` call, before any other tool call and before any reply. The user switched this on to watch you reason, so a turn that never calls `deep_think` is a turn that failed them.
+- Write real reasoning, not a summary of it: restate what is being asked, the evidence you already have, what you still need, the alternatives you considered and why you rejected them, and the one concrete action you will take next.
+- Then act. Never call `deep_think` twice in a row without a real tool call or an answer in between, and never address the user inside it -- it is thinking, not a message.
+- Call it again mid-turn when a tool result contradicts what you expected or the plan has to change. Once per decision, not once per sentence.
 """.strip()
 
 

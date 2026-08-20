@@ -8,11 +8,13 @@ the flag. Each one is exercised here against real objects.
 
 from pathlib import Path
 from typing import Any, Dict, List
+from unittest import mock
+import sys
 
 import pytest
 from rich.console import Console
 
-from reverie.agent.agent import ReverieAgent
+from reverie.agent.agent import ReverieAgent, decode_stream_event, encode_stream_event
 from reverie.agent.system_prompt import build_system_prompt
 from reverie.agent.tool_executor import ToolExecutor
 from reverie.cli.commands import CommandHandler
@@ -176,6 +178,20 @@ def test_system_prompt_only_explains_the_tool_when_it_is_offered() -> None:
     assert "deep_think" in on
 
 
+def test_the_guidance_asks_for_a_call_every_turn_not_only_for_hard_steps() -> None:
+    """The switch exists to make reasoning visible, so opting out must not be offered.
+
+    The first cut told the model to "skip it entirely for trivial work", which a
+    model obeys -- the user enabled the feature and saw nothing at all.
+    """
+    prompt = build_system_prompt(config=Config(thinking_tool=True))
+
+    assert "Start every turn with exactly one `deep_think` call" in prompt
+    assert "skip it entirely" not in prompt.lower()
+    # The tool description is what many providers weight most, so it has to agree.
+    assert "at the start of every turn" in DeepThinkTool.description
+
+
 # --------------------------------------------------------------------------- #
 # Loop safety
 # --------------------------------------------------------------------------- #
@@ -317,6 +333,47 @@ def test_a_think_tool_call_renders_as_thinking_under_its_own_tag() -> None:
     assert "think_tool" in rendered
     assert "thinking" in rendered
     assert "Config round-trip" in rendered
+
+
+def test_the_streamed_event_the_agent_emits_reaches_the_thinking_renderer() -> None:
+    """Cover the real path: the agent's encoded tool_start, not the renderer alone.
+
+    Every other display test calls the renderer directly, which cannot catch a
+    break between the wire format and the transcript.
+    """
+    display, console = _display()
+    frame = encode_stream_event(
+        "tool_start",
+        tool_name="deep_think",
+        message="Thinking through Config round-trip",
+        arguments={"topic": "Config round-trip", "thought": THOUGHT, "next_step": "Read the loader."},
+        tool_call_id="call_stream",
+        agent_id="",
+        agent_color="",
+    )
+    event = decode_stream_event(frame)
+    assert event is not None
+
+    assert display.show_stream_event(event) is True
+
+    rendered = console.export_text()
+    assert "think_tool" in rendered
+    assert "Config round-trip" in rendered
+    assert "Next: Read the loader." in rendered
+    # The acknowledgement row must not follow the thinking block.
+    display.show_stream_event(
+        decode_stream_event(
+            encode_stream_event(
+                "tool_result",
+                tool_name="deep_think",
+                success=True,
+                output="Thought recorded. Now act on it: Read the loader.",
+                arguments={},
+                tool_call_id="call_stream",
+            )
+        )
+    )
+    assert "Thought recorded" not in console.export_text()
 
 
 def test_the_terminal_never_shows_raw_markdown_from_the_think_tool() -> None:
@@ -668,6 +725,158 @@ def test_the_settings_view_survives_an_unknown_section(tmp_path: Path) -> None:
 
     rendered = console.export_text()
     assert "no settings" in rendered.lower()
+
+
+# --------------------------------------------------------------------------- #
+# Section tabs and key decoding
+# --------------------------------------------------------------------------- #
+
+
+class _ScriptedKeyboard:
+    """Stand-in for msvcrt that replays a fixed byte script."""
+
+    def __init__(self, *keys: bytes) -> None:
+        self._keys = list(keys)
+
+    def kbhit(self) -> bool:
+        return bool(self._keys)
+
+    def getch(self) -> bytes:
+        return self._keys.pop(0)
+
+
+@pytest.mark.parametrize(
+    "keys, expected",
+    [
+        ((b"\x00", b"H"), "up"),
+        ((b"\xe0", b"P"), "down"),
+        ((b"\xe0", b"K"), "left"),
+        ((b"\xe0", b"M"), "right"),
+        ((b"\x00", b"I"), "pgup"),
+        ((b"\x00", b"Q"), "pgdn"),
+        ((b"\x00", b"G"), "home"),
+        ((b"\x00", b"O"), "end"),
+        ((b"\x00", b"\x0f"), "shift-tab"),
+        ((b"\t",), "tab"),
+        ((b"[",), "shift-tab"),
+        ((b"]",), "tab"),
+        ((b"\r",), "enter"),
+        ((b"\x1b",), "escape"),
+        ((b" ",), "right"),
+        ((b"k",), "up"),
+        ((b"J",), "down"),
+        ((b"H",), "left"),
+        ((b"L",), "right"),
+        ((b"3",), "digit:3"),
+        ((b"0",), "digit:0"),
+        ((b"z",), ""),
+        ((b"\x00", b"\x99"), ""),
+    ],
+)
+def test_key_decoding_names_the_action_instead_of_comparing_bytes(
+    tmp_path: Path, keys: tuple, expected: str
+) -> None:
+    """An extended-key `b"H"` is Up; a typed `b"H"` is left. One reader, one answer."""
+    handler, _console, _manager, _reinits = _handler(tmp_path)
+
+    assert handler._read_semantic_key(_ScriptedKeyboard(*keys)) == expected
+
+
+def test_a_truncated_extended_key_does_not_hang_the_browser(tmp_path: Path) -> None:
+    """A lead byte with no scan code behind it must resolve, not block."""
+    handler, _console, _manager, _reinits = _handler(tmp_path)
+
+    class _Truncated:
+        def getch(self) -> bytes:
+            raise OSError("console closed")
+
+    assert handler._read_semantic_key(_Truncated()) == "escape"
+
+
+def test_number_keys_select_the_tab_they_are_printed_with(tmp_path: Path) -> None:
+    handler, _console, _manager, _reinits = _handler(tmp_path)
+    sections = ["All", "Session", "Model", "Reasoning"]
+
+    assert handler._setting_section_for_digit(sections, "1") == 0
+    assert handler._setting_section_for_digit(sections, "4") == 3
+    # Beyond the strip, and the non-digits the decoder never emits anyway.
+    assert handler._setting_section_for_digit(sections, "5") == -1
+    assert handler._setting_section_for_digit(sections, "0") == -1
+    assert handler._setting_section_for_digit(sections, "") == -1
+    assert handler._setting_section_for_digit([], "1") == -1
+    # A tenth tab is reachable with the 0 key, matching the printed hotkey.
+    assert handler._setting_section_for_digit(list("abcdefghij"), "0") == 9
+
+
+def test_the_tab_strip_prints_the_key_that_selects_each_section(tmp_path: Path) -> None:
+    """The strip is where a reader learns the tabs are switchable at all."""
+    handler, console, _manager, _reinits = _handler(tmp_path)
+    sections = ["All", "Session", "Model", "Reasoning"]
+
+    console.print(handler._build_setting_tabs_line(sections, "Model"))
+
+    rendered = console.export_text()
+    for index, section in enumerate(sections):
+        assert f"{handler._setting_section_hotkey(index)} {section}" in rendered
+
+
+def test_the_tab_strip_stops_offering_keys_past_the_tenth_section(tmp_path: Path) -> None:
+    handler, _console, _manager, _reinits = _handler(tmp_path)
+
+    assert handler._setting_section_hotkey(0) == "1"
+    assert handler._setting_section_hotkey(8) == "9"
+    assert handler._setting_section_hotkey(9) == "0"
+    assert handler._setting_section_hotkey(10) == ""
+
+
+def test_tab_and_number_keys_both_change_the_rendered_section(tmp_path: Path) -> None:
+    """End-to-end through the real key loop: the tabs are not decoration."""
+    handler, _console, manager, _reinits = _handler(tmp_path)
+    sections = handler._setting_sections(handler._get_setting_items(manager.load(), manager, None))
+    assert len(sections) >= 4, sections
+
+    seen: List[str] = []
+    original = handler._render_setting_ui
+
+    def spy(selected_idx, scroll_offset, *args, **kwargs):
+        seen.append(str(kwargs.get("active_section")))
+        return original(selected_idx, scroll_offset, *args, **kwargs)
+
+    handler._render_setting_ui = spy
+    # The browser drains queued keys on entry, which would eat the whole script.
+    handler._drain_msvcrt_keyboard_buffer = lambda *_a, **_k: 0
+    keyboard = _ScriptedKeyboard(b"\t", b"4", b"\x00", b"\x0f", b"1", b"\x1b")
+    with mock.patch.dict(sys.modules, {"msvcrt": keyboard}):
+        assert handler._cmd_setting_ui() is True
+
+    # Initial view, Tab forward, digit jump, Shift+Tab back, digit home.
+    assert seen[0] == sections[0]
+    assert seen[1] == sections[1]
+    assert seen[2] == sections[3]
+    assert seen[3] == sections[2]
+    assert seen[4] == sections[0]
+
+
+def test_an_unassigned_number_key_says_so_instead_of_moving(tmp_path: Path) -> None:
+    handler, _console, manager, _reinits = _handler(tmp_path)
+    sections = handler._setting_sections(handler._get_setting_items(manager.load(), manager, None))
+    assert len(sections) < 10, "this test needs an unassigned 0 key"
+
+    seen: List[tuple] = []
+    original = handler._render_setting_ui
+
+    def spy(selected_idx, scroll_offset, *args, **kwargs):
+        # The feedback line is retired on the next keypress, so read it here.
+        seen.append((str(kwargs.get("active_section")), handler._setting_ui_message))
+        return original(selected_idx, scroll_offset, *args, **kwargs)
+
+    handler._render_setting_ui = spy
+    handler._drain_msvcrt_keyboard_buffer = lambda *_a, **_k: 0
+    with mock.patch.dict(sys.modules, {"msvcrt": _ScriptedKeyboard(b"0", b"\x1b")}):
+        assert handler._cmd_setting_ui() is True
+
+    assert [entry[0] for entry in seen] == [sections[0], sections[0]]
+    assert seen[-1][1] == "No section 0."
 
 
 def test_setting_status_lists_the_whole_catalog(tmp_path: Path) -> None:

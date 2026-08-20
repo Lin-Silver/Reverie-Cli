@@ -75,6 +75,44 @@ _REVIEW_MODEL_SOURCES = {
     "aihubmix", "agnes", "webgemini", "opencode", "custom",
 }
 
+# Windows delivers extended keys as a two-byte handshake: a `\x00`/`\xe0` lead
+# byte followed by a scan code.  The scan code reuses ASCII letters, so a raw
+# `b"H"` is Up when it follows the lead byte and a typed capital H when it does
+# not.  Decoding both halves in one place keeps that ambiguity out of the key
+# loops, which used to compare bytes at two nesting levels.
+_SCAN_CODE_KEYS = {
+    b"H": "up",
+    b"P": "down",
+    b"K": "left",
+    b"M": "right",
+    b"I": "pgup",
+    b"Q": "pgdn",
+    b"G": "home",
+    b"O": "end",
+    b"\x0f": "shift-tab",
+}
+# Single bytes that mean the same thing wherever they are typed.
+_LITERAL_KEYS = {
+    b"\x1b": "escape",
+    b"\r": "enter",
+    b"\n": "enter",
+    b"\t": "tab",
+    b" ": "right",
+    b"[": "shift-tab",
+    b"{": "shift-tab",
+    b"]": "tab",
+    b"}": "tab",
+}
+# Vim and WASD-style equivalents, matched case-insensitively.
+_LETTER_KEYS = {
+    "k": "up",
+    "j": "down",
+    "h": "left",
+    "l": "right",
+    "a": "left",
+    "d": "right",
+}
+
 
 class CommandHandler:
     """Handles CLI commands (starting with /) with Dreamscape styling"""
@@ -13444,14 +13482,43 @@ class CommandHandler:
             return list(items)
         return [item for item in items if self._setting_section_of(item) == label]
 
+    @staticmethod
+    def _setting_section_hotkey(index: int) -> str:
+        """Number-row key that jumps straight to the section at ``index``."""
+        if index < 9:
+            return str(index + 1)
+        if index == 9:
+            return "0"
+        return ""
+
+    def _setting_section_for_digit(self, sections: List[str], digit: str) -> int:
+        """Section index a number-row keypress selects, or -1 when unassigned."""
+        if not sections or len(digit) != 1 or digit not in "0123456789":
+            return -1
+        position = 10 if digit == "0" else int(digit)
+        if position > len(sections):
+            return -1
+        return position - 1
+
     def _build_setting_tabs_line(self, sections: List[str], active: str) -> Text:
-        """Section tab strip rendered above the settings table."""
+        """Section tab strip rendered above the settings table.
+
+        Each tab carries the digit that selects it. The strip is the only place a
+        reader learns the sections are switchable at all, so it has to say so
+        itself rather than leaving the hint to the footer.
+        """
         line = Text()
         for index, section in enumerate(sections):
             if index:
                 line.append("  ")
+            hotkey = self._setting_section_hotkey(index)
+            label = f"{hotkey} {section}" if hotkey else section
             if section == active:
-                line.append(f" {section} ", style=f"bold reverse {self.theme.PINK_SOFT}")
+                line.append(f" {label} ", style=f"bold reverse {self.theme.PINK_SOFT}")
+                continue
+            if hotkey:
+                line.append(f" {hotkey}", style=f"bold {self.theme.AMBER_GLOW}")
+                line.append(f" {section} ", style=self.theme.TEXT_DIM)
             else:
                 line.append(f" {section} ", style=self.theme.TEXT_DIM)
         return line
@@ -13547,7 +13614,7 @@ class CommandHandler:
         visible_range = f"{scroll_offset + 1}-{end_idx} / {total}" if visible_items else f"0 / {total}"
         hints = [f"Rows {visible_range}"]
         if sections:
-            hints.append("Tab / Shift+Tab switches section")
+            hints.append("Press a tab number, or Tab / Shift+Tab, to switch section")
         subtitle = f"[{self.theme.TEXT_DIM}]{f'  {self.deco.DOT_MEDIUM}  '.join(hints)}[/{self.theme.TEXT_DIM}]"
 
         section_label = active_section if active_section and active_section != "All" else "All settings"
@@ -13689,7 +13756,8 @@ class CommandHandler:
         footer_grid.add_row(
             Text.from_markup(
                 f"[{self.theme.TEXT_DIM}]"
-                f"{dot} Tab / Shift+Tab: Section  "
+                f"{dot} 1-9: Jump to section  "
+                f"{dot} Tab / Shift+Tab: Cycle sections  "
                 f"{dot} PgUp/PgDn, Home/End: Jump  "
                 f"{dot} Esc: Exit"
                 f"[/{self.theme.TEXT_DIM}]"
@@ -13787,6 +13855,32 @@ class CommandHandler:
         except (EOFError, OSError):
             return drained
         return drained
+
+    def _read_semantic_key(self, msvcrt_module) -> str:
+        """Read one keypress and name what it means.
+
+        Returns a semantic action (``"up"``, ``"tab"``, ``"escape"``, ...),
+        ``"digit:N"`` for a number row key, or ``""`` for anything unbound.  The
+        two-byte extended-key handshake is consumed here so callers never have to
+        re-read mid-decision.
+        """
+        try:
+            key = msvcrt_module.getch()
+        except (EOFError, OSError):
+            return "escape"
+        if key in (b"\x00", b"\xe0"):
+            try:
+                return _SCAN_CODE_KEYS.get(msvcrt_module.getch(), "")
+            except (EOFError, OSError):
+                return "escape"
+        if key in _LITERAL_KEYS:
+            return _LITERAL_KEYS[key]
+        char = key.decode("utf-8", "ignore")
+        # Deliberately not str.isdigit(): that accepts superscripts and full-width
+        # forms, which int() then rejects.
+        if len(char) == 1 and char in "0123456789":
+            return f"digit:{char}"
+        return _LETTER_KEYS.get(char.lower(), "")
 
     def _setting_parse_bool(self, value: str):
         """Parse common boolean input values."""
@@ -14399,7 +14493,7 @@ class CommandHandler:
             last_size = self._console_size()
             while True:
                 if msvcrt.kbhit():
-                    key = msvcrt.getch()
+                    action = self._read_semantic_key(msvcrt)
                     # Feedback from the previous keypress has been on screen for a
                     # full input cycle, so retire it before handling this one.
                     self._setting_ui_message = ""
@@ -14447,43 +14541,42 @@ class CommandHandler:
                         selected_idx = 0
                         scroll_offset = 0
 
-                    if key == b"\x1b":
+                    def select_section(digit: str) -> None:
+                        """Select the section printed with this number-row key."""
+                        nonlocal section_idx, selected_idx, scroll_offset
+                        target = self._setting_section_for_digit(sections, digit)
+                        if target < 0:
+                            self._setting_ui_message = f"No section {digit}."
+                            return
+                        section_idx = target
+                        selected_idx = 0
+                        scroll_offset = 0
+
+                    if action == "escape":
                         break
-                    if key in (b"k", b"K"):
+                    if action == "up":
                         move(-1)
-                    elif key in (b"j", b"J"):
+                    elif action == "down":
                         move(1)
-                    elif key == b"\t":
-                        switch_section(1)
-                    elif key in (b"\x00", b"\xe0"):
-                        key = msvcrt.getch()
-                        if key == b"H":
-                            move(-1)
-                        elif key == b"P":
-                            move(1)
-                        elif key == b"K":
-                            step(-1)
-                        elif key == b"M":
-                            step(1)
-                        elif key == b"I":  # PgUp
-                            move(-max(1, visible))
-                        elif key == b"Q":  # PgDn
-                            move(max(1, visible))
-                        elif key == b"G":  # Home
-                            selected_idx = 0
-                        elif key == b"O":  # End
-                            selected_idx = max(0, total - 1)
-                        elif key == b"\x0f":  # Shift+Tab arrives as a scan code
-                            switch_section(-1)
-                    elif key in (b"h", b"H", b"a", b"A"):
+                    elif action == "left":
                         step(-1)
-                    elif key in (b"l", b"L", b"d", b"D", b" "):
+                    elif action == "right":
                         step(1)
-                    elif key in (b"[", b"{"):
-                        switch_section(-1)
-                    elif key in (b"]", b"}"):
+                    elif action == "tab":
                         switch_section(1)
-                    elif key == b"\r":
+                    elif action == "shift-tab":
+                        switch_section(-1)
+                    elif action == "pgup":
+                        move(-max(1, visible))
+                    elif action == "pgdn":
+                        move(max(1, visible))
+                    elif action == "home":
+                        selected_idx = 0
+                    elif action == "end":
+                        selected_idx = max(0, total - 1)
+                    elif action.startswith("digit:"):
+                        select_section(action.split(":", 1)[1])
+                    elif action == "enter":
                         if selected_item:
                             live.stop()
                             changed_this_input = self._setting_edit_item(

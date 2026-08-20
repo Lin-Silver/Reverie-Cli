@@ -420,6 +420,7 @@ kbd { display: inline-flex; min-width: 18px; height: 18px; align-items: center; 
 .setting-row:last-child { border: 0; }.setting-row > div { min-width: 0; }.setting-row strong { font-size: var(--font-small); }.setting-row p { margin: 5px 0 0; color: var(--muted); font-size: var(--font-caption); line-height: 1.45; }
 .setting-row select, .setting-row input, .setting-row textarea, .form-grid input, .form-grid select, .form-grid textarea { width: 100%; min-height: 30px; border: 1px solid #303640; border-radius: 7px; background: #151920; color: var(--text-2); padding: 0 8px; outline: 0; font-size: var(--font-small); }
 .setting-row p.setting-hint { margin-top: 4px; padding-left: 8px; border-left: 2px solid var(--accent); color: var(--dim); }
+.setting-badge { margin-left: 7px; padding: 1px 6px; border: 1px solid var(--amber); border-radius: 999px; color: var(--amber); font-size: var(--font-caption); font-weight: 500; letter-spacing: 0.02em; vertical-align: 1px; }
 .setting-row.stacked { grid-template-columns: 1fr; }.setting-row textarea, .form-grid textarea { padding: 8px; resize: vertical; line-height: 1.5; }
 .rules-editor { display: flex; flex-direction: column; gap: 7px; }
 .rules-editor > div { display: flex; justify-content: flex-end; align-items: center; gap: 7px; }

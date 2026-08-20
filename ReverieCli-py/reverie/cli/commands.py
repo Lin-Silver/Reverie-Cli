@@ -38,10 +38,14 @@ from ..modes import (
 )
 from ..config import model_source_display_name, normalize_thinking_output_style, normalize_tool_output_style
 from ..settings_catalog import (
+    SECURITY_SETTING_KEYS,
+    SETTING_SECTION_ORDER,
+    apply_setting_value,
     apply_workspace_mode_setting,
     get_setting_items,
     parse_bool as parse_setting_bool,
     review_model_label,
+    security_setting_value,
     setting_mode_options,
     setting_theme_options,
     setting_thinking_output_choices,
@@ -13221,6 +13225,8 @@ class CommandHandler:
             return self._cmd_setting_bool("show_status_line", "Status Line", value)
         if action in ("tool-output", "tool-output-style", "output-style"):
             return self._cmd_setting_tool_output_style(value)
+        if action in ("thinking-tool", "think-tool", "deep-think"):
+            return self._cmd_setting_thinking_tool(value)
         if action in ("thinking", "thinking-output", "reasoning", "reasoning-output"):
             return self._cmd_setting_thinking_output_style(value)
         if action == "stream":
@@ -13242,7 +13248,7 @@ class CommandHandler:
 
         self.console.print(
             f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} "
-            f"Usage: /setting [status|ui|mode|model|theme|auto-index|status-line|tool-output|thinking|stream|timeout|retries|debug|workspace|rules]"
+            f"Usage: /setting [status|ui|mode|model|theme|auto-index|status-line|tool-output|thinking|thinking-tool|stream|timeout|retries|debug|workspace|rules]"
             f"[/{self.theme.AMBER_GLOW}]"
         )
         return True
@@ -13318,7 +13324,12 @@ class CommandHandler:
                 preview += f" +{len(rules) - 1} more"
             return escape(preview[:56] + ("..." if len(preview) > 56 else ""))
 
-        value = getattr(config, key, None)
+        if key in SECURITY_SETTING_KEYS:
+            # These live in the `config.security` dict; a plain getattr() reads
+            # None for most of them and the row would render as "(empty)".
+            value = security_setting_value(key, config)
+        else:
+            value = getattr(config, key, None)
         if key == "active_model_index":
             if not config.models:
                 return f"[{self.theme.TEXT_DIM}](no standard models)[/{self.theme.TEXT_DIM}]"
@@ -13391,8 +13402,66 @@ class CommandHandler:
     def _setting_visible_count(self) -> int:
         """Choose a stable visible-row count for the settings browser."""
         width = self._console_width()
-        reserve = 18 if width >= 140 else 20 if width >= 110 else 22
-        return max(5, min(9, self._console_height() - reserve))
+        # Summary, tab strip, detail, and footer chrome all sit around the table;
+        # wide consoles wrap less of it, so they can afford more rows.
+        reserve = 21 if width >= 140 else 23 if width >= 110 else 25
+        if str(getattr(self, "_setting_ui_message", "") or "").strip():
+            # The footer grows a feedback line; give up a row instead of clipping it.
+            reserve += 1
+        return max(4, min(10, self._console_height() - reserve))
+
+    @staticmethod
+    def _setting_clamp_index(index: int, total: int) -> int:
+        """Keep a selection index inside a list whose length can change."""
+        if total <= 0:
+            return 0
+        try:
+            value = int(index)
+        except (TypeError, ValueError):
+            value = 0
+        return max(0, min(value, total - 1))
+
+    @staticmethod
+    def _setting_section_of(item: Optional[Dict[str, Any]]) -> str:
+        """Section label for one settings item."""
+        return str((item or {}).get("section") or "").strip() or "Other"
+
+    def _setting_sections(self, items: List[Dict[str, Any]]) -> List[str]:
+        """Tab labels for the settings browser: All, then every section present."""
+        present: List[str] = []
+        for item in items:
+            section = self._setting_section_of(item)
+            if section not in present:
+                present.append(section)
+        ordered = [section for section in SETTING_SECTION_ORDER if section in present]
+        ordered.extend(section for section in present if section not in ordered)
+        return ["All"] + ordered
+
+    def _setting_filtered_items(self, items: List[Dict[str, Any]], section: str) -> List[Dict[str, Any]]:
+        """Items belonging to one section tab."""
+        label = str(section or "All").strip()
+        if not label or label == "All":
+            return list(items)
+        return [item for item in items if self._setting_section_of(item) == label]
+
+    def _build_setting_tabs_line(self, sections: List[str], active: str) -> Text:
+        """Section tab strip rendered above the settings table."""
+        line = Text()
+        for index, section in enumerate(sections):
+            if index:
+                line.append("  ")
+            if section == active:
+                line.append(f" {section} ", style=f"bold reverse {self.theme.PINK_SOFT}")
+            else:
+                line.append(f" {section} ", style=self.theme.TEXT_DIM)
+        return line
+
+    def _setting_name_cell(self, item: Dict[str, Any], width: int) -> str:
+        """Setting name markup, marked when the catalog flags it experimental."""
+        name = escape(self._truncate_middle(str(item.get("name", "") or ""), width))
+        if item.get("experimental"):
+            return f"{name} [{self.theme.AMBER_GLOW}]{self.deco.SPARKLE}[/{self.theme.AMBER_GLOW}]"
+        return name
 
     def _build_setting_list_panel(
         self,
@@ -13403,47 +13472,97 @@ class CommandHandler:
         config,
         config_manager,
         rules_manager,
+        *,
+        sections: Optional[List[str]] = None,
+        active_section: str = "All",
+        group_headers: bool = False,
     ) -> Panel:
-        """Settings list panel for the TUI."""
-        table = Table(box=box.SIMPLE, show_header=True, pad_edge=False)
+        """Settings list panel for the TUI and the `/setting status` dashboard."""
+        # expand=True so the header rule spans the panel instead of stopping short.
+        table = Table(box=box.SIMPLE, show_header=True, pad_edge=False, expand=True)
+        table.add_column(" ", width=2, no_wrap=True)
         table.add_column("#", style=self.theme.TEXT_DIM, width=4, justify="right")
-        table.add_column("Setting", style=f"bold {self.theme.BLUE_SOFT}", width=24, no_wrap=True)
+        # Wide enough for the longest catalog name plus the experimental marker,
+        # so real settings are not elided down to "Strict Al... Read-Only".
+        name_width = 26
+        table.add_column(
+            "Setting",
+            style=f"bold {self.theme.BLUE_SOFT}",
+            width=name_width + 2,
+            no_wrap=True,
+        )
         table.add_column("Kind", style=self.theme.TEXT_DIM, width=10, no_wrap=True)
         table.add_column("Value", style=self.theme.TEXT_PRIMARY, ratio=1, no_wrap=True)
 
-        end_idx = min(scroll_offset + max_visible, len(items))
+        total = len(items)
+        max_visible = max(1, int(max_visible or 1))
+        scroll_offset = max(0, min(int(scroll_offset or 0), max(0, total - 1)))
+        end_idx = min(scroll_offset + max_visible, total)
         visible_items = items[scroll_offset:end_idx]
 
+        last_section = ""
         for row_index, item in enumerate(visible_items):
             actual_idx = scroll_offset + row_index
+            if group_headers:
+                section = self._setting_section_of(item)
+                if section != last_section:
+                    last_section = section
+                    table.add_row(
+                        "",
+                        "",
+                        f"[bold {self.theme.PURPLE_SOFT}]{escape(section)}[/bold {self.theme.PURPLE_SOFT}]",
+                        "",
+                        "",
+                    )
             is_selected = actual_idx == selected_idx
             value_text = self._setting_display_value(item, config, config_manager, rules_manager)
             kind_label = str(item.get("kind", "") or "").strip()
+            name_cell = self._setting_name_cell(item, name_width)
             if is_selected:
                 table.add_row(
+                    f"[bold {self.theme.PINK_SOFT}]{self.deco.CHEVRON_RIGHT}[/bold {self.theme.PINK_SOFT}]",
                     f"[{self.theme.TEXT_DIM}]{actual_idx + 1}[/{self.theme.TEXT_DIM}]",
-                    f"[bold {self.theme.PINK_SOFT}]{escape(self._truncate_middle(item['name'], 22))}[/bold {self.theme.PINK_SOFT}]",
+                    f"[bold {self.theme.PINK_SOFT}]{name_cell}[/bold {self.theme.PINK_SOFT}]",
                     f"[{self.theme.TEXT_PRIMARY}]{escape(kind_label)}[/{self.theme.TEXT_PRIMARY}]",
                     f"[reverse]{value_text}[/reverse]",
                 )
             else:
                 table.add_row(
+                    "",
                     str(actual_idx + 1),
-                    escape(self._truncate_middle(item["name"], 22)),
+                    name_cell,
                     escape(kind_label),
                     value_text,
                 )
 
-        visible_range = (
-            f"{scroll_offset + 1}-{end_idx} / {len(items)}"
-            if visible_items
-            else f"0 / {len(items)}"
-        )
+        if not visible_items:
+            table.add_row(
+                "",
+                "",
+                f"[{self.theme.TEXT_DIM}](nothing in this section)[/{self.theme.TEXT_DIM}]",
+                "",
+                "",
+            )
+
+        visible_range = f"{scroll_offset + 1}-{end_idx} / {total}" if visible_items else f"0 / {total}"
+        hints = [f"Rows {visible_range}"]
+        if sections:
+            hints.append("Tab / Shift+Tab switches section")
+        subtitle = f"[{self.theme.TEXT_DIM}]{f'  {self.deco.DOT_MEDIUM}  '.join(hints)}[/{self.theme.TEXT_DIM}]"
+
+        section_label = active_section if active_section and active_section != "All" else "All settings"
+        body: Any = table
+        if sections:
+            # No spacer row: box.SIMPLE already opens the table with a blank line.
+            body = Group(self._build_setting_tabs_line(sections, active_section), table)
 
         return Panel(
-            table,
-            title=f"[bold {self.theme.BLUE_SOFT}]{self.deco.DIAMOND} Settings[/bold {self.theme.BLUE_SOFT}]",
-            subtitle=f"[{self.theme.TEXT_DIM}]Visible window: {visible_range}  {self.deco.DOT_MEDIUM}  Scroll down to reveal more[/{self.theme.TEXT_DIM}]",
+            body,
+            title=(
+                f"[bold {self.theme.BLUE_SOFT}]{self.deco.DIAMOND} Settings "
+                f"{self.deco.DOT_MEDIUM} {escape(section_label)}[/bold {self.theme.BLUE_SOFT}]"
+            ),
+            subtitle=subtitle,
             border_style=self.theme.BORDER_SUBTLE,
             padding=(0, 1),
             box=box.ROUNDED,
@@ -13451,17 +13570,41 @@ class CommandHandler:
 
     def _build_setting_detail_panel(self, item: Dict[str, Any], config, config_manager, rules_manager) -> Panel:
         """Detailed description panel for the selected setting."""
+        item = item or {}
         kind = str(item.get("kind", "")).strip()
         key = str(item.get("key", "")).strip()
         description = str(item.get("description", "")).strip()
         command = str(item.get("command", "")).strip()
 
+        if not item:
+            return Panel(
+                Text.from_markup(
+                    f"[{self.theme.TEXT_DIM}]This section has no settings. "
+                    f"Press Tab to move to another section.[/{self.theme.TEXT_DIM}]"
+                ),
+                title=f"[bold {self.theme.PURPLE_SOFT}]{self.deco.DIAMOND} Details[/bold {self.theme.PURPLE_SOFT}]",
+                border_style=self.theme.BORDER_SUBTLE,
+                padding=(1, 2),
+                box=box.ROUNDED,
+            )
+
         detail_lines = [
-            f"[bold {self.theme.PURPLE_SOFT}]{escape(item['name'])}[/bold {self.theme.PURPLE_SOFT}]",
-            f"[{self.theme.TEXT_SECONDARY}]{escape(description)}[/{self.theme.TEXT_SECONDARY}]",
-            "",
-            f"[{self.theme.TEXT_DIM}]Current[/{self.theme.TEXT_DIM}] {self._setting_display_value(item, config, config_manager, rules_manager)}",
+            f"[bold {self.theme.PURPLE_SOFT}]{escape(str(item.get('name', '') or ''))}[/bold {self.theme.PURPLE_SOFT}]"
+            f"  [{self.theme.TEXT_DIM}]{escape(self._setting_section_of(item))}[/{self.theme.TEXT_DIM}]",
         ]
+        if item.get("experimental"):
+            detail_lines.append(
+                f"[{self.theme.AMBER_GLOW}]{self.deco.SPARKLE} Experimental "
+                f"{self.deco.DOT_MEDIUM} behavior and defaults may change between releases."
+                f"[/{self.theme.AMBER_GLOW}]"
+            )
+        detail_lines.extend(
+            [
+                f"[{self.theme.TEXT_SECONDARY}]{escape(description)}[/{self.theme.TEXT_SECONDARY}]",
+                "",
+                f"[{self.theme.TEXT_DIM}]Current[/{self.theme.TEXT_DIM}] {self._setting_display_value(item, config, config_manager, rules_manager)}",
+            ]
+        )
 
         if kind == "choice":
             choices = item.get("choices", []) or []
@@ -13512,26 +13655,60 @@ class CommandHandler:
             box=box.ROUNDED,
         )
 
-    def _build_setting_footer_panel(self, *, changed: bool, selected_idx: int, total_items: int) -> Panel:
+    def _build_setting_footer_panel(
+        self,
+        *,
+        changed: bool,
+        selected_idx: int,
+        total_items: int,
+        active_section: str = "All",
+        message: str = "",
+    ) -> Panel:
         """Footer panel with setting TUI controls."""
-        footer_grid = Table.grid(expand=True)
-        footer_grid.add_column(ratio=1)
+        # Two deliberate hint rows rather than one long line: a single row wraps at
+        # the status column and the two collide mid-word on narrow terminals.
+        footer_grid = Table.grid(expand=True, padding=(0, 2))
+        footer_grid.add_column(ratio=1, overflow="ellipsis", no_wrap=True)
         footer_grid.add_column(justify="right", no_wrap=True)
+        dot = self.deco.DOT_MEDIUM
         footer_grid.add_row(
             Text.from_markup(
                 f"[{self.theme.TEXT_DIM}]"
-                f"{self.deco.DOT_MEDIUM} ↑/↓ or j/k: Navigate  "
-                f"{self.deco.DOT_MEDIUM} ←/→ or h/l: Quick change  "
-                f"{self.deco.DOT_MEDIUM} Enter: Edit & save  "
-                f"{self.deco.DOT_MEDIUM} One focused page at a time  "
-                f"{self.deco.DOT_MEDIUM} Esc: Exit"
+                f"{dot} ↑/↓ or j/k: Navigate  "
+                f"{dot} ←/→ or h/l: Quick change  "
+                f"{dot} Enter: Edit & save"
                 f"[/{self.theme.TEXT_DIM}]"
             ),
             Text(
-                f"{selected_idx + 1}/{max(1, total_items)} · {'saved' if changed else 'ready'}",
+                f"{str(active_section or 'All')} · "
+                f"{min(selected_idx + 1, max(1, total_items))}/{max(1, total_items)} · "
+                f"{'saved' if changed else 'ready'}",
                 style=self.theme.MINT_SOFT if changed else self.theme.TEXT_DIM,
             ),
         )
+        footer_grid.add_row(
+            Text.from_markup(
+                f"[{self.theme.TEXT_DIM}]"
+                f"{dot} Tab / Shift+Tab: Section  "
+                f"{dot} PgUp/PgDn, Home/End: Jump  "
+                f"{dot} Esc: Exit"
+                f"[/{self.theme.TEXT_DIM}]"
+            ),
+            Text(""),
+        )
+        note = str(message or "").strip()
+        if note:
+            # One line of feedback from the last change, so a rejected value does
+            # not just silently do nothing.
+            footer_grid.add_row(
+                Text(
+                    f"{self.deco.CHEVRON_RIGHT} {note}",
+                    style=self.theme.MINT_SOFT if changed else self.theme.AMBER_GLOW,
+                    overflow="ellipsis",
+                    no_wrap=True,
+                ),
+                Text(""),
+            )
         return Panel(
             footer_grid,
             border_style=self.theme.BORDER_SUBTLE,
@@ -13548,10 +13725,19 @@ class CommandHandler:
         rules_manager,
         *,
         changed: bool = False,
+        active_section: str = "All",
+        sections: Optional[List[str]] = None,
     ) -> Group:
         """Compose the full settings TUI renderable."""
-        items = self._get_setting_items(config, config_manager, rules_manager)
-        selected_item = items[selected_idx]
+        all_items = self._get_setting_items(config, config_manager, rules_manager)
+        section_tabs = list(sections) if sections else self._setting_sections(all_items)
+        if active_section not in section_tabs:
+            active_section = section_tabs[0] if section_tabs else "All"
+        items = self._setting_filtered_items(all_items, active_section)
+        # The item list can shrink under us (plugins rescan, workspace switch),
+        # so never index it with a stale selection.
+        selected_idx = self._setting_clamp_index(selected_idx, len(items))
+        selected_item = items[selected_idx] if items else {}
         max_visible = self._setting_visible_count()
         summary_panel = self._build_setting_summary_panel(
             config,
@@ -13559,7 +13745,7 @@ class CommandHandler:
             rules_manager,
             selected_item=selected_item,
             changed=changed,
-            item_count=len(items),
+            item_count=len(all_items),
         )
         list_panel = self._build_setting_list_panel(
             items,
@@ -13569,9 +13755,17 @@ class CommandHandler:
             config,
             config_manager,
             rules_manager,
+            sections=section_tabs,
+            active_section=active_section,
         )
         detail_panel = self._build_setting_detail_panel(selected_item, config, config_manager, rules_manager)
-        footer_panel = self._build_setting_footer_panel(changed=changed, selected_idx=selected_idx, total_items=len(items))
+        footer_panel = self._build_setting_footer_panel(
+            changed=changed,
+            selected_idx=selected_idx,
+            total_items=len(items),
+            active_section=active_section,
+            message=self._setting_ui_message,
+        )
         return Group(summary_panel, list_panel, detail_panel, footer_panel)
 
     def _setting_save_ui_change(self, config, config_manager) -> None:
@@ -13626,6 +13820,12 @@ class CommandHandler:
         config = config_manager.load()
         self.console.print()
         items = self._get_setting_items(config, config_manager, rules_manager)
+        # Group the dashboard by section so the whole catalog reads in one pass.
+        grouped_items = [
+            item
+            for section in self._setting_sections(items)[1:]
+            for item in self._setting_filtered_items(items, section)
+        ]
         self.console.print(
             self._build_setting_summary_panel(
                 config,
@@ -13639,13 +13839,14 @@ class CommandHandler:
         self.console.print()
         self.console.print(
             self._build_setting_list_panel(
-                items,
-                selected_idx=0,
+                grouped_items,
+                selected_idx=-1,
                 scroll_offset=0,
-                max_visible=min(len(items), self._setting_visible_count()),
+                max_visible=max(1, len(grouped_items)),
                 config=config,
                 config_manager=config_manager,
                 rules_manager=rules_manager,
+                group_headers=True,
             )
         )
         self.console.print()
@@ -13655,6 +13856,7 @@ class CommandHandler:
                 f"[bold {self.theme.BLUE_SOFT}]/setting mode writer[/bold {self.theme.BLUE_SOFT}]  "
                 f"[bold {self.theme.BLUE_SOFT}]/setting tool-output condensed[/bold {self.theme.BLUE_SOFT}]  "
                 f"[bold {self.theme.BLUE_SOFT}]/setting thinking full[/bold {self.theme.BLUE_SOFT}]  "
+                f"[bold {self.theme.BLUE_SOFT}]/setting thinking-tool on[/bold {self.theme.BLUE_SOFT}]  "
                 f"[bold {self.theme.BLUE_SOFT}]/setting timeout 120[/bold {self.theme.BLUE_SOFT}]  "
                 f"[bold {self.theme.BLUE_SOFT}]/setting workspace on[/bold {self.theme.BLUE_SOFT}]",
                 border_style=self.theme.BORDER_SUBTLE,
@@ -13840,6 +14042,48 @@ class CommandHandler:
             reinit=False,
         )
 
+    def _cmd_setting_thinking_tool(self, value: str) -> bool:
+        """Toggle the experimental Thinking Tool (the deep_think scratchpad)."""
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]")
+            return True
+
+        config = config_manager.load()
+        current = bool(getattr(config, "thinking_tool", False))
+        parsed = self._setting_parse_bool(value)
+        if parsed is None:
+            parsed = Confirm.ask("Thinking Tool (experimental)", default=current)
+
+        config.thinking_tool = parsed
+        message = (
+            "Thinking Tool ON - deep_think is offered to the model and renders as think_tool."
+            if parsed
+            else "Thinking Tool OFF - deep_think is hidden from the model."
+        )
+        saved = self._setting_save_and_reinit(config, message, reinit=False)
+        # Tool visibility and the prompt section both read this flag, so resync
+        # the live agent instead of waiting for the next reinit.
+        self._resync_thinking_tool_state()
+        return saved
+
+    def _resync_thinking_tool_state(self) -> None:
+        """Push a Thinking Tool change into the running agent."""
+        refresh_prompt = self.app.get("refresh_agent_prompt_guidance")
+        if refresh_prompt:
+            try:
+                refresh_prompt()
+            except Exception:
+                report_suppressed_exception("refresh prompt guidance after Thinking Tool toggle")
+        agent = self.app.get("agent")
+        executor = getattr(agent, "tool_executor", None)
+        invalidate = getattr(executor, "invalidate_schema_cache", None)
+        if callable(invalidate):
+            try:
+                invalidate()
+            except Exception:
+                report_suppressed_exception("invalidate tool schema cache after Thinking Tool toggle")
+
     def _cmd_setting_bool(self, attr: str, label: str, value: str) -> bool:
         """Toggle or set a boolean config value."""
         config_manager = self.app.get('config_manager')
@@ -13948,6 +14192,49 @@ class CommandHandler:
         self.console.print()
         return True
 
+    # Transient state for the interactive settings browser: the last message a
+    # mutation produced, and whether any of them needs the agent rebuilt.
+    _setting_ui_message: str = ""
+    _setting_ui_needs_reinit: bool = False
+
+    def _setting_current_value(self, item: Dict[str, Any], config, config_manager) -> Any:
+        """Read the live value behind one settings item."""
+        key = str(item.get("key", "")).strip()
+        kind = str(item.get("kind", "")).strip()
+        if kind == "workspace":
+            return bool(config_manager.is_workspace_mode())
+        if kind == "plugin-bool":
+            manager = self.app.get("runtime_plugin_manager")
+            plugin_id = str(item.get("plugin_id") or "").strip()
+            state = manager.get_plugin_state(plugin_id) if manager else {}
+            return bool((state or {}).get("enabled"))
+        # Security settings live in the `config.security` dict, so a plain
+        # getattr() would raise instead of returning the current value.
+        if key in SECURITY_SETTING_KEYS:
+            return security_setting_value(key, config)
+        return getattr(config, key, None)
+
+    def _setting_apply_value(self, item: Dict[str, Any], config, config_manager, rules_manager, value: Any) -> bool:
+        """Write one settings value through the shared catalog mutator."""
+        key = str(item.get("key", "")).strip()
+        try:
+            success, message, needs_reinit = apply_setting_value(
+                config,
+                config_manager,
+                rules_manager,
+                key,
+                value,
+                self.app.get("runtime_plugin_manager"),
+            )
+        except Exception:
+            report_suppressed_exception(f"apply setting '{key}'")
+            self._setting_ui_message = f"Could not update {item.get('name', key)}."
+            return False
+        self._setting_ui_message = str(message or "").strip()
+        if success and needs_reinit:
+            self._setting_ui_needs_reinit = True
+        return bool(success)
+
     def _setting_step_item(self, item: Dict[str, Any], config, config_manager, rules_manager, direction: int) -> bool:
         """Apply a quick left/right change in the settings TUI."""
         kind = str(item.get("kind", "")).strip()
@@ -13961,90 +14248,99 @@ class CommandHandler:
                 return False
             plugin_id = str(item.get("plugin_id") or "").strip()
             state = manager.get_plugin_state(plugin_id)
-            manager.set_plugin_enabled(plugin_id, not bool(state.get("enabled")))
+            manager.set_plugin_enabled(plugin_id, not bool((state or {}).get("enabled")))
             skills_manager = self.app.get("skills_manager")
             if skills_manager:
                 skills_manager.scan()
             refresh_prompt = self.app.get("refresh_agent_prompt_guidance")
             if refresh_prompt:
                 refresh_prompt()
+            self._setting_ui_message = f"Plugin {plugin_id} toggled."
             return True
         if kind == "workspace":
             target = not bool(config_manager.is_workspace_mode())
-            success, _ = self._apply_workspace_mode_setting(target)
+            success, message = self._apply_workspace_mode_setting(target)
+            self._setting_ui_message = str(message or "").strip()
             return success
         if kind == "bool":
-            setattr(config, key, not bool(getattr(config, key)))
-            return True
+            current = bool(self._setting_current_value(item, config, config_manager))
+            return self._setting_apply_value(item, config, config_manager, rules_manager, not current)
         if kind == "int":
-            step = int(item.get("step", 1))
-            min_value = int(item.get("min", 0))
-            max_value = int(item.get("max", 999999))
-            current = int(getattr(config, key))
-            current += step * direction
-            current = max(min_value, min(max_value, current))
-            setattr(config, key, current)
-            return True
-        if kind == "choice":
-            choices = item.get("choices", []) or []
-            if not choices:
-                return False
-            current = getattr(config, key)
+            step = max(1, int(item.get("step", 1) or 1))
+            min_value = int(item.get("min", 0) or 0)
+            max_value = int(item.get("max", 999999) or 0)
             try:
-                current_index = choices.index(current)
-            except ValueError:
-                current_index = 0
+                current = int(self._setting_current_value(item, config, config_manager) or 0)
+            except (TypeError, ValueError):
+                current = min_value
+            target = max(min_value, min(max_value, current + step * direction))
+            if target == current:
+                self._setting_ui_message = f"{item.get('name', key)} is already at its {'maximum' if direction > 0 else 'minimum'}."
+                return False
+            return self._setting_apply_value(item, config, config_manager, rules_manager, target)
+        if kind == "choice":
+            choices = list(item.get("choices", []) or [])
+            if not choices:
+                self._setting_ui_message = f"{item.get('name', key)} has no selectable values."
+                return False
+            current = self._setting_current_value(item, config, config_manager)
+            current_index = self._setting_choice_index(choices, current)
             new_index = (current_index + direction) % len(choices)
-            new_value = choices[new_index]
-            setattr(config, key, new_value)
-            if key == "active_model_index":
-                config.active_model_source = "standard"
-            return True
+            return self._setting_apply_value(item, config, config_manager, rules_manager, choices[new_index])
         return False
+
+    @staticmethod
+    def _setting_choice_index(choices: List[Any], current: Any) -> int:
+        """Locate the active choice, tolerating type and case differences."""
+        try:
+            return choices.index(current)
+        except ValueError:
+            pass
+        text = str(current if current is not None else "").strip().lower()
+        for index, choice in enumerate(choices):
+            if str(choice).strip().lower() == text:
+                return index
+        return 0
 
     def _setting_edit_item(self, item: Dict[str, Any], config, config_manager, rules_manager) -> bool:
         """Edit the selected setting with a precise prompt."""
         kind = str(item.get("kind", "")).strip()
         key = str(item.get("key", "")).strip()
+        label = str(item.get("name", "") or key or "setting")
 
         if kind == "rules":
             self._cmd_setting_rules("")
             return True
         if kind == "readonly":
+            self._setting_ui_message = f"{label} is read-only."
             return False
-        if kind == "plugin-bool":
+        if kind in ("plugin-bool", "workspace", "bool"):
+            # Nothing to type: an explicit Enter means the same as a step.
             return self._setting_step_item(item, config, config_manager, rules_manager, 1)
-        if kind == "workspace":
-            success, _ = self._apply_workspace_mode_setting(not bool(config_manager.is_workspace_mode()))
-            return success
-        if kind == "bool":
-            setattr(config, key, not bool(getattr(config, key)))
-            return True
         if kind == "int":
-            raw = Prompt.ask(item["name"], default=str(getattr(config, key))).strip()
+            current = self._setting_current_value(item, config, config_manager)
+            raw = Prompt.ask(label, default=str(current if current is not None else "")).strip()
             try:
                 parsed = int(raw)
             except ValueError:
+                self._setting_ui_message = f"{label} must be an integer."
                 return False
-            min_value = int(item.get("min", 0))
-            max_value = int(item.get("max", 999999))
-            if parsed < min_value or parsed > max_value:
-                return False
-            setattr(config, key, parsed)
-            return True
+            return self._setting_apply_value(item, config, config_manager, rules_manager, parsed)
         if kind == "choice":
             if key == "active_model_index":
                 selected_idx = self._select_standard_model_index("", prompt_if_missing=True)
                 if selected_idx < 0:
                     return False
-                config.active_model_index = selected_idx
-                config.active_model_source = "standard"
-                return True
+                return self._setting_apply_value(item, config, config_manager, rules_manager, selected_idx)
             choices = [str(choice) for choice in (item.get("choices", []) or [])]
-            current = str(getattr(config, key) or "")
-            picked = Prompt.ask(item["name"], default=current, choices=choices).strip()
-            setattr(config, key, picked)
-            return True
+            if not choices:
+                self._setting_ui_message = f"{label} has no selectable values."
+                return False
+            current = str(self._setting_current_value(item, config, config_manager) or "")
+            # Rich re-prompts forever when the default is not one of `choices`.
+            default = current if current in choices else choices[0]
+            picked = Prompt.ask(label, default=default, choices=choices).strip()
+            return self._setting_apply_value(item, config, config_manager, rules_manager, picked)
         return False
 
     def _cmd_setting_ui(self) -> bool:
@@ -14064,14 +14360,36 @@ class CommandHandler:
             return True
         rules_manager = self.app.get('rules_manager')
         config = config_manager.load()
+
+        all_items = self._get_setting_items(config, config_manager, rules_manager)
+        if not all_items:
+            self.console.print(f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} No settings are available to edit.[/{self.theme.AMBER_GLOW}]")
+            return True
+
+        sections = self._setting_sections(all_items)
+        section_idx = 0
         selected_idx = 0
         scroll_offset = 0
         changed = False
+        self._setting_ui_message = ""
+        self._setting_ui_needs_reinit = False
 
         from rich.live import Live
 
+        def render() -> Group:
+            return self._render_setting_ui(
+                selected_idx,
+                scroll_offset,
+                config,
+                config_manager,
+                rules_manager,
+                changed=changed,
+                active_section=sections[section_idx] if sections else "All",
+                sections=sections,
+            )
+
         with Live(
-            self._render_setting_ui(selected_idx, scroll_offset, config, config_manager, rules_manager, changed=changed),
+            render(),
             auto_refresh=False,
             screen=True,
             transient=True,
@@ -14082,87 +14400,157 @@ class CommandHandler:
             while True:
                 if msvcrt.kbhit():
                     key = msvcrt.getch()
-                    items = self._get_setting_items(config, config_manager, rules_manager)
-                    selected_item = items[selected_idx]
+                    # Feedback from the previous keypress has been on screen for a
+                    # full input cycle, so retire it before handling this one.
+                    self._setting_ui_message = ""
+                    # Rebuild every tick: plugins rescan and workspace switches can
+                    # add or drop rows while the browser is open.
+                    all_items = self._get_setting_items(config, config_manager, rules_manager)
+                    sections = self._setting_sections(all_items)
+                    section_idx = self._setting_clamp_index(section_idx, len(sections))
+                    active_section = sections[section_idx] if sections else "All"
+                    items = self._setting_filtered_items(all_items, active_section)
+                    selected_idx = self._setting_clamp_index(selected_idx, len(items))
+                    selected_item = items[selected_idx] if items else {}
+                    total = len(items)
+                    visible = self._setting_visible_count()
                     should_reload_config = False
                     changed_this_input = False
+
+                    def step(direction: int) -> None:
+                        """Quick-change the highlighted row."""
+                        nonlocal changed, changed_this_input, should_reload_config
+                        if not selected_item:
+                            return
+                        changed_this_input = self._setting_step_item(
+                            selected_item, config, config_manager, rules_manager, direction
+                        )
+                        changed = changed_this_input or changed
+                        should_reload_config = str(selected_item.get("kind", "")).strip() == "workspace"
+
+                    def move(delta: int) -> None:
+                        """Move the highlight; single steps wrap, page jumps clamp."""
+                        nonlocal selected_idx
+                        if total <= 0:
+                            return
+                        if abs(delta) == 1:
+                            selected_idx = (selected_idx + delta) % total
+                        else:
+                            selected_idx = max(0, min(total - 1, selected_idx + delta))
+
+                    def switch_section(delta: int) -> None:
+                        """Jump to another section tab and restart the selection."""
+                        nonlocal section_idx, selected_idx, scroll_offset
+                        if not sections:
+                            return
+                        section_idx = (section_idx + delta) % len(sections)
+                        selected_idx = 0
+                        scroll_offset = 0
 
                     if key == b"\x1b":
                         break
                     if key in (b"k", b"K"):
-                        selected_idx = (selected_idx - 1) % len(items)
+                        move(-1)
                     elif key in (b"j", b"J"):
-                        selected_idx = (selected_idx + 1) % len(items)
-                    elif key in (b"h", b"H", b"a", b"A"):
-                        changed_this_input = self._setting_step_item(selected_item, config, config_manager, rules_manager, -1)
-                        changed = changed_this_input or changed
-                        should_reload_config = str(selected_item.get("kind", "")).strip() == "workspace"
-                    elif key in (b"l", b"L", b"d", b"D", b" "):
-                        changed_this_input = self._setting_step_item(selected_item, config, config_manager, rules_manager, 1)
-                        changed = changed_this_input or changed
-                        should_reload_config = str(selected_item.get("kind", "")).strip() == "workspace"
-                    elif key == b"\r":
-                        live.stop()
-                        changed_this_input = self._setting_edit_item(selected_item, config, config_manager, rules_manager)
-                        changed = changed_this_input or changed
-                        kind = str(selected_item.get("kind", "")).strip()
-                        should_reload_config = kind == "workspace"
-                        if kind == "rules":
-                            should_reload_config = False
-                        if should_reload_config:
-                            config = config_manager.load()
-                        live.start()
+                        move(1)
+                    elif key == b"\t":
+                        switch_section(1)
                     elif key in (b"\x00", b"\xe0"):
                         key = msvcrt.getch()
                         if key == b"H":
-                            selected_idx = (selected_idx - 1) % len(items)
+                            move(-1)
                         elif key == b"P":
-                            selected_idx = (selected_idx + 1) % len(items)
+                            move(1)
                         elif key == b"K":
-                            changed_this_input = self._setting_step_item(selected_item, config, config_manager, rules_manager, -1)
-                            changed = changed_this_input or changed
-                            should_reload_config = str(selected_item.get("kind", "")).strip() == "workspace"
+                            step(-1)
                         elif key == b"M":
-                            changed_this_input = self._setting_step_item(selected_item, config, config_manager, rules_manager, 1)
+                            step(1)
+                        elif key == b"I":  # PgUp
+                            move(-max(1, visible))
+                        elif key == b"Q":  # PgDn
+                            move(max(1, visible))
+                        elif key == b"G":  # Home
+                            selected_idx = 0
+                        elif key == b"O":  # End
+                            selected_idx = max(0, total - 1)
+                        elif key == b"\x0f":  # Shift+Tab arrives as a scan code
+                            switch_section(-1)
+                    elif key in (b"h", b"H", b"a", b"A"):
+                        step(-1)
+                    elif key in (b"l", b"L", b"d", b"D", b" "):
+                        step(1)
+                    elif key in (b"[", b"{"):
+                        switch_section(-1)
+                    elif key in (b"]", b"}"):
+                        switch_section(1)
+                    elif key == b"\r":
+                        if selected_item:
+                            live.stop()
+                            changed_this_input = self._setting_edit_item(
+                                selected_item, config, config_manager, rules_manager
+                            )
                             changed = changed_this_input or changed
-                            should_reload_config = str(selected_item.get("kind", "")).strip() == "workspace"
+                            kind = str(selected_item.get("kind", "")).strip()
+                            should_reload_config = kind == "workspace"
+                            if should_reload_config:
+                                config = config_manager.load()
+                            # Typing at the prompt can leave keys queued; they are
+                            # not navigation input for the browser.
+                            self._drain_msvcrt_keyboard_buffer(msvcrt)
+                            live.start()
 
                     if should_reload_config:
                         config = config_manager.load()
                     elif changed_this_input:
                         kind = str(selected_item.get("kind", "")).strip()
-                        if kind not in ("rules", "readonly"):
+                        if kind not in ("rules", "readonly", "plugin-bool"):
                             self._setting_save_ui_change(config, config_manager)
+                    if changed_this_input:
+                        # A change can resize the catalog (model list, plugins), so
+                        # re-derive the row count before clamping the scroll window.
+                        all_items = self._get_setting_items(config, config_manager, rules_manager)
+                        sections = self._setting_sections(all_items)
+                        section_idx = self._setting_clamp_index(section_idx, len(sections))
+                        items = self._setting_filtered_items(
+                            all_items, sections[section_idx] if sections else "All"
+                        )
+                        selected_idx = self._setting_clamp_index(selected_idx, len(items))
+                        total = len(items)
+                    # The footer may have grown a feedback line, so re-measure the
+                    # window before clamping the scroll offset against it.
+                    visible = self._setting_visible_count()
                     scroll_offset = self._clamp_help_browser_scroll(
                         selected_idx,
                         scroll_offset,
-                        len(items),
-                        self._setting_visible_count(),
+                        total,
+                        visible,
                     )
-                    live.update(
-                        self._render_setting_ui(selected_idx, scroll_offset, config, config_manager, rules_manager, changed=changed),
-                        refresh=True,
-                    )
+                    live.update(render(), refresh=True)
                 current_size = self._console_size()
                 if current_size != last_size:
                     last_size = current_size
-                    items = self._get_setting_items(config, config_manager, rules_manager)
+                    all_items = self._get_setting_items(config, config_manager, rules_manager)
+                    sections = self._setting_sections(all_items)
+                    section_idx = self._setting_clamp_index(section_idx, len(sections))
+                    items = self._setting_filtered_items(
+                        all_items, sections[section_idx] if sections else "All"
+                    )
+                    selected_idx = self._setting_clamp_index(selected_idx, len(items))
                     scroll_offset = self._clamp_help_browser_scroll(
                         selected_idx,
                         scroll_offset,
                         len(items),
                         self._setting_visible_count(),
                     )
-                    live.update(
-                        self._render_setting_ui(selected_idx, scroll_offset, config, config_manager, rules_manager, changed=changed),
-                        refresh=True,
-                    )
+                    live.update(render(), refresh=True)
                 time.sleep(0.025)
 
         if changed:
             config_manager.save(config)
-        if changed and self.app.get('reinit_agent'):
+        if (changed or self._setting_ui_needs_reinit) and self.app.get('reinit_agent'):
             self.app['reinit_agent']()
+        self._setting_ui_needs_reinit = False
+        self._setting_ui_message = ""
 
         self.console.print()
         self.console.print(

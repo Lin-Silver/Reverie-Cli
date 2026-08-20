@@ -41,6 +41,7 @@ from .create_file import CreateFileTool
 from .user_input import UserInputTool
 from .skill_lookup import SkillLookupTool
 from .clarification import ClarificationTool
+from .deep_think import DeepThinkTool
 from .media_generation_capabilities import MediaGenerationCapabilitiesTool
 from .text_to_image import TextToImageTool
 from .text_to_video import TextToVideoTool
@@ -108,6 +109,7 @@ __all__ = [
     "UserInputTool",
     "SkillLookupTool",
     "ClarificationTool",
+    "DeepThinkTool",
     "MediaGenerationCapabilitiesTool",
     "TextToImageTool",
     "TextToVideoTool",

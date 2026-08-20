@@ -55,6 +55,25 @@ These rules apply in every mode when the task involves software design, code edi
 """.strip()
 
 
+THINKING_TOOL_GUIDANCE = """
+## Deep Think (experimental)
+- The `deep_think` tool is enabled. It is your private scratchpad: whatever you pass as `thought` is shown to the user as thinking, never as an answer, and nothing is executed.
+- Use it before a non-obvious edit, when a plan has more than one reasonable shape, when a tool result contradicts your expectation, or when you are about to debug something you do not yet understand.
+- Write real reasoning, not a summary: the goal, the evidence you already have, the alternatives and why you rejected them, and the one concrete next action.
+- One call, then act. Never call `deep_think` twice in a row without a real tool call or an answer in between, and never use it to reply to the user or to restate a plan you have already committed to.
+- Skip it entirely for trivial or already-decided work; a wasted thinking turn is worse than none.
+""".strip()
+
+
+def _thinking_tool_enabled(config: object) -> bool:
+    """Whether the experimental Thinking Tool switch is on for this run."""
+    if config is None:
+        return False
+    if isinstance(config, dict):
+        return bool(config.get("thinking_tool", False))
+    return bool(getattr(config, "thinking_tool", False))
+
+
 def build_system_prompt(
     model_name: str = "Reverie",
     additional_rules: str = "",
@@ -153,6 +172,9 @@ def _append_shared_prompt_guidance(additional_rules: str, normalized_mode: str, 
             build_media_capabilities(config=config)
         )
     )
+
+    if _thinking_tool_enabled(config):
+        shared_sections.append(THINKING_TOOL_GUIDANCE)
 
     shared_guidance = "\n\n".join(section for section in shared_sections if section.strip())
     if additional_rules.strip():

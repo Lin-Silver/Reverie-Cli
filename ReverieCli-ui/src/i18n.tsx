@@ -285,6 +285,7 @@ const ENGLISH_TRANSLATIONS: Record<string, string> = {
   "保存规则": "Save rules",
   "已配置；留空保持不变": "Configured; leave blank to keep it unchanged",
   "可选": "Optional",
+  "实验性": "Experimental",
   "管理任意 OpenAI、Anthropic、Responses 或请求兼容模型。": "Manage any OpenAI, Anthropic, Responses, or request-compatible model.",
   "官方实时目录": "live provider catalog",
   "内置回退目录": "built-in fallback catalog",

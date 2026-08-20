@@ -20,6 +20,7 @@ import time
 from ..config import get_project_data_dir, get_workspace_checkpoint_dir
 from ..diagnostics import report_suppressed_exception
 from ..modes import normalize_mode
+from ..thinking_tool import THINK_TOOL_NAME
 from ..tools.base import BaseTool, ToolResult
 from ..tools.mcp_dynamic import MCPDynamicTool
 from ..tools.rats_catalog import RatsCatalogTool
@@ -44,6 +45,8 @@ from ..workspace_guard import ShadowGitManager, WorkspaceGuardError
 
 
 logger = logging.getLogger(__name__)
+
+DEEP_THINK_TOOL_NAME = THINK_TOOL_NAME
 
 
 class ToolExecutor:
@@ -161,6 +164,10 @@ class ToolExecutor:
 
     def _invalidate_schema_cache(self) -> None:
         self._schema_cache = {}
+
+    def invalidate_schema_cache(self) -> None:
+        """Drop cached schemas after a setting that changes tool visibility."""
+        self._invalidate_schema_cache()
 
     def _get_memory_os(self):
         """Return the shared Memory OS facade when available."""
@@ -318,6 +325,8 @@ class ToolExecutor:
     def _tool_is_visible(self, name: str, tool: BaseTool, mode: object) -> bool:
         """Return whether a tool should be exposed in the supplied mode."""
         normalized_mode = normalize_mode(mode)
+        if name == DEEP_THINK_TOOL_NAME and not self._thinking_tool_enabled():
+            return False
         if name in {"list_mcp_resources", "read_mcp_resource"}:
             runtime = self.context.get("mcp_runtime")
             if runtime is not None and hasattr(runtime, "has_healthy_servers"):
@@ -564,6 +573,22 @@ class ToolExecutor:
         return normalize_permission_level(
             security.get("permission_level") if isinstance(security, dict) else security
         )
+
+    def _thinking_tool_enabled(self) -> bool:
+        """Whether the experimental Thinking Tool switch is on.
+
+        The flag lives on Config, which the registry's mode-only predicate cannot
+        reach, so the gate is applied here and folded into the schema cache key.
+        """
+        agent = self.context.get("agent")
+        config = getattr(agent, "config", None) if agent is not None else None
+        if config is None:
+            config = self.context.get("config")
+        if config is None:
+            return False
+        if isinstance(config, dict):
+            return bool(config.get("thinking_tool", False))
+        return bool(getattr(config, "thinking_tool", False))
 
     def _extract_search_terms(self, tool: BaseTool) -> List[str]:
         """Collect discovery terms from one tool."""
@@ -1403,6 +1428,7 @@ class ToolExecutor:
             self._runtime_plugin_generation,
             self._rats_generation,
             self._configured_permission_level(),
+            self._thinking_tool_enabled(),
         )
         cached = self._schema_cache.get(cache_key)
         if cached is not None:

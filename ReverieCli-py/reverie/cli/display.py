@@ -29,6 +29,13 @@ from rich import box
 from rich.pager import Pager
 
 from .theme import THEME, DECO, DREAM, DreamBoxes
+from ..thinking_tool import extract_think_tool_text, is_think_tool
+
+
+# The Thinking Tool text is assembled as light markdown for the GUI's renderer;
+# the terminal shows the same body as styled Rich text instead of raw asterisks.
+_THINK_HEADING_RE = re.compile(r"^\*\*(.+?)\*\*$")
+_THINK_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
 
 
 class DisplayComponents:
@@ -1029,6 +1036,9 @@ class DisplayComponents:
             }.get(query_type, "SearchCode")
         if lowered == "command_exec":
             return "Run"
+        if is_think_tool(lowered):
+            # Keep the failure row under the same tag the thinking block uses.
+            return "think_tool"
 
         normalized = re.sub(r"[^A-Za-z0-9]+", " ", str(tool_name or "")).strip().title().replace(" ", "")
         return normalized or "Tool"
@@ -1411,6 +1421,18 @@ class DisplayComponents:
             "agent_id": str(agent_id or "").strip(),
             "agent_color": str(agent_color or "").strip(),
         }
+        if self._is_think_tool(tool_name):
+            # The reasoning is already complete in the call arguments, so render it
+            # as thinking right away and keep the tool row out of the transcript.
+            self.show_think_tool_block(
+                payload["arguments"],
+                agent_id=payload["agent_id"],
+                agent_color=payload["agent_color"],
+            )
+            payload["think_tool_rendered"] = True
+            if tool_call_id:
+                self._pending_tool_events[tool_call_id] = payload
+            return
         if tool_call_id:
             self._pending_tool_events[tool_call_id] = payload
             return
@@ -1423,6 +1445,64 @@ class DisplayComponents:
             state="pending",
             agent_id=agent_id,
             agent_color=agent_color,
+        )
+
+    @staticmethod
+    def _is_think_tool(tool_name: Any) -> bool:
+        """Whether a tool call is the Thinking Tool scratchpad."""
+        return is_think_tool(tool_name)
+
+    def show_think_tool_block(
+        self,
+        arguments: Optional[Dict[str, Any]],
+        *,
+        agent_id: str = "",
+        agent_color: str = "",
+    ) -> None:
+        """Render a deep_think call as thinking content under a think_tool tag."""
+        style = self._normalize_thinking_output_style(self.thinking_output_style)
+        if style == "hidden":
+            return
+
+        text = extract_think_tool_text(arguments if isinstance(arguments, dict) else None)
+        if not text:
+            return
+
+        lines = [line for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
+        if style == "compact":
+            lines = [line for line in lines if line.strip()]
+            if len(lines) > 6:
+                hidden = len(lines) - 6
+                lines = lines[:6] + [f"... {hidden} more line{'s' if hidden != 1 else ''}"]
+
+        rendered: List[Any] = []
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                rendered.append(Text(""))
+                continue
+            heading = _THINK_HEADING_RE.fullmatch(stripped)
+            if heading:
+                rendered.append(
+                    Text(heading.group(1).strip(), style=f"bold {self.theme.THINKING_MEDIUM}")
+                )
+                continue
+            rendered.append(
+                Text(
+                    _THINK_BOLD_RE.sub(r"\1", stripped),
+                    style=f"italic {self.theme.THINKING_SOFT}",
+                )
+            )
+
+        separator = self._safe_separator()
+        label = self._truncate_text(agent_id, 24) if agent_id else "think_tool"
+        accent = agent_color or self.theme.THINKING_MEDIUM
+        char_count = len(text)
+        self._show_timeline_block(
+            title=f"{label}  {separator}  thinking",
+            accent=accent,
+            body=Group(*rendered) if rendered else None,
+            footer=f"deep_think  {separator}  {char_count:,} chars",
         )
 
     def show_tool_result_card(
@@ -1445,6 +1525,30 @@ class DisplayComponents:
         merged_agent_color = str(agent_color or pending.get("agent_color") or "").strip()
         output_style = self._normalize_tool_output_style(self.tool_output_style)
         live_progress_seen = bool(had_live_progress or pending.get("had_live_progress"))
+
+        if self._is_think_tool(merged_tool_name):
+            # Thinking already printed at call time; the acknowledgement carries no
+            # information for the user. Only a real failure is worth a row.
+            if not pending.get("think_tool_rendered"):
+                self.show_think_tool_block(
+                    merged_arguments if isinstance(merged_arguments, dict) else None,
+                    agent_id=merged_agent_id,
+                    agent_color=merged_agent_color,
+                )
+            if success:
+                return
+            # A whitespace-only error would leave splitlines() empty, so pick the
+            # fallback after normalizing rather than before.
+            reason = str(error or output or "").strip().splitlines()
+            self._render_compact_tool_event(
+                tool_name=merged_tool_name,
+                arguments=merged_arguments if isinstance(merged_arguments, dict) else None,
+                summary=reason[0] if reason else "Thinking Tool call failed",
+                state="error",
+                agent_id=merged_agent_id,
+                agent_color=merged_agent_color,
+            )
+            return
 
         if output_style == "full":
             self._render_full_tool_result_card(

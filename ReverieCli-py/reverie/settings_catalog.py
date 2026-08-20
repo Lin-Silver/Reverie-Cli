@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Tuple
 
 from .config import normalize_thinking_output_style, normalize_tool_output_style
 from .modes import list_modes, normalize_mode
@@ -40,6 +40,50 @@ def setting_thinking_output_choices() -> List[str]:
     return ["full", "compact", "hidden"]
 
 
+# Grouping for the terminal settings browser and any other surface that wants to
+# page a long flat list. Keys not listed fall back to "Session".
+SETTING_SECTION_ORDER: Tuple[str, ...] = (
+    "Session",
+    "Model",
+    "Reasoning",
+    "Appearance",
+    "Workspace",
+    "Network",
+    "Security",
+    "Plugins",
+)
+
+_SETTING_SECTIONS: Dict[str, str] = {
+    "mode": "Session",
+    "stream_responses": "Session",
+    "rules": "Session",
+    "active_model_source": "Model",
+    "active_model_index": "Model",
+    "thinking_output_style": "Reasoning",
+    "thinking_tool": "Reasoning",
+    "theme": "Appearance",
+    "show_status_line": "Appearance",
+    "tool_output_style": "Appearance",
+    "auto_index": "Workspace",
+    "use_workspace_config": "Workspace",
+    "api_timeout": "Network",
+    "api_max_retries": "Network",
+    "api_enable_debug_logging": "Network",
+    "permission_level": "Security",
+    "permission_mode": "Security",
+    "review_approve_risk_at": "Security",
+    "review_model": "Security",
+    "strict_allow_read_only": "Security",
+}
+
+
+def setting_section_for(key: Any, kind: Any = "") -> str:
+    """Group label for one setting item."""
+    if str(kind or "").strip() == "plugin-bool":
+        return "Plugins"
+    return _SETTING_SECTIONS.get(str(key or "").strip(), "Session")
+
+
 def review_model_label(config: Any) -> str:
     """Human-facing description of which model performs the Auto Check review."""
     review = resolve_review_config(getattr(config, "security", {}) or {})
@@ -50,6 +94,17 @@ def review_model_label(config: Any) -> str:
     if not name:
         return f"{source or 'custom'} (model not set)"
     return f"{source}:{name}" if source else name
+
+
+# Settings that live inside `config.security` rather than as plain Config
+# attributes, so readers must go through security_setting_value().
+SECURITY_SETTING_KEYS: FrozenSet[str] = frozenset({
+    "permission_level",
+    "permission_mode",
+    "strict_allow_read_only",
+    "review_approve_risk_at",
+    "review_model",
+})
 
 
 def security_setting_value(key: str, config: Any) -> Any:
@@ -136,6 +191,18 @@ def get_setting_items(
             "choices": setting_thinking_output_choices(),
             "description": "Choose whether streamed reasoning stays fully visible, compact, or hidden in the transcript.",
             "command": "/setting thinking full|compact|hidden",
+        },
+        {
+            "name": "Thinking Tool",
+            "key": "thinking_tool",
+            "kind": "bool",
+            "experimental": True,
+            "description": (
+                "Experimental. Offer the deep_think tool so a model with no visible "
+                "reasoning channel can still deliberate; the text it writes renders as "
+                "thinking rather than as a tool result."
+            ),
+            "command": "/setting thinking-tool on|off",
         },
         {
             "name": "Stream Responses",
@@ -246,6 +313,8 @@ def get_setting_items(
                     "command": f"/plugins enable {record.plugin_id} | /plugins disable {record.plugin_id}",
                 }
             )
+    for item in items:
+        item.setdefault("section", setting_section_for(item.get("key"), item.get("kind")))
     return items
 
 
@@ -291,6 +360,11 @@ def apply_workspace_mode_setting(config_manager: Any, enabled: bool) -> Tuple[bo
     config.use_workspace_config = False
     config_manager.save(config)
     return True, f"Workspace mode disabled. Config path: {config_manager.global_config_path}"
+
+
+# Boolean settings that change how the running agent is wired, not just how it
+# renders: flipping one has to rebuild the system prompt and tool schemas.
+_BOOL_KEYS_REQUIRING_REINIT = frozenset({"thinking_tool"})
 
 
 def _coerce_choice(value: Any, choices: Iterable[Any]) -> Tuple[bool, Any]:
@@ -363,7 +437,11 @@ def apply_setting_value(
             state = "allowed without a prompt" if parsed else "prompted like every other tool"
             return True, f"Strict mode: read-only tools are {state}.", True
         setattr(config, normalized_key, parsed)
-        return True, f"{item.get('name', normalized_key)} set to {'on' if parsed else 'off'}.", False
+        return (
+            True,
+            f"{item.get('name', normalized_key)} set to {'on' if parsed else 'off'}.",
+            normalized_key in _BOOL_KEYS_REQUIRING_REINIT,
+        )
     if kind == "int":
         try:
             parsed_int = int(value)

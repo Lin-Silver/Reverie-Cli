@@ -137,6 +137,8 @@ class ReverieSdkBridge:
         return self.tool_executor
 
     def _setting_value(self, item: Dict[str, Any], config: Any, interface: Any) -> Any:
+        from .settings_catalog import SECURITY_SETTING_KEYS, security_setting_value
+
         kind = str(item.get("kind") or "")
         key = str(item.get("key") or "")
         if kind == "plugin-bool":
@@ -145,11 +147,8 @@ class ReverieSdkBridge:
             return bool(interface.config_manager.is_workspace_mode())
         if kind == "rules":
             return "\n".join(interface.rules_manager.get_rules())
-        if key == "permission_level":
-            return str((getattr(config, "security", {}) or {}).get("permission_level", "full_control"))
-        if key in {"permission_mode", "strict_allow_read_only", "review_approve_risk_at", "review_model"}:
-            from .settings_catalog import security_setting_value
-
+        if key in SECURITY_SETTING_KEYS:
+            # These live inside `config.security`, so a plain getattr() reads None.
             return security_setting_value(key, config)
         return getattr(config, key, None)
 

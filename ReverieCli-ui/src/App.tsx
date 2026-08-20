@@ -137,6 +137,7 @@ import {
   mergeLiveTurnBatch,
   type LiveTurnBatch,
 } from "./live-stream";
+import { isThinkTool, thinkToolText } from "./thinking-tool";
 import type { ApprovalDecision } from "./core-protocol";
 
 type Toast = { id: number; kind: "success" | "error" | "info"; message: string };
@@ -282,7 +283,11 @@ function eventLabel(event: Record<string, unknown>): { title: string; detail: st
   const eventType = String(event.event ?? type);
   const toolName = String(event.tool_name ?? event.name ?? "");
   const title = String(event.title ?? event.message ?? event.tool_name ?? event.name ?? eventType);
-  const detail = eventText(event.detail ?? event.output ?? event.error ?? event.text ?? "");
+  // For the Thinking Tool the payload the user wants to read is the reasoning the
+  // model wrote into the call, not the acknowledgement it got back.
+  const detail = isThinkTool(toolName)
+    ? thinkToolText(event.arguments) || eventText(event.detail ?? event.error ?? "")
+    : eventText(event.detail ?? event.output ?? event.error ?? event.text ?? "");
   const inferredStatus = eventType === "model_request" || eventType === "tool_start"
     ? "working"
     : eventType === "model_response" || (eventType === "tool_result" && event.success !== false)
@@ -993,6 +998,8 @@ function ActivityItem({ event }: { event: Record<string, unknown> }) {
 
 function ToolGlyph({ name, size = 14 }: { name: string; size?: number }) {
   const normalized = name.toLowerCase();
+  // The Thinking Tool is reasoning wearing a tool's clothes, so it gets the reasoning icon.
+  if (normalized.includes("think")) return <Brain size={size} />;
   if (normalized.includes("search") || normalized.includes("find") || normalized.includes("grep")) return <FileSearch size={size} />;
   if (normalized.includes("shell") || normalized.includes("terminal") || normalized.includes("command") || normalized.includes("exec")) return <Terminal size={size} />;
   if (normalized.includes("browser") || normalized.includes("web") || normalized.includes("http")) return <Globe size={size} />;
@@ -1060,17 +1067,25 @@ function ToolCallList({ message }: { message: SessionMessage }) {
   if (!calls.length) return null;
   return (
     <div className="tool-call-list">
-      {calls.map((call, index) => (
-        <details className="tool-call-card" key={`${call.name}-${index}`}>
-          <summary>
-            <span className="trace-icon"><ToolGlyph name={call.name} /></span>
-            <span><strong>{call.name}</strong><small>{t("模型调用")}</small></span>
-            {call.arguments && <code>{call.arguments.replace(/\s+/g, " ").slice(0, 90)}</code>}
-            <ChevronDown size={13} />
-          </summary>
-          {call.arguments && <pre>{call.arguments}</pre>}
-        </details>
-      ))}
+      {calls.map((call, index) => {
+        // The Thinking Tool carries prose, not parameters, so render the reasoning
+        // itself inside the ordinary tool-call card instead of raw JSON.
+        const thinking = isThinkTool(call.name) ? thinkToolText(call.arguments) : "";
+        const preview = thinking || call.arguments;
+        return (
+          <details className="tool-call-card" key={`${call.name}-${index}`}>
+            <summary>
+              <span className="trace-icon"><ToolGlyph name={call.name} /></span>
+              <span><strong>{call.name}</strong><small>{t(thinking ? "推理记录" : "模型调用")}</small></span>
+              {preview && <code>{preview.replace(/\s+/g, " ").slice(0, 90)}</code>}
+              <ChevronDown size={13} />
+            </summary>
+            {thinking
+              ? <div className="reasoning-content"><Markdown>{thinking}</Markdown></div>
+              : call.arguments ? <pre>{call.arguments}</pre> : null}
+          </details>
+        );
+      })}
     </div>
   );
 }
@@ -2183,7 +2198,7 @@ function SettingsView({
                 return (
                   <div className={`setting-row ${item.kind === "rules" ? "stacked" : ""}`} key={item.key}>
                     <div>
-                      <strong>{t(item.name)}</strong>
+                      <strong>{t(item.name)}{item.experimental && <span className="setting-badge">{t("实验性")}</span>}</strong>
                       <p>{t(item.description)}</p>
                       {hint && <p className="setting-hint">{t(hint)}</p>}
                     </div>

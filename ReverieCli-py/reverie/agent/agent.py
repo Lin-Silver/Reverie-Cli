@@ -37,6 +37,7 @@ from ..memory import MEMORY_CONTEXT_PROMPT_HEADER, MemoryOS
 from ..modes import normalize_mode
 from ..config import model_source_display_name, normalize_model_provider
 from ..request_identity import apply_reverie_client_identity
+from ..thinking_tool import is_think_tool
 from ..prompt_cache import (
     anthropic_stream_with_prompt_cache_fallback,
     apply_anthropic_prompt_cache,
@@ -2066,6 +2067,9 @@ class ReverieAgent:
         self._last_context_safety_signature: Optional[tuple[Any, ...]] = None
         self._memory_os: Optional[MemoryOS] = None
         self._prompt_history_limit = 28
+        # Thinking Tool spin guard, reset at the start of every user turn.
+        self._consecutive_think_only_batches = 0
+        self._think_tool_suppressed = False
         
         # Operation history and rollback support
         self.operation_history = operation_history
@@ -2762,6 +2766,15 @@ class ReverieAgent:
             or self._is_nvidia_request()
         ) and not nvidia_model_allows_tools(self.model):
             return []
+
+        if getattr(self, "_think_tool_suppressed", False):
+            # The spin guard tripped this turn: stop advertising deep_think so the
+            # model cannot keep choosing it instead of doing the work.
+            schemas = [
+                schema
+                for schema in schemas
+                if not is_think_tool(((schema or {}).get("function") or {}).get("name"))
+            ]
 
         return schemas
 
@@ -4504,6 +4517,74 @@ class ReverieAgent:
             "verdicts": flagged,
         }
 
+    # A thinking-only turn is real progress the first time and pure spin after
+    # that: every tool loop -- streaming and non-streaming alike -- restarts
+    # unconditionally after a tool batch, so a model that only ever calls
+    # deep_think would never terminate.
+    THINK_TOOL_NUDGE_AT = 2
+    THINK_TOOL_HARD_LIMIT = 4
+
+    def _reset_think_tool_budget(self) -> None:
+        """Clear the per-turn Thinking Tool spin guard."""
+        self._consecutive_think_only_batches = 0
+        self._think_tool_suppressed = False
+
+    def _think_tool_budget_state(self) -> tuple[int, bool]:
+        """Return the current (consecutive thought-only batches, suppressed) pair."""
+        return (
+            int(getattr(self, "_consecutive_think_only_batches", 0) or 0),
+            bool(getattr(self, "_think_tool_suppressed", False)),
+        )
+
+    def _guard_think_tool_spin(
+        self,
+        tool_calls: List[Dict[str, Any]],
+        messages: List[Dict[str, Any]],
+    ) -> None:
+        """Stop a model from thinking forever instead of acting.
+
+        Called once per executed tool-call batch. A batch that did any real work
+        clears the counter; consecutive thought-only batches first earn a nudge
+        and then lose access to the tool for the rest of the turn.
+        """
+        names: List[str] = []
+        for call in tool_calls or []:
+            if isinstance(call, dict):
+                raw_name = (call.get("function") or {}).get("name", "")
+            else:
+                # Provider SDK objects (OpenAI ChatCompletionMessageToolCall, ...).
+                raw_name = getattr(getattr(call, "function", None), "name", "")
+            name = str(raw_name or "").strip()
+            if name:
+                names.append(name)
+        if not names:
+            return
+
+        if not all(is_think_tool(name) for name in names):
+            self._reset_think_tool_budget()
+            return
+
+        count = int(getattr(self, "_consecutive_think_only_batches", 0) or 0) + 1
+        self._consecutive_think_only_batches = count
+
+        if count >= self.THINK_TOOL_HARD_LIMIT:
+            self._think_tool_suppressed = True
+            self._append_internal_system_message(
+                messages,
+                "You have used deep_think several turns in a row without doing anything "
+                "else. The tool is now unavailable for the rest of this turn. Act on the "
+                "reasoning you already have: call a working tool or answer the user.",
+            )
+            return
+
+        if count >= self.THINK_TOOL_NUDGE_AT:
+            self._append_internal_system_message(
+                messages,
+                "That was another deep_think call with no work in between. Stop thinking "
+                "and take the next concrete step now - call a working tool or answer the "
+                "user. Do not call deep_think again until you have.",
+            )
+
     def _execute_streamed_tool_calls(
         self,
         tool_calls: List[Dict[str, Any]],
@@ -4530,6 +4611,7 @@ class ReverieAgent:
             executor = getattr(self, "tool_executor", None)
             if executor is not None:
                 executor.clear_review_verdicts()
+            self._guard_think_tool_spin(tool_calls, messages)
 
     def _stream_execute_tool_call(
         self,
@@ -5192,9 +5274,12 @@ class ReverieAgent:
                 checkpoint_id=self.current_checkpoint_id
             )
         
+        # A new user turn always gets a fresh Thinking Tool budget.
+        self._reset_think_tool_budget()
+
         # Check for context threshold and auto-rotate if the session is too large
         self._check_and_compress_context(session_id=session_id)
-        
+
         # Call model with tools
         try:
             if stream:
@@ -6188,6 +6273,7 @@ class ReverieAgent:
                     messages.append(relay_tool_result_message)
                 
                 # Continue to get response to tool results
+                self._guard_think_tool_spin(message.tool_calls, messages)
                 continue
             
             # No tool calls, final response check
@@ -6394,7 +6480,8 @@ class ReverieAgent:
                         "content": _tool_result_history_content(result),
                     })
                     messages.append(relay_tool_result_message)
-                
+
+                self._guard_think_tool_spin(tool_calls, messages)
                 continue
             
             # No tool calls, final response check
@@ -6590,7 +6677,10 @@ class ReverieAgent:
 
                 if tool_result_blocks:
                     anthropic_messages.append({"role": "user", "content": tool_result_blocks})
-                
+
+                # `messages` is the OpenAI-shaped list this loop rebuilds every
+                # iteration, so a nudge here reaches the next request safely.
+                self._guard_think_tool_spin(collected_tool_calls, messages)
                 continue
             
             # No tool calls, final response check

@@ -365,6 +365,8 @@ export interface SettingItem {
   name: string;
   key: string;
   kind: string;
+  section?: string;
+  experimental?: boolean;
   choices?: Array<string | number>;
   labels?: Record<string, string>;
   descriptions?: Record<string, string>;

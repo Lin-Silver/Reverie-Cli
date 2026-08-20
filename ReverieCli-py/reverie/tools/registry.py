@@ -26,6 +26,7 @@ from .create_file import CreateFileTool
 from .user_input import UserInputTool
 from .skill_lookup import SkillLookupTool
 from .clarification import ClarificationTool
+from .deep_think import DeepThinkTool
 from .media_generation_capabilities import MediaGenerationCapabilitiesTool
 from .text_to_image import TextToImageTool
 from .text_to_video import TextToVideoTool
@@ -208,6 +209,9 @@ def _register_builtin_tools() -> None:
     register_tool_class(UserInputTool)
     register_tool_class(SkillLookupTool, exclude_modes=("writer",))
     register_tool_class(ClarificationTool, include_modes=("writer",))
+    # Visible in every mode, but only when the Thinking Tool switch is on -- the
+    # config gate lives in ToolExecutor._tool_is_visible, which can read config.
+    register_tool_class(DeepThinkTool)
     register_tool_class(MediaGenerationCapabilitiesTool, exclude_modes=("writer",))
     register_tool_class(TextToImageTool, exclude_modes=("writer",))
     register_tool_class(TextToVideoTool, exclude_modes=("writer",))

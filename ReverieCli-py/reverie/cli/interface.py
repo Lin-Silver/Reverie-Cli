@@ -86,6 +86,7 @@ from ..nvidia import (
 )
 from ..plugin.runtime_manager import RuntimePluginManager
 from ..runtime_flags import debug_mode_enabled, set_debug_mode
+from ..thinking_tool import extract_think_tool_text, is_think_tool
 from ..workspace_guard import ShadowGitManager
 
 
@@ -1802,6 +1803,10 @@ class ReverieInterface:
     def _handle_stream_tool_event(self, event: Dict[str, Any]) -> None:
         """Update live tool surfaces from streamed tool start/result events."""
         event_type = str(event.get("event", "") or "").strip().lower()
+        if is_think_tool(event.get("tool_name")):
+            # The Thinking Tool returns instantly and renders as thinking, so it
+            # never belongs in the "currently running" footer.
+            return
         if event_type == "tool_start":
             if self._upsert_active_tool(event):
                 self._refresh_streaming_footer(force=True)

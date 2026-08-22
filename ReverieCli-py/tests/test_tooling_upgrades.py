@@ -196,7 +196,7 @@ def test_tool_catalog_search_and_inspect(tmp_path: Path) -> None:
             search_hint="run builds tests git and workspace commands",
             category="workspace",
             tags=["shell", "command", "test"],
-            supported_modes=["reverie", "reverie-atlas", "reverie-gamer", "reverie-ant", "spec-driven", "spec-vibe", "writer"],
+            supported_modes=["reverie", "reverie-atlas", "reverie-gamer", "writer"],
         ),
         DummyTool(
             "read_mcp_resource",
@@ -215,7 +215,7 @@ def test_tool_catalog_search_and_inspect(tmp_path: Path) -> None:
             tags=["mcp", "resource", "read"],
             read_only=True,
             concurrency_safe=True,
-            supported_modes=["reverie", "reverie-atlas", "reverie-gamer", "reverie-ant", "spec-driven", "spec-vibe", "writer"],
+            supported_modes=["reverie", "reverie-atlas", "reverie-gamer", "writer"],
         ),
     ]
     agent = DummyAgent(tools)

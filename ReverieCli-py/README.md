@@ -5,7 +5,7 @@ Reverie CLI is a context-engine-powered AI coding assistant for large repositori
 ## Highlights
 
 - **Context Engine** - shared by every mode for symbol lookup, dependency tracking, semantic retrieval, commit-history learning, and project-isolated persistent memory
-- **Multiple Workflow Modes** - `Reverie`, `Reverie-Atlas`, `Reverie-Gamer` (work in progress), `Reverie-Ant`, `Spec-Driven`, `Spec-Vibe`, `Writer`, `Computer Controller`
+- **Multiple Workflow Modes** - `Reverie`, `Reverie-Atlas`, `Reverie-Gamer` (work in progress), `Writer`, `Computer Controller`
 - **Multi-Provider** - standard OpenAI-compatible presets plus built-in `Codex`, `AIHubMix`, `Agnes`, `SenseNova`, `unlimited.surf`, `NVIDIA`, `ModelScope`, and `WebGemini`
 - **Rich TUI** - selectors, streaming output, help browser, status panels, session browsing, checkpoint rollback, command discovery
 - **Workspace Safety** - workspace-only mutation paths, internal shadow-Git checkpoints, delete backups, audited command execution, archive extraction hardening
@@ -115,12 +115,9 @@ For the full reference, see [docs/CLI_COMMANDS.md](../docs/CLI_COMMANDS.md).
 
 | Mode | Description |
 | --- | --- |
-| `Reverie` | Full-spectrum Ultra Agentic execution for general software, automation, runtime, and repository work |
-| `Reverie-Atlas` | Document-driven spec development for complex systems |
+| `Reverie` | Full-spectrum Ultra Agentic execution for general software, automation, runtime, and repository work, including structured long-running planning/execution/verification and spec-package implementation |
+| `Reverie-Atlas` | Document-driven spec development for complex systems, plus spec-package authoring (requirements/design/tasks) |
 | `Reverie-Gamer` | Work-in-progress game-production mode for prompt-to-blueprint, runtime scaffolding, vertical-slice delivery, and verification |
-| `Reverie-Ant` | Structured long-running planning, execution, and verification |
-| `Spec-Driven` | Spec authoring for requirements, design, and task breakdown |
-| `Spec-Vibe` | Lighter spec implementation for approved plans |
 | `Writer` | Native long-form fiction workflow with disk-backed chapters, reader TXT exports, and continuity control |
 | `Computer Controller` | Embedded Open Computer Use-compatible desktop runtime plus managed Reverie SubAgents; entered explicitly for desktop work and free to hand off when the task changes |
 

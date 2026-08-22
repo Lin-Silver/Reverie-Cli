@@ -18,10 +18,7 @@ MANIFEST_RESOURCE = "tool_manifest.json"
 
 
 def _normalize_manifest_mode(mode: Any) -> str:
-    normalized = normalize_mode(str(mode or "reverie"))
-    if normalized == "reverie-ant":
-        return "ant"
-    return normalized
+    return normalize_mode(str(mode or "reverie"))
 
 
 @lru_cache(maxsize=1)

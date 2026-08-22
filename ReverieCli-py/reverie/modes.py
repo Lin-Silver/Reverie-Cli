@@ -13,32 +13,17 @@ from typing import Any, Dict, List
 MODE_METADATA: Dict[str, Dict[str, object]] = {
     "reverie": {
         "display_name": "Reverie",
-        "description": "General coding and automation mode with Context Engine retrieval, core workspace tools, and direct Blender/3D modeling capability without the full game-runtime surface.",
+        "description": "General-purpose coding, automation, and long-running execution mode with Context Engine retrieval, the full core workspace surface, structured task boundaries, Reverie Engine control, and direct Blender/3D modeling capability.",
         "switchable": True,
     },
     "reverie-atlas": {
         "display_name": "Reverie-Atlas",
-        "description": "Document-driven spec development mode for complex systems, pairing deep research with Context Engine and Atlas delivery artifacts.",
+        "description": "Document-driven spec development mode for complex systems, pairing deep research with Context Engine, spec packages (requirements/design/tasks), and Atlas delivery artifacts.",
         "switchable": True,
     },
     "reverie-gamer": {
         "display_name": "Reverie-Gamer",
         "description": "Work-in-progress game-production mode for compiling prompts into unified Reverie Engine projects, system packets, continuity artifacts, playable vertical slices, legacy-engine migrations, and verification loops.",
-        "switchable": True,
-    },
-    "reverie-ant": {
-        "display_name": "Reverie-Ant",
-        "description": "Structured long-running execution mode for planning, checkpoints, and verification.",
-        "switchable": True,
-    },
-    "spec-driven": {
-        "display_name": "Spec-Driven",
-        "description": "Spec authoring mode for requirements, design, and implementation task breakdown.",
-        "switchable": True,
-    },
-    "spec-vibe": {
-        "display_name": "Spec-Vibe",
-        "description": "Implementation mode for executing approved specs with a lighter workflow.",
         "switchable": True,
     },
     "writer": {
@@ -65,14 +50,7 @@ MODE_ALIASES = {
     "deeper": "reverie-atlas",
     "reverie-gamer": "reverie-gamer",
     "gamer": "reverie-gamer",
-    "reverie-spec-driven": "spec-driven",
-    "spec-driven": "spec-driven",
-    "spec driven": "spec-driven",
-    "spec-vibe": "spec-vibe",
-    "spec vibe": "spec-vibe",
     "writer": "writer",
-    "reverie-ant": "reverie-ant",
-    "ant": "reverie-ant",
     "computer-controller": "computer-controller",
     "computer controller": "computer-controller",
     "computer-control": "computer-controller",
@@ -87,6 +65,43 @@ LEGACY_MODE_ALIASES = {
 }
 
 MODE_ALIASES.update(LEGACY_MODE_ALIASES)
+
+
+# Modes that were removed outright. These are NOT aliases: they no longer
+# resolve to anything, so `/mode <name>` must fail loudly. The mapping exists
+# only so the CLI can point users at the mode that absorbed the capability.
+# Keyed by every spelling a user might still type, valued as
+# (replacement mode, what moved where).
+RETIRED_MODE_MIGRATIONS: Dict[str, tuple[str, str]] = {
+    "spec-driven": (
+        "reverie-atlas",
+        "Spec authoring (requirements/design/tasks) is now part of reverie-atlas.",
+    ),
+    "spec-vibe": (
+        "reverie",
+        "Implementing an approved spec is now handled by the default reverie mode.",
+    ),
+    "reverie-ant": (
+        "reverie",
+        "Structured planning, task boundaries, and verification are now built into the default reverie mode.",
+    ),
+}
+
+# Alternate spellings of a retired mode, mapped to their canonical retired name.
+RETIRED_MODE_SPELLINGS: Dict[str, str] = {
+    "spec-driven": "spec-driven",
+    "reverie-spec-driven": "spec-driven",
+    "spec driven": "spec-driven",
+    "spec-vibe": "spec-vibe",
+    "spec vibe": "spec-vibe",
+    "reverie-ant": "reverie-ant",
+    "ant": "reverie-ant",
+}
+
+RETIRED_MODES: Dict[str, str] = {
+    spelling: RETIRED_MODE_MIGRATIONS[canonical][0]
+    for spelling, canonical in RETIRED_MODE_SPELLINGS.items()
+}
 
 
 DEFAULT_TOOL_DISCOVERY_PROFILE: Dict[str, tuple[str, ...]] = {
@@ -105,25 +120,39 @@ MODE_TOOL_DISCOVERY_PROFILES: Dict[str, Dict[str, tuple[str, ...]]] = {
             "workspace",
             "context",
             "coordination",
+            "planning",
             "game-modeling",
         ),
+        # Distinctive capabilities first. `_primary_tool_names_for_mode`
+        # (`tools/mode_switch.py:122`) keeps this order and truncates to 8 when
+        # listing modes, so anything after the eighth entry is not advertised;
+        # a mode listing is only useful if it names what separates the modes,
+        # not the editor/shell tools every mode has. Discovery ranking reads
+        # this as a set (`tools/tool_catalog.py:321`), so order is display-only.
         "boost_tools": (
+            "reverie_engine",
+            "blender_modeling_workbench",
+            "game_modeling_workbench",
+            "task_boundary",
+            "task_manager",
             "codebase-retrieval",
             "git-commit-retrieval",
             "str_replace_editor",
             "file_ops",
             "command_exec",
-            "blender_modeling_workbench",
-            "game_modeling_workbench",
+            "notify_user",
         ),
         "domain_tokens": (
             "3d",
+            "artifact",
             "asset",
             "blender",
             "bug",
             "build",
+            "checkpoint",
             "class",
             "code",
+            "execute",
             "file",
             "files",
             "fix",
@@ -132,14 +161,24 @@ MODE_TOOL_DISCOVERY_PROFILES: Dict[str, Dict[str, tuple[str, ...]]] = {
             "glb",
             "gltf",
             "godot",
+            "implement",
             "mesh",
             "model",
             "modeling",
+            "phase",
+            "plan",
+            "planning",
+            "progress",
+            "refine",
             "repo",
             "repository",
             "refactor",
+            "review",
+            "resume",
             "runtime",
+            "ship",
             "test",
+            "verification",
             "verify",
             "workspace",
         ),
@@ -151,22 +190,29 @@ MODE_TOOL_DISCOVERY_PROFILES: Dict[str, Dict[str, tuple[str, ...]]] = {
             "atlas_delivery_orchestrator",
             "codebase-retrieval",
             "create_file",
+            "str_replace_editor",
             "command_exec",
         ),
         "domain_tokens": (
+            "acceptance",
             "appendix",
             "architecture",
             "atlas",
+            "breakdown",
             "charter",
             "contract",
             "delivery",
+            "design",
             "document",
             "documents",
             "handoff",
             "manifest",
+            "plan",
+            "requirement",
             "resume",
             "slice",
             "spec",
+            "task",
             "tracker",
         ),
         "deemphasize_categories": ("game-design", "game-runtime", "game-playtest", "writer", "desktop"),
@@ -256,60 +302,6 @@ MODE_TOOL_DISCOVERY_PROFILES: Dict[str, Dict[str, tuple[str, ...]]] = {
         ),
         "deemphasize_categories": ("writer", "atlas", "desktop"),
     },
-    "reverie-ant": {
-        "focus_categories": ("planning", "coordination", "retrieval", "workspace", "context"),
-        "boost_tools": (
-            "task_boundary",
-            "notify_user",
-            "task_manager",
-            "codebase-retrieval",
-            "command_exec",
-        ),
-        "domain_tokens": (
-            "artifact",
-            "checkpoint",
-            "phase",
-            "plan",
-            "planning",
-            "progress",
-            "review",
-            "resume",
-            "verification",
-            "verify",
-        ),
-        "deemphasize_categories": ("game-design", "game-runtime", "writer", "desktop"),
-    },
-    "spec-driven": {
-        "focus_categories": ("planning", "retrieval", "editing", "workspace", "context"),
-        "boost_tools": (
-            "codebase-retrieval",
-            "create_file",
-            "str_replace_editor",
-            "command_exec",
-        ),
-        "domain_tokens": (
-            "acceptance",
-            "architecture",
-            "breakdown",
-            "design",
-            "plan",
-            "requirement",
-            "spec",
-            "task",
-        ),
-        "deemphasize_categories": ("game-design", "writer", "desktop"),
-    },
-    "spec-vibe": {
-        "focus_categories": ("editing", "workspace", "retrieval", "context"),
-        "boost_tools": (
-            "codebase-retrieval",
-            "str_replace_editor",
-            "create_file",
-            "command_exec",
-        ),
-        "domain_tokens": ("approved", "execute", "implement", "refine", "ship", "spec", "wire"),
-        "deemphasize_categories": ("game-design", "writer", "desktop"),
-    },
     "writer": {
         "focus_categories": ("writer", "retrieval", "context", "coordination"),
         "boost_tools": (
@@ -386,6 +378,30 @@ def normalize_mode(value: object, default: str = "reverie") -> str:
         return default
     normalized = MODE_ALIASES.get(raw, raw)
     return normalized if normalized in MODE_METADATA else default
+
+
+def is_known_mode(value: object) -> bool:
+    """Whether the supplied name resolves to a real mode (no silent fallback)."""
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return False
+    return MODE_ALIASES.get(raw, raw) in MODE_METADATA
+
+
+def get_retired_mode_replacement(value: object) -> str:
+    """Return the mode that absorbed a removed mode, or an empty string."""
+    raw = str(value or "").strip().lower()
+    return RETIRED_MODES.get(raw, "")
+
+
+def describe_retired_mode(value: object) -> str:
+    """Return migration guidance for a removed mode name, or an empty string."""
+    raw = str(value or "").strip().lower()
+    canonical = RETIRED_MODE_SPELLINGS.get(raw, "")
+    if not canonical:
+        return ""
+    replacement, note = RETIRED_MODE_MIGRATIONS[canonical]
+    return f"Mode '{raw}' has been removed. Use '{replacement}' instead. {note}"
 
 
 def get_mode_metadata(mode: object) -> Dict[str, object]:

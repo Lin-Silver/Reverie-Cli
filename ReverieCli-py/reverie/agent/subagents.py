@@ -26,9 +26,6 @@ from .agent import ReverieAgent
 _NON_REVERIE_WORKFLOW_MODES = {
     "reverie-gamer",
     "reverie-atlas",
-    "reverie-ant",
-    "spec-driven",
-    "spec-vibe",
     "writer",
     "computer-controller",
 }

@@ -2,6 +2,14 @@
 
 Released 2026-07-17.
 
+### Post-release update (still v2.5.0) — 2026-08-22
+
+* Made the RATS native catalog progressively disclosed, so a connected Engine costs a card instead of a schema dump. Enabling a service previously pushed every native tool definition into the request; the Engine now answers `catalog.index`, `catalog.describe`, and `catalog.search` with `definitions_embedded: false`, and the CLI exposes one `rats_catalog` tool with `list` / `search` / `load` actions that fetches full JSON schemas only for the tools a turn actually names. Loaded definitions become directly callable dynamic tools as before. The per-service working set is bounded at 32 definitions and evicted least-recently-used, calling a tool touches it so an in-use definition is never the first eviction candidate, and the preloaded status tools are pinned and never evicted — the eviction path reports what it dropped rather than letting a silently-missing definition surface as an unknown tool. `rats_catalog`'s own description renders a live capability card for whichever services are connected, so the model can see what an Engine offers without loading any of it.
+
+* Consolidated the mode set from eight to five and removed the retired names outright. `reverie`, `reverie-atlas`, `reverie-gamer`, `writer`, and `computer-controller` remain; `reverie-ant`, `spec-driven`, and `spec-vibe` are gone, with their configured spellings migrated on read rather than kept as permanent aliases. Engine control moved into the default `reverie` mode: 3D authoring that ends in a `.glb` the Engine imports is general work, and the previous split forced a mode switch in the middle of it. The game-production libraries (`game_design_orchestrator`, `game_project_scaffolder`, `game_playtest_lab`, `level_design`) stay in `reverie-gamer`, which is what still distinguishes the two. Mode listings truncate their advertised tool list, so each mode's ordering now leads with what separates it from the others instead of the editor and shell tools every mode has.
+
+* Verified on 2026-08-22: the full Python suite at 1279 passed, 0 failed, 0 skipped, and the real-provider RTP end-to-end suite at 11 passed against a discovered Engine binary (`v0.1.dev.custom_build.2a75201b6`). The desktop RTP interaction suite and the TypeScript build were not re-run in this cycle.
+
 ### Post-release update (still v2.5.0) — 2026-08-12
 
 * Fixed UTF-8 decoding for OpenCode Zen streaming responses whose `text/event-stream` content type omits a charset, preventing Chinese and other non-ASCII output from appearing as mojibake.

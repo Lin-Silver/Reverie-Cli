@@ -31,8 +31,10 @@ from .markdown_formatter import MarkdownFormatter, format_markdown
 from .theme import THEME, DECO, DREAM
 from ..harness import build_harness_capability_report
 from ..modes import (
+    describe_retired_mode,
     get_mode_description,
     get_mode_display_name,
+    is_known_mode,
     list_modes,
     normalize_mode,
 )
@@ -1315,7 +1317,7 @@ class CommandHandler:
             ("<number>", "2"),
             ("<count>", "20"),
             ("<model-id>", "gpt-5.4"),
-            ("<mode-name>", "spec-driven"),
+            ("<mode-name>", "reverie-atlas"),
             ("<theme>", "ocean"),
             ("<project-id>", "my-project-123"),
             ("<url|/path|clear>", "http://127.0.0.1:8000/v1/chat/completions"),
@@ -9892,9 +9894,6 @@ class CommandHandler:
         non_reverie_modes = {
             "reverie-gamer",
             "reverie-atlas",
-            "reverie-ant",
-            "spec-driven",
-            "spec-vibe",
             "writer",
         }
         if current_mode in {"reverie", "computer-controller"} or current_mode not in non_reverie_modes:
@@ -10135,6 +10134,19 @@ class CommandHandler:
 
         config = config_manager.load()
         raw_mode = args.strip()
+        # Validate the raw string first: normalize_mode() falls back to "reverie"
+        # for anything it does not recognize, which would silently swallow typos
+        # and removed mode names.
+        if raw_mode and not is_known_mode(raw_mode):
+            retired_note = describe_retired_mode(raw_mode)
+            if retired_note:
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} {escape(retired_note)}[/{self.theme.CORAL_SOFT}]")
+            else:
+                self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Unknown mode: {escape(raw_mode)}[/{self.theme.CORAL_SOFT}]")
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Available modes: {', '.join(list_modes(include_computer=True))}[/{self.theme.TEXT_DIM}]"
+            )
+            return True
         mode = normalize_mode(raw_mode) if raw_mode else ""
         
         # Available modes

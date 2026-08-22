@@ -82,7 +82,7 @@ def test_reverie_tool_workflow_comes_from_json_manifest() -> None:
     assert "`game_modeling_workbench`" in workflow
     assert "`tool_catalog`" not in workflow
     assert "`game_design_orchestrator`" not in workflow
-    assert "`reverie_engine`" not in workflow
+    assert "`reverie_engine`" in workflow
     assert "core Blender/modeling tools directly in Reverie" in workflow
 
 
@@ -120,11 +120,12 @@ def test_reverie_default_tool_surface_keeps_core_modeling_without_runtime_tools(
     assert "game_modeling_workbench" in tool_names
     assert "game_design_orchestrator" not in tool_names
     assert "game_project_scaffolder" not in tool_names
-    assert "reverie_engine" not in tool_names
-    assert "reverie_engine" + "_lite" not in tool_names
+    assert "reverie_engine" in tool_names
     assert "codebase-retrieval" in tool_names
     assert "command_exec" in tool_names
     assert "task_manager" in tool_names
+    assert "task_boundary" in tool_names
+    assert "notify_user" in tool_names
 
 
 def test_shared_coding_guardrails_are_injected_into_all_modes() -> None:
@@ -132,9 +133,6 @@ def test_shared_coding_guardrails_are_injected_into_all_modes() -> None:
         "reverie",
         "reverie-atlas",
         "reverie-gamer",
-        "reverie-ant",
-        "spec-driven",
-        "spec-vibe",
         "writer",
         "computer-controller",
     ):
@@ -147,16 +145,47 @@ def test_shared_coding_guardrails_are_injected_into_all_modes() -> None:
         assert "Goal-Driven Execution" in prompt
 
 
-def test_spec_driven_prompt_allows_one_shot_document_chain() -> None:
+def test_atlas_prompt_owns_spec_package_authoring() -> None:
+    prompt = build_system_prompt(model_name="Test Model", mode="reverie-atlas")
+
+    assert "# Spec Package Authoring" in prompt
+    assert "WHEN <trigger> THE SYSTEM SHALL <response>" in prompt
+    assert "IF <precondition> THEN THE SYSTEM SHALL <response>" in prompt
+    assert "#[[file:<relative_file_name>]]" in prompt
+    assert "**Authoring is not implementing.**" in prompt
+
+
+def test_atlas_spec_authoring_allows_one_shot_document_chain() -> None:
     prompt = build_system_prompt(
         model_name="Test Model",
-        mode="spec-driven",
+        mode="reverie-atlas",
         additional_rules="This run was started through Reverie's one-shot prompt mode. There will be no follow-up turn.",
     )
 
-    assert "Exception for one-shot non-interactive prompt runs" in prompt
-    assert "treat the initial request as approval to generate requirements, design, and tasks sequentially" in prompt
-    assert "Avoid extra spec files beyond requirements, design, and tasks" in prompt
+    assert "Exception for one-shot non-interactive runs" in prompt
+    assert "produce all three documents in the same run without stopping for review" in prompt
+    assert "Keep the deliverable to those three files unless the user explicitly asks for more." in prompt
+
+
+def test_reverie_prompt_absorbs_structured_long_running_execution() -> None:
+    prompt = build_system_prompt(model_name="Test Model", mode="reverie")
+
+    assert "## Structured long-running execution" in prompt
+    assert "PLANNING" in prompt
+    assert "EXECUTION" in prompt
+    assert "VERIFICATION" in prompt
+    assert "`task_boundary`" in prompt
+    assert "`notify_user`" in prompt
+
+
+def test_reverie_prompt_absorbs_spec_package_implementation() -> None:
+    prompt = build_system_prompt(model_name="Test Model", mode="reverie")
+
+    assert "## Spec packages" in prompt
+    assert "requirements.md" in prompt
+    assert "design.md" in prompt
+    assert "tasks.md" in prompt
+    assert "switch to `reverie-atlas`" in prompt
 
 
 def test_writer_prompt_allows_one_shot_requested_deliverables() -> None:

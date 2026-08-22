@@ -118,10 +118,47 @@ schema channel carries the exact request schema without duplicating it in the
 system prompt. The Tools page reads that same live catalog and labels RATS tools
 separately from built-ins, MCP tools, and runtime plugins.
 
+Its own description carries a capability card instead of a static blurb: the
+connected product, its native tool count, how many definitions are loaded against
+the cap, and the category histogram. That is the always-visible half of the
+design — a model that never learns a native surface exists never looks it up —
+and it costs a few tokens rather than one request schema per tool.
+
+Searching does not load by default. `load=False` means a search is an intent to
+look; `load=True` describes the matches that can be described. Either way each
+match reports `loaded`, and `rats_catalog` echoes only the names that ended up in
+the working set under `loaded_for_next_step`, listing the rest under
+`not_loaded`. The distinction is not cosmetic: matching a tool and being able to
+call it are different facts, and reporting the first as the second costs a wasted
+round trip on the exact path this design exists to make cheap.
+
+The loaded working set is bounded, because progressive disclosure only saves
+tokens while it stays small — without a cap a long session reloads its way back
+to a fully visible catalog. Definitions past the cap are evicted
+least-recently-used first, calling a tool counts as a use, and the session-open
+preloads are pinned so status tools never evict. The cap is 32: it has to clear
+the largest coherent single-task working set rather than the average one, and the
+engine's world-streaming flow alone loads 20 tools on top of the 4 pinned ones.
+
 Tools without an RTP request schema remain visible in the compact catalog but
 are not promoted to direct model functions. This is intentional: guessing an
 argument contract would be less reliable than leaving the tool unavailable
-until the Engine publishes a versioned schema.
+until the provider publishes a versioned schema. Against today's Reverie Engine
+that case does not arise: `_get_tool_schemas` answers for eight tool families
+covering 67 catalog entries plus six specials, which is all 73, so
+`not_loaded` is expected to be empty and `loaded` true for every match. The
+reporting exists for the provider-neutral case and for a future catalog entry
+added without a matching schema branch — RATS must not silently present such a
+tool as callable.
+
+**Status of this section, verified 2026-08-21:** the capability card, the bounded
+working set, the opt-in loading flag, and the honest `loaded` / `not_loaded`
+reporting are pinned by `tests/test_rats_progressive_disclosure.py`. That file
+plus `tests/test_rats_runtime.py` pass 49 tests, and the complete Python suite
+passes 1279 tests with no failures and no skips — including
+`tests/test_rats_engine_task_e2e.py`, whose 11 real-provider tests paired with the
+Engine binary reporting `v0.1.dev.custom_build.2a75201b6`. Not re-run against this
+change: the desktop RTP interaction suite and the TypeScript build.
 
 ## Verified scope and remaining work
 

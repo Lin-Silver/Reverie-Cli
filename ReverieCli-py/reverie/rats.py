@@ -12,10 +12,11 @@ import re
 import threading
 import time
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Set, Tuple
 
 from .config import get_app_root
 
@@ -35,6 +36,20 @@ _MAX_DIAGNOSTIC_BYTES = 2 * 1024 * 1024
 _MAX_DIAGNOSTIC_ENTRIES = 240
 _MAX_TERMINAL_TASK_HISTORY_PER_SESSION = 64
 _DEFAULT_LOADED_TOOLS = ("ping", "version", "get_status", "project.status")
+# Progressive disclosure only saves tokens while the loaded working set stays
+# small. Without a cap a long session keeps loading definitions until every
+# native tool is model-visible again, which is the failure mode this design
+# exists to avoid. Definitions past this cap are evicted least-recently-used
+# first; the preloaded status tools are pinned and never evicted.
+#
+# The cap has to clear the largest coherent single-task working set, not the
+# average one: the engine's world-streaming flow alone loads 20 tools on top of
+# the 4 pinned status tools (see ``test_rats_engine_task_e2e``'s
+# ``requested_dynamic_tools``). 32 leaves headroom above that while staying well
+# below the 73 native tools the Reverie Engine provider publishes today. That
+# 73 is context, not the derivation: the cap is justified by the 20 + 4 working
+# set, so a provider growing its catalog does not by itself invalidate the cap.
+_MAX_LOADED_DEFINITIONS_PER_SESSION = 32
 _REVERIE_ENGINE_PRODUCT_NAMES = frozenset({"Reverie Engine", "Reverie Engine (Console)"})
 _REVERIE_ENGINE_TERMINAL_PRODUCT_NAME = "Reverie Engine Terminal"
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
@@ -459,7 +474,10 @@ class _RatsSession:
     token: str = field(repr=False)
     permissions: List[str] = field(default_factory=list)
     compact_tools: List[Dict[str, Any]] = field(default_factory=list)
-    definitions: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    # Insertion order is least-recently-used first so the working set can be
+    # bounded without losing the tools the model is actively working with.
+    definitions: "OrderedDict[str, Dict[str, Any]]" = field(default_factory=OrderedDict)
+    pinned: Set[str] = field(default_factory=set)
     io_lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
 
@@ -984,7 +1002,52 @@ class RatsRuntime:
         except RatsClientError:
             pass
 
-    def _describe_into_session(self, session: _RatsSession, names: Iterable[Any]) -> List[Dict[str, Any]]:
+    @staticmethod
+    def _store_definitions(
+        session: _RatsSession,
+        definitions: Iterable[Dict[str, Any]],
+        *,
+        pin: bool = False,
+    ) -> None:
+        """Insert definitions as the most recently used entries of the working set."""
+        for definition in definitions:
+            name = _text(definition.get("name"))
+            if not name:
+                continue
+            session.definitions.pop(name, None)
+            # Store an independent copy: callers receive their own list and must
+            # not be able to mutate the session working set through it.
+            session.definitions[name] = dict(definition)
+            if pin:
+                session.pinned.add(name)
+
+    @staticmethod
+    def _evict_definitions(session: _RatsSession) -> List[str]:
+        """Drop least-recently-used unpinned definitions past the per-session cap."""
+        evicted: List[str] = []
+        for name in list(session.definitions):
+            if len(session.definitions) <= _MAX_LOADED_DEFINITIONS_PER_SESSION:
+                break
+            if name in session.pinned:
+                continue
+            session.definitions.pop(name, None)
+            evicted.append(name)
+        return evicted
+
+    @staticmethod
+    def _touch_definition(session: _RatsSession, tool_name: Any) -> None:
+        """Mark one loaded definition as most recently used so calls keep it hot."""
+        name = _text(tool_name)
+        if name in session.definitions:
+            session.definitions.move_to_end(name)
+
+    def _describe_into_session(
+        self,
+        session: _RatsSession,
+        names: Iterable[Any],
+        *,
+        pin: bool = False,
+    ) -> List[Dict[str, Any]]:
         """Populate a provisional session before it is published in ``_sessions``."""
         requested = list(dict.fromkeys(_text(name) for name in names if _text(name)))[:16]
         if not requested:
@@ -1001,9 +1064,10 @@ class RatsRuntime:
             name = _text(definition.get("name"))
             request_schema = definition.get("request_schema")
             if name and isinstance(request_schema, dict):
-                session.definitions[name] = definition
                 definitions.append(dict(definition))
-        return definitions
+        self._store_definitions(session, definitions, pin=pin)
+        self._evict_definitions(session)
+        return [dict(definition) for definition in definitions]
 
     def _open_session(self, descriptor: RatsDescriptor, permissions: List[str]) -> _RatsSession:
         opened = self._request(
@@ -1029,7 +1093,7 @@ class RatsRuntime:
                 if any(tool.get("name") == name and tool.get("schema") for tool in session.compact_tools)
             ]
             if preload:
-                self._describe_into_session(session, preload)
+                self._describe_into_session(session, preload, pin=True)
             return session
         except RatsClientError:
             self._close_session(session)
@@ -1383,20 +1447,35 @@ class RatsRuntime:
             with self._lock:
                 if not self._session_is_current(session):
                     raise ValueError("Enable the RATS service before requesting tool definitions.")
-                for definition in definitions:
-                    session.definitions[_text(definition.get("name"))] = definition
+                self._store_definitions(session, definitions)
+                self._evict_definitions(session)
                 self._update_generation()
+                # Return what the working set holds, so the caller's "these are
+                # callable now" claim is read out of observed state rather than
+                # assumed. This is a guard, not a live fix: one call describes at
+                # most 16 names into a cap of 32, so nothing it just stored can be
+                # evicted yet. It stops that arithmetic from being load-bearing.
+                definitions = [
+                    definition for definition in definitions if _text(definition.get("name")) in session.definitions
+                ]
             return definitions
 
-    def _find_session(self, service_id: str, provider_id: str = "") -> Optional[_RatsSession]:
+    def _find_session(self, service_id: str = "", provider_id: str = "") -> Optional[_RatsSession]:
+        """Resolve a session, letting callers omit ids that only have one answer.
+
+        Making the model learn a service id before it can load a tool costs a
+        round trip and buys no safety: an omitted id resolves only when exactly
+        one session can satisfy it, and stays ambiguous otherwise.
+        """
         normalized_service_id = _text(service_id)
         normalized_provider_id = _text(provider_id)
-        if normalized_provider_id:
+        if normalized_provider_id and normalized_service_id:
             return self._sessions.get((normalized_provider_id, normalized_service_id))
         matches = [
             session
             for (session_provider_id, session_key), session in self._sessions.items()
-            if session_key == normalized_service_id
+            if (not normalized_service_id or session_key == normalized_service_id)
+            and (not normalized_provider_id or session_provider_id == normalized_provider_id)
         ]
         return matches[0] if len(matches) == 1 else None
 
@@ -1411,15 +1490,31 @@ class RatsRuntime:
         limit: int = 5,
         service_id: str = "",
         provider_id: str = "",
-        load: bool = True,
+        load: bool = False,
     ) -> List[Dict[str, Any]]:
+        """Rank native tools by relevance, disclosing full schemas only if asked.
+
+        ``load`` defaults to off: a search is an intent to look, not an intent to
+        spend a schema on every match.
+
+        Every match carries ``loaded``: ``True`` only when this call left that
+        tool's definition in the session's working set, so it really is callable
+        on the next step. With ``load=False`` it is ``False`` everywhere; with
+        ``load=True`` it is ``False`` for any match the provider publishes without
+        a schema, which is why callers must not treat "matched" as "loaded".
+        """
         wanted = _text(query)
         if not wanted:
             raise ValueError("RATS search requires a non-empty query.")
         with self._lock:
-            selected = self._find_session(service_id, provider_id) if service_id else None
-            if service_id and selected is None:
-                sessions = []
+            # An explicit service_id narrows to exactly that session. It must not
+            # fall through to the provider-wide branch when both ids are given:
+            # broadening there would search services the caller deliberately
+            # excluded and, with load=True, spend schemas in sessions it never
+            # named.
+            if service_id:
+                selected = self._find_session(service_id, provider_id)
+                sessions = [selected] if selected is not None else []
             elif provider_id:
                 sessions = [
                     session
@@ -1427,7 +1522,7 @@ class RatsRuntime:
                     if session_provider_id == provider_id
                 ]
             else:
-                sessions = [selected] if selected is not None else list(self._sessions.values())
+                sessions = list(self._sessions.values())
         matches: List[Dict[str, Any]] = []
         request_limit = min(16, max(1, int(limit)))
         for session in sessions:
@@ -1462,13 +1557,25 @@ class RatsRuntime:
                             definition = _record(item)
                             if _text(definition.get("name")) and isinstance(definition.get("request_schema"), dict):
                                 definitions.append(dict(definition))
+                loaded_names: Set[str] = set()
                 with self._lock:
                     if self._sessions.get(session_key) is not session:
                         continue
-                    for definition in definitions:
-                        session.definitions[_text(definition.get("name"))] = definition
                     if definitions:
+                        self._store_definitions(session, definitions)
+                        self._evict_definitions(session)
                         self._update_generation()
+                        # Read the flag back out of the working set instead of
+                        # trusting the request: a name the provider declined to
+                        # describe, or one eviction dropped, is not callable in the
+                        # next step, and claiming it is costs the model a
+                        # NO_SUCH_TOOL round trip on the one path this design
+                        # exists to make cheap.
+                        loaded_names = {
+                            name
+                            for name in (_text(definition.get("name")) for definition in definitions)
+                            if name in session.definitions
+                        }
                 for item in local:
                     item["providerId"] = session.descriptor.provider_id
                     item["serviceId"] = session.descriptor.service_id
@@ -1477,6 +1584,7 @@ class RatsRuntime:
                         f"{session.descriptor.provider_id}.{session.descriptor.service_id}.{_text(item.get('name'))}"
                     )
                     item["executable"] = str(session.descriptor.executable)
+                    item["loaded"] = _text(item.get("name")) in loaded_names
                     matches.append(item)
         return sorted(matches, key=lambda item: (-int(item.get("score", 0) or 0), _text(item.get("name"))))[: max(1, int(limit))]
 
@@ -1509,9 +1617,12 @@ class RatsRuntime:
                 idempotency_key=idempotency_key,
             )
             task = _record(result.get("task"))
-            if task:
-                with self._lock:
-                    if self._session_is_current(session):
+            with self._lock:
+                if self._session_is_current(session):
+                    # A called tool is a tool in active use: keep it at the hot
+                    # end of the working set so eviction never targets it first.
+                    self._touch_definition(session, tool_name)
+                    if task:
                         self._remember_task(session, task, result=result)
             return result
 
@@ -1802,6 +1913,50 @@ class RatsRuntime:
                         }
                     )
             return rows
+
+    def capability_card(self) -> List[Dict[str, Any]]:
+        """Summarize each connected service in a few tokens instead of many schemas.
+
+        This is the always-visible half of progressive disclosure. A model that
+        never sees that a native surface exists never looks it up, so the card
+        names the provider, how many tools it has, and which categories they fall
+        into, without spending a request schema on any of them.
+        """
+        with self._lock:
+            cards: List[Dict[str, Any]] = []
+            for session in sorted(
+                self._sessions.values(),
+                key=lambda item: (item.descriptor.provider_id, item.descriptor.service_id),
+            ):
+                counts: Dict[str, int] = {}
+                for tool in session.compact_tools:
+                    category = _text(tool.get("category")) or "other"
+                    counts[category] = counts.get(category, 0) + 1
+                cards.append(
+                    {
+                        "providerId": session.descriptor.provider_id,
+                        "serviceId": session.descriptor.service_id,
+                        "product": session.descriptor.product,
+                        "toolCount": len(session.compact_tools),
+                        "loadedCount": len(session.definitions),
+                        "loadedLimit": _MAX_LOADED_DEFINITIONS_PER_SESSION,
+                        "permissions": sorted(dict.fromkeys(session.permissions)),
+                        "categories": [
+                            {"name": name, "count": counts[name]} for name in sorted(counts)
+                        ],
+                    }
+                )
+            return cards
+
+    def loaded_definition_names(self) -> Dict[str, List[str]]:
+        """Map ``provider.service`` to the native tool names currently loaded."""
+        with self._lock:
+            return {
+                f"{session.descriptor.provider_id}.{session.descriptor.service_id}": list(
+                    session.definitions
+                )
+                for session in self._sessions.values()
+            }
 
     def _dynamic_name(self, session: _RatsSession, tool_name: str, used: set[str]) -> str:
         provider = _safe_identifier(session.descriptor.provider_id)

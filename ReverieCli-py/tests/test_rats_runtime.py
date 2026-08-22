@@ -804,6 +804,11 @@ def test_runtime_owns_session_persists_locally_and_progressively_loads_tools() -
         discovered = executor.execute("rats_catalog", {"operation": "search", "query": "read scene"})
         assert discovered.success is True
         names = {schema["function"]["name"] for schema in executor.get_tool_schemas(mode="reverie")}
+        assert "rats_reverie_engine_scene_read" not in names, "a search alone must not spend a schema"
+
+        loaded = executor.execute("rats_catalog", {"operation": "load", "names": ["scene.read"]})
+        assert loaded.success is True
+        names = {schema["function"]["name"] for schema in executor.get_tool_schemas(mode="reverie")}
         assert "rats_reverie_engine_scene_read" in names
 
         runtime.shutdown()

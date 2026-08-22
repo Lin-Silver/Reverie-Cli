@@ -74,7 +74,7 @@ also has isolated persistent context managed with remember/context/forget/clear_
             },
             "mode": {
                 "type": "string",
-                "enum": ["reverie", "reverie-gamer", "reverie-atlas", "reverie-ant", "spec-driven", "spec-vibe", "writer"],
+                "enum": ["reverie", "reverie-gamer", "reverie-atlas", "writer"],
                 "description": "Workflow mode for a newly created SubAgent. Defaults to reverie.",
             },
             "model_ref": {

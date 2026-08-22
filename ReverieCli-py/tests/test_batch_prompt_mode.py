@@ -57,7 +57,7 @@ class _FakeAgent:
         self.messages = []
         self.additional_rules = ""
         self.mode = "reverie"
-        self.ant_phase = "PLANNING"
+        self.task_stage = "PLANNING"
 
     def set_history(self, messages) -> None:
         self.messages = list(messages)
@@ -82,7 +82,7 @@ class _SpecAutoContinueAgent(_FakeAgent):
     def __init__(self, project_root: Path) -> None:
         super().__init__()
         self.project_root = Path(project_root)
-        self.mode = "spec-driven"
+        self.mode = "reverie-atlas"
         self.turn = 0
 
     def process_message(self, user_message, stream=True, session_id="default", user_display_text=None):
@@ -373,7 +373,7 @@ def test_prompt_run_result_to_dict_is_json_serializable_with_paths(tmp_path: Pat
     json.dumps(serialized, ensure_ascii=False)
 
 
-def test_run_prompt_once_auto_continues_spec_driven(tmp_path, monkeypatch):
+def test_run_prompt_once_auto_continues_atlas_spec_package(tmp_path, monkeypatch):
     interface = ReverieInterface(tmp_path, headless=True)
     config = Config(
         models=[
@@ -385,7 +385,7 @@ def test_run_prompt_once_auto_continues_spec_driven(tmp_path, monkeypatch):
             )
         ],
         active_model_index=0,
-        mode="spec-driven",
+        mode="reverie-atlas",
     )
 
     monkeypatch.setattr(interface.config_manager, "load", lambda: config)
@@ -401,7 +401,7 @@ def test_run_prompt_once_auto_continues_spec_driven(tmp_path, monkeypatch):
 
     result = interface.run_prompt_once(
         "Create requirements.md, design.md, and tasks.md for this feature.",
-        mode_override="spec-driven",
+        mode_override="reverie-atlas",
         no_index=True,
     )
 
@@ -412,6 +412,46 @@ def test_run_prompt_once_auto_continues_spec_driven(tmp_path, monkeypatch):
     assert (tmp_path / "artifacts" / "specs" / "sample-feature" / "requirements.md").exists()
     assert (tmp_path / "artifacts" / "specs" / "sample-feature" / "design.md").exists()
     assert (tmp_path / "artifacts" / "specs" / "sample-feature" / "tasks.md").exists()
+
+
+def test_run_prompt_once_does_not_nudge_atlas_without_a_spec_package(tmp_path, monkeypatch):
+    """Atlas also delivers master-document sets, which have no artifacts/specs dir."""
+    interface = ReverieInterface(tmp_path, headless=True)
+    config = Config(
+        models=[
+            ModelConfig(
+                model="fake-model",
+                model_display_name="Fake Model",
+                base_url="https://example.com/v1",
+                api_key="test-key",
+            )
+        ],
+        active_model_index=0,
+        mode="reverie-atlas",
+    )
+
+    monkeypatch.setattr(interface.config_manager, "load", lambda: config)
+    monkeypatch.setattr(interface, "ensure_context_engine", lambda announce=False: True)
+    monkeypatch.setattr(interface, "_sync_workspace_memory_message", lambda session: None)
+    monkeypatch.setattr(interface.workspace_stats_manager, "update_session_snapshot", lambda *args, **kwargs: None)
+    monkeypatch.setattr(interface.workspace_stats_manager, "flush", lambda: None)
+
+    def _fake_init_agent(config_override=None, persist_config_changes=True):
+        agent = _FakeAgent()
+        agent.mode = "reverie-atlas"
+        interface.agent = agent
+
+    monkeypatch.setattr(interface, "_init_agent", _fake_init_agent)
+
+    result = interface.run_prompt_once(
+        "Produce the architecture master document for the telemetry subsystem.",
+        mode_override="reverie-atlas",
+        no_index=True,
+    )
+
+    assert result.success is True
+    assert result.auto_followup_count == 0
+    assert not (tmp_path / "artifacts" / "specs").exists()
 
 
 def test_run_prompt_once_auto_continues_writer_when_files_missing(tmp_path, monkeypatch):

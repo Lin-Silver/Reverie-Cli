@@ -1,5 +1,5 @@
 """
-Reverie-Ant Tools - Advanced tools for Reverie-Ant autonomous agentic mode
+Task-flow tools for structured long-running execution.
 
 These tools enable:
 - Transparent task progress tracking via task_boundary
@@ -23,10 +23,9 @@ class TaskBoundaryTool(BaseTool):
     and estimated scope to create a visible task UI for users.
     """
     name = "task_boundary"
-    aliases = ("ant_task_boundary",)
-    search_hint = "track ant task phases and progress boundaries"
+    search_hint = "track task stages and progress boundaries during long-running work"
     tool_category = "planning"
-    tool_tags = ("ant", "task", "progress", "phase", "planning", "execution", "verification")
+    tool_tags = ("task", "progress", "stage", "planning", "execution", "verification")
     description = """
 Communicate task progress and current focus through a structured boundary update.
 Call this FREQUENTLY during agentic work to maintain transparency.
@@ -105,10 +104,9 @@ class NotifyUserTool(BaseTool):
     - Exit task mode for user interaction
     """
     name = "notify_user"
-    aliases = ("ant_notify_user",)
-    search_hint = "ask the user to review artifacts during ant work"
+    search_hint = "ask the user to review artifacts during long-running work"
     tool_category = "coordination"
-    tool_tags = ("ant", "user", "review", "artifact", "notification")
+    tool_tags = ("user", "review", "artifact", "notification")
     description = """
 Communicate with the user during task mode to request review, ask questions, or provide updates.
 

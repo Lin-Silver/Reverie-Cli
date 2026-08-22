@@ -377,7 +377,7 @@ def test_blender_repair_loop_records_blocked_attempt_without_blender(tmp_path: P
     assert Path(report["repair_report_path"]).exists()
 
 
-def test_blender_tool_is_visible_in_reverie_and_gamer_without_engine_surface(tmp_path: Path) -> None:
+def test_blender_tool_is_visible_in_reverie_and_gamer_with_engine_control(tmp_path: Path) -> None:
     executor = ToolExecutor(project_root=tmp_path)
 
     reverie_names = {item["function"]["name"] for item in executor.get_tool_schemas(mode="reverie")}
@@ -387,8 +387,14 @@ def test_blender_tool_is_visible_in_reverie_and_gamer_without_engine_surface(tmp
 
     assert "blender_modeling_workbench" in reverie_names
     assert "game_modeling_workbench" in reverie_names
-    assert "reverie_engine" not in reverie_names
-    assert "reverie_engine" + "_lite" not in reverie_names
+    # Mode consolidation moved Engine control into the default mode: 3D authoring
+    # that ends in a `.glb` the Engine imports is general work, not game
+    # production, and the old split forced a mode switch in the middle of it.
+    assert "reverie_engine" in reverie_names
+    # The game-production libraries are what still separates the two modes.
+    for gamer_only in ("game_design_orchestrator", "game_project_scaffolder", "game_playtest_lab", "level_design"):
+        assert gamer_only in gamer_names
+        assert gamer_only not in reverie_names
     assert "blender_modeling_workbench" in gamer_names
     assert "rc_blender_ensure_runtime" in gamer_prompt
     assert "black-box iteration plan" in gamer_prompt

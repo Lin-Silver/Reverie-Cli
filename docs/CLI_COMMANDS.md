@@ -34,12 +34,9 @@ Notes:
 | `/subagent run <id> <task>` | Run a direct delegated task through a Subagent |
 | `/subagent delete <id>` | Delete a configured Subagent |
 | `/mode` | Show current mode and available modes. All modes share Context Engine; the selected mode changes the workflow and specialized tools. |
-| `/mode reverie` | Switch to the general-purpose coding mode |
-| `/mode reverie-atlas` | Switch to the document-driven spec development mode |
+| `/mode reverie` | Switch to the general-purpose coding, automation, and long-running execution mode |
+| `/mode reverie-atlas` | Switch to the document-driven spec development and spec-authoring mode |
 | `/mode reverie-gamer` | Switch to the work-in-progress game-development mode |
-| `/mode reverie-ant` | Switch to the long-running execution and verification mode |
-| `/mode spec-driven` | Switch to the spec authoring mode |
-| `/mode spec-vibe` | Switch to the lighter spec implementation mode |
 | `/mode writer` | Switch to the writing and narrative continuity mode |
 | `/mode computer-controller` | Switch to the pinned NVIDIA desktop orchestrator with an embedded Open Computer Use-compatible desktop runtime |
 

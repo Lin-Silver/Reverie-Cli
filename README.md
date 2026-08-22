@@ -7,7 +7,7 @@ Current stable version: **v2.5.0** (released 2026-07-17).
 - **Core function**: terminal-based AI coding assistant with local workspace tools, context retrieval, session continuity, and multi-provider LLM access
 - **Native desktop**: Electron workspace host using the same Python core, with project/session management, full-window backgrounds, Context Engine file recommendations, arbitrary attachments, settings, tools, plugins, and recovery views
 - **RATS / RTP**: opt-in, executable-local allowlisted Reverie/Rilance provider discovery with Python-core session ownership, exact permissions, compact catalogs, and progressive native tool schemas; Reverie Engine is currently the only implemented provider
-- **Optional workflows**: spec-driven development, creative writing, browser automation, computer control, and game/3D asset authoring
+- **Optional workflows**: spec-package authoring, creative writing, browser automation, computer control, and game/3D asset authoring
 - **Multi-provider LLM** support: NVIDIA, ModelScope, Codex (ChatGPT), SenseNova, AIHubMix, Agnes, WebGemini, Opencode, plus any endpoint you add with `/provider add`
 - **Context Engine**: Augment-style codebase retrieval, LSP integration, git history analysis
 - **Session management**: Conversation persistence, rotation, working memory injection, handoff packets
@@ -95,12 +95,9 @@ Reverie ships with specialized modes that change tooling, system prompt rules, a
 
 | Mode                  | Display Name        | Description                                                                                                                                                                                                       |
 | --------------------- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `reverie`             | Reverie             | Default general coding and automation mode. Context Engine retrieval, core workspace tools, Blender/3D modeling.                                                                                                  |
-| `reverie-atlas`       | Reverie-Atlas       | Document-driven spec development. Deep research paired with Context Engine and Atlas delivery artifacts.                                                                                                          |
+| `reverie`             | Reverie             | Default general coding, automation, and long-running execution mode. Context Engine retrieval, core workspace tools, structured task boundaries, Reverie Engine control, Blender/3D modeling.                      |
+| `reverie-atlas`       | Reverie-Atlas       | Document-driven spec development. Deep research paired with Context Engine, spec packages (requirements/design/tasks), and Atlas delivery artifacts.                                                               |
 | `reverie-gamer`       | Reverie-Gamer       | ⚠️**Work in Progress** — Full game production pipeline (blueprints, system packets, vertical slices, playtest loops, modeling pipelines). Not yet complete.                                                    |
-| `reverie-ant`         | Reverie-Ant         | Structured long-running execution: planning, checkpoints, verification.                                                                                                                                           |
-| `spec-driven`         | Spec-Driven         | Spec authoring: requirements, design, implementation task breakdown.                                                                                                                                              |
-| `spec-vibe`           | Spec-Vibe           | Implementation mode for executing approved specs with a lighter workflow.                                                                                                                                         |
 | `writer`              | Writer              | Creative writing: persistent long-form fiction planning, serialized drafting, continuity control, and verified completion.                                                                                        |
 | `computer-controller` | Computer Controller | Pinned NVIDIA desktop orchestrator using an embedded Open Computer Use-compatible desktop runtime and managed Reverie SubAgents. Entered explicitly; it can still hand off to another mode when the task changes. |
 
@@ -438,11 +435,15 @@ Switch modes with `/mode <name>` or `--mode` at launch.
 
 ### Reverie (default)
 
-General-purpose coding and automation. Full Context Engine, all workspace tools, Blender modeling, browser control.
+General-purpose coding and automation. Full Context Engine, all workspace tools, Blender modeling, browser control, and direct `reverie_engine` control of Reverie Engine.
+
+It also owns structured long-running execution — planning/execution/verification stages, `task_boundary` progress updates, `notify_user` review checkpoints, and checkpoint-and-resume artifacts — plus implementing an approved spec package from `artifacts/specs/<feature>/`.
 
 ### Reverie-Atlas
 
 Document-driven development for complex systems. Produces structured specs, architecture documents, and delivery artifacts. Focus tools: `codebase-retrieval`, `create_file`, `command_exec`.
+
+Atlas also owns spec-package authoring for a single bounded feature: `requirements.md` (EARS acceptance criteria) → `design.md` → `tasks.md`, written in order with review gates between them. Hand the finished package to `reverie` to build it.
 
 ### Reverie-Gamer
 
@@ -460,23 +461,6 @@ Full game production pipeline:
 - **Story Design**: Narrative and quest design tools
 - **Game Playtest Lab**: Playable slice verification
 - **Blender/Blockbench modeling**: Full 3D asset pipeline
-
-### Reverie-Ant
-
-Structured long-running execution with:
-
-- Task boundary management
-- Checkpoint and resume
-- Progress notifications
-- Verification loops
-
-### Spec-Driven
-
-Requirements → Design → Implementation task breakdown. Produces `.reverie/specs/` artifacts.
-
-### Spec-Vibe
-
-Execute approved specs with lighter workflow. Implements the `spec-driven` output.
 
 ### Writer
 

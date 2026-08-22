@@ -155,10 +155,7 @@ const MODES = [
   ["reverie", "Reverie", Code2],
   ["reverie-atlas", "Atlas", FileText],
   ["reverie-gamer", "Gamer", Gamepad2],
-  ["spec-driven", "Spec", ListFilter],
-  ["spec-vibe", "Spec Vibe", Sparkles],
   ["writer", "Writer", Pencil],
-  ["reverie-ant", "Ant", Zap],
   ["computer-controller", "Computer", SquareTerminal],
 ] as const;
 

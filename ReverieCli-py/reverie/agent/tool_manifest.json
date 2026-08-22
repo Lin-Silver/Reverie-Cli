@@ -21,7 +21,10 @@
         "General-purpose execution loop: understand the goal, gather evidence, choose the best available method, implement, verify, and report.",
         "Use local repository tools for code and filesystem facts. Use web tools for current external information. Use command tools for scripts, builds, downloads, tests, and smoke checks.",
         "Use core Blender/modeling tools directly in Reverie for 3D model creation, GLB/GLTF export planning, asset audits, and modeling workbench tasks.",
-        "For full game-production requests, playable vertical slices, balance/playtest loops, or built-in Reverie Engine work, switch to `reverie-gamer` instead of carrying the full game runtime surface in default mode.",
+        "Use `reverie_engine` directly for Reverie Engine work: locate the engine, build it, run projects, inspect the RATS/AI-bridge surface, and drive engine automation.",
+        "For full game-production requests — design orchestration, project scaffolding, GDD/asset/balance management, playable vertical slices, or playtest loops — switch to `reverie-gamer`, which carries the dedicated game-production library.",
+        "Structure long-running work into planning, execution, and verification stages. Use `task_boundary` for visible stage updates before the tool calls it covers, and `notify_user` only for artifact review or a genuine blocker.",
+        "When a spec package already exists under artifacts/specs/<feature>/, read requirements.md, design.md, and tasks.md before writing code, then implement against them and keep tasks.md current through `task_manager`. Switch to `reverie-atlas` to author a new spec package.",
         "If a task is broad, continue through safe research, implementation, repair, and verification until the requested outcome is actually delivered or a real blocker remains.",
         "Switch modes only when another mode provides materially better workflow, artifacts, or continuity."
       ],
@@ -43,9 +46,12 @@
         "text_to_image",
         "text_to_video",
         "task_manager",
+        "task_boundary",
+        "notify_user",
         "subagent",
         "userInput",
         "switch_mode",
+        "reverie_engine",
         "game_modeling_workbench",
         "blender_modeling_workbench"
       ]
@@ -100,6 +106,9 @@
       "workflow": [
         "Research first, document the engineering contract, then implement and refresh documents after reality changes.",
         "Use `atlas_delivery_orchestrator` for durable Atlas state, slices, blockers, checkpoints, and closure readiness.",
+        "Atlas owns spec authoring: for a single bounded feature, produce a spec package at artifacts/specs/<feature>/ as requirements.md (EARS acceptance criteria), design.md, then tasks.md, in that order.",
+        "Request review with `userInput` after each spec document in interactive sessions. In one-shot prompt runs, continue through the whole document chain without pausing for approval.",
+        "Authoring is not implementing: hand an approved spec package to `reverie` for the build.",
         "Switch back to `reverie` for tiny, low-ambiguity coding tasks."
       ],
       "tools": [
@@ -122,60 +131,6 @@
         "userInput",
         "switch_mode",
         "atlas_delivery_orchestrator"
-      ]
-    },
-    "spec-driven": {
-      "title": "Spec-Driven Tool Surface",
-      "workflow": [
-        "Inspect current state, create requirements, design, and tasks, then implement only after the contract is clear.",
-        "In one-shot prompt mode, continue through the requested document chain without pausing for approval."
-      ],
-      "tools": [
-        "codebase-retrieval",
-        "git-commit-retrieval",
-        "str_replace_editor",
-        "create_file",
-        "file_ops",
-        "delete_file",
-        "command_exec",
-        "web_search",
-        "web_fetch",
-        "browser_controler",
-        "skill_lookup",
-        "list_mcp_resources",
-        "read_mcp_resource",
-        "media_generation_capabilities",
-        "text_to_image",
-        "text_to_video",
-        "userInput",
-        "switch_mode"
-      ]
-    },
-    "spec-vibe": {
-      "title": "Spec-Vibe Tool Surface",
-      "workflow": [
-        "Move quickly while still gathering enough evidence before edits.",
-        "Keep specs lightweight and useful; verify concrete outputs."
-      ],
-      "tools": [
-        "codebase-retrieval",
-        "git-commit-retrieval",
-        "str_replace_editor",
-        "create_file",
-        "file_ops",
-        "delete_file",
-        "command_exec",
-        "web_search",
-        "web_fetch",
-        "browser_controler",
-        "skill_lookup",
-        "list_mcp_resources",
-        "read_mcp_resource",
-        "media_generation_capabilities",
-        "text_to_image",
-        "text_to_video",
-        "userInput",
-        "switch_mode"
       ]
     },
     "writer": {
@@ -201,35 +156,6 @@
         "novel_context_manager",
         "consistency_checker",
         "plot_analyzer"
-      ]
-    },
-    "ant": {
-      "title": "Reverie-Ant Tool Surface",
-      "workflow": [
-        "Structure long-running work into planning, execution, and verification phases.",
-        "Use `task_boundary` for visible phase updates and `notify_user` only when user review or a blocker matters."
-      ],
-      "tools": [
-        "codebase-retrieval",
-        "git-commit-retrieval",
-        "str_replace_editor",
-        "create_file",
-        "file_ops",
-        "delete_file",
-        "command_exec",
-        "web_search",
-        "web_fetch",
-        "browser_controler",
-        "skill_lookup",
-        "list_mcp_resources",
-        "read_mcp_resource",
-        "media_generation_capabilities",
-        "text_to_image",
-        "text_to_video",
-        "userInput",
-        "switch_mode",
-        "task_boundary",
-        "notify_user"
       ]
     },
     "computer-controller": {
@@ -884,8 +810,8 @@
       ]
     },
     "task_boundary": {
-      "purpose": "Publish Reverie-Ant phase/progress boundary updates.",
-      "use_when": "Ant mode starts or changes planning, execution, or verification phases.",
+      "purpose": "Publish a visible stage/progress boundary update for long-running work.",
+      "use_when": "A run starts or changes its planning, execution, or verification stage.",
       "parameters": {
         "TaskName": "Current task identifier.",
         "TaskSummary": "Cumulative summary.",
@@ -898,8 +824,8 @@
       ]
     },
     "notify_user": {
-      "purpose": "Ask for review, surface blockers, or notify completion in Ant mode.",
-      "use_when": "User-visible Ant communication is required.",
+      "purpose": "Ask for review, surface blockers, or notify completion while a task boundary is open.",
+      "use_when": "User-visible communication is required during long-running work.",
       "parameters": {
         "Message": "User-facing message.",
         "PathsToReview": "Optional artifact paths.",

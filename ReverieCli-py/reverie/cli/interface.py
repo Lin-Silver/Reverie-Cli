@@ -629,7 +629,7 @@ def _build_prompt_completion_followup_message(
     auto_followup_count: int = 0,
 ) -> Optional[str]:
     """Continue code tasks that ended without observable edits or verification."""
-    if normalize_mode(mode) not in {"reverie", "reverie-ant"}:
+    if normalize_mode(mode) != "reverie":
         return None
     if not _prompt_looks_like_code_task(original_prompt):
         return None
@@ -699,7 +699,7 @@ def _latest_spec_dir(project_root: Path) -> Optional[Path]:
 
 
 def _missing_spec_documents(project_root: Path) -> List[str]:
-    """Return missing spec artifact names for spec-driven prompt mode."""
+    """Return missing spec artifact names for the Atlas spec-package workflow."""
     required = ["requirements.md", "design.md", "tasks.md"]
     spec_dir = _latest_spec_dir(project_root)
     if spec_dir is None:
@@ -761,16 +761,19 @@ def _build_prompt_followup_message(
     normalized_mode = normalize_mode(mode)
     output_text = str(latest_output or "").strip()
 
-    if normalized_mode == "spec-driven":
-        missing_docs = _missing_spec_documents(project_root)
-        if not missing_docs:
-            return None
-        missing_text = ", ".join(missing_docs)
-        return (
-            "Approved. Continue through the remaining spec phases right now and finish the full spec package in this same run. "
-            f"Create any missing documents ({missing_text}) under artifacts/specs. "
-            "Stay in spec-only scope, do not implement code, and do not ask for more approvals unless a real safety blocker exists."
-        )
+    if normalized_mode == "reverie-atlas":
+        # Only nudge when this run actually started a spec package: Atlas also
+        # delivers master-document sets that legitimately have no specs dir.
+        if _latest_spec_dir(project_root) is not None:
+            missing_docs = _missing_spec_documents(project_root)
+            if missing_docs:
+                missing_text = ", ".join(missing_docs)
+                return (
+                    "Approved. Continue through the remaining spec phases right now and finish the full spec package in this same run. "
+                    f"Create any missing documents ({missing_text}) under artifacts/specs. "
+                    "Stay in spec-authoring scope, do not implement code, and do not ask for more approvals unless a real safety blocker exists."
+                )
+        return None
 
     if normalized_mode == "writer":
         project_progress = _writer_project_progress(project_root, original_prompt)
@@ -3718,12 +3721,10 @@ class ReverieInterface:
         config = self._load_active_runtime_config()
         self.agent.config = config
         self.agent.additional_rules = self._build_additional_rules_with_tti(config)
-        prompt_phase = "EXECUTION" if getattr(self.agent, "ant_phase", "PLANNING") in {"EXECUTION", "VERIFICATION"} else "PLANNING"
         self.agent.system_prompt = build_system_prompt(
             model_name=self.agent.model_display_name,
             additional_rules=self.agent.additional_rules,
             mode=self.agent.mode,
-            ant_phase=prompt_phase,
             config=config,
         )
 
@@ -4129,7 +4130,6 @@ class ReverieInterface:
                     activity_events=list(self._captured_activity_events),
                 )
 
-            prompt_phase = "EXECUTION" if getattr(self.agent, "ant_phase", "PLANNING") in {"EXECUTION", "VERIFICATION"} else "PLANNING"
             self.agent.additional_rules = "\n\n".join(
                 part for part in [self.agent.additional_rules, _build_batch_prompt_rules()] if str(part).strip()
             )
@@ -4137,7 +4137,6 @@ class ReverieInterface:
                 model_name=self.agent.model_display_name,
                 additional_rules=self.agent.additional_rules,
                 mode=self.agent.mode,
-                ant_phase=prompt_phase,
                 config=getattr(self.agent, "config", None),
             )
 

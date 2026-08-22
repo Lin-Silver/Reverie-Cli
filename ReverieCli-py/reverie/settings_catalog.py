@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Tuple
 
 from .config import normalize_thinking_output_style, normalize_tool_output_style
-from .modes import list_modes, normalize_mode
+from .modes import describe_retired_mode, is_known_mode, list_modes, normalize_mode
 from .security_policy import (
     PERMISSION_LEVELS,
     PERMISSION_MODES,
@@ -482,6 +482,10 @@ def apply_setting_value(
             config.security = security
             return True, f"Auto Check pauses at risk '{threshold}' and above.", True
         if normalized_key == "mode":
+            if not is_known_mode(value):
+                retired_note = describe_retired_mode(value)
+                detail = retired_note or f"Unknown mode '{value}'."
+                return False, f"{detail} Available modes: {', '.join(setting_mode_options())}.", False
             config.mode = normalize_mode(value)
             return True, f"Mode set to {config.mode}.", True
         if normalized_key == "active_model_index":

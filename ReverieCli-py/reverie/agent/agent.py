@@ -2007,7 +2007,7 @@ class ReverieAgent:
         self.parent_agent_id = str(parent_agent_id or "").strip()
         self.additional_rules = additional_rules
         self.mode = mode
-        self.ant_phase = "PLANNING"
+        self.task_stage = "PLANNING"
         self.provider = normalize_model_provider(provider)
         self.config = config
         self.thinking_mode = thinking_mode
@@ -2080,42 +2080,31 @@ class ReverieAgent:
             model_name=self.model_display_name,
             additional_rules=additional_rules,
             mode=self.mode,
-            ant_phase=self.ant_phase,
             config=self.config,
         )
 
-    def set_ant_phase(self, phase: str) -> None:
-        """Update Antigravity phase (PLANNING/EXECUTION)"""
-        if phase in ["PLANNING", "EXECUTION", "VERIFICATION"]:
-            self.ant_phase = phase
+    def set_task_stage(self, stage: str) -> None:
+        """Record the declared execution stage (PLANNING/EXECUTION/VERIFICATION).
 
-            prompt_phase = "EXECUTION" if phase in ["EXECUTION", "VERIFICATION"] else "PLANNING"
-
-            self.system_prompt = build_system_prompt(
-                model_name=self.model_display_name,
-                additional_rules=self.additional_rules,
-                mode=self.mode,
-                ant_phase=prompt_phase,
-                config=self.config,
-            )
+        Informational only: the system prompt no longer varies by stage, so this
+        does not rebuild it.
+        """
+        if stage in ("PLANNING", "EXECUTION", "VERIFICATION"):
+            self.task_stage = stage
 
     def _check_tool_side_effects(self, tool_name: str, args: Dict[str, Any]) -> None:
         """Check for tools that modify agent state"""
         if tool_name == "task_boundary":
-            mode = args.get("Mode")
-            if mode and mode in ["PLANNING", "EXECUTION", "VERIFICATION"]:
-                if mode != self.ant_phase:
-                    self.set_ant_phase(mode)
+            self.set_task_stage(str(args.get("Mode") or ""))
 
     def update_mode(self, mode: str) -> None:
         """Update the agent's mode and rebuild the system prompt"""
         self.mode = mode
-        self.ant_phase = "PLANNING" # Reset phase on mode switch
+        self.task_stage = "PLANNING"  # Reset stage on mode switch
         self.system_prompt = build_system_prompt(
             model_name=self.model_display_name,
             additional_rules=self.additional_rules,
             mode=self.mode,
-            ant_phase=self.ant_phase,
             config=self.config,
         )
 
@@ -2141,7 +2130,7 @@ class ReverieAgent:
         self.model_display_name = model_display_name or model
         self.additional_rules = additional_rules
         self.mode = mode
-        self.ant_phase = "PLANNING"
+        self.task_stage = "PLANNING"
         self.provider = normalize_model_provider(provider)
         self.config = config
         self.thinking_mode = thinking_mode
@@ -2184,7 +2173,6 @@ class ReverieAgent:
             model_name=self.model_display_name,
             additional_rules=self.additional_rules,
             mode=self.mode,
-            ant_phase=self.ant_phase,
             config=self.config,
         )
     

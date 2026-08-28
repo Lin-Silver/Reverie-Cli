@@ -386,6 +386,61 @@ def test_runtime_plugin_manager_prefers_packaged_entry_when_available(tmp_path: 
     assert result["data"]["echo"] == "packaged-call"
 
 
+def test_runtime_plugin_manager_launches_a_packaged_entry_from_a_path_containing_spaces(
+    tmp_path: Path,
+) -> None:
+    """A plugin under a directory whose name has a space is still runnable.
+
+    This is the ordinary case, not an edge one: ``C:\\Program Files`` and
+    ``Documents and Settings`` both have spaces, and so does the tree this
+    project itself is developed in. The test asserts it here rather than relying
+    on the temp directory pytest happens to hand out, because whether that path
+    contains a space is an accident of the invocation and the guarantee is not.
+    """
+    app_root = tmp_path / "app root with spaces"
+    _create_runtime_plugin(app_root, packaged=True)
+
+    manager = RuntimePluginManager(app_root)
+    manager.scan()
+
+    result = manager.call_tool("sample-runtime", "status", {"message": "spaced-call"})
+    assert result["success"] is True, result.get("error")
+    assert result["data"]["entry"] == "packaged"
+    assert result["data"]["echo"] == "spaced-call"
+
+
+def test_a_cmd_wrapper_is_launched_the_one_way_cmd_reads_correctly() -> None:
+    """``cmd /c`` needs ``/s`` and an extra quote layer, so it needs a string.
+
+    ``cmd`` strips the first and last quote of everything following its
+    switches. Handed a list, ``subprocess`` quotes the batch path once and
+    ``cmd`` eats that pair, leaving the path split at its spaces. The fix is the
+    documented ``/s`` form, and it cannot be expressed as a list because the
+    outer layer would be escaped C-style rather than the way ``cmd`` reads it.
+    """
+    command = ["cmd.exe", "/d", "/s", "/c", r"C:\Program Files\p\run.cmd", "--flag", "a b"]
+    spawnable = RuntimePluginManager._spawnable(command)
+
+    if not sys.platform.startswith("win"):
+        assert spawnable == command
+        return
+
+    assert isinstance(spawnable, str)
+    assert spawnable == (
+        'cmd.exe /d /s /c ""C:\\Program Files\\p\\run.cmd" --flag "a b""'
+    )
+    # `/s` is what makes the outer pair removable; without it cmd would strip the
+    # inner quotes instead and the path would break at its first space again.
+    assert "/s" in spawnable.split('"', 1)[0].split()
+    # Anything that is not cmd is launched as the list it already was: argument
+    # vectors do not need, and must not get, a second layer of quoting.
+    assert RuntimePluginManager._spawnable([sys.executable, "-c", "pass"]) == [
+        sys.executable,
+        "-c",
+        "pass",
+    ]
+
+
 def test_runtime_plugin_manager_reuses_persistent_protocol_cache(tmp_path: Path, monkeypatch) -> None:
     app_root = tmp_path / "app"
     _create_runtime_plugin(app_root, packaged=False)

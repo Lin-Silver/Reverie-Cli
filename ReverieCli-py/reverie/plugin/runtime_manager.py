@@ -1051,7 +1051,9 @@ class RuntimePluginManager:
 
         command = self._build_launch_command(entry_path, list(args or []))
         try:
-            process = subprocess.Popen(command, cwd=str(entry_path.parent), shell=False)
+            process = subprocess.Popen(
+                self._spawnable(command), cwd=str(entry_path.parent), shell=False
+            )
         except Exception as exc:
             return {
                 "success": False,
@@ -1897,7 +1899,7 @@ class RuntimePluginManager:
 
         try:
             completed = subprocess.run(
-                command,
+                self._spawnable(command),
                 cwd=str(entry_path.parent),
                 capture_output=True,
                 text=True,
@@ -1930,10 +1932,40 @@ class RuntimePluginManager:
             "stderr": str(completed.stderr or ""),
         }
 
+    @staticmethod
+    def _spawnable(command: list[str]) -> Any:
+        """Turn a command list into what ``subprocess`` can actually launch.
+
+        Only ``cmd.exe`` needs the treatment. ``cmd /c`` strips the outer pair of
+        quotes from everything after the switch, so a batch entry whose own path
+        contains spaces arrives unquoted and fails with "the system cannot find
+        the path specified" — every plugin under ``C:\\Program Files`` or any
+        directory with a space in its name.
+
+        The documented fix is ``/s`` plus one extra layer of quotes around the
+        whole line, which is what ``/s`` then removes. It has to be built as a
+        verbatim command line: ``list2cmdline`` escapes an embedded quote as
+        ``\\"``, which is a C convention that ``cmd`` does not read, so the extra
+        layer cannot survive being passed as another list element.
+        """
+        if not command or not sys.platform.startswith("win"):
+            return command
+        if Path(command[0]).name.lower() != "cmd.exe":
+            return command
+        index = 1
+        switches: list[str] = []
+        while index < len(command) and command[index].startswith("/"):
+            switches.append(command[index])
+            index += 1
+        if "/s" not in {switch.lower() for switch in switches}:
+            switches.insert(0, "/s")
+        inner = subprocess.list2cmdline(command[index:])
+        return " ".join([command[0], *switches, f'"{inner}"'])
+
     def _build_launch_command(self, entry_path: Path, extra_args: list[str]) -> list[str]:
         suffix = entry_path.suffix.lower()
         if suffix in {".cmd", ".bat"}:
-            return ["cmd.exe", "/d", "/c", str(entry_path), *extra_args]
+            return ["cmd.exe", "/d", "/s", "/c", str(entry_path), *extra_args]
         if suffix == ".ps1":
             return [
                 "powershell",
@@ -2429,7 +2461,7 @@ class RuntimePluginManager:
 
         try:
             completed = subprocess.run(
-                command,
+                self._spawnable(command),
                 cwd=str(working_dir),
                 capture_output=True,
                 text=True,
@@ -2493,7 +2525,7 @@ class RuntimePluginManager:
         suffix = Path(program).suffix.lower()
 
         if suffix in {".cmd", ".bat"}:
-            return ["cmd.exe", "/d", "/c", program, *remaining]
+            return ["cmd.exe", "/d", "/s", "/c", program, *remaining]
         if suffix == ".ps1":
             return ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", program, *remaining]
         if suffix == ".py":

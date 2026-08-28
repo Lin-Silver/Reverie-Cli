@@ -19,23 +19,47 @@ from types import MappingProxyType
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Set, Tuple
 
 from .config import get_app_root
+from .rats_contract import (
+    FALLBACK_BOOTSTRAP_TOOLS,
+    FALLBACK_LIMITS,
+    FALLBACK_PERMISSIONS,
+    RATS_CAPABILITY_CONTRACT,
+    RATS_CONTRACT_PROTOCOL,
+    RATS_HELLO_ROLE,
+    RatsCapabilities,
+    fallback_capabilities,
+    parse_capabilities,
+)
 
 
-RATS_PROTOCOL = "reverie.rtp/1"
+RATS_PROTOCOL = RATS_CONTRACT_PROTOCOL
 RATS_DISCOVERY_SCHEMA = "reverie.rats.discovery/1"
-RATS_SETTINGS_VERSION = 2
+# Bumped to 3 when stored provider selections gained ``providerPermissionClasses``:
+# the permission classes a service published the last time it was reachable, so
+# a selection made against a service that has since gone offline is not silently
+# narrowed to whatever list this client was compiled with.
+RATS_SETTINGS_VERSION = 3
 RATS_STATE_VERSION = 2
-RATS_PERMISSIONS = ("read", "project", "edit", "asset", "ai", "run", "build")
+# Kept as the client's pre-contract default rather than its truth: a connected
+# service publishes its own permission classes and those win. See
+# ``rats_contract`` for why the fallback reproduces today's list instead of an
+# empty one.
+RATS_PERMISSIONS = FALLBACK_PERMISSIONS
 _TOKEN_RE = re.compile(r"^[0-9a-f]{64}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _SERVICE_RE = re.compile(r"^rats-[1-9][0-9]*-[a-z0-9]+$")
 _IDENTIFIER_RE = re.compile(r"[^a-z0-9_-]+")
+# The shape of a permission class name. Stored selections are checked against
+# the shape rather than against a list of known classes, because a class this
+# client has never heard of is exactly what a newer service is allowed to add.
+_PERMISSION_CLASS_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,31}$")
+_MAX_STORED_PERMISSION_CLASSES = 32
 _MAX_DESCRIPTOR_BYTES = 128 * 1024
 _MAX_RESPONSE_BYTES = 1024 * 1024
 _MAX_DIAGNOSTIC_BYTES = 2 * 1024 * 1024
 _MAX_DIAGNOSTIC_ENTRIES = 240
 _MAX_TERMINAL_TASK_HISTORY_PER_SESSION = 64
-_DEFAULT_LOADED_TOOLS = ("ping", "version", "get_status", "project.status")
+_DEFAULT_LOADED_TOOLS = FALLBACK_BOOTSTRAP_TOOLS
 # Progressive disclosure only saves tokens while the loaded working set stays
 # small. Without a cap a long session keeps loading definitions until every
 # native tool is model-visible again, which is the failure mode this design
@@ -46,8 +70,8 @@ _DEFAULT_LOADED_TOOLS = ("ping", "version", "get_status", "project.status")
 # average one: the engine's world-streaming flow alone loads 20 tools on top of
 # the 4 pinned status tools (see ``test_rats_engine_task_e2e``'s
 # ``requested_dynamic_tools``). 32 leaves headroom above that while staying well
-# below the 73 native tools the Reverie Engine provider publishes today. That
-# 73 is context, not the derivation: the cap is justified by the 20 + 4 working
+# below the 77 native tools the Reverie Engine provider publishes today. That
+# 77 is context, not the derivation: the cap is justified by the 20 + 4 working
 # set, so a provider growing its catalog does not by itself invalidate the cap.
 _MAX_LOADED_DEFINITIONS_PER_SESSION = 32
 _REVERIE_ENGINE_PRODUCT_NAMES = frozenset({"Reverie Engine", "Reverie Engine (Console)"})
@@ -179,11 +203,68 @@ def _unique_paths(values: Iterable[Any]) -> List[Path]:
     return output
 
 
-def normalize_rats_permissions(value: Any, provider: Optional["RatsProviderSpec"] = None) -> List[str]:
+def shaped_rats_permission_classes(value: Any) -> List[str]:
+    """Keep the entries of a permission class list that have a class name's shape.
+
+    Applied at every boundary where a class name crosses into storage or state:
+    a selection read from the settings file, and the list a service declares.
+    Neither source is this client's own constant, so neither is bounded unless
+    this is where the bound is applied.
+    """
+    requested = value if isinstance(value, (list, tuple, set, frozenset)) else []
+    kept = sorted(
+        {
+            _text(item).lower()
+            for item in requested
+            if _PERMISSION_CLASS_RE.fullmatch(_text(item).lower())
+        }
+    )
+    return kept[:_MAX_STORED_PERMISSION_CLASSES]
+
+
+def stored_rats_permission_request(value: Any) -> List[str]:
+    """Keep a stored permission selection without narrowing it to known classes.
+
+    ``_read_settings`` rewrites the settings file, so anything it drops on read
+    is dropped permanently. Filtering there against this client's compiled-in
+    class list would silently delete a grant the user made for a class a newer
+    service added — the one case where the user is right and the client is out
+    of date. Storage therefore keeps whatever has the shape of a class name,
+    bounded so a corrupt file cannot grow without limit, and the filtering
+    against what a service actually recognises happens when a session is opened.
+    """
+    return shaped_rats_permission_classes(value) or ["read"]
+
+
+def normalize_rats_permissions(
+    value: Any,
+    provider: Optional["RatsProviderSpec"] = None,
+    declared: Optional[Iterable[str]] = None,
+) -> List[str]:
+    """Filter a requested permission set down to what is actually recognised.
+
+    ``declared`` is the list a connected service published about itself and
+    wins when it is available, because the service is the authority on its own
+    permission classes. The provider spec, and then this client's compiled-in
+    list, are what remain when nothing has answered yet.
+    """
     requested = value if isinstance(value, (list, tuple, set)) else []
-    allowed = set(provider.permission_classes if provider else RATS_PERMISSIONS)
+    declared_classes = [_text(item) for item in declared] if declared is not None else []
+    declared_classes = [item for item in declared_classes if item]
+    if declared_classes:
+        allowed = set(declared_classes)
+    else:
+        allowed = set(provider.permission_classes if provider else RATS_PERMISSIONS)
     normalized = sorted({_text(item) for item in requested if _text(item) in allowed})
-    return normalized or ["read"]
+    if normalized:
+        return normalized
+    # "read" is the floor: it is the one class every provider registers, so a
+    # selection that filtered down to nothing still yields a usable session
+    # rather than an empty one. If a service ever omits it, honour that service
+    # by falling back to its narrowest declared class instead of inventing one.
+    if "read" in allowed or not declared_classes:
+        return ["read"]
+    return [sorted(allowed)[0]]
 
 
 def rats_discovery_root_for_executable(executable: Path | str) -> Path:
@@ -473,6 +554,11 @@ class _RatsSession:
     descriptor: RatsDescriptor
     token: str = field(repr=False)
     permissions: List[str] = field(default_factory=list)
+    # What the service published about itself when this session was opened.
+    # Held per session rather than per process because two services can be
+    # different builds, and the operation names, limits and error taxonomy this
+    # session must use are the ones its own service declared.
+    capabilities: RatsCapabilities = field(default_factory=fallback_capabilities, compare=False)
     compact_tools: List[Dict[str, Any]] = field(default_factory=list)
     # Insertion order is least-recently-used first so the working set can be
     # bounded without losing the tools the model is actively working with.
@@ -646,6 +732,10 @@ class RatsRuntime:
         self._has_refreshed = False
         self._closed = False
         self._tasks: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+        # Permission classes learned from live services, by provider id. Starts
+        # empty and is filled by discovery, so nothing here is a guess about a
+        # service this process has not spoken to.
+        self._declared_permission_classes: Dict[str, Tuple[str, ...]] = {}
         # Lock order: lifecycle -> session I/O -> state. Diagnostics is a leaf lock.
         # Never wait for lifecycle or session I/O while holding the state lock.
         self._lock = threading.RLock()
@@ -653,18 +743,33 @@ class RatsRuntime:
         self._diagnostics_lock = threading.Lock()
 
     @staticmethod
-    def _validate_deadline(deadline_ms: Optional[int]) -> Optional[int]:
+    def _validate_deadline(
+        deadline_ms: Optional[int],
+        capabilities: Optional[RatsCapabilities] = None,
+    ) -> Optional[int]:
         if deadline_ms is None:
             return None
-        if isinstance(deadline_ms, bool) or not isinstance(deadline_ms, int) or deadline_ms < 0 or deadline_ms > 120_000:
-            raise ValueError("RTP deadline_ms must be an integer between 0 and 120000.")
+        contract = capabilities if capabilities is not None else fallback_capabilities()
+        ceiling = contract.limit("deadline_ms")
+        if isinstance(deadline_ms, bool) or not isinstance(deadline_ms, int) or deadline_ms < 0 or deadline_ms > ceiling:
+            raise ValueError(f"RTP deadline_ms must be an integer between 0 and {ceiling}.")
         return int(deadline_ms)
 
     @staticmethod
-    def _validate_idempotency_key(value: str) -> str:
+    def _validate_idempotency_key(
+        value: str,
+        capabilities: Optional[RatsCapabilities] = None,
+    ) -> str:
         key = _text(value)
-        if len(key) > 128 or "\n" in key or "\r" in key:
-            raise ValueError("RTP idempotency_key must be at most 128 characters and contain no line breaks.")
+        contract = capabilities if capabilities is not None else fallback_capabilities()
+        ceiling = contract.limit("idempotency_key_bytes")
+        # Measured in bytes, matching what the service counts. Characters and
+        # bytes only agree for ASCII keys, and the disagreement is exactly the
+        # case where a locally-accepted key is rejected on the wire.
+        if len(key.encode("utf-8")) > ceiling or "\n" in key or "\r" in key:
+            raise ValueError(
+                f"RTP idempotency_key must be at most {ceiling} UTF-8 bytes and contain no line breaks."
+            )
         return key
 
     def _load_diagnostics(self) -> List[Dict[str, Any]]:
@@ -692,6 +797,8 @@ class RatsRuntime:
         operation: str = "",
         reason: str = "",
         path: str = "",
+        field: str = "",
+        detail: str = "",
         duration_ms: Optional[int] = None,
         count: Optional[int] = None,
         audit_id: str = "",
@@ -712,6 +819,10 @@ class RatsRuntime:
             "operation": _text(operation),
             "reason": _text(reason),
             "path": _text(path),
+            # Which published field was unusable, and what it held. A contract
+            # rejection that names neither is a warning nobody can act on.
+            "field": _text(field),
+            "detail": _text(detail),
         }
         entry.update({key: value for key, value in optional.items() if value})
         if duration_ms is not None:
@@ -752,6 +863,11 @@ class RatsRuntime:
             source = {}
         raw_roots = source.get("discoveryRoots", [])
         roots = _unique_paths(raw_roots if isinstance(raw_roots, list) else [])
+        # The permission classes each provider was last seen to declare. Stored
+        # so the state a client renders lists what a service actually offers
+        # rather than what this build was compiled knowing about, and so a
+        # selection survives a restart while its service is offline.
+        declared_classes = self._read_declared_permission_classes(source)
         legacy_items = source.get("enabledEngines") if isinstance(source.get("enabledEngines"), list) else []
         current_items = source.get("enabledProviders") if isinstance(source.get("enabledProviders"), list) else []
         migrating_legacy = bool(legacy_items) and not current_items
@@ -785,7 +901,7 @@ class RatsRuntime:
             selection = {
                 "providerId": provider_id,
                 "executable": str(path),
-                "permissions": normalize_rats_permissions(record.get("permissions"), provider),
+                "permissions": stored_rats_permission_request(record.get("permissions")),
                 "discoveryRoot": discovery_root,
             }
             enabled[(provider_id, _path_key(path))] = selection
@@ -796,6 +912,9 @@ class RatsRuntime:
                 enabled.values(),
                 key=lambda item: (item["providerId"], item["executable"].lower()),
             ),
+            "providerPermissionClasses": {
+                provider_id: list(classes) for provider_id, classes in sorted(declared_classes.items())
+            },
         }
         if source and (
             source.get("schemaVersion") != RATS_SETTINGS_VERSION
@@ -803,12 +922,48 @@ class RatsRuntime:
             or "enabledEngines" in source
             or source.get("enabledProviders") != settings["enabledProviders"]
             or source.get("discoveryRoots") != settings["discoveryRoots"]
+            or source.get("providerPermissionClasses") != settings["providerPermissionClasses"]
         ):
             try:
                 self._write_settings(settings)
             except OSError:
                 pass
         return settings
+
+    def _read_declared_permission_classes(self, source: Dict[str, Any]) -> Dict[str, Tuple[str, ...]]:
+        """Merge the stored permission classes with what live services declared.
+
+        A schema-2 file has no stored map, which migrates to an empty one: with
+        nothing learned yet, normalization falls back to the provider spec and
+        behaves exactly as it did before this key existed.
+        """
+        stored = source.get("providerPermissionClasses")
+        merged: Dict[str, Tuple[str, ...]] = {}
+        if isinstance(stored, dict):
+            for provider_id, value in stored.items():
+                key = _text(provider_id)
+                if not key or key not in self.provider_registry or not isinstance(value, list):
+                    continue
+                classes = tuple(shaped_rats_permission_classes(value))
+                if classes:
+                    merged[key] = classes
+        with self._lock:
+            learned = dict(self._declared_permission_classes)
+        merged.update(learned)
+        return merged
+
+    def _known_permission_classes(self, provider: "RatsProviderSpec") -> List[str]:
+        """The widest permission list this client can justify for one provider.
+
+        A class the provider spec never listed is still legitimate if a service
+        of that provider published it, and refusing to store it would make an
+        engine-side permission class unreachable until this client is rebuilt.
+        """
+        with self._lock:
+            learned = self._declared_permission_classes.get(provider.provider_id, ())
+        if learned:
+            return sorted({*provider.permission_classes, *learned})
+        return list(provider.permission_classes)
 
     def _write_settings(self, settings: Dict[str, Any]) -> None:
         self.state_dir.mkdir(parents=True, exist_ok=True)
@@ -824,7 +979,7 @@ class RatsRuntime:
     def _request(
         self,
         descriptor: RatsDescriptor,
-        operation: str,
+        role: str,
         args: Optional[Dict[str, Any]] = None,
         *,
         control_token: str = "",
@@ -832,11 +987,17 @@ class RatsRuntime:
         timeout: Optional[float] = None,
         deadline_ms: Optional[int] = None,
         idempotency_key: str = "",
+        capabilities: Optional[RatsCapabilities] = None,
     ) -> Dict[str, Any]:
         started = time.perf_counter()
+        # Callers name roles, not wire names. The service publishes the mapping
+        # between them, so this is the one place a role becomes an operation and
+        # the one place that has to change if a service ever renames one.
+        contract = capabilities if capabilities is not None else fallback_capabilities()
+        operation = contract.operation(_text(role))
         effective_timeout = float(timeout) if timeout is not None else self.request_timeout
-        validated_deadline = self._validate_deadline(deadline_ms)
-        validated_idempotency_key = self._validate_idempotency_key(idempotency_key)
+        validated_deadline = self._validate_deadline(deadline_ms, contract)
+        validated_idempotency_key = self._validate_idempotency_key(idempotency_key, contract)
         request_object: Dict[str, Any] = {
             "id": f"reverie-cli-{uuid.uuid4().hex}",
             "protocol": RATS_PROTOCOL,
@@ -854,9 +1015,9 @@ class RatsRuntime:
         ).encode("utf-8")
         headers = {"Content-Type": "application/json; charset=utf-8", "Content-Length": str(len(body))}
         if control_token:
-            headers["X-Reverie-RATS-Control"] = control_token
+            headers[contract.control_header] = control_token
         if session_token:
-            headers["X-Reverie-RTP-Session"] = session_token
+            headers[contract.session_header] = session_token
         connection = http.client.HTTPConnection("127.0.0.1", descriptor.port, timeout=effective_timeout)
         try:
             connection.request("POST", "/rtp", body=body, headers=headers)
@@ -998,7 +1159,13 @@ class RatsRuntime:
 
     def _close_session(self, session: _RatsSession, *, timeout: float = 0.75) -> None:
         try:
-            self._request(session.descriptor, "session.close", session_token=session.token, timeout=timeout)
+            self._request(
+                session.descriptor,
+                "session.close",
+                session_token=session.token,
+                timeout=timeout,
+                capabilities=session.capabilities,
+            )
         except RatsClientError:
             pass
 
@@ -1049,7 +1216,8 @@ class RatsRuntime:
         pin: bool = False,
     ) -> List[Dict[str, Any]]:
         """Populate a provisional session before it is published in ``_sessions``."""
-        requested = list(dict.fromkeys(_text(name) for name in names if _text(name)))[:16]
+        batch = session.capabilities.limit("describe_tools")
+        requested = list(dict.fromkeys(_text(name) for name in names if _text(name)))[:batch]
         if not requested:
             return []
         result = self._request(
@@ -1057,6 +1225,7 @@ class RatsRuntime:
             "catalog.describe",
             {"names": requested},
             session_token=session.token,
+            capabilities=session.capabilities,
         )
         definitions: List[Dict[str, Any]] = []
         for item in result.get("tools", []) if isinstance(result.get("tools"), list) else []:
@@ -1069,12 +1238,19 @@ class RatsRuntime:
         self._evict_definitions(session)
         return [dict(definition) for definition in definitions]
 
-    def _open_session(self, descriptor: RatsDescriptor, permissions: List[str]) -> _RatsSession:
+    def _open_session(
+        self,
+        descriptor: RatsDescriptor,
+        permissions: List[str],
+        capabilities: Optional[RatsCapabilities] = None,
+    ) -> _RatsSession:
+        contract = capabilities if capabilities is not None else fallback_capabilities()
         opened = self._request(
             descriptor,
             "session.open",
             {"client": "reverie-cli", "permissions": permissions},
             control_token=descriptor.control_token,
+            capabilities=contract,
         )
         token = _text(opened.get("session_token")).lower()
         if not _TOKEN_RE.fullmatch(token):
@@ -1083,13 +1259,29 @@ class RatsRuntime:
             descriptor=descriptor,
             token=token,
             permissions=list(permissions),
+            capabilities=contract,
         )
         try:
-            index = self._request(descriptor, "catalog.index", session_token=token)
+            index = self._request(
+                descriptor,
+                "catalog.index",
+                session_token=token,
+                capabilities=contract,
+            )
             session.compact_tools = _compact_tools(index.get("tools"))
+            # The service names its own preload budget, already filtered to what
+            # this session was granted. Asking it beats guessing: a tool this
+            # client would have preloaded may not exist in the connected build,
+            # and one worth preloading may have been added after this release.
+            declared_bootstrap = opened.get("bootstrap_tools")
+            wanted = (
+                [_text(name) for name in declared_bootstrap if _text(name)]
+                if isinstance(declared_bootstrap, list)
+                else list(_DEFAULT_LOADED_TOOLS)
+            )
             preload = [
                 name
-                for name in _DEFAULT_LOADED_TOOLS
+                for name in dict.fromkeys(wanted)
                 if any(tool.get("name") == name and tool.get("schema") for tool in session.compact_tools)
             ]
             if preload:
@@ -1131,7 +1323,12 @@ class RatsRuntime:
         probe_started = time.perf_counter()
         try:
             try:
-                hello = self._request(descriptor, "hello", timeout=self.probe_timeout)
+                hello = self._request(
+                    descriptor,
+                    RATS_HELLO_ROLE,
+                    timeout=self.probe_timeout,
+                    capabilities=fallback_capabilities(),
+                )
             except RatsClientError:
                 if session is not None and self._detach_session(session):
                     self._close_session(session)
@@ -1157,8 +1354,33 @@ class RatsRuntime:
                     self._close_session(session)
                 return None
 
+            # Everything past the five identity fields above is what the service
+            # says about itself: its operation names, permission classes, limits
+            # and error taxonomy. Keeping it is what lets this client stop
+            # carrying a second copy of each of those facts.
+            capabilities, contract_rejections = parse_capabilities(hello, protocol=RATS_PROTOCOL)
+            for rejection in contract_rejections:
+                self._log_diagnostic(
+                    "provider.contract",
+                    level="warning",
+                    service_id=descriptor.service_id,
+                    provider_id=descriptor.provider_id,
+                    reason=rejection.get("reason", "contract_rejected"),
+                    field=rejection.get("field", ""),
+                    detail=rejection.get("value", ""),
+                )
+
             probe_latency_ms = round((time.perf_counter() - probe_started) * 1000)
             selection = self._selection(settings, descriptor.provider_id, descriptor.executable)
+            # Shape-filtered here rather than where it is stored: this is the one
+            # point a remote list crosses into the client, and everything
+            # downstream of it goes into state, the settings file, or a request.
+            declared_permissions = shaped_rats_permission_classes(capabilities.permissions)
+            if capabilities.declared and declared_permissions:
+                # Learned, not assumed: only a service that actually published
+                # its classes gets to widen what this client will store.
+                with self._lock:
+                    self._declared_permission_classes[descriptor.provider_id] = tuple(declared_permissions)
             base = {
                 "serviceId": descriptor.service_id,
                 "providerId": descriptor.provider_id,
@@ -1177,7 +1399,17 @@ class RatsRuntime:
                 "enabled": selection is not None,
                 "connection": "available",
                 "sessionActive": False,
-                "permissions": normalize_rats_permissions(selection.get("permissions")) if selection else ["read"],
+                "permissions": normalize_rats_permissions(
+                    selection.get("permissions"), declared=declared_permissions
+                )
+                if selection
+                else ["read"],
+                "contract": capabilities.contract,
+                "declaredPermissions": declared_permissions,
+                "permissionToolCounts": dict(capabilities.permission_tool_counts),
+                "features": sorted(capabilities.features),
+                "constraints": sorted(capabilities.constraints),
+                "limits": dict(capabilities.limits),
                 "tools": [],
                 "loadedToolNames": [],
                 "error": "",
@@ -1187,25 +1419,34 @@ class RatsRuntime:
                     self._close_session(session)
                 return base
 
-            permissions = normalize_rats_permissions(selection.get("permissions"))
+            permissions = normalize_rats_permissions(selection.get("permissions"), declared=declared_permissions)
             if session is not None and (
                 session.permissions != permissions
                 or _path_key(session.descriptor.executable) != _path_key(descriptor.executable)
                 or session.descriptor.port != descriptor.port
+                # A service that restarted into a different build publishes a
+                # different contract. Reopening is cheaper than running a session
+                # against operation names and limits that have since moved.
+                or session.capabilities.roles != capabilities.roles
             ):
                 if self._detach_session(session):
                     self._close_session(session)
                 session = None
             if session is not None:
                 try:
-                    self._request(descriptor, "status", session_token=session.token)
+                    self._request(
+                        descriptor,
+                        "status",
+                        session_token=session.token,
+                        capabilities=session.capabilities,
+                    )
                 except RatsClientError:
                     if self._detach_session(session):
                         self._close_session(session)
                     session = None
             if session is None:
                 try:
-                    provisional = self._open_session(descriptor, permissions)
+                    provisional = self._open_session(descriptor, permissions, capabilities)
                 except RatsClientError as exc:
                     with self._lock:
                         if self._sessions.get(session_key) is None:
@@ -1269,6 +1510,20 @@ class RatsRuntime:
             if service is not None:
                 services.append(service)
 
+        # Discovery may have learned permission classes this file does not hold
+        # yet. Re-reading is what folds them in, and it happens once per refresh
+        # rather than per service so a scan writes the file at most one extra
+        # time. The stored selections are unchanged unless a class they already
+        # named has become recognisable again.
+        with self._lock:
+            learned = dict(self._declared_permission_classes)
+        stored = settings.get("providerPermissionClasses")
+        if learned and not (
+            isinstance(stored, dict)
+            and all(list(classes) == stored.get(provider_id) for provider_id, classes in learned.items())
+        ):
+            settings = self._read_settings()
+
         current_ids = {(service["providerId"], service["serviceId"]) for service in services}
         with self._lock:
             stale_sessions = [
@@ -1317,7 +1572,11 @@ class RatsRuntime:
                     "product": provider.product,
                     "serviceKind": provider.service_kind,
                     "label": provider.label,
-                    "permissions": list(provider.permission_classes),
+                    # Widened by what live services declared, so a client
+                    # rendering permission choices offers the classes the
+                    # connected engine actually has rather than the ones this
+                    # build was compiled with.
+                    "permissions": self._known_permission_classes(provider),
                     "toolTags": list(provider.tool_tags),
                 }
                 for provider_id, provider in sorted(self.provider_registry.items())
@@ -1400,7 +1659,11 @@ class RatsRuntime:
                     {
                         "providerId": provider.provider_id,
                         "executable": str(path),
-                        "permissions": normalize_rats_permissions(permissions, provider),
+                        # Stored as requested, not as filtered. A class this
+                        # build does not know is still the user's grant, and the
+                        # session that uses it is filtered against what the
+                        # service declares at the time it is opened.
+                        "permissions": stored_rats_permission_request(permissions),
                         "discoveryRoot": discovery_root,
                     }
                 )
@@ -1421,13 +1684,14 @@ class RatsRuntime:
         *,
         provider_id: str = "",
     ) -> List[Dict[str, Any]]:
-        requested = list(dict.fromkeys(_text(name) for name in names if _text(name)))[:16]
-        if not requested:
+        wanted = list(dict.fromkeys(_text(name) for name in names if _text(name)))
+        if not wanted:
             return []
         with self._lock:
             session = self._find_session(service_id, provider_id)
             if session is None:
                 raise ValueError("Enable the RATS service before requesting tool definitions.")
+        requested = wanted[: session.capabilities.limit("describe_tools")]
         with session.io_lock:
             with self._lock:
                 if not self._session_is_current(session):
@@ -1437,6 +1701,7 @@ class RatsRuntime:
                 "catalog.describe",
                 {"names": requested},
                 session_token=session.token,
+                capabilities=session.capabilities,
             )
             definitions: List[Dict[str, Any]] = []
             for item in result.get("tools", []) if isinstance(result.get("tools"), list) else []:
@@ -1453,8 +1718,9 @@ class RatsRuntime:
                 # Return what the working set holds, so the caller's "these are
                 # callable now" claim is read out of observed state rather than
                 # assumed. This is a guard, not a live fix: one call describes at
-                # most 16 names into a cap of 32, so nothing it just stored can be
-                # evicted yet. It stops that arithmetic from being load-bearing.
+                # most the service's describe limit into a larger working-set
+                # cap, so nothing it just stored can be evicted yet. It stops
+                # that arithmetic from being load-bearing.
                 definitions = [
                     definition for definition in definitions if _text(definition.get("name")) in session.definitions
                 ]
@@ -1524,7 +1790,6 @@ class RatsRuntime:
             else:
                 sessions = list(self._sessions.values())
         matches: List[Dict[str, Any]] = []
-        request_limit = min(16, max(1, int(limit)))
         for session in sessions:
             with session.io_lock:
                 session_key = (session.descriptor.provider_id, session.descriptor.service_id)
@@ -1532,11 +1797,16 @@ class RatsRuntime:
                     if self._sessions.get(session_key) is not session:
                         continue
                     compact_tools = list(session.compact_tools)
+                # Clamped per session: each service publishes its own ceiling,
+                # and asking one for more than it will return is a request that
+                # fails instead of a result that is merely short.
+                request_limit = min(session.capabilities.limit("search_results"), max(1, int(limit)))
                 result = self._request(
                     session.descriptor,
                     "catalog.search",
                     {"query": wanted, "limit": request_limit},
                     session_token=session.token,
+                    capabilities=session.capabilities,
                 )
                 local = [_record(item) for item in result.get("matches", []) if isinstance(item, dict)]
                 definitions: List[Dict[str, Any]] = []
@@ -1550,8 +1820,13 @@ class RatsRuntime:
                         described = self._request(
                             session.descriptor,
                             "catalog.describe",
-                            {"names": list(dict.fromkeys(describable))[:16]},
+                            {
+                                "names": list(dict.fromkeys(describable))[
+                                    : session.capabilities.limit("describe_tools")
+                                ]
+                            },
                             session_token=session.token,
+                            capabilities=session.capabilities,
                         )
                         for item in described.get("tools", []) if isinstance(described.get("tools"), list) else []:
                             definition = _record(item)
@@ -1615,6 +1890,7 @@ class RatsRuntime:
                 timeout=self.tool_timeout,
                 deadline_ms=deadline_ms,
                 idempotency_key=idempotency_key,
+                capabilities=session.capabilities,
             )
             task = _record(result.get("task"))
             with self._lock:
@@ -1741,6 +2017,7 @@ class RatsRuntime:
                     session_token=session.token,
                     timeout=self.tool_timeout,
                     deadline_ms=deadline_ms,
+                    capabilities=session.capabilities,
                 )
             except (RatsClientError, ValueError) as exc:
                 with self._lock:
@@ -1772,8 +2049,9 @@ class RatsRuntime:
                 cursor = int(task.get("cursor", 0) or 0)
             if isinstance(cursor, bool) or not isinstance(cursor, int) or cursor < 0:
                 raise ValueError("RTP task cursor must be a non-negative integer.")
-            if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1 or limit > 64:
-                raise ValueError("RTP task event limit must be an integer between 1 and 64.")
+            event_ceiling = session.capabilities.limit("task_events")
+            if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1 or limit > event_ceiling:
+                raise ValueError(f"RTP task event limit must be an integer between 1 and {event_ceiling}.")
             try:
                 result = self._request(
                     session.descriptor,
@@ -1782,6 +2060,7 @@ class RatsRuntime:
                     session_token=session.token,
                     timeout=self.tool_timeout,
                     deadline_ms=deadline_ms,
+                    capabilities=session.capabilities,
                 )
             except (RatsClientError, ValueError) as exc:
                 with self._lock:
@@ -1818,6 +2097,7 @@ class RatsRuntime:
                 session_token=session.token,
                 timeout=self.tool_timeout,
                 deadline_ms=deadline_ms,
+                capabilities=session.capabilities,
             )
             with self._lock:
                 if self._session_is_current(session) and self._tasks.get(key) is task:
@@ -1859,6 +2139,7 @@ class RatsRuntime:
                 session_token=session.token,
                 timeout=self.tool_timeout,
                 deadline_ms=deadline_ms,
+                capabilities=session.capabilities,
             )
             output = _record(result.get("output"))
             with self._lock:
@@ -1947,6 +2228,23 @@ class RatsRuntime:
                     }
                 )
             return cards
+
+    def request_limits(self) -> Dict[str, int]:
+        """The request limits every connected service can satisfy.
+
+        Taken as the minimum across sessions, not the maximum: these become the
+        bounds of a schema shown to the model, and a bound one service would
+        reject is a call the model was invited to make and cannot.
+        """
+        wanted = ("describe_tools", "search_results", "task_events")
+        with self._lock:
+            sessions = list(self._sessions.values())
+        if not sessions:
+            return {name: int(FALLBACK_LIMITS[name]) for name in wanted}
+        return {
+            name: max(1, min(session.capabilities.limit(name) for session in sessions))
+            for name in wanted
+        }
 
     def loaded_definition_names(self) -> Dict[str, List[str]]:
         """Map ``provider.service`` to the native tool names currently loaded."""
@@ -2068,6 +2366,7 @@ class RatsRuntime:
 
 
 __all__ = [
+    "RATS_CAPABILITY_CONTRACT",
     "RATS_DISCOVERY_SCHEMA",
     "RATS_PERMISSIONS",
     "RATS_PROTOCOL",
@@ -2075,6 +2374,7 @@ __all__ = [
     "RATS_SETTINGS_VERSION",
     "RATS_STATE_VERSION",
     "RATS_SUPPORTED_PROVIDERS",
+    "RatsCapabilities",
     "RatsClientError",
     "RatsDescriptor",
     "RatsProviderRegistry",
@@ -2082,6 +2382,9 @@ __all__ = [
     "RatsRuntime",
     "discover_rats_descriptors",
     "normalize_rats_permissions",
+    "parse_capabilities",
     "parse_rats_descriptor",
     "rats_discovery_root_for_executable",
+    "shaped_rats_permission_classes",
+    "stored_rats_permission_request",
 ]

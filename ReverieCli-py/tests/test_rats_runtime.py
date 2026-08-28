@@ -403,9 +403,10 @@ def _configure_fake_discovery(
         "discoveryRoot": str(descriptor.descriptor_path.parent),
     }
     settings = {
-        "schemaVersion": 2,
+        "schemaVersion": rats_module.RATS_SETTINGS_VERSION,
         "discoveryRoots": [],
         "enabledProviders": [selection] if enabled else [],
+        "providerPermissionClasses": {},
     }
     monkeypatch.setattr(runtime, "_read_settings", lambda: settings)
     monkeypatch.setattr(runtime, "_roots", lambda _settings: [])
@@ -1732,8 +1733,12 @@ def test_legacy_enabled_engines_migrate_losslessly_and_idempotently() -> None:
         runtime = RatsRuntime(cli_root, provider_registry=TEST_PROVIDER_REGISTRY)
         first = runtime.refresh()
         persisted = json.loads(settings_path.read_text(encoding="utf-8"))
-        assert persisted["schemaVersion"] == 2
+        assert persisted["schemaVersion"] == 3
         assert "enabledEngines" not in persisted
+        # Schema 3 adds the map of classes each provider was last seen to
+        # declare. Migrating from 2 leaves it empty: nothing has been learned
+        # yet, so normalization still falls back to the provider spec.
+        assert persisted["providerPermissionClasses"] == {}
         assert persisted["discoveryRoots"] == [str(discovery_root.resolve()), str((executable.parent / "ReverieLocal" / "RATS" / "Services").resolve())]
         assert persisted["enabledProviders"] == [
             {

@@ -66,6 +66,7 @@ import {
   FormEvent,
   KeyboardEvent,
   ReactNode,
+  memo,
   useCallback,
   useEffect,
   useMemo,
@@ -138,15 +139,19 @@ import {
   type LiveTurnBatch,
 } from "./live-stream";
 import { isThinkTool, thinkToolText } from "./thinking-tool";
+import {
+  CUSTOM_SOURCE_ID,
+  activeSourceId,
+  coreSourceId,
+  customProviderIdOf,
+  expandModelSources,
+  settingsModelSources,
+} from "./model-sources";
+import { SessionCache } from "./session-cache";
 import type { ApprovalDecision } from "./core-protocol";
 
 type Toast = { id: number; kind: "success" | "error" | "info"; message: string };
 
-const RETIRED_MODEL_SOURCE_IDS = new Set(["unlimitedsurf", "unlimited_surf", "unlimited.surf", "us", "ue"]);
-
-function visibleModelSources(sources: ModelSource[]): ModelSource[] {
-  return sources.filter((source) => !RETIRED_MODEL_SOURCE_IDS.has(source.id.trim().toLowerCase()));
-}
 type ComposerAttachment = { name: string; relativePath: string; size: number };
 
 const REVERIE_MARK_URL = new URL("reverie-mark-2.5.png", document.baseURI).href;
@@ -687,12 +692,8 @@ function ModelPicker({
   const { t } = useI18n();
   const dialogRef = useRef<HTMLDivElement>(null);
   useDialogFocus(dialogRef, close);
-  const sources = visibleModelSources(state.models.sources);
-  const [sourceId, setSourceId] = useState(
-    sources.some((item) => item.id === state.models.active_source)
-      ? state.models.active_source
-      : sources[0]?.id ?? "",
-  );
+  const sources = expandModelSources(state.models.sources);
+  const [sourceId, setSourceId] = useState(() => activeSourceId(sources, state.models.active_source));
   const [query, setQuery] = useState("");
   const [pendingSelection, setPendingSelection] = useState<{ source: ModelSource; model: ModelRecord } | null>(null);
   const source = sources.find((item) => item.id === sourceId) ?? sources[0];
@@ -829,7 +830,7 @@ function Topbar({
   const [reasoningOpen, setReasoningOpen] = useState(false);
   const [modeOpen, setModeOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
-  const activeSource = visibleModelSources(state.models.sources).find((source) => source.active);
+  const activeSource = expandModelSources(state.models.sources).find((source) => source.active);
   const reasoning = activeSource?.selected_reasoning;
   const reasoningOptions = reasoning?.options ?? [];
   const selectedReasoning = reasoningOptions.find((item) => item.id === reasoning?.value);
@@ -1087,7 +1088,15 @@ function ToolCallList({ message }: { message: SessionMessage }) {
   );
 }
 
-function Message({ message, preferences }: { message: SessionMessage; preferences: UiPreferences }) {
+/**
+ * One transcript row.
+ *
+ * Memoized: a stored message never changes once it is on screen, so a streaming
+ * turn -- which re-renders the conversation up to 25 times a second -- must not
+ * rebuild the markdown of every message above it. Both props come straight from
+ * state, so their identities are stable between renders.
+ */
+const Message = memo(function Message({ message, preferences }: { message: SessionMessage; preferences: UiPreferences }) {
   const { language, t } = useI18n();
   const text = messageText(message.content, language);
   const reasoning = messageReasoningText(message);
@@ -1115,7 +1124,7 @@ function Message({ message, preferences }: { message: SessionMessage; preference
       </div>
     </article>
   );
-}
+});
 
 function LiveMessage({ turn, running, preferences }: { turn: LiveTurn; running: boolean; preferences: UiPreferences }) {
   const { t } = useI18n();
@@ -1314,14 +1323,17 @@ function ConversationTraceBar({
   updatePreferences: (patch: Partial<UiPreferences>) => void;
 }) {
   const { language, t } = useI18n();
-  const counts = messages.reduce(
+  // Counting walks every message and every tool call, so it must not re-run on a
+  // preference toggle or on each streaming tick -- only when the transcript or
+  // the display language actually changes.
+  const counts = useMemo(() => messages.reduce(
     (current, message) => ({
       reasoning: current.reasoning + (messageReasoningText(message) ? 1 : 0),
       calls: current.calls + toolCallRecords(message).length,
       results: current.results + (message.role === "tool" && messageText(message.content, language) ? 1 : 0),
     }),
     { reasoning: 0, calls: 0, results: 0 },
-  );
+  ), [messages, language]);
   const hasTrace = counts.reasoning > 0 || counts.calls > 0 || counts.results > 0;
   if (!hasTrace) return null;
   return (
@@ -2042,6 +2054,7 @@ function ProviderSettings({
   selectModel,
   saveProvider,
   addStandard,
+  editStandard,
   deleteStandard,
   customProviders,
 }: {
@@ -2049,12 +2062,15 @@ function ProviderSettings({
   selectModel: (source: ModelSource, model: ModelRecord) => void;
   saveProvider: (source: ModelSource, patch: Record<string, unknown>) => void;
   addStandard: () => void;
+  editStandard: (index: number, model: ModelRecord) => void;
   deleteStandard: (index: number) => void;
   customProviders: CustomProviderControls;
 }) {
   const { t } = useI18n();
   const [sourceId, setSourceId] = useState(state.models.active_source);
-  const sources = visibleModelSources(state.models.sources);
+  // The settings panel manages the aggregate `custom` source, so it must never
+  // see the per-provider entries the picker synthesizes from it.
+  const sources = settingsModelSources(state.models.sources);
   const source = sources.find((item) => item.id === sourceId) ?? sources[0];
   const [patch, setPatch] = useState<Record<string, unknown>>({});
   useEffect(() => setPatch({}), [source?.id]);
@@ -2087,7 +2103,12 @@ function ProviderSettings({
               </button>
               <p>{t(model.description)}</p>
               <div className="tag-row"><span>{formatTokens(model.context_length)} ctx</span>{model.vision && <span>vision</span>}{model.tool_calling && <span>tools</span>}{model.reasoning.control !== "none" && <span>{model.reasoning.control}</span>}</div>
-              {source.id === "standard" && <button type="button" className="delete-model" onClick={() => deleteStandard(Number(model.id))}><Trash2 size={13} /></button>}
+              {source.id === "standard" && (
+                <div className="model-card-actions">
+                  <button type="button" className="edit-model" onClick={() => editStandard(Number(model.id), model)} aria-label={t("编辑标准模型")} title={t("编辑标准模型")}><Pencil size={13} /></button>
+                  <button type="button" className="delete-model" onClick={() => deleteStandard(Number(model.id))} aria-label={t("删除")} title={t("删除")}><Trash2 size={13} /></button>
+                </div>
+              )}
             </div>
           ))}
           {source.models.length === 0 && (
@@ -2121,6 +2142,7 @@ function SettingsView({
   selectModel,
   saveProvider,
   addStandard,
+  editStandard,
   deleteStandard,
   customProviders,
   paths,
@@ -2137,6 +2159,7 @@ function SettingsView({
   selectModel: (source: ModelSource, model: ModelRecord) => void;
   saveProvider: (source: ModelSource, patch: Record<string, unknown>) => void;
   addStandard: () => void;
+  editStandard: (index: number, model: ModelRecord) => void;
   deleteStandard: (index: number) => void;
   customProviders: CustomProviderControls;
   paths: DesktopPaths | null;
@@ -2195,7 +2218,10 @@ function SettingsView({
                 return (
                   <div className={`setting-row ${item.kind === "rules" ? "stacked" : ""}`} key={item.key}>
                     <div>
-                      <strong>{t(item.name)}{item.experimental && <span className="setting-badge">{t("实验性")}</span>}</strong>
+                      {/* The core supplies setting names in English and `translate`
+                          only maps Chinese to English, so a translated badge is the
+                          one Chinese word in an otherwise English row. */}
+                      <strong>{t(item.name)}{item.experimental && <span className="setting-badge">Experimental</span>}</strong>
                       <p>{t(item.description)}</p>
                       {hint && <p className="setting-hint">{t(hint)}</p>}
                     </div>
@@ -2338,7 +2364,7 @@ function SettingsView({
         {tab === "models" && (
           <>
             <PageHeader icon={<Brain size={20} />} title={t("模型与提供商")} description={t("选择模型、配置凭据，并检查模型级思考与多模态能力。")} />
-            <ProviderSettings state={state} selectModel={selectModel} saveProvider={saveProvider} addStandard={addStandard} deleteStandard={deleteStandard} customProviders={customProviders} />
+            <ProviderSettings state={state} selectModel={selectModel} saveProvider={saveProvider} addStandard={addStandard} editStandard={editStandard} deleteStandard={deleteStandard} customProviders={customProviders} />
           </>
         )}
         {tab === "about" && (
@@ -2359,12 +2385,14 @@ function Inspector({
   indexWorkspace,
   compactContext,
   compactDisabled,
+  hidden,
 }: {
   state: DesktopState;
   liveTurn: LiveTurn | null;
   indexWorkspace: () => void;
   compactContext: () => void;
   compactDisabled: boolean;
+  hidden: boolean;
 }) {
   const { t } = useI18n();
   const [tab, setTab] = useState<"context" | "activity">("context");
@@ -2377,12 +2405,14 @@ function Inspector({
       ? t("自动检索已启用")
       : t("正在按需预热");
   return (
-    <aside className="inspector">
+    // Stays in the tree while collapsed so the slide-out can play, but is taken
+    // out of the accessibility tree and the tab order while it is off screen.
+    <aside className="inspector" aria-hidden={hidden || undefined} inert={hidden || undefined}>
       <div className="inspector-tabs"><button type="button" className={tab === "context" ? "active" : ""} onClick={() => setTab("context")}>{t("上下文")}</button><button type="button" className={tab === "activity" ? "active" : ""} onClick={() => setTab("activity")}>{t("活动")} {events.length > 0 && <span>{events.length}</span>}</button></div>
       {tab === "context" ? (
         <div className="inspector-content">
           <section><div className="inspector-heading"><span>{t("工作区")}</span><div className="inspector-actions"><button type="button" onClick={compactContext} disabled={compactDisabled} aria-label={t("压缩上下文")} title={t("压缩上下文")}><Archive size={13} /></button><button type="button" onClick={indexWorkspace} title={t("重新索引")}><RefreshCw className={contextEngine?.indexing ? "spin" : ""} size={13} /></button></div></div><div className="context-card"><Folder size={15} /><div><strong>{state.workspace.project_name}</strong><span>{state.workspace.project_root}</span></div></div><div className="context-engine-card"><div><span className="context-engine-orbit"><Sparkles size={14} /></span><span><strong>Context Engine</strong><small>{contextLabel}</small></span></div><div className="context-engine-metrics"><span><strong>{contextEngine?.files ?? 0}</strong> {t("文件")}</span><span><strong>{contextEngine?.symbols ?? 0}</strong> {t("符号")}</span></div>{contextEngine?.indexing && <div className="context-progress"><span style={{ width: `${Math.max(3, contextEngine.progress)}%` }} /></div>}</div></section>
-          <section><div className="inspector-heading"><span>{t("运行时")}</span></div><div className="context-line"><span>{t("模型")}</span><strong>{state.models.active_model?.display_name || t("未配置")}</strong></div><div className="context-line"><span>Source</span><strong>{visibleModelSources(state.models.sources).find((item) => item.active)?.display_name}</strong></div><div className="context-line"><span>{t("模式")}</span><strong>{state.workspace.mode}</strong></div><div className="context-line"><span>{t("权限")}</span><strong>{String(permission ?? "workspace_write")}</strong></div></section>
+          <section><div className="inspector-heading"><span>{t("运行时")}</span></div><div className="context-line"><span>{t("模型")}</span><strong>{state.models.active_model?.display_name || t("未配置")}</strong></div><div className="context-line"><span>Source</span><strong>{expandModelSources(state.models.sources).find((item) => item.active)?.display_name}</strong></div><div className="context-line"><span>{t("模式")}</span><strong>{state.workspace.mode}</strong></div><div className="context-line"><span>{t("权限")}</span><strong>{String(permission ?? "workspace_write")}</strong></div></section>
           <section><div className="inspector-heading"><span>{t("恢复")}</span></div><div className="context-line"><span>{t("检查点")}</span><strong>{state.recovery.checkpoints.length}</strong></div><div className="context-line"><span>{t("操作")}</span><strong>{String(state.recovery.summary.total_operations ?? state.recovery.operations.length)}</strong></div></section>
           <section><div className="inspector-heading"><span>{t("快捷提示")}</span></div><div className="hint-card"><AtSign size={14} /><span><kbd>@</kbd> {t("会用 Context Engine 推荐当前任务最相关的文件。")}</span></div><div className="hint-card"><Paperclip size={14} /><span>{t("回形针可选择任意文件，并安全复制到工作区附件区。")}</span></div><div className="hint-card"><Command size={14} /><span><kbd>Ctrl K</kbd> {t("打开完整命令目录。")}</span></div></section>
         </div>
@@ -2472,19 +2502,59 @@ function RenameSessionModal({ session, close, save }: { session: { id: string; n
   );
 }
 
-function StandardModelModal({ close, save }: { close: () => void; save: (model: Record<string, unknown>) => void }) {
+/** The add/edit form's draft for one manual model, prefilled when editing. */
+function standardModelDraft(model?: ModelRecord | null): Record<string, unknown> {
+  if (!model) return { provider: "openai-chat", supports_vision: false, max_context_tokens: 128000 };
+  return {
+    model: model.model ?? model.id,
+    model_display_name: model.display_name ?? "",
+    provider: model.transport || "openai-chat",
+    base_url: model.base_url ?? "",
+    endpoint: model.endpoint ?? "",
+    max_context_tokens: Number(model.context_length ?? 0) || 128000,
+    supports_vision: Boolean(model.vision),
+    // Carried through untouched: the form has no header editor, and dropping
+    // the key here would silently erase headers on every edit.
+    custom_headers: { ...(model.custom_headers ?? {}) },
+  };
+}
+
+function StandardModelModal({
+  target,
+  close,
+  save,
+}: {
+  target: { index: number; model: ModelRecord } | null;
+  close: () => void;
+  save: (model: Record<string, unknown>) => void;
+}) {
   const { t } = useI18n();
   const dialogRef = useRef<HTMLFormElement>(null);
   useDialogFocus(dialogRef, close);
-  const [model, setModel] = useState<Record<string, unknown>>({ provider: "openai-chat", supports_vision: false, max_context_tokens: 128000 });
+  const editing = target !== null;
+  const [model, setModel] = useState<Record<string, unknown>>(() => standardModelDraft(target?.model));
   const update = (key: string, value: unknown) => setModel((current) => ({ ...current, [key]: value }));
   const valid = Boolean(model.model && model.model_display_name && model.base_url);
+  const keyStored = Boolean(target?.model.api_key_configured);
+  const headerCount = Object.keys((model.custom_headers ?? {}) as Record<string, string>).length;
+  // A stored transport the picker never offered (codex, webgemini) must stay
+  // selectable, otherwise editing anything else would silently rewrite it.
+  const providerId = String(model.provider ?? "openai-chat");
+  const providerOptions: Array<[string, string]> = [
+    ["openai-chat", "OpenAI Chat Completions"],
+    ["openai-responses", "OpenAI Responses"],
+    ["anthropic", "Anthropic"],
+    ["request", "Generic Request"],
+    ["curl", "cURL"],
+  ];
+  if (!providerOptions.some(([id]) => id === providerId)) providerOptions.push([providerId, providerId]);
   return (
     <div className="modal-backdrop" onMouseDown={close}>
       <form ref={dialogRef} className="form-modal" role="dialog" aria-modal="true" aria-labelledby="standard-model-title" tabIndex={-1} onMouseDown={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); if (valid) save(model); }}>
-        <div className="form-modal-header"><div><h2 id="standard-model-title">{t("添加标准模型")}</h2><p>{t("该模型会同时出现在 TUI、命令行和 GUI 中。")}</p></div><IconButton label={t("关闭")} onClick={close}><X size={16} /></IconButton></div>
-        <div className="form-grid single"><label><span>{t("模型 ID")}</span><input autoFocus value={String(model.model ?? "")} onChange={(event) => update("model", event.target.value)} placeholder={t("例如 gpt-5.4")} /></label><label><span>{t("显示名称")}</span><input value={String(model.model_display_name ?? "")} onChange={(event) => update("model_display_name", event.target.value)} placeholder={t("例如 GPT-5.4")} /></label><label><span>Provider</span><select value={String(model.provider)} onChange={(event) => update("provider", event.target.value)}><option value="openai-chat">OpenAI Chat Completions</option><option value="openai-responses">OpenAI Responses</option><option value="anthropic">Anthropic</option><option value="request">Generic Request</option><option value="curl">cURL</option></select></label><label><span>Base URL</span><input value={String(model.base_url ?? "")} onChange={(event) => update("base_url", event.target.value)} placeholder="https://api.example.com/v1" /></label><label><span>API Key</span><input type="password" value={String(model.api_key ?? "")} onChange={(event) => update("api_key", event.target.value)} /></label><label><span>{t("上下文长度")}</span><input type="number" value={Number(model.max_context_tokens)} onChange={(event) => update("max_context_tokens", Number(event.target.value))} /></label><label className="inline-toggle"><span>{t("支持视觉")}</span><Toggle checked={Boolean(model.supports_vision)} onChange={(value) => update("supports_vision", value)} /></label></div>
-        <div className="form-modal-footer"><button type="button" className="secondary-button" onClick={close}>{t("取消")}</button><button type="submit" className="primary-button" disabled={!valid}>{t("添加模型")}</button></div>
+        <div className="form-modal-header"><div><h2 id="standard-model-title">{editing ? t("编辑标准模型") : t("添加标准模型")}</h2><p>{t("该模型会同时出现在 TUI、命令行和 GUI 中。")}</p></div><IconButton label={t("关闭")} onClick={close}><X size={16} /></IconButton></div>
+        <div className="form-grid single"><label><span>{t("模型 ID")}</span><input autoFocus value={String(model.model ?? "")} onChange={(event) => update("model", event.target.value)} placeholder={t("例如 gpt-5.4")} /></label><label><span>{t("显示名称")}</span><input value={String(model.model_display_name ?? "")} onChange={(event) => update("model_display_name", event.target.value)} placeholder={t("例如 GPT-5.4")} /></label><label><span>Provider</span><select value={providerId} onChange={(event) => update("provider", event.target.value)}>{providerOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label><label><span>Base URL</span><input value={String(model.base_url ?? "")} onChange={(event) => update("base_url", event.target.value)} placeholder="https://api.example.com/v1" /></label><label><span>{t("请求路径")}<small>{t("可选")}</small></span><input value={String(model.endpoint ?? "")} onChange={(event) => update("endpoint", event.target.value)} placeholder="/chat/completions" /></label><label><span>API Key{keyStored && <small>{t("留空表示保留现有密钥")}</small>}</span><input type="password" value={String(model.api_key ?? "")} onChange={(event) => update("api_key", event.target.value)} placeholder={keyStored ? "••••••••" : ""} /></label><label><span>{t("上下文长度")}</span><input type="number" value={Number(model.max_context_tokens)} onChange={(event) => update("max_context_tokens", Number(event.target.value))} /></label><label className="inline-toggle"><span>{t("支持视觉")}</span><Toggle checked={Boolean(model.supports_vision)} onChange={(value) => update("supports_vision", value)} /></label></div>
+        {editing && headerCount > 0 && <p className="form-modal-note">{t("standardModel.headersKept", { count: headerCount })}</p>}
+        <div className="form-modal-footer"><button type="button" className="secondary-button" onClick={close}>{t("取消")}</button><button type="submit" className="primary-button" disabled={!valid}>{editing ? t("保存") : t("添加模型")}</button></div>
       </form>
     </div>
   );
@@ -3262,11 +3332,11 @@ export default function App() {
     compactViewport,
     sidebarViewportOverride,
   );
-  const [inspectorOpen, setInspectorOpen] = useState(true);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [sessionSearchOpen, setSessionSearchOpen] = useState(false);
-  const [standardModelOpen, setStandardModelOpen] = useState(false);
+  /** `null` while closed; `{ target: null }` to add; `{ target }` to edit in place. */
+  const [standardModelForm, setStandardModelForm] = useState<{ target: { index: number; model: ModelRecord } | null } | null>(null);
   const [providerModal, setProviderModal] = useState<{ provider: CustomProviderRecord | null } | null>(null);
   const [contextLimitModal, setContextLimitModal] = useState<{ provider: CustomProviderRecord; model: CustomProviderModel } | null>(null);
   const [providerProbes, setProviderProbes] = useState<Record<string, ProviderProbe>>({});
@@ -3293,6 +3363,14 @@ export default function App() {
   const themeRequestSequence = useRef(0);
   const uiPreferenceRequestSequence = useRef(0);
   const drafts = useRef<Record<string, string>>({});
+  const sessionCache = useRef(new SessionCache());
+
+  // Feeding the cache from the rendered session covers every path that can
+  // produce one -- open, create, prompt, compact, fork, rewind -- so no call
+  // site can forget to update it.
+  useEffect(() => {
+    if (session) sessionCache.current.set(session);
+  }, [session]);
 
   const toggleSidebar = useCallback(() => {
     if (compactViewport) {
@@ -3412,6 +3490,8 @@ export default function App() {
   const initialize = useCallback(async (projectRoot?: string) => {
     const requestSequence = ++initializeSequence.current;
     setBootError("");
+    // Transcripts are per project, and switching projects re-enters this path.
+    sessionCache.current.clear();
     try {
       const [paths, preferences] = await Promise.all([
         window.reverie.paths(),
@@ -3486,7 +3566,22 @@ export default function App() {
       const batch = pendingLiveBatch.current;
       if (type === "assistant.delta") batch.assistantText += String(event.text ?? "");
       else if (type === "reasoning.delta") batch.reasoningText += String(event.text ?? "");
-      else if (type === "ui.event") batch.events.push(asRecord(event.event));
+      else if (type === "ui.event") {
+        const inner = asRecord(event.event);
+        // The Thinking Tool's deliberation arrives as a tool call's arguments, not
+        // as reasoning deltas. Show it as reasoning -- which is what it is -- so it
+        // does not sit unread in the activity feed. The terminal likewise keeps
+        // think calls out of its running-tools footer.
+        //
+        // `encode_stream_event` stores the kind under `event`; the activity feed's
+        // own events use `type`, so accept either.
+        const innerType = String(inner.event ?? inner.type ?? "").trim().toLowerCase();
+        const thinking = innerType === "tool_start" && isThinkTool(inner.tool_name)
+          ? thinkToolText(inner.arguments)
+          : "";
+        if (thinking) batch.reasoningText += `${batch.reasoningText ? "\n\n" : ""}${thinking}`;
+        else batch.events.push(inner);
+      }
       else if (type === "run.auto_followup" || type === "approval.request") batch.events.push(event);
       else return;
 
@@ -3511,7 +3606,7 @@ export default function App() {
         setModelPickerOpen(false);
         setCommandOpen(false);
         setSessionSearchOpen(false);
-        setStandardModelOpen(false);
+        setStandardModelForm(null);
         setRenameSessionTarget(null);
         setConfirmation(null);
         mentionRequestSequence.current += 1;
@@ -3527,7 +3622,24 @@ export default function App() {
     if (running || id === session?.id) return;
     if (session) drafts.current[session.id] = prompt;
     const requestSequence = ++sessionRequestSequence.current;
-    setSessionBusy(true);
+    // A transcript already read in this window cannot have changed unless this
+    // window changed it, so paint it now and let the core reconcile behind us.
+    // Without this the chat area shows a spinner on every switch, including the
+    // trip back to a session the user just left.
+    const cached = sessionCache.current.get(id);
+    if (cached) {
+      // `activeSessionId` prefers the rendered session, so this alone moves the
+      // sidebar highlight -- patching `state.sessions` too would re-render every
+      // consumer of `state` for a value the arriving response overwrites anyway.
+      setSession(cached);
+      setView("chat");
+      setLiveTurn(null);
+      setPrompt(drafts.current[id] ?? "");
+      setAttachments([]);
+      setMentionOpen(false);
+    } else {
+      setSessionBusy(true);
+    }
     try {
       const response = await window.reverie.request("getSession", { sessionId: id });
       if (requestSequence !== sessionRequestSequence.current) return;
@@ -3536,9 +3648,13 @@ export default function App() {
       setState((current) => current ? { ...current, sessions: response.sessions } : current);
       setView("chat");
       setLiveTurn(null);
-      setPrompt(drafts.current[nextSession.id] ?? "");
-      setAttachments([]);
-      setMentionOpen(false);
+      // The draft was already restored for the optimistic paint; re-applying it
+      // here would discard anything typed while the request was in flight.
+      if (!cached) {
+        setPrompt(drafts.current[nextSession.id] ?? "");
+        setAttachments([]);
+        setMentionOpen(false);
+      }
     } catch (error) {
       if (requestSequence === sessionRequestSequence.current) toast(error instanceof Error ? error.message : String(error), "error");
     } finally {
@@ -3786,6 +3902,7 @@ export default function App() {
         try {
           const response = await window.reverie.request("deleteSession", { sessionId: target.id, confirmed: true });
           delete drafts.current[target.id];
+          sessionCache.current.delete(target.id);
           const nextSession = response.session ?? null;
           setSession(nextSession);
           setState((current) => current ? { ...current, sessions: response.sessions } : current);
@@ -3830,7 +3947,10 @@ export default function App() {
           const deletedIds = Array.isArray(response.deleted_session_ids)
             ? response.deleted_session_ids.map((value) => String(value))
             : targetIds;
-          deletedIds.forEach((sessionId) => { delete drafts.current[sessionId]; });
+          deletedIds.forEach((sessionId) => {
+            delete drafts.current[sessionId];
+            sessionCache.current.delete(sessionId);
+          });
           const nextSession = response.session ?? null;
           setSession(nextSession);
           setState((current) => current ? { ...current, sessions: response.sessions } : current);
@@ -3871,20 +3991,6 @@ export default function App() {
     }
   }, [approval, t, toast]);
 
-  const selectModel = useCallback(async (source: ModelSource, model: ModelRecord, selectedReasoning?: string) => {
-    try {
-      const reasoning = selectedReasoning ?? (
-        model.reasoning.options.some((option) => option.id === model.reasoning.value)
-          ? model.reasoning.value
-          : model.reasoning.options[0]?.id
-      );
-      const response = await window.reverie.request("selectModel", { source: source.id, modelId: model.id, ...(reasoning ? { reasoning } : {}) });
-      setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current);
-      setModelPickerOpen(false);
-      toast(t("model.switched", { name: model.display_name }), "success");
-    } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
-  }, [t, toast]);
-
   const openModelPicker = useCallback(() => {
     if (state?.workspace.mode === "computer-controller") return;
     setModelPickerOpen(true);
@@ -3902,10 +4008,12 @@ export default function App() {
 
   const selectReasoning = useCallback(async (reasoning: string) => {
     if (!state) return;
-    const source = visibleModelSources(state.models.sources).find((item) => item.active);
+    // Act on the entry the trigger actually shows, then map it back: a custom
+    // provider's reasoning is stored against the aggregate `custom` source.
+    const source = expandModelSources(state.models.sources).find((item) => item.active);
     if (!source) return;
     try {
-      const response = await window.reverie.request("selectModel", { source: source.id, modelId: source.selected_model_id, reasoning });
+      const response = await window.reverie.request("selectModel", { source: coreSourceId(source), modelId: source.selected_model_id, reasoning });
       setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current);
       toast(t("思考设置已更新"), "success");
     } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
@@ -3929,14 +4037,19 @@ export default function App() {
     } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
   }, [t, toast]);
 
-  const addStandard = useCallback(async (model: Record<string, unknown>) => {
+  const saveStandard = useCallback(async (model: Record<string, unknown>) => {
+    // One handler for both directions: the modal only knows the draft, and the
+    // core preserves an omitted API key on update, so a blank key stays intact.
+    const target = standardModelForm?.target ?? null;
     try {
-      const response = await window.reverie.request("addStandardModel", { model });
+      const response = target
+        ? await window.reverie.request("updateStandardModel", { index: target.index, model })
+        : await window.reverie.request("addStandardModel", { model });
       setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current);
-      setStandardModelOpen(false);
-      toast(t("标准模型已添加"), "success");
+      setStandardModelForm(null);
+      toast(target ? t("标准模型已更新") : t("标准模型已添加"), "success");
     } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
-  }, [t, toast]);
+  }, [standardModelForm, t, toast]);
 
   const deleteStandard = useCallback((index: number) => {
     setConfirmation({ title: t("删除标准模型？"), message: t("这会从 Reverie 内核配置中移除该模型，但不会删除任何远端数据。"), label: t("删除模型"), danger: true, action: () => { void (async () => { try { const response = await window.reverie.request("deleteStandardModel", { index }); setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current); toast(t("模型已删除"), "success"); } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); } })(); } });
@@ -4011,6 +4124,40 @@ export default function App() {
       toast(t("model.switched", { name: model.display_name }), "success");
     } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
   }, [t, toast]);
+
+  /** The stored record behind a synthetic `custom:<id>` picker entry. */
+  const customProviderById = useCallback((providerId: string): CustomProviderRecord | null => {
+    const aggregate = (state?.models.sources ?? []).find((item) => item.id === CUSTOM_SOURCE_ID);
+    return (aggregate?.custom_providers ?? []).find((record) => record.id === providerId) ?? null;
+  }, [state?.models.sources]);
+
+  const selectModel = useCallback(async (source: ModelSource, model: ModelRecord, selectedReasoning?: string) => {
+    // A per-provider picker entry is not a source the core knows: activating it
+    // means activating that provider, which has its own call because it may still
+    // need the user to confirm the model's context limit.
+    const providerId = customProviderIdOf(source);
+    if (providerId) {
+      const provider = customProviderById(providerId);
+      if (!provider) {
+        toast(t("Provider 已不存在，请刷新后重试"), "error");
+        return;
+      }
+      setModelPickerOpen(false);
+      await selectCustomProviderModel(provider, model as CustomProviderModel);
+      return;
+    }
+    try {
+      const reasoning = selectedReasoning ?? (
+        model.reasoning.options.some((option) => option.id === model.reasoning.value)
+          ? model.reasoning.value
+          : model.reasoning.options[0]?.id
+      );
+      const response = await window.reverie.request("selectModel", { source: source.id, modelId: model.id, ...(reasoning ? { reasoning } : {}) });
+      setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current);
+      setModelPickerOpen(false);
+      toast(t("model.switched", { name: model.display_name }), "success");
+    } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
+  }, [customProviderById, selectCustomProviderModel, t, toast]);
 
   const saveCustomProviderContextLimit = useCallback(async (
     provider: CustomProviderRecord,
@@ -4257,7 +4404,7 @@ export default function App() {
     if (view === "subagents") return <SubagentsView />;
     if (view === "plugins") return <PluginsView plugins={state.plugins.records} updatePlugin={updatePlugin} refresh={refreshPlugins} />;
     if (view === "recovery") return <RecoveryView recovery={state.recovery} rollback={rollback} />;
-    if (view === "settings") return <SettingsView state={state} updateSetting={updateSetting} selectModel={selectModel} saveProvider={saveProvider} addStandard={() => setStandardModelOpen(true)} deleteStandard={deleteStandard} customProviders={customProviderControls} paths={desktopPaths} selectCoreData={() => void selectCoreData()} theme={theme} setTheme={changeTheme} preferences={uiPreferences} updatePreferences={updateUiPreferences} selectBackground={() => void selectBackground()} clearBackground={() => void clearBackground()} />;
+    if (view === "settings") return <SettingsView state={state} updateSetting={updateSetting} selectModel={selectModel} saveProvider={saveProvider} addStandard={() => setStandardModelForm({ target: null })} editStandard={(index, model) => setStandardModelForm({ target: { index, model } })} deleteStandard={deleteStandard} customProviders={customProviderControls} paths={desktopPaths} selectCoreData={() => void selectCoreData()} theme={theme} setTheme={changeTheme} preferences={uiPreferences} updatePreferences={updateUiPreferences} selectBackground={() => void selectBackground()} clearBackground={() => void clearBackground()} />;
     return <ChatView session={session} liveTurn={liveTurn} running={running} prompt={prompt} setPrompt={setPrompt} send={() => void sendPrompt()} cancel={() => void cancelPrompt()} mentionItems={mentionItems} mentionOpen={mentionOpen} mentionLoading={mentionLoading} requestMentions={() => void requestMentions()} chooseMention={(value) => { setPrompt((current) => `${current}${current && !current.endsWith(" ") ? " " : ""}${value} `); setMentionOpen(false); }} attachments={attachments} selectAttachment={() => void selectAttachment()} removeAttachment={removeAttachment} modelName={state.models.active_model?.display_name ?? "Reverie"} sessionBusy={sessionBusy} renameSession={() => { if (session) setRenameSessionTarget({ id: session.id, name: session.name }); }} forkSession={() => void forkActiveSession()} rewindSession={rewindActiveSession} deleteSession={() => { if (session) deleteSession(session); }} preferences={uiPreferences} updatePreferences={updateUiPreferences} />;
   }, [state, view, updatePlugin, refreshPlugins, rollback, updateSetting, selectModel, saveProvider, deleteStandard, customProviderControls, desktopPaths, selectCoreData, theme, changeTheme, uiPreferences, updateUiPreferences, selectBackground, clearBackground, session, liveTurn, running, prompt, mentionItems, mentionOpen, mentionLoading, attachments, selectAttachment, removeAttachment, sendPrompt, cancelPrompt, requestMentions, sessionBusy, forkActiveSession, rewindActiveSession, deleteSession]);
 
@@ -4266,18 +4413,20 @@ export default function App() {
 
   return (
     <I18nProvider language={uiPreferences.language}>
-    <div className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${inspectorOpen ? "with-inspector" : ""}`}>
+    <div className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${uiPreferences.inspectorOpen ? "with-inspector" : ""}`}>
       <Sidebar state={state} view={view} setView={setView} activeSessionId={activeSessionId} openSession={(id) => void openSession(id)} newSession={() => void createSession()} sessionBusy={sessionBusy} selectWorkspace={() => void selectWorkspace()} switchWorkspace={(projectRoot) => void switchWorkspace(projectRoot)} openSearch={() => setSessionSearchOpen(true)} preferences={uiPreferences} toggleSidebar={toggleSidebar} renameSession={(target) => setRenameSessionTarget({ id: target.id, name: target.name })} toggleArchive={toggleSessionArchive} deleteSession={deleteSession} deleteArchivedSessions={deleteArchivedSessions} deleteProject={deleteProject} />
       <main className="main-area">
-        <Topbar state={state} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} openModelPicker={openModelPicker} selectReasoning={(value) => void selectReasoning(value)} setMode={(mode) => void updateSetting("mode", mode)} inspectorOpen={inspectorOpen} toggleInspector={() => setInspectorOpen((value) => !value)} openCommands={() => setCommandOpen(true)} theme={theme} setTheme={changeTheme} />
+        <Topbar state={state} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} openModelPicker={openModelPicker} selectReasoning={(value) => void selectReasoning(value)} setMode={(mode) => void updateSetting("mode", mode)} inspectorOpen={uiPreferences.inspectorOpen} toggleInspector={() => updateUiPreferences({ inspectorOpen: !uiPreferences.inspectorOpen })} openCommands={() => setCommandOpen(true)} theme={theme} setTheme={changeTheme} />
         <div className="content-area">{page}</div>
       </main>
-      {inspectorOpen && <Inspector state={state} liveTurn={liveTurn} indexWorkspace={() => void indexWorkspace()} compactContext={() => void compactContext()} compactDisabled={running || sessionBusy} />}
+      {/* Always mounted so the pane can transition out instead of vanishing; the
+          `with-inspector` class alone decides whether it is on screen. */}
+      <Inspector state={state} liveTurn={liveTurn} indexWorkspace={() => void indexWorkspace()} compactContext={() => void compactContext()} compactDisabled={running || sessionBusy} hidden={!uiPreferences.inspectorOpen} />
       {modelPickerOpen && state.workspace.mode !== "computer-controller" && <ModelPicker state={state} onSelect={(source, model, reasoning) => void selectModel(source, model, reasoning)} close={() => setModelPickerOpen(false)} />}
       {commandOpen && <CommandPalette commands={state.commands.items} close={() => setCommandOpen(false)} choose={chooseCommand} />}
       {sessionSearchOpen && <SessionSearch close={() => setSessionSearchOpen(false)} openSession={(id) => void openSession(id)} />}
       {renameSessionTarget && <RenameSessionModal session={renameSessionTarget} close={() => setRenameSessionTarget(null)} save={(name) => void renameSession(name)} />}
-      {standardModelOpen && <StandardModelModal close={() => setStandardModelOpen(false)} save={(model) => void addStandard(model)} />}
+      {standardModelForm && <StandardModelModal target={standardModelForm.target} close={() => setStandardModelForm(null)} save={(model) => void saveStandard(model)} />}
       {providerModal && (
         <CustomProviderModal
           provider={providerModal.provider}

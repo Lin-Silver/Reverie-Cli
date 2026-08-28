@@ -86,6 +86,7 @@ interface CoreRequestMap {
   setSetting: { payload: { key: string; value: unknown }; response: Envelope<"setting.updated", { success: boolean; message: string; settings: SettingsState; models: ModelSourcesState; workspace: WorkspaceState }> };
   setProviderConfig: { payload: { source: string; patch: Record<string, unknown>; clearFields?: string[] }; response: Envelope<"provider.updated", { models: ModelSourcesState; workspace: WorkspaceState }> };
   addStandardModel: { payload: { model: Record<string, unknown> }; response: Envelope<"standard-model.updated", { index: number; models: ModelSourcesState; workspace: WorkspaceState }> };
+  updateStandardModel: { payload: { index: number; model: Record<string, unknown> }; response: Envelope<"standard-model.updated", { index: number; models: ModelSourcesState; workspace: WorkspaceState }> };
   deleteStandardModel: { payload: { index: number }; response: Envelope<"standard-model.updated", { index: number; models: ModelSourcesState; workspace: WorkspaceState }> };
   addCustomProvider: { payload: { provider: { name: string; base_url: string; api_key: string; format: string } }; response: CustomProviderEnvelope };
   updateCustomProvider: { payload: { providerId: string; patch: Record<string, unknown> }; response: CustomProviderEnvelope };

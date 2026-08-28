@@ -430,11 +430,16 @@ const ENGLISH_TRANSLATIONS: Record<string, string> = {
   "会话标题": "Chat title",
   "取消": "Cancel",
   "添加标准模型": "Add standard model",
+  "编辑标准模型": "Edit standard model",
   "该模型会同时出现在 TUI、命令行和 GUI 中。": "This model will appear in the TUI, command line, and GUI.",
   "模型 ID": "Model ID",
   "例如 gpt-5.4": "For example, gpt-5.4",
   "显示名称": "Display name",
   "例如 GPT-5.4": "For example, GPT-5.4",
+  "请求路径": "Request path",
+  "留空表示保留现有密钥": "leave blank to keep the current key",
+  "标准模型已更新": "Standard model updated",
+  "Provider 已不存在，请刷新后重试": "That provider no longer exists. Refresh and try again.",
   "上下文长度": "Context length",
   "支持视觉": "Supports vision",
   "工具请求更高权限": "A tool is requesting more permission",
@@ -516,6 +521,7 @@ const ENGLISH_TEMPLATES: Record<string, string> = {
   "project.deleteTitle": "Remove “{name}” from Reverie?",
   "project.deleted": "Project data deleted ({count} chats)",
   "command.inserted": "Inserted {command}; edit it using the command hint or ask Reverie in natural language.",
+  "standardModel.headersKept": "{count} custom request headers are kept as they are.",
 };
 
 const CHINESE_TEMPLATES: Record<string, string> = {
@@ -555,6 +561,7 @@ const CHINESE_TEMPLATES: Record<string, string> = {
   "project.deleteTitle": "从 Reverie 删除“{name}”？",
   "project.deleted": "项目记录已删除（{count} 个会话）",
   "command.inserted": "{command} 已插入；可按命令提示改写，或用自然语言要求 Reverie 执行。",
+  "standardModel.headersKept": "{count} 个自定义请求头会原样保留。",
 };
 
 function interpolate(value: string, values: TranslationValues): string {

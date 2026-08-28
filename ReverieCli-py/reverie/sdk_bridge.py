@@ -22,11 +22,32 @@ def _interactive_context_worker_limit(cpu_count: Optional[int] = None) -> int:
 
 
 def _json_safe(value: Any) -> Any:
+    """Coerce a payload into something `json.dumps` accepts.
+
+    Containers are returned unchanged when nothing inside them needed coercing.
+    Almost every payload the desktop asks for -- a whole transcript, most of
+    all -- is already plain JSON, and rebuilding it verbatim used to copy every
+    dict and list in it on the way out.
+    """
     if isinstance(value, Path):
         return str(value)
     if isinstance(value, dict):
-        return {str(key): _json_safe(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple, set)):
+        converted: Dict[Any, Any] = {}
+        changed = False
+        for key, item in value.items():
+            safe_key = key if type(key) is str else str(key)
+            safe_item = _json_safe(item)
+            if safe_key is not key or safe_item is not item:
+                changed = True
+            converted[safe_key] = safe_item
+        return converted if changed else value
+    if isinstance(value, list):
+        converted_items = [_json_safe(item) for item in value]
+        for original, safe_item in zip(value, converted_items):
+            if safe_item is not original:
+                return converted_items
+        return value
+    if isinstance(value, (tuple, set)):
         return [_json_safe(item) for item in value]
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value

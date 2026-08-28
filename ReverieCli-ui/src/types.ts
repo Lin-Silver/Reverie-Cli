@@ -194,6 +194,12 @@ export interface ModelRecord {
   base_url?: string;
   configured?: boolean;
   reasoning: ReasoningCapability;
+  /** `standard` models only: request path override. */
+  endpoint?: string;
+  /** `standard` models only: whether a key is stored (never the key itself). */
+  api_key_configured?: boolean;
+  /** `standard` models only: extra request headers. */
+  custom_headers?: Record<string, string>;
 }
 
 export interface ConfigField {
@@ -302,6 +308,11 @@ export interface ModelSource {
   };
   custom_providers?: CustomProviderRecord[];
   custom_provider_formats?: CustomProviderFormat[];
+  /**
+   * Set on the per-provider entries the picker synthesizes from
+   * `custom_providers`; never sent by the core. See `model-sources.ts`.
+   */
+  custom_provider_id?: string;
 }
 
 export interface ModelSourcesState {

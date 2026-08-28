@@ -1315,3 +1315,215 @@ def test_workspace_mentions_fall_back_to_partial_filename_matches(tmp_path: Path
 
     assert [item["path"] for item in candidates] == ["src/composer.tsx"]
     assert candidates[0]["source"] == "workspace-scan"
+
+
+def test_standard_catalog_exposes_enough_to_prefill_the_desktop_edit_form() -> None:
+    config = Config()
+    index = add_standard_model(
+        config,
+        {
+            "model": "gpt-5.4",
+            "model_display_name": "GPT-5.4",
+            "base_url": "https://api.example.com/v1",
+            "endpoint": "/chat/completions",
+            "api_key": "secret-key",
+            "provider": "openai-chat",
+            "max_context_tokens": 200_000,
+            "custom_headers": {"x-tenant": "reverie"},
+        },
+    )
+    entry = _source(build_model_sources_payload(config), "standard")["models"][index]
+
+    assert entry["id"] == str(index)
+    assert entry["endpoint"] == "/chat/completions"
+    assert entry["context_length"] == 200_000
+    assert entry["custom_headers"] == {"x-tenant": "reverie"}
+    # `configured` is also true for the keyless transports, so the edit form needs
+    # its own answer to "is a key stored?" -- and never the key itself.
+    assert entry["api_key_configured"] is True
+    assert "api_key" not in entry
+    assert "secret-key" not in json.dumps(entry)
+
+    keyless = Config()
+    add_standard_model(
+        keyless,
+        {
+            "model": "gemini-web",
+            "model_display_name": "Gemini Web",
+            "base_url": "https://gemini.example.com",
+            "provider": "webgemini",
+        },
+    )
+    keyless_entry = _source(build_model_sources_payload(keyless), "standard")["models"][0]
+    assert keyless_entry["configured"] is True
+    assert keyless_entry["api_key_configured"] is False
+    assert keyless_entry["custom_headers"] == {}
+
+
+def test_wire_sessions_keep_provider_facing_roles_without_a_round_trip() -> None:
+    from reverie.session.manager import Session
+
+    session = Session(id="s1", name="Wire", created_at="2026-07-15T10:00:00", updated_at="2026-07-15T10:01:00", messages=[
+        {"role": "user", "content": "Ask"},
+        {"role": "assistant", "content": "Answer", "tool_calls": [{"id": "c1"}]},
+    ])
+    session.metadata = {"workspace_id": "w1"}
+    wire = session.to_wire_dict()
+    stored = session.to_dict()
+
+    assert [message["role"] for message in wire["messages"]] == ["user", "assistant"]
+    assert wire["messages"][1]["tool_calls"] == [{"id": "c1"}]
+    assert set(wire) == set(stored)
+    assert wire["id"] == "s1" and wire["name"] == "Wire"
+    # Relabelling is what the *stored* form is for; the wire form must not have
+    # visited it on the way out.
+    assert [message["role"] for message in stored["messages"]] == ["user", "Reverie"]
+    # Serializing either way leaves the live transcript alone -- a relabelled turn
+    # is copied, never mutated in place.
+    assert [message["role"] for message in session.messages] == ["user", "assistant"]
+    assert stored["messages"][1] is not session.messages[1]
+    assert wire["metadata"] == {"workspace_id": "w1"}
+
+
+def test_json_safe_reuses_containers_that_need_no_coercion() -> None:
+    from reverie.sdk_bridge import _json_safe
+
+    transcript = {"messages": [{"role": "user", "content": "Ask"}], "count": 1, "ok": True}
+    assert _json_safe(transcript) is transcript
+    assert _json_safe(transcript["messages"]) is transcript["messages"]
+
+    needs_coercion = {"root": Path("/tmp/x"), "messages": transcript["messages"]}
+    coerced = _json_safe(needs_coercion)
+    assert coerced is not needs_coercion
+    assert coerced["root"] == str(Path("/tmp/x"))
+    # An untouched subtree is shared, not re-copied.
+    assert coerced["messages"] is needs_coercion["messages"]
+    assert json.dumps(coerced)
+
+    nested = {"outer": [{"path": Path("/tmp/y")}]}
+    safe_nested = _json_safe(nested)
+    assert safe_nested is not nested
+    assert safe_nested["outer"][0]["path"] == str(Path("/tmp/y"))
+    assert _json_safe({1: "a"}) == {"1": "a"}
+    assert _json_safe(("a", "b")) == ["a", "b"]
+
+
+def test_session_index_survives_a_foreign_file_without_rereading_every_transcript(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path / "state", project_root=tmp_path)
+    first = manager.create_session("First")
+    first.messages = [{"role": "user", "content": "First request"}]
+    manager.save_session(first)
+    second = manager.create_session("Second")
+    manager.save_session(second)
+    manager.flush_session_index()
+
+    # A session belonging to another workspace is skipped while indexing, so an
+    # entry-count heuristic could never agree with the directory again.
+    (manager.sessions_dir / "foreign.json").write_text(json.dumps({
+        "id": "foreign",
+        "name": "Another workspace",
+        "messages": [],
+        "metadata": {"workspace_id": "other-workspace", "workspace_path": "/elsewhere"},
+    }), encoding="utf-8")
+    (manager.sessions_dir / "broken.json").write_text("{not json", encoding="utf-8")
+
+    reads = []
+    original = SessionManager._read_session_index_entry
+
+    def _counting_read(self, session_id):
+        reads.append(session_id)
+        return original(self, session_id)
+
+    SessionManager._read_session_index_entry = _counting_read
+    try:
+        assert {info.id for info in manager.list_sessions()} == {first.id, second.id}
+        first_pass = list(reads)
+        for _ in range(5):
+            assert {info.id for info in manager.list_sessions()} == {first.id, second.id}
+    finally:
+        SessionManager._read_session_index_entry = original
+
+    assert sorted(first_pass) == ["broken", "foreign"]
+    # Everything after the first scan is answered from the mtime fingerprint.
+    assert reads == first_pass
+
+    # A genuine outside edit is still picked up.
+    second_path = manager.sessions_dir / f"{second.id}.json"
+    payload = json.loads(second_path.read_text(encoding="utf-8"))
+    payload["name"] = "Renamed outside Reverie"
+    second_path.write_text(json.dumps(payload), encoding="utf-8")
+    manager._scanned_session_files[second.id] = 0
+    assert {info.name for info in manager.list_sessions()} == {"First", "Renamed outside Reverie"}
+
+    # And a deleted file leaves the index.
+    second_path.unlink()
+    assert {info.id for info in manager.list_sessions()} == {first.id}
+
+
+def test_generated_name_refresh_reads_an_untitleable_session_only_once(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path / "state", project_root=tmp_path)
+    untitleable = manager.create_session("Prompt Run 2026-07-15 10:00:00")
+    untitleable.messages = [{"role": "user", "content": "   "}]
+    manager.save_session(untitleable)
+    empty = manager.create_session("Prompt Run 2026-07-15 10:05:00")
+    manager.save_session(empty)
+    manager.flush_session_index()
+
+    reads = []
+    original = Path.read_text
+
+    def _counting_read_text(self, *args, **kwargs):
+        if self.parent == manager.sessions_dir:
+            reads.append(self)
+        return original(self, *args, **kwargs)
+
+    Path.read_text = _counting_read_text
+    try:
+        for _ in range(4):
+            assert manager.refresh_generated_session_names() == 0
+    finally:
+        Path.read_text = original
+
+    # The blank prompt yields no title, and a session with no messages has no
+    # prompt at all -- neither is worth re-reading on every session switch.
+    assert reads == [manager.sessions_dir / f"{untitleable.id}.json"]
+
+    # Once a real prompt lands, the next refresh sees it and renames the session.
+    untitleable.messages = [{"role": "user", "content": "Diagnose the switch latency"}]
+    manager.save_session(untitleable)
+    assert manager.refresh_generated_session_names() == 1
+    assert {info.name for info in manager.list_sessions()} == {
+        "Diagnose the switch latency",
+        empty.name,
+    }
+
+
+def test_reloading_the_active_session_skips_a_redundant_parse(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path / "state", project_root=tmp_path)
+    session = manager.create_session("Active")
+    session.messages = [{"role": "user", "content": "Ask"}, {"role": "assistant", "content": "Answer"}]
+    manager.save_session(session)
+    manager.load_session(session.id)
+
+    loads = []
+    original = json.load
+
+    def _counting_load(handle, *args, **kwargs):
+        loads.append(str(getattr(handle, "name", "")))
+        return original(handle, *args, **kwargs)
+
+    json.load = _counting_load
+    try:
+        assert manager.load_session(session.id) is session
+        assert loads == []
+
+        # An outside write invalidates the fingerprint, so the transcript is
+        # re-read rather than served stale.
+        manager._scanned_session_files[session.id] = 0
+        reloaded = manager.load_session(session.id)
+    finally:
+        json.load = original
+
+    assert reloaded is not None
+    assert [message["content"] for message in reloaded.messages] == ["Ask", "Answer"]
+    assert any(str(session.id) in name for name in loads)

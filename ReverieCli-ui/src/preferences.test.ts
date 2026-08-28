@@ -2,15 +2,23 @@ import { describe, expect, it } from "vitest";
 import { backgroundPresetUrl, DEFAULT_UI_PREFERENCES, effectiveBackgroundUrl, normalizeUiPreferences } from "./preferences";
 
 describe("renderer UI preferences", () => {
-  it("keeps technical detail off by default except tool call names", () => {
+  it("shows reasoning and tool calls by default, and keeps raw results off", () => {
     const value = normalizeUiPreferences({});
-    expect(value.showReasoning).toBe(false);
+    // The trace bar counts reasoning regardless of this flag, so hiding it by
+    // default produced a transcript that reported thinking it never rendered.
+    expect(value.showReasoning).toBe(true);
     expect(value.language).toBe("zh-CN");
     expect(value.startupMode).toBe("gui");
     expect(value.expandReasoning).toBe(true);
     expect(value.showToolCalls).toBe(true);
     expect(value.showToolResults).toBe(false);
+    expect(value.inspectorOpen).toBe(true);
     expect(value).toEqual(DEFAULT_UI_PREFERENCES);
+  });
+
+  it("keeps an explicitly persisted panel state, including the closed inspector", () => {
+    expect(normalizeUiPreferences({ inspectorOpen: false }).inspectorOpen).toBe(false);
+    expect(normalizeUiPreferences({ showReasoning: false }).showReasoning).toBe(false);
   });
 
   it("normalizes persisted values received from Electron", () => {

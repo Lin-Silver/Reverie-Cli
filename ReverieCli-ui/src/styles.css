@@ -126,7 +126,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed !important; }
 ::-webkit-scrollbar-thumb { background: var(--scrollbar); border: 2px solid transparent; background-clip: padding-box; border-radius: 9px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--dim); border: 2px solid transparent; background-clip: padding-box; }
 
-.app-shell { position: relative; isolation: isolate; overflow: hidden; display: grid; grid-template-columns: 248px minmax(0, 1fr); grid-template-rows: minmax(0,1fr); width: 100%; height: 100%; background: var(--bg); }
+.app-shell { position: relative; isolation: isolate; overflow: hidden; display: grid; grid-template-columns: 248px minmax(0, 1fr) 0; grid-template-rows: minmax(0,1fr); width: 100%; height: 100%; background: var(--bg); }
 .app-shell.with-inspector { grid-template-columns: 248px minmax(0, 1fr) 292px; }
 .sidebar { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: #0b0e13; border-right: 1px solid var(--border-soft); overflow: hidden; }
 .sidebar-drag, .sidebar-actions, .main-nav, .session-heading, .sidebar-footer, .sidebar > .inline-search { flex: 0 0 auto; }
@@ -438,7 +438,12 @@ kbd { display: inline-flex; min-width: 18px; height: 18px; align-items: center; 
 .model-card-main { width: 100%; display: flex; align-items: flex-start; justify-content: space-between; border: 0; background: transparent; padding: 0; text-align: left; cursor: pointer; }
 .model-card-main div { min-width: 0; display: flex; flex-direction: column; gap: 2px; }.model-card-main strong { font-size: var(--font-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.model-card-main span { color: var(--dim); font-size: var(--font-caption); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.model-card-main svg { color: var(--accent); }
 .settings-model-card p { height: 26px; margin: 7px 0; color: var(--muted); font-size: var(--font-caption); line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.delete-model { position: absolute; right: 7px; bottom: 7px; width: 23px; height: 23px; display: grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: var(--dim); cursor: pointer; }.delete-model:hover { background: rgba(211,90,90,.1); color: var(--red); }
+/* One absolutely-positioned row, so a card keeps the same corner whether the
+   source offers delete alone or edit as well. */
+.model-card-actions { position: absolute; right: 7px; bottom: 7px; display: flex; align-items: center; gap: 2px; }
+.edit-model, .delete-model { width: 23px; height: 23px; display: grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: var(--dim); cursor: pointer; }
+.edit-model:hover { background: var(--accent-bg); color: var(--accent); }
+.delete-model:hover { background: rgba(211,90,90,.1); color: var(--red); }
 .provider-config { margin-top: 25px; padding-top: 18px; border-top: 1px solid var(--border-soft); }
 .form-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 13px; }.form-grid.single { grid-template-columns: 1fr; }
 .form-grid label { min-width: 0; display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: var(--font-caption); }.form-grid label > span { display: flex; gap: 5px; }.form-grid label small { color: var(--dim); }
@@ -468,6 +473,7 @@ kbd { display: inline-flex; min-width: 18px; height: 18px; align-items: center; 
 .probe-badge.bad { color: var(--red); }
 .probe-badge.idle { color: var(--dim); }
 .form-modal .form-modal-hint { margin: 0; padding: 0 15px 14px; color: var(--dim); font-size: var(--font-caption); line-height: 1.5; }
+.form-modal .form-modal-note { margin: 0; padding: 0 15px 14px; color: var(--muted); font-size: var(--font-caption); line-height: 1.5; }
 .about-card { min-height: 108px; display: flex; gap: 15px; align-items: center; padding: 17px; border: 1px solid var(--border); border-radius: 10px; background: #0e1117; }.about-mark { width: 56px; height: 56px; display: grid; place-items: center; border-radius: 16px; background: var(--accent-bg); color: var(--accent); }.about-card h2 { margin: 0; font-size: var(--font-heading-md); }.about-card p { margin: 6px 0 0; color: var(--muted); font-size: var(--font-caption); }
 .core-data-card { margin-bottom: 12px; padding: 14px; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 11px 14px; align-items: center; border: 1px solid #2d3340; border-radius: 10px; background: #10141a; }
 .core-data-heading { grid-column: 1 / -1; display: flex; align-items: flex-start; gap: 10px; color: var(--blue); }
@@ -511,12 +517,16 @@ kbd { display: inline-flex; min-width: 18px; height: 18px; align-items: center; 
 
 /* Refined desktop visual system */
 button, input, textarea, select { transition: color .14s ease, background-color .14s ease, border-color .14s ease, box-shadow .14s ease, transform .14s ease; }
-.app-shell { grid-template-columns: 268px minmax(0, 1fr); background: var(--bg); transition: grid-template-columns .18s ease; }
+/* Every template keeps all three tracks so both side panes animate: a track that
+   changes width transitions, a track that appears or disappears cannot. */
+.app-shell { grid-template-columns: 268px minmax(0, 1fr) 0; background: var(--bg); transition: grid-template-columns .18s ease; }
 .app-shell.with-inspector { grid-template-columns: 268px minmax(0, 1fr) 316px; }
-.app-shell.sidebar-collapsed { grid-template-columns: 0 minmax(0, 1fr); }
+.app-shell.sidebar-collapsed { grid-template-columns: 0 minmax(0, 1fr) 0; }
 .app-shell.sidebar-collapsed.with-inspector { grid-template-columns: 0 minmax(0, 1fr) 316px; }
 .sidebar { background: var(--sidebar-bg); border-color: var(--border-soft); transition: opacity .16s ease, transform .18s ease, visibility .18s ease; }
 .sidebar-collapsed > .sidebar { opacity: 0; transform: translateX(-14px); visibility: hidden; pointer-events: none; border-right-color: transparent; }
+.inspector { overflow: hidden; transition: opacity .16s ease, transform .18s ease, visibility .18s ease; }
+.app-shell:not(.with-inspector) > .inspector { opacity: 0; transform: translateX(14px); visibility: hidden; pointer-events: none; border-left-color: transparent; }
 .sidebar-drag { height: 54px; padding: 0 17px; }
 .sidebar-collapse-button { width: 30px; height: 30px; margin-left: auto; display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; -webkit-app-region: no-drag; }
 .sidebar-collapse-button:hover { background: var(--hover); color: var(--text); }
@@ -1558,8 +1568,8 @@ input[type="range"] { width: 100%; accent-color: var(--accent-2); }
 
 @media (max-width: 1250px) {
   .app-shell.with-inspector { grid-template-columns: 230px minmax(0,1fr) 265px; }
-  .app-shell { grid-template-columns: 230px minmax(0,1fr); }
-  .app-shell.sidebar-collapsed { grid-template-columns: 0 minmax(0,1fr); }
+  .app-shell { grid-template-columns: 230px minmax(0,1fr) 0; }
+  .app-shell.sidebar-collapsed { grid-template-columns: 0 minmax(0,1fr) 0; }
   .app-shell.sidebar-collapsed.with-inspector { grid-template-columns: 0 minmax(0,1fr) 265px; }
   .message-column { width: calc(100% - 38px); }
   .topbar { padding-left: 8px; }

@@ -159,6 +159,11 @@ def _standard_catalog(config: Config) -> List[Dict[str, Any]]:
                 "base_url": model.base_url,
                 "endpoint": model.endpoint,
                 "configured": bool(str(model.api_key or "").strip() or model.provider in {"webgemini", "codex"}),
+                # Enough to prefill the desktop's edit form without ever sending
+                # the key itself: `configured` also covers keyless transports, so
+                # the form needs to know whether a key is actually stored.
+                "api_key_configured": bool(str(model.api_key or "").strip()),
+                "custom_headers": dict(getattr(model, "custom_headers", {}) or {}),
             }
         )
     return models
@@ -294,7 +299,9 @@ def build_model_sources_payload(config: Config, *, fetch_live: bool = False) -> 
             source_payload["config"] = _safe_provider_config(source, config)
         if source == "custom":
             # The GUI edits a list of records, not one flat section, so it needs
-            # every provider rather than only the active one.
+            # every provider rather than only the active one. The aggregate keeps
+            # its generic label on purpose: it titles the management panel, while
+            # the picker names each provider from the records below.
             source_payload["custom_providers"] = custom_provider_entries(config)
             source_payload["custom_provider_formats"] = custom_provider_format_options()
         if source in {"sensenova", "opencode"}:

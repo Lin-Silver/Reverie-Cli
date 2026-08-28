@@ -36,6 +36,7 @@ export const CORE_RESPONSE_CONTRACT = {
   setSetting: { type: "setting.updated", required: ["success", "message", "settings"] },
   setProviderConfig: { type: "provider.updated", required: ["models", "workspace"] },
   addStandardModel: { type: "standard-model.updated", required: ["models", "workspace"] },
+  updateStandardModel: { type: "standard-model.updated", required: ["models", "workspace"] },
   deleteStandardModel: { type: "standard-model.updated", required: ["models", "workspace"] },
   addCustomProvider: { type: "custom-provider.updated", required: ["models", "workspace"] },
   updateCustomProvider: { type: "custom-provider.updated", required: ["models", "workspace"] },

@@ -24,6 +24,7 @@ export interface UiPreferences {
   showToolResults: boolean;
   expandToolResults: boolean;
   showLiveActivity: boolean;
+  inspectorOpen: boolean;
   recentProjects: string[];
   archivedSessions: Record<string, string[]>;
 }
@@ -40,12 +41,15 @@ export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   backgroundOpacity: 0.9,
   backgroundBlur: 0,
   backgroundDim: 0.12,
-  showReasoning: false,
+  // Reasoning is shown by default: the trace bar counts it either way, so
+  // hiding it produced a transcript that reported thinking it never rendered.
+  showReasoning: true,
   expandReasoning: true,
   showToolCalls: true,
   showToolResults: false,
   expandToolResults: false,
   showLiveActivity: true,
+  inspectorOpen: true,
   recentProjects: [],
   archivedSessions: {},
 };
@@ -93,6 +97,7 @@ export function normalizeUiPreferences(value: unknown): UiPreferences {
     showToolResults: source.showToolResults === undefined ? DEFAULT_UI_PREFERENCES.showToolResults : Boolean(source.showToolResults),
     expandToolResults: source.expandToolResults === undefined ? DEFAULT_UI_PREFERENCES.expandToolResults : Boolean(source.expandToolResults),
     showLiveActivity: source.showLiveActivity === undefined ? DEFAULT_UI_PREFERENCES.showLiveActivity : Boolean(source.showLiveActivity),
+    inspectorOpen: source.inspectorOpen === undefined ? DEFAULT_UI_PREFERENCES.inspectorOpen : Boolean(source.inspectorOpen),
     recentProjects: stringList(source.recentProjects).slice(0, 12),
     archivedSessions: Object.fromEntries(
       Object.entries(rawArchives).map(([project, sessions]) => [project, stringList(sessions)]),

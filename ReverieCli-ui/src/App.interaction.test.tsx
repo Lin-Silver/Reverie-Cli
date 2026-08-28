@@ -5,8 +5,21 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
-import { DEFAULT_UI_PREFERENCES } from "./preferences";
-import type { CustomProviderRecord, DesktopState, ModelSource, ModelSourcesState, ProviderProbe, RatsState, RatsTaskRecord, SessionState } from "./types";
+import { DEFAULT_UI_PREFERENCES, normalizeUiPreferences, type UiPreferences } from "./preferences";
+import type { CustomProviderRecord, DesktopState, ModelRecord, ModelSource, ModelSourcesState, ProviderProbe, RatsState, RatsTaskRecord, SessionState } from "./types";
+
+/** One stored manual ("Manual Model") entry, in the core's own config shape. */
+type StandardModelConfig = {
+  model: string;
+  model_display_name: string;
+  provider: string;
+  base_url: string;
+  endpoint?: string;
+  api_key?: string;
+  max_context_tokens?: number;
+  supports_vision?: boolean;
+  custom_headers?: Record<string, string>;
+};
 
 function customProviderRecord(overrides: Partial<CustomProviderRecord> = {}): CustomProviderRecord {
   return {
@@ -184,11 +197,16 @@ function installDesktopApi(options: {
   refreshedModels?: ModelSourcesState;
   initialState?: DesktopState;
   customProviders?: CustomProviderRecord[];
+  standardModels?: StandardModelConfig[];
+  settingItems?: DesktopState["settings"]["items"];
+  gatePrompt?: boolean;
+  gateSession?: boolean;
 } = {}) {
   let promptFinished = false;
   let ratsEnabled = false;
   let ratsTaskCancelled = false;
   let providers: CustomProviderRecord[] = (options.customProviders ?? []).map((record) => ({ ...record }));
+  let standardModels: StandardModelConfig[] = (options.standardModels ?? []).map((record) => ({ ...record }));
   const customSource = (): ModelSource => ({
     id: "custom",
     display_name: "Custom Provider",
@@ -204,15 +222,64 @@ function installDesktopApi(options: {
       { id: "anthropic", label: "Anthropic Messages", description: "POST <base>/messages with an x-api-key header." },
     ],
   });
-  const models = (): ModelSourcesState => options.customProviders
-    ? { ...desktopState.models, sources: [...desktopState.models.sources, customSource()] }
-    : desktopState.models;
+  // Mirrors `_standard_catalog`: the index *is* the model id, and the key itself
+  // never crosses the bridge -- only whether one is stored.
+  const standardRecord = (record: StandardModelConfig, index: number): ModelRecord => ({
+    id: String(index),
+    model: record.model,
+    display_name: record.model_display_name || record.model,
+    description: `Custom ${record.provider} model`,
+    transport: record.provider,
+    context_length: record.max_context_tokens ?? 128_000,
+    vision: Boolean(record.supports_vision),
+    tool_calling: true,
+    thinking: false,
+    base_url: record.base_url,
+    endpoint: record.endpoint ?? "",
+    configured: Boolean(String(record.api_key ?? "").trim()),
+    api_key_configured: Boolean(String(record.api_key ?? "").trim()),
+    custom_headers: { ...(record.custom_headers ?? {}) },
+    reasoning: { control: "none", options: [], value: "" },
+  });
+  const standardSource = (): ModelSource => ({
+    id: "standard",
+    display_name: "Manual Model",
+    active: false,
+    selected_model_id: "",
+    selected_reasoning: { control: "none", options: [], value: "" },
+    models: standardModels.map(standardRecord),
+    config_fields: [],
+  });
+  const models = (): ModelSourcesState => {
+    // The core activates exactly one source, so a custom provider taking over
+    // must stand the built-in ones down -- otherwise the topbar would keep
+    // reporting whichever built-in source happens to come first.
+    const activeProvider = providers.find((record) => record.active) ?? null;
+    const sources = desktopState.models.sources.map((source) => activeProvider ? { ...source, active: false } : source);
+    if (options.standardModels) sources.push(standardSource());
+    if (options.customProviders) sources.push(customSource());
+    return {
+      ...desktopState.models,
+      active_source: activeProvider ? "custom" : desktopState.models.active_source,
+      active_model: activeProvider
+        ? {
+            id: activeProvider.selected_model_id,
+            display_name: activeProvider.selected_model_display_name || activeProvider.selected_model_id,
+            provider: activeProvider.format,
+          }
+        : desktopState.models.active_model,
+      sources,
+    };
+  };
   const customEnvelope = (provider: CustomProviderRecord | null) => ({
     type: "custom-provider.updated",
     provider,
     models: models(),
     workspace: desktopState.workspace,
   });
+  const settings = (): DesktopState["settings"] => options.settingItems
+    ? { ...desktopState.settings, items: options.settingItems }
+    : desktopState.settings;
   const probeFor = (key: string): ProviderProbe => {
     const provider = providers.find((record) => `custom:${record.id}` === key);
     return {
@@ -240,6 +307,17 @@ function installDesktopApi(options: {
   const emitCoreEvent = (event: Record<string, unknown>) => {
     for (const listener of [...eventListeners]) listener({ event });
   };
+  // A held prompt keeps the live turn on screen: `sendPrompt` clears it as soon
+  // as the result lands, so anything streaming can only be asserted before then.
+  let releasePrompt: () => void = () => {};
+  const promptGate = new Promise<void>((resolve) => { releasePrompt = resolve; });
+  // A held `getSession` is how a slow core is simulated: whatever is on screen
+  // while it is held is what the user actually sees when switching sessions.
+  // Boot fetches the current session too, so the first call passes through --
+  // there is nothing to look at until it lands.
+  let sessionFetches = 0;
+  let releaseSession: () => void = () => {};
+  let sessionGate = new Promise<void>((resolve) => { releaseSession = resolve; });
   const ratsState = (): RatsState => {
     const state: RatsState = ({
     protocol: "reverie.rtp/1",
@@ -290,8 +368,8 @@ function installDesktopApi(options: {
   };
   const request = vi.fn(async (action: string, payload: Record<string, unknown>) => {
     if (action === "initialize") {
-      const state = options.initialState ?? desktopState;
-      return { type: "state", state: options.customProviders ? { ...state, models: models() } : state };
+      const state = options.initialState ?? { ...desktopState, models: models(), settings: settings() };
+      return { type: "state", state };
     }
     if (action === "addCustomProvider") {
       const input = payload.provider as { name: string; base_url: string; api_key: string; format: string };
@@ -354,6 +432,8 @@ function installDesktopApi(options: {
       return { type: "providers.probed", probes: keys.map(probeFor) };
     }
     if (action === "getSession") {
+      sessionFetches += 1;
+      if (options.gateSession && sessionFetches > 1) await sessionGate;
       const requested = String(payload.sessionId);
       const session = requested === searchSession.id
         ? searchSession
@@ -372,8 +452,31 @@ function installDesktopApi(options: {
     if (action === "listTools") return { type: "tools", mode: "reverie", tools: [] };
     if (action === "refreshModelSources") return {
       type: "models",
-      models: options.refreshedModels ?? desktopState.models,
+      models: options.refreshedModels ?? models(),
     };
+    if (action === "addStandardModel" || action === "updateStandardModel" || action === "deleteStandardModel") {
+      const draft = (payload.model ?? {}) as Partial<StandardModelConfig>;
+      let index = standardModels.length;
+      if (action === "addStandardModel") {
+        standardModels = [...standardModels, { provider: "openai-chat", ...draft } as StandardModelConfig];
+      } else {
+        index = Number(payload.index);
+        if (index < 0 || index >= standardModels.length) throw new Error("Standard model index is out of range.");
+        if (action === "deleteStandardModel") {
+          standardModels = standardModels.filter((_record, position) => position !== index);
+        } else {
+          // The core merges over the stored record and *skips* an empty key, so a
+          // blank API Key field must leave the saved one in place.
+          const merged: StandardModelConfig = { ...standardModels[index] };
+          for (const [key, value] of Object.entries(draft)) {
+            if (key === "api_key" && !String(value ?? "").trim()) continue;
+            (merged as Record<string, unknown>)[key] = value;
+          }
+          standardModels = standardModels.map((record, position) => position === index ? merged : record);
+        }
+      }
+      return { type: "standard-model.updated", index, models: models(), workspace: desktopState.workspace };
+    }
     if (action === "ratsState") return { type: "rats.state", rats: ratsState() };
     if (action === "ratsRegisterProvider" || action === "ratsRemoveRoot") return { type: "rats.state", rats: ratsState() };
     if (action === "ratsSetProviderEnabled") {
@@ -447,7 +550,7 @@ function installDesktopApi(options: {
       return {
         type: "model.selected",
         selected: { id: String(payload.modelId) },
-        models: desktopState.models,
+        models: models(),
         workspace: desktopState.workspace,
       };
     }
@@ -460,14 +563,15 @@ function installDesktopApi(options: {
         type: "setting.updated",
         success: true,
         message: "saved",
-        settings: desktopState.settings,
-        models: { ...desktopState.models, active_model: activeModel },
+        settings: settings(),
+        models: { ...models(), active_model: activeModel },
         workspace: { ...desktopState.workspace, mode, active_model: activeModel },
       };
     }
     if (action === "runPrompt") {
       promptFinished = true;
       if (options.approvalRequest) emitCoreEvent(options.approvalRequest);
+      if (options.gatePrompt) await promptGate;
       return {
         type: "prompt.result",
         result: {
@@ -512,6 +616,9 @@ function installDesktopApi(options: {
     }
     throw new Error(`Unexpected action: ${action}`);
   });
+  // Stateful, like the Electron main process: a toggle that reads its own value
+  // back from a constant would snap straight back to the default.
+  let preferences: UiPreferences = DEFAULT_UI_PREFERENCES;
   const api = {
     request,
     cancel: vi.fn(async () => undefined),
@@ -530,8 +637,11 @@ function installDesktopApi(options: {
     appearance: vi.fn(async () => ({ theme: "dark" as const, resolved: "dark" as const })),
     setAppearance: vi.fn(async () => ({ theme: "dark" as const, resolved: "dark" as const })),
     onAppearance: vi.fn(() => () => undefined),
-    uiPreferences: vi.fn(async () => DEFAULT_UI_PREFERENCES),
-    setUiPreferences: vi.fn(async () => DEFAULT_UI_PREFERENCES),
+    uiPreferences: vi.fn(async () => preferences),
+    setUiPreferences: vi.fn(async (patch: Partial<UiPreferences>) => {
+      preferences = normalizeUiPreferences({ ...preferences, ...patch });
+      return preferences;
+    }),
     selectBackground: vi.fn(async () => null),
     clearBackground: vi.fn(async () => DEFAULT_UI_PREFERENCES),
     reveal: vi.fn(async () => true),
@@ -542,7 +652,18 @@ function installDesktopApi(options: {
     versions: {},
   };
   Object.defineProperty(window, "reverie", { configurable: true, value: api });
-  return { api, request, emitCoreEvent };
+  return {
+    api,
+    request,
+    emitCoreEvent,
+    releasePrompt: () => releasePrompt(),
+    /** Let the held `getSession` resolve, and arm the gate for the next switch. */
+    releaseSession: () => {
+      const open = releaseSession;
+      sessionGate = new Promise<void>((resolve) => { releaseSession = resolve; });
+      open();
+    },
+  };
 }
 
 beforeEach(() => {
@@ -1308,5 +1429,245 @@ describe("desktop GUI interactions", () => {
 
     await waitFor(() => expect(request).toHaveBeenCalledWith("deleteCustomProvider", { providerId: "xkiro" }));
     expect(await screen.findByText("还没有自定义 Provider")).toBeTruthy();
+  });
+
+  it("repaints an already-visited session immediately instead of waiting on the core", async () => {
+    const { request, releaseSession } = installDesktopApi({ gateSession: true });
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("button", { name: "命令面板" });
+    const transcript = () => document.querySelector(".transcript");
+    // The row's overflow menu is also labelled with the session name, so pick the
+    // row button itself.
+    const openSession = (name: string) => {
+      const row = [...document.querySelectorAll(".session-item")]
+        .find((item) => item.textContent?.includes(name));
+      if (!row) throw new Error(`No session row for ${name}`);
+      return user.click(row);
+    };
+
+    // First visit: nothing cached, so the switch is honest about waiting.
+    await openSession("Cache investigation");
+    expect(screen.getByText("正在切换会话")).toBeTruthy();
+    expect(transcript()?.getAttribute("aria-busy")).toBe("true");
+    expect(screen.queryByText("Investigate cache invalidation")).toBeNull();
+
+    releaseSession();
+    expect(await screen.findByText("Investigate cache invalidation")).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText("正在切换会话")).toBeNull());
+
+    // Back to the first session: read once already, so it paints now.
+    await openSession("Initial session");
+    expect(screen.queryByText("正在切换会话")).toBeNull();
+    expect(transcript()?.getAttribute("aria-busy")).toBe("false");
+    expect(screen.queryByText("Investigate cache invalidation")).toBeNull();
+    releaseSession();
+
+    // And the return trip to a cached session shows its transcript before the
+    // core has answered -- the switch the user notices most.
+    await openSession("Cache investigation");
+    expect(screen.getByText("Investigate cache invalidation")).toBeTruthy();
+    expect(screen.queryByText("正在切换会话")).toBeNull();
+    releaseSession();
+
+    await waitFor(() => expect(request).toHaveBeenCalledWith("getSession", { sessionId: "session-2" }));
+    // Every switch still reconciles with the core; the cache only decides what
+    // is on screen while that is in flight.
+    const fetches = request.mock.calls.filter(([action]) => action === "getSession");
+    expect(fetches.length).toBe(4);
+  });
+
+  it("lists every custom provider in the picker under the name the user gave it", async () => {
+    const { request } = installDesktopApi({
+      customProviders: [
+        customProviderRecord({ active: false, selected_model_id: "", selected_model_display_name: "" }),
+        customProviderRecord({
+          id: "qwen",
+          name: "Qwen3.8 Max",
+          base_url: "https://api.qwen.invalid/v1",
+          active: false,
+          selected_model_id: "",
+          selected_model_display_name: "",
+          models: [],
+          model_context_limits: {},
+        }),
+      ],
+    });
+    const user = userEvent.setup();
+    const { container } = render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: /Test Model/ }));
+    const dialog = await screen.findByRole("dialog", { name: "模型来源" });
+    // The generic bucket is gone: a named provider is a source by that name.
+    await waitFor(() => expect(within(dialog).getByText("Qwen3.8 Max")).toBeTruthy());
+    expect(within(dialog).getByText("xkiro")).toBeTruthy();
+    expect(within(dialog).queryByText("Custom Provider")).toBeNull();
+
+    await user.click(within(dialog).getByText("xkiro"));
+    await user.click(await within(dialog).findByRole("button", { name: /xkiro-pro/ }));
+
+    // Activating a provider is its own core call, not a `selectModel` on a
+    // source the core has never heard of.
+    await waitFor(() => expect(request).toHaveBeenCalledWith("selectCustomProviderModel", {
+      providerId: "xkiro",
+      modelId: "xkiro-pro",
+    }));
+    expect(request).not.toHaveBeenCalledWith("selectModel", expect.objectContaining({ source: "custom:xkiro" }));
+    await waitFor(() => expect(container.querySelector(".model-trigger small")?.textContent).toBe("xkiro"));
+  });
+
+  it("edits a manual model in place, keeping the stored key and custom headers", async () => {
+    const { request } = installDesktopApi({
+      standardModels: [{
+        model: "gpt-5.4",
+        model_display_name: "GPT-5.4",
+        provider: "openai-chat",
+        base_url: "https://api.example.com/v1",
+        endpoint: "/chat/completions",
+        api_key: "sk-stored-secret",
+        max_context_tokens: 128_000,
+        supports_vision: false,
+        custom_headers: { "x-tenant": "reverie" },
+      }],
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("button", { name: "命令面板" });
+
+    await user.click(screen.getByRole("button", { name: "设置" }));
+    await user.click(await screen.findByRole("button", { name: "模型与提供商" }));
+    await user.click(await screen.findByRole("button", { name: /Manual Model/ }));
+    await user.click(screen.getByRole("button", { name: "编辑标准模型" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "编辑标准模型" });
+    expect((within(dialog).getByLabelText("模型 ID") as HTMLInputElement).value).toBe("gpt-5.4");
+    expect((within(dialog).getByLabelText("Base URL") as HTMLInputElement).value).toBe("https://api.example.com/v1");
+    expect((within(dialog).getByLabelText(/请求路径/) as HTMLInputElement).value).toBe("/chat/completions");
+    expect((within(dialog).getByLabelText("Provider") as HTMLSelectElement).value).toBe("openai-chat");
+    // The key never reaches the renderer, so the form says so instead of
+    // pretending the empty field means "erase it".
+    const key = within(dialog).getByLabelText(/API Key/) as HTMLInputElement;
+    expect(key.value).toBe("");
+    expect(key.placeholder).toBe("••••••••");
+    expect(within(dialog).getByText("留空表示保留现有密钥")).toBeTruthy();
+    expect(within(dialog).getByText("1 个自定义请求头会原样保留。")).toBeTruthy();
+
+    const displayName = within(dialog).getByLabelText("显示名称") as HTMLInputElement;
+    await user.clear(displayName);
+    await user.type(displayName, "GPT-5.4 Turbo");
+    const context = within(dialog).getByLabelText("上下文长度") as HTMLInputElement;
+    await user.clear(context);
+    await user.type(context, "200000");
+    await user.click(within(dialog).getByRole("button", { name: "保存" }));
+
+    await waitFor(() => expect(request).toHaveBeenCalledWith("updateStandardModel", {
+      index: 0,
+      model: {
+        model: "gpt-5.4",
+        model_display_name: "GPT-5.4 Turbo",
+        provider: "openai-chat",
+        base_url: "https://api.example.com/v1",
+        endpoint: "/chat/completions",
+        max_context_tokens: 200_000,
+        supports_vision: false,
+        custom_headers: { "x-tenant": "reverie" },
+      },
+    }));
+    expect(await screen.findByText("标准模型已更新")).toBeTruthy();
+    expect(await screen.findByText("GPT-5.4 Turbo")).toBeTruthy();
+    expect(screen.getByText("200K ctx")).toBeTruthy();
+
+    // Reopening proves the blank key left the stored one in place.
+    await user.click(screen.getByRole("button", { name: "编辑标准模型" }));
+    const reopened = await screen.findByRole("dialog", { name: "编辑标准模型" });
+    expect((within(reopened).getByLabelText(/API Key/) as HTMLInputElement).placeholder).toBe("••••••••");
+    expect((within(reopened).getByLabelText("上下文长度") as HTMLInputElement).value).toBe("200000");
+  });
+
+  it("keeps the inspector mounted while it collapses, and remembers the choice", async () => {
+    const { api } = installDesktopApi();
+    const user = userEvent.setup();
+    const { container } = render(<App />);
+    await screen.findByRole("button", { name: "命令面板" });
+    const shell = container.querySelector(".app-shell");
+
+    expect(shell?.classList.contains("with-inspector")).toBe(true);
+    expect(container.querySelector(".inspector")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "关闭检查器" }));
+
+    // A pane that unmounts cannot animate out, so it stays in the tree and is
+    // only taken out of the accessibility tree and the tab order.
+    await waitFor(() => expect(shell?.classList.contains("with-inspector")).toBe(false));
+    const inspector = container.querySelector(".inspector");
+    expect(inspector).toBeTruthy();
+    expect(inspector?.getAttribute("aria-hidden")).toBe("true");
+    expect(inspector?.hasAttribute("inert")).toBe(true);
+    expect(api.setUiPreferences).toHaveBeenCalledWith({ inspectorOpen: false });
+
+    await user.click(screen.getByRole("button", { name: "打开检查器" }));
+
+    await waitFor(() => expect(shell?.classList.contains("with-inspector")).toBe(true));
+    expect(container.querySelector(".inspector")?.hasAttribute("aria-hidden")).toBe(false);
+  });
+
+  it("renders a streaming Thinking Tool call as reasoning instead of a silent activity row", async () => {
+    const { emitCoreEvent, releasePrompt } = installDesktopApi({ gatePrompt: true });
+    const user = userEvent.setup();
+    render(<App />);
+    const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
+
+    await user.type(composer, "Inspect the cache{Enter}");
+    await act(async () => {
+      // The wire shape the core actually emits: `encode_stream_event` puts the
+      // kind under `event`, and the deliberation arrives as call arguments.
+      emitCoreEvent({
+        type: "ui.event",
+        event: {
+          event: "tool_start",
+          tool_name: "deep_think",
+          tool_call_id: "call-1",
+          message: "deep_think",
+          arguments: JSON.stringify({
+            topic: "Cache invalidation",
+            thought: "The index is keyed by mtime, so a same-second write is missed.",
+            next_step: "Compare size as well as mtime.",
+          }),
+        },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    });
+
+    expect(await screen.findByText("Cache invalidation")).toBeTruthy();
+    // Scope to the expanded body: the summary carries a truncated copy of the
+    // same prose, so an unscoped regex would match twice.
+    const reasoning = document.querySelector(".reasoning-block .reasoning-content") as HTMLElement | null;
+    expect(reasoning).toBeTruthy();
+    expect(within(reasoning!).getByText(/The index is keyed by mtime/)).toBeTruthy();
+    expect(within(reasoning!).getByText(/Next: Compare size as well as mtime\./)).toBeTruthy();
+
+    releasePrompt();
+    expect(await screen.findByText("Cache inspection complete")).toBeTruthy();
+  });
+
+  it("keeps the experimental badge in English, matching the core's own setting copy", async () => {
+    installDesktopApi({
+      settingItems: [{
+        name: "Thinking Tool",
+        key: "thinking_tool",
+        kind: "bool",
+        description: "Give the model a private scratchpad for deliberate reasoning.",
+        value: true,
+        experimental: true,
+      }],
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "设置" }));
+
+    const badge = await screen.findByText("Experimental");
+    expect(badge.className).toBe("setting-badge");
+    expect(screen.queryByText("实验性")).toBeNull();
   });
 });

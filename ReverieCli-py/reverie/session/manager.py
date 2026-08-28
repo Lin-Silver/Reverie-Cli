@@ -68,10 +68,19 @@ class Session:
 
         Only saved transcripts use the `Reverie` spelling; every live consumer
         (desktop bridge, provider payloads) expects the provider-facing role.
+        In-memory messages already carry that spelling, so this converts once
+        defensively rather than relabelling the whole transcript to `Reverie`
+        and straight back -- two full passes to end up where it started, paid on
+        every session switch.
         """
-        payload = self.to_dict()
-        payload['messages'] = from_stored_messages(payload.get('messages', []))
-        return payload
+        return {
+            'id': self.id,
+            'name': self.name,
+            'created_at': self.created_at,
+            'updated_at': self.updated_at,
+            'messages': from_stored_messages(self.messages),
+            'metadata': self.metadata,
+        }
 
     @classmethod
     def from_dict(cls, data: dict) -> 'Session':
@@ -132,6 +141,17 @@ class SessionManager:
         self._current_session: Optional[Session] = None
         self._session_index: Dict[str, Dict[str, Any]] = self._load_session_index()
         self._session_index_dirty = False
+        # Session file id -> mtime already reflected in `self._session_index`.
+        # Seeded from the persisted index so a fresh process trusts it instead of
+        # re-reading every transcript, and kept current by our own writes.
+        self._scanned_session_files: Dict[str, int] = {
+            session_id: int(entry.get('mtime') or 0)
+            for session_id, entry in self._session_index.items()
+            if int(entry.get('mtime') or 0) > 0
+        }
+        # Session file id -> mtime already inspected for a name upgrade, so a
+        # session whose first prompt yields no title is not re-read forever.
+        self._name_upgrade_scanned: Dict[str, int] = {}
         # Last `current_session_id` written to session_state.json, so repeated
         # saves of the same session skip a redundant fsync'd write.
         self._persisted_state_session_id: Optional[str] = None
@@ -288,6 +308,15 @@ class SessionManager:
                 'workspace_id': str(entry.get('workspace_id') or ''),
                 'workspace_path': str(entry.get('workspace_path') or ''),
             }
+            # Cache validator, not session data: the mtime the entry was built
+            # from. Absent in indexes written by older versions, which simply
+            # costs one rebuild before it is stamped in.
+            try:
+                mtime = int(entry.get('mtime') or 0)
+            except (TypeError, ValueError):
+                mtime = 0
+            if mtime > 0:
+                session_entry['mtime'] = mtime
             if self._belongs_to_workspace({'metadata': session_entry}):
                 index[str(session_entry['id'])] = session_entry
         return index
@@ -324,7 +353,7 @@ class SessionManager:
 
     def _session_index_entry(self, session: Session) -> Dict[str, Any]:
         metadata = self._merge_scope_metadata(session.metadata)
-        return {
+        entry: Dict[str, Any] = {
             'id': session.id,
             'name': session.name,
             'created_at': session.created_at,
@@ -333,41 +362,97 @@ class SessionManager:
             'workspace_id': str(metadata.get('workspace_id') or ''),
             'workspace_path': str(metadata.get('workspace_path') or ''),
         }
+        mtime = int(self._scanned_session_files.get(session.id) or 0)
+        if mtime > 0:
+            entry['mtime'] = mtime
+        return entry
 
-    def _rebuild_session_index(self) -> None:
-        rebuilt: Dict[str, Dict[str, Any]] = {}
-        for session_file in self.sessions_dir.glob('*.json'):
-            try:
-                with open(session_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-            except Exception:
-                continue
+    def _scan_session_files(self) -> Dict[str, int]:
+        """Map session id to file mtime without reading a single session file."""
+        scanned: Dict[str, int] = {}
+        try:
+            with os.scandir(self.sessions_dir) as entries:
+                for entry in entries:
+                    if not entry.name.endswith('.json'):
+                        continue
+                    try:
+                        if not entry.is_file():
+                            continue
+                        scanned[entry.name[:-5]] = entry.stat().st_mtime_ns
+                    except OSError:
+                        continue
+        except OSError:
+            return {}
+        return scanned
 
-            if not isinstance(data, dict) or not self._belongs_to_workspace(data):
-                continue
+    def _read_session_index_entry(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Build one index entry from its session file, or None if unusable."""
+        try:
+            with open(self.sessions_dir / f"{session_id}.json", 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except Exception:
+            return None
 
-            session_id = str(data.get('id') or session_file.stem)
-            rebuilt[session_id] = {
-                'id': session_id,
-                'name': str(data.get('name') or session_id),
-                'created_at': str(data.get('created_at') or ''),
-                'updated_at': str(data.get('updated_at') or ''),
-                'message_count': len(data.get('messages', []) or []),
-                'workspace_id': str((data.get('metadata') or {}).get('workspace_id') or self.workspace_id),
-                'workspace_path': str((data.get('metadata') or {}).get('workspace_path') or self.workspace_path),
-            }
+        if not isinstance(data, dict) or not self._belongs_to_workspace(data):
+            return None
 
-        self._session_index = rebuilt
-        self._save_session_index()
+        resolved_id = str(data.get('id') or session_id)
+        return {
+            'id': resolved_id,
+            'name': str(data.get('name') or resolved_id),
+            'created_at': str(data.get('created_at') or ''),
+            'updated_at': str(data.get('updated_at') or ''),
+            'message_count': len(data.get('messages', []) or []),
+            'workspace_id': str((data.get('metadata') or {}).get('workspace_id') or self.workspace_id),
+            'workspace_path': str((data.get('metadata') or {}).get('workspace_path') or self.workspace_path),
+        }
 
     def _ensure_session_index(self) -> None:
-        expected_count = sum(1 for _ in self.sessions_dir.glob('*.json'))
-        if self._session_index and len(self._session_index) == expected_count:
+        """Reconcile the cached index with the sessions directory.
+
+        Only files that appeared or changed since the last scan are read, and
+        Reverie's own writes record their mtime as they go, so a settled
+        workspace costs one directory scan and nothing else. Comparing entry
+        counts instead -- as this used to -- rebuilt the entire index on *every*
+        call as soon as one file was unreadable or belonged to another
+        workspace: such a file is skipped while rebuilding, so the counts could
+        never agree again and each session switch re-parsed every transcript.
+        """
+        scanned = self._scan_session_files()
+        if scanned == self._scanned_session_files:
             return
-        if not self.session_index_path.exists() and expected_count == 0:
-            self._session_index = {}
-            return
-        self._rebuild_session_index()
+
+        changed = False
+        live_ids: set = set()
+        for session_id, mtime in scanned.items():
+            if self._scanned_session_files.get(session_id) == mtime and session_id in self._session_index:
+                live_ids.add(session_id)
+                continue
+            entry = self._read_session_index_entry(session_id)
+            if entry is None:
+                # Unreadable, or another workspace's session. Remembering the
+                # mtime anyway is what stops it being re-read on every call.
+                if self._session_index.pop(session_id, None) is not None:
+                    changed = True
+                continue
+            resolved_id = str(entry['id'])
+            entry['mtime'] = mtime
+            live_ids.add(resolved_id)
+            if self._session_index.get(resolved_id) != entry:
+                self._session_index[resolved_id] = entry
+                changed = True
+
+        for session_id in list(self._session_index):
+            if session_id not in live_ids:
+                self._session_index.pop(session_id, None)
+                changed = True
+
+        self._scanned_session_files = scanned
+        for session_id in list(self._name_upgrade_scanned):
+            if session_id not in scanned:
+                self._name_upgrade_scanned.pop(session_id, None)
+        if changed:
+            self._save_session_index()
 
     def refresh_generated_session_names(self) -> int:
         """Upgrade timestamp-only legacy names from their first user prompt."""
@@ -376,6 +461,15 @@ class SessionManager:
         for session_id, entry in list(self._session_index.items()):
             if not is_generated_session_name(entry.get('name')):
                 continue
+            if int(entry.get('message_count') or 0) <= 0:
+                # No prompt to take a title from yet.
+                continue
+            file_mtime = int(self._scanned_session_files.get(session_id) or 0)
+            if file_mtime and self._name_upgrade_scanned.get(session_id) == file_mtime:
+                # Already inspected at this exact revision and it yielded no
+                # title -- re-reading the transcript would find the same answer.
+                continue
+            self._name_upgrade_scanned[session_id] = file_mtime
             session_path = self.sessions_dir / f"{session_id}.json"
             try:
                 data = json.loads(session_path.read_text(encoding='utf-8'))
@@ -400,12 +494,37 @@ class SessionManager:
             data['name'] = title
             self._write_json_atomic(session_path, data)
             entry['name'] = title
+            self._stamp_session_file_mtime(session_id, entry)
+            self._name_upgrade_scanned[session_id] = int(
+                self._scanned_session_files.get(session_id) or 0
+            )
             changed += 1
             if self._current_session and self._current_session.id == session_id:
                 self._current_session.name = title
         if changed:
             self._save_session_index()
         return changed
+
+    def _stamp_session_file_mtime(
+        self,
+        session_id: str,
+        entry: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        """Record the on-disk mtime of a session Reverie just wrote.
+
+        Keeping the scan fingerprint in step with our own writes is what lets
+        `_ensure_session_index` treat an unchanged directory as authoritative
+        instead of mistaking every save for an outside edit.
+        """
+        try:
+            mtime = (self.sessions_dir / f"{session_id}.json").stat().st_mtime_ns
+        except OSError:
+            self._scanned_session_files.pop(session_id, None)
+            return 0
+        self._scanned_session_files[session_id] = mtime
+        if entry is not None:
+            entry['mtime'] = mtime
+        return mtime
 
     def _write_session(self, session: Session, *, touch_updated_at: bool = True) -> Dict:
         if touch_updated_at:
@@ -415,6 +534,7 @@ class SessionManager:
         session_path = self.sessions_dir / f"{session.id}.json"
         payload = session.to_dict()
         self._write_json_atomic(session_path, payload)
+        self._stamp_session_file_mtime(session.id)
         self._session_index[session.id] = self._session_index_entry(session)
         # Deferred: the transcript itself is already durable above, and the index
         # entry is reconstructible from it. Flushed by the observable operations.
@@ -604,7 +724,22 @@ class SessionManager:
         # Switching away from the active session: land any deferred index write
         # so the outgoing session's counts are not lost.
         self.flush_session_index()
+        session_id = str(session_id or '')
         session_path = self.sessions_dir / f"{session_id}.json"
+
+        current = self._current_session
+        if current is not None and current.id == session_id:
+            # Already active. Re-reading and re-parsing the transcript would only
+            # matter if another process wrote to it since, and the mtime settles
+            # that without touching the contents.
+            known_mtime = int(self._scanned_session_files.get(session_id) or 0)
+            try:
+                on_disk_mtime = session_path.stat().st_mtime_ns
+            except OSError:
+                on_disk_mtime = 0
+            if known_mtime and on_disk_mtime == known_mtime:
+                self._save_state(session_id)
+                return current
 
         if not session_path.exists():
             return None
@@ -619,6 +754,9 @@ class SessionManager:
             session = Session.from_dict(data)
             original_metadata = dict(session.metadata or {})
             session.metadata = self._merge_scope_metadata(session.metadata)
+            # The transcript was just read, so its mtime is known for free and
+            # keeps the index entry comparable without a rebuild.
+            self._stamp_session_file_mtime(session_id)
             refreshed_index_entry = self._session_index_entry(session)
 
             self._current_session = session
@@ -641,6 +779,8 @@ class SessionManager:
         if session_path.exists():
             session_path.unlink()
             self._session_index.pop(session_id, None)
+            self._scanned_session_files.pop(session_id, None)
+            self._name_upgrade_scanned.pop(session_id, None)
             self._save_session_index()
             self._refresh_memory_index_for_session(session_id)
 

@@ -30,17 +30,34 @@ function mergeActivityEvents(
   incoming: Array<Record<string, unknown>>,
 ): Array<Record<string, unknown>> {
   const merged = [...existing];
+  // Index the stored events once. Scanning them per incoming event -- with a
+  // JSON.stringify of each candidate for the identity check -- made a long turn
+  // quadratic in the number of activity rows, and tool payloads are not small.
+  const lifecycleIndexes = new Map<string, number>();
+  const identities = new Set<string>();
+  merged.forEach((event, index) => {
+    const lifecycleKey = eventLifecycleKey(event);
+    if (lifecycleKey) lifecycleIndexes.set(lifecycleKey, index);
+    // Only events without a lifecycle key are ever compared by identity, so
+    // stringifying the rest would be wasted work.
+    else identities.add(JSON.stringify(event));
+  });
   for (const event of incoming) {
     const lifecycleKey = eventLifecycleKey(event);
     if (lifecycleKey) {
-      const lifecycleIndex = merged.findIndex((candidate) => eventLifecycleKey(candidate) === lifecycleKey);
-      if (lifecycleIndex >= 0) {
+      const lifecycleIndex = lifecycleIndexes.get(lifecycleKey);
+      if (lifecycleIndex !== undefined) {
         merged[lifecycleIndex] = event;
         continue;
       }
+      lifecycleIndexes.set(lifecycleKey, merged.length);
+      merged.push(event);
+      continue;
     }
     const identity = JSON.stringify(event);
-    if (!merged.some((candidate) => JSON.stringify(candidate) === identity)) merged.push(event);
+    if (identities.has(identity)) continue;
+    identities.add(identity);
+    merged.push(event);
   }
   return merged.slice(-LIVE_STREAM_EVENT_LIMIT);
 }

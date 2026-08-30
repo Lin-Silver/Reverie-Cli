@@ -22,9 +22,24 @@ export interface StoredUiPreferences {
   showToolResults: boolean;
   expandToolResults: boolean;
   showLiveActivity: boolean;
+  inspectorOpen: boolean;
+  sidebarWidth: number;
+  inspectorWidth: number;
   recentProjects: string[];
   archivedSessions: Record<string, string[]>;
 }
+
+/**
+ * Pane drag bounds, mirrored from `src/layout.ts`.
+ *
+ * The main process cannot import the renderer bundle, and a width clamped to a
+ * different range here than there would snap the pane back the moment the
+ * stored value returned to the renderer. Keep the two lists in step.
+ */
+const SIDEBAR_MIN_WIDTH = 208;
+const SIDEBAR_MAX_WIDTH = 460;
+const INSPECTOR_MIN_WIDTH = 264;
+const INSPECTOR_MAX_WIDTH = 620;
 
 export const DEFAULT_UI_PREFERENCES: StoredUiPreferences = {
   language: "zh-CN",
@@ -37,12 +52,17 @@ export const DEFAULT_UI_PREFERENCES: StoredUiPreferences = {
   backgroundOpacity: 0.9,
   backgroundBlur: 0,
   backgroundDim: 0.12,
-  showReasoning: false,
+  // Matches the renderer's default. When these two disagreed the main process
+  // won, so the transcript hid a trace the trace bar had already counted.
+  showReasoning: true,
   expandReasoning: true,
   showToolCalls: true,
   showToolResults: false,
   expandToolResults: false,
   showLiveActivity: true,
+  inspectorOpen: true,
+  sidebarWidth: 268,
+  inspectorWidth: 316,
   recentProjects: [],
   archivedSessions: {},
 };
@@ -54,6 +74,11 @@ function enumValue<T extends string>(value: unknown, values: readonly T[], fallb
 function clamp(value: unknown, minimum: number, maximum: number, fallback: number): number {
   const number = Number(value);
   return Number.isFinite(number) ? Math.min(maximum, Math.max(minimum, number)) : fallback;
+}
+
+/** Pane widths are written straight into a CSS track, so keep them integral. */
+function paneWidth(value: unknown, minimum: number, maximum: number, fallback: number): number {
+  return Math.round(clamp(value, minimum, maximum, fallback));
 }
 
 function stringList(value: unknown): string[] {
@@ -95,6 +120,9 @@ export function normalizeUiPreferences(value: unknown): StoredUiPreferences {
     showToolResults: source.showToolResults === undefined ? DEFAULT_UI_PREFERENCES.showToolResults : Boolean(source.showToolResults),
     expandToolResults: source.expandToolResults === undefined ? DEFAULT_UI_PREFERENCES.expandToolResults : Boolean(source.expandToolResults),
     showLiveActivity: source.showLiveActivity === undefined ? DEFAULT_UI_PREFERENCES.showLiveActivity : Boolean(source.showLiveActivity),
+    inspectorOpen: source.inspectorOpen === undefined ? DEFAULT_UI_PREFERENCES.inspectorOpen : Boolean(source.inspectorOpen),
+    sidebarWidth: paneWidth(source.sidebarWidth, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH, DEFAULT_UI_PREFERENCES.sidebarWidth),
+    inspectorWidth: paneWidth(source.inspectorWidth, INSPECTOR_MIN_WIDTH, INSPECTOR_MAX_WIDTH, DEFAULT_UI_PREFERENCES.inspectorWidth),
     recentProjects: stringList(source.recentProjects).slice(0, 12),
     archivedSessions: archivedSessions(source.archivedSessions),
   };

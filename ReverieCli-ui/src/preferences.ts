@@ -1,4 +1,10 @@
 import { normalizeUiLanguage, type UiLanguage } from "./i18n";
+import {
+  INSPECTOR_DEFAULT_WIDTH,
+  SIDEBAR_DEFAULT_WIDTH,
+  clampInspectorWidth,
+  clampSidebarWidth,
+} from "./layout";
 
 export type AccentPreference = "violet" | "blue" | "teal" | "rose" | "amber";
 export type StartupModePreference = "gui" | "tui";
@@ -25,6 +31,8 @@ export interface UiPreferences {
   expandToolResults: boolean;
   showLiveActivity: boolean;
   inspectorOpen: boolean;
+  sidebarWidth: number;
+  inspectorWidth: number;
   recentProjects: string[];
   archivedSessions: Record<string, string[]>;
 }
@@ -50,6 +58,8 @@ export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   expandToolResults: false,
   showLiveActivity: true,
   inspectorOpen: true,
+  sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
+  inspectorWidth: INSPECTOR_DEFAULT_WIDTH,
   recentProjects: [],
   archivedSessions: {},
 };
@@ -98,6 +108,8 @@ export function normalizeUiPreferences(value: unknown): UiPreferences {
     expandToolResults: source.expandToolResults === undefined ? DEFAULT_UI_PREFERENCES.expandToolResults : Boolean(source.expandToolResults),
     showLiveActivity: source.showLiveActivity === undefined ? DEFAULT_UI_PREFERENCES.showLiveActivity : Boolean(source.showLiveActivity),
     inspectorOpen: source.inspectorOpen === undefined ? DEFAULT_UI_PREFERENCES.inspectorOpen : Boolean(source.inspectorOpen),
+    sidebarWidth: clampSidebarWidth(Number(source.sidebarWidth ?? Number.NaN)),
+    inspectorWidth: clampInspectorWidth(Number(source.inspectorWidth ?? Number.NaN)),
     recentProjects: stringList(source.recentProjects).slice(0, 12),
     archivedSessions: Object.fromEntries(
       Object.entries(rawArchives).map(([project, sessions]) => [project, stringList(sessions)]),

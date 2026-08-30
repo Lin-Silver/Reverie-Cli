@@ -63,9 +63,11 @@ import {
   Zap,
 } from "lucide-react";
 import {
+  CSSProperties,
   FormEvent,
   KeyboardEvent,
   ReactNode,
+  RefObject,
   memo,
   useCallback,
   useEffect,
@@ -126,7 +128,15 @@ import {
   type UiPreferences,
 } from "./preferences";
 import {
+  INSPECTOR_DEFAULT_WIDTH,
+  INSPECTOR_MAX_WIDTH,
+  INSPECTOR_MIN_WIDTH,
+  SIDEBAR_DEFAULT_WIDTH,
+  SIDEBAR_MAX_WIDTH,
+  SIDEBAR_MIN_WIDTH,
+  clampPaneWidth,
   normalizeSidebarCollapsed,
+  paneDragLimit,
   resolveSidebarCollapsed,
   SIDEBAR_AUTO_COLLAPSE_QUERY,
   SIDEBAR_COLLAPSED_STORAGE_KEY,
@@ -397,6 +407,126 @@ function ErrorScreen({ error, retry }: { error: string; retry: () => void }) {
         <RefreshCw size={15} /> {t("重试")}
       </button>
     </div>
+  );
+}
+
+/**
+ * Drag handle for one of the two side panes.
+ *
+ * `edge` says which shell edge the pane is anchored to, which is all that is
+ * needed to turn a pointer position into a width. Pointer capture keeps the
+ * events coming to this element even when the cursor outruns the handle, so no
+ * window-level listeners are involved and a lost pointerup cannot wedge the
+ * shell in resizing state.
+ */
+function PaneResizer({
+  edge,
+  label,
+  width,
+  minimum,
+  maximum,
+  fallback,
+  shell,
+  opposite,
+  preview,
+  commit,
+}: {
+  edge: "left" | "right";
+  label: string;
+  width: number;
+  minimum: number;
+  maximum: number;
+  fallback: number;
+  shell: RefObject<HTMLDivElement | null>;
+  opposite: number;
+  preview: (width: number) => void;
+  commit: (width: number) => void;
+}) {
+  const dragging = useRef(false);
+  const [active, setActive] = useState(false);
+
+  /**
+   * Capture keeps the events coming when the cursor outruns the 9px handle. It
+   * is absent under jsdom and throws in a browser once the pointer has already
+   * gone away, and neither case should abort a drag that otherwise works.
+   */
+  const capture = useCallback((target: Element, pointerId: number, hold: boolean) => {
+    try {
+      if (hold) target.setPointerCapture?.(pointerId);
+      else target.releasePointerCapture?.(pointerId);
+    } catch {
+      // Direct events on the handle still drive the drag without capture.
+    }
+  }, []);
+
+  const resolve = useCallback((clientX: number): number => {
+    const bounds = shell.current?.getBoundingClientRect();
+    const ceiling = bounds
+      ? Math.max(minimum, paneDragLimit(bounds.width, opposite, maximum))
+      : maximum;
+    const raw = bounds
+      ? edge === "left" ? clientX - bounds.left : bounds.right - clientX
+      : width;
+    return clampPaneWidth(raw, minimum, ceiling, fallback);
+  }, [edge, fallback, maximum, minimum, opposite, shell, width]);
+
+  const step = useCallback((delta: number) => {
+    const bounds = shell.current?.getBoundingClientRect();
+    const ceiling = bounds
+      ? Math.max(minimum, paneDragLimit(bounds.width, opposite, maximum))
+      : maximum;
+    commit(clampPaneWidth(width + delta, minimum, ceiling, fallback));
+  }, [commit, fallback, maximum, minimum, opposite, shell, width]);
+
+  return (
+    <div
+      role="separator"
+      tabIndex={0}
+      aria-orientation="vertical"
+      aria-label={label}
+      aria-valuenow={width}
+      aria-valuemin={minimum}
+      aria-valuemax={maximum}
+      className={`pane-resizer ${edge === "left" ? "sidebar-resizer" : "inspector-resizer"} ${active ? "dragging" : ""}`}
+      onPointerDown={(event) => {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        capture(event.currentTarget, event.pointerId, true);
+        dragging.current = true;
+        setActive(true);
+      }}
+      onPointerMove={(event) => {
+        if (!dragging.current) return;
+        preview(resolve(event.clientX));
+      }}
+      onPointerUp={(event) => {
+        if (!dragging.current) return;
+        dragging.current = false;
+        setActive(false);
+        capture(event.currentTarget, event.pointerId, false);
+        commit(resolve(event.clientX));
+      }}
+      onPointerCancel={() => {
+        if (!dragging.current) return;
+        dragging.current = false;
+        setActive(false);
+        commit(width);
+      }}
+      onDoubleClick={() => commit(fallback)}
+      onKeyDown={(event) => {
+        // A left-anchored pane grows as the handle moves right, and vice versa.
+        const grow = edge === "left" ? "ArrowRight" : "ArrowLeft";
+        const shrink = edge === "left" ? "ArrowLeft" : "ArrowRight";
+        const amount = event.shiftKey ? 4 : 16;
+        if (event.key === grow) step(amount);
+        else if (event.key === shrink) step(-amount);
+        else if (event.key === "Home") step(minimum - width);
+        else if (event.key === "End") step(maximum - width);
+        else if (event.key === "Enter" || event.key === " ") commit(fallback);
+        else return;
+        event.preventDefault();
+      }}
+    />
   );
 }
 
@@ -2578,6 +2708,123 @@ function ConfirmModal({ title, message, confirmLabel, danger = false, close, con
 
 const RATS_PERMISSION_OPTIONS: RatsPermission[] = ["read", "project", "edit", "asset", "run", "build", "ai"];
 
+/** The provider this client implements and verifies; preferred when offering registration. */
+const RATS_BUILTIN_PROVIDER_ID = "reverie.engine";
+
+/** What the core assumes when a definition names no discovery root. */
+const RATS_DEFAULT_DISCOVERY_ROOT = "ReverieLocal/RATS/Services";
+
+/** One custom-provider definition being written. Text fields stay text so they stay editable. */
+type RatsProviderDraft = {
+  providerId: string;
+  product: string;
+  label: string;
+  serviceKinds: string;
+  permissionClasses: RatsPermission[];
+  toolTags: string;
+  discoveryRoot: string;
+  executableIdentity: "path" | "product_name";
+  executableProductNames: string;
+  executableError: string;
+};
+
+const EMPTY_RATS_PROVIDER_DRAFT: RatsProviderDraft = {
+  providerId: "",
+  product: "",
+  label: "",
+  serviceKinds: "",
+  // The core refuses an empty permission list, so the draft opens on the
+  // narrowest grant that is actually accepted rather than on nothing.
+  permissionClasses: ["read"],
+  toolTags: "",
+  discoveryRoot: "",
+  executableIdentity: "path",
+  executableProductNames: "",
+  executableError: "",
+};
+
+/** Split a comma- or whitespace-separated field into the lowercase list the core validates. */
+function splitRatsDraftList(value: string): string[] {
+  return [...new Set(value.split(/[,\s]+/).map((item) => item.trim().toLowerCase()).filter(Boolean))];
+}
+
+/**
+ * The definition to send for one draft.
+ *
+ * `discoveryRoot` goes out as typed rather than pre-split into segments: the core
+ * refuses an absolute path outright, and splitting it here would quietly
+ * reinterpret it as relative and then discover nothing under it.
+ */
+function ratsProviderDefinition(draft: RatsProviderDraft): Record<string, unknown> {
+  const definition: Record<string, unknown> = {
+    providerId: draft.providerId.trim().toLowerCase(),
+    product: draft.product.trim(),
+    serviceKinds: splitRatsDraftList(draft.serviceKinds),
+    permissionClasses: draft.permissionClasses,
+    toolTags: splitRatsDraftList(draft.toolTags),
+    executableIdentity: draft.executableIdentity,
+  };
+  if (draft.label.trim()) definition.label = draft.label.trim();
+  if (draft.discoveryRoot.trim()) definition.discoveryRoot = draft.discoveryRoot.trim();
+  if (draft.executableIdentity === "product_name") {
+    // Only meaningful in this mode, and the core refuses the mode without them.
+    definition.executableProductNames = draft.executableProductNames
+      .split(/[,\n]+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  if (draft.executableError.trim()) definition.executableError = draft.executableError.trim();
+  return definition;
+}
+
+/** The fields the core cannot accept a draft without. Everything else has a default. */
+function ratsDraftIsSendable(draft: RatsProviderDraft): boolean {
+  return Boolean(
+    draft.providerId.trim()
+    && draft.product.trim()
+    && splitRatsDraftList(draft.serviceKinds).length
+    && draft.permissionClasses.length
+    && (draft.executableIdentity === "path" || draft.executableProductNames.trim()),
+  );
+}
+
+/**
+ * The six checks `/rats confirm` reports, computed from one state record.
+ *
+ * Same order and same names as the terminal command, so a user who reads one
+ * surface recognises the other. Nothing here talks to the service: a check that
+ * asked its own question could disagree with the row shown right above it.
+ */
+function ratsConfirmationChecks(
+  service: RatsServiceRecord,
+  protocol: string,
+): Array<{ label: string; passed: boolean; detail: string }> {
+  return [
+    { label: "descriptor verified", passed: true, detail: service.descriptorPath },
+    {
+      label: "protocol agreed",
+      passed: Boolean(service.protocol) && service.protocol === protocol,
+      detail: service.protocol === protocol ? service.protocol : `${service.protocol || "—"} ≠ ${protocol}`,
+    },
+    {
+      label: "endpoint reachable",
+      passed: service.connection === "connected" || service.connection === "available",
+      detail: service.endpoint,
+    },
+    {
+      label: "enabled by you",
+      passed: service.enabled,
+      detail: service.enabled ? service.permissions.join(" · ") : "",
+    },
+    { label: "session open", passed: service.sessionActive, detail: service.error },
+    {
+      label: "catalog readable",
+      passed: service.tools.length > 0,
+      detail: `${service.tools.length}/${service.nativeToolCount}`,
+    },
+  ];
+}
+
 function normalizeRatsState(next: RatsState): RatsState {
   if (Array.isArray(next.enabledProviders)) return next;
   const legacy = Array.isArray(next.enabledEngines) ? next.enabledEngines : [];
@@ -2600,6 +2847,12 @@ function RatsView() {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [logsOpen, setLogsOpen] = useState(false);
+  const [registerTarget, setRegisterTarget] = useState("");
+  const [confirmed, setConfirmed] = useState<Record<string, boolean>>({});
+  const [draftOpen, setDraftOpen] = useState(false);
+  const [draft, setDraft] = useState<RatsProviderDraft>(EMPTY_RATS_PROVIDER_DRAFT);
+  /** True while the banner is showing a failure the background poll itself caused. */
+  const pollFailed = useRef(false);
 
   const acceptState = useCallback((next: RatsState) => {
     const normalized = normalizeRatsState(next);
@@ -2612,6 +2865,17 @@ function RatsView() {
       for (const selection of normalized.enabledProviders ?? []) updated[selection.executable] = selection.permissions;
       return updated;
     });
+    setRegisterTarget((current) => {
+      if (current && normalized.supportedProviders.some((provider) => provider.providerId === current)) return current;
+      // Never index blindly into supportedProviders: it is sorted by id, so a
+      // custom provider named earlier in the alphabet would otherwise become the
+      // default target and the register button would quietly register the wrong
+      // application.
+      const preferred = normalized.supportedProviders.find((provider) => provider.providerId === RATS_BUILTIN_PROVIDER_ID)
+        ?? normalized.supportedProviders.find((provider) => !provider.custom)
+        ?? normalized.supportedProviders[0];
+      return preferred?.providerId ?? "";
+    });
   }, []);
 
   const load = useCallback(async (foreground = false) => {
@@ -2619,8 +2883,15 @@ function RatsView() {
     try {
       const response = await window.reverie.request("ratsState", {});
       acceptState(response.rats);
-      setError("");
+      // A successful poll says nothing about the action that failed, so it only
+      // clears a message it put there itself. Otherwise the core's field-specific
+      // refusal would vanish 2.5 seconds later, while it is still being read.
+      if (foreground || pollFailed.current) {
+        pollFailed.current = false;
+        setError("");
+      }
     } catch (loadError) {
+      pollFailed.current = !foreground;
       setError(loadError instanceof Error ? loadError.message : String(loadError));
     } finally {
       setLoading(false);
@@ -2628,19 +2899,34 @@ function RatsView() {
   }, [acceptState]);
 
   useEffect(() => {
-    void load(true);
+    // Paint from the scan this session already did, then scan for real. Opening
+    // the page is instant, and the poll below always scans: whether the disk
+    // changed is the only question a poll is asking.
+    void (async () => {
+      try {
+        const response = await window.reverie.request("ratsStateCached", {});
+        acceptState(response.rats);
+        setLoading(false);
+      } catch {
+        // An older core has no cached view. The scan is the answer either way.
+      }
+      await load(true);
+    })();
     const timer = window.setInterval(() => void load(false), 2500);
     return () => window.clearInterval(timer);
-  }, [load]);
+  }, [acceptState, load]);
 
-  const registerProvider = useCallback(async () => {
-    setBusy("add");
+  const registerProvider = useCallback(async (providerId: string) => {
+    const target = providerId.trim();
+    if (!target) {
+      setError("No supported RATS provider is registered.");
+      return;
+    }
+    setBusy(`add:${target}`);
     try {
-      const providerId = state?.supportedProviders[0]?.providerId;
-      if (!providerId) throw new Error("No supported RATS provider is registered.");
-      const executable = await window.reverie.selectRatsProvider(providerId);
+      const executable = await window.reverie.selectRatsProvider(target);
       if (executable) {
-        const response = await window.reverie.request("ratsRegisterProvider", { providerId, executable });
+        const response = await window.reverie.request("ratsRegisterProvider", { providerId: target, executable });
         acceptState(response.rats);
       }
       setError("");
@@ -2649,7 +2935,7 @@ function RatsView() {
     } finally {
       setBusy("");
     }
-  }, [acceptState, state?.supportedProviders]);
+  }, [acceptState]);
 
   const setEnabled = useCallback(async (service: RatsServiceRecord, enabled: boolean, permissions?: RatsPermission[]) => {
     setBusy(service.serviceId);
@@ -2707,6 +2993,68 @@ function RatsView() {
     }
   }, [acceptState]);
 
+  const confirmService = useCallback(async (service: RatsServiceRecord) => {
+    if (confirmed[service.serviceId]) {
+      setConfirmed((current) => ({ ...current, [service.serviceId]: false }));
+      return;
+    }
+    // Detection is a fresh scan, not a read of what is already on screen:
+    // confirming a service against a state view from 2 seconds ago would report
+    // on a descriptor that may no longer exist.
+    setBusy(`confirm:${service.serviceId}`);
+    try {
+      const response = await window.reverie.request("ratsState", {});
+      acceptState(response.rats);
+      setConfirmed((current) => ({ ...current, [service.serviceId]: true }));
+      setError("");
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : String(actionError));
+    } finally {
+      setBusy("");
+    }
+  }, [acceptState, confirmed]);
+
+  const defineCustomProvider = useCallback(async () => {
+    setBusy("define");
+    try {
+      const response = await window.reverie.request("ratsDefineCustomProvider", {
+        definition: ratsProviderDefinition(draft),
+      });
+      acceptState(response.rats);
+      setDraft(EMPTY_RATS_PROVIDER_DRAFT);
+      setDraftOpen(false);
+      setError("");
+    } catch (actionError) {
+      // The draft is deliberately kept: the core names exactly which field it
+      // refused, and clearing the form would make that message unusable.
+      setError(actionError instanceof Error ? actionError.message : String(actionError));
+    } finally {
+      setBusy("");
+    }
+  }, [acceptState, draft]);
+
+  const removeCustomProvider = useCallback(async (providerId: string) => {
+    setBusy(`remove:${providerId}`);
+    try {
+      const response = await window.reverie.request("ratsRemoveCustomProvider", { providerId });
+      acceptState(response.rats);
+      setError("");
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : String(actionError));
+    } finally {
+      setBusy("");
+    }
+  }, [acceptState]);
+
+  const toggleDraftPermission = useCallback((permission: RatsPermission) => {
+    setDraft((current) => {
+      const next = current.permissionClasses.includes(permission)
+        ? current.permissionClasses.filter((item) => item !== permission)
+        : [...current.permissionClasses, permission];
+      return { ...current, permissionClasses: (next.length ? next : ["read"]) as RatsPermission[] };
+    });
+  }, []);
+
   const connected = state?.services.filter((service) => service.connection === "connected").length ?? 0;
   const available = state?.services.filter((service) => service.connection !== "unreachable").length ?? 0;
   const toolCount = state?.services.reduce((total, service) => total + service.tools.length, 0) ?? 0;
@@ -2716,6 +3064,20 @@ function RatsView() {
       service.providerId.toLowerCase() === selection.providerId.toLowerCase()
       && service.executable.toLowerCase() === selection.executable.toLowerCase()
     )) ?? [];
+  const supportedProviders = state?.supportedProviders ?? [];
+  const customProviders = state?.customProviders ?? [];
+  // A core that never published the schema does not have the declarative layer,
+  // so the define surface is hidden rather than offered and then refused.
+  const customProvidersSupported = Boolean(state?.customProviderSchema);
+  const customProviderLimit = state?.customProviderLimit ?? 0;
+  const permissionOptionsFor = (providerId: string): RatsPermission[] => {
+    const declared = supportedProviders.find((provider) => provider.providerId === providerId)?.permissions ?? [];
+    // Narrowed to the classes this build can render, then widened back to the
+    // full list if that leaves nothing: an empty permission row would make an
+    // enabled service look ungrantable.
+    const known = declared.filter((permission) => RATS_PERMISSION_OPTIONS.includes(permission));
+    return known.length ? known : RATS_PERMISSION_OPTIONS;
+  };
 
   return (
     <div className="page-scroll rats-page">
@@ -2723,7 +3085,7 @@ function RatsView() {
         icon={<Database size={20} />}
         title="RATS"
         description={t("RATS 支持多个经过批准的 Reverie/Rilance 提供者；当前主动选择列表中只有 Reverie Engine 已实现并验证。")}
-        action={<div className="header-action-row"><button type="button" className="secondary-button" aria-expanded={logsOpen} aria-controls="rats-diagnostic-panel" onClick={() => setLogsOpen((open) => !open)}><FileText size={14} />{t("RTP 日志")}</button><button type="button" className="secondary-button" onClick={() => void load(true)} disabled={loading}><RefreshCw className={loading ? "spin" : ""} size={14} />{t("刷新")}</button><button type="button" className="primary-button" onClick={() => void registerProvider()} disabled={busy === "add"}><Plus size={14} />{t("登记提供者应用")}</button></div>}
+        action={<div className="header-action-row">{supportedProviders.length > 1 && <select aria-label={t("选择要登记的提供者")} value={registerTarget} onChange={(event) => setRegisterTarget(event.target.value)}>{supportedProviders.map((provider) => <option key={provider.providerId} value={provider.providerId}>{provider.providerId}</option>)}</select>}<button type="button" className="secondary-button" aria-expanded={logsOpen} aria-controls="rats-diagnostic-panel" onClick={() => setLogsOpen((open) => !open)}><FileText size={14} />{t("RTP 日志")}</button><button type="button" className="secondary-button" onClick={() => void load(true)} disabled={loading}><RefreshCw className={loading ? "spin" : ""} size={14} />{t("刷新")}</button><button type="button" className="primary-button" onClick={() => void registerProvider(registerTarget)} disabled={busy === `add:${registerTarget}`}><Plus size={14} />{t("登记提供者应用")}</button></div>}
       />
       <div className="tool-overview rats-overview">
         <div><Globe size={17} /><span>{t("发现服务")}<strong>{state?.services.length ?? 0}</strong></span></div>
@@ -2780,12 +3142,25 @@ function RatsView() {
                   <div className="rats-permissions">
                     <div><strong>{t("会话权限")}</strong><span>{t("修改已启用服务的权限会立即轮换会话令牌。")}</span></div>
                     <div className="permission-chips">
-                      {RATS_PERMISSION_OPTIONS.map((permission) => (
+                      {permissionOptionsFor(service.providerId).map((permission) => (
                         <button type="button" key={permission} className={selectedPermissions.includes(permission) ? "active" : ""} onClick={() => togglePermission(service, permission)} disabled={busy === service.serviceId}>{permission}</button>
                       ))}
                     </div>
                   </div>
                   {service.error && <div className="rats-inline-error"><AlertCircle size={14} />{service.error}</div>}
+                  <div className="rats-catalog-heading">
+                    <div><strong>{t("检测与确认")}</strong><span>{t("重新扫描发现目录，再逐项核对这个服务是否真的可用。")}</span></div>
+                    <button type="button" className="secondary-button" aria-expanded={Boolean(confirmed[service.serviceId])} onClick={() => void confirmService(service)} disabled={busy === `confirm:${service.serviceId}`}>{busy === `confirm:${service.serviceId}` ? <RefreshCw className="spin" size={13} /> : <ShieldCheck size={13} />}{t("确认服务")}</button>
+                  </div>
+                  {confirmed[service.serviceId] && <div className="rats-confirm-list">
+                    {ratsConfirmationChecks(service, state?.protocol ?? "").map((check) => (
+                      <div className={`rats-confirm-row ${check.passed ? "passed" : "failed"}`} key={check.label}>
+                        {check.passed ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
+                        <strong>{check.label}</strong>
+                        <code title={check.detail}>{check.detail || "—"}</code>
+                      </div>
+                    ))}
+                  </div>}
                   <div className="rats-catalog-heading"><div><strong>{t("RTP 紧凑目录")}</strong><span>{service.tools.length ? t("按需展开定义，不把全部 schema 注入提示词。") : t(service.enabled ? "正在等待工具目录" : "启用服务后读取工具目录")}</span></div><span>{service.tools.length}/{service.nativeToolCount}</span></div>
                   {service.tools.length > 0 && <div className="rats-tool-list">
                     {service.tools.map((tool) => {
@@ -2803,8 +3178,63 @@ function RatsView() {
                 </section>
               );
             })}
-            {state?.services.length === 0 && <div className="empty-panel rats-empty"><Database size={28} /><strong>{t("尚未发现正在运行的 RATS 服务")}</strong><span>{t("启动已支持的提供者应用，或登记其可执行文件以检查固定的本地服务目录；拒绝原因可在 RTP 日志中审查。")}</span><button type="button" className="primary-button" onClick={() => void registerProvider()}><Plus size={14} />{t("登记提供者应用")}</button></div>}
+            {state?.services.length === 0 && <div className="empty-panel rats-empty"><Database size={28} /><strong>{t("尚未发现正在运行的 RATS 服务")}</strong><span>{t("启动已支持的提供者应用，或登记其可执行文件以检查固定的本地服务目录；拒绝原因可在 RTP 日志中审查。")}</span><button type="button" className="primary-button" onClick={() => void registerProvider(registerTarget)}><Plus size={14} />{t("登记提供者应用")}</button></div>}
           </div>
+          {supportedProviders.length > 0 && <section className="rats-provider-panel">
+            <div className="rats-section-heading"><div><h2>{t("可识别的提供者")}</h2><p>{t("内置提供者由本客户端编译时固定；自定义提供者读自设置文件，二者都不能互相覆盖。")}</p></div><span>{supportedProviders.length}</span></div>
+            {supportedProviders.map((provider) => <div className="rats-provider-row" key={provider.providerId}>
+              <Plug size={15} />
+              <div>
+                <strong>{provider.providerId}</strong>
+                <span>{[provider.label || provider.product, ...(provider.serviceKinds ?? [provider.serviceKind])].filter(Boolean).join(" · ")}</span>
+              </div>
+              <span className="rats-provider-origin">{provider.custom ? t("自定义") : t("内置")}</span>
+              <button type="button" aria-label={t("rats.registerProvider", { provider: provider.providerId })} onClick={() => void registerProvider(provider.providerId)} disabled={busy === `add:${provider.providerId}`}><Plus size={14} /></button>
+            </div>)}
+          </section>}
+          {customProvidersSupported && <section className="rats-custom-panel">
+            <div className="rats-section-heading"><div><h2>{t("自定义提供者")}</h2><p>{t("声明一个新的 RATS 提供者：定义只是数据，校验规则由核心据此构建。发现目录是相对于该提供者可执行文件所在目录的路径。")}</p></div><span>{customProviders.length}/{customProviderLimit}</span></div>
+            {customProviders.map((definition) => <div className="rats-custom-row" key={definition.providerId}>
+              <Plug size={15} />
+              <div>
+                <strong>{definition.providerId}</strong>
+                <span>{[definition.label, definition.serviceKinds.join("/"), definition.discoveryRoot.join("/"), definition.executableIdentity].filter(Boolean).join(" · ")}</span>
+              </div>
+              <code>{definition.permissionClasses.join(" · ")}</code>
+              <button type="button" aria-label={t("rats.removeCustomProvider", { provider: definition.providerId })} onClick={() => void removeCustomProvider(definition.providerId)} disabled={busy === `remove:${definition.providerId}`}><Trash2 size={14} /></button>
+            </div>)}
+            {customProviders.length === 0 && <div className="rats-custom-empty">{t("还没有自定义提供者。内置提供者的 ID 是保留的，不能被定义覆盖。")}</div>}
+            <div className="rats-custom-actions">
+              <button type="button" className="secondary-button" aria-expanded={draftOpen} aria-controls="rats-provider-draft" onClick={() => setDraftOpen((open) => !open)} disabled={customProviders.length >= customProviderLimit && !draftOpen}><Plus size={14} />{draftOpen ? t("收起定义表单") : t("定义新提供者")}</button>
+              {customProviders.length >= customProviderLimit && <span>{t("已达到自定义提供者数量上限。")}</span>}
+            </div>
+            {draftOpen && <form id="rats-provider-draft" className="rats-custom-form" onSubmit={(event) => { event.preventDefault(); void defineCustomProvider(); }}>
+              <div className="form-grid">
+                <label><span>{t("提供者 ID")}</span><input value={draft.providerId} onChange={(event) => setDraft((current) => ({ ...current, providerId: event.target.value }))} placeholder="acme.toolhost" /></label>
+                <label><span>{t("产品名称")}</span><input value={draft.product} onChange={(event) => setDraft((current) => ({ ...current, product: event.target.value }))} placeholder="Acme Tool Host" /></label>
+                <label><span>{t("显示名称")}</span><input value={draft.label} onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))} placeholder={t("留空则沿用产品名称")} /></label>
+                <label><span>{t("服务种类")}</span><input value={draft.serviceKinds} onChange={(event) => setDraft((current) => ({ ...current, serviceKinds: event.target.value }))} placeholder="editor, headless" /></label>
+                <label><span>{t("工具标签")}</span><input value={draft.toolTags} onChange={(event) => setDraft((current) => ({ ...current, toolTags: event.target.value }))} placeholder={t("可留空")} /></label>
+                <label><span>{t("发现目录（相对）")}</span><input value={draft.discoveryRoot} onChange={(event) => setDraft((current) => ({ ...current, discoveryRoot: event.target.value }))} placeholder={RATS_DEFAULT_DISCOVERY_ROOT} /></label>
+                <label><span>{t("可执行文件校验方式")}</span><select value={draft.executableIdentity} onChange={(event) => setDraft((current) => ({ ...current, executableIdentity: event.target.value === "product_name" ? "product_name" : "path" }))}><option value="path">{t("path：只校验路径存在")}</option><option value="product_name">{t("product_name：校验文件的产品名资源")}</option></select></label>
+                {draft.executableIdentity === "product_name" && <label><span>{t("允许的产品名")}</span><input value={draft.executableProductNames} onChange={(event) => setDraft((current) => ({ ...current, executableProductNames: event.target.value }))} placeholder="Acme Tool Host" /></label>}
+                <label className="wide"><span>{t("选择失败时的提示")}</span><input value={draft.executableError} onChange={(event) => setDraft((current) => ({ ...current, executableError: event.target.value }))} placeholder={t("留空则由核心生成")} /></label>
+              </div>
+              <div className="rats-draft-permissions">
+                <div><strong>{t("可授予的权限类别")}</strong><span>{t("这里声明的是这个提供者最多能被授予什么，而不是现在授予了什么。")}</span></div>
+                <div className="permission-chips">
+                  {RATS_PERMISSION_OPTIONS.map((permission) => (
+                    <button type="button" key={permission} className={draft.permissionClasses.includes(permission) ? "active" : ""} onClick={() => toggleDraftPermission(permission)}>{permission}</button>
+                  ))}
+                </div>
+              </div>
+              <details className="rats-draft-preview"><summary>{t("查看将要提交的定义")}</summary><pre>{JSON.stringify(ratsProviderDefinition(draft), null, 2)}</pre></details>
+              <div className="rats-custom-actions">
+                <button type="button" className="secondary-button" onClick={() => { setDraft(EMPTY_RATS_PROVIDER_DRAFT); setDraftOpen(false); }}>{t("取消")}</button>
+                <button type="submit" className="primary-button" disabled={busy === "define" || !ratsDraftIsSendable(draft)}>{busy === "define" ? <RefreshCw className="spin" size={13} /> : <Check size={13} />}{t("保存定义")}</button>
+              </div>
+            </form>}
+          </section>}
           {offlineSelections.length > 0 && <section className="rats-offline-panel"><div className="rats-section-heading"><div><h2>{t("已保存但离线")}</h2><p>{t("这些提供者下次启动时会自动建立已授权会话。")}</p></div></div>{offlineSelections.map((selection) => <div className="rats-offline-row" key={`${selection.providerId}:${selection.executable}`}><Database size={15} /><div><strong>{selection.providerId}</strong><code>{selection.executable}</code></div><span>{selection.permissions.join(" · ")}</span></div>)}</section>}
           {state && state.configuredDiscoveryRoots.length > 0 && <section className="rats-roots-panel"><div className="rats-section-heading"><div><h2>{t("已登记发现目录")}</h2><p>{t("设置实时保存在 Reverie CLI 可执行文件旁的 .reverie/rats 目录中。")}</p></div><code title={state.statePath}>{state.statePath}</code></div>{state.configuredDiscoveryRoots.map((root) => <div className="rats-root-row" key={root}><Folder size={15} /><code>{root}</code><button type="button" aria-label={t("移除发现目录")} onClick={() => void removeRoot(root)} disabled={busy === root}><X size={14} /></button></div>)}</section>}
         </>
@@ -3045,6 +3475,87 @@ function taskStatusLabel(task: RatsTaskRecord, status: Record<string, unknown>, 
   return t("已完成");
 }
 
+/** One provider's live standing, with the worst-case reason it is not usable. */
+type RtpProviderStatus = {
+  providerId: string;
+  label: string;
+  kinds: string;
+  origin: "builtin" | "custom" | "unlisted";
+  authorized: boolean;
+  services: RatsServiceRecord[];
+  connected: number;
+  tools: number;
+  tasks: number;
+  connection: "connected" | "available" | "unreachable" | "absent";
+  error: string;
+};
+
+/**
+ * Every provider this page should report on, whether or not it is running.
+ *
+ * Built from the three lists the core publishes rather than from a hard-coded
+ * id: `supportedProviders` covers compiled-in and user-declared definitions,
+ * the enabled selections cover ones authorized in an earlier run that have not
+ * come back up, and `services` covers anything live that the other two somehow
+ * do not name — an older core, or a definition deleted while its service ran.
+ */
+function rtpProviderStatuses(state: RatsState | null, tasks: RatsTaskRecord[]): RtpProviderStatus[] {
+  if (!state) return [];
+  const services = state.services;
+  const authorized = new Set([
+    ...(state.enabledProviders ?? []).map((selection) => selection.providerId),
+    ...(state.enabledProviders === undefined && state.enabledEngines?.length ? [RATS_BUILTIN_PROVIDER_ID] : []),
+  ]);
+  const build = (providerId: string, label: string, kinds: string[], origin: RtpProviderStatus["origin"]): RtpProviderStatus => {
+    const owned = services.filter((service) => service.providerId === providerId);
+    const connection = owned.some((service) => service.connection === "connected")
+      ? "connected" as const
+      : owned.some((service) => service.connection === "available")
+        ? "available" as const
+        : owned.length ? "unreachable" as const : "absent" as const;
+    return {
+      providerId,
+      label: label || providerId,
+      kinds: kinds.filter(Boolean).join(" · "),
+      origin,
+      authorized: authorized.has(providerId),
+      services: owned,
+      connected: owned.filter((service) => service.connection === "connected" && service.sessionActive).length,
+      tools: owned.reduce((total, service) => total + service.tools.length, 0),
+      tasks: tasks.filter((task) => task.provider_id === providerId).length,
+      connection,
+      error: owned.map((service) => service.error).find(Boolean) ?? "",
+    };
+  };
+  const rows = state.supportedProviders.map((provider) => build(
+    provider.providerId,
+    provider.label || provider.product,
+    provider.serviceKinds ?? [provider.serviceKind],
+    provider.custom ? "custom" : "builtin",
+  ));
+  const listed = new Set(rows.map((row) => row.providerId));
+  for (const providerId of [...authorized, ...services.map((service) => service.providerId)]) {
+    if (listed.has(providerId)) continue;
+    listed.add(providerId);
+    const service = services.find((item) => item.providerId === providerId);
+    rows.push(build(providerId, service?.product ?? providerId, service ? [service.serviceKind] : [], "unlisted"));
+  }
+  // Live first, then anything the user authorized, then the rest by id, so the
+  // panel opens on whatever is actually answering RTP right now.
+  const rank = { connected: 0, available: 1, unreachable: 2, absent: 3 };
+  return rows.sort((left, right) =>
+    rank[left.connection] - rank[right.connection]
+    || Number(right.authorized) - Number(left.authorized)
+    || left.providerId.localeCompare(right.providerId));
+}
+
+function rtpProviderStatusLabel(row: RtpProviderStatus, t: (key: string) => string): string {
+  if (row.connection === "connected") return row.connected ? t("已连接") : t("已握手");
+  if (row.connection === "available") return t("可用");
+  if (row.connection === "unreachable") return t("不可达");
+  return row.authorized ? t("已授权待启动") : t("未发现服务");
+}
+
 function RtpTasksView() {
   const { t } = useI18n();
   const [state, setState] = useState<RatsState | null>(null);
@@ -3061,6 +3572,14 @@ function RtpTasksView() {
   const logHistory = useRef<Record<string, string>>({});
   const logCursors = useRef<Record<string, number>>({});
   const cancelledTasks = useRef(new Set<string>());
+  /**
+   * Provider the task list is narrowed to, or `"all"`.
+   *
+   * Kept in a ref as well because `load` reads it while choosing which task to
+   * select, and `load` is rebuilt only when its own callbacks change.
+   */
+  const [providerFilter, setProviderFilter] = useState("all");
+  const providerFilterRef = useRef("all");
   const selectTask = useCallback((key: string) => {
     selectedKeyRef.current = key;
     setSelectedKey(key);
@@ -3108,9 +3627,16 @@ function RtpTasksView() {
       );
       setTasks(nextTasks);
       const currentKey = selectedKeyRef.current;
-      const nextKey = currentKey && nextTasks.some((task) => taskKey(task) === currentKey)
+      // Selection follows the visible list: a task hidden by the provider filter
+      // must not stay selected, or the detail pane would describe a row the user
+      // cannot see.
+      const filter = providerFilterRef.current;
+      const candidates = filter === "all"
+        ? nextTasks
+        : nextTasks.filter((task) => task.provider_id === filter);
+      const nextKey = currentKey && candidates.some((task) => taskKey(task) === currentKey)
         ? currentKey
-        : nextTasks[0] ? taskKey(nextTasks[0]) : "";
+        : candidates[0] ? taskKey(candidates[0]) : "";
       selectTask(nextKey);
       if (!nextKey || !nextTasks.some((task) => taskKey(task) === nextKey)) {
         setDetail(null);
@@ -3178,7 +3704,20 @@ function RtpTasksView() {
     };
   }, [load]);
 
-  const selectedTask = tasks.find((task) => taskKey(task) === selectedKey) ?? null;
+  const providerRows = useMemo(() => rtpProviderStatuses(state, tasks), [state, tasks]);
+  const visibleTasks = useMemo(
+    () => providerFilter === "all" ? tasks : tasks.filter((task) => task.provider_id === providerFilter),
+    [providerFilter, tasks],
+  );
+  const chooseProviderFilter = useCallback((providerId: string) => {
+    providerFilterRef.current = providerId;
+    setProviderFilter(providerId);
+    selectTask("");
+    setDetail(null);
+    void load(true);
+  }, [load, selectTask]);
+
+  const selectedTask = visibleTasks.find((task) => taskKey(task) === selectedKey) ?? null;
   const status = detail?.status ?? recordValue(selectedTask?.status);
   const output = recordValue(status.output);
   const progressValue = typeof status.progress === "number" ? status.progress : typeof output.progress === "number" ? output.progress : null;
@@ -3186,6 +3725,8 @@ function RtpTasksView() {
     ? Math.max(0, Math.min(1, progressValue)) * 100
     : null;
   const connected = state?.services.filter((service) => service.connection === "connected" && service.sessionActive).length ?? 0;
+  const liveProviders = providerRows.filter((row) => row.connected > 0).length;
+  const activeTasks = visibleTasks.filter((task) => taskRunning(task, recordValue(task.status))).length;
 
   const cancel = useCallback(async () => {
     if (!selectedTask) return;
@@ -3212,32 +3753,77 @@ function RtpTasksView() {
       <PageHeader
         icon={<Clock3 size={20} />}
         title={t("RTP 任务")}
-        description={t("实时查看已授权 Reverie Engine 任务的状态、事件游标、日志和取消结果。")}
-        action={<button type="button" className="secondary-button" onClick={() => void load(true)} disabled={loading}><RefreshCw className={loading ? "spin" : ""} size={14} />{t("刷新")}</button>}
+        description={t("实时查看每个已登记 RATS 提供者的连接状态，以及它们的任务、事件游标、日志和取消结果。")}
+        action={<div className="header-action-row">
+          {providerRows.length > 1 && <select aria-label={t("按提供者筛选任务")} value={providerFilter} onChange={(event) => chooseProviderFilter(event.target.value)}>
+            <option value="all">{t("全部提供者")}</option>
+            {providerRows.map((row) => <option key={row.providerId} value={row.providerId}>{row.providerId}</option>)}
+          </select>}
+          <button type="button" className="secondary-button" onClick={() => void load(true)} disabled={loading}><RefreshCw className={loading ? "spin" : ""} size={14} />{t("刷新")}</button>
+        </div>}
       />
       <div className="tool-overview rats-task-overview">
+        <div><Plug size={17} /><span>{t("在线提供者")}<strong>{liveProviders}/{providerRows.length}</strong></span></div>
         <div><Activity size={17} /><span>{t("已连接服务")}<strong>{connected}</strong></span></div>
-        <div><Clock3 size={17} /><span>{t("活动任务")}<strong>{tasks.filter((task) => taskRunning(task, recordValue(task.status))).length}</strong></span></div>
+        <div><Clock3 size={17} /><span>{t("活动任务")}<strong>{activeTasks}</strong></span></div>
         <div><FileText size={17} /><span>{t("事件记录")}<strong>{detail?.events.length ?? 0}</strong></span></div>
       </div>
       {error && <div className="page-loading error"><AlertCircle size={18} />{error}</div>}
+      {/* Always rendered, connected or not: seeing that an authorized provider is
+          offline is the whole point of a per-provider status board. */}
+      <section className="rtp-provider-panel" aria-labelledby="rtp-provider-title">
+        <div className="rats-task-panel-heading">
+          <div><h2 id="rtp-provider-title">{t("提供者实时状态")}</h2><p>{t("列出全部已登记提供者（内置与自定义），每 1.5 秒刷新一次连接、会话与任务数。")}</p></div>
+          <span>{liveProviders}/{providerRows.length}</span>
+        </div>
+        <div className="rtp-provider-list">
+          {providerRows.map((row) => (
+            <button
+              type="button"
+              key={row.providerId}
+              className={`rtp-provider-row ${row.connection} ${providerFilter === row.providerId ? "active" : ""}`}
+              aria-pressed={providerFilter === row.providerId}
+              onClick={() => chooseProviderFilter(providerFilter === row.providerId ? "all" : row.providerId)}
+            >
+              <span className={`rats-task-dot ${row.connected ? "running" : row.connection === "absent" ? "" : "done"}`} />
+              <span className="rtp-provider-identity">
+                <strong>{row.providerId}</strong>
+                <small>{[row.label, row.kinds].filter(Boolean).join(" · ") || t("暂无说明")}</small>
+              </span>
+              <span className="rtp-provider-origin">{row.origin === "builtin" ? t("内置") : row.origin === "custom" ? t("自定义") : t("未登记")}</span>
+              <span className="rtp-provider-metrics">
+                <code>{t("rtp.providerServices", { connected: row.connected, total: row.services.length })}</code>
+                <code>{t("rtp.providerTools", { count: row.tools })}</code>
+                <code>{t("rtp.providerTasks", { count: row.tasks })}</code>
+              </span>
+              <span className={`rats-status ${row.connection === "absent" ? "" : row.connection}`}>{rtpProviderStatusLabel(row, t)}</span>
+            </button>
+          ))}
+          {providerRows.length === 0 && <div className="rats-task-empty-inline">{t("核心还没有报告任何 RATS 提供者。")}</div>}
+        </div>
+        {providerRows.some((row) => row.error) && <div className="rtp-provider-errors">
+          {providerRows.filter((row) => row.error).map((row) => (
+            <div className="rats-inline-error" key={row.providerId}><AlertCircle size={14} />{row.providerId}: {row.error}</div>
+          ))}
+        </div>}
+      </section>
       {connected === 0 && !loading ? (
-        <div className="empty-panel rats-task-empty"><ShieldCheck size={28} /><strong>{t("尚未启用 RTP 服务")}</strong><span>{t("先在 RATS 页面显式启用 Reverie Engine，运行中的任务会在这里自动出现。")}</span></div>
+        <div className="empty-panel rats-task-empty"><ShieldCheck size={28} /><strong>{t("尚未启用 RTP 服务")}</strong><span>{t("在 RATS 页面启用上面任意一个提供者的服务，它启动的长任务就会自动出现在这里。")}</span></div>
       ) : (
         <div className="rats-task-layout">
           <section className="rats-task-list-panel" aria-labelledby="rats-task-list-title">
-            <div className="rats-task-panel-heading"><div><h2 id="rats-task-list-title">{t("任务列表")}</h2><p>{t("每 1.5 秒从已连接服务同步状态")}</p></div><span>{tasks.length}</span></div>
+            <div className="rats-task-panel-heading"><div><h2 id="rats-task-list-title">{t("任务列表")}</h2><p>{providerFilter === "all" ? t("每 1.5 秒从全部已连接服务同步状态") : t("rtp.taskListFiltered", { provider: providerFilter })}</p></div><span>{visibleTasks.length}</span></div>
             <div className="rats-task-list">
-              {tasks.map((task) => {
+              {visibleTasks.map((task) => {
                 const itemStatus = recordValue(task.status);
                 const itemKey = taskKey(task);
                 return <button type="button" className={`rats-task-row ${itemKey === selectedKey ? "active" : ""}`} key={itemKey} onClick={() => { selectTask(itemKey); setDetail(null); void load(true); }}>
                   <span className={`rats-task-dot ${taskRunning(task, itemStatus) ? "running" : "done"}`} />
-                  <span className="rats-task-row-main"><strong>{task.tool || t("原生任务")}</strong><code>{task.task_id}</code></span>
+                  <span className="rats-task-row-main"><strong>{task.tool || t("原生任务")}</strong><code><span className="rats-task-row-provider">{task.provider_id}</span>{task.task_id}</code></span>
                   <span className={`rats-status ${taskRunning(task, itemStatus) ? "connected" : "available"}`}>{taskStatusLabel(task, itemStatus, t)}</span>
                 </button>;
               })}
-              {!tasks.length && <div className="rats-task-list-empty"><Clock3 size={20} /><span>{t("暂无活动任务")}</span><small>{t("由 AI 或工具调用启动的长任务会自动同步到这里。")}</small></div>}
+              {!visibleTasks.length && <div className="rats-task-list-empty"><Clock3 size={20} /><span>{providerFilter === "all" ? t("暂无活动任务") : t("该提供者暂无任务")}</span><small>{t("由 AI 或工具调用启动的长任务会自动同步到这里。")}</small></div>}
             </div>
           </section>
           <section className="rats-task-detail" aria-labelledby="rats-task-detail-title">
@@ -3332,6 +3918,14 @@ export default function App() {
     compactViewport,
     sidebarViewportOverride,
   );
+  const shellRef = useRef<HTMLDivElement>(null);
+  /**
+   * Width being dragged right now, which deliberately bypasses the preference
+   * round-trip: persisting every pointer frame would queue an IPC call per
+   * frame, and the reply would arrive behind the cursor and fight it.
+   */
+  const [paneWidthDraft, setPaneWidthDraft] = useState<{ sidebar?: number; inspector?: number }>({});
+  const paneResizing = paneWidthDraft.sidebar !== undefined || paneWidthDraft.inspector !== undefined;
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [sessionSearchOpen, setSessionSearchOpen] = useState(false);
@@ -3464,6 +4058,23 @@ export default function App() {
       toast(error instanceof Error ? error.message : String(error), "error");
     });
   }, [toast]);
+
+  const sidebarWidth = paneWidthDraft.sidebar ?? uiPreferences.sidebarWidth;
+  const inspectorWidth = paneWidthDraft.inspector ?? uiPreferences.inspectorWidth;
+  const commitSidebarWidth = useCallback((width: number) => {
+    setPaneWidthDraft((current) => ({ ...current, sidebar: undefined }));
+    updateUiPreferences({ sidebarWidth: width });
+  }, [updateUiPreferences]);
+  const commitInspectorWidth = useCallback((width: number) => {
+    setPaneWidthDraft((current) => ({ ...current, inspector: undefined }));
+    updateUiPreferences({ inspectorWidth: width });
+  }, [updateUiPreferences]);
+  const previewSidebarWidth = useCallback((width: number) => {
+    setPaneWidthDraft((current) => (current.sidebar === width ? current : { ...current, sidebar: width }));
+  }, []);
+  const previewInspectorWidth = useCallback((width: number) => {
+    setPaneWidthDraft((current) => (current.inspector === width ? current : { ...current, inspector: width }));
+  }, []);
 
   const selectBackground = useCallback(async () => {
     try {
@@ -4413,7 +5024,11 @@ export default function App() {
 
   return (
     <I18nProvider language={uiPreferences.language}>
-    <div className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${uiPreferences.inspectorOpen ? "with-inspector" : ""}`}>
+    <div
+      ref={shellRef}
+      className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${uiPreferences.inspectorOpen ? "with-inspector" : ""} ${paneResizing ? "pane-resizing" : ""}`}
+      style={{ "--sidebar-width": `${sidebarWidth}px`, "--inspector-width": `${inspectorWidth}px` } as CSSProperties}
+    >
       <Sidebar state={state} view={view} setView={setView} activeSessionId={activeSessionId} openSession={(id) => void openSession(id)} newSession={() => void createSession()} sessionBusy={sessionBusy} selectWorkspace={() => void selectWorkspace()} switchWorkspace={(projectRoot) => void switchWorkspace(projectRoot)} openSearch={() => setSessionSearchOpen(true)} preferences={uiPreferences} toggleSidebar={toggleSidebar} renameSession={(target) => setRenameSessionTarget({ id: target.id, name: target.name })} toggleArchive={toggleSessionArchive} deleteSession={deleteSession} deleteArchivedSessions={deleteArchivedSessions} deleteProject={deleteProject} />
       <main className="main-area">
         <Topbar state={state} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} openModelPicker={openModelPicker} selectReasoning={(value) => void selectReasoning(value)} setMode={(mode) => void updateSetting("mode", mode)} inspectorOpen={uiPreferences.inspectorOpen} toggleInspector={() => updateUiPreferences({ inspectorOpen: !uiPreferences.inspectorOpen })} openCommands={() => setCommandOpen(true)} theme={theme} setTheme={changeTheme} />
@@ -4422,6 +5037,32 @@ export default function App() {
       {/* Always mounted so the pane can transition out instead of vanishing; the
           `with-inspector` class alone decides whether it is on screen. */}
       <Inspector state={state} liveTurn={liveTurn} indexWorkspace={() => void indexWorkspace()} compactContext={() => void compactContext()} compactDisabled={running || sessionBusy} hidden={!uiPreferences.inspectorOpen} />
+      {/* Handles live on the shell, not inside the panes: both panes clip their
+          overflow, so a child handle could not straddle the seam it drags. */}
+      <PaneResizer
+        edge="left"
+        label={t("调整会话侧栏宽度")}
+        width={sidebarWidth}
+        minimum={SIDEBAR_MIN_WIDTH}
+        maximum={SIDEBAR_MAX_WIDTH}
+        fallback={SIDEBAR_DEFAULT_WIDTH}
+        shell={shellRef}
+        opposite={uiPreferences.inspectorOpen ? inspectorWidth : 0}
+        preview={previewSidebarWidth}
+        commit={commitSidebarWidth}
+      />
+      <PaneResizer
+        edge="right"
+        label={t("调整检查器宽度")}
+        width={inspectorWidth}
+        minimum={INSPECTOR_MIN_WIDTH}
+        maximum={INSPECTOR_MAX_WIDTH}
+        fallback={INSPECTOR_DEFAULT_WIDTH}
+        shell={shellRef}
+        opposite={sidebarCollapsed ? 0 : sidebarWidth}
+        preview={previewInspectorWidth}
+        commit={commitInspectorWidth}
+      />
       {modelPickerOpen && state.workspace.mode !== "computer-controller" && <ModelPicker state={state} onSelect={(source, model, reasoning) => void selectModel(source, model, reasoning)} close={() => setModelPickerOpen(false)} />}
       {commandOpen && <CommandPalette commands={state.commands.items} close={() => setCommandOpen(false)} choose={chooseCommand} />}
       {sessionSearchOpen && <SessionSearch close={() => setSessionSearchOpen(false)} openSession={(id) => void openSession(id)} />}

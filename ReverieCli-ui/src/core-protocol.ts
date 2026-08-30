@@ -13,6 +13,7 @@ import type {
   SubagentRunLog,
   SubagentsState,
   ToolRecord,
+  RatsCustomProviderDefinition,
   RatsState,
   WorkspaceState,
 } from "./types";
@@ -47,6 +48,11 @@ export interface WorkspaceMention extends Record<string, unknown> {
 interface CoreRequestMap {
   listTools: { payload: { mode: string }; response: Envelope<"tools", { mode: string; tools: ToolRecord[] }> };
   ratsState: { payload: EmptyPayload; response: Envelope<"rats.state", { rats: RatsState }> };
+  /** The last scan, without walking the discovery roots again. `ratsState` is the rescan. */
+  ratsStateCached: { payload: EmptyPayload; response: Envelope<"rats.state", { rats: RatsState }> };
+  ratsCustomProviders: { payload: EmptyPayload; response: Envelope<"rats.custom_providers", { schema: string; providers: RatsCustomProviderDefinition[] }> };
+  ratsDefineCustomProvider: { payload: { definition: Record<string, unknown> }; response: Envelope<"rats.state", { rats: RatsState }> };
+  ratsRemoveCustomProvider: { payload: { providerId: string }; response: Envelope<"rats.state", { rats: RatsState }> };
   ratsRegisterProvider: { payload: { providerId: string; executable: string }; response: Envelope<"rats.state", { rats: RatsState }> };
   ratsSetProviderEnabled: { payload: { providerId: string; executable: string; enabled: boolean; permissions: string[] }; response: Envelope<"rats.state", { rats: RatsState }> };
   // Deprecated aliases retained for packaged Desktop/Core compatibility.

@@ -3,6 +3,10 @@ export type JsonRecord = Record<string, unknown>;
 export const CORE_RESPONSE_CONTRACT = {
   listTools: { type: "tools", required: ["tools"] },
   ratsState: { type: "rats.state", required: ["rats"] },
+  ratsStateCached: { type: "rats.state", required: ["rats"] },
+  ratsCustomProviders: { type: "rats.custom_providers", required: ["providers"] },
+  ratsDefineCustomProvider: { type: "rats.state", required: ["rats"] },
+  ratsRemoveCustomProvider: { type: "rats.state", required: ["rats"] },
   ratsRegisterProvider: { type: "rats.state", required: ["rats"] },
   ratsSetProviderEnabled: { type: "rats.state", required: ["rats"] },
   // Deprecated protocol aliases retained until packaged Desktop clients migrate.

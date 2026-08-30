@@ -81,6 +81,14 @@ export interface RatsServiceRecord {
   connection: "connected" | "available" | "unreachable";
   sessionActive: boolean;
   permissions: RatsPermission[];
+  /** The contract identifier the service published, or the assumed pre-contract default. */
+  contract?: string;
+  /** Permission classes the live service declared, which may exceed this build's list. */
+  declaredPermissions?: string[];
+  permissionToolCounts?: Record<string, number>;
+  features?: string[];
+  constraints?: string[];
+  limits?: Record<string, number>;
   tools: RatsCompactTool[];
   loadedToolNames: string[];
   error: string;
@@ -90,9 +98,39 @@ export interface RatsProviderRecord {
   providerId: string;
   product: string;
   serviceKind: string;
+  /** Every kind this provider answers for; `serviceKind` is the first of them. */
+  serviceKinds?: string[];
   label?: string;
   permissions?: RatsPermission[];
   toolTags?: string[];
+  /** True for a provider read from the settings file, false for a compiled-in one. */
+  custom?: boolean;
+}
+
+/**
+ * One user-declared provider, exactly as the core stores and returns it.
+ *
+ * Data only, never callables: the core builds the executable and process
+ * validators from these fields. `discoveryRoot` holds path *segments* relative
+ * to the provider executable's own directory, because a descriptor is only
+ * trusted inside the root its own declared executable resolves to.
+ */
+export interface RatsCustomProviderDefinition {
+  schema: "reverie.rats.custom-provider/1";
+  providerId: string;
+  product: string;
+  label: string;
+  serviceKinds: string[];
+  /**
+   * Not narrowed to `RatsPermission`: the core keeps any well-shaped class name
+   * so a provider can declare a class this build was never compiled with.
+   */
+  permissionClasses: string[];
+  toolTags: string[];
+  discoveryRoot: string[];
+  executableIdentity: "path" | "product_name";
+  executableProductNames: string[];
+  executableError: string;
 }
 
 export interface RatsDiagnosticEntry {
@@ -129,6 +167,10 @@ export interface RatsState {
   enabledProviders?: RatsProviderSelection[];
   enabledEngines?: RatsEngineSelection[];
   supportedProviders: RatsProviderRecord[];
+  /** User-declared providers only. Optional while an older packaged core is in use. */
+  customProviders?: RatsCustomProviderDefinition[];
+  customProviderSchema?: string;
+  customProviderLimit?: number;
   services: RatsServiceRecord[];
   scanDurationMs: number;
   rejectedDescriptorCount: number;

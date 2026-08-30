@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
 import { DEFAULT_UI_PREFERENCES, normalizeUiPreferences, type UiPreferences } from "./preferences";
-import type { CustomProviderRecord, DesktopState, ModelRecord, ModelSource, ModelSourcesState, ProviderProbe, RatsState, RatsTaskRecord, SessionState } from "./types";
+import type { CustomProviderRecord, DesktopState, ModelRecord, ModelSource, ModelSourcesState, ProviderProbe, RatsCustomProviderDefinition, RatsPermission, RatsState, RatsTaskRecord, SessionState } from "./types";
 
 /** One stored manual ("Manual Model") entry, in the core's own config shape. */
 type StandardModelConfig = {
@@ -186,6 +186,8 @@ const desktopState: DesktopState = {
 
 function installDesktopApi(options: {
   legacyRats?: boolean;
+  /** RATS provider definitions the settings file already holds at first paint. */
+  ratsCustomProviders?: RatsCustomProviderDefinition[];
   approvalRequest?: Record<string, unknown>;
   ratsStateTransform?: (state: RatsState) => RatsState;
   ratsTasks?: (payload: Record<string, unknown>, cancelled: boolean) => RatsTaskRecord[] | Promise<RatsTaskRecord[]>;
@@ -205,6 +207,8 @@ function installDesktopApi(options: {
   let promptFinished = false;
   let ratsEnabled = false;
   let ratsTaskCancelled = false;
+  /** Definitions the harness has accepted, in the order the core would report them. */
+  let ratsCustomProviders: RatsCustomProviderDefinition[] = (options.ratsCustomProviders ?? []).map((definition) => ({ ...definition }));
   let providers: CustomProviderRecord[] = (options.customProviders ?? []).map((record) => ({ ...record }));
   let standardModels: StandardModelConfig[] = (options.standardModels ?? []).map((record) => ({ ...record }));
   const customSource = (): ModelSource => ({
@@ -328,7 +332,25 @@ function installDesktopApi(options: {
     discoveryRoots: ["C:/Engine/ReverieLocal/RATS/Services"],
     configuredDiscoveryRoots: ["C:/Engine/ReverieLocal/RATS/Services"],
     enabledProviders: ratsEnabled ? [{ providerId: "reverie.engine", executable: "C:/Engine/reverie.windows.editor.x86_64.exe", permissions: ["read"], discoveryRoot: "C:/Engine/ReverieLocal/RATS/Services" }] : [],
-    supportedProviders: [{ providerId: "reverie.engine", product: "Reverie Engine", serviceKind: "builtin" }],
+    supportedProviders: [
+      { providerId: "reverie.engine", product: "Reverie Engine", serviceKind: "builtin" },
+      // The effective registry is the built-ins merged with the definitions and
+      // sorted by id, so a definition named earlier in the alphabet really does
+      // come first. Anything that picks a default provider positionally is wrong.
+      ...ratsCustomProviders.map((definition) => ({
+        providerId: definition.providerId,
+        product: definition.product,
+        serviceKind: definition.serviceKinds[0] ?? "",
+        serviceKinds: definition.serviceKinds,
+        label: definition.label,
+        permissions: definition.permissionClasses as RatsPermission[],
+        toolTags: definition.toolTags,
+        custom: true,
+      })),
+    ].sort((left, right) => left.providerId.localeCompare(right.providerId)),
+    customProviders: ratsCustomProviders,
+    customProviderSchema: "reverie.rats.custom-provider/1",
+    customProviderLimit: 16,
     services: [{
       serviceId: "rats-4242-testservice",
       providerId: "reverie.engine",
@@ -362,8 +384,14 @@ function installDesktopApi(options: {
     });
     const transformedState = options.ratsStateTransform?.(state) ?? state;
     if (!options.legacyRats) return transformedState;
+    // A pre-declarative core: no enabledProviders, and no custom-provider layer
+    // at all. The page has to hide the define surface rather than offer a form
+    // whose submissions that core would refuse.
     const legacy = { ...transformedState, enabledEngines: [{ executable: "C:/Engine/reverie.windows.editor.x86_64.exe", permissions: ["read"] }] } as RatsState & { enabledProviders?: RatsState["enabledProviders"] };
     delete legacy.enabledProviders;
+    delete legacy.customProviders;
+    delete legacy.customProviderSchema;
+    delete legacy.customProviderLimit;
     return legacy;
   };
   const request = vi.fn(async (action: string, payload: Record<string, unknown>) => {
@@ -478,6 +506,44 @@ function installDesktopApi(options: {
       return { type: "standard-model.updated", index, models: models(), workspace: desktopState.workspace };
     }
     if (action === "ratsState") return { type: "rats.state", rats: ratsState() };
+    if (action === "ratsStateCached") {
+      // A packaged core older than the cached view has no such action, and the
+      // page must still paint from the scan that follows.
+      if (options.legacyRats) throw new Error("Unsupported Reverie core action: ratsStateCached");
+      return { type: "rats.state", rats: ratsState() };
+    }
+    if (action === "ratsDefineCustomProvider") {
+      const definition = payload.definition as Record<string, unknown>;
+      const providerId = String(definition.providerId ?? "");
+      // The refusals a user can actually provoke from the form. Each one names
+      // the offending field, which is why the page keeps the draft on failure.
+      if (providerId === "reverie.engine") throw new Error(`reserved_provider_id: ${providerId}`);
+      if (ratsCustomProviders.some((entry) => entry.providerId === providerId)) throw new Error(`duplicate_provider_id: ${providerId}`);
+      if (ratsCustomProviders.length >= 16) throw new Error("too_many_custom_providers");
+      const discoveryRoot = String(definition.discoveryRoot ?? "ReverieLocal/RATS/Services");
+      if (/^([A-Za-z]:|[\\/~])/.test(discoveryRoot)) throw new Error(`invalid_discovery_root: ${discoveryRoot}`);
+      const product = String(definition.product ?? "");
+      ratsCustomProviders = [...ratsCustomProviders, {
+        schema: "reverie.rats.custom-provider/1",
+        providerId,
+        product,
+        label: String(definition.label ?? "") || product,
+        serviceKinds: (definition.serviceKinds as string[] | undefined) ?? [],
+        permissionClasses: (definition.permissionClasses as string[] | undefined) ?? [],
+        toolTags: (definition.toolTags as string[] | undefined) ?? [],
+        // The core splits the root itself; the client sends it whole so that an
+        // absolute path is refused instead of silently becoming relative.
+        discoveryRoot: discoveryRoot.split(/[\\/]+/).filter(Boolean),
+        executableIdentity: definition.executableIdentity === "product_name" ? "product_name" : "path",
+        executableProductNames: (definition.executableProductNames as string[] | undefined) ?? [],
+        executableError: String(definition.executableError ?? ""),
+      }];
+      return { type: "rats.state", rats: ratsState() };
+    }
+    if (action === "ratsRemoveCustomProvider") {
+      ratsCustomProviders = ratsCustomProviders.filter((entry) => entry.providerId !== payload.providerId);
+      return { type: "rats.state", rats: ratsState() };
+    }
     if (action === "ratsRegisterProvider" || action === "ratsRemoveRoot") return { type: "rats.state", rats: ratsState() };
     if (action === "ratsSetProviderEnabled") {
       ratsEnabled = payload.enabled === true;
@@ -1000,6 +1066,144 @@ describe("desktop GUI interactions", () => {
     await user.click(await screen.findByRole("button", { name: "RATS" }));
     expect(await screen.findByText("Reverie Engine")).toBeTruthy();
     expect(screen.queryByText(/display error/i)).toBeNull();
+    // That core has no declarative layer, so the page must not offer a form
+    // whose submissions it would refuse -- nor report the missing cached view
+    // as a failure.
+    expect(screen.queryByRole("button", { name: "定义新提供者" })).toBeNull();
+    expect(screen.queryByText(/ratsStateCached/)).toBeNull();
+  });
+
+  it("defines a custom RATS provider from the GUI, keeps the draft when the core refuses it, then removes it", async () => {
+    const { api } = installDesktopApi();
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "RATS" }));
+    expect(await screen.findByText("还没有自定义提供者。内置提供者的 ID 是保留的，不能被定义覆盖。")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "定义新提供者" }));
+    await user.type(screen.getByLabelText("提供者 ID"), "Acme.ToolHost");
+    await user.type(screen.getByLabelText("产品名称"), "Acme Tool Host");
+    await user.type(screen.getByLabelText("服务种类"), "editor, headless");
+    await user.type(screen.getByLabelText("发现目录（相对）"), "C:/Anywhere/RATS");
+
+    // An absolute root is the core's call to refuse, which is why the client
+    // sends the string whole instead of splitting it into segments first.
+    await user.click(screen.getByRole("button", { name: "保存定义" }));
+    expect(await screen.findByText(/invalid_discovery_root/)).toBeTruthy();
+    // The refusal names a field, so the draft has to survive to be correctable.
+    expect((screen.getByLabelText("提供者 ID") as HTMLInputElement).value).toBe("Acme.ToolHost");
+    // And the 2.5s background poll must not take the message off screen while it
+    // is still being read: a poll that succeeded says nothing about this failure.
+    const scansAtRefusal = api.request.mock.calls.filter(([action]) => action === "ratsState").length;
+    await waitFor(
+      () => expect(api.request.mock.calls.filter(([action]) => action === "ratsState").length).toBeGreaterThan(scansAtRefusal),
+      { timeout: 6000 },
+    );
+    expect(screen.getByText(/invalid_discovery_root/)).toBeTruthy();
+
+    await user.clear(screen.getByLabelText("发现目录（相对）"));
+    await user.type(screen.getByLabelText("发现目录（相对）"), "Custom/RATS/Services");
+    await user.click(screen.getByText("查看将要提交的定义"));
+    expect(screen.getByText(/"discoveryRoot": "Custom\/RATS\/Services"/)).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "保存定义" }));
+    await waitFor(() => expect(api.request).toHaveBeenCalledWith("ratsDefineCustomProvider", {
+      definition: {
+        providerId: "acme.toolhost",
+        product: "Acme Tool Host",
+        serviceKinds: ["editor", "headless"],
+        permissionClasses: ["read"],
+        toolTags: [],
+        executableIdentity: "path",
+        discoveryRoot: "Custom/RATS/Services",
+      },
+    }));
+    // The id now appears in three places at once -- the definition row, the
+    // recognized-provider strip, and the header's target picker -- so the row is
+    // identified by the one label that is unique to it.
+    expect(await screen.findByRole("button", { name: "移除自定义提供者 acme.toolhost" })).toBeTruthy();
+    expect(screen.getByText("Acme Tool Host · editor/headless · Custom/RATS/Services · path")).toBeTruthy();
+    expect(screen.getByRole("option", { name: "acme.toolhost" })).toBeTruthy();
+    // A state update that adds a provider must not move a selection the user is
+    // already pointing at, so the button still registers the engine.
+    await user.click(screen.getByRole("button", { name: "登记提供者应用" }));
+    await waitFor(() => expect(api.request).toHaveBeenCalledWith("ratsRegisterProvider", {
+      providerId: "reverie.engine",
+      executable: "C:/Engine/reverie.windows.editor.x86_64.exe",
+    }));
+
+    await user.click(screen.getByRole("button", { name: "移除自定义提供者 acme.toolhost" }));
+    await waitFor(() => expect(api.request).toHaveBeenCalledWith("ratsRemoveCustomProvider", { providerId: "acme.toolhost" }));
+    await waitFor(() => expect(screen.queryByText("Acme Tool Host · editor/headless · Custom/RATS/Services · path")).toBeNull());
+    expect(screen.queryByRole("button", { name: "移除自定义提供者 acme.toolhost" })).toBeNull();
+  });
+
+  it("keeps the built-in as the default register target when a stored definition sorts ahead of it", async () => {
+    // The core returns the effective registry sorted by id, so a definition the
+    // settings file already holds can be the first entry at first paint -- when
+    // nothing is selected yet and the default is being chosen.
+    const { api } = installDesktopApi({
+      ratsCustomProviders: [{
+        schema: "reverie.rats.custom-provider/1",
+        providerId: "acme.toolhost",
+        product: "Acme Tool Host",
+        label: "Acme Tool Host",
+        serviceKinds: ["editor"],
+        permissionClasses: ["read"],
+        toolTags: [],
+        discoveryRoot: ["Custom", "RATS", "Services"],
+        executableIdentity: "path",
+        executableProductNames: [],
+        executableError: "",
+      }],
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "RATS" }));
+    const picker = await screen.findByLabelText("选择要登记的提供者") as HTMLSelectElement;
+    expect([...picker.options].map((option) => option.value)).toEqual(["acme.toolhost", "reverie.engine"]);
+    // Indexing into that list would default to the third-party entry and the
+    // register button would then quietly ask for the wrong application.
+    expect(picker.value).toBe("reverie.engine");
+
+    await user.click(screen.getByRole("button", { name: "登记提供者应用" }));
+    // The file dialog filters by the target's own product name, so choosing the
+    // wrong target picks the wrong file long before the core sees the request.
+    await waitFor(() => expect(api.selectRatsProvider).toHaveBeenCalledWith("reverie.engine"));
+    await waitFor(() => expect(api.request).toHaveBeenCalledWith("ratsRegisterProvider", {
+      providerId: "reverie.engine",
+      executable: "C:/Engine/reverie.windows.editor.x86_64.exe",
+    }));
+  });
+
+  it("confirms one discovered service item by item against a fresh scan", async () => {
+    installDesktopApi();
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "RATS" }));
+    const confirm = await screen.findByRole("button", { name: "确认服务" });
+    expect(confirm.getAttribute("aria-expanded")).toBe("false");
+
+    await user.click(confirm);
+    // Same six checks, in the same order and under the same names, as the
+    // `/rats confirm` verb reports in the terminal.
+    const rows = await screen.findAllByText(/descriptor verified|protocol agreed|endpoint reachable|enabled by you|session open|catalog readable/);
+    expect(rows.map((row) => row.textContent)).toEqual([
+      "descriptor verified", "protocol agreed", "endpoint reachable", "enabled by you", "session open", "catalog readable",
+    ]);
+    // The service is discovered but not enabled, so the last three fail and the
+    // page says so rather than reporting a usable service.
+    const verdicts = rows.map((row) => row.parentElement?.className);
+    expect(verdicts).toEqual([
+      "rats-confirm-row passed", "rats-confirm-row passed", "rats-confirm-row passed",
+      "rats-confirm-row failed", "rats-confirm-row failed", "rats-confirm-row failed",
+    ]);
+
+    await user.click(screen.getByRole("button", { name: "确认服务" }));
+    await waitFor(() => expect(screen.queryByText("descriptor verified")).toBeNull());
   });
 
   it("aggregates RTP tasks across services and routes details and cancellation through the task", async () => {
@@ -1062,6 +1266,103 @@ describe("desktop GUI interactions", () => {
       deadlineMs: 5_000,
     }));
     expect((await screen.findAllByText("已取消")).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("drags each side pane to a new width and stores it once the pointer is released", async () => {
+    const { api } = installDesktopApi();
+    const { container } = render(<App />);
+    await screen.findByRole("button", { name: "命令面板" });
+    const shell = container.querySelector(".app-shell") as HTMLElement;
+    expect(shell.style.getPropertyValue("--sidebar-width")).toBe("268px");
+
+    const sidebarHandle = screen.getByRole("separator", { name: "调整会话侧栏宽度" });
+    fireEvent.pointerDown(sidebarHandle, { button: 0, pointerId: 1, clientX: 268 });
+    fireEvent.pointerMove(sidebarHandle, { pointerId: 1, clientX: 352 });
+
+    // The drag runs off local state: one preference write per pointer frame would
+    // put the persisted reply behind the cursor and fight it.
+    await waitFor(() => expect(shell.style.getPropertyValue("--sidebar-width")).toBe("352px"));
+    expect(shell.classList.contains("pane-resizing")).toBe(true);
+    expect(api.setUiPreferences).not.toHaveBeenCalledWith(expect.objectContaining({ sidebarWidth: expect.anything() }));
+
+    fireEvent.pointerUp(sidebarHandle, { pointerId: 1, clientX: 352 });
+    await waitFor(() => expect(api.setUiPreferences).toHaveBeenCalledWith({ sidebarWidth: 352 }));
+    expect(shell.classList.contains("pane-resizing")).toBe(false);
+
+    // Anchored to the opposite edge, so the same cursor travel means the inverse
+    // width: a shell reporting no geometry under jsdom puts its right edge at 0.
+    const inspectorHandle = screen.getByRole("separator", { name: "调整检查器宽度" });
+    fireEvent.pointerDown(inspectorHandle, { button: 0, pointerId: 2, clientX: 0 });
+    fireEvent.pointerMove(inspectorHandle, { pointerId: 2, clientX: -404 });
+    await waitFor(() => expect(shell.style.getPropertyValue("--inspector-width")).toBe("404px"));
+    fireEvent.pointerUp(inspectorHandle, { pointerId: 2, clientX: -404 });
+    await waitFor(() => expect(api.setUiPreferences).toHaveBeenCalledWith({ inspectorWidth: 404 }));
+
+    // Keyboard and double-click reach the same widths without a pointer.
+    fireEvent.keyDown(sidebarHandle, { key: "ArrowRight" });
+    await waitFor(() => expect(api.setUiPreferences).toHaveBeenCalledWith({ sidebarWidth: 368 }));
+    fireEvent.doubleClick(sidebarHandle);
+    await waitFor(() => expect(api.setUiPreferences).toHaveBeenCalledWith({ sidebarWidth: 268 }));
+  });
+
+  it("reports every registered RATS provider on the RTP page, live or not", async () => {
+    const engineTask: RatsTaskRecord = {
+      provider_id: "reverie.engine",
+      service_id: "rats-4242-testservice",
+      task_id: "task-engine-1",
+      tool: "project.scan",
+      deadline_msec: 5_000,
+      cursor: 0,
+      status: { running: true, next_cursor: 1, output: { running: true } },
+      events: [],
+    };
+    const secondTask: RatsTaskRecord = { ...engineTask, provider_id: "reverie.second", service_id: "rats-second", task_id: "task-second-1", tool: "run.play" };
+    installDesktopApi({
+      ratsStateTransform: (state) => ({
+        ...state,
+        supportedProviders: [
+          ...state.supportedProviders,
+          { providerId: "reverie.second", product: "Second Engine", serviceKind: "builtin", custom: true },
+          { providerId: "reverie.offline", product: "Offline Engine", serviceKind: "builtin", custom: true },
+        ],
+        // Authorized in an earlier run and never came back up. The page has to
+        // name it anyway, which is the whole point of a per-provider board.
+        enabledProviders: [
+          ...(state.enabledProviders ?? []),
+          { providerId: "reverie.offline", executable: "C:/Offline/engine.exe", permissions: ["read"], discoveryRoot: "C:/Offline/ReverieLocal/RATS/Services" },
+        ],
+        services: [
+          { ...state.services[0], enabled: true, connection: "connected", sessionActive: true },
+          { ...state.services[0], providerId: "reverie.second", serviceId: "rats-second", enabled: true, connection: "connected", sessionActive: true },
+        ],
+      }),
+      ratsTasks: (payload) => Object.keys(payload).length === 0 ? [engineTask, secondTask] : [],
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "RTP 任务" }));
+    const panel = await screen.findByRole("region", { name: "提供者实时状态" });
+    const rows = within(panel).getAllByRole("button");
+    expect(rows.map((row) => row.querySelector("strong")?.textContent))
+      .toEqual(["reverie.engine", "reverie.second", "reverie.offline"]);
+    expect(rows.map((row) => row.querySelector(".rats-status")?.textContent))
+      .toEqual(["已连接", "已连接", "已授权待启动"]);
+    expect(within(panel).getByText("2/3")).toBeTruthy();
+    expect(within(rows[2]).getByText("0 个任务")).toBeTruthy();
+
+    // Both providers' tasks arrive on one page, each labelled with its owner.
+    expect((await screen.findAllByText("task-engine-1")).length).toBeGreaterThanOrEqual(1);
+    expect(await screen.findByText("task-second-1")).toBeTruthy();
+    expect(screen.getAllByText("reverie.second").length).toBeGreaterThanOrEqual(2);
+
+    await user.click(rows[1]);
+    expect(await screen.findByText("仅显示 reverie.second 的任务")).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText("task-engine-1")).toBeNull());
+    expect((await screen.findAllByText("task-second-1")).length).toBeGreaterThanOrEqual(2);
+
+    await user.click(rows[2]);
+    expect(await screen.findByText("该提供者暂无任务")).toBeTruthy();
   });
 
   it("keeps slow RTP polling single-flight", async () => {

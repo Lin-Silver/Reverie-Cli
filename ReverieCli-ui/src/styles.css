@@ -348,8 +348,8 @@ kbd { display: inline-flex; min-width: 18px; height: 18px; align-items: center; 
 .page-title-icon { width: 39px; height: 39px; display: grid; place-items: center; border-radius: 10px; color: var(--accent); background: var(--accent-bg); border: 1px solid rgba(190,153,255,.15); }
 .page-header h1 { margin: 1px 0 5px; font-size: 18px; font-weight: 600; letter-spacing: -.02em; }
 .page-header p { margin: 0; color: var(--muted); font-size: var(--font-small); line-height: 1.5; }
-.page-header-action { align-self: center; }
-.primary-button, .secondary-button, .danger-button { min-height: 32px; border-radius: 7px; padding: 0 11px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-size: var(--font-small); cursor: pointer; }
+.page-header-action { min-width: 0; align-self: center; }
+.primary-button, .secondary-button, .danger-button { min-height: 32px; border-radius: 7px; padding: 0 11px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex-shrink: 0; white-space: nowrap; font-size: var(--font-small); cursor: pointer; }
 .primary-button { border: 1px solid #d9dbe0; background: #e6e7ea; color: #17191d; }
 .primary-button:hover { background: white; }
 .primary-button.small { min-height: 29px; }
@@ -518,15 +518,38 @@ kbd { display: inline-flex; min-width: 18px; height: 18px; align-items: center; 
 /* Refined desktop visual system */
 button, input, textarea, select { transition: color .14s ease, background-color .14s ease, border-color .14s ease, box-shadow .14s ease, transform .14s ease; }
 /* Every template keeps all three tracks so both side panes animate: a track that
-   changes width transitions, a track that appears or disappears cannot. */
-.app-shell { grid-template-columns: 268px minmax(0, 1fr) 0; background: var(--bg); transition: grid-template-columns .18s ease; }
-.app-shell.with-inspector { grid-template-columns: 268px minmax(0, 1fr) 316px; }
+   changes width transitions, a track that appears or disappears cannot. The two
+   pane widths come from the drag handles via --sidebar-width/--inspector-width,
+   which App.tsx sets on the shell; the fallbacks keep this stylesheet standalone. */
+.app-shell { grid-template-columns: var(--sidebar-width, 268px) minmax(0, 1fr) 0; background: var(--bg); transition: grid-template-columns .18s ease; }
+.app-shell.with-inspector { grid-template-columns: var(--sidebar-width, 268px) minmax(0, 1fr) var(--inspector-width, 316px); }
 .app-shell.sidebar-collapsed { grid-template-columns: 0 minmax(0, 1fr) 0; }
-.app-shell.sidebar-collapsed.with-inspector { grid-template-columns: 0 minmax(0, 1fr) 316px; }
+.app-shell.sidebar-collapsed.with-inspector { grid-template-columns: 0 minmax(0, 1fr) var(--inspector-width, 316px); }
+/* A tracked pointer already owns the width; animating towards it would lag the
+   handle behind the cursor and fight every subsequent frame. */
+.app-shell.pane-resizing { transition: none; }
+.app-shell.pane-resizing .sidebar, .app-shell.pane-resizing .inspector { transition: none; }
 .sidebar { background: var(--sidebar-bg); border-color: var(--border-soft); transition: opacity .16s ease, transform .18s ease, visibility .18s ease; }
 .sidebar-collapsed > .sidebar { opacity: 0; transform: translateX(-14px); visibility: hidden; pointer-events: none; border-right-color: transparent; }
 .inspector { overflow: hidden; transition: opacity .16s ease, transform .18s ease, visibility .18s ease; }
 .app-shell:not(.with-inspector) > .inspector { opacity: 0; transform: translateX(14px); visibility: hidden; pointer-events: none; border-left-color: transparent; }
+
+/* Pane drag handles.
+   They are children of the shell rather than of the panes, because both panes
+   clip their overflow: anchored to the shell the handle can straddle the seam
+   instead of being cut off at it, and neither pane needs to know it exists. */
+.pane-resizer { position: absolute; z-index: 6; top: 0; bottom: 0; width: 9px; border: 0; padding: 0; background: transparent; cursor: col-resize; touch-action: none; -webkit-app-region: no-drag; }
+.pane-resizer.sidebar-resizer { left: calc(var(--sidebar-width, 268px) - 5px); }
+.pane-resizer.inspector-resizer { right: calc(var(--inspector-width, 316px) - 5px); }
+.pane-resizer::after { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; transform: translateX(-50%); border-radius: 2px; background: transparent; transition: background-color .14s ease; }
+.pane-resizer:hover::after, .pane-resizer:focus-visible::after, .pane-resizer.dragging::after { background: color-mix(in srgb, var(--accent) 62%, transparent); }
+.pane-resizer:focus-visible { outline: 0; }
+/* A closed pane has no seam to drag: the grid pins its track to 0 regardless of
+   the stored width, so the handle would float over the conversation. */
+.app-shell.sidebar-collapsed > .sidebar-resizer, .app-shell:not(.with-inspector) > .inspector-resizer { display: none; }
+/* Chromium keeps sending the pointer to the element that captured it, but any
+   text under the cursor would still highlight as the drag crosses it. */
+.app-shell.pane-resizing, .app-shell.pane-resizing * { cursor: col-resize !important; user-select: none; }
 .sidebar-drag { height: 54px; padding: 0 17px; }
 .sidebar-collapse-button { width: 30px; height: 30px; margin-left: auto; display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; -webkit-app-region: no-drag; }
 .sidebar-collapse-button:hover { background: var(--hover); color: var(--text); }
@@ -876,8 +899,19 @@ kbd { border-color: var(--border-strong); border-bottom-color: var(--border); ba
 .tool-card-details p { margin: 0; color: var(--text-2); font-size: var(--font-small); line-height: 1.5; overflow-wrap: anywhere; }
 .tool-catalog > .empty-panel { grid-column: 1 / -1; }
 
-.header-action-row { display: flex; align-items: center; gap: 8px; }
+/* Wraps rather than squeezes: RATS puts four controls up here, and a nowrap row
+   forced the header's auto track down to a single button's width, which shredded
+   every CJK label into a one-character-per-line column. */
+.header-action-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
 .rats-page > * { width: min(1080px, 100%); }
+/* Both RATS pages carry crowded headers, and the column they sit in narrows as
+   soon as either side pane widens, so they measure themselves, not the window. */
+.rats-page, .rats-tasks-page { overflow-x: hidden; container-type: inline-size; }
+@container (max-width: 720px) {
+  .page-header { grid-template-columns: 40px minmax(0,1fr); }
+  .page-header-action { grid-column: 2; justify-self: start; }
+  .header-action-row { justify-content: flex-start; }
+}
 .rats-security-note { margin-bottom: 22px; padding: 14px 16px; display: flex; align-items: flex-start; gap: 11px; border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border)); border-radius: 12px; background: color-mix(in srgb, var(--accent) 8%, var(--panel)); color: var(--accent); }
 .rats-security-note div { display: flex; flex-direction: column; gap: 4px; }
 .rats-security-note strong { color: var(--text); font-size: var(--font-small); }
@@ -952,13 +986,42 @@ kbd { border-color: var(--border-strong); border-bottom-color: var(--border); ba
 .rats-tool-detail pre { width: 100%; max-height: 320px; margin: 0; padding: 12px; overflow: auto; border: 1px solid var(--border); border-radius: 9px; background: var(--bg); color: var(--text-2); font-size: 11px; line-height: 1.5; }
 .rats-empty { min-height: 220px; grid-column: 1 / -1; }
 .rats-empty .primary-button { margin-top: 8px; }
-.rats-offline-panel, .rats-roots-panel { margin-top: 22px; }
+.rats-offline-panel, .rats-roots-panel, .rats-provider-panel, .rats-custom-panel { margin-top: 22px; }
 .rats-offline-row, .rats-root-row { min-height: 42px; padding: 8px 11px; display: grid; grid-template-columns: 18px minmax(0,1fr) auto; align-items: center; gap: 9px; border: 1px solid var(--border); border-bottom-width: 0; background: var(--panel); color: var(--muted); }
 .rats-offline-row:first-of-type, .rats-root-row:first-of-type { border-radius: 10px 10px 0 0; }
 .rats-offline-row:last-child, .rats-root-row:last-child { border-bottom-width: 1px; border-radius: 0 0 10px 10px; }
 .rats-offline-row span { color: var(--dim); font-size: var(--font-caption); }
 .rats-root-row button { width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 7px; background: transparent; color: var(--dim); cursor: pointer; }
 .rats-root-row button:hover { background: var(--hover); color: var(--text); }
+.rats-confirm-list { padding: 0 16px 13px; display: grid; gap: 6px; }
+.rats-confirm-row { min-height: 32px; padding: 6px 10px; display: grid; grid-template-columns: 14px minmax(120px,auto) minmax(0,1fr); align-items: center; gap: 9px; border: 1px solid var(--border-soft); border-radius: 8px; background: var(--panel-2); }
+.rats-confirm-row.passed { border-color: color-mix(in srgb, var(--green) 32%, var(--border-soft)); color: var(--green); }
+.rats-confirm-row.failed { border-color: rgba(217,100,122,.32); color: #ef8293; }
+.rats-confirm-row strong { color: var(--text-2); font: 600 var(--font-caption) var(--font-mono); }
+.rats-confirm-row code { overflow: hidden; color: var(--muted); font: var(--font-caption) var(--font-mono); text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.rats-provider-row, .rats-custom-row { min-height: 44px; margin-bottom: 7px; padding: 8px 11px; display: grid; grid-template-columns: 18px minmax(0,1fr) auto 28px; align-items: center; gap: 9px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); color: var(--muted); }
+.rats-provider-row > svg, .rats-custom-row > svg { color: var(--dim); }
+.rats-provider-row > div, .rats-custom-row > div { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.rats-provider-row strong, .rats-custom-row strong { font: 600 var(--font-small) var(--font-mono); }
+.rats-provider-row > div > span, .rats-custom-row > div > span { overflow: hidden; color: var(--muted); font-size: var(--font-caption); text-overflow: ellipsis; white-space: nowrap; }
+.rats-custom-row > code { overflow: hidden; color: var(--dim); font: var(--font-caption) var(--font-mono); text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.rats-provider-origin { padding: 3px 8px; border-radius: 999px; background: var(--panel-2); color: var(--dim); font-size: var(--font-caption); white-space: nowrap; }
+.rats-provider-row > button, .rats-custom-row > button { width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 7px; background: transparent; color: var(--dim); cursor: pointer; }
+.rats-provider-row > button:hover, .rats-custom-row > button:hover { background: var(--hover); color: var(--text); }
+.rats-provider-row > button:disabled, .rats-custom-row > button:disabled { opacity: .5; cursor: default; }
+.rats-custom-empty { padding: 22px 14px; border: 1px dashed var(--border); border-radius: 10px; color: var(--muted); font-size: var(--font-caption); text-align: center; }
+.rats-custom-actions { margin-top: 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.rats-custom-actions > span { color: var(--dim); font-size: var(--font-caption); }
+.rats-custom-form { margin-top: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 13px; border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--border)); border-radius: 12px; background: var(--panel); }
+.rats-custom-form label.wide { grid-column: 1 / -1; }
+.rats-custom-form .rats-custom-actions { margin-top: 0; justify-content: flex-end; }
+.rats-draft-permissions { display: grid; grid-template-columns: minmax(210px,.8fr) minmax(0,1.2fr); align-items: center; gap: 16px; }
+.rats-draft-permissions > div:first-child { display: flex; flex-direction: column; gap: 4px; }
+.rats-draft-permissions strong { font-size: var(--font-small); }
+.rats-draft-permissions span { color: var(--muted); font-size: var(--font-caption); line-height: 1.45; }
+.rats-draft-preview > summary { color: var(--dim); font-size: var(--font-caption); cursor: pointer; }
+.rats-draft-preview pre { max-height: 260px; margin: 8px 0 0; padding: 11px; overflow: auto; border: 1px solid var(--border-soft); border-radius: 9px; background: var(--bg); color: var(--text-2); font-size: 11px; line-height: 1.5; }
+.header-action-row select { flex: 0 1 auto; max-width: 220px; min-height: 30px; padding: 0 8px; border: 1px solid var(--border-strong, var(--border)); border-radius: 8px; background: var(--panel-2); color: var(--text-2); font-size: var(--font-caption); outline: 0; }
 .rats-tasks-page > * { width: min(1180px, 100%); }
 .rats-task-overview { margin-bottom: 20px; }
 .rats-task-layout { display: grid; grid-template-columns: minmax(260px, .72fr) minmax(0, 1.28fr); gap: 12px; align-items: start; }
@@ -977,6 +1040,9 @@ kbd { border-color: var(--border-strong); border-bottom-color: var(--border); ba
 .rats-task-row-main { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .rats-task-row-main strong { overflow: hidden; font: 600 var(--font-small) var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
 .rats-task-row-main code { overflow: hidden; color: var(--dim); font-size: var(--font-caption); text-overflow: ellipsis; white-space: nowrap; }
+/* Separator lives in CSS so the task id stays its own text node — the row and
+   the detail pane are then both queryable by the bare id. */
+.rats-task-row-provider::after { content: " · "; }
 .rats-task-row .rats-status { white-space: nowrap; }
 .rats-task-list-empty, .rats-task-detail-empty { min-height: 180px; padding: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; color: var(--dim); text-align: center; }
 .rats-task-list-empty span, .rats-task-detail-empty strong { color: var(--text-2); font-size: var(--font-small); }
@@ -1010,6 +1076,38 @@ kbd { border-color: var(--border-strong); border-bottom-color: var(--border); ba
 .rats-task-empty-inline { padding: 28px 14px; color: var(--muted); font-size: var(--font-caption); text-align: center; }
 .rats-task-log-output { min-height: 240px; max-height: 430px; margin: 0; padding: 13px 14px; overflow: auto; color: var(--text-2); font: 11px/1.55 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .rats-task-empty { min-height: 220px; }
+.rats-task-overview { grid-template-columns: repeat(4, minmax(0,1fr)); }
+/* Provider board. Rendered whether or not anything is connected, so every row
+   has to read sensibly with zero services behind it. */
+.rtp-provider-panel { margin-bottom: 14px; overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: var(--panel); box-shadow: 0 16px 50px rgba(0,0,0,.12); }
+.rtp-provider-list { max-height: 300px; overflow-y: auto; }
+.rtp-provider-row { width: 100%; min-height: 58px; padding: 10px 14px; display: grid; grid-template-columns: 10px minmax(0,1fr) auto minmax(0,auto) auto; align-items: center; gap: 10px 12px; border: 0; border-bottom: 1px solid var(--border-soft); background: transparent; color: var(--text-2); text-align: left; cursor: pointer; }
+.rtp-provider-row:last-child { border-bottom: 0; }
+.rtp-provider-row:hover, .rtp-provider-row.active { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.rtp-provider-row.absent { color: var(--muted); }
+.rtp-provider-identity { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.rtp-provider-identity strong { overflow: hidden; font: 600 var(--font-small) var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.rtp-provider-identity small { overflow: hidden; color: var(--dim); font-size: var(--font-caption); text-overflow: ellipsis; white-space: nowrap; }
+.rtp-provider-origin { padding: 2px 7px; border: 1px solid var(--border-soft); border-radius: 99px; color: var(--dim); font-size: var(--font-caption); white-space: nowrap; }
+.rtp-provider-metrics { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.rtp-provider-metrics code { color: var(--dim); font: var(--font-caption) var(--font-mono); white-space: nowrap; }
+.rtp-provider-row .rats-status { white-space: nowrap; }
+.rtp-provider-errors { padding: 0 0 12px; }
+/* The row is a five-track grid at full width; once the middle column narrows the
+   badge and metrics have nowhere to go, so they drop onto a second row instead
+   of shredding their CJK labels into one glyph per line. Placement is spelled
+   out because the DOM order (badge before status) is not the visual order. */
+@container (max-width: 780px) {
+  .rtp-provider-row { grid-template-columns: 10px minmax(0,1fr) auto; }
+  .rtp-provider-row .rats-status { grid-area: 1 / 3 / 2 / 4; }
+  .rtp-provider-origin { grid-area: 2 / 2 / 3 / 3; justify-self: start; }
+  .rtp-provider-metrics { grid-area: 2 / 3 / 3 / 4; justify-content: flex-end; }
+}
+/* Four tiles need roughly 900px of column; below that they pair up rather than
+   letting `已连接服务` wrap under its own number. */
+@container (max-width: 900px) {
+  .rats-task-overview { grid-template-columns: repeat(2, minmax(0,1fr)); }
+}
 
 .subagents-page { overflow-x: hidden; container-type: inline-size; }
 .subagents-page > * { width: min(1320px, 100%); }
@@ -1118,8 +1216,11 @@ kbd { border-color: var(--border-strong); border-bottom-color: var(--border); ba
 .preference-row small { color: var(--muted); font-size: var(--font-caption); }
 .segmented-control { display: flex; padding: 3px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel-2); }
 .language-section { margin-bottom: 12px; }
+/* The min-width keeps the control the same size in both languages; without the
+   flexible segments the surplus piled up as dead space to the right of English. */
 .language-control { min-width: 230px; }
-.segmented-control button { height: 28px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: var(--font-small); cursor: pointer; }
+.language-control button { flex: 1 1 0; }
+.segmented-control button { height: 28px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: var(--font-small); white-space: nowrap; cursor: pointer; }
 .segmented-control button.active { background: var(--active); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
 .background-preview { height: 150px; margin: 12px 0 17px; display: grid; place-items: center; overflow: hidden; border: 1px dashed var(--border-strong); border-radius: 11px; background: var(--panel-2); background-size: cover; background-position: center; }
 .background-preview.has-image { align-items: end; justify-items: stretch; border-style: solid; }
@@ -1589,11 +1690,15 @@ input[type="range"] { width: 100%; accent-color: var(--accent-2); }
 @keyframes reasoning-pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 8%, transparent); transform: scale(1.03); } }
 
 @media (max-width: 1100px) {
-  .app-shell.with-inspector { grid-template-columns: 220px minmax(0,1fr); }
+  /* No room for the inspector here, and the drag ceiling is capped so a width
+     chosen on a wide window cannot swallow the conversation on a narrow one. */
+  .app-shell.with-inspector { grid-template-columns: min(var(--sidebar-width, 220px), 240px) minmax(0,1fr); }
   .inspector { display: none; }
-  .app-shell { grid-template-columns: 220px minmax(0,1fr); }
+  .app-shell { grid-template-columns: min(var(--sidebar-width, 220px), 240px) minmax(0,1fr); }
   .app-shell.sidebar-collapsed,
   .app-shell.sidebar-collapsed.with-inspector { grid-template-columns: 0 minmax(0,1fr); }
+  .pane-resizer.sidebar-resizer { left: calc(min(var(--sidebar-width, 220px), 240px) - 5px); }
+  .pane-resizer.inspector-resizer { display: none; }
   .settings-page { grid-template-columns: 165px minmax(0,1fr); }
   .tool-overview { grid-template-columns: 1fr; }
   .rats-log-summary { grid-template-columns: auto auto; }

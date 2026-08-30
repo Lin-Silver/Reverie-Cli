@@ -766,7 +766,9 @@ ipcMain.handle("desktop:open-external", async (_event, url: string) => {
 });
 
 const RATS_PROVIDER_PICKERS: Record<string, { chinese: string; english: string; filterName: string }> = {
-  // The registry currently contains only the verified Reverie Engine adapter.
+  // Only the compiled-in providers get bespoke picker copy. User-declared
+  // providers are named by the settings file, which this process does not read,
+  // so they fall through to the generic picker below.
   "reverie.engine": {
     chinese: "选择 Reverie Engine 可执行文件",
     english: "Choose a Reverie Engine executable",
@@ -774,10 +776,25 @@ const RATS_PROVIDER_PICKERS: Record<string, { chinese: string; english: string; 
   },
 };
 
+/** A dotted, lowercase provider id — the shape the core's validator accepts. */
+const RATS_PROVIDER_ID_PATTERN = /^[a-z][a-z0-9]{1,31}(\.[a-z0-9][a-z0-9_-]{0,31}){1,3}$/;
+
 async function selectRatsProvider(providerId: string): Promise<string | null> {
   if (!mainWindow) return null;
-  const picker = RATS_PROVIDER_PICKERS[String(providerId ?? "").trim()];
-  if (!picker) throw new Error(`Unsupported RATS provider: ${String(providerId ?? "unknown")}`);
+  const normalized = String(providerId ?? "").trim();
+  // The core owns which provider ids exist: it holds the compiled-in allowlist
+  // *and* the user's definitions, and this process reads neither. Refusing an
+  // id here on the strength of a hardcoded map would make a provider the user
+  // legitimately defined unregisterable from the GUI, so the check is on shape
+  // only. Naming a nonexistent provider fails in the core, where it should.
+  if (!RATS_PROVIDER_ID_PATTERN.test(normalized)) {
+    throw new Error(`Unsupported RATS provider: ${normalized || "unknown"}`);
+  }
+  const picker = RATS_PROVIDER_PICKERS[normalized] ?? {
+    chinese: `选择 ${normalized} 的可执行文件`,
+    english: `Choose an executable for ${normalized}`,
+    filterName: normalized,
+  };
   const preferences = normalizeUiPreferences((await readDesktopSettings()).ui);
   const result = await dialog.showOpenDialog(mainWindow, {
     title: localizedUiText(preferences.language, picker.chinese, picker.english),

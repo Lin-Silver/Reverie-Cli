@@ -1365,6 +1365,89 @@ describe("desktop GUI interactions", () => {
     expect(await screen.findByText("该提供者暂无任务")).toBeTruthy();
   });
 
+  it("expands the RTP provider board's contract detail only once it is ticked", async () => {
+    const { api } = installDesktopApi({
+      ratsCustomProviders: [{
+        schema: "reverie.rats.custom-provider/1",
+        providerId: "studio.blender",
+        product: "Blender",
+        label: "Blender Studio",
+        serviceKinds: ["dcc"],
+        permissionClasses: ["read", "asset"],
+        toolTags: ["mesh", "render"],
+        discoveryRoot: ["ReverieLocal", "RATS", "Services"],
+        executableIdentity: "product_name",
+        executableProductNames: ["blender"],
+        executableError: "",
+      }],
+      ratsStateTransform: (state) => ({
+        ...state,
+        services: [{
+          ...state.services[0],
+          enabled: true,
+          connection: "connected",
+          sessionActive: true,
+          // The capability-contract fields an older core omits entirely. They
+          // are the whole reason the detail pane exists, so the test supplies
+          // them here rather than leaning on the base fixture.
+          contract: "reverie.rats.capability/1",
+          declaredPermissions: ["read", "project", "cinematic"],
+          permissionToolCounts: { read: 12, project: 9 },
+          features: ["task.cancel", "log.tail"],
+          constraints: ["main_thread_only"],
+          limits: { max_events: 512 },
+          // Deliberately three different numbers: loaded < compact < native is
+          // the normal shape once a session is granted fewer classes than the
+          // service publishes, and the detail row has to keep them apart.
+          tools: [
+            { key: "project1", name: "project.status", category: "project", summary: "Read selected project state.", permission: "read", flags: ["main_thread"], schema: "schema" },
+            { key: "asset1", name: "asset.import", category: "asset", summary: "Import an asset.", permission: "asset", flags: [], schema: "schema" },
+          ],
+          loadedToolNames: ["project.status"],
+        }],
+      }),
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "RTP 任务" }));
+    const panel = await screen.findByRole("region", { name: "提供者实时状态" });
+    // Collapsed by default, so the board stays scannable until asked otherwise.
+    expect(within(panel).queryByText("能力契约")).toBeNull();
+
+    const toggle = within(panel).getByRole("checkbox", { name: "显示详细信息" }) as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    await user.click(toggle);
+    await waitFor(() => expect(api.setUiPreferences).toHaveBeenCalledWith({ rtpProviderDetails: true }));
+
+    // A live service reports its negotiated contract, not just its endpoint.
+    expect(await within(panel).findByText("reverie.rats.capability/1")).toBeTruthy();
+    expect(within(panel).getByText("http://127.0.0.1:17777/rtp")).toBeTruthy();
+    expect(within(panel).getByText("PID 4242")).toBeTruthy();
+    // Loaded / compact / native diverge whenever a session loads fewer tools
+    // than the service publishes, which is exactly what this row shows.
+    expect(within(panel).getByText("1 / 2 / 35")).toBeTruthy();
+    for (const chip of ["cinematic", "task.cancel", "main_thread_only", "read 12", "max_events 512"]) {
+      expect(within(panel).getByText(chip)).toBeTruthy();
+    }
+
+    // The user-declared provider has no service, so its block is the definition
+    // the core stored plus a plain reason the runtime rows are missing.
+    expect(within(panel).getByText("ReverieLocal/RATS/Services")).toBeTruthy();
+    expect(within(panel).getByText("product_name")).toBeTruthy();
+    expect(within(panel).getByText("blender")).toBeTruthy();
+    expect(within(panel).getByText("asset")).toBeTruthy();
+    expect(within(panel).getByText("尚未在这台机器上发现该提供者的服务。")).toBeTruthy();
+
+    // Rows still filter while expanded: the detail is not a modal state.
+    await user.click(within(panel).getAllByRole("button")[0]);
+    expect(await screen.findByText("仅显示 reverie.engine 的任务")).toBeTruthy();
+
+    await user.click(toggle);
+    await waitFor(() => expect(api.setUiPreferences).toHaveBeenCalledWith({ rtpProviderDetails: false }));
+    await waitFor(() => expect(within(panel).queryByText("能力契约")).toBeNull());
+  });
+
   it("keeps slow RTP polling single-flight", async () => {
     let releaseTasks: () => void = () => {};
     const taskGate = new Promise<void>((resolve) => {

@@ -90,7 +90,9 @@ import type {
   ModelSource,
   PluginRecord,
   ProviderProbe,
+  RatsCustomProviderDefinition,
   RatsPermission,
+  RatsProviderRecord,
   RatsServiceRecord,
   RatsState,
   RatsTaskRecord,
@@ -3488,6 +3490,11 @@ type RtpProviderStatus = {
   tasks: number;
   connection: "connected" | "available" | "unreachable" | "absent";
   error: string;
+  /** Permission classes the *definition* grants, which a live session may narrow. */
+  permissionClasses: string[];
+  toolTags: string[];
+  /** Present only for a user-declared provider, and only if the core reports them. */
+  definition: RatsCustomProviderDefinition | null;
 };
 
 /**
@@ -3502,17 +3509,25 @@ type RtpProviderStatus = {
 function rtpProviderStatuses(state: RatsState | null, tasks: RatsTaskRecord[]): RtpProviderStatus[] {
   if (!state) return [];
   const services = state.services;
+  const definitions = new Map((state.customProviders ?? []).map((entry) => [entry.providerId, entry]));
   const authorized = new Set([
     ...(state.enabledProviders ?? []).map((selection) => selection.providerId),
     ...(state.enabledProviders === undefined && state.enabledEngines?.length ? [RATS_BUILTIN_PROVIDER_ID] : []),
   ]);
-  const build = (providerId: string, label: string, kinds: string[], origin: RtpProviderStatus["origin"]): RtpProviderStatus => {
+  const build = (
+    providerId: string,
+    label: string,
+    kinds: string[],
+    origin: RtpProviderStatus["origin"],
+    provider?: RatsProviderRecord,
+  ): RtpProviderStatus => {
     const owned = services.filter((service) => service.providerId === providerId);
     const connection = owned.some((service) => service.connection === "connected")
       ? "connected" as const
       : owned.some((service) => service.connection === "available")
         ? "available" as const
         : owned.length ? "unreachable" as const : "absent" as const;
+    const definition = definitions.get(providerId) ?? null;
     return {
       providerId,
       label: label || providerId,
@@ -3525,6 +3540,12 @@ function rtpProviderStatuses(state: RatsState | null, tasks: RatsTaskRecord[]): 
       tasks: tasks.filter((task) => task.provider_id === providerId).length,
       connection,
       error: owned.map((service) => service.error).find(Boolean) ?? "",
+      // The definition is the more authoritative of the two: a compiled-in
+      // record carries only what this build knows, while a user-declared one
+      // may name a class this build was never compiled with.
+      permissionClasses: definition?.permissionClasses ?? provider?.permissions ?? [],
+      toolTags: definition?.toolTags ?? provider?.toolTags ?? [],
+      definition,
     };
   };
   const rows = state.supportedProviders.map((provider) => build(
@@ -3532,6 +3553,7 @@ function rtpProviderStatuses(state: RatsState | null, tasks: RatsTaskRecord[]): 
     provider.label || provider.product,
     provider.serviceKinds ?? [provider.serviceKind],
     provider.custom ? "custom" : "builtin",
+    provider,
   ));
   const listed = new Set(rows.map((row) => row.providerId));
   for (const providerId of [...authorized, ...services.map((service) => service.providerId)]) {
@@ -3556,7 +3578,114 @@ function rtpProviderStatusLabel(row: RtpProviderStatus, t: (key: string) => stri
   return row.authorized ? t("已授权待启动") : t("未发现服务");
 }
 
-function RtpTasksView() {
+/** One labelled fact in an expanded provider. `wide` spans the whole fact grid. */
+type RtpFact = { label: string; value: string; wide?: boolean };
+
+/**
+ * Everything the core reports about one live service.
+ *
+ * Facts with no value are dropped rather than rendered as an em dash: an older
+ * core answers without the capability-contract fields at all, and a grid full
+ * of blanks reads as breakage instead of as "this service predates the field".
+ */
+function rtpServiceFacts(service: RatsServiceRecord, t: (key: string) => string): RtpFact[] {
+  return ([
+    { label: t("能力契约"), value: service.contract ?? "" },
+    { label: t("传输协议"), value: service.protocol },
+    { label: t("产品版本"), value: service.productVersion },
+    { label: t("服务种类"), value: service.serviceKind },
+    { label: t("端点"), value: service.endpoint },
+    { label: t("进程"), value: service.pid ? `PID ${service.pid}` : "" },
+    { label: t("身份握手"), value: service.probeLatencyMs ? `${service.probeLatencyMs} ms` : "" },
+    { label: t("启动时间"), value: service.startedUtc },
+    { label: t("目录版本"), value: service.catalogRevision },
+    // Loaded / compact / native: the three counts diverge when the service
+    // publishes more tools than the session was granted permission to load.
+    { label: t("工具计数"), value: `${service.loadedToolNames.length} / ${service.tools.length} / ${service.nativeToolCount}` },
+    { label: t("描述符"), value: service.descriptorPath, wide: true },
+    { label: t("可执行文件"), value: service.executable, wide: true },
+  ] satisfies RtpFact[]).filter((fact) => Boolean(fact.value));
+}
+
+function RtpFactGrid({ facts }: { facts: RtpFact[] }) {
+  if (!facts.length) return null;
+  return <div className="rtp-fact-grid">
+    {facts.map((fact) => (
+      <div className={fact.wide ? "wide" : ""} key={fact.label}>
+        <span>{fact.label}</span>
+        <code title={fact.value}>{fact.value}</code>
+      </div>
+    ))}
+  </div>;
+}
+
+function RtpChipRow({ label, items }: { label: string; items: string[] }) {
+  if (!items.length) return null;
+  return <div className="rtp-chip-row">
+    <span>{label}</span>
+    <div className="tag-row">{items.map((item) => <span key={item}>{item}</span>)}</div>
+  </div>;
+}
+
+/** `{ read: 12 }` rendered as `read 12`, so a zero count still reads as a class. */
+function rtpCountChips(counts: Record<string, number> | undefined): string[] {
+  return Object.entries(counts ?? {}).map(([key, value]) => `${key} ${value}`);
+}
+
+function RtpProviderDetail({ row, t }: { row: RtpProviderStatus; t: (key: string, values?: Record<string, string | number>) => string }) {
+  const definition = row.definition;
+  return (
+    <div className="rtp-provider-detail">
+      <div className="rtp-detail-block">
+        <div className="rtp-detail-heading">
+          <strong>{t("登记信息")}</strong>
+          <span>{row.origin === "custom" ? t("读自设置文件的自定义定义") : row.origin === "builtin" ? t("本客户端编译时固定的内置定义") : t("核心未登记，仅从运行中的服务推断")}</span>
+        </div>
+        <RtpFactGrid facts={([
+          { label: t("提供者 ID"), value: row.providerId },
+          { label: t("名称"), value: row.label },
+          { label: t("服务种类"), value: row.kinds },
+          { label: t("授权状态"), value: row.authorized ? t("已授权") : t("未授权") },
+          { label: t("发现目录"), value: definition ? definition.discoveryRoot.join("/") : "", wide: true },
+          { label: t("可执行匹配"), value: definition ? definition.executableIdentity : "" },
+          { label: t("可执行产品名"), value: definition ? definition.executableProductNames.join(" · ") : "", wide: true },
+        ] satisfies RtpFact[]).filter((fact) => Boolean(fact.value))} />
+        <RtpChipRow label={t("权限类别")} items={row.permissionClasses} />
+        <RtpChipRow label={t("工具标签")} items={row.toolTags} />
+        {definition?.executableError && <div className="rats-inline-error"><AlertCircle size={14} />{definition.executableError}</div>}
+      </div>
+      {row.services.map((service) => (
+        <div className="rtp-detail-block" key={service.serviceId}>
+          <div className="rtp-detail-heading">
+            <strong>{service.product || service.serviceId}</strong>
+            <span>{service.serviceId}</span>
+            <span className={`rats-status ${service.connection}`}>
+              {service.connection === "connected"
+                ? (service.sessionActive ? t("已连接") : t("已握手"))
+                : service.connection === "available" ? t("可用") : t("不可达")}
+            </span>
+          </div>
+          <RtpFactGrid facts={rtpServiceFacts(service, t)} />
+          <RtpChipRow label={t("声明权限")} items={service.declaredPermissions ?? service.permissions} />
+          <RtpChipRow label={t("会话权限")} items={service.permissions} />
+          <RtpChipRow label={t("每类工具数")} items={rtpCountChips(service.permissionToolCounts)} />
+          <RtpChipRow label={t("协商特性")} items={service.features ?? []} />
+          <RtpChipRow label={t("服务约束")} items={service.constraints ?? []} />
+          <RtpChipRow label={t("服务限额")} items={rtpCountChips(service.limits)} />
+          {service.error && <div className="rats-inline-error"><AlertCircle size={14} />{service.error}</div>}
+        </div>
+      ))}
+      {!row.services.length && <div className="rats-task-empty-inline">
+        {row.authorized ? t("已授权但当前没有服务在运行，启动提供者应用后会自动出现。") : t("尚未在这台机器上发现该提供者的服务。")}
+      </div>}
+    </div>
+  );
+}
+
+function RtpTasksView({ preferences, updatePreferences }: {
+  preferences: UiPreferences;
+  updatePreferences: (patch: Partial<UiPreferences>) => void;
+}) {
   const { t } = useI18n();
   const [state, setState] = useState<RatsState | null>(null);
   const [tasks, setTasks] = useState<RatsTaskRecord[]>([]);
@@ -3771,33 +3900,45 @@ function RtpTasksView() {
       {error && <div className="page-loading error"><AlertCircle size={18} />{error}</div>}
       {/* Always rendered, connected or not: seeing that an authorized provider is
           offline is the whole point of a per-provider status board. */}
-      <section className="rtp-provider-panel" aria-labelledby="rtp-provider-title">
+      <section className={`rtp-provider-panel ${preferences.rtpProviderDetails ? "expanded" : ""}`} aria-labelledby="rtp-provider-title">
         <div className="rats-task-panel-heading">
           <div><h2 id="rtp-provider-title">{t("提供者实时状态")}</h2><p>{t("列出全部已登记提供者（内置与自定义），每 1.5 秒刷新一次连接、会话与任务数。")}</p></div>
+          {/* Opt-in, and remembered: the detail is several screens per provider,
+              but a user who wants contract fields wants them every session. */}
+          <label className="rtp-detail-toggle">
+            <input
+              type="checkbox"
+              checked={preferences.rtpProviderDetails}
+              onChange={(event) => updatePreferences({ rtpProviderDetails: event.target.checked })}
+            />
+            {t("显示详细信息")}
+          </label>
           <span>{liveProviders}/{providerRows.length}</span>
         </div>
         <div className="rtp-provider-list">
           {providerRows.map((row) => (
-            <button
-              type="button"
-              key={row.providerId}
-              className={`rtp-provider-row ${row.connection} ${providerFilter === row.providerId ? "active" : ""}`}
-              aria-pressed={providerFilter === row.providerId}
-              onClick={() => chooseProviderFilter(providerFilter === row.providerId ? "all" : row.providerId)}
-            >
-              <span className={`rats-task-dot ${row.connected ? "running" : row.connection === "absent" ? "" : "done"}`} />
-              <span className="rtp-provider-identity">
-                <strong>{row.providerId}</strong>
-                <small>{[row.label, row.kinds].filter(Boolean).join(" · ") || t("暂无说明")}</small>
-              </span>
-              <span className="rtp-provider-origin">{row.origin === "builtin" ? t("内置") : row.origin === "custom" ? t("自定义") : t("未登记")}</span>
-              <span className="rtp-provider-metrics">
-                <code>{t("rtp.providerServices", { connected: row.connected, total: row.services.length })}</code>
-                <code>{t("rtp.providerTools", { count: row.tools })}</code>
-                <code>{t("rtp.providerTasks", { count: row.tasks })}</code>
-              </span>
-              <span className={`rats-status ${row.connection === "absent" ? "" : row.connection}`}>{rtpProviderStatusLabel(row, t)}</span>
-            </button>
+            <div className="rtp-provider-entry" key={row.providerId}>
+              <button
+                type="button"
+                className={`rtp-provider-row ${row.connection} ${providerFilter === row.providerId ? "active" : ""}`}
+                aria-pressed={providerFilter === row.providerId}
+                onClick={() => chooseProviderFilter(providerFilter === row.providerId ? "all" : row.providerId)}
+              >
+                <span className={`rats-task-dot ${row.connected ? "running" : row.connection === "absent" ? "" : "done"}`} />
+                <span className="rtp-provider-identity">
+                  <strong>{row.providerId}</strong>
+                  <small>{[row.label, row.kinds].filter(Boolean).join(" · ") || t("暂无说明")}</small>
+                </span>
+                <span className="rtp-provider-origin">{row.origin === "builtin" ? t("内置") : row.origin === "custom" ? t("自定义") : t("未登记")}</span>
+                <span className="rtp-provider-metrics">
+                  <code>{t("rtp.providerServices", { connected: row.connected, total: row.services.length })}</code>
+                  <code>{t("rtp.providerTools", { count: row.tools })}</code>
+                  <code>{t("rtp.providerTasks", { count: row.tasks })}</code>
+                </span>
+                <span className={`rats-status ${row.connection === "absent" ? "" : row.connection}`}>{rtpProviderStatusLabel(row, t)}</span>
+              </button>
+              {preferences.rtpProviderDetails && <RtpProviderDetail row={row} t={t} />}
+            </div>
           ))}
           {providerRows.length === 0 && <div className="rats-task-empty-inline">{t("核心还没有报告任何 RATS 提供者。")}</div>}
         </div>
@@ -5011,7 +5152,7 @@ export default function App() {
     if (!state) return null;
     if (view === "tools") return <ToolsView mode={state.workspace.mode} />;
     if (view === "rats") return <RatsView />;
-    if (view === "tasks") return <RtpTasksView />;
+    if (view === "tasks") return <RtpTasksView preferences={uiPreferences} updatePreferences={updateUiPreferences} />;
     if (view === "subagents") return <SubagentsView />;
     if (view === "plugins") return <PluginsView plugins={state.plugins.records} updatePlugin={updatePlugin} refresh={refreshPlugins} />;
     if (view === "recovery") return <RecoveryView recovery={state.recovery} rollback={rollback} />;

@@ -22,6 +22,7 @@ export interface StoredUiPreferences {
   showToolResults: boolean;
   expandToolResults: boolean;
   showLiveActivity: boolean;
+  rtpProviderDetails: boolean;
   inspectorOpen: boolean;
   sidebarWidth: number;
   inspectorWidth: number;
@@ -60,6 +61,7 @@ export const DEFAULT_UI_PREFERENCES: StoredUiPreferences = {
   showToolResults: false,
   expandToolResults: false,
   showLiveActivity: true,
+  rtpProviderDetails: false,
   inspectorOpen: true,
   sidebarWidth: 268,
   inspectorWidth: 316,
@@ -120,6 +122,7 @@ export function normalizeUiPreferences(value: unknown): StoredUiPreferences {
     showToolResults: source.showToolResults === undefined ? DEFAULT_UI_PREFERENCES.showToolResults : Boolean(source.showToolResults),
     expandToolResults: source.expandToolResults === undefined ? DEFAULT_UI_PREFERENCES.expandToolResults : Boolean(source.expandToolResults),
     showLiveActivity: source.showLiveActivity === undefined ? DEFAULT_UI_PREFERENCES.showLiveActivity : Boolean(source.showLiveActivity),
+    rtpProviderDetails: source.rtpProviderDetails === undefined ? DEFAULT_UI_PREFERENCES.rtpProviderDetails : Boolean(source.rtpProviderDetails),
     inspectorOpen: source.inspectorOpen === undefined ? DEFAULT_UI_PREFERENCES.inspectorOpen : Boolean(source.inspectorOpen),
     sidebarWidth: paneWidth(source.sidebarWidth, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH, DEFAULT_UI_PREFERENCES.sidebarWidth),
     inspectorWidth: paneWidth(source.inspectorWidth, INSPECTOR_MIN_WIDTH, INSPECTOR_MAX_WIDTH, DEFAULT_UI_PREFERENCES.inspectorWidth),

@@ -1093,6 +1093,34 @@ kbd { border-color: var(--border-strong); border-bottom-color: var(--border); ba
 .rtp-provider-metrics code { color: var(--dim); font: var(--font-caption) var(--font-mono); white-space: nowrap; }
 .rtp-provider-row .rats-status { white-space: nowrap; }
 .rtp-provider-errors { padding: 0 0 12px; }
+/* The row is only one entry's summary now; the entry wraps it together with the
+   opt-in detail, so the seam-hiding rule has to look at the entry the list
+   actually ends on rather than at the row. */
+.rtp-provider-entry:last-child > .rtp-provider-row { border-bottom: 0; }
+/* The left column grows so the checkbox and the live count read as one
+   right-hand group, instead of space-between parking the checkbox mid-row. */
+.rtp-provider-panel .rats-task-panel-heading > div:first-child { flex: 1 1 auto; min-width: 0; }
+.rtp-detail-toggle { flex-shrink: 0; display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: var(--font-caption); white-space: nowrap; cursor: pointer; -webkit-app-region: no-drag; }
+.rtp-detail-toggle:hover { color: var(--text-2); }
+.rtp-detail-toggle input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+/* Expanded, the board is a reference view rather than a glance: keeping the
+   collapsed cap would hide every provider behind a 300px scroll port. */
+.rtp-provider-panel.expanded .rtp-provider-list { max-height: none; }
+.rtp-provider-detail { padding: 0 14px 13px 34px; display: flex; flex-direction: column; gap: 9px; border-bottom: 1px solid var(--border-soft); }
+.rtp-provider-entry:last-child > .rtp-provider-detail { border-bottom: 0; }
+.rtp-detail-block { padding: 11px 12px; display: flex; flex-direction: column; gap: 9px; border: 1px solid var(--border-soft); border-radius: 10px; background: var(--panel-2); }
+.rtp-detail-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 9px; }
+.rtp-detail-heading strong { color: var(--text); font-size: var(--font-small); white-space: nowrap; }
+.rtp-detail-heading > span { min-width: 0; overflow: hidden; color: var(--dim); font: var(--font-caption) var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.rtp-detail-heading .rats-status { flex-shrink: 0; margin-left: auto; }
+.rtp-fact-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(186px, 1fr)); gap: 8px 12px; }
+.rtp-fact-grid > div { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.rtp-fact-grid > div.wide { grid-column: 1 / -1; }
+.rtp-fact-grid span { color: var(--dim); font-size: var(--font-caption); }
+.rtp-fact-grid code { overflow: hidden; color: var(--text-2); font: var(--font-caption) var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.rtp-chip-row { display: grid; grid-template-columns: 78px minmax(0,1fr); align-items: baseline; gap: 4px 10px; }
+.rtp-chip-row > span { color: var(--dim); font-size: var(--font-caption); }
+.rtp-provider-detail .rats-inline-error { margin: 0; }
 /* The row is a five-track grid at full width; once the middle column narrows the
    badge and metrics have nowhere to go, so they drop onto a second row instead
    of shredding their CJK labels into one glyph per line. Placement is spelled
@@ -1102,6 +1130,10 @@ kbd { border-color: var(--border-strong); border-bottom-color: var(--border); ba
   .rtp-provider-row .rats-status { grid-area: 1 / 3 / 2 / 4; }
   .rtp-provider-origin { grid-area: 2 / 2 / 3 / 3; justify-self: start; }
   .rtp-provider-metrics { grid-area: 2 / 3 / 3 / 4; justify-content: flex-end; }
+  /* The detail indent lines up with the row's identity column, which is worth
+     less than the width once the column is this narrow. */
+  .rtp-provider-detail { padding-left: 14px; }
+  .rtp-chip-row { grid-template-columns: minmax(0,1fr); }
 }
 /* Four tiles need roughly 900px of column; below that they pair up rather than
    letting `已连接服务` wrap under its own number. */

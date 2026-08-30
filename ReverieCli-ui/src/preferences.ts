@@ -30,6 +30,8 @@ export interface UiPreferences {
   showToolResults: boolean;
   expandToolResults: boolean;
   showLiveActivity: boolean;
+  /** Whether the RTP provider board expands each provider's contract detail. */
+  rtpProviderDetails: boolean;
   inspectorOpen: boolean;
   sidebarWidth: number;
   inspectorWidth: number;
@@ -57,6 +59,9 @@ export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   showToolResults: false,
   expandToolResults: false,
   showLiveActivity: true,
+  // Off by default: the board's job is to be scannable at a glance, and the
+  // per-service contract detail is several screens of it.
+  rtpProviderDetails: false,
   inspectorOpen: true,
   sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
   inspectorWidth: INSPECTOR_DEFAULT_WIDTH,
@@ -107,6 +112,7 @@ export function normalizeUiPreferences(value: unknown): UiPreferences {
     showToolResults: source.showToolResults === undefined ? DEFAULT_UI_PREFERENCES.showToolResults : Boolean(source.showToolResults),
     expandToolResults: source.expandToolResults === undefined ? DEFAULT_UI_PREFERENCES.expandToolResults : Boolean(source.expandToolResults),
     showLiveActivity: source.showLiveActivity === undefined ? DEFAULT_UI_PREFERENCES.showLiveActivity : Boolean(source.showLiveActivity),
+    rtpProviderDetails: source.rtpProviderDetails === undefined ? DEFAULT_UI_PREFERENCES.rtpProviderDetails : Boolean(source.rtpProviderDetails),
     inspectorOpen: source.inspectorOpen === undefined ? DEFAULT_UI_PREFERENCES.inspectorOpen : Boolean(source.inspectorOpen),
     sidebarWidth: clampSidebarWidth(Number(source.sidebarWidth ?? Number.NaN)),
     inspectorWidth: clampInspectorWidth(Number(source.inspectorWidth ?? Number.NaN)),

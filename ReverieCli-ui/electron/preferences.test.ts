@@ -14,6 +14,8 @@ describe("desktop UI preferences", () => {
     expect(DEFAULT_UI_PREFERENCES.expandReasoning).toBe(true);
     expect(DEFAULT_UI_PREFERENCES.showToolCalls).toBe(true);
     expect(DEFAULT_UI_PREFERENCES.showToolResults).toBe(false);
+    // The RTP board opens scannable; the contract detail is opt-in per install.
+    expect(DEFAULT_UI_PREFERENCES.rtpProviderDetails).toBe(false);
   });
 
   it("carries every preference the renderer stores", () => {

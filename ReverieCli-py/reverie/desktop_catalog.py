@@ -222,6 +222,27 @@ def _reasoning_metadata(source: str, model: Dict[str, Any], provider_config: Dic
             "options": list(model.get("thinking_options") or []),
             "value": resolve_modelscope_thinking_choice(provider_config, model_id),
         }
+    if source == "custom":
+        from .custom_providers import (
+            custom_provider_reasoning_level_for_model,
+            custom_provider_reasoning_options,
+            normalize_custom_provider_reasoning_effort,
+        )
+
+        options = custom_provider_reasoning_options(model)
+        if not options:
+            return {"control": "none", "options": [], "value": "off"}
+        value = normalize_custom_provider_reasoning_effort(provider_config.get("reasoning_effort"))
+        if not provider_config.get("thinking", True):
+            value = "off"
+        return {
+            "control": "effort",
+            "options": options,
+            "value": value,
+            # ``max`` is relative to the model, so hand the client the rung the
+            # request will actually carry.
+            "resolved": custom_provider_reasoning_level_for_model(model, value),
+        }
 
     control = str(model.get("thinking_control") or "")
     if not control:
@@ -362,9 +383,18 @@ def _catalog_match(catalog: List[Dict[str, Any]], query: Any) -> Optional[Dict[s
     return matches[0] if len(matches) == 1 else None
 
 
-def _apply_custom_provider_selection(config: Config, selected: Dict[str, Any]) -> Dict[str, Any]:
+def _apply_custom_provider_selection(
+    config: Config,
+    selected: Dict[str, Any],
+    reasoning: Any = None,
+) -> Dict[str, Any]:
     """Store a model choice on the active custom provider record."""
-    from .custom_providers import resolve_active_custom_provider, upsert_custom_provider
+    from .custom_providers import (
+        custom_provider_reasoning_options,
+        normalize_custom_provider_reasoning_effort,
+        resolve_active_custom_provider,
+        upsert_custom_provider,
+    )
 
     provider = resolve_active_custom_provider(getattr(config, "custom_providers", {}))
     if not provider:
@@ -381,6 +411,13 @@ def _apply_custom_provider_selection(config: Config, selected: Dict[str, Any]) -
         )
     if selected.get("vision") is not None:
         provider["supports_vision"] = bool(selected.get("vision"))
+    if reasoning is not None:
+        depth = normalize_custom_provider_reasoning_effort(reasoning, default="")
+        allowed = {item["id"] for item in custom_provider_reasoning_options(selected)}
+        if not depth or (allowed and depth not in allowed):
+            raise ValueError(f"Reasoning level {reasoning!r} is not supported by {selected['id']}")
+        provider["reasoning_effort"] = depth
+        provider["thinking"] = depth != "off"
     config.custom_providers = upsert_custom_provider(
         getattr(config, "custom_providers", {}),
         provider,
@@ -424,7 +461,7 @@ def apply_model_selection(
         return selected
 
     if normalized_source == "custom":
-        return _apply_custom_provider_selection(config, selected)
+        return _apply_custom_provider_selection(config, selected, reasoning)
 
     provider_config = dict(getattr(config, normalized_source, {}) or {})
     provider_config["selected_model_id"] = str(selected.get("id") or "")
@@ -604,9 +641,12 @@ def _custom_provider_entry(config: Config, record: Dict[str, Any]) -> Dict[str, 
     from .custom_providers import (
         custom_provider_format_label,
         custom_provider_models_url,
+        custom_provider_reasoning_choices,
         get_custom_provider_model_context_limit,
         mask_secret,
+        normalize_custom_provider_reasoning_effort,
         resolve_custom_provider_api_key,
+        resolve_custom_provider_reasoning_level,
         suggest_custom_provider_model_context_limit,
     )
 
@@ -650,6 +690,11 @@ def _custom_provider_entry(config: Config, record: Dict[str, Any]) -> Dict[str, 
         "max_tokens": int(record.get("max_tokens") or 0),
         "supports_vision": bool(record.get("supports_vision", False)),
         "thinking": bool(record.get("thinking", True)),
+        "reasoning_effort": normalize_custom_provider_reasoning_effort(
+            record.get("reasoning_effort")
+        ),
+        "reasoning_effort_options": custom_provider_reasoning_choices(),
+        "reasoning_effort_resolved": resolve_custom_provider_reasoning_level(record),
         "model_context_limits": {
             str(key): int(value)
             for key, value in (record.get("model_context_limits") or {}).items()
@@ -761,14 +806,24 @@ def update_custom_provider(
 ) -> Dict[str, Any]:
     """Edit one provider's four fields, preserving an omitted API key."""
     from .custom_providers import (
+        CUSTOM_PROVIDER_DEFAULT_REASONING_EFFORT,
         normalize_custom_provider_format,
+        normalize_custom_provider_reasoning_effort,
         resolve_custom_provider_base_url,
         upsert_custom_provider,
     )
 
     record = dict(_require_custom_provider(config, provider_ref))
     patch = dict(patch or {})
-    unsupported = set(patch) - {"name", "base_url", "api_key", "format", "enabled", "thinking"}
+    unsupported = set(patch) - {
+        "name",
+        "base_url",
+        "api_key",
+        "format",
+        "enabled",
+        "thinking",
+        "reasoning_effort",
+    }
     if unsupported:
         raise ValueError(f"Unsupported custom provider field: {sorted(unsupported)[0]}")
 
@@ -796,6 +851,21 @@ def update_custom_provider(
         record["enabled"] = bool(patch["enabled"])
     if "thinking" in patch:
         record["thinking"] = bool(patch["thinking"])
+        # The switch and the depth are two views of one setting, so turning
+        # thinking back on has to restore a depth or the normalizer will read
+        # the leftover ``off`` and switch it straight back down.
+        if not record["thinking"]:
+            record["reasoning_effort"] = "off"
+        elif normalize_custom_provider_reasoning_effort(record.get("reasoning_effort")) == "off":
+            record["reasoning_effort"] = CUSTOM_PROVIDER_DEFAULT_REASONING_EFFORT
+    if "reasoning_effort" in patch:
+        depth = normalize_custom_provider_reasoning_effort(patch.get("reasoning_effort"), default="")
+        if not depth:
+            raise ValueError(f"Unsupported reasoning depth: {patch.get('reasoning_effort')!r}")
+        record["reasoning_effort"] = depth
+        # An explicit depth decides the switch unless the same patch set it.
+        if "thinking" not in patch:
+            record["thinking"] = depth != "off"
 
     config.custom_providers = upsert_custom_provider(getattr(config, "custom_providers", {}), record)
     stored = _require_custom_provider(config, record["id"])

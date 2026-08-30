@@ -237,6 +237,41 @@ def test_responses_result_extracts_text_and_function_calls(tmp_path) -> None:
     assert usage == {"input_tokens": 3, "output_tokens": 2}
 
 
+def test_responses_result_keeps_the_reasoning_trace(tmp_path) -> None:
+    """A Responses gateway may return the trace as a summary or as raw text."""
+    agent = ReverieAgent(
+        base_url="https://api.xkiro.com/v1",
+        api_key="secret",
+        model="demo",
+        project_root=tmp_path,
+        provider="openai-responses",
+    )
+    state, _ = agent._responses_result_state(
+        {
+            "output": [
+                {"type": "reasoning", "summary": [{"type": "summary_text", "text": "First, "}]},
+                {"type": "reasoning", "content": [{"type": "reasoning_text", "text": "27*14."}]},
+                {"type": "message", "content": [{"type": "output_text", "text": "378"}]},
+            ]
+        }
+    )
+    assert state.collected_thinking == "First, 27*14."
+    assert state.cleaned_content() == "378"
+
+
+@pytest.mark.parametrize(
+    "event_type",
+    ["response.reasoning_summary_text.delta", "response.reasoning_text.delta"],
+)
+def test_responses_stream_reasoning_survives_either_event_name(event_type: str) -> None:
+    from reverie.codex import parse_codex_sse_event
+
+    events, _ = parse_codex_sse_event(
+        json.dumps({"type": event_type, "delta": "thinking out loud"}),
+    )
+    assert events == [{"type": "reasoning", "text": "thinking out loud"}]
+
+
 def test_openai_responses_provider_calls_sdk_responses_endpoint(tmp_path) -> None:
     captured = {}
 

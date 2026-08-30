@@ -308,6 +308,73 @@ def test_a_gateway_that_rejects_the_thinking_flags_retries_once_without_them(tmp
     assert calls[1]["stream"] is True
 
 
+def test_a_strict_gateway_is_narrowed_one_dialect_at_a_time(tmp_path):
+    """The reasoning payload speaks every dialect, so give up one tier per refusal."""
+    from reverie.custom_providers import (
+        build_custom_provider_reasoning_extra_body,
+        reset_custom_provider_reasoning_narrowing,
+    )
+
+    class FakeProviderError(Exception):
+        status_code = 400
+
+    reset_custom_provider_reasoning_narrowing()
+    extra_body = build_custom_provider_reasoning_extra_body(
+        {
+            "id": "strict",
+            "name": "strict",
+            "base_url": "https://api.strict.invalid/v1",
+            "api_key": "x",
+            "format": "openai-chat",
+            "models": [{"id": "gpt-strict", "context_length": 128000, "max_output_tokens": 32000}],
+            "selected_model_id": "gpt-strict",
+        },
+        output_tokens=32000,
+    )
+    assert "chat_template_kwargs" in extra_body  # the full union goes out first
+
+    calls = []
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            calls.append(dict(kwargs))
+            body = kwargs.get("extra_body") or {}
+            # Accept nothing but the one field the OpenAI API itself documents.
+            offending = next((key for key in body if key != "reasoning_effort"), "")
+            if offending:
+                raise FakeProviderError(f"Unrecognized request argument supplied: {offending}")
+            return "ok"
+
+    fake_client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+    agent = ReverieAgent(
+        base_url="https://api.strict.invalid/v1",
+        api_key="x",
+        model="gpt-strict",
+        project_root=tmp_path,
+        provider="openai-sdk",
+        config=_standard_config(),
+    )
+    agent._ensure_client = lambda: fake_client
+
+    response = agent._create_openai_chat_completion(
+        model="gpt-strict",
+        messages=[{"role": "user", "content": "hello"}],
+        stream=True,
+        timeout=17,
+        extra_body=dict(extra_body),
+    )
+
+    assert response == "ok"
+    # Three refusals shed the three vendor tiers; the fourth attempt carries only
+    # the field the OpenAI API documents, and is accepted.
+    assert len(calls) == 4
+    assert calls[-1]["extra_body"] == {"reasoning_effort": extra_body["reasoning_effort"]}
+    # Narrowing never costs the request anything else it was carrying.
+    assert calls[-1]["messages"] == calls[0]["messages"]
+    assert calls[-1]["stream"] is True
+    reset_custom_provider_reasoning_narrowing()
+
+
 def test_only_a_thinking_flag_refusal_triggers_the_thinking_fallback():
     from reverie.agent.agent import (
         _has_thinking_hints,

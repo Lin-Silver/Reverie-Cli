@@ -9,7 +9,7 @@ This is the main agent class that:
 """
 
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional, Generator, AsyncGenerator, Callable
+from typing import List, Dict, Any, Optional, Generator, AsyncGenerator, Callable, Tuple
 from pathlib import Path
 import json
 import hashlib
@@ -70,7 +70,15 @@ from ..agnes import build_agnes_openai_options
 from ..opencode import build_opencode_openai_options
 from ..sensenova import build_sensenova_openai_options
 from ..modelscope import build_modelscope_openai_options
-from ..custom_providers import build_custom_provider_openai_options
+from ..custom_providers import (
+    CUSTOM_PROVIDER_REASONING_FIELD_TIERS,
+    CUSTOM_PROVIDER_REASONING_FIELDS,
+    build_custom_provider_anthropic_options,
+    build_custom_provider_openai_options,
+    build_custom_provider_responses_options,
+    narrow_custom_provider_reasoning_payload,
+    remember_custom_provider_reasoning_narrowing,
+)
 from ..webgemini import (
     generate_webgemini_message,
     iter_webgemini_text_deltas,
@@ -1558,8 +1566,11 @@ def _should_retry_without_tooling(status_code: Any) -> bool:
 
 
 # Thinking is enabled by default, and a gateway that does not understand the
-# flags must degrade to a plain request instead of failing the turn.
-_THINKING_HINT_FIELDS = ("chat_template_kwargs", "enable_thinking", "clear_thinking")
+# flags must degrade to a plain request instead of failing the turn.  The tiers
+# are ordered most-vendor-specific first, so a provider that only speaks plain
+# `reasoning_effort` keeps thinking on instead of losing it to one blanket strip.
+_THINKING_HINT_TIERS: Tuple[Tuple[str, ...], ...] = CUSTOM_PROVIDER_REASONING_FIELD_TIERS
+_THINKING_HINT_FIELDS: Tuple[str, ...] = CUSTOM_PROVIDER_REASONING_FIELDS
 
 
 def _has_thinking_hints(payload: Dict[str, Any]) -> bool:
@@ -1583,6 +1594,26 @@ def _without_thinking_hints(payload: Dict[str, Any]) -> Dict[str, Any]:
     return prepared
 
 
+def _narrow_thinking_hints(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Drop the most vendor-specific thinking tier still in the request.
+
+    Returns ``None`` once no reasoning field is left, which is how the caller
+    tells "retry with a narrower payload" from "stop retrying".
+    """
+    prepared = dict(payload or {})
+    extra_body = prepared.get("extra_body")
+    if not isinstance(extra_body, dict):
+        return None
+    narrowed = narrow_custom_provider_reasoning_payload(extra_body)
+    if narrowed is None:
+        return None
+    if narrowed:
+        prepared["extra_body"] = narrowed
+    else:
+        prepared.pop("extra_body", None)
+    return prepared
+
+
 def _is_thinking_hint_rejection(error: BaseException) -> bool:
     """Whether a failure looks like the provider refusing the thinking flags."""
     status = getattr(error, "status_code", None)
@@ -1594,10 +1625,15 @@ def _is_thinking_hint_rejection(error: BaseException) -> bool:
     response = getattr(error, "response", None)
     if response is not None:
         text = f"{text} {str(getattr(response, 'text', '') or '')}".lower()
-    if not text:
-        return False
     if any(field in text for field in _THINKING_HINT_FIELDS):
         return True
+    # A bare validation failure is worth one narrowing pass: the reasoning union
+    # is the only speculative part of the request, so it is the likeliest cause
+    # and narrowing keeps every other field -- tools included -- intact.
+    if isinstance(status, int) and status in (400, 422):
+        return True
+    if not text:
+        return False
     if "thinking" not in text and "extra_body" not in text:
         return False
     return any(
@@ -3640,7 +3676,7 @@ class ReverieAgent:
                 getattr(self.config, "custom_providers", {}),
                 model_id=model_for_sdk,
             )
-            extra_body = self._openai_extra_body_for_thinking()
+            extra_body = provider_options.get("extra_body")
         else:
             extra_body = self._openai_extra_body_for_thinking()
             if extra_body is not None and isinstance(model_for_sdk, str) and "(" in model_for_sdk and ")" in model_for_sdk:
@@ -3700,9 +3736,10 @@ class ReverieAgent:
         call_kwargs = apply_openai_prompt_cache(kwargs, namespace="agent-chat")
         fresh_user_query_retry_used = False
         prompt_cache_fallback_used = False
-        thinking_fallback_used = False
+        thinking_tiers_dropped = 0
+        attempt = 0
 
-        for attempt in range(retries + 1):
+        while True:
             try:
                 if self._is_active_model_source("nvidia"):
                     _wait_for_nvidia_rate_limit()
@@ -3719,15 +3756,21 @@ class ReverieAgent:
                     call_kwargs = without_prompt_cache(call_kwargs)
                     prompt_cache_fallback_used = True
                     continue
-                if (
-                    not thinking_fallback_used
-                    and _has_thinking_hints(call_kwargs)
-                    and _is_thinking_hint_rejection(exc)
-                ):
-                    logger.warning("Provider rejected the thinking flags; retrying once without them")
-                    call_kwargs = _without_thinking_hints(call_kwargs)
-                    thinking_fallback_used = True
-                    continue
+                if _has_thinking_hints(call_kwargs) and _is_thinking_hint_rejection(exc):
+                    # One tier at a time, so a gateway that only dislikes the
+                    # vendor-specific knobs still gets to keep thinking on.
+                    narrowed = _narrow_thinking_hints(call_kwargs)
+                    if narrowed is not None:
+                        thinking_tiers_dropped += 1
+                        call_kwargs = narrowed
+                        self._remember_thinking_narrowing(
+                            call_kwargs.get("model"), thinking_tiers_dropped
+                        )
+                        logger.warning(
+                            "Provider rejected reasoning fields; retrying with a narrower payload (tier %s)",
+                            thinking_tiers_dropped,
+                        )
+                        continue
                 if (
                     (
                         self._is_active_model_source("agnes")
@@ -3785,11 +3828,30 @@ class ReverieAgent:
                     retries,
                     exc,
                 )
+                attempt += 1
                 time.sleep(backoff)
 
         if last_error:
             raise last_error
         raise RuntimeError("OpenAI-compatible SDK call failed without an exception")
+
+    def _remember_thinking_narrowing(self, model_id: Any, tiers_dropped: int) -> None:
+        """Remember a custom provider's refused reasoning tier for this process.
+
+        Without this, every turn would re-probe the same rejected dialect and pay
+        one wasted request per tier before the payload the gateway accepts.
+        """
+        if not self._is_active_model_source("custom"):
+            return
+        try:
+            provider_id = str(
+                (getattr(self.config, "custom_providers", {}) or {}).get("active_provider_id") or ""
+            )
+            remember_custom_provider_reasoning_narrowing(
+                provider_id, model_id or self.model, tiers_dropped
+            )
+        except Exception:
+            logger.debug("Could not remember the custom provider reasoning narrowing", exc_info=True)
 
     def _openai_sdk_provider_label(self) -> str:
         """Return a user-facing label for OpenAI SDK backed requests."""
@@ -3949,6 +4011,33 @@ class ReverieAgent:
         effort = str(cfg.get("reasoning_effort", self.thinking_mode or "high") or "high").strip().lower()
         if effort in {"low", "medium", "high", "max"}:
             prepared["extra_body"] = {"output_config": {"effort": effort}}
+        return prepared
+
+    def _apply_custom_provider_anthropic_options(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        """Add the native Anthropic thinking block for a custom provider."""
+        if not self._is_active_model_source("custom"):
+            return kwargs
+        try:
+            options = build_custom_provider_anthropic_options(
+                getattr(self.config, "custom_providers", {}),
+                model_id=self.model,
+            )
+        except Exception:
+            logger.debug("Could not build the custom provider thinking block", exc_info=True)
+            return kwargs
+        thinking = options.get("thinking")
+        if not isinstance(thinking, dict):
+            return kwargs
+        prepared = dict(kwargs)
+        prepared["thinking"] = thinking
+        # Anthropic rejects a budget that does not fit inside the output cap, and
+        # rejects sampling overrides while thinking is on.
+        cap = int(prepared.get("max_tokens") or 0)
+        budget = int(thinking.get("budget_tokens") or 0)
+        if budget and cap and budget >= cap:
+            prepared["max_tokens"] = int(options.get("max_tokens") or cap)
+        prepared.pop("temperature", None)
+        prepared.pop("top_p", None)
         return prepared
 
     def _completion_continuation_limit(self) -> int:
@@ -5362,6 +5451,21 @@ class ReverieAgent:
                 tool_name = str((tool_choice.get("function", {}) or {}).get("name", "") or "").strip()
                 if tool_name:
                     payload["tool_choice"] = {"type": "function", "name": tool_name}
+        if self._is_active_model_source("custom"):
+            # `build_codex_request_payload` reasons for Codex's own account; a
+            # custom provider gets its own resolved depth instead.
+            try:
+                options = build_custom_provider_responses_options(
+                    getattr(self.config, "custom_providers", {}),
+                    model_id=self.model,
+                )
+            except Exception:
+                logger.debug("Could not build custom provider Responses options", exc_info=True)
+                options = {}
+            for key in ("reasoning", "include", "max_output_tokens"):
+                value = options.get(key)
+                if value:
+                    payload[key] = value
         return apply_openai_prompt_cache(payload, namespace="agent-responses")
 
     def _create_openai_response(self, payload: Dict[str, Any]) -> Any:
@@ -5561,7 +5665,10 @@ class ReverieAgent:
                     getattr(self.config, "custom_providers", {}),
                     model_id=model_for_sdk,
                 )
-                extra_body = self._openai_extra_body_for_thinking()
+                # The provider's own reasoning union already covers every dialect
+                # the generic thinking hint would have sent, and it carries the
+                # resolved depth as well.
+                extra_body = provider_options.get("extra_body")
             else:
                 extra_body = self._openai_extra_body_for_thinking()
             if extra_body is not None and isinstance(model_for_sdk, str) and "(" in model_for_sdk and ")" in model_for_sdk:
@@ -5840,6 +5947,7 @@ class ReverieAgent:
                 if tool_choice:
                     kwargs["tool_choice"] = tool_choice
             kwargs = self._apply_sensenova_anthropic_options(kwargs)
+            kwargs = self._apply_custom_provider_anthropic_options(kwargs)
             kwargs = apply_anthropic_prompt_cache(kwargs)
             
             # Make request
@@ -5963,6 +6071,16 @@ class ReverieAgent:
         state = _StreamingTurnState()
         for item in data.get("output", []) or []:
             item_type = str(item.get("type", "") or "").strip().lower()
+            if item_type == "reasoning":
+                # Codex returns a summary, other Responses gateways return the raw
+                # trace under ``content``; either one is the thinking to surface.
+                for key in ("summary", "content"):
+                    for part in item.get(key, []) or []:
+                        if isinstance(part, dict):
+                            state.add_reasoning(part.get("text", ""))
+                        elif isinstance(part, str):
+                            state.add_reasoning(part)
+                continue
             if item_type == "message":
                 for part in item.get("content", []) or []:
                     part_type = str(part.get("type", "") or "").strip().lower()
@@ -6095,7 +6213,10 @@ class ReverieAgent:
                     getattr(self.config, "custom_providers", {}),
                     model_id=model_for_sdk,
                 )
-                extra_body = self._openai_extra_body_for_thinking()
+                # The provider's own reasoning union already covers every dialect
+                # the generic thinking hint would have sent, and it carries the
+                # resolved depth as well.
+                extra_body = provider_options.get("extra_body")
             else:
                 extra_body = self._openai_extra_body_for_thinking()
             if extra_body is not None and isinstance(model_for_sdk, str) and "(" in model_for_sdk and ")" in model_for_sdk:
@@ -6558,6 +6679,7 @@ class ReverieAgent:
                 if tool_choice:
                     kwargs["tool_choice"] = tool_choice
             kwargs = self._apply_sensenova_anthropic_options(kwargs)
+            kwargs = self._apply_custom_provider_anthropic_options(kwargs)
             kwargs = apply_anthropic_prompt_cache(kwargs)
             
             # Make request

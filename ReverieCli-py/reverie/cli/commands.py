@@ -8706,7 +8706,7 @@ class CommandHandler:
             return self._cmd_provider_models(row, value)
         if action in ("context", "context-limit", "contextlimit", "window", "tokens"):
             return self._cmd_provider_context(row, value)
-        if action in ("thinking", "think", "reasoning"):
+        if action in ("thinking", "think", "reasoning", "depth", "effort", "reasoning-effort"):
             return self._cmd_provider_thinking(row, value)
         if action in ("test", "check", "probe", "ping"):
             return self._cmd_provider_test(row, value)
@@ -8741,7 +8741,7 @@ class CommandHandler:
             f"[{self.theme.PINK_SOFT}]/provider <name>[/{self.theme.PINK_SOFT}]               Show one provider in detail",
             f"[{self.theme.PINK_SOFT}]/provider <name> models[/{self.theme.PINK_SOFT}]        Refresh the live model list and pick a model",
             f"[{self.theme.PINK_SOFT}]/provider <name> context[/{self.theme.PINK_SOFT}]       Set the context limit for the selected model",
-            f"[{self.theme.PINK_SOFT}]/provider <name> thinking[/{self.theme.PINK_SOFT}]      Turn thinking mode on or off (on by default)",
+            f"[{self.theme.PINK_SOFT}]/provider <name> thinking[/{self.theme.PINK_SOFT}]      Reasoning depth: off|minimal|low|medium|high|xhigh|max (max by default)",
             f"[{self.theme.PINK_SOFT}]/provider <name> test[/{self.theme.PINK_SOFT}]          Verify with one real minimal request",
             f"[{self.theme.PINK_SOFT}]/provider <name> use[/{self.theme.PINK_SOFT}]           Make it the active model source",
             f"[{self.theme.PINK_SOFT}]/provider <name> key[/{self.theme.PINK_SOFT}]           Replace the stored API key",
@@ -9244,7 +9244,7 @@ class CommandHandler:
             f"[{self.theme.BLUE_SOFT}]Cached models:[/{self.theme.BLUE_SOFT}] {len(record.get('models') or [])} (synced {synced_text})",
             f"[{self.theme.BLUE_SOFT}]Context window:[/{self.theme.BLUE_SOFT}] {context_text}",
             f"[{self.theme.BLUE_SOFT}]Saved limits:[/{self.theme.BLUE_SOFT}] {len(record.get('model_context_limits') or {})} model(s)",
-            f"[{self.theme.BLUE_SOFT}]Thinking:[/{self.theme.BLUE_SOFT}] {'on' if record.get('thinking', True) else 'off'}",
+            f"[{self.theme.BLUE_SOFT}]Reasoning:[/{self.theme.BLUE_SOFT}] {escape(self._describe_provider_reasoning(record))}",
             f"[{self.theme.BLUE_SOFT}]Enabled:[/{self.theme.BLUE_SOFT}] {'YES' if row.enabled else 'no'}",
         ]
         self.console.print()
@@ -9394,55 +9394,106 @@ class CommandHandler:
         )
         return True
 
+    def _describe_provider_reasoning(self, record: Dict[str, Any]) -> str:
+        """Describe the stored depth plus what it resolves to for the live model."""
+        from ..custom_providers import resolve_custom_provider_reasoning_level
+
+        stored = str(record.get("reasoning_effort") or "off")
+        if not record.get("thinking", True) or stored == "off":
+            return "off"
+        resolved = resolve_custom_provider_reasoning_level(record)
+        if not resolved:
+            return "off"
+        if resolved == stored:
+            return stored
+        # ``max`` is a wish, not a wire value: show the rung this model publishes.
+        return f"{stored} {self.deco.ARROW_RIGHT} {resolved}"
+
     def _cmd_provider_thinking(self, row: Any, value: str) -> bool:
-        """Turn thinking mode on or off for one custom provider."""
+        """Set the reasoning depth for one custom provider, or turn thinking off."""
         if row.kind == "builtin":
             return self._provider_builtin_only(row, "thinking mode")
 
-        from ..custom_providers import upsert_custom_provider
+        from ..custom_providers import (
+            CUSTOM_PROVIDER_DEFAULT_REASONING_EFFORT,
+            custom_provider_reasoning_options,
+            normalize_custom_provider_reasoning_effort,
+            resolve_custom_provider_selected_model,
+            upsert_custom_provider,
+        )
 
         config_manager, config, record = self._load_custom_provider_record(row)
         if record is None:
             return True
 
-        current = bool(record.get("thinking", True))
-        typed = str(value or "").strip().lower()
-        if typed in ("on", "true", "yes", "enable", "enabled", "1"):
-            enabled = True
-        elif typed in ("off", "false", "no", "disable", "disabled", "0"):
-            enabled = False
-        elif typed in ("toggle", "flip", "switch"):
-            enabled = not current
-        elif typed in ("status", "show", ""):
-            if not typed:
-                enabled = Confirm.ask(
-                    f"[{self.theme.BLUE_SOFT}]Thinking mode for {escape(row.name)}?[/{self.theme.BLUE_SOFT}]",
-                    default=current,
-                )
-            else:
-                self.console.print(
-                    f"[{self.theme.TEXT_DIM}]{escape(row.name)} thinking mode: "
-                    f"{'on' if current else 'off'}[/{self.theme.TEXT_DIM}]"
-                )
-                return True
-        else:
+        selected = resolve_custom_provider_selected_model(record) or {}
+        choices = custom_provider_reasoning_options(selected)
+        if not choices:
             self.console.print(
-                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Use on, off, or toggle.[/{self.theme.CORAL_SOFT}]"
+                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} "
+                f"{escape(str(selected.get('display_name') or selected.get('id') or 'This model'))} "
+                f"reports no reasoning support.[/{self.theme.AMBER_GLOW}]"
+            )
+            return True
+        levels = [item["id"] for item in choices]
+        current = str(record.get("reasoning_effort") or CUSTOM_PROVIDER_DEFAULT_REASONING_EFFORT)
+        if not record.get("thinking", True):
+            current = "off"
+        typed = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+        if typed in ("status", "show"):
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]{escape(row.name)} reasoning depth: "
+                f"{escape(self._describe_provider_reasoning(record))}[/{self.theme.TEXT_DIM}]"
             )
             return True
 
-        record["thinking"] = enabled
+        if typed in ("toggle", "flip", "switch"):
+            depth = "off" if current != "off" else CUSTOM_PROVIDER_DEFAULT_REASONING_EFFORT
+        elif not typed:
+            for item in choices:
+                marker = self.deco.CHECK_FANCY if item["id"] == current else " "
+                self.console.print(
+                    f" [{self.theme.MINT_VIBRANT}]{marker}[/{self.theme.MINT_VIBRANT}] "
+                    f"[{self.theme.TEXT_BRIGHT}]{item['id']:<8}[/{self.theme.TEXT_BRIGHT}] "
+                    f"[{self.theme.TEXT_DIM}]{escape(item['description'])}[/{self.theme.TEXT_DIM}]"
+                )
+            depth = Prompt.ask(
+                f"[{self.theme.BLUE_SOFT}]Reasoning depth for {escape(row.name)}[/{self.theme.BLUE_SOFT}]",
+                choices=levels,
+                default=current if current in levels else CUSTOM_PROVIDER_DEFAULT_REASONING_EFFORT,
+            ).strip()
+        else:
+            depth = normalize_custom_provider_reasoning_effort(typed, default="")
+            if not depth:
+                self.console.print(
+                    f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Use one of "
+                    f"{escape(', '.join(levels))}, or toggle.[/{self.theme.CORAL_SOFT}]"
+                )
+                return True
+
+        record["reasoning_effort"] = depth
+        record["thinking"] = depth != "off"
         config.custom_providers = upsert_custom_provider(config.custom_providers, record)
         self._save_provider_config(config, config_manager, mirror_custom=True)
-        self.console.print(
-            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Thinking mode "
-            f"{'enabled' if enabled else 'disabled'} for {escape(row.name)}.[/{self.theme.MINT_VIBRANT}]"
-        )
-        if enabled:
+
+        from ..custom_providers import find_custom_provider
+
+        saved = find_custom_provider(config.custom_providers, record.get("id")) or record
+        if depth == "off":
             self.console.print(
-                f"[{self.theme.TEXT_DIM}]Providers that reject the thinking flags fall back to a plain "
-                f"request automatically.[/{self.theme.TEXT_DIM}]"
+                f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Thinking disabled for "
+                f"{escape(row.name)}.[/{self.theme.MINT_VIBRANT}]"
             )
+            return True
+        self.console.print(
+            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Reasoning depth for {escape(row.name)}: "
+            f"{escape(self._describe_provider_reasoning(saved))}[/{self.theme.MINT_VIBRANT}]"
+        )
+        self.console.print(
+            f"[{self.theme.TEXT_DIM}]Reverie sends every reasoning dialect it knows and drops the "
+            f"vendor-specific ones one tier at a time if the provider objects.[/{self.theme.TEXT_DIM}]"
+        )
         return True
 
     def _render_provider_probe(

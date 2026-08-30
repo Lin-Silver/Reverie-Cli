@@ -1193,11 +1193,13 @@ def parse_codex_sse_event(data_str: str, state: Optional[Dict[str, Any]] = None)
     if isinstance(response_usage, dict):
         events.append({"type": "usage", "usage": response_usage})
 
-    if event_type == "response.reasoning_summary_text.delta":
+    if event_type in {"response.reasoning_summary_text.delta", "response.reasoning_text.delta"}:
+        # Codex streams a summary; other Responses gateways stream the raw
+        # reasoning text under ``reasoning_text``.  Both are the thinking trace.
         delta = str(payload.get("delta", "") or "")
         if delta:
             events.append({"type": "reasoning", "text": delta})
-    elif event_type == "response.reasoning_summary_text.done":
+    elif event_type in {"response.reasoning_summary_text.done", "response.reasoning_text.done"}:
         events.append({"type": "reasoning", "text": "\n\n"})
     elif event_type == "response.output_text.delta":
         delta = str(payload.get("delta", "") or "")

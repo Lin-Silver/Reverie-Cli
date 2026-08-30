@@ -188,6 +188,13 @@ def _custom_provider_config() -> Config:
     return config
 
 
+def _reupsert(section, record):
+    """Re-store an edited record so the normalizers re-run over it."""
+    from reverie.custom_providers import upsert_custom_provider
+
+    return upsert_custom_provider(section, record, activate=True)
+
+
 def test_desktop_catalog_exposes_the_active_custom_provider_without_its_key() -> None:
     payload = build_model_sources_payload(_custom_provider_config())
     source = _source(payload, "custom")
@@ -231,6 +238,74 @@ def test_desktop_model_selection_writes_back_to_the_custom_provider_record(monke
     record = find_custom_provider(config.custom_providers, "xkiro")
     assert record["selected_model_id"] == "kiro-mini"
     assert record["max_context_tokens"] == 32000
+
+
+def test_desktop_catalog_offers_the_reasoning_depths_a_custom_model_publishes() -> None:
+    config = _custom_provider_config()
+    record = config.custom_providers["providers"][0]
+    record["models"][0]["reasoning_efforts"] = {"levels": ["low", "medium", "high", "xhigh"]}
+    config.custom_providers = _reupsert(config.custom_providers, record)
+
+    source = _source(build_model_sources_payload(config), "custom")
+    published = next(item for item in source["models"] if item["id"] == "kiro-pro")
+    silent = next(item for item in source["models"] if item["id"] == "kiro-mini")
+
+    assert published["reasoning"]["control"] == "effort"
+    assert [item["id"] for item in published["reasoning"]["options"]] == [
+        "off",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+    ]
+    # The stored wish is ``max``; the client is also told which rung that means.
+    assert published["reasoning"]["value"] == "max"
+    assert published["reasoning"]["resolved"] == "xhigh"
+    # A model that publishes nothing keeps the whole ladder on offer.
+    assert len(silent["reasoning"]["options"]) == 7
+    assert silent["reasoning"]["resolved"] == "high"
+
+
+def test_desktop_can_set_and_clear_the_custom_provider_reasoning_depth() -> None:
+    from reverie.desktop_catalog import update_custom_provider
+
+    config = _custom_provider_config()
+
+    entry = update_custom_provider(config, "xkiro", {"reasoning_effort": "Extra-High"})
+    assert entry["reasoning_effort"] == "xhigh"
+    assert entry["thinking"] is True
+
+    entry = update_custom_provider(config, "xkiro", {"reasoning_effort": "off"})
+    assert entry["reasoning_effort"] == "off"
+    assert entry["thinking"] is False
+    assert entry["reasoning_effort_resolved"] == ""
+
+    with pytest.raises(ValueError, match="reasoning depth"):
+        update_custom_provider(config, "xkiro", {"reasoning_effort": "as deep as it goes"})
+
+
+def test_desktop_model_selection_can_carry_a_reasoning_depth(monkeypatch) -> None:
+    from reverie import custom_providers as custom_providers_module
+    from reverie.custom_providers import find_custom_provider
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"data": [{"id": "kiro-pro"}, {"id": "kiro-mini", "context_length": 32000}]}
+
+    monkeypatch.setattr(
+        custom_providers_module.requests, "get", lambda url, *, headers, timeout: FakeResponse()
+    )
+    config = _custom_provider_config()
+
+    apply_model_selection(config, "custom", "kiro-mini", "low")
+
+    record = find_custom_provider(config.custom_providers, "xkiro")
+    assert record["reasoning_effort"] == "low"
+    assert record["thinking"] is True
 
 
 def test_desktop_provider_patches_are_refused_for_custom_providers() -> None:

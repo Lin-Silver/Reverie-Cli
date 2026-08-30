@@ -25,18 +25,28 @@ from reverie.custom_providers import (
     CUSTOM_PROVIDER_ANTHROPIC_VERSION,
     CUSTOM_PROVIDER_COMMAND_ACTIONS,
     CUSTOM_PROVIDER_DEFAULT_CONTEXT_TOKENS,
+    CUSTOM_PROVIDER_DEFAULT_REASONING_EFFORT,
     CUSTOM_PROVIDER_FORMATS,
     CUSTOM_PROVIDER_MAX_CONTEXT_TOKENS,
     CUSTOM_PROVIDER_MAX_PROVIDERS,
+    CUSTOM_PROVIDER_MIN_THINKING_BUDGET,
+    CUSTOM_PROVIDER_REASONING_FIELD_TIERS,
+    build_custom_provider_anthropic_options,
     build_custom_provider_command_completions,
     build_custom_provider_openai_options,
+    build_custom_provider_reasoning_extra_body,
+    build_custom_provider_responses_options,
     build_custom_provider_runtime_model_data,
     custom_provider_auth_headers,
     custom_provider_chat_url,
+    custom_provider_sdk_base_url,
     custom_provider_format_choices,
     custom_provider_format_label,
     custom_provider_models_url,
     custom_provider_model_needs_context_limit,
+    custom_provider_reasoning_budget,
+    custom_provider_reasoning_choices,
+    custom_provider_reasoning_options,
     custom_provider_transport,
     default_custom_provider,
     default_custom_providers_config,
@@ -45,16 +55,21 @@ from reverie.custom_providers import (
     get_custom_provider_model_context_limit,
     list_custom_providers,
     mask_secret,
+    narrow_custom_provider_reasoning_payload,
     normalize_custom_provider,
     normalize_custom_provider_format,
+    normalize_custom_provider_reasoning_effort,
     normalize_custom_providers_config,
     parse_context_token_limit,
     probe_custom_provider,
     probe_custom_provider_chat,
+    remember_custom_provider_reasoning_narrowing,
     remove_custom_provider,
+    reset_custom_provider_reasoning_narrowing,
     resolve_active_custom_provider,
     resolve_custom_provider_api_key,
     resolve_custom_provider_base_url,
+    resolve_custom_provider_reasoning_level,
     set_custom_provider_model_context_limit,
     slugify_provider_name,
     suggest_custom_provider_model_context_limit,
@@ -595,7 +610,9 @@ def test_a_saved_limit_outranks_the_published_context_window() -> None:
     data = build_custom_provider_runtime_model_data(section)
 
     assert data["max_context_tokens"] == 256000  # not the catalog's 200000
-    assert data["thinking_mode"] == "true"
+    # A catalog that publishes no effort names still gets thinking, at the
+    # deepest level every OpenAI-compatible gateway is known to accept.
+    assert data["thinking_mode"] == "high"
 
 
 def test_thinking_mode_reaches_the_runtime_payload_as_a_string() -> None:
@@ -665,7 +682,33 @@ def test_anthropic_format_selects_the_anthropic_transport() -> None:
         default_custom_providers_config(), _xkiro_record(format="anthropic"), activate=True
     )
 
-    assert build_custom_provider_runtime_model_data(section)["provider"] == "anthropic"
+    data = build_custom_provider_runtime_model_data(section)
+    assert data["provider"] == "anthropic"
+    # The Anthropic SDK appends ``/v1/messages`` itself, so the runtime base URL
+    # has to shed the ``/v1`` the user typed or the request lands on ``/v1/v1``.
+    assert data["base_url"] == "https://api.xkiro.invalid"
+    # The raw HTTP path is unaffected: it still builds the full endpoint.
+    assert custom_provider_chat_url(_xkiro_record(format="anthropic")) == (
+        "https://api.xkiro.invalid/v1/messages"
+    )
+
+
+@pytest.mark.parametrize(
+    ("fmt", "expected"),
+    [
+        ("openai-chat", "https://api.xkiro.invalid/v1"),
+        ("openai-responses", "https://api.xkiro.invalid/v1"),
+        ("anthropic", "https://api.xkiro.invalid"),
+    ],
+)
+def test_only_the_anthropic_sdk_base_url_drops_the_version_prefix(fmt: str, expected: str) -> None:
+    assert custom_provider_sdk_base_url(_xkiro_record(format=fmt)) == expected
+
+
+def test_a_gateway_without_a_version_prefix_is_left_alone() -> None:
+    record = _xkiro_record(format="anthropic", base_url="https://api.xkiro.invalid")
+    assert custom_provider_sdk_base_url(record) == "https://api.xkiro.invalid"
+    assert custom_provider_sdk_base_url({}) == ""
 
 
 @pytest.mark.parametrize(
@@ -691,8 +734,260 @@ def test_an_empty_section_has_no_runtime_model() -> None:
 def test_output_cap_is_the_lower_of_the_provider_and_model_limits() -> None:
     section = upsert_custom_provider(default_custom_providers_config(), _xkiro_record(), activate=True)
 
-    assert build_custom_provider_openai_options(section) == {"max_tokens": 8192}
+    assert build_custom_provider_openai_options(section)["max_tokens"] == 8192
     assert build_custom_provider_openai_options(section, model_id="kiro-mini")["max_tokens"] == 8192
+
+
+def test_thinking_off_leaves_the_request_completely_plain() -> None:
+    record = _xkiro_record(reasoning_effort="off")
+    section = upsert_custom_provider(default_custom_providers_config(), record, activate=True)
+
+    assert build_custom_provider_openai_options(section) == {"max_tokens": 8192}
+    assert build_custom_provider_runtime_model_data(section)["thinking_mode"] == "false"
+
+
+# --------------------------------------------------------------------------
+# Reasoning depth
+# --------------------------------------------------------------------------
+
+
+def _reasoning_record(**overrides):
+    """A record whose catalog publishes its own effort ladder, as xkiro does."""
+    record = _xkiro_record(
+        models=[
+            {
+                "id": "codex-spark",
+                "display_name": "Codex Spark",
+                "context_length": 128000,
+                "max_output_tokens": 65536,
+                "capabilities": {"vision": False},
+                "reasoning_efforts": {
+                    "levels": ["low", "medium", "high", "xhigh"],
+                    "default": "medium",
+                },
+            },
+            {"id": "plain-mini", "context_length": 32000, "max_output_tokens": 8192},
+        ],
+        selected_model_id="codex-spark",
+        max_tokens=20000,
+    )
+    record.update(overrides)
+    return record
+
+
+@pytest.fixture(autouse=True)
+def clear_reasoning_narrowing():
+    reset_custom_provider_reasoning_narrowing()
+    yield
+    reset_custom_provider_reasoning_narrowing()
+
+
+def test_reasoning_depth_defaults_to_the_deepest_level_available() -> None:
+    assert CUSTOM_PROVIDER_DEFAULT_REASONING_EFFORT == "max"
+    assert default_custom_provider()["reasoning_effort"] == "max"
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("MAX", "max"),
+        ("Extra-High", "xhigh"),
+        ("very high", "xhigh"),
+        ("balanced", "medium"),
+        ("disabled", "off"),
+        (True, "max"),
+        (False, "off"),
+        (0, "off"),
+        (3, "max"),
+        (None, "max"),
+        ("nonsense", "max"),
+    ],
+)
+def test_every_depth_spelling_lands_on_a_rung(value, expected) -> None:
+    assert normalize_custom_provider_reasoning_effort(value) == expected
+
+
+def test_max_resolves_to_the_deepest_level_the_model_publishes() -> None:
+    record = _reasoning_record()
+
+    assert resolve_custom_provider_reasoning_level(record) == "xhigh"
+    assert resolve_custom_provider_reasoning_level(record, desired="medium") == "medium"
+    # ``minimal`` is below every published rung, so the shallowest one stands in
+    # rather than silently upgrading to a deep -- or dropping thinking entirely.
+    assert resolve_custom_provider_reasoning_level(record, desired="minimal") == "low"
+    assert resolve_custom_provider_reasoning_level(record, desired="off") == ""
+
+
+def test_a_silent_catalog_still_gets_thinking_at_the_safest_deep_level() -> None:
+    record = _reasoning_record()
+
+    assert resolve_custom_provider_reasoning_level(record, "plain-mini") == "high"
+    assert resolve_custom_provider_reasoning_level(record, "plain-mini", desired="xhigh") == "xhigh"
+
+
+def test_a_catalog_that_denies_reasoning_is_believed() -> None:
+    record = _reasoning_record(
+        models=[{"id": "no-think", "context_length": 32000, "capabilities": {"reasoning": False}}],
+        selected_model_id="no-think",
+    )
+
+    assert resolve_custom_provider_reasoning_level(record) == ""
+    assert build_custom_provider_reasoning_extra_body(record) is None
+    assert custom_provider_reasoning_options(
+        {"id": "no-think", "reasoning": False, "reasoning_levels": []}
+    ) == []
+
+
+def test_the_two_views_of_the_setting_stay_in_agreement() -> None:
+    off_by_switch = normalize_custom_provider(_xkiro_record(thinking=False))
+    assert off_by_switch["reasoning_effort"] == "off"
+
+    off_by_depth = normalize_custom_provider(_xkiro_record(reasoning_effort="off"))
+    assert off_by_depth["thinking"] is False
+
+    deep = normalize_custom_provider(_xkiro_record(thinking=True, reasoning_effort="low"))
+    assert (deep["thinking"], deep["reasoning_effort"]) == (True, "low")
+
+
+def test_the_extra_body_speaks_every_reasoning_dialect_at_once() -> None:
+    payload = build_custom_provider_reasoning_extra_body(_reasoning_record(), output_tokens=20000)
+
+    assert payload["reasoning_effort"] == "xhigh"
+    assert payload["reasoning"] == {
+        "effort": "xhigh",
+        "enabled": True,
+        "exclude": False,
+        "max_tokens": payload["thinking_budget"],
+    }
+    assert payload["include_reasoning"] is True
+    assert payload["enable_thinking"] is True
+    assert payload["reasoning_format"] == "parsed"
+    assert payload["chat_template_kwargs"] == {"enable_thinking": True, "thinking": True}
+    assert payload["thinking"] == {
+        "type": "enabled",
+        "budget_tokens": payload["thinking_budget"],
+    }
+    # Every field the narrowing ladder knows about is one this payload can carry.
+    assert set(payload) <= set(
+        field for tier in CUSTOM_PROVIDER_REASONING_FIELD_TIERS for field in tier
+    )
+
+
+def test_glm_keeps_its_thinking_block_instead_of_having_it_cleared() -> None:
+    record = _reasoning_record(
+        models=[{"id": "glm-4.6", "context_length": 128000, "max_output_tokens": 32000}],
+        selected_model_id="glm-4.6",
+    )
+
+    payload = build_custom_provider_reasoning_extra_body(record, output_tokens=20000)
+
+    assert payload["chat_template_kwargs"]["clear_thinking"] is False
+
+
+def test_the_thinking_budget_always_leaves_room_for_the_answer() -> None:
+    assert custom_provider_reasoning_budget("xhigh", 20000) == 16000
+    assert custom_provider_reasoning_budget("low", 20000) == 7000
+    assert custom_provider_reasoning_budget("off", 20000) == 0
+    # Too small to split: a budget that crowds out the reply is worse than none.
+    assert custom_provider_reasoning_budget("max", CUSTOM_PROVIDER_MIN_THINKING_BUDGET) == 0
+    assert custom_provider_reasoning_budget("max", 0) == 0
+
+
+def test_a_budget_that_would_not_fit_is_simply_left_out() -> None:
+    record = _reasoning_record(
+        models=[{"id": "tiny", "context_length": 8000, "max_output_tokens": 512}],
+        selected_model_id="tiny",
+        max_tokens=512,
+    )
+
+    payload = build_custom_provider_reasoning_extra_body(record, output_tokens=512)
+
+    assert payload["reasoning_effort"] == "high"
+    assert "thinking_budget" not in payload
+    assert "thinking" not in payload
+    assert "max_tokens" not in payload["reasoning"]
+
+
+def test_narrowing_drops_the_most_vendor_specific_tier_first() -> None:
+    payload = build_custom_provider_reasoning_extra_body(_reasoning_record(), output_tokens=20000)
+
+    step1 = narrow_custom_provider_reasoning_payload(payload)
+    assert set(step1) == {"reasoning", "include_reasoning", "reasoning_effort", "thinking"}
+
+    step2 = narrow_custom_provider_reasoning_payload(step1)
+    assert set(step2) == {"reasoning", "reasoning_effort"}
+
+    step3 = narrow_custom_provider_reasoning_payload(step2)
+    assert set(step3) == {"reasoning_effort"}
+
+    step4 = narrow_custom_provider_reasoning_payload(step3)
+    assert step4 == {}
+
+    # Nothing reasoning-related left means "give up", not "try again with less".
+    assert narrow_custom_provider_reasoning_payload(step4) is None
+    assert narrow_custom_provider_reasoning_payload(None) is None
+
+
+def test_a_remembered_narrowing_is_applied_before_the_next_request() -> None:
+    record = _reasoning_record()
+    full = build_custom_provider_reasoning_extra_body(record, output_tokens=20000)
+
+    remember_custom_provider_reasoning_narrowing("xkiro", "codex-spark", 2)
+    narrowed = build_custom_provider_reasoning_extra_body(record, output_tokens=20000)
+
+    assert set(narrowed) == {"reasoning", "reasoning_effort"}
+    assert narrowed["reasoning_effort"] == full["reasoning_effort"]
+    # A different model on the same provider is unaffected.
+    assert "chat_template_kwargs" in (
+        build_custom_provider_reasoning_extra_body(record, "plain-mini", output_tokens=20000) or {}
+    )
+
+    reset_custom_provider_reasoning_narrowing()
+    assert build_custom_provider_reasoning_extra_body(record, output_tokens=20000) == full
+
+
+def test_anthropic_options_fit_the_budget_inside_the_output_cap() -> None:
+    record = _reasoning_record(format="anthropic")
+    section = upsert_custom_provider(default_custom_providers_config(), record, activate=True)
+
+    options = build_custom_provider_anthropic_options(section)
+
+    assert options["thinking"]["type"] == "enabled"
+    assert options["thinking"]["budget_tokens"] < options["max_tokens"]
+
+
+def test_responses_options_ask_for_a_reasoning_summary() -> None:
+    record = _reasoning_record(format="openai-responses")
+    section = upsert_custom_provider(default_custom_providers_config(), record, activate=True)
+
+    options = build_custom_provider_responses_options(section)
+
+    assert options["reasoning"] == {"effort": "xhigh", "summary": "detailed"}
+    assert options["include"] == ["reasoning.encrypted_content"]
+
+
+def test_the_offered_depths_follow_what_the_model_publishes() -> None:
+    ladder = [item["id"] for item in custom_provider_reasoning_choices()]
+    assert ladder == ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
+
+    published = custom_provider_reasoning_options(
+        {"id": "codex-spark", "reasoning": True, "reasoning_levels": ["low", "medium", "high", "xhigh"]}
+    )
+    assert [item["id"] for item in published] == ["off", "low", "medium", "high", "xhigh", "max"]
+
+    # Silence is not a refusal, so the whole ladder stays on offer.
+    silent = custom_provider_reasoning_options({"id": "mystery", "reasoning": None, "reasoning_levels": []})
+    assert [item["id"] for item in silent] == ladder
+
+
+def test_the_runtime_payload_carries_the_resolved_depth() -> None:
+    section = upsert_custom_provider(default_custom_providers_config(), _reasoning_record(), activate=True)
+
+    data = build_custom_provider_runtime_model_data(section)
+
+    assert data["thinking_mode"] == "xhigh"
+    # The catalog says this model is text-only, so the name hint must not win.
+    assert data["supports_vision"] is False
 
 
 # --------------------------------------------------------------------------
@@ -1330,13 +1625,41 @@ def test_the_thinking_command_turns_the_stored_flag_off_and_back_on(tmp_path, mo
     config_manager.save(config)
 
     assert handler.cmd_provider("xkiro thinking off") is True
-    assert find_custom_provider(config_manager.load().custom_providers, "xkiro")["thinking"] is False
+    stored = find_custom_provider(config_manager.load().custom_providers, "xkiro")
+    assert (stored["thinking"], stored["reasoning_effort"]) == (False, "off")
 
     assert handler.cmd_provider("xkiro thinking on") is True
-    assert find_custom_provider(config_manager.load().custom_providers, "xkiro")["thinking"] is True
+    stored = find_custom_provider(config_manager.load().custom_providers, "xkiro")
+    assert (stored["thinking"], stored["reasoning_effort"]) == (True, "max")
 
     assert handler.cmd_provider("xkiro thinking toggle") is True
     assert find_custom_provider(config_manager.load().custom_providers, "xkiro")["thinking"] is False
+
+
+def test_the_thinking_command_also_sets_the_depth(tmp_path, monkeypatch) -> None:
+    handler, config_manager = _handler(tmp_path, monkeypatch)
+
+    config = config_manager.load()
+    config.custom_providers = upsert_custom_provider(config.custom_providers, _reasoning_record())
+    config_manager.save(config)
+
+    assert handler.cmd_provider("xkiro thinking medium") is True
+    stored = find_custom_provider(config_manager.load().custom_providers, "xkiro")
+    assert (stored["thinking"], stored["reasoning_effort"]) == (True, "medium")
+
+    # An alias for a rung is accepted, and the resolved level is shown alongside.
+    assert handler.cmd_provider("xkiro thinking extra-high") is True
+    assert find_custom_provider(config_manager.load().custom_providers, "xkiro")["reasoning_effort"] == "xhigh"
+
+    assert handler.cmd_provider("xkiro thinking status") is True
+    assert handler.cmd_provider("xkiro thinking as deep as it goes") is True
+    text = _output(handler)
+    assert "xhigh" in text
+    assert "off, low, medium, high, xhigh, max" in text
+    # ``max`` is a wish; the detail view reports the rung the request will carry.
+    assert handler.cmd_provider("xkiro thinking max") is True
+    assert handler.cmd_provider("xkiro") is True
+    assert "max" in _output(handler)
 
 
 def test_context_and_thinking_are_custom_only(tmp_path, monkeypatch) -> None:

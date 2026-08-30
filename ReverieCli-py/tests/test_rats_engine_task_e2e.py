@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import time
+import urllib.request
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,11 +16,14 @@ import pytest
 
 from _engine_pairing import (
     ENGINE_BIN_ENV,
+    RETRY_SEMANTICS_FEATURE,
     assert_response_schema,
+    assert_retry_contract,
     discover_engine_binary,
     engine_pairing_skip_reason,
 )
-from reverie.rats import RatsRuntime
+from reverie.rats import RATS_PROTOCOL, RatsRuntime
+from reverie.rats_contract import parse_capabilities
 from reverie.agent.tool_executor import ToolExecutor
 
 
@@ -458,6 +462,31 @@ def _settle_streaming(
         latest = executor.execute(refresh_tool, {"node_path": node_path})
 
 
+def _live_capability_contract(endpoint: str):
+    """Read the live service's capability contract off the wire.
+
+    `hello` is the one anonymous operation, so this needs no token and no
+    session: it is the same request the runtime's discovery probe sends, issued
+    directly so the raw contract can be handed to the client's own parser. The
+    runtime keeps the parsed object private and publishes a summary of it, which
+    is the right shape for a caller but cannot show whether the two repositories
+    still agree about the columns a retry decision is made from.
+    """
+    payload = json.dumps(
+        {"id": f"pair-{uuid.uuid4().hex}", "protocol": RATS_PROTOCOL, "op": "hello", "args": {}}
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        endpoint,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=5.0) as response:
+        body = json.loads(response.read().decode("utf-8"))
+    assert body.get("ok") is True, body
+    return parse_capabilities(body.get("result") or {}, protocol=RATS_PROTOCOL)
+
+
 @pytest.mark.skipif(not ENGINE_BIN, reason=engine_pairing_skip_reason())
 def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
     launch_binary = Path(ENGINE_BIN).resolve()
@@ -620,6 +649,18 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             and _path_key(Path(item["descriptorPath"])) == _path_key(owned_descriptor.descriptor_path)
         )
         assert service["connection"] == "connected", service
+
+        # The retry contract, against the service that actually shipped it. The
+        # Engine suite proves its compiled tables are consistent and this
+        # repository's unit tests prove the client's decisions are right for a
+        # given contract; neither can show the two still agree, which is the
+        # failure this asserts. Read raw so the columns a retry turns on are
+        # checked, not the summary the runtime republishes.
+        live_capabilities, contract_rejections = _live_capability_contract(service["endpoint"])
+        assert_retry_contract(live_capabilities, contract_rejections)
+        # And the same fact through the runtime's published payload, which is
+        # what a caller branching on the feature would read.
+        assert RETRY_SEMANTICS_FEATURE in service["features"], service["features"]
 
         requested_dynamic_tools = [
             "animation.configure",

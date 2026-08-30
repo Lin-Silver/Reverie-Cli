@@ -20,6 +20,8 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Set, 
 
 from .config import get_app_root
 from .rats_contract import (
+    EFFECTS_IDEMPOTENT,
+    EFFECTS_NONE,
     FALLBACK_BOOTSTRAP_TOOLS,
     FALLBACK_LIMITS,
     FALLBACK_PERMISSIONS,
@@ -27,6 +29,7 @@ from .rats_contract import (
     RATS_CONTRACT_PROTOCOL,
     RATS_HELLO_ROLE,
     RatsCapabilities,
+    RatsErrorSpec,
     fallback_capabilities,
     parse_capabilities,
 )
@@ -76,6 +79,47 @@ _DEFAULT_LOADED_TOOLS = FALLBACK_BOOTSTRAP_TOOLS
 _MAX_LOADED_DEFINITIONS_PER_SESSION = 32
 _REVERIE_ENGINE_PRODUCT_NAMES = frozenset({"Reverie Engine", "Reverie Engine (Console)"})
 _REVERIE_ENGINE_TERMINAL_PRODUCT_NAME = "Reverie Engine Terminal"
+
+# Retry policy. Deliberately small: retrying is a correctness-sensitive act, not a
+# way to paper over a service that is failing for a reason.
+#
+# Three attempts, because the conditions the service marks retryable are
+# transients whose whole character is that they clear immediately — a queue that
+# was unavailable, a token write that lost a race, a deadline that elapsed while
+# another request held an idempotency key. A condition still present on the third
+# attempt is not a transient and the caller should see it.
+_RETRY_MAX_ATTEMPTS = 3
+# 120 ms, doubling. The service answers a sequential `status` in about 0.6 ms
+# after the latency-floor work, so this is already two orders of magnitude above
+# a normal round trip: long enough for a lost race to resolve, short enough that
+# a human never notices the retry happened.
+_RETRY_BACKOFF_SECONDS = 0.12
+# A ceiling over the whole attempt sequence. Each retry restarts the service-side
+# `deadline_ms` clock, so without this a caller's own timeout could be exceeded
+# several times over by a client that was technically obeying every deadline it
+# sent.
+_RETRY_TOTAL_BUDGET_SECONDS = 5.0
+# Failures where no response was received, or where one arrived that could not be
+# trusted. The service cannot classify these because it never got to answer, or
+# its answer did not survive verification, so the operation's declared effects
+# decide alone.
+#
+# `response_too_large`, `malformed_response` and the hash and id mismatches are
+# deliberately *in* this set rather than treated as permanent: a truncated or
+# corrupted response says nothing about whether the request ran, which is exactly
+# the "outcome unknown" case. Being in the set does not make them retryable — a
+# mutating operation still refuses — it makes them decidable by effects.
+_TRANSPORT_FAILURE_CODES = frozenset(
+    {
+        "transport_error",
+        "response_too_large",
+        "malformed_response",
+        "result_hash_missing",
+        "result_hash_mismatch",
+        "response_id_missing",
+        "response_id_mismatch",
+    }
+)
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 _SYNCHRONIZE = 0x00100000
 _WAIT_TIMEOUT = 0x00000102
@@ -110,6 +154,8 @@ class RatsClientError(RuntimeError):
         audit_id: str = "",
         result_sha256: str = "",
         retryable: bool = False,
+        retry: str = "",
+        attempts: int = 1,
     ) -> None:
         super().__init__(message)
         self.status = int(status)
@@ -117,6 +163,15 @@ class RatsClientError(RuntimeError):
         self.audit_id = str(audit_id or "")
         self.result_sha256 = str(result_sha256 or "")
         self.retryable = bool(retryable)
+        # The service's own statement about whether re-sending is sound: "safe",
+        # "unsafe", "never", or "" from a service that predates the field.
+        # `retryable` says the condition may pass; this says whether the request
+        # already took effect, and only both together justify a retry.
+        self.retry = str(retry or "")
+        # How many attempts the client actually made. A caller that sees 3 knows
+        # the failure survived retrying, which is a different situation from a
+        # first-attempt failure even when the code is identical.
+        self.attempts = max(1, int(attempts))
 
 
 def _record(value: Any) -> Dict[str, Any]:
@@ -807,6 +862,10 @@ class RatsRuntime:
         cursor: Optional[int] = None,
         task_state: str = "",
         progress: Optional[float] = None,
+        attempt: Optional[int] = None,
+        retry: str = "",
+        effects: str = "",
+        delay_ms: Optional[int] = None,
     ) -> None:
         entry: Dict[str, Any] = {
             "timestampUtc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -841,6 +900,17 @@ class RatsRuntime:
             entry["taskState"] = _text(task_state)
         if progress is not None:
             entry["progress"] = max(0.0, min(1.0, float(progress)))
+        if attempt is not None:
+            entry["attempt"] = max(1, int(attempt))
+        # Both published facts are recorded, not just the decision they produced:
+        # a retry that turns out to have been wrong has to be diagnosable from the
+        # log alone, and "why did it retry" is answered by these two together.
+        if _text(retry):
+            entry["retry"] = _text(retry)
+        if _text(effects):
+            entry["effects"] = _text(effects)
+        if delay_ms is not None:
+            entry["delayMs"] = max(0, int(delay_ms))
         with self._diagnostics_lock:
             self._diagnostics.append(entry)
             self._diagnostics = self._diagnostics[-_MAX_DIAGNOSTIC_ENTRIES:]
@@ -988,6 +1058,127 @@ class RatsRuntime:
         deadline_ms: Optional[int] = None,
         idempotency_key: str = "",
         capabilities: Optional[RatsCapabilities] = None,
+        attempts: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Send one RTP request, retrying only where the service says it is sound.
+
+        The policy lives here and the transport lives in ``_attempt_request`` so
+        that no caller has to know it exists: every existing call site keeps its
+        signature and gains the retry.
+
+        Whether a retry is permitted is never decided by this client. It comes
+        from two published facts combined in
+        ``RatsCapabilities.may_retry`` — the failed code's ``retry`` semantic and
+        the operation's ``effects``. A service that publishes neither gets no
+        retries at all, which is the behaviour this client had before.
+
+        ``attempts=1`` opts a call out. It is for the probes and teardowns inside
+        a discovery scan, where the answer is "is this reachable right now" and a
+        failure already has a cheap local fallback: retrying there spends the
+        user's wall clock re-asking a question whose negative answer was useful.
+        """
+        contract = capabilities if capabilities is not None else fallback_capabilities()
+        ceiling = _RETRY_MAX_ATTEMPTS if attempts is None else max(1, int(attempts))
+        # Total wall clock, not attempt count, is what bounds the work: `deadline_ms`
+        # is measured by the service from each request's arrival, so a retry restarts
+        # the service-side clock and only the client can hold a ceiling over the whole
+        # sequence.
+        budget_seconds = _RETRY_TOTAL_BUDGET_SECONDS
+        started = time.monotonic()
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                return self._attempt_request(
+                    descriptor,
+                    role,
+                    args,
+                    control_token=control_token,
+                    session_token=session_token,
+                    timeout=timeout,
+                    deadline_ms=deadline_ms,
+                    idempotency_key=idempotency_key,
+                    capabilities=capabilities,
+                )
+            except RatsClientError as error:
+                if attempt >= ceiling or not self._retry_permitted(role, error, contract):
+                    error.attempts = attempt
+                    raise
+                elapsed = time.monotonic() - started
+                delay = _RETRY_BACKOFF_SECONDS * (2 ** (attempt - 1))
+                if elapsed + delay >= budget_seconds:
+                    # Sleeping would spend more of the budget than the retry could
+                    # use. Reporting the failure the caller already has beats
+                    # holding them for a request there is no time left to make.
+                    error.attempts = attempt
+                    raise
+                self._log_diagnostic(
+                    "rtp.retry",
+                    level="warning",
+                    service_id=descriptor.service_id,
+                    provider_id=descriptor.provider_id,
+                    operation=contract.operation(_text(role)),
+                    reason=error.code,
+                    attempt=attempt,
+                    retry=error.retry or "unstated",
+                    effects=contract.effects(_text(role)),
+                    delay_ms=round(delay * 1000),
+                )
+                time.sleep(delay)
+
+    def _retry_permitted(
+        self,
+        role: str,
+        error: RatsClientError,
+        contract: RatsCapabilities,
+    ) -> bool:
+        """Whether this failure may be retried, per the service's own statements.
+
+        Transport failures are the one class the service cannot classify, because
+        it never answered. They split the same way its own codes do and are
+        judged by the operation's declared effects alone: a connection that failed
+        may have failed before or after the request was read, so re-sending is
+        sound exactly when acting twice is harmless.
+
+        Otherwise the service classified it, in up to two places. A failed
+        response carries ``retry`` and ``retryable`` inline, which is what this
+        service said about *this* failure; the published taxonomy says what it
+        says about the code in general. The inline statement wins when there is
+        one, because it is the finer-grained truth — a service can distinguish a
+        timeout that fired before dispatch from one that fired after, and the
+        taxonomy row cannot. A response that omits it falls back to the taxonomy,
+        which is every response a pre-``retry`` service sends.
+        """
+        if error.code in _TRANSPORT_FAILURE_CODES:
+            return contract.effects(_text(role)) in (EFFECTS_NONE, EFFECTS_IDEMPOTENT)
+        if error.retry:
+            # Both fields are taken from the same response, so a service that
+            # states `retry` but omits `retryable` is refused rather than topped
+            # up from the taxonomy: mixing two sources is how a "safe" from one
+            # ends up authorising a retry the other never allowed.
+            return contract.may_retry_spec(
+                _text(role),
+                RatsErrorSpec(
+                    code=error.code,
+                    status=error.status,
+                    retryable=error.retryable,
+                    retry=error.retry,
+                ),
+            )
+        return contract.may_retry(_text(role), error.code)
+
+    def _attempt_request(
+        self,
+        descriptor: RatsDescriptor,
+        role: str,
+        args: Optional[Dict[str, Any]] = None,
+        *,
+        control_token: str = "",
+        session_token: str = "",
+        timeout: Optional[float] = None,
+        deadline_ms: Optional[int] = None,
+        idempotency_key: str = "",
+        capabilities: Optional[RatsCapabilities] = None,
     ) -> Dict[str, Any]:
         started = time.perf_counter()
         # Callers name roles, not wire names. The service publishes the mapping
@@ -1120,6 +1311,7 @@ class RatsRuntime:
                 audit_id=audit_id,
                 result_sha256=result_sha256,
                 retryable=bool(error.get("retryable", False)),
+                retry=_text(error.get("retry")),
             )
         result = _record(payload.get("result"))
         task = _record(result.get("task"))
@@ -1165,6 +1357,10 @@ class RatsRuntime:
                 session_token=session.token,
                 timeout=timeout,
                 capabilities=session.capabilities,
+                # The session is already detached and the caller ignores the
+                # outcome, so a retry buys nothing it can act on. The service
+                # expires an abandoned session on its own.
+                attempts=1,
             )
         except RatsClientError:
             pass
@@ -1328,6 +1524,12 @@ class RatsRuntime:
                     RATS_HELLO_ROLE,
                     timeout=self.probe_timeout,
                     capabilities=fallback_capabilities(),
+                    # A liveness probe, so one attempt. A stale descriptor left by
+                    # a crashed editor is the common case, and a scan walks every
+                    # descriptor in the directory: retrying each one would put the
+                    # backoff sequence between the user and their tool list. A
+                    # service that lost a packet is found by the next scan.
+                    attempts=1,
                 )
             except RatsClientError:
                 if session is not None and self._detach_session(session):
@@ -1439,6 +1641,10 @@ class RatsRuntime:
                         "status",
                         session_token=session.token,
                         capabilities=session.capabilities,
+                        # Asking whether the held session is still good. The
+                        # failure branch reopens one, which is both faster and
+                        # more likely to work than asking the same question twice.
+                        attempts=1,
                     )
                 except RatsClientError:
                     if self._detach_session(session):

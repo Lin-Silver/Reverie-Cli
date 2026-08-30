@@ -24,6 +24,10 @@ keep that safe:
   older than the contract must keep working, so the fallback carries the
   feature and limit assumptions the client already shipped with rather than an
   absence that would silently disable working features.
+* **Retry safety is the one place the default is restrictive.** Every other
+  unknown degrades to what the client already did; an unknown retry semantic
+  degrades to refusing the retry. The asymmetry is deliberate — being wrong the
+  other way runs a tool twice, and no amount of compatibility is worth that.
 """
 
 from __future__ import annotations
@@ -110,6 +114,30 @@ DEFAULT_ERROR_STATUS = 400
 DEFAULT_ERROR_RETRYABLE = False
 DEFAULT_ERROR_CATEGORY = "request"
 
+# What re-sending a failed request does, as published on each error row. A
+# service that does not publish it is one this client must not retry against, so
+# the default is the refusing one: `retryable` alone cannot tell "never ran" from
+# "may still be running", and guessing the difference is how a client executes a
+# tool twice.
+RETRY_NEVER = "never"
+RETRY_SAFE = "safe"
+RETRY_UNSAFE = "unsafe"
+RETRY_VALUES = (RETRY_NEVER, RETRY_SAFE, RETRY_UNSAFE)
+DEFAULT_ERROR_RETRY = RETRY_NEVER
+
+# What re-sending an operation does, as published on each operation row. Same
+# reasoning: an operation whose effects are unstated is treated as the worst case.
+EFFECTS_NONE = "none"
+EFFECTS_IDEMPOTENT = "idempotent"
+EFFECTS_MUTATING = "mutating"
+EFFECTS_VALUES = (EFFECTS_NONE, EFFECTS_IDEMPOTENT, EFFECTS_MUTATING)
+DEFAULT_EFFECTS = EFFECTS_MUTATING
+
+# The named capability that says both fields above are populated. Branching on a
+# feature the service declares beats sniffing for a key's presence: an older
+# service and a malformed one look identical to a sniff.
+FEATURE_RETRY_SEMANTICS = "error.retry_semantics"
+
 
 def _text(value: Any) -> str:
     return str(value or "").strip()
@@ -159,6 +187,14 @@ class RatsErrorSpec:
     status: int = DEFAULT_ERROR_STATUS
     retryable: bool = DEFAULT_ERROR_RETRYABLE
     category: str = DEFAULT_ERROR_CATEGORY
+    # Whether re-sending the request this error answered is sound. Distinct from
+    # `retryable`, which only says the condition may pass later.
+    retry: str = DEFAULT_ERROR_RETRY
+
+    @property
+    def proves_no_effect(self) -> bool:
+        """True when the failure itself proves the request never took effect."""
+        return self.retry == RETRY_SAFE
 
 
 @dataclass(frozen=True)
@@ -170,6 +206,7 @@ class RatsCapabilities:
     protocol: str
     roles: Mapping[str, str]
     auth_by_role: Mapping[str, str]
+    effects_by_role: Mapping[str, str]
     summaries: Mapping[str, str]
     control_header: str
     session_header: str
@@ -200,6 +237,55 @@ class RatsCapabilities:
     def auth(self, role: str) -> str:
         """The credential class a role needs: ``none``, ``control`` or ``session``."""
         return self.auth_by_role.get(role, "session")
+
+    def effects(self, role: str) -> str:
+        """What re-sending this role's operation does.
+
+        Unstated means ``mutating``. An unknown operation is not a harmless one,
+        and the cost of being wrong is asymmetric: treating a read as mutating
+        loses a retry, treating a mutation as a read runs it twice.
+        """
+        value = self.effects_by_role.get(role, "")
+        return value if value in EFFECTS_VALUES else DEFAULT_EFFECTS
+
+    def may_retry(self, role: str, code: str) -> bool:
+        """Whether re-sending ``role`` after failing with ``code`` is sound.
+
+        Classifies the code through the published taxonomy. Use
+        :meth:`may_retry_spec` when the failed response stated its own semantics,
+        which is the finer-grained truth about that one failure.
+        """
+        return self.may_retry_spec(role, self.error(code))
+
+    def may_retry_spec(self, role: str, spec: RatsErrorSpec) -> bool:
+        """The retry rule, over one already-classified error.
+
+        The one place it lives, because it needs two published facts and a call
+        site that consulted only one of them would be subtly wrong rather than
+        visibly broken:
+
+        * ``retryable`` — will the condition pass on a later attempt?
+        * ``retry`` — does this failure prove the request never took effect?
+        * ``effects`` — does acting twice matter?
+
+        A failure that proves nothing ran is retryable whatever the operation
+        does. A failure that leaves the outcome unknown is retryable only when
+        acting twice is harmless, which is exactly what ``none`` and
+        ``idempotent`` mean. Everything else is refused, including every case
+        where the service stayed silent.
+        """
+        if not spec.retryable or spec.retry == RETRY_NEVER:
+            return False
+        if spec.retry == RETRY_SAFE:
+            return True
+        if spec.retry == RETRY_UNSAFE:
+            return self.effects(role) in (EFFECTS_NONE, EFFECTS_IDEMPOTENT)
+        # A value this build does not recognise. The service may have introduced a
+        # third semantic whose safety condition this code cannot evaluate, so it
+        # is refused rather than mapped onto the nearest familiar one. Reachable
+        # through the per-response path, where the value comes straight off the
+        # wire rather than through the validating contract reader.
+        return False
 
     def summary(self, role: str) -> str:
         return self.summaries.get(role, "")
@@ -238,6 +324,7 @@ class RatsCapabilities:
             status=self.error_default.status,
             retryable=self.error_default.retryable,
             category=self.error_default.category,
+            retry=self.error_default.retry,
         )
 
     def describes_error(self, code: str) -> bool:
@@ -282,6 +369,17 @@ def fallback_capabilities(hello_result: Any = None) -> RatsCapabilities:
                 "session.open": "control",
             }
         ),
+        # A pre-contract service publishes no effects, and this client must not
+        # retry against it: every role reads back as `mutating`.
+        #
+        # `hello` is the one exception, for the same reason it is the one wire
+        # name this module hardcodes. It is the request that fetches the contract,
+        # so it can never be governed by one, and the protocol defines it as an
+        # anonymous read that publishes identity — there is nothing for a second
+        # call to do twice. Without this, a transport blip during discovery could
+        # never be retried, because discovery is precisely the moment no contract
+        # is available yet.
+        effects_by_role=MappingProxyType({RATS_HELLO_ROLE: EFFECTS_NONE}),
         summaries=MappingProxyType({}),
         # v1 publishes both header names at the top level of `hello`, so even the
         # pre-contract path is derived here rather than assumed. Validated the
@@ -319,13 +417,14 @@ def _parse_operations(
     source: Dict[str, Any],
     roles: Dict[str, str],
     rejections: List[Dict[str, str]],
-) -> Tuple[Dict[str, str], Dict[str, str]]:
+) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str]]:
     auth_by_role: Dict[str, str] = {}
+    effects_by_role: Dict[str, str] = {}
     summaries: Dict[str, str] = {}
     raw = source.get("operations")
     if not isinstance(raw, list):
         rejections.append({"field": "capabilities.operations", "reason": "not_a_list"})
-        return auth_by_role, summaries
+        return auth_by_role, effects_by_role, summaries
     for item in raw:
         entry = _record(item)
         role = _text(entry.get("role"))
@@ -350,8 +449,20 @@ def _parse_operations(
             # the client internally consistent whichever view is wrong.
             rejections.append({"field": "capabilities.operations", "reason": "role_disagreement", "value": role})
         auth_by_role[role] = auth
+        # An absent `effects` is a service older than the field, not an error, so
+        # it is left out of the map and reads back as the `mutating` default. A
+        # *present but unrecognised* value is reported, because it means the
+        # service is describing a semantic this build cannot evaluate.
+        effects = _text(entry.get("effects"))
+        if effects:
+            if effects in EFFECTS_VALUES:
+                effects_by_role[role] = effects
+            else:
+                rejections.append(
+                    {"field": "capabilities.operations.effects", "reason": "unknown_effects", "value": role}
+                )
         summaries[role] = _text(entry.get("summary"))
-    return auth_by_role, summaries
+    return auth_by_role, effects_by_role, summaries
 
 
 def _parse_permissions(
@@ -415,6 +526,23 @@ def _parse_limits(source: Dict[str, Any], rejections: List[Dict[str, str]]) -> D
     return limits
 
 
+def _retry_semantic(value: Any, fallback: str, field: str, rejections: List[Dict[str, str]], where: str) -> str:
+    """Read one published ``retry`` value, refusing anything unrecognised.
+
+    Absent means the service predates the field, which is not an error and lands
+    on the refusing default. Present but unknown is reported: it says the service
+    has a retry semantic this build cannot reason about, and mapping it onto the
+    nearest familiar value is precisely the guess that must not be made.
+    """
+    text = _text(value)
+    if not text:
+        return fallback
+    if text in RETRY_VALUES:
+        return text
+    rejections.append({"field": field, "reason": "unknown_retry", "value": where})
+    return DEFAULT_ERROR_RETRY
+
+
 def _parse_errors(
     source: Dict[str, Any],
     rejections: List[Dict[str, str]],
@@ -430,6 +558,13 @@ def _parse_errors(
         else DEFAULT_ERROR_STATUS,
         retryable=bool(default_retryable) if isinstance(default_retryable, bool) else DEFAULT_ERROR_RETRYABLE,
         category=_text(default_row.get("category")) or DEFAULT_ERROR_CATEGORY,
+        retry=_retry_semantic(
+            default_row.get("retry"),
+            DEFAULT_ERROR_RETRY,
+            "capabilities.errors.default.retry",
+            rejections,
+            "default",
+        ),
     )
     if not default_row:
         rejections.append({"field": "capabilities.errors.default", "reason": "missing"})
@@ -457,6 +592,15 @@ def _parse_errors(
             status=int(status),
             retryable=retryable,
             category=_text(entry.get("category")) or default.category,
+            # A row that omits `retry` inherits the declared default rather than
+            # the hardcoded one, so a service can state its own baseline once.
+            retry=_retry_semantic(
+                entry.get("retry"),
+                default.retry,
+                "capabilities.errors.codes.retry",
+                rejections,
+                code,
+            ),
         )
     return errors, default
 
@@ -507,7 +651,7 @@ def parse_capabilities(
         return fallback_capabilities(hello), rejections
 
     roles = _parse_roles(source, rejections)
-    auth_by_role, summaries = _parse_operations(source, roles, rejections)
+    auth_by_role, effects_by_role, summaries = _parse_operations(source, roles, rejections)
     headers = _record(source.get("auth_headers"))
     permissions, permission_tool_counts = _parse_permissions(source, rejections)
     features = _parse_strings(source, "features", rejections)
@@ -529,6 +673,7 @@ def parse_capabilities(
             protocol=declared_protocol,
             roles=MappingProxyType(dict(roles)),
             auth_by_role=MappingProxyType(dict(auth_by_role)),
+            effects_by_role=MappingProxyType(dict(effects_by_role)),
             summaries=MappingProxyType(dict(summaries)),
             control_header=_header_name(headers, "control", FALLBACK_CONTROL_HEADER, rejections),
             session_header=_header_name(headers, "session", FALLBACK_SESSION_HEADER, rejections),
@@ -546,9 +691,15 @@ def parse_capabilities(
 
 
 __all__ = [
+    "DEFAULT_EFFECTS",
     "DEFAULT_ERROR_CATEGORY",
+    "DEFAULT_ERROR_RETRY",
     "DEFAULT_ERROR_RETRYABLE",
     "DEFAULT_ERROR_STATUS",
+    "EFFECTS_IDEMPOTENT",
+    "EFFECTS_MUTATING",
+    "EFFECTS_NONE",
+    "EFFECTS_VALUES",
     "FALLBACK_BOOTSTRAP_TOOLS",
     "FALLBACK_CONSTRAINTS",
     "FALLBACK_CONTROL_HEADER",
@@ -556,10 +707,15 @@ __all__ = [
     "FALLBACK_LIMITS",
     "FALLBACK_PERMISSIONS",
     "FALLBACK_SESSION_HEADER",
+    "FEATURE_RETRY_SEMANTICS",
     "RATS_CAPABILITY_CONTRACT",
     "RATS_CLIENT_ROLES",
     "RATS_CONTRACT_PROTOCOL",
     "RATS_HELLO_ROLE",
+    "RETRY_NEVER",
+    "RETRY_SAFE",
+    "RETRY_UNSAFE",
+    "RETRY_VALUES",
     "RatsCapabilities",
     "RatsErrorSpec",
     "fallback_capabilities",
